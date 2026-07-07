@@ -25,7 +25,7 @@ struct GalaxyMapView: View {
             GeometryReader { geo in
                 let center = CGPoint(x: geo.size.width / 2 + pan.width,
                                      y: geo.size.height / 2 + pan.height)
-                func plot(_ x: Int, _ y: Int) -> CGPoint {
+                let plot: (Int, Int) -> CGPoint = { x, y in
                     CGPoint(x: center.x + CGFloat(x - cx) * zoom,
                             y: center.y + CGFloat(y - cy) * zoom)
                 }
