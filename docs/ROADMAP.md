@@ -21,10 +21,13 @@ Swift `EVNovaKit` container layer complete:
 - ⏭ *Remaining:* decode individual resource *bodies* into typed structs
   (`shïp`/`oütf`/`wëap`/`sÿst`/`spöb` field layouts) — starts M1.5, overlaps M2.
 
-## M2 — See the art
-- `rlëD` / `rlë8` RLE decoder → `CGImage`; `PICT` decoder; `spïn`/`shän` frame geometry.
-- **Demo:** `evnova-extract sprites <file>` writes PNG sprite sheets; a ship's
-  36 rotation frames render correctly (validates 1-5-5-5 vs 5-6-5 color).
+## M2 — See the art 🟡 (rlëD done)
+- ✅ `rlëD` RLE decoder → `SpriteSheet` (RGBA) → `CGImage`/PNG. Verified: real
+  Nova ship sprites (24–180px, 36–384 frames) decode pixel-perfect; colour is
+  1-5-5-5 (confirmed, not 565). Hermetic unit tests + `evnova-extract sprites`.
+- ⏭ `rlë8` (8-bit palettised) decoder; `PICT` decoder (planet/UI art); wire
+  `spïn`/`shän` so a sprite's frame geometry & rotation count are read from data
+  rather than inferred.
 
 ## M3 — Fly a ship
 - SwiftUI + SpriteKit skeleton on iOS & macOS.

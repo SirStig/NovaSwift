@@ -13,9 +13,10 @@ func usage() -> Never {
     \(name) — inspect EV Nova resource containers
 
     USAGE:
-      \(name) info  <file>
-      \(name) types <file>
-      \(name) list  <file> <TYPE>
+      \(name) info    <file>
+      \(name) types   <file>
+      \(name) list    <file> <TYPE>
+      \(name) sprites <file> [outDir]     Decode rlëD sprites → PNG sheets
 
     <TYPE> is a four-char resource code, e.g. shïp  wëap  oütf  sÿst  spöb
     (paste the exact code including accents).
@@ -79,6 +80,38 @@ case "list":
             print(String(format: "  #%-6d %7d bytes%@", r.id, r.data.count, name))
         }
     }
+
+case "sprites":
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let (collection, _) = loadCollection(args[1])
+    let outDir = args.count == 3 ? args[2] : "data/converted/sprites"
+    try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
+    let sprites = collection.resources(of: NovaType.rleD)
+    if sprites.isEmpty {
+        print("no rlëD sprites in \(args[1])")
+        break
+    }
+    print("decoding \(sprites.count) rlëD sprites → \(outDir)/")
+    var ok = 0, failed = 0
+    for res in sprites {
+        do {
+            let sheet = try RLED.decode(res.data)
+            let url = URL(fileURLWithPath: outDir).appendingPathComponent("rleD_\(res.id).png")
+            if sheet.writePNG(to: url) {
+                ok += 1
+                print(String(format: "  #%-6d %dx%d × %d frames → %@",
+                             res.id, sheet.frameWidth, sheet.frameHeight, sheet.frameCount,
+                             url.lastPathComponent))
+            } else {
+                failed += 1
+                print("  #\(res.id): PNG encode failed")
+            }
+        } catch {
+            failed += 1
+            print("  #\(res.id): \(error)")
+        }
+    }
+    print("done: \(ok) written, \(failed) failed")
 
 default:
     usage()

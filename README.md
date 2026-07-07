@@ -12,16 +12,20 @@ This repo contains **only** open reimplementation code and tooling. It contains
 
 ## Status
 
-🟢 **M1 complete — the data layer works on real game files.** `EVNovaKit` reads
-both classic resource forks / `.ndat` and the modern `BRGR` `.rez` container, and
-the `evnova-extract` CLI dumps ships/outfits/weapons/systems from real plug-ins.
-Engine foundation decided (native Swift + Metal/SpriteKit). Next: decode
-resource bodies and render sprites. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+🟢 **M1 + M2 (rlëD) complete — we read real game data *and* render its art.**
+`EVNovaKit` reads both classic resource forks / `.ndat` and the modern `BRGR`
+`.rez` container, and decodes `rlëD` sprites to RGBA/PNG. Verified end-to-end on
+a full owned copy of EV Nova (288+ ships, 545 systems, 411 planets) and its ship
+sprites (36-frame rotations decode pixel-perfect). Engine foundation: native
+Swift + Metal/SpriteKit. Next: `PICT`/`rlë8`, typed resource bodies, then a
+SpriteKit fly-a-ship demo. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ```bash
 swift build && swift test                    # build the core + run tests
 scripts/fetch-plugins.sh                      # grab free community plug-ins (test data)
-.build/debug/evnova-extract types "data/plugins/The Frozen Heart/Nova Files/E3 Data.rez"
+# With your own EV Nova data in data/base/:
+.build/debug/evnova-extract types   "data/base/Nova Files/Nova Data 1.rez"
+.build/debug/evnova-extract sprites "data/base/Nova Files/Nova Ships 1.rez" out/
 ```
 
 ## Goals
