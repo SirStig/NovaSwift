@@ -1,0 +1,117 @@
+import Foundation
+import SwiftUI
+import EVNovaKit
+
+/// Locates game data and the plug-in catalog, tracks which plug-ins are enabled,
+/// and produces a merged `NovaGame` for the engine.
+///
+/// Data sources, in priority order:
+///  1. User-imported base data in Application Support (the mobile BYO-data path).
+///  2. A dev override via the `EVNOVA_DATA` environment variable (points at a
+///     `Nova Files` folder) — used when running from the repo.
+///  3. A bundled plug-in catalog (prebundled, toggleable) — see docs/MOBILE_AND_PLUGINS.md §3.
+@MainActor
+final class GameDataController: ObservableObject {
+    @Published private(set) var hasBaseData = false
+    @Published private(set) var plugins: [PluginBundle] = []
+    @Published private(set) var status: String = "No game data imported yet."
+
+    /// The resolved game, once base data is available.
+    private(set) var game: NovaGame?
+    private var loaded = false
+
+    // MARK: Locations
+
+    private var appSupport: URL {
+        let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
+                                                 in: .userDomainMask, appropriateFor: nil, create: true))
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("EVNova", isDirectory: true)
+    }
+
+    /// Where imported base data lives on device.
+    var importedBaseDir: URL { appSupport.appendingPathComponent("Base/Nova Files", isDirectory: true) }
+    /// Where imported plug-ins live on device.
+    var importedPluginsDir: URL { appSupport.appendingPathComponent("Plugins", isDirectory: true) }
+
+    /// Bundled plug-ins shipped inside the app (if present in the app bundle).
+    private var bundledPluginsDir: URL? {
+        Bundle.main.url(forResource: "Plugins", withExtension: nil)
+    }
+
+    /// Resolve the base "Nova Files" directory from the available sources.
+    private func resolveBaseDir() -> URL? {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: importedBaseDir.path),
+           !GameLibrary.discoverResourceFiles(in: importedBaseDir).isEmpty {
+            return importedBaseDir
+        }
+        if let dev = ProcessInfo.processInfo.environment["EVNOVA_DATA"],
+           !dev.isEmpty, fm.fileExists(atPath: dev) {
+            return URL(fileURLWithPath: dev)
+        }
+        return nil
+    }
+
+    private func resolvePluginDirs() -> [URL] {
+        var dirs: [URL] = []
+        if let b = bundledPluginsDir { dirs.append(b) }
+        if FileManager.default.fileExists(atPath: importedPluginsDir.path) {
+            dirs.append(importedPluginsDir)
+        }
+        // Dev convenience: repo plug-ins next to EVNOVA_DATA/../..
+        if let dev = ProcessInfo.processInfo.environment["EVNOVA_PLUGINS"], !dev.isEmpty {
+            dirs.append(URL(fileURLWithPath: dev))
+        }
+        return dirs
+    }
+
+    // MARK: Loading
+
+    func reloadIfNeeded() { if !loaded { reload() } }
+
+    func reload() {
+        loaded = true
+        // Discover plug-ins (catalog is available even before base data).
+        var discovered: [PluginBundle] = []
+        for dir in resolvePluginDirs() {
+            discovered.append(contentsOf: GameLibrary.discoverPlugins(in: dir))
+        }
+        // Preserve enabled state across reloads.
+        let previouslyEnabled = Set(plugins.filter(\.isEnabled).map(\.id))
+        for i in discovered.indices where previouslyEnabled.contains(discovered[i].id) {
+            discovered[i].isEnabled = true
+        }
+        plugins = discovered
+
+        guard let baseDir = resolveBaseDir() else {
+            hasBaseData = false
+            game = nil
+            status = "No EV Nova data found. Import your game data to play. \(plugins.count) plug-in(s) ready."
+            return
+        }
+        let baseFiles = GameLibrary.discoverResourceFiles(in: baseDir)
+        do {
+            let merged = try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins)
+            game = NovaGame(merged)
+            hasBaseData = true
+            status = "Loaded \(merged.totalCount) resources from base + \(plugins.filter(\.isEnabled).count) plug-in(s)."
+        } catch {
+            hasBaseData = false
+            game = nil
+            status = "Failed to load data: \(error)"
+        }
+    }
+
+    func setPlugin(_ id: String, enabled: Bool) {
+        guard let i = plugins.firstIndex(where: { $0.id == id }) else { return }
+        plugins[i].isEnabled = enabled
+        reload()
+    }
+
+    /// Pick a reasonable player ship: the first ship the data defines (usually the
+    /// Shuttle, id 128), else nil so the scene falls back to a placeholder.
+    func defaultPlayerShip() -> ShipRes? {
+        game?.ship(128) ?? game?.ships().first
+    }
+}
