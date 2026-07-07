@@ -18,6 +18,7 @@ func usage() -> Never {
       \(name) list    <file> <TYPE>
       \(name) sprites <file> [outDir]     Decode rlëD sprites → PNG sheets
       \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
+      \(name) ship    <baseDir> [id]      Decode ship stats + resolve its sprite → PNG
 
     <TYPE> is a four-char resource code, e.g. shïp  wëap  oütf  sÿst  spöb
     (paste the exact code including accents).
@@ -143,6 +144,51 @@ case "library":
     } catch {
         FileHandle.standardError.write(Data("error: \(error)\n".utf8))
         exit(1)
+    }
+
+case "ship":
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do {
+        game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles))
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1)
+    }
+
+    if args.count == 2 {
+        // No id: list all ships with a few stats.
+        let ships = game.ships()
+        print("\(ships.count) ships:")
+        for s in ships.prefix(60) {
+            print(String(format: "  #%-5d  %-24@  shield %-5d armor %-5d speed %-4d turn %-4d",
+                         s.id, s.name as NSString, s.shield, s.armor, s.speed, s.turnRate))
+        }
+        break
+    }
+
+    guard let id = Int(args[2]), let s = game.ship(id) else {
+        FileHandle.standardError.write(Data("error: no ship with id \(args[2])\n".utf8)); exit(1)
+    }
+    print("""
+    ship #\(s.id): \(s.name)
+      shield \(s.shield)  armor \(s.armor)  mass \(s.mass)
+      speed \(s.speed)  accel \(s.acceleration)  turn \(s.turnRate)
+      shieldRecharge \(s.shieldRecharge)  armorRecharge \(s.armorRecharge)  energyRecharge \(s.energyRecharge)
+      cargo \(s.cargoSpace)
+    """)
+    if let shan = game.shan(s.id) {
+        print("  shän #\(shan.id): baseSprite spïn \(shan.baseSpriteID)  frames \(shan.baseSetCount)  \(shan.baseWidth)x\(shan.baseHeight)")
+    }
+    if let (spin, rle) = game.shipSpriteData(s.id), let sheet = try? RLED.decode(rle) {
+        let outDir = "data/converted/ships"
+        try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
+        let url = URL(fileURLWithPath: outDir).appendingPathComponent("ship_\(s.id).png")
+        sheet.writePNG(to: url)
+        let via = spin.map { "spïn \($0.id)→rlëD \($0.spriteID)" } ?? "rlëD direct"
+        print("  sprite: \(sheet.frameWidth)x\(sheet.frameHeight) × \(sheet.frameCount) frames (\(via)) → \(url.path)")
+    } else {
+        print("  sprite: (could not resolve)")
     }
 
 default:
