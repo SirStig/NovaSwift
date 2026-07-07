@@ -6,13 +6,11 @@ import EVNovaKit
 /// (base data + plug-in catalog with enabled state).
 @MainActor
 final class AppModel: ObservableObject {
-    enum Screen: Equatable {
-        case launcher
-        case game
-    }
+    enum Screen: Equatable { case launcher, loading, game }
 
     @Published var screen: Screen = .launcher
     @Published var settings: GameSettings = .load()
+    @Published var bindings: KeyBindings = .load()
     @Published var data = GameDataController()
 
     private var dataObserver: AnyCancellable?
@@ -26,8 +24,14 @@ final class AppModel: ObservableObject {
 
     /// Persist settings whenever they change materially.
     func commitSettings() { settings.save() }
+    func commitBindings() { bindings.save() }
 
+    /// Enter the game via a brief loading screen (loads/merges data off the main flow).
     func startGame() {
+        screen = .loading
+    }
+
+    func finishLoadingIntoGame() {
         data.reloadIfNeeded()
         screen = .game
     }

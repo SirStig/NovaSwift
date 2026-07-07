@@ -69,16 +69,22 @@ struct AboutView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                HStack { AppMark().frame(width: 56, height: 56); Text("EV Nova — unofficial port").font(.title2.bold()) }
+                VStack(alignment: .leading, spacing: 10) {
+                    AppMark().frame(width: 64, height: 64)
+                    Text("EV Nova").font(.largeTitle.bold())
+                    Text("an unofficial port").font(.subheadline).foregroundStyle(.secondary)
+                }
+                Divider()
                 Text("A non-commercial, fan-made port of EV Nova to Apple platforms. Not affiliated with or endorsed by Ambrosia Software, ATMOS, or the original authors.")
                 Text("Game data is not included. You supply your own legally-obtained EV Nova data via Import Data. Community plug-ins are the property of their respective authors.")
                     .foregroundStyle(.secondary)
                 Text("Built on the open reimplementation work of the Escape Velocity community.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
         .navigationTitle("About")
-        .toolbar { Button("Done") { dismiss() } }
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
 }

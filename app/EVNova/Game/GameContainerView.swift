@@ -62,33 +62,13 @@ struct GameContainerView: View {
 
     @ViewBuilder
     private func sceneLayer(_ host: GameHost) -> some View {
-        GeometryReader { geo in
-            SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
-                .ignoresSafeArea()
-                .focusable()
-                .modifier(KeyboardControls(input: host.input))
-                #if os(macOS)
-                .onContinuousHover(coordinateSpace: .local) { phase in
-                    switch phase {
-                    case .active(let loc):
-                        let dx = loc.x - geo.size.width / 2
-                        let dy = loc.y - geo.size.height / 2
-                        if hypot(dx, dy) > 24 {
-                            host.input.mouse.desiredHeading = Double(atan2(dx, -dy))
-                        } else {
-                            host.input.mouse.desiredHeading = nil
-                        }
-                    case .ended:
-                        host.input.mouse.desiredHeading = nil
-                    }
-                }
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in host.input.mouse.firePrimary = true }
-                        .onEnded { _ in host.input.mouse.firePrimary = false }
-                )
-                #endif
-        }
+        // Flight is driven by keybindings (keyboard) + controller + touch.
+        // The mouse is reserved for UI/targeting (no auto-follow steering).
+        SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
+            .ignoresSafeArea()
+            .focusable()
+            .focusEffectDisabled()
+            .modifier(KeyboardControls(input: host.input, bindings: model.bindings))
     }
 
     private var closeButton: some View {
@@ -108,24 +88,28 @@ struct GameContainerView: View {
     }
 }
 
-/// Routes hardware-keyboard presses (arrows / WASD / space) into the input sink.
+/// Routes hardware-keyboard presses into flight intents using the user's
+/// keybindings. Continuous actions (turn/thrust/fire) are held; discrete actions
+/// (target/jump/map/…) will dispatch once their systems exist.
 private struct KeyboardControls: ViewModifier {
     let input: InputController
+    let bindings: KeyBindings
+
     func body(content: Content) -> some View {
         content.onKeyPress(phases: [.down, .up]) { press in
             let pressed = press.phase == .down
-            switch press.key {
-            case .leftArrow:  input.setKeyTurnLeft(pressed);  return .handled
-            case .rightArrow: input.setKeyTurnRight(pressed); return .handled
-            case .upArrow:    input.setKeyThrust(pressed);    return .handled
-            case .downArrow:  input.setKeyReverse(pressed);   return .handled
-            case .space:      input.setKeyFire(pressed);      return .handled
-            default:
-                if let c = press.characters.first, input.handleKeyChar(c, pressed: pressed) {
-                    return .handled
-                }
-                return .ignored
+            let token = KeyToken.from(press)
+            guard let action = bindings.action(for: token) else { return .ignored }
+            switch action.flightEffect {
+            case .turnLeft: input.keyboard.turnLeft = pressed
+            case .turnRight: input.keyboard.turnRight = pressed
+            case .thrust: input.keyboard.thrust = pressed
+            case .reverse: input.keyboard.reverse = pressed
+            case .firePrimary: input.keyboard.firePrimary = pressed
+            case .fireSecondary: input.keyboard.fireSecondary = pressed
+            case .none: return .ignored // discrete action — not yet wired
             }
+            return .handled
         }
     }
 }

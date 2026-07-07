@@ -1,84 +1,56 @@
-# Roadmap
+# Roadmap — faithful full port
 
-Milestones are ordered so each produces something demonstrable and de-risks the
-next. "Demo" = a concrete thing you can see/run.
+**Goal:** reproduce EV Nova **as closely as possible** on a modern engine for
+iOS / iPadOS / macOS — the original's feel, interface, controls, systems, AI,
+missions and story — driven entirely by the **user's own game data** (bring your
+own data; nothing copyrighted is bundled). Modern upgrades (resolution, touch,
+controllers, quality-of-life) layered on top, but fidelity first.
 
-## M0 — Foundation ✅ (in progress)
-- Repo structure, README, license, `.gitignore` (no game data committed).
-- Research locked: data format, engine decision, legal model.
-- `docs/DATA_FORMAT.md`, `docs/ARCHITECTURE.md`, this roadmap.
-- Fetch reference repos + a **free total-conversion plug-in as a test fixture**.
+This is a large, multi-phase effort. Status below is honest about what actually
+works vs. what is stubbed.
 
-## M1 — Read the data (the load-bearing milestone) ✅
-Swift `EVNovaKit` container layer complete:
-- ✅ `ClassicResourceFork` parser (resource-fork + `.ndat`; big-endian).
-- ✅ `RezContainer` parser (the `BRGR` Rez format modern community plug-ins use).
-- ✅ `ResourceFile` format auto-detection; `FourCharCode` with correct Mac Roman
-  handling of accented type codes; plug-in override chain (`overlay`).
-- ✅ `evnova-extract` CLI (`types` / `list` / `info`) + hermetic unit tests.
-- ✅ **Verified on real data:** reads The Frozen Heart TC — 38 `shïp`, 81 `oütf`,
-  41 `wëap`, 191 `sÿst`, 205 `spöb`, etc.
-- ⏭ *Remaining:* decode individual resource *bodies* into typed structs
-  (`shïp`/`oütf`/`wëap`/`sÿst`/`spöb` field layouts) — starts M1.5, overlaps M2.
+## Done (foundation)
+- ✅ **Data layer** (`EVNovaKit`): classic resource-fork / `.ndat` / `BRGR .rez`
+  containers; plug-in override chain; typed decoders (shïp/oütf/wëap/sÿst/spöb/
+  spïn/shän); `rlëD` sprite → texture. Reads the full real game.
+- ✅ **Plug-in library**: discover/classify/enable-disable; bundled catalog + import.
+- ✅ **Engine** (`EVNovaEngine`): Newtonian flight, multi-source input intents.
+- ✅ **App shell**: multiplatform Xcode app, launcher, settings, game scene with
+  real ship sprites + starfield + exhaust; touch/keyboard/mouse/controller input.
 
-## M2 — See the art 🟡 (rlëD done)
-- ✅ `rlëD` RLE decoder → `SpriteSheet` (RGBA) → `CGImage`/PNG. Verified: real
-  Nova ship sprites (24–180px, 36–384 frames) decode pixel-perfect; colour is
-  1-5-5-5 (confirmed, not 565). Hermetic unit tests + `evnova-extract sprites`.
-- ⏭ `rlë8` (8-bit palettised) decoder; `PICT` decoder (planet/UI art); wire
-  `spïn`/`shän` so a sprite's frame geometry & rotation count are read from data
-  rather than inferred.
+## Now (fidelity pass)
+- 🔨 **Authentic controls**: full rebindable keybindings matching EV Nova's
+  scheme; mouse used the way the original does (no auto-follow steering);
+  full controller + touch. → `docs/CONTROLS.md`.
+- 🔨 **UX correctness**: macOS title-bar/traffic-light safe area; fixed Settings/
+  About layouts; **loading screens**; launcher visually distinct from game.
+- ⏭ **Authentic UI from the user's assets** (the big one): decode `PICT` and the
+  interface resources and render the **real EV Nova HUD, status bar, radar,
+  menus and landing screens** from the player's own data — not our placeholder
+  HUD. Includes the original **main menu** (toggle: modern launcher ↔ authentic).
 
-## M2.5 — Plug-in library & data loading ✅
-- ✅ `GameLibrary`: discover base resource files + plug-in bundles (folders or
-  loose `.rez`/`.ndat`), auto-classify (total conversion / patch / gameplay),
-  and merge base + **enabled** plug-ins into one `ResourceCollection` via the
-  `(type,id)` override chain. `PluginBundle` is Codable (persistable enabled set).
-- ✅ `evnova-extract library <base> <plugins>` shows the override effect.
-- ✅ Verified on the full free catalog (12 plug-ins/TCs incl. **ARPIA2**,
-  Polycon, Frozen Heart): base 8,362 → 11,585 resources with all enabled.
-- ✅ Mobile/launcher/plug-in design captured in `docs/MOBILE_AND_PLUGINS.md`.
+## The full game (phased)
+1. **Systems & space**: load a `sÿst`, place `spöb` planets/stations (real sprites),
+   asteroids, the star background; hyperspace **jump** between systems; galaxy **map**.
+2. **Interaction**: **land** on planets → spaceport, **commodity trading**/economy,
+   **outfitting**, **shipyard**; save/load pilot files (`.plt`).
+3. **Combat**: weapons (`wëap`) firing + projectiles/beams, shields/armor/damage,
+   `bööm` explosions, energy/fuel, afterburners, ammo.
+4. **AI (100%)**: NPC ships via `düde`/`flët`, government (`gövt`) standings &
+   relations, fighters/escorts, fleeing/hailing/boarding, patrols, pirates,
+   defense fleets — behaviors matching the original.
+5. **Missions & story** (`mïsn`): bar missions, cargo/escort/combat/deliver,
+   `crön` background events, `përs` characters, control bits, `dësc` text,
+   ranks (`ränk`), the full main storyline(s).
+6. **Audio**: `snd ` sound effects, music; **PICT** planet/landing/mission art;
+   `ïntf` interface colors; `STR#`/`dësc` all text.
+7. **Full options**: every EV Nova setting, difficulty, plus modern graphics/audio/
+   accessibility; complete keybinding & mouse config; controller remapping.
+8. **Plug-ins**: prebundled catalog + **user-installed plug-ins where supported**
+   (desktop filesystem folder + mobile import), with load-order/override UI.
 
-## M3 — Fly a ship 🟢 (app scaffolded & building)
-- ✅ Real multiplatform **Xcode app** (iOS/iPadOS/macOS), SwiftUI + SpriteKit,
-  linking local `EVNovaKit`/`EVNovaEngine`. Builds clean for macOS & iOS Sim.
-- ✅ `EVNovaEngine`: `ControlIntent` input abstraction, Newtonian `World.step`,
-  ship rotation-frame selection; physics tests.
-- ✅ SpriteKit `GameScene`: parallax starfield, follow camera, real ship sprite
-  (vector placeholder before data import), HUD.
-- ✅ Touch controls overlay + hardware keyboard (WASD/arrows/space).
-- ✅ Launcher, plug-in toggles, settings, import-data flow, original app icon.
-- ⏭ Verify interactive flight on device/sim; tune flight feel; spawn stellar
-  objects (`spöb`) into the scene from real system data.
-
-## M4 — A living system
-- Load a `sÿst`: planets (`spöb`), asteroids, other ships (`düde`/`flët`) with basic AI.
-- Radar/HUD, target selection, hyperspace jump between systems, galaxy map.
-- **Demo:** jump across a few systems; NPCs fly around.
-
-## M5 — Interaction loop
-- Land on planets: spaceport, commodity trading (economy), outfitting, shipyard.
-- Weapons + combat + shields/armor + damage + explosions (`bööm`).
-- Save/load pilot files.
-- **Demo:** buy a ship, outfit it, trade for profit, win a dogfight.
-
-## M-Launcher — Menu, settings & mobile controls (parallel track)
-See `docs/MOBILE_AND_PLUGINS.md`.
-- SwiftUI launcher: Play/Continue/New Pilot, Scenario+Plug-in toggles, Settings,
-  Import Data, About/Legal.
-- `ControlIntent` input abstraction; touch scheme (turn/thrust/fire zones,
-  tap-to-target), MFi/controller, keyboard — all feed the same intents.
-- Settings model (controls/graphics/audio/gameplay/accessibility), persisted.
-- **Base-data import flow** (BYO owned data via Files/share-sheet/AirDrop) — the
-  mobile answer to "no drop-in plug-in folder"; plug-ins ship prebundled + toggle.
-
-## M6 — Story
-- Mission engine (`mïsn`): bar missions, cargo/escort/combat, `crön` background
-  events, `përs` characters, `dësc` text, control-bit logic.
-- Full plug-in / total-conversion loading & override chain.
-- **Demo:** play the opening EV Nova storyline; load a TC (e.g. Polycon).
-
-## Cross-cutting (ongoing)
-- Test fixtures from freely-distributed plug-ins; golden-file tests vs `evnova-utils` dumps.
-- On-device data import flow (user brings their EV Nova data).
-- Performance: texture atlasing, culling; drop to Metal where SpriteKit limits.
+## Cross-cutting
+- Fidelity checks against the original behavior; golden-data tests.
+- Performance (atlasing, culling); drop to Metal where SpriteKit limits.
+- The base game data is always **user-supplied**; only original code + our own
+  art (icon, placeholder HUD) ship in the repo.

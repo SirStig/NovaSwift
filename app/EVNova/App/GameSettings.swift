@@ -29,6 +29,11 @@ struct GameSettings: Codable, Equatable {
     var musicVolume: Double = 0.7
     var sfxVolume: Double = 0.9
 
+    // Interface
+    /// Show the authentic EV Nova main menu (rendered from the user's assets)
+    /// instead of the modern launcher. Requires imported game data.
+    var useAuthenticMenu: Bool = false
+
     // Gameplay / accessibility
     var largerHUD: Bool = false
 

@@ -22,7 +22,7 @@ struct PluginsView: View {
             }
         }
         .navigationTitle("Plug-ins")
-        .toolbar { Button("Done") { dismiss() } }
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
 
     private func row(_ plugin: PluginBundle) -> some View {

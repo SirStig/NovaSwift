@@ -10,6 +10,9 @@ struct RootView: View {
             case .launcher:
                 LauncherView()
                     .transition(.opacity)
+            case .loading:
+                LoadingView()
+                    .transition(.opacity)
             case .game:
                 GameContainerView()
                     .transition(.opacity)

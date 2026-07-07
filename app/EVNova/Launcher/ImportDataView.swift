@@ -36,7 +36,7 @@ struct ImportDataView: View {
             .padding()
         }
         .navigationTitle("Import Data")
-        .toolbar { Button("Done") { dismiss() } }
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.folder, .data],
                       allowsMultipleSelection: false) { result in
