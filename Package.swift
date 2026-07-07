@@ -12,12 +12,15 @@ let package = Package(
         .library(name: "EVNovaKit", targets: ["EVNovaKit"]),
         // Simulation core: flight physics, input intents, world state.
         .library(name: "EVNovaEngine", targets: ["EVNovaEngine"]),
+        // Story/mission runtime: control bits, missions, crons, player state.
+        .library(name: "EVNovaStory", targets: ["EVNovaStory"]),
         // Command-line extractor / inspector.
         .executable(name: "evnova-extract", targets: ["evnova-extract"]),
     ],
     targets: [
         .target(name: "EVNovaKit", path: "Sources/EVNovaKit"),
         .target(name: "EVNovaEngine", dependencies: ["EVNovaKit"], path: "Sources/EVNovaEngine"),
+        .target(name: "EVNovaStory", dependencies: ["EVNovaKit"], path: "Sources/EVNovaStory"),
         .executableTarget(
             name: "evnova-extract",
             dependencies: ["EVNovaKit", "EVNovaEngine"],
@@ -32,6 +35,11 @@ let package = Package(
             name: "EVNovaEngineTests",
             dependencies: ["EVNovaEngine"],
             path: "Tests/EVNovaEngineTests"
+        ),
+        .testTarget(
+            name: "EVNovaStoryTests",
+            dependencies: ["EVNovaStory"],
+            path: "Tests/EVNovaStoryTests"
         ),
     ]
 )

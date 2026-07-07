@@ -22,6 +22,123 @@ import Foundation
     return UInt16(d[base]) << 8 | UInt16(d[base + 1])
 }
 
+@inline(__always) private func ai32(_ d: Data, _ off: Int) -> Int {
+    guard off >= 0, off + 4 <= d.count else { return 0 }
+    let b = d.startIndex + off
+    let v = (UInt32(d[b]) << 24) | (UInt32(d[b + 1]) << 16) | (UInt32(d[b + 2]) << 8) | UInt32(d[b + 3])
+    return Int(Int32(bitPattern: v))
+}
+
+// MARK: oütf — outfit (equipment sold at outfitters; modifies the ship)
+
+/// What an outfit *does* to the ship it's installed on. These are EV Nova's
+/// "ModType" function codes (the number stored in each of an outfit's four
+/// modifier slots), from novaparse `OutfResource.ts`. Most carry a signed value;
+/// the boolean-style ones ignore it. `EVNovaEngine` aggregates these into a
+/// ship's effective stats.
+public enum OutfitModType: Int, Sendable {
+    case none = 0
+    case weapon = 1            // grants weapon (value = wëap id)
+    case freeCargo = 2         // +cargo capacity (tons)
+    case ammunition = 3        // +ammo for a weapon (value = wëap id)
+    case shield = 4            // +max shield
+    case shieldRecharge = 5    // +shield regen
+    case armor = 6             // +max armor
+    case acceleration = 7      // +acceleration
+    case speed = 8             // +max speed
+    case turnRate = 9          // +turn rate
+    case escapePod = 11
+    case fuelCapacity = 12     // +fuel capacity (novaparse "energy")
+    case densityScanner = 13
+    case iff = 14
+    case afterburner = 15      // afterburner fuel cost (value = fuel/frame ×?)
+    case map = 16
+    case cloak = 17
+    case fuelRegen = 18        // +fuel regen (novaparse "energyRecharge")
+    case autoRefuel = 19
+    case autoEject = 20
+    case cleanRecord = 21
+    case hyperspaceSpeed = 22
+    case hyperspaceDist = 23
+    case interference = 24
+    case marines = 25
+    case increaseMax = 27
+    case murk = 28
+    case armorRecharge = 29
+    case cloakScanner = 30
+    case miningScoop = 31
+    case multiJump = 32
+    case jam1 = 33, jam2 = 34, jam3 = 35, jam4 = 36
+    case fastJump = 37
+    case inertialDamper = 38
+    case deionize = 39
+    case ionCapacity = 40
+    case gravityResist = 41
+    case stellarResist = 42
+    case paint = 43
+    case reinforcementInhibitor = 44
+    case maxGuns = 45
+    case maxTurrets = 46
+    case bomb = 47
+    case iffScrambler = 48
+    case repairSystem = 49
+    case nonlethalBomb = 50
+    case unknown = 1000
+
+    public init(raw: Int) { self = OutfitModType(rawValue: raw) ?? .unknown }
+}
+
+/// An outfit: what it weighs, costs, and the up-to-four modifiers it applies to a
+/// ship. Offsets verified against novaparse `OutfResource.ts`.
+public struct OutfRes {
+    public let id: Int
+    public let name: String
+    public let displayWeight: Int   // @0  sort order in the outfitter
+    public let mass: Int            // @2  tons of free mass this consumes
+    public let techLevel: Int       // @4
+    public let maxInstallable: Int  // @10 max the player may own (0 = unlimited)
+    public let cost: Int            // @14 credits (int32)
+    /// The outfit's modifier slots: (function, value). Slots that are empty
+    /// (`.none`/`.unknown`) are stripped.
+    public let modifiers: [(type: OutfitModType, value: Int)]
+
+    public init(_ r: Resource) {
+        id = r.id
+        name = r.name.isEmpty ? "Outfit \(r.id)" : r.name
+        let d = r.data
+        displayWeight = ai16(d, 0)
+        mass = ai16(d, 2)
+        techLevel = ai16(d, 4)
+        maxInstallable = ai16(d, 10)
+        cost = ai32(d, 14)
+        // Four modifier slots at 6, 18, 22, 26 — each is (Int16 type, Int16 value).
+        var mods: [(OutfitModType, Int)] = []
+        for pos in [6, 18, 22, 26] {
+            let t = OutfitModType(raw: ai16(d, pos))
+            guard t != .none, t != .unknown else { continue }
+            mods.append((t, ai16(d, pos + 2)))
+        }
+        modifiers = mods
+    }
+
+    /// Sum of one modifier kind across this outfit's slots (0 if absent).
+    public func value(of kind: OutfitModType) -> Int {
+        modifiers.filter { $0.type == kind }.reduce(0) { $0 + $1.value }
+    }
+    /// True if any slot has this modifier (for boolean-style outfits).
+    public func has(_ kind: OutfitModType) -> Bool {
+        modifiers.contains { $0.type == kind }
+    }
+    /// Weapon ids this outfit grants (ModType 1).
+    public var grantedWeapons: [Int] {
+        modifiers.filter { $0.type == .weapon }.map(\.value)
+    }
+    /// (weapon id) this outfit supplies ammo for (ModType 3), if any.
+    public var ammoFor: [Int] {
+        modifiers.filter { $0.type == .ammunition }.map(\.value)
+    }
+}
+
 // MARK: gövt — government (diplomatic relations & behavior)
 
 /// A government: its diplomatic stance (class membership, ally/enemy classes),

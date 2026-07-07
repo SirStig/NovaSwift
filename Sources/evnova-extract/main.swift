@@ -1,5 +1,6 @@
 import Foundation
 import EVNovaKit
+import EVNovaEngine
 
 // evnova-extract — inspect EV Nova resource containers (classic fork / .ndat / BRGR .rez).
 //
@@ -177,7 +178,7 @@ case "ship":
     ship #\(s.id): \(s.name)
       shield \(s.shield)  armor \(s.armor)  mass \(s.mass)
       speed \(s.speed)  accel \(s.acceleration)  turn \(s.turnRate)
-      shieldRecharge \(s.shieldRecharge)  armorRecharge \(s.armorRecharge)  energyRecharge \(s.energyRecharge)
+      shieldRecharge \(s.shieldRecharge)  armorRecharge \(s.armorRecharge)  fuelRegen \(s.fuelRegen)
       cargo \(s.cargoSpace)
     """)
     if let shan = game.shan(s.id) {
@@ -371,6 +372,171 @@ case "strscan":
     print("printable-run START offsets across \(ssCol.resources(of: type).count) \(type.stringValue):")
     for off in startTally.keys.sorted() {
         print(String(format: "  @%-5d ×%-4d  e.g. %@", off, startTally[off]!, String(sampleAt[off]!.prefix(48))))
+    }
+
+case "pict":
+    guard args.count == 3 || args.count == 4 else { usage() }
+    let (collection, _) = loadCollection(args[1])
+    guard let id = Int(args[2]), let res = collection.resource(NovaType.pict, id) else {
+        FileHandle.standardError.write(Data("error: no PICT \(args[2]) in \(args[1])\n".utf8)); exit(1)
+    }
+    do {
+        let img = try PICT.decode(res.data)
+        let out = args.count == 4 ? args[3] : "data/converted/pict_\(id).png"
+        try? FileManager.default.createDirectory(atPath: URL(fileURLWithPath: out).deletingLastPathComponent().path,
+                                                 withIntermediateDirectories: true)
+        if img.writePNG(to: URL(fileURLWithPath: out)) {
+            print("PICT \(id): \(img.frameWidth)x\(img.frameHeight) → \(out)")
+        } else {
+            print("PICT \(id): decoded \(img.frameWidth)x\(img.frameHeight) but PNG write failed")
+        }
+    } catch {
+        FileHandle.standardError.write(Data("error decoding PICT \(id): \(error)\n".utf8)); exit(1)
+    }
+
+case "ai":
+    // Headless AI simulation: load a real system, populate it with NPCs from its
+    // düde/flët spawn table, run the full engine (diplomacy + behaviors + combat)
+    // for N seconds, and report what happened. Proves the AI works on real data.
+    //   evnova-extract ai <baseDir> [systemID] [seconds]
+    guard args.count >= 2 else { usage() }
+    let aiBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let aiGame: NovaGame
+    do { aiGame = NovaGame(try GameLibrary.merge(baseFiles: aiBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    let galaxy = Galaxy(game: aiGame)
+    let sysID = args.count >= 3 ? (Int(args[2]) ?? 0) : (aiGame.startingSystem()?.id ?? 128)
+    let seconds = args.count >= 4 ? (Double(args[3]) ?? 60) : 60
+    guard let sys = aiGame.system(sysID) else {
+        FileHandle.standardError.write(Data("error: no system \(sysID)\n".utf8)); exit(1)
+    }
+    let govName = aiGame.govt(sys.government)?.name ?? "Independent"
+    print("System #\(sys.id) \"\(sys.name)\"  govt: \(govName)  avgShips: \(sys.averageShips)")
+    print("spawn table: \(sys.dudeSpawns.count) dude(s), \(sys.fleetSpawns.count) fleet(s)")
+
+    // A player ship at the centre (using the system's dominant hull if we can).
+    let playerHull = aiGame.ship(sys.spawns.first?.id ?? 128).map { _ in sys.spawns.first!.id } ?? 128
+    let player = galaxy.makeShip(playerHull, government: independentGovt, at: Vec2())
+        ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
+    let world = World(player: player)
+    world.diplomacy = galaxy.makeDiplomacy()
+    world.galaxy = galaxy
+    world.systemContext = galaxy.systemContext(for: sys.id)
+    world.spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
+    world.spawner?.populate(world)
+    print("populated with \(world.npcs.count) NPC(s); jumpRadius \(Int(world.systemContext.jumpRadius))")
+
+    var arrivals = 0, departures = 0, kills = 0, shots = 0, beams = 0
+    var stateHistogram: [String: Int] = [:]
+    let dt = 1.0 / 30.0
+    let steps = Int(seconds / dt)
+    for i in 0..<steps {
+        world.step(dt)
+        for e in world.events {
+            switch e {
+            case .shipArrived: arrivals += 1
+            case .shipDeparted: departures += 1
+            case .shipDestroyed: kills += 1
+            case .weaponFired: shots += 1
+            case .beam(_, _, let hit): if hit { beams += 1 }
+            default: break
+            }
+        }
+        if i % (steps / 4 == 0 ? 1 : steps / 4) == 0 {
+            for npc in world.npcs { stateHistogram[npc.brain?.state.rawValue ?? "?", default: 0] += 1 }
+        }
+    }
+
+    print(String(repeating: "-", count: 44))
+    print("after \(Int(seconds))s:  live NPCs \(world.npcs.count)   projectiles \(world.projectiles.count)")
+    print("  arrivals \(arrivals)   departures \(departures)   kills \(kills)")
+    print("  shots fired \(shots)   beam hits \(beams)")
+    let hist = stateHistogram.sorted { $0.value > $1.value }
+        .map { "\($0.key)×\($0.value)" }.joined(separator: "  ")
+    print("  behavior samples: \(hist)")
+    print("  sample ships:")
+    for npc in world.npcs.prefix(8) {
+        let gov = aiGame.govt(npc.government)?.name ?? "indep"
+        let tgt = npc.currentTargetID.map { " → target #\($0)" } ?? ""
+        print(String(format: "    #%-3d %-22@ [%@] %@  shield %3.0f/%3.0f armor %3.0f/%3.0f%@",
+                     npc.entityID, npc.name as NSString, gov as NSString,
+                     npc.brain?.state.rawValue ?? "?",
+                     npc.shield, npc.maxShield, npc.armor, npc.maxArmor, tgt))
+    }
+
+case "mission":
+    // Decode a single mission and print its resolved fields + text. Validates
+    // the mïsn decoder against real data.
+    //   evnova-extract mission <baseDir> <id>
+    guard args.count == 3, let id = Int(args[2]) else { usage() }
+    let mBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let mGame: NovaGame
+    do { mGame = NovaGame(try GameLibrary.merge(baseFiles: mBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    guard let m = mGame.mission(id) else {
+        FileHandle.standardError.write(Data("error: no mission #\(id)\n".utf8)); exit(1)
+    }
+    func nz(_ s: String) -> String { s.isEmpty ? "—" : s }
+    print("""
+    mïsn #\(m.id): \(m.name)
+      offered:   loc=\(m.availLocation)  stellar=\(m.availStellar)  random=\(m.availRandom)%  \
+    minRecord=\(m.availRecord) minRating=\(m.availRating) shipType=\(m.availShipType)
+      availBits: \(nz(m.availBits))
+      travel→\(m.travelStellar)  return→\(m.returnStellar)  \
+    cargo=\(m.cargoType)×\(m.cargoQty) pickup=\(m.cargoPickup) dropoff=\(m.cargoDropoff)
+      pay:       \(m.pay)  compGovt=\(m.compRewardGovt) compLegal=\(m.compLegalReward)  \
+    timeLimit=\(m.timeLimit) canAbort=\(m.canAbort)
+      ships:     count=\(m.shipCount) syst=\(m.shipSystem) dude=\(m.shipDude) goal=\(m.shipGoal) \
+    aux=\(m.auxShipCount)
+      flags:     0x\(String(m.flags1, radix: 16))/0x\(String(m.flags2, radix: 16))  \
+    dateInc=\(m.datePostIncrement)  weight=\(m.displayWeight)
+      onAccept:  \(nz(m.onAccept))
+      onSuccess: \(nz(m.onSuccess))
+      onFailure: \(nz(m.onFailure))
+      onAbort:   \(nz(m.onAbort))
+      onShipDone:\(nz(m.onShipDone))
+      buttons:   [\(nz(m.acceptButton))] [\(nz(m.refuseButton))]
+      offerText(\(m.offerTextID)): \(nz(String(mGame.descText(m.offerTextID).prefix(120))))
+      compText(\(m.completionText)):  \(nz(String(mGame.descText(m.completionText).prefix(120))))
+    """)
+
+case "missions":
+    // Parse ALL missions and report aggregate stats — a bulk validation that the
+    // decoder handles every real mission without producing garbage.
+    //   evnova-extract missions <baseDir>
+    guard args.count == 2 else { usage() }
+    let msBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let msGame: NovaGame
+    do { msGame = NovaGame(try GameLibrary.merge(baseFiles: msBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    let all = msGame.missions()
+    var withBits = 0, withAccept = 0, withSuccess = 0, withShips = 0, withPay = 0
+    var badBits = 0
+    for m in all {
+        if !m.availBits.isEmpty { withBits += 1 }
+        if !m.onAccept.isEmpty { withAccept += 1 }
+        if !m.onSuccess.isEmpty { withSuccess += 1 }
+        if m.hasShipObjective { withShips += 1 }
+        if m.pay != 0 { withPay += 1 }
+        // Sanity: control-bit strings should be ASCII-ish, not binary garbage.
+        if m.availBits.unicodeScalars.contains(where: { $0.value > 0x7E || ($0.value < 0x20 && $0 != " ") }) {
+            badBits += 1
+        }
+    }
+    print("""
+    parsed \(all.count) missions
+      with availBits:   \(withBits)
+      with onAccept:    \(withAccept)
+      with onSuccess:   \(withSuccess)
+      with ship goal:   \(withShips)
+      with pay:         \(withPay)
+      garbled bit-str:  \(badBits)   (should be 0)
+    """)
+    // Show a handful so a human can eyeball correctness.
+    for m in all.prefix(6) {
+        print(String(format: "  #%-4d %-32@ bits=%@", m.id, m.name as NSString,
+                     m.availBits.isEmpty ? "—" : m.availBits))
     }
 
 default:

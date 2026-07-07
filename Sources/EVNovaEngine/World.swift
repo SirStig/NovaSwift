@@ -1,18 +1,20 @@
 import Foundation
 
-/// Abstract control input. Touch, keyboard, and game controllers all translate
-/// into this; the simulation only ever reads `ControlIntent`, never raw input.
-/// See docs/MOBILE_AND_PLUGINS.md §1.
+/// Abstract control input. Touch, keyboard, game controllers **and the NPC AI**
+/// all translate into this; the simulation only ever reads `ControlIntent`, never
+/// raw input. An NPC's `AIBrain` produces exactly the same struct a player's
+/// fingers do — that symmetry is what lets one flight model drive every ship.
 public struct ControlIntent: Equatable {
     public var turnLeft = false
     public var turnRight = false
     public var thrust = false
     public var reverse = false      // reverse thrust / brake-to-stop assist
+    public var afterburner = false  // burn fuel for a speed / accel boost
     public var firePrimary = false
     public var fireSecondary = false
-    /// Absolute heading (radians, compass) to rotate toward — used by mouse and
-    /// analog-stick aiming. When set, it drives turning unless a discrete
-    /// turnLeft/turnRight is also active (discrete input wins).
+    /// Absolute heading (radians, compass) to rotate toward — used by mouse,
+    /// analog-stick aiming, and the AI. When set, it drives turning unless a
+    /// discrete turnLeft/turnRight is also active (discrete input wins).
     public var desiredHeading: Double?
     public init() {}
 
@@ -72,12 +74,54 @@ public struct ShipStats {
 
 /// A moving ship in world space. `angle` is a compass heading in radians
 /// (0 = up/north, increasing clockwise), matching EV Nova sprite frame 0.
+///
+/// Every ship — player or NPC — is a `Ship`. Combat state (shields/armor), a
+/// faction (`government`), a weapon loadout, and an optional `brain` turn the
+/// same body into an AI-controlled combatant. A `nil` brain means "driven from
+/// the outside" (the player).
 public final class Ship {
     public var position: Vec2
     public var velocity: Vec2
     public var angle: Double
     public let stats: ShipStats
     public let name: String
+
+    /// Unique per-instance id assigned by the world (player == 0). Distinct from
+    /// `shipTypeID`, which is the `shïp` resource id used for the sprite.
+    public var entityID: Int = 0
+    public var shipTypeID: Int = -1
+    /// Faction/government. Drives who this ship will fight (see `Diplomacy`).
+    public var government: Int = independentGovt
+    /// Collision radius (px). Set from the sprite size where known.
+    public var radius: Double = 16
+
+    // Combat state.
+    public var maxShield: Double = 100
+    public var shield: Double = 100
+    public var maxArmor: Double = 100
+    public var armor: Double = 100
+    public var shieldRechargePerSec: Double = 8
+    public var armorRechargePerSec: Double = 0
+    public var weapons: [WeaponMount] = []
+
+    // AI state.
+    public var brain: AIBrain?
+    /// The entity this ship is currently aiming at (for turrets / guided shots
+    /// and HUD). Set by the brain each think().
+    public var currentTargetID: Int?
+    /// The brain requests hyperspace departure; the world despawns it past the
+    /// system edge.
+    public var wantsToDepart = false
+
+    public var isPlayer: Bool { entityID == 0 }
+    public var isAlive: Bool { armor > 0 }
+    /// 0…1 overall health, shields included, for morale/retreat decisions.
+    public var healthFraction: Double {
+        let maxTotal = maxShield + maxArmor
+        return maxTotal > 0 ? (shield + armor) / maxTotal : 0
+    }
+    public var armorFraction: Double { maxArmor > 0 ? armor / maxArmor : 0 }
+    public var shieldFraction: Double { maxShield > 0 ? shield / maxShield : 0 }
 
     public init(name: String, stats: ShipStats, position: Vec2 = Vec2(), angle: Double = 0) {
         self.name = name
@@ -95,6 +139,34 @@ public final class Ship {
         var a = angle.truncatingRemainder(dividingBy: twoPi)
         if a < 0 { a += twoPi }
         return Int((a / twoPi * Double(n)).rounded()) % n
+    }
+
+    // MARK: Combat helpers
+
+    /// Apply damage: shields first, then armor bleed-through. Returns true if the
+    /// hit destroyed the ship.
+    @discardableResult
+    public func applyDamage(shield dmgShield: Double, armor dmgArmor: Double) -> Bool {
+        // A shot's shield and armor damage are separate figures in EV Nova; when
+        // shields are up they soak the shield-damage, and leftover proportion
+        // carries into armor.
+        if shield > 0 {
+            let before = shield
+            shield = max(0, shield - dmgShield)
+            let soakedFraction = dmgShield > 0 ? (before - shield) / dmgShield : 1
+            let leftover = dmgArmor * (1 - soakedFraction)
+            if leftover > 0 { armor = max(0, armor - leftover) }
+        } else {
+            armor = max(0, armor - dmgArmor)
+        }
+        return armor <= 0
+    }
+
+    func regen(_ dt: Double) {
+        if shield < maxShield { shield = min(maxShield, shield + shieldRechargePerSec * dt) }
+        if armor < maxArmor && armorRechargePerSec > 0 {
+            armor = min(maxArmor, armor + armorRechargePerSec * dt)
+        }
     }
 
     func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning) {
@@ -128,20 +200,281 @@ public final class Ship {
     }
 }
 
-/// The live game simulation. Owns the player ship (and, later, NPCs, projectiles,
-/// stellar objects). Deterministic: `step(dt)` advances everything from the
-/// current `intent`. Rendering reads state; it never mutates it.
+/// The live game simulation. Owns the player ship, the NPC ships, and their
+/// projectiles, and advances everything deterministically from the current
+/// `intent` (player) and each NPC's `brain`. Rendering reads state and drains
+/// `events`; it never mutates the simulation.
 public final class World {
     public var player: Ship
     public var intent = ControlIntent()
     public var tuning: FlightTuning
+    public var combatTuning: CombatTuning
 
-    public init(player: Ship, tuning: FlightTuning = .default) {
+    /// Live NPC ships (does not include the player).
+    public private(set) var npcs: [Ship] = []
+    public private(set) var projectiles: [Projectile] = []
+    /// Transient render/audio events produced this step; drain after `step`.
+    public private(set) var events: [WorldEvent] = []
+
+    /// Diplomacy table (governments & player standing). Optional so a bare
+    /// physics world still works; when nil, nobody is hostile.
+    public var diplomacy: Diplomacy?
+    /// The system's stellar geometry (planets, jump radius) for AI navigation.
+    public var systemContext = SystemContext()
+    /// Catalog used to instantiate NPC ships & weapons. Optional for physics-only.
+    public var galaxy: Galaxy?
+    /// Populates and refreshes the NPC population.
+    public var spawner: Spawner?
+
+    public var rng = SplitMix64(seed: 0xE7_0A_5EED)
+    private var nextEntityID = 1
+
+    public init(player: Ship, tuning: FlightTuning = .default,
+                combatTuning: CombatTuning = .default) {
         self.player = player
         self.tuning = tuning
+        self.combatTuning = combatTuning
+        player.entityID = 0
     }
 
-    public func step(_ dt: Double) {
-        player.step(dt, intent: intent, tuning: tuning)
+    // MARK: Roster
+
+    /// Every live ship, player first. Handy for AI perception.
+    public var allShips: [Ship] { [player] + npcs }
+
+    public func ship(id: Int) -> Ship? {
+        if id == 0 { return player }
+        return npcs.first { $0.entityID == id }
     }
+
+    /// Add an NPC, assigning it a fresh entity id. Returns the id.
+    @discardableResult
+    public func addNPC(_ ship: Ship) -> Int {
+        ship.entityID = nextEntityID
+        nextEntityID += 1
+        npcs.append(ship)
+        events.append(.shipArrived(entityID: ship.entityID))
+        return ship.entityID
+    }
+
+    public func drainEvents() -> [WorldEvent] {
+        let e = events
+        events.removeAll(keepingCapacity: true)
+        return e
+    }
+
+    // MARK: Step
+
+    public func step(_ dt: Double) {
+        events.removeAll(keepingCapacity: true)
+
+        spawner?.update(dt, world: self)
+
+        // Player: outside intent.
+        fireWeapons(from: player, intent: intent)
+        player.step(dt, intent: intent, tuning: tuning)
+
+        // NPCs: each brain decides an intent.
+        for npc in npcs where npc.isAlive {
+            let npcIntent = npc.brain?.think(ship: npc, world: self, dt: dt) ?? ControlIntent()
+            fireWeapons(from: npc, intent: npcIntent)
+            npc.step(dt, intent: npcIntent, tuning: tuning)
+        }
+
+        // Cooldowns & regen.
+        for s in allShips {
+            for w in s.weapons { w.tick(dt) }
+            s.regen(dt)
+        }
+
+        stepProjectiles(dt)
+        despawnDepartedAndDead()
+    }
+
+    // MARK: Weapons
+
+    private func fireWeapons(from ship: Ship, intent: ControlIntent) {
+        guard intent.firePrimary || intent.fireSecondary else { return }
+        guard ship.isAlive else { return }
+        let target = ship.currentTargetID.flatMap { self.ship(id: $0) }
+
+        for mount in ship.weapons where mount.ready {
+            let spec = mount.spec
+            // Aim: turrets/guided track the target; fixed guns fire along heading.
+            var aim = ship.angle
+            if let t = target, spec.isBeam || spec.isGuided || mount.spec.turnRate > 0 || target != nil {
+                if spec.isBeam || spec.isGuided {
+                    aim = (t.position - ship.position).angle
+                }
+            }
+            if spec.accuracyRadians > 0 {
+                aim += rng.double(in: -spec.accuracyRadians...spec.accuracyRadians)
+            }
+
+            if spec.isBeam {
+                fireBeam(from: ship, spec: spec, aim: aim, target: target)
+            } else {
+                let dir = Vec2.heading(aim)
+                let muzzle = ship.position + dir * (ship.radius + 4)
+                let vel = dir * spec.projectileSpeed + ship.velocity * 0.5
+                let life = spec.range / max(1, spec.projectileSpeed)
+                let p = Projectile(position: muzzle, velocity: vel, life: life,
+                                   shieldDamage: spec.shieldDamage, armorDamage: spec.armorDamage,
+                                   blastRadius: spec.blastRadius, ownerID: ship.entityID,
+                                   ownerGovt: ship.government, guided: spec.isGuided,
+                                   turnRate: spec.turnRate, speed: spec.projectileSpeed,
+                                   targetID: spec.isGuided ? ship.currentTargetID : nil)
+                projectiles.append(p)
+                events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim))
+            }
+            mount.didFire()
+        }
+    }
+
+    /// Instant-hit beam: damage the aimed target if it's within range and roughly
+    /// in the beam's path.
+    private func fireBeam(from ship: Ship, spec: WeaponSpec, aim: Double, target: Ship?) {
+        let dir = Vec2.heading(aim)
+        let origin = ship.position + dir * (ship.radius + 2)
+        var endPoint = origin + dir * spec.range
+        var hitShip: Ship?
+
+        // Nearest valid ship along the ray within range.
+        var bestT = spec.range
+        for other in allShips where other.entityID != ship.entityID && other.isAlive {
+            if !canHit(owner: ship.entityID, ownerGovt: ship.government, victim: other) { continue }
+            let rel = other.position - origin
+            let along = rel.dot(dir)
+            guard along > 0, along <= spec.range else { continue }
+            let perp = (rel - dir * along).length
+            if perp <= other.radius + 4 && along < bestT {
+                bestT = along; hitShip = other
+            }
+        }
+        if let h = hitShip {
+            endPoint = origin + dir * bestT
+            applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID)
+        }
+        events.append(.beam(from: origin, to: endPoint, hit: hitShip != nil))
+    }
+
+    // MARK: Projectiles
+
+    private func stepProjectiles(_ dt: Double) {
+        for p in projectiles where p.alive {
+            // Guided steering toward the (still-living) target.
+            if p.guided, let tid = p.targetID, let t = ship(id: tid), t.isAlive {
+                let desired = (t.position - p.position).angle
+                let cur = p.velocity.angle
+                var d = angleDelta(from: cur, to: desired)
+                let maxTurn = p.turnRate * dt
+                d = max(-maxTurn, min(maxTurn, d))
+                p.velocity = Vec2.heading(cur + d) * p.speed
+            }
+            p.position += p.velocity * dt
+            p.life -= dt
+            if p.life <= 0 { p.alive = false; continue }
+
+            for other in allShips where other.isAlive {
+                if !canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) { continue }
+                if (other.position - p.position).length <= other.radius {
+                    applyHit(to: other, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID)
+                    // Splash damage.
+                    if p.blastRadius > 0 {
+                        for splash in allShips where splash.entityID != other.entityID && splash.isAlive {
+                            if canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: splash),
+                               (splash.position - p.position).length <= p.blastRadius {
+                                applyHit(to: splash, shield: p.shieldDamage * 0.5,
+                                         armor: p.armorDamage * 0.5, ownerID: p.ownerID)
+                            }
+                        }
+                    }
+                    p.alive = false
+                    break
+                }
+            }
+        }
+        projectiles.removeAll { !$0.alive }
+    }
+
+    /// Whether a shot from `owner` (faction `ownerGovt`) may damage `victim`.
+    /// No self-hits and no friendly fire between the same government.
+    private func canHit(owner: Int, ownerGovt: Int, victim: Ship) -> Bool {
+        if victim.entityID == owner { return false }
+        // Same government doesn't shoot itself (independents are fair game).
+        if ownerGovt != independentGovt && victim.government == ownerGovt { return false }
+        return true
+    }
+
+    private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int) {
+        let hadShield = ship.shield > 0
+        let killed = ship.applyDamage(shield: shield, armor: armor)
+        events.append(hadShield ? .shieldHit(at: ship.position) : .armorHit(at: ship.position))
+
+        // Player fire provokes the victim and dents the player's record.
+        if ownerID == 0 && !ship.isPlayer {
+            ship.brain?.provokedByPlayer = true
+            if let dip = diplomacy, let gov = dip.govt(ship.government) {
+                dip.recordCrime(against: ship.government, penalty: max(1, gov.shootPenalty))
+            }
+        }
+        // NPC fire on player: let the player's would-be attacker be remembered.
+        if !ship.isPlayer, ship.brain?.targetID == nil, ownerID != 0 {
+            // (no-op hook for future player-side AI/escorts)
+        }
+        if killed { ship.armor = 0 }
+    }
+
+    // MARK: Despawn
+
+    private func despawnDepartedAndDead() {
+        var survivors: [Ship] = []
+        for npc in npcs {
+            if !npc.isAlive {
+                events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5)))
+                events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
+                                             at: npc.position))
+                // Clear any targeting of the dead ship.
+                clearTarget(npc.entityID)
+                continue
+            }
+            // Departed past the system edge → gone to hyperspace.
+            if npc.wantsToDepart {
+                let d = (npc.position - systemContext.center).length
+                if d >= systemContext.jumpRadius {
+                    events.append(.shipDeparted(entityID: npc.entityID))
+                    clearTarget(npc.entityID)
+                    continue
+                }
+            }
+            survivors.append(npc)
+        }
+        npcs = survivors
+        // Player death is left to the app (respawn / game-over UI).
+    }
+
+    private func clearTarget(_ id: Int) {
+        if player.currentTargetID == id { player.currentTargetID = nil }
+        for s in npcs where s.currentTargetID == id {
+            s.currentTargetID = nil
+            s.brain?.targetID = nil
+        }
+    }
+}
+
+// MARK: - Small vector angle helpers used across the AI/combat code
+
+extension Vec2 {
+    /// Compass heading (0 = north/up, clockwise) of this vector.
+    public var angle: Double { atan2(x, y) }
+    public func dot(_ o: Vec2) -> Double { x * o.x + y * o.y }
+}
+
+/// Shortest signed turn (radians) from heading `a` to heading `b`, in −π…π.
+public func angleDelta(from a: Double, to b: Double) -> Double {
+    let twoPi = 2 * Double.pi
+    var d = (b - a).truncatingRemainder(dividingBy: twoPi)
+    if d > .pi { d -= twoPi }
+    if d < -.pi { d += twoPi }
+    return d
 }

@@ -68,28 +68,62 @@ public struct ShanRes {
 }
 
 // MARK: shïp — ship type & stats
+//
+// Full field layout verified against novaparse `ShipResource.ts` (the EV Nova
+// reference parser). All big-endian. Note on **fuel**: EV Nova's ship resource
+// stores a single blue-gauge resource at @10/@94 that novaparse labels "energy";
+// in EV Nova this is the player-facing **Fuel** gauge (100 units = one hyperjump,
+// also spent by afterburners). We name it `fuelCapacity`/`fuelRegen` accordingly.
 
 public struct ShipRes {
     public let id: Int
     public let name: String
-    public let cargoSpace: Int
-    public let shield: Int
-    public let acceleration: Int
-    public let speed: Int          // max speed
-    public let turnRate: Int
-    public let armor: Int
-    public let shieldRecharge: Int
-    public let armorRecharge: Int
-    public let mass: Int
-    public let energyRecharge: Int
+
+    // Cargo & mass
+    public let cargoSpace: Int      // @0  base cargo hold, tons
+    public let freeMass: Int        // @12 free mass available for outfits, tons
+    public let mass: Int            // @62 hull mass (inertia / scan)
+
+    // Defenses
+    public let shield: Int          // @2  max shield
+    public let shieldRecharge: Int  // @16 shield regen stat (→ pts/sec via ×FPS/1000)
+    public let armor: Int           // @14 max armor
+    public let armorRecharge: Int   // @54 armor regen stat (0 for most hulls)
+
+    // Flight
+    public let acceleration: Int    // @4
+    public let speed: Int           // @6  max speed
+    public let turnRate: Int        // @8
+
+    // Fuel (the blue gauge; novaparse "energy")
+    public let fuelCapacity: Int    // @10 fuel units (100 = one jump)
+    public let fuelRegen: Int       // @94 fuel regen stat (frames per unit; 0 = none)
+
+    // Weapon mounts
+    public let maxGuns: Int         // @42
+    public let maxTurrets: Int      // @44
+
+    // Economy / meta
+    public let techLevel: Int       // @46
+    public let cost: Int            // @50
+    public let deathDelay: Int      // @52
+    public let length: Int          // @64
+    public let crew: Int            // @68
+    public let podCount: Int        // @76 escape pods
+
     /// Default AI disposition (0 = none); a spawning `düde` overrides it.
-    public let inherentAI: Int
+    public let inherentAI: Int      // @66
     /// Combat rating — how tough this hull is, used for engagement odds/morale.
-    public let strength: Int
+    public let strength: Int        // @70
     /// Government this hull "belongs" to when spawned outside a `düde`.
-    public let inherentGovt: Int
-    /// Built-in weapons: (weapon id, count, ammo). Drives NPC loadouts.
+    public let inherentGovt: Int    // @72
+    public let flags: UInt16        // @74
+
+    /// Built-in weapons: (weapon id, count, ammo). Drives NPC + starting loadouts.
     public let weapons: [(id: Int, count: Int, ammo: Int)]
+    /// Preinstalled outfits: (outfit id, count). These grant their stat mods and
+    /// weapons on top of the hull's stock weapons.
+    public let outfits: [(id: Int, count: Int)]
 
     public init(_ r: Resource) {
         id = r.id
@@ -100,21 +134,50 @@ public struct ShipRes {
         acceleration = i16(d, 4)
         speed = i16(d, 6)
         turnRate = i16(d, 8)
+        fuelCapacity = i16(d, 10)
+        freeMass = i16(d, 12)
         armor = i16(d, 14)
         shieldRecharge = i16(d, 16)
+        maxGuns = i16(d, 42)
+        maxTurrets = i16(d, 44)
+        techLevel = i16(d, 46)
+        cost = i16(d, 50)
+        deathDelay = i16(d, 52)
         armorRecharge = i16(d, 54)
         mass = i16(d, 62)
+        length = i16(d, 64)
         inherentAI = i16(d, 66)
+        crew = i16(d, 68)
         strength = i16(d, 70)
         inherentGovt = i16(d, 72)
-        energyRecharge = i16(d, 94)
-        // Stock weapons: 4 slots — ids @18, counts @26, ammo @34.
+        flags = UInt16(truncatingIfNeeded: u16(d, 74))
+        podCount = i16(d, 76)
+        fuelRegen = i16(d, 94)
+
+        // Stock weapons: 4 primary slots (ids @18, counts @26, ammo @34) plus
+        // 4 extended slots stored far down the resource (ids @1742, …).
         var w: [(Int, Int, Int)] = []
         for i in 0..<4 {
             let wid = i16(d, 18 + i * 2)
             if wid >= 128 { w.append((wid, i16(d, 26 + i * 2), i16(d, 34 + i * 2))) }
         }
+        for i in 0..<4 {
+            let wid = i16(d, 1742 + i * 2)
+            if wid >= 128 { w.append((wid, i16(d, 1750 + i * 2), i16(d, 1758 + i * 2))) }
+        }
         weapons = w
+
+        // Preinstalled outfits: 4 slots (ids @78, counts @86) plus 4 more (@880/@888).
+        var o: [(Int, Int)] = []
+        for i in 0..<4 {
+            let oid = i16(d, 78 + i * 2)
+            if oid >= 128 { o.append((oid, max(1, i16(d, 86 + i * 2)))) }
+        }
+        for i in 0..<4 {
+            let oid = i16(d, 880 + i * 2)
+            if oid >= 128 { o.append((oid, max(1, i16(d, 888 + i * 2)))) }
+        }
+        outfits = o
     }
 }
 
@@ -127,6 +190,22 @@ public struct SystRes {
     public let y: Int
     public let links: [Int]  // ids of connected systems
     public let spobs: [Int]  // ids of stellar objects in this system
+    /// What spawns here: (spawn id, probability). Positive id = `düde`; negative
+    /// id = `flët` (fleet id = −value, so −128 → fleet 128).
+    public let spawns: [(id: Int, prob: Int)]
+    /// Roughly how many NPC ships populate the system at once.
+    public let averageShips: Int
+    /// Controlling government (−1 = independent/contested).
+    public let government: Int
+
+    /// Spawn entries that reference dudes directly.
+    public var dudeSpawns: [(dudeID: Int, prob: Int)] {
+        spawns.filter { $0.id >= 128 }.map { (dudeID: $0.id, prob: $0.prob) }
+    }
+    /// Spawn entries that reference fleets.
+    public var fleetSpawns: [(fleetID: Int, prob: Int)] {
+        spawns.filter { $0.id < 0 }.map { (fleetID: -$0.id, prob: $0.prob) }
+    }
 
     public init(_ r: Resource) {
         id = r.id
@@ -136,6 +215,17 @@ public struct SystRes {
         y = i16(d, 2)
         links = (0..<16).map { i16(d, 4 + $0 * 2) }.filter { $0 >= 128 }
         spobs = (0..<16).map { i16(d, 36 + $0 * 2) }.filter { $0 >= 128 }
+        // Spawn table: 8 ids @68, 8 probs @84 (verified: real Federation system
+        // probabilities sum to 100), avg ship count @100, government @102.
+        var sp: [(Int, Int)] = []
+        for i in 0..<8 {
+            let sid = i16(d, 68 + i * 2)
+            let prob = i16(d, 84 + i * 2)
+            if sid != -1 && sid != 0 && prob > 0 { sp.append((sid, prob)) }
+        }
+        spawns = sp
+        averageShips = i16(d, 100)
+        government = i16(d, 102)
     }
 }
 
@@ -194,6 +284,22 @@ public struct NovaGame {
     public func fleets() -> [FleetRes] { resources.resources(of: NovaType.fleet).map(FleetRes.init) }
     public func weapon(_ id: Int) -> WeapRes? { resources.resource(NovaType.weapon, id).map(WeapRes.init) }
     public func weapons() -> [WeapRes] { resources.resources(of: NovaType.weapon).map(WeapRes.init) }
+    public func outfit(_ id: Int) -> OutfRes? { resources.resource(NovaType.outfit, id).map(OutfRes.init) }
+    public func outfits() -> [OutfRes] { resources.resources(of: NovaType.outfit).map(OutfRes.init) }
+
+    // Story / mission resources (see MissionModels.swift).
+    public func mission(_ id: Int) -> MissionRes? { resources.resource(NovaType.mission, id).map(MissionRes.init) }
+    public func missions() -> [MissionRes] { resources.resources(of: NovaType.mission).map(MissionRes.init) }
+    public func cron(_ id: Int) -> CronRes? { resources.resource(NovaType.cron, id).map(CronRes.init) }
+    public func crons() -> [CronRes] { resources.resources(of: NovaType.cron).map(CronRes.init) }
+    public func pers(_ id: Int) -> PersRes? { resources.resource(NovaType.pers, id).map(PersRes.init) }
+    public func persons() -> [PersRes] { resources.resources(of: NovaType.pers).map(PersRes.init) }
+    public func rank(_ id: Int) -> RankRes? { resources.resource(NovaType.rank, id).map(RankRes.init) }
+    public func ranks() -> [RankRes] { resources.resources(of: NovaType.rank).map(RankRes.init) }
+    public func desc(_ id: Int) -> DescRes? { resources.resource(NovaType.desc, id).map(DescRes.init) }
+    public func stringList(_ id: Int) -> StringListRes? { resources.resource(NovaType.strList, id).map(StringListRes.init) }
+    /// Convenience: the narrative text of a `dësc` resource, or "" if absent.
+    public func descText(_ id: Int) -> String { desc(id)?.text ?? "" }
 
     /// Resolve a ship's base hull sprite: shïp id → shän (same id) → rlëD.
     ///
