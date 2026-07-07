@@ -49,7 +49,7 @@ final class GameHost {
         }
         hud.systemName = systemName
         scene.configure(player: ship, textures: textures, settings: model.settings,
-                        input: input, controller: controller, hud: hud,
+                        input: input, controller: controller, hud: hud, audio: model.audio,
                         planets: planets, systemName: systemName)
     }
 }

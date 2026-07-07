@@ -341,6 +341,38 @@ case "tmpl":
         if let s = sz { tByteOff += s }
     }
 
+case "strscan":
+    // Dev tool: across all resources of a type, find printable ASCII runs (>=3
+    // chars) and tally their START offsets — reveals fixed string-field offsets.
+    //   evnova-extract strscan <baseDir> <TYPE>
+    guard args.count == 3, let type = FourCharCode(args[2]) else { usage() }
+    let ssBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let ssCol: ResourceCollection
+    do { ssCol = try GameLibrary.merge(baseFiles: ssBase) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    var startTally: [Int: Int] = [:]
+    var sampleAt: [Int: String] = [:]
+    for r in ssCol.resources(of: type) {
+        let d = r.data
+        var i = d.startIndex
+        while i < d.endIndex {
+            if d[i] >= 32 && d[i] < 127 {
+                let start = i - d.startIndex
+                var j = i, s = ""
+                while j < d.endIndex, d[j] >= 32, d[j] < 127 { s.append(Character(UnicodeScalar(d[j]))); j = d.index(after: j) }
+                if s.count >= 3 {
+                    startTally[start, default: 0] += 1
+                    if sampleAt[start] == nil { sampleAt[start] = s }
+                }
+                i = j
+            } else { i = d.index(after: i) }
+        }
+    }
+    print("printable-run START offsets across \(ssCol.resources(of: type).count) \(type.stringValue):")
+    for off in startTally.keys.sorted() {
+        print(String(format: "  @%-5d ×%-4d  e.g. %@", off, startTally[off]!, String(sampleAt[off]!.prefix(48))))
+    }
+
 default:
     usage()
 }

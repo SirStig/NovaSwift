@@ -68,6 +68,7 @@ struct LauncherView: View {
     private var actions: some View {
         VStack(spacing: 14) {
             Button {
+                model.audio.play(.uiSelect)
                 model.startGame()
             } label: {
                 HStack {
@@ -96,7 +97,7 @@ struct LauncherView: View {
     }
 
     private func tile(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button { model.audio.play(.uiSelect); action() } label: {
             VStack(spacing: 8) {
                 Image(systemName: icon).font(.title3)
                 Text(title).font(.caption.weight(.medium))

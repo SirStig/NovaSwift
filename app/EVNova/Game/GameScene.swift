@@ -21,6 +21,8 @@ final class GameScene: SKScene {
     private var controllerInput: GameControllerInput?
     private var hud: GameHUDModel?
     private var settings = GameSettings()
+    private var audio: GameAudio?
+    private var wasFiring = false
 
     private let cameraNode = SKCameraNode()
     private var shipNode: SKNode!
@@ -51,6 +53,7 @@ final class GameScene: SKScene {
 
     func configure(player ship: Ship, textures: [SKTexture], settings: GameSettings,
                    input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
+                   audio: GameAudio? = nil,
                    planets: [PlanetVisual] = [], systemName: String = "") {
         self.world = World(player: ship)
         self.rotationTextures = textures
@@ -58,6 +61,7 @@ final class GameScene: SKScene {
         self.input = input
         self.controllerInput = controller
         self.hud = hud
+        self.audio = audio
         self.planetVisuals = planets
         self.systemName = systemName
     }
@@ -70,6 +74,8 @@ final class GameScene: SKScene {
         buildStarfield()
         buildPlanets()
         buildShip()
+        // Arriving in the system.
+        audio?.play(.hyperspaceArrive)
     }
 
     private func buildPlanets() {
@@ -190,6 +196,14 @@ final class GameScene: SKScene {
 
         let p = world.player
         let scenePos = CGPoint(x: p.position.x, y: p.position.y)
+
+        // Weapon fire SFX on the rising edge of the fire intent. Until the combat
+        // system supplies each weapon's own `snd `, we use a stock blaster report;
+        // it plays from the player's position (centred on the listener).
+        if intent.firePrimary && !wasFiring {
+            audio?.play(208, at: scenePos, listener: scenePos)
+        }
+        wasFiring = intent.firePrimary
         shipNode.position = scenePos
 
         if let sprite = shipSprite, !rotationTextures.isEmpty {

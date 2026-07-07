@@ -19,6 +19,11 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model.screen)
-        .onAppear { model.data.reload() }
+        .onAppear {
+            model.data.reload()
+            // Wire audio to the data and start menu music (if the player enabled it
+            // and their data ships a track). Music carries through into the game.
+            model.prepareAudioAndData()
+        }
     }
 }

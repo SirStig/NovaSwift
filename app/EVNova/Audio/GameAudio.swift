@@ -80,8 +80,16 @@ final class GameAudio: ObservableObject {
 
     // MARK: SFX
 
-    /// Play a fixed engine/UI event.
-    func play(_ event: GameEvent) { playSound(event.soundID) }
+    /// Play a fixed engine/UI event. Interface beeps use the interface-volume
+    /// slider; world events use the effects volume.
+    func play(_ event: GameEvent) {
+        switch event {
+        case .uiSelect, .uiError:
+            playSound(event.soundID, volume: Float(settings.uiVolume))
+        default:
+            playSound(event.soundID)
+        }
+    }
 
     /// Play a `snd ` id centred (no attenuation/pan). Combat/UI systems use this
     /// with a weapon's own sound id.

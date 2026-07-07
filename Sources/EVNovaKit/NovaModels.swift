@@ -82,6 +82,14 @@ public struct ShipRes {
     public let armorRecharge: Int
     public let mass: Int
     public let energyRecharge: Int
+    /// Default AI disposition (0 = none); a spawning `düde` overrides it.
+    public let inherentAI: Int
+    /// Combat rating — how tough this hull is, used for engagement odds/morale.
+    public let strength: Int
+    /// Government this hull "belongs" to when spawned outside a `düde`.
+    public let inherentGovt: Int
+    /// Built-in weapons: (weapon id, count, ammo). Drives NPC loadouts.
+    public let weapons: [(id: Int, count: Int, ammo: Int)]
 
     public init(_ r: Resource) {
         id = r.id
@@ -96,7 +104,17 @@ public struct ShipRes {
         shieldRecharge = i16(d, 16)
         armorRecharge = i16(d, 54)
         mass = i16(d, 62)
+        inherentAI = i16(d, 66)
+        strength = i16(d, 70)
+        inherentGovt = i16(d, 72)
         energyRecharge = i16(d, 94)
+        // Stock weapons: 4 slots — ids @18, counts @26, ammo @34.
+        var w: [(Int, Int, Int)] = []
+        for i in 0..<4 {
+            let wid = i16(d, 18 + i * 2)
+            if wid >= 128 { w.append((wid, i16(d, 26 + i * 2), i16(d, 34 + i * 2))) }
+        }
+        weapons = w
     }
 }
 
@@ -166,6 +184,16 @@ public struct NovaGame {
     public func system(_ id: Int) -> SystRes? { resources.resource(NovaType.syst, id).map(SystRes.init) }
     public func systems() -> [SystRes] { resources.resources(of: NovaType.syst).map(SystRes.init) }
     public func spob(_ id: Int) -> SpobRes? { resources.resource(NovaType.spob, id).map(SpobRes.init) }
+
+    // AI-driving resources.
+    public func govt(_ id: Int) -> GovtRes? { resources.resource(NovaType.govt, id).map(GovtRes.init) }
+    public func govts() -> [GovtRes] { resources.resources(of: NovaType.govt).map(GovtRes.init) }
+    public func dude(_ id: Int) -> DudeRes? { resources.resource(NovaType.dude, id).map(DudeRes.init) }
+    public func dudes() -> [DudeRes] { resources.resources(of: NovaType.dude).map(DudeRes.init) }
+    public func fleet(_ id: Int) -> FleetRes? { resources.resource(NovaType.fleet, id).map(FleetRes.init) }
+    public func fleets() -> [FleetRes] { resources.resources(of: NovaType.fleet).map(FleetRes.init) }
+    public func weapon(_ id: Int) -> WeapRes? { resources.resource(NovaType.weapon, id).map(WeapRes.init) }
+    public func weapons() -> [WeapRes] { resources.resources(of: NovaType.weapon).map(WeapRes.init) }
 
     /// Resolve a ship's base hull sprite: shïp id → shän (same id) → rlëD.
     ///
