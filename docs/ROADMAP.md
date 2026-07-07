@@ -39,11 +39,17 @@ Swift `EVNovaKit` container layer complete:
   Polycon, Frozen Heart): base 8,362 → 11,585 resources with all enabled.
 - ✅ Mobile/launcher/plug-in design captured in `docs/MOBILE_AND_PLUGINS.md`.
 
-## M3 — Fly a ship
-- SwiftUI + SpriteKit skeleton on iOS & macOS.
-- Starfield, one ship sprite cycling its rotation frames, Newtonian thrust/turn.
-- Touch controls (iPad) + keyboard (Mac).
-- **Demo:** fly a ship around an empty system on device/simulator.
+## M3 — Fly a ship 🟢 (app scaffolded & building)
+- ✅ Real multiplatform **Xcode app** (iOS/iPadOS/macOS), SwiftUI + SpriteKit,
+  linking local `EVNovaKit`/`EVNovaEngine`. Builds clean for macOS & iOS Sim.
+- ✅ `EVNovaEngine`: `ControlIntent` input abstraction, Newtonian `World.step`,
+  ship rotation-frame selection; physics tests.
+- ✅ SpriteKit `GameScene`: parallax starfield, follow camera, real ship sprite
+  (vector placeholder before data import), HUD.
+- ✅ Touch controls overlay + hardware keyboard (WASD/arrows/space).
+- ✅ Launcher, plug-in toggles, settings, import-data flow, original app icon.
+- ⏭ Verify interactive flight on device/sim; tune flight feel; spawn stellar
+  objects (`spöb`) into the scene from real system data.
 
 ## M4 — A living system
 - Load a `sÿst`: planets (`spöb`), asteroids, other ships (`düde`/`flët`) with basic AI.
