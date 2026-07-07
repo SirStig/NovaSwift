@@ -2,6 +2,15 @@ import SpriteKit
 import EVNovaKit
 import EVNovaEngine
 
+/// A stellar object to render in the scene (planet / station / wormhole).
+struct PlanetVisual {
+    let id: Int
+    let name: String
+    let position: CGPoint     // in-system coordinates
+    let texture: SKTexture?
+    let radius: CGFloat
+}
+
 /// The live game scene. Runs the `EVNovaEngine` simulation and draws it: an
 /// infinite parallax starfield, the player ship (real EV Nova sprite when data
 /// is loaded, a vector placeholder otherwise) with an engine exhaust plume, a
@@ -22,8 +31,12 @@ final class GameScene: SKScene {
     private var shipRadius: CGFloat = 16
 
     private var starLayers: [StarLayer] = []
+    private var planetVisuals: [PlanetVisual] = []
+    private var planetNodes: [SKNode] = []
+    private var systemName = ""
     private var lastUpdate: TimeInterval = 0
     private var hudClock: TimeInterval = 0
+    private let radarRange: CGFloat = 8000
 
     private final class StarLayer {
         let container = SKNode()
@@ -37,13 +50,16 @@ final class GameScene: SKScene {
     // MARK: Setup
 
     func configure(player ship: Ship, textures: [SKTexture], settings: GameSettings,
-                   input: InputController, controller: GameControllerInput?, hud: GameHUDModel?) {
+                   input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
+                   planets: [PlanetVisual] = [], systemName: String = "") {
         self.world = World(player: ship)
         self.rotationTextures = textures
         self.settings = settings
         self.input = input
         self.controllerInput = controller
         self.hud = hud
+        self.planetVisuals = planets
+        self.systemName = systemName
     }
 
     override func didMove(to view: SKView) {
@@ -52,7 +68,36 @@ final class GameScene: SKScene {
         camera = cameraNode
         addChild(cameraNode)
         buildStarfield()
+        buildPlanets()
         buildShip()
+    }
+
+    private func buildPlanets() {
+        for p in planetVisuals {
+            let node: SKNode
+            if let tex = p.texture {
+                let sprite = SKSpriteNode(texture: tex)
+                sprite.texture?.filteringMode = .nearest
+                node = sprite
+            } else {
+                // Fallback disc for stellars whose art we can't decode yet (e.g. PICT).
+                let disc = SKShapeNode(circleOfRadius: max(24, p.radius))
+                disc.fillColor = SKColor(red: 0.25, green: 0.35, blue: 0.6, alpha: 1)
+                disc.strokeColor = SKColor(white: 1, alpha: 0.3)
+                node = disc
+            }
+            node.position = p.position
+            node.zPosition = 5
+            let label = SKLabelNode(fontNamed: "Menlo")
+            label.text = p.name
+            label.fontSize = 11
+            label.fontColor = SKColor(white: 0.8, alpha: 0.8)
+            label.verticalAlignmentMode = .top
+            label.position = CGPoint(x: 0, y: -p.radius - 6)
+            node.addChild(label)
+            addChild(node)
+            planetNodes.append(node)
+        }
     }
 
     private func buildStarfield() {
@@ -200,9 +245,21 @@ final class GameScene: SKScene {
         hud.maxSpeed = max(1, Int(p.stats.maxSpeed))
         hud.thrusting = world.intent.thrust
         hud.controllerConnected = controllerInput?.isConnected ?? false
+        hud.systemName = systemName
         var deg = p.angle * 180 / .pi
         deg = deg.truncatingRemainder(dividingBy: 360)
         if deg < 0 { deg += 360 }
         hud.headingDegrees = deg
+
+        // Radar: planets relative to the ship, normalized and clamped to the scope.
+        // Screen north is up, so world +y maps to radar -y.
+        let shipPos = p.position
+        hud.planetBlips = planetVisuals.map { pv in
+            var dx = (Double(pv.position.x) - shipPos.x) / Double(radarRange)
+            var dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
+            let m = (dx * dx + dy * dy).squareRoot()
+            if m > 1 { dx /= m; dy /= m } // clamp to the rim
+            return CGPoint(x: dx, y: dy)
+        }
     }
 }

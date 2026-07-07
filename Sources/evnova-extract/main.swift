@@ -19,6 +19,7 @@ func usage() -> Never {
       \(name) sprites <file> [outDir]     Decode rlëD sprites → PNG sheets
       \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
       \(name) ship    <baseDir> [id]      Decode ship stats + resolve its sprite → PNG
+      \(name) system  <baseDir> [id]      List a system's planets + resolve sprites
 
     <TYPE> is a four-char resource code, e.g. shïp  wëap  oütf  sÿst  spöb
     (paste the exact code including accents).
@@ -189,6 +190,36 @@ case "ship":
         print("  sprite: \(sheet.frameWidth)x\(sheet.frameHeight) × \(sheet.frameCount) frames (\(via)) → \(url.path)")
     } else {
         print("  sprite: (could not resolve)")
+    }
+
+case "system":
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do { game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    let systemID: Int
+    if args.count == 3, let id = Int(args[2]) {
+        systemID = id
+    } else if let start = game.startingSystem() {
+        systemID = start.id
+        print("(no id given — using most-populated system)")
+    } else {
+        print("no systems with stellar objects found"); break
+    }
+
+    guard let sys = game.system(systemID) else {
+        FileHandle.standardError.write(Data("error: no system \(systemID)\n".utf8)); exit(1)
+    }
+    print("system #\(sys.id): \(sys.name)  at (\(sys.x),\(sys.y))")
+    print("  links → \(sys.links.map(String.init).joined(separator: ", "))")
+    let bodies = game.stellarObjects(in: sys.id)
+    print("  \(bodies.count) stellar object(s):")
+    for (spob, sprite) in bodies {
+        let spr = sprite.map { "\($0.frameWidth)x\($0.frameHeight)" } ?? "(no rlëD sprite / PICT)"
+        print(String(format: "    #%-5d %-22@ at (%5d,%5d)  gfx spïn %d  sprite %@",
+                     spob.id, spob.name as NSString, spob.x, spob.y, spob.graphicSpinID, spr))
     }
 
 default:

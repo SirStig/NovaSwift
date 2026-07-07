@@ -17,6 +17,9 @@ final class GameHost {
 
         let ship: Ship
         var textures: [SKTexture] = []
+        var planets: [PlanetVisual] = []
+        var systemName = ""
+
         if let game = model.data.game, let res = model.data.defaultPlayerShip() {
             let stats = ShipStats(speed: res.speed, acceleration: res.acceleration,
                                   turnRate: res.turnRate, rotationFrames: 36)
@@ -25,13 +28,28 @@ final class GameHost {
             if let sheet = game.shipSprite(res.id) {
                 textures = SpriteTextures.rotationFrames(from: sheet)
             }
+            // Load a real starting system and its stellar objects.
+            if let system = game.startingSystem() {
+                systemName = system.name
+                planets = game.stellarObjects(in: system.id).map { entry in
+                    let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
+                    let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
+                    return PlanetVisual(id: entry.spob.id, name: entry.spob.name,
+                                        position: CGPoint(x: entry.spob.x, y: entry.spob.y),
+                                        texture: tex, radius: radius)
+                }
+                // Start the player a little "south" of the system centre so planets are in view.
+                ship.position = Vec2(0, -700)
+            }
         } else {
             ship = Ship(name: "Test Craft",
                         stats: ShipStats(speed: 300, acceleration: 500, turnRate: 40))
             hud.shipName = "Test Craft"
         }
+        hud.systemName = systemName
         scene.configure(player: ship, textures: textures, settings: model.settings,
-                        input: input, controller: controller, hud: hud)
+                        input: input, controller: controller, hud: hud,
+                        planets: planets, systemName: systemName)
     }
 }
 

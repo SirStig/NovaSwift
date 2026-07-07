@@ -12,8 +12,11 @@ final class GameHUDModel: ObservableObject {
     @Published var thrusting = false
     @Published var headingDegrees = 0.0
     @Published var controllerConnected = false
-    /// Radar contacts in normalized [-1, 1] space (currently none until NPCs exist).
+    @Published var systemName = ""
+    /// Hostile/ship contacts in normalized [-1, 1] radar space (none until NPCs exist).
     @Published var blips: [CGPoint] = []
+    /// Stellar-object contacts (planets/stations) in normalized radar space.
+    @Published var planetBlips: [CGPoint] = []
 }
 
 /// An original, EV-style flight HUD (our own artwork — not EV Nova's interface):
@@ -47,6 +50,11 @@ struct GameHUDView: View {
             Text(model.shipName.uppercased())
                 .font(.system(.subheadline, design: .monospaced).weight(.bold))
                 .foregroundStyle(amber)
+            if !model.systemName.isEmpty {
+                Text(model.systemName)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
             bar("SHIELD", model.shield, Color.cyan)
             bar("ARMOR", model.armor, amber)
             bar("FUEL", model.fuel, Color.green)
@@ -82,7 +90,11 @@ struct GameHUDView: View {
                 .rotationEffect(.degrees(model.headingDegrees))
             // Contacts.
             GeometryReader { geo in
-                let r = min(geo.size.width, geo.size.height) / 2
+                let r = min(geo.size.width, geo.size.height) / 2 - 4
+                ForEach(Array(model.planetBlips.enumerated()), id: \.offset) { _, b in
+                    Circle().fill(.cyan).frame(width: 5, height: 5)
+                        .position(x: geo.size.width/2 + b.x * r, y: geo.size.height/2 + b.y * r)
+                }
                 ForEach(Array(model.blips.enumerated()), id: \.offset) { _, b in
                     Circle().fill(.red).frame(width: 4, height: 4)
                         .position(x: geo.size.width/2 + b.x * r, y: geo.size.height/2 + b.y * r)

@@ -190,4 +190,35 @@ public struct NovaGame {
         guard let (_, rle) = shipSpriteData(shipID) else { return nil }
         return try? RLED.decode(rle)
     }
+
+    // MARK: Stellar objects
+
+    /// Resolve a stellar object's sprite: spöb.graphic → spïn → rlëD.
+    /// (Some stellars use PICT, which isn't decoded yet — those return nil.)
+    public func spobSprite(_ spobID: Int) -> SpriteSheet? {
+        guard let spob = spob(spobID) else { return nil }
+        if let spin = spin(spob.graphicSpinID),
+           let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
+            return try? RLED.decode(rle)
+        }
+        if let rle = resources.resource(NovaType.rleD, spob.graphicSpinID)?.data {
+            return try? RLED.decode(rle)
+        }
+        return nil
+    }
+
+    /// A reasonable starting system when the pilot's start isn't known: the most
+    /// populated system (most stellar objects), so there's something to see.
+    public func startingSystem() -> SystRes? {
+        systems().filter { !$0.spobs.isEmpty }.max { $0.spobs.count < $1.spobs.count }
+    }
+
+    /// The stellar objects of a system, decoded, with sprites where available.
+    public func stellarObjects(in systemID: Int) -> [(spob: SpobRes, sprite: SpriteSheet?)] {
+        guard let system = system(systemID) else { return [] }
+        return system.spobs.compactMap { id in
+            guard let s = spob(id) else { return nil }
+            return (s, spobSprite(id))
+        }
+    }
 }
