@@ -11,7 +11,7 @@ final class GameHost {
     let hud = GameHUDModel()
     let controller: GameControllerInput
 
-    init(model: AppModel) {
+    init(model: AppModel, systemID: Int? = nil) {
         controller = GameControllerInput(input: input)
         scene.scaleMode = .resizeFill
 
@@ -28,8 +28,9 @@ final class GameHost {
             if let sheet = game.shipSprite(res.id) {
                 textures = SpriteTextures.rotationFrames(from: sheet)
             }
-            // Load a real starting system and its stellar objects.
-            if let system = game.startingSystem() {
+            // Load the requested system (or a default starting system).
+            let targetSystem = systemID.flatMap { game.system($0) } ?? game.startingSystem()
+            if let system = targetSystem {
                 systemName = system.name
                 planets = game.stellarObjects(in: system.id).map { entry in
                     let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
@@ -58,6 +59,8 @@ final class GameHost {
 struct GameContainerView: View {
     @EnvironmentObject private var model: AppModel
     @State private var host: GameHost?
+    @StateObject private var nav = NavigationModel(game: nil, startSystemID: 128)
+    @State private var navReady = false
 
     var body: some View {
         ZStack {
@@ -69,13 +72,30 @@ struct GameContainerView: View {
                 TouchControlsOverlay(input: host.input)
                 #endif
 
-                closeButton
+                topBar
+
+                if nav.showingMap {
+                    GalaxyMapView(nav: nav) { nav.showingMap = false }
+                        .transition(.opacity)
+                }
             } else {
                 Color.black.ignoresSafeArea()
                 ProgressView().tint(.white)
             }
         }
-        .task { if host == nil { host = GameHost(model: model) } }
+        .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
+        .task {
+            if host == nil {
+                nav.configure(game: model.data.game,
+                              startSystemID: model.data.game?.startingSystem()?.id ?? 128)
+                host = GameHost(model: model, systemID: nav.currentSystemID)
+                navReady = true
+            }
+        }
+        .onChange(of: nav.currentSystemID) { _, newID in
+            guard navReady else { return }
+            host = GameHost(model: model, systemID: newID)  // rebuild the system on jump
+        }
     }
 
     @ViewBuilder
@@ -86,23 +106,38 @@ struct GameContainerView: View {
             .ignoresSafeArea()
             .focusable()
             .focusEffectDisabled()
-            .modifier(KeyboardControls(input: host.input, bindings: model.bindings))
+            .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
+                                       onDiscrete: handleDiscrete))
     }
 
-    private var closeButton: some View {
+    private func handleDiscrete(_ action: GameAction) {
+        switch action {
+        case .galaxyMap, .hyperjump: nav.showingMap.toggle()
+        default: break
+        }
+    }
+
+    private var topBar: some View {
         VStack {
-            HStack {
+            HStack(spacing: 10) {
+                navButton("map", "map.fill") { nav.showingMap.toggle() }
+                navButton("jump", "sparkles") { nav.showingMap = true }
                 Spacer()
-                Button { model.exitToLauncher() } label: {
-                    Image(systemName: "xmark")
-                        .font(.headline).padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .padding()
+                navButton("exit", "xmark") { model.exitToLauncher() }
             }
+            .padding()
             Spacer()
         }
+    }
+
+    private func navButton(_ label: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.headline).padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
@@ -112,6 +147,7 @@ struct GameContainerView: View {
 private struct KeyboardControls: ViewModifier {
     let input: InputController
     let bindings: KeyBindings
+    var onDiscrete: (GameAction) -> Void = { _ in }
 
     func body(content: Content) -> some View {
         content.onKeyPress(phases: [.down, .up]) { press in
@@ -125,7 +161,9 @@ private struct KeyboardControls: ViewModifier {
             case .reverse: input.keyboard.reverse = pressed
             case .firePrimary: input.keyboard.firePrimary = pressed
             case .fireSecondary: input.keyboard.fireSecondary = pressed
-            case .none: return .ignored // discrete action — not yet wired
+            case .none:
+                // Discrete action (map / jump / target / …): fire once on key-down.
+                if pressed { onDiscrete(action) }
             }
             return .handled
         }
