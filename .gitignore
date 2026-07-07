@@ -1,0 +1,43 @@
+# --- Copyrighted / user-supplied game data (NEVER commit) ---
+# The base EV Nova game data is copyrighted. Contributors must supply their
+# own legally-obtained copy. Only tooling and open reimplementation code lives
+# in this repo.
+data/base/**
+!data/base/.gitkeep
+data/plugins/**
+!data/plugins/.gitkeep
+data/converted/**
+!data/converted/.gitkeep
+assets/converted/**
+!assets/converted/.gitkeep
+
+# --- Build artifacts ---
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+.build/
+*.o
+*.a
+*.dSYM/
+
+# --- Xcode / macOS ---
+.DS_Store
+xcuserdata/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+
+# --- Third-party sources (vendored via scripts, not committed) ---
+third_party/*/
+!third_party/.gitkeep
+
+# --- Node (extractor tooling, if used) ---
+node_modules/
+dist/
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
