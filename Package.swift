@@ -23,7 +23,7 @@ let package = Package(
         .target(name: "EVNovaStory", dependencies: ["EVNovaKit"], path: "Sources/EVNovaStory"),
         .executableTarget(
             name: "evnova-extract",
-            dependencies: ["EVNovaKit", "EVNovaEngine"],
+            dependencies: ["EVNovaKit", "EVNovaEngine", "EVNovaStory"],
             path: "Sources/evnova-extract"
         ),
         .testTarget(

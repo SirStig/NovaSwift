@@ -69,13 +69,14 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     }
 
     /// How this continuous action drives the flight `ControlIntent`.
-    enum FlightEffect { case turnLeft, turnRight, thrust, reverse, firePrimary, fireSecondary, none }
+    enum FlightEffect { case turnLeft, turnRight, thrust, reverse, afterburner, firePrimary, fireSecondary, none }
     var flightEffect: FlightEffect {
         switch self {
         case .turnLeft: return .turnLeft
         case .turnRight: return .turnRight
         case .accelerate: return .thrust
         case .decelerate: return .reverse
+        case .afterburner: return .afterburner
         case .firePrimary: return .firePrimary
         case .fireSecondary: return .fireSecondary
         default: return .none

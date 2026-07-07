@@ -9,10 +9,17 @@ final class GameHUDModel: ObservableObject {
     @Published var shield = 1.0     // 0…1
     @Published var armor = 1.0      // 0…1
     @Published var fuel = 1.0       // 0…1
+    @Published var jumps = 0        // whole hyperjumps of fuel remaining
     @Published var thrusting = false
+    @Published var afterburning = false
     @Published var headingDegrees = 0.0
     @Published var controllerConnected = false
     @Published var systemName = ""
+    // Loadout readout.
+    @Published var weaponName = ""      // active primary weapon (empty = unarmed)
+    @Published var weaponAmmo = -1      // rounds left; -1 = unlimited / n/a
+    @Published var cargoUsed = 0
+    @Published var cargoCapacity = 0
     /// Hostile/ship contacts in normalized [-1, 1] radar space (none until NPCs exist).
     @Published var blips: [CGPoint] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
@@ -57,7 +64,12 @@ struct GameHUDView: View {
             }
             bar("SHIELD", model.shield, Color.cyan)
             bar("ARMOR", model.armor, amber)
-            bar("FUEL", model.fuel, Color.green)
+            bar(model.jumps > 0 ? "FUEL · \(model.jumps) JUMP\(model.jumps == 1 ? "" : "S")" : "FUEL",
+                model.fuel, Color.green)
+            if model.cargoCapacity > 0 {
+                Text("CARGO \(model.cargoUsed)/\(model.cargoCapacity)t")
+                    .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+            }
         }
         .padding(12)
         .background(panel, in: RoundedRectangle(cornerRadius: 10))
@@ -108,7 +120,17 @@ struct GameHUDView: View {
         HStack(spacing: 14) {
             Label("\(model.speed)", systemImage: "gauge.with.dots.needle.67percent")
             Text("HDG \(Int(model.headingDegrees))°")
-            if model.thrusting {
+            if !model.weaponName.isEmpty {
+                Label {
+                    Text(model.weaponAmmo >= 0 ? "\(model.weaponName) ×\(model.weaponAmmo)" : model.weaponName)
+                } icon: {
+                    Image(systemName: "scope")
+                }
+                .foregroundStyle(.cyan)
+            }
+            if model.afterburning {
+                Label("BURN", systemImage: "flame.circle.fill").foregroundStyle(.orange)
+            } else if model.thrusting {
                 Label("THRUST", systemImage: "flame.fill").foregroundStyle(amber)
             }
             if model.controllerConnected {

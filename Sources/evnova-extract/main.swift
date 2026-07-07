@@ -1,5 +1,6 @@
 import Foundation
 import EVNovaKit
+import EVNovaStory
 import EVNovaEngine
 
 // evnova-extract — inspect EV Nova resource containers (classic fork / .ndat / BRGR .rez).
@@ -179,8 +180,22 @@ case "ship":
       shield \(s.shield)  armor \(s.armor)  mass \(s.mass)
       speed \(s.speed)  accel \(s.acceleration)  turn \(s.turnRate)
       shieldRecharge \(s.shieldRecharge)  armorRecharge \(s.armorRecharge)  fuelRegen \(s.fuelRegen)
-      cargo \(s.cargoSpace)
+      cargo \(s.cargoSpace)t  freeMass \(s.freeMass)t  guns \(s.maxGuns)  turrets \(s.maxTurrets)  crew \(s.crew)  cost \(s.cost)
+      fuel \(s.fuelCapacity) (\(s.fuelCapacity / 100) jumps)
     """)
+    // The full ship system: aggregate preinstalled outfits into effective stats.
+    if let lo = Galaxy(game: game).loadout(shipID: s.id) {
+        print("  loadout: shield \(Int(lo.maxShield))  armor \(Int(lo.maxArmor))  fuel \(Int(lo.maxFuel)) (\(lo.jumpRange) jumps)  cargo \(lo.cargoCapacity)t  freeMass \(lo.freeMass)/\(lo.massCapacity)t\(lo.afterburner != nil ? "  +afterburner" : "")")
+        if !lo.outfits.isEmpty {
+            let names = lo.outfits.sorted { $0.key < $1.key }
+                .map { "\(game.outfit($0.key)?.name ?? "oütf \($0.key)")×\($0.value)" }
+            print("  outfits: \(names.joined(separator: ", "))")
+        }
+        for w in lo.weapons {
+            let wn = game.weapon(w.id)?.name ?? "wëap \(w.id)"
+            print("    weapon \(wn) ×\(w.count)\(w.ammo > 0 ? "  ammo \(w.ammo)" : "")")
+        }
+    }
     if let shan = game.shan(s.id) {
         print("  shän #\(shan.id): baseSprite spïn \(shan.baseSpriteID)  frames \(shan.baseSetCount)  \(shan.baseWidth)x\(shan.baseHeight)")
     }
@@ -194,6 +209,32 @@ case "ship":
     } else {
         print("  sprite: (could not resolve)")
     }
+
+case "outfit":
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do { game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    if args.count == 2 {
+        let outfits = game.outfits()
+        print("\(outfits.count) outfits:")
+        for o in outfits.prefix(80) {
+            let mods = o.modifiers.map { "\($0.type)=\($0.value)" }.joined(separator: ",")
+            print(String(format: "  #%-5d  %-28@  %4dt  %8dcr  [%@]",
+                         o.id, o.name as NSString, o.mass, o.cost, mods as NSString))
+        }
+        break
+    }
+    guard let id = Int(args[2]), let o = game.outfit(id) else {
+        FileHandle.standardError.write(Data("error: no outfit with id \(args[2])\n".utf8)); exit(1)
+    }
+    print("""
+    outfit #\(o.id): \(o.name)
+      mass \(o.mass)t  cost \(o.cost)cr  techLevel \(o.techLevel)  max \(o.maxInstallable == 0 ? "∞" : "\(o.maxInstallable)")
+    """)
+    for (type, value) in o.modifiers { print("    \(type) = \(value)") }
 
 case "system":
     guard args.count == 2 || args.count == 3 else { usage() }
@@ -538,6 +579,71 @@ case "missions":
         print(String(format: "  #%-4d %-32@ bits=%@", m.id, m.name as NSString,
                      m.availBits.isEmpty ? "—" : m.availBits))
     }
+
+case "story":
+    // End-to-end story-engine playthrough on REAL data: drive the actual first
+    // Vell-os storyline missions through the engine and show the control-bit
+    // chain advancing. Proves the mission runtime works on shipping game data.
+    //   evnova-extract story <baseDir> [firstMissionID]
+    guard args.count >= 2 else { usage() }
+    let stBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let stGame: NovaGame
+    do { stGame = NovaGame(try GameLibrary.merge(baseFiles: stBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    let firstID = args.count >= 3 ? (Int(args[2]) ?? 128) : 128
+    let services = LoggingGameServices()
+    let pilot = PlayerState(pilotName: "Test Pilot", shipType: stGame.ships().first?.id ?? 128,
+                            credits: 10_000, currentSystem: 128)
+    let engine = StoryEngine(game: stGame, player: pilot, services: services)
+
+    func bitsSet() -> String {
+        engine.player.setBits.sorted().map { "b\($0)" }.joined(separator: " ")
+    }
+    guard let m = stGame.mission(firstID) else {
+        FileHandle.standardError.write(Data("error: no mission #\(firstID)\n".utf8)); exit(1)
+    }
+    print("=== Story playthrough starting at mïsn #\(firstID): \(m.name) ===\n")
+    print("availBits: \(m.availBits.isEmpty ? "(none)" : m.availBits)")
+    print("eligible at mission computer? \(engine.isEligible(m, at: .missionComputer, spobID: nil))")
+
+    print("\n-- accepting --")
+    engine.accept(firstID)
+    print("bits after accept: [\(bitsSet())]")
+    print("credits: \(engine.player.credits)   active missions: \(engine.player.activeMissions.map { $0.missionID })")
+
+    print("\n-- completing (landing at return stellar #\(m.returnStellar)) --")
+    if m.returnStellar >= 128 {
+        engine.playerLanded(onSpob: m.returnStellar)
+    } else {
+        engine.completeMission(firstID)
+    }
+    print("bits after success: [\(bitsSet())]")
+    print("credits: \(engine.player.credits)   completed: \(engine.player.completedMissions.sorted())")
+
+    // Show the chain: the very next storyline mission and whether its gate now
+    // passes (the engine evaluating a real, hand-authored NCB expression).
+    if let next = stGame.mission(firstID + 1) {
+        print("\n-- next storyline mission #\(next.id): \(next.name) --")
+        print("  gate: \(next.availBits.isEmpty ? "(none)" : next.availBits)")
+        let ok = engine.evaluate(test: next.availBits)
+        print("  gate passes now? \(ok)")
+        if !ok {
+            // Explain which sub-clauses are blocking, so the gate is legible.
+            let blockers = next.availBits
+                .split(whereSeparator: { "()&|! ".contains($0) })
+                .compactMap { tok -> String? in
+                    guard tok.hasPrefix("b"), let n = Int(tok.dropFirst()) else { return nil }
+                    return engine.player.isBitSet(n) ? "\(tok)=set" : nil
+                }
+            if !blockers.isEmpty {
+                print("  (blocked because these bits are set: \(Set(blockers).sorted().joined(separator: " ")))")
+                print("  → authentic EV Nova pacing: a later cron/event clears the pending bit.")
+            }
+        }
+    }
+    print("\nservices log:")
+    for line in services.log { print("  · \(line)") }
 
 default:
     usage()

@@ -35,6 +35,8 @@ final class GameScene: SKScene {
     private var starLayers: [StarLayer] = []
     private var planetVisuals: [PlanetVisual] = []
     private var planetNodes: [SKNode] = []
+    private let projectileLayer = SKNode()
+    private var projectileNodes: [SKShapeNode] = []
     private var systemName = ""
     private var lastUpdate: TimeInterval = 0
     private var hudClock: TimeInterval = 0
@@ -73,6 +75,8 @@ final class GameScene: SKScene {
         addChild(cameraNode)
         buildStarfield()
         buildPlanets()
+        projectileLayer.zPosition = 8
+        addChild(projectileLayer)
         buildShip()
         // Arriving in the system.
         audio?.play(.hyperspaceArrive)
@@ -197,13 +201,16 @@ final class GameScene: SKScene {
         let p = world.player
         let scenePos = CGPoint(x: p.position.x, y: p.position.y)
 
-        // Weapon fire SFX on the rising edge of the fire intent. Until the combat
-        // system supplies each weapon's own `snd `, we use a stock blaster report;
-        // it plays from the player's position (centred on the listener).
-        if intent.firePrimary && !wasFiring {
-            audio?.play(208, at: scenePos, listener: scenePos)
+        // The world fires each ready weapon mount itself (respecting reload and
+        // ammo). We drain its events for SFX and render the live projectiles it
+        // spawned, so firing reflects the real weapon system, not the raw input.
+        for event in world.drainEvents() {
+            if case let .weaponFired(shooterID, at, _) = event, shooterID == 0 {
+                audio?.play(208, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+            }
         }
         wasFiring = intent.firePrimary
+        syncProjectiles()
         shipNode.position = scenePos
 
         if let sprite = shipSprite, !rotationTextures.isEmpty {
@@ -212,14 +219,15 @@ final class GameScene: SKScene {
             tri.zRotation = -CGFloat(p.angle)
         }
 
-        updateThruster(active: intent.thrust, angle: p.angle)
+        updateThruster(active: intent.thrust || p.afterburnerActive, angle: p.angle,
+                       boosted: p.afterburnerActive)
 
         cameraNode.position = scenePos
         updateStarfield(cameraAt: scenePos)
         updateHUD(dt: dt)
     }
 
-    private func updateThruster(active: Bool, angle: Double) {
+    private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
         thruster.isHidden = !active
         guard active else { return }
         // Sit at the tail (opposite heading) and point backward, with a flicker.
@@ -227,9 +235,34 @@ final class GameScene: SKScene {
         let tail = CGPoint(x: sin(angle) * -shipRadius * 0.7, y: cos(angle) * -shipRadius * 0.7)
         thruster.position = tail
         thruster.zRotation = CGFloat(back)
-        let flicker = CGFloat.random(in: 0.8...1.15)
-        thruster.setScale(flicker)
-        thruster.alpha = .random(in: 0.75...1.0)
+        // The afterburner plume is longer and brighter than normal thrust.
+        let base: CGFloat = boosted ? 1.5 : 1.0
+        thruster.setScale(base * .random(in: 0.85...1.15))
+        thruster.alpha = boosted ? .random(in: 0.9...1.0) : .random(in: 0.75...1.0)
+    }
+
+    /// Mirror the world's live projectiles into a pool of dot nodes (reusing nodes
+    /// across frames, hiding the surplus). Beams are instantaneous and handled via
+    /// events, so only travelling projectiles are drawn here.
+    private func syncProjectiles() {
+        let shots = world.projectiles
+        while projectileNodes.count < shots.count {
+            let dot = SKShapeNode(circleOfRadius: 2.2)
+            dot.fillColor = SKColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1)
+            dot.strokeColor = .clear
+            dot.blendMode = .add
+            projectileLayer.addChild(dot)
+            projectileNodes.append(dot)
+        }
+        for (i, node) in projectileNodes.enumerated() {
+            if i < shots.count {
+                let s = shots[i]
+                node.position = CGPoint(x: s.position.x, y: s.position.y)
+                node.isHidden = false
+            } else {
+                node.isHidden = true
+            }
+        }
     }
 
     private func updateStarfield(cameraAt cam: CGPoint) {
@@ -258,8 +291,25 @@ final class GameScene: SKScene {
         hud.speed = Int(p.velocity.length)
         hud.maxSpeed = max(1, Int(p.stats.maxSpeed))
         hud.thrusting = world.intent.thrust
+        hud.afterburning = p.afterburnerActive
         hud.controllerConnected = controllerInput?.isConnected ?? false
         hud.systemName = systemName
+
+        // Real ship-system state: shields, armor, fuel (with whole-jump readout),
+        // cargo, and the active weapon + ammo.
+        hud.shield = p.maxShield > 0 ? p.shield / p.maxShield : 0
+        hud.armor = p.maxArmor > 0 ? p.armor / p.maxArmor : 1
+        hud.fuel = p.maxFuel > 0 ? p.fuel / p.maxFuel : 0
+        hud.jumps = Int((p.fuel / 100).rounded(.down))
+        hud.cargoUsed = p.cargoUsed
+        hud.cargoCapacity = p.cargoCapacity
+        if let mount = p.weapons.first {
+            hud.weaponName = mount.spec.name
+            hud.weaponAmmo = mount.ammo   // -1 = unlimited
+        } else {
+            hud.weaponName = ""
+            hud.weaponAmmo = -1
+        }
         var deg = p.angle * 180 / .pi
         deg = deg.truncatingRemainder(dividingBy: 360)
         if deg < 0 { deg += 360 }

@@ -36,12 +36,26 @@ works vs. what is stubbed.
    **outfitting**, **shipyard**; save/load pilot files (`.plt`).
 3. **Combat**: weapons (`wëap`) firing + projectiles/beams, shields/armor/damage,
    `bööm` explosions, energy/fuel, afterburners, ammo.
-4. **AI (100%)**: NPC ships via `düde`/`flët`, government (`gövt`) standings &
-   relations, fighters/escorts, fleeing/hailing/boarding, patrols, pirates,
-   defense fleets — behaviors matching the original.
+4. **AI** — ✅ *core built* (`docs/AI.md`, `EVNovaEngine`): NPC ships spawned from
+   real `düde`/`flët`/`sÿst` tables, government (`gövt`) class-based standings &
+   relations, warship patrols, trader travel + jump-out, escorts adopting a
+   flagship's target, flee-when-outmatched, and real weapon combat
+   (projectiles/beams, shield/armor, deaths). Validated on the real game via
+   `evnova-extract ai` and unit-tested. ⏭ still to add: hailing/bribing/boarding,
+   distress calls & reinforcements, disabling/plundering, `përs` named captains.
 5. **Missions & story** (`mïsn`): bar missions, cargo/escort/combat/deliver,
    `crön` background events, `përs` characters, control bits, `dësc` text,
    ranks (`ränk`), the full main storyline(s).
+   - 🔨 **Runtime built** (`EVNovaStory` module): verified `mïsn`/`crön`/`përs`/
+     `ränk`/`dësc`/`STR#` decoders (checked against the real 791 missions); the
+     NCB control-bit scripting engine (TEST + SET); mission availability →
+     accept → objective tracking → completion + rewards; `crön` events on the
+     galaxy clock; ranks/salary; `Codable` pilot save-state. Plugs into the rest
+     of the game via the `GameServices` protocol (spawn ships, play sound, show
+     text, swap hull) — a logging stub runs it headless today. Validated on real
+     data via `evnova-extract story`/`mission`/`missions`; unit-tested. See
+     `docs/MISSIONS.md`. ⏭ still to wire: special-ship spawning/kill-reporting to
+     combat/AI, `përs` placement, `dësc` art to the UI.
 6. **Audio**: `snd ` sound effects, music; **PICT** planet/landing/mission art;
    `ïntf` interface colors; `STR#`/`dësc` all text.
 7. **Full options**: every EV Nova setting, difficulty, plus modern graphics/audio/

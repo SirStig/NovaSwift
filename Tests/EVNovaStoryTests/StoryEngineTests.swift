@@ -147,9 +147,10 @@ final class StoryEngineTests: XCTestCase {
     // MARK: Cron events
 
     func testCronStartsAndEnds() {
-        // Active window covers the start date; enable when b1 set; 5-day duration.
+        // Active window covers the start date; enable when b1 set and not yet
+        // finished (!b501); 5-day duration. onEnd sets b501, making it one-shot.
         let c = CronSpec(id: 128, firstYear: 1177, lastYear: 1177, random: 100,
-                         duration: 5, enableOn: "b1", onStart: "b500", onEnd: "b501")
+                         duration: 5, enableOn: "b1 & !b501", onStart: "b500", onEnd: "b501")
             .resource()
         var player = PlayerState(date: GameDate(day: 1, month: 6, year: 1177))
         player.setBit(1)

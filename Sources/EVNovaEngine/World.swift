@@ -28,6 +28,7 @@ public struct ControlIntent: Equatable {
             r.turnRight = r.turnRight || s.turnRight
             r.thrust = r.thrust || s.thrust
             r.reverse = r.reverse || s.reverse
+            r.afterburner = r.afterburner || s.afterburner
             r.firePrimary = r.firePrimary || s.firePrimary
             r.fireSecondary = r.fireSecondary || s.fireSecondary
             if r.desiredHeading == nil { r.desiredHeading = s.desiredHeading }
@@ -104,6 +105,47 @@ public final class Ship {
     public var armorRechargePerSec: Double = 0
     public var weapons: [WeaponMount] = []
 
+    // Fuel — EV Nova's blue gauge. Spent by hyperspace jumps (100 per jump) and
+    // by the afterburner; regenerates only if the hull/outfits grant it.
+    public var maxFuel: Double = 0
+    public var fuel: Double = 0
+    public var fuelRegenPerSec: Double = 0
+    /// Installed afterburner (nil = none).
+    public var afterburner: Afterburner?
+    /// True on frames the afterburner is actually burning (input + fuel present).
+    public private(set) var afterburnerActive = false
+
+    // Cargo hold: `cargoCapacity` tons total; `cargo` maps commodity id → tons.
+    public var cargoCapacity: Int = 0
+    public var cargo: [Int: Int] = [:]
+    public var cargoUsed: Int { cargo.values.reduce(0, +) }
+    public var cargoFree: Int { max(0, cargoCapacity - cargoUsed) }
+
+    /// Whether the ship has enough fuel for one hyperspace jump.
+    public var canJump: Bool { fuel >= ShipFuel.perJump }
+    /// Spend one jump's fuel; returns false and spends nothing if too low.
+    @discardableResult
+    public func consumeJumpFuel() -> Bool {
+        guard fuel >= ShipFuel.perJump else { return false }
+        fuel -= ShipFuel.perJump
+        return true
+    }
+    /// Load up to `tons` of commodity `id` into the hold; returns tons added.
+    @discardableResult
+    public func loadCargo(_ id: Int, tons: Int) -> Int {
+        let n = min(max(0, tons), cargoFree)
+        if n > 0 { cargo[id, default: 0] += n }
+        return n
+    }
+    /// Remove up to `tons` of commodity `id`; returns tons removed.
+    @discardableResult
+    public func unloadCargo(_ id: Int, tons: Int) -> Int {
+        let have = cargo[id] ?? 0
+        let n = min(max(0, tons), have)
+        if n > 0 { let left = have - n; cargo[id] = left > 0 ? left : nil }
+        return n
+    }
+
     // AI state.
     public var brain: AIBrain?
     /// The entity this ship is currently aiming at (for turrets / guided shots
@@ -167,6 +209,9 @@ public final class Ship {
         if armor < maxArmor && armorRechargePerSec > 0 {
             armor = min(maxArmor, armor + armorRechargePerSec * dt)
         }
+        if fuel < maxFuel && fuelRegenPerSec > 0 {
+            fuel = min(maxFuel, fuel + fuelRegenPerSec * dt)
+        }
     }
 
     func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning) {
@@ -183,18 +228,30 @@ public final class Ship {
             angle += max(-maxTurn, min(maxTurn, delta))
         }
 
+        // Afterburner: while lit and fuelled, boost acceleration and raise the
+        // speed cap, draining fuel. EV Nova's afterburner is a held control.
+        var accel = stats.acceleration
+        var topSpeed = stats.maxSpeed
+        afterburnerActive = false
+        if intent.afterburner, let ab = afterburner, fuel > 0 {
+            afterburnerActive = true
+            accel *= ab.accelMultiplier
+            topSpeed *= ab.speedMultiplier
+            fuel = max(0, fuel - ab.fuelPerSecond * dt)
+        }
+
         let heading = Vec2.heading(angle)
-        if intent.thrust { velocity += heading * (stats.acceleration * dt) }
+        if intent.thrust { velocity += heading * (accel * dt) }
         if intent.reverse { velocity += heading * (-stats.acceleration * 0.5 * dt) }
 
         if tuning.dragPerSecond > 0 {
             let k = max(0, 1 - tuning.dragPerSecond * dt)
             velocity = velocity * k
         }
-        // Clamp to max speed.
+        // Clamp to max speed (raised while the afterburner is lit).
         let speed = velocity.length
-        if speed > stats.maxSpeed, speed > 0 {
-            velocity = velocity.normalized * stats.maxSpeed
+        if speed > topSpeed, speed > 0 {
+            velocity = velocity.normalized * topSpeed
         }
         position += velocity * dt
     }

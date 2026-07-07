@@ -10,9 +10,12 @@ final class GameHost {
     let input = InputController()
     let hud = GameHUDModel()
     let controller: GameControllerInput
+    /// The authentic status-bar style (ïntf + backdrop PICT), when the data has one.
+    let hudStyle: AuthenticHUDStyle?
 
     init(model: AppModel, systemID: Int? = nil) {
         controller = GameControllerInput(input: input)
+        hudStyle = GameHost.makeHUDStyle(model.data.game)
         scene.scaleMode = .resizeFill
 
         let ship: Ship
@@ -21,9 +24,14 @@ final class GameHost {
         var systemName = ""
 
         if let game = model.data.game, let res = model.data.defaultPlayerShip() {
-            let stats = ShipStats(speed: res.speed, acceleration: res.acceleration,
-                                  turnRate: res.turnRate, rotationFrames: 36)
-            ship = Ship(name: res.name, stats: stats)
+            // Build the player's ship through the loadout system: hull stats +
+            // preinstalled outfits → real shields/armor/fuel/afterburner/cargo and
+            // a resolved weapon set. Falls back to bare flight stats if needed.
+            let galaxy = Galaxy(game: game)
+            ship = galaxy.makeLoadedShip(res.id)
+                ?? Ship(name: res.name,
+                        stats: ShipStats(speed: res.speed, acceleration: res.acceleration,
+                                         turnRate: res.turnRate, rotationFrames: 36))
             hud.shipName = res.name
             if let sheet = game.shipSprite(res.id) {
                 textures = SpriteTextures.rotationFrames(from: sheet)
@@ -52,6 +60,16 @@ final class GameHost {
                         input: input, controller: controller, hud: hud, audio: model.audio,
                         planets: planets, systemName: systemName)
     }
+
+    /// Decode the authentic status bar: the ïntf interface definition + its
+    /// backdrop PICT, from the player's own data. Returns nil if unavailable.
+    static func makeHUDStyle(_ game: NovaGame?) -> AuthenticHUDStyle? {
+        guard let game, let intf = game.interface(),
+              let pictData = game.resources.resource(NovaType.pict, intf.backgroundPictID)?.data,
+              let sheet = try? PICT.decode(pictData),
+              let cg = sheet.makeCGImage() else { return nil }
+        return AuthenticHUDStyle(image: cg, intf: intf)
+    }
 }
 
 /// The full-screen game view: SpriteKit scene + HUD + platform input
@@ -66,7 +84,11 @@ struct GameContainerView: View {
         ZStack {
             if let host {
                 sceneLayer(host)
-                GameHUDView(model: host.hud)
+                if let style = host.hudStyle {
+                    AuthenticHUDView(model: host.hud, style: style)   // real EV Nova status bar
+                } else {
+                    GameHUDView(model: host.hud)                      // fallback (no ïntf in data)
+                }
 
                 #if os(iOS)
                 TouchControlsOverlay(input: host.input)
@@ -162,6 +184,7 @@ private struct KeyboardControls: ViewModifier {
             case .turnRight: input.keyboard.turnRight = pressed
             case .thrust: input.keyboard.thrust = pressed
             case .reverse: input.keyboard.reverse = pressed
+            case .afterburner: input.keyboard.afterburner = pressed
             case .firePrimary: input.keyboard.firePrimary = pressed
             case .fireSecondary: input.keyboard.fireSecondary = pressed
             case .none:
