@@ -221,4 +221,22 @@ public struct NovaGame {
             return (s, spobSprite(id))
         }
     }
+
+    // MARK: Audio
+
+    /// All `snd ` resource ids present in the loaded data, ascending.
+    public func soundIDs() -> [Int] { resources.resources(of: NovaType.snd).map(\.id) }
+
+    /// The name of a `snd ` resource, if any (useful for a sound browser).
+    public func soundName(_ id: Int) -> String? {
+        guard let r = resources.resource(NovaType.snd, id), !r.name.isEmpty else { return nil }
+        return r.name
+    }
+
+    /// Decode a `snd ` resource into playable PCM. Returns nil if the resource is
+    /// missing or uses an encoding we don't support.
+    public func sound(_ id: Int) -> NovaSound? {
+        guard let r = resources.resource(NovaType.snd, id) else { return nil }
+        return try? SndDecoder.decode(r.data)
+    }
 }

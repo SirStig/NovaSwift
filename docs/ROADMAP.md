@@ -46,8 +46,12 @@ works vs. what is stubbed.
    `ïntf` interface colors; `STR#`/`dësc` all text.
 7. **Full options**: every EV Nova setting, difficulty, plus modern graphics/audio/
    accessibility; complete keybinding & mouse config; controller remapping.
-8. **Plug-ins**: prebundled catalog + **user-installed plug-ins where supported**
-   (desktop filesystem folder + mobile import), with load-order/override UI.
+8. **Plug-ins & tooling**: prebundled catalog + **user-installed plug-ins where supported**
+   (desktop filesystem folder + mobile import), with load-order/override UI; an **in-app
+   resource editor** (Mission Computer / ResForge-class: edit all game data, author new
+   plug-ins, full sprite/PICT rendering) and **save-game (pilot) editing**. Requires a new
+   *write path* in `EVNovaKit` (container serializers + per-type encoders). Scoped in
+   `docs/EDITOR_AND_PLUGINS_SCOPE.md`.
 
 ## Cross-cutting
 - Fidelity checks against the original behavior; golden-data tests.

@@ -114,4 +114,18 @@ final class GameDataController: ObservableObject {
     func defaultPlayerShip() -> ShipRes? {
         game?.ship(128) ?? game?.ships().first
     }
+
+    /// A background-music track shipped alongside the base data, if the player's
+    /// copy includes one (EV Nova CE ships `Nova Music.mp3` in "Nova Files").
+    /// Sound *effects* come from `snd ` resources; music is an external audio file.
+    func musicTrackURL() -> URL? {
+        guard let baseDir = resolveBaseDir() else { return nil }
+        let audioExts: Set<String> = ["mp3", "m4a", "aac", "aiff", "aif", "wav"]
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: baseDir, includingPropertiesForKeys: nil,
+                                                      options: [.skipsHiddenFiles]) else { return nil }
+        let tracks = items.filter { audioExts.contains($0.pathExtension.lowercased()) }
+        // Prefer a file that looks like the main music track.
+        return tracks.first { $0.lastPathComponent.lowercased().contains("music") } ?? tracks.first
+    }
 }

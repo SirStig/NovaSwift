@@ -20,6 +20,8 @@ func usage() -> Never {
       \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
       \(name) ship    <baseDir> [id]      Decode ship stats + resolve its sprite → PNG
       \(name) system  <baseDir> [id]      List a system's planets + resolve sprites
+      \(name) sounds  <baseDir>           List all snd resources (id, name, rate, length)
+      \(name) sound   <baseDir> <id> [out] Decode one snd → WAV (default: <id>.wav)
 
     <TYPE> is a four-char resource code, e.g. shïp  wëap  oütf  sÿst  spöb
     (paste the exact code including accents).
@@ -220,6 +222,123 @@ case "system":
         let spr = sprite.map { "\($0.frameWidth)x\($0.frameHeight)" } ?? "(no rlëD sprite / PICT)"
         print(String(format: "    #%-5d %-22@ at (%5d,%5d)  gfx spïn %d  sprite %@",
                      spob.id, spob.name as NSString, spob.x, spob.y, spob.graphicSpinID, spr))
+    }
+
+case "sounds":
+    guard args.count == 2 else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do { game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    let ids = game.soundIDs()
+    print("\(ids.count) snd resource(s):")
+    for id in ids {
+        let name = game.soundName(id) ?? ""
+        if let s = game.sound(id) {
+            print(String(format: "  #%-6d %-28@ %6.0f Hz  %7d samples  %5.2fs",
+                         id, name as NSString, s.sampleRate, s.frameCount, s.duration))
+        } else {
+            print(String(format: "  #%-6d %-28@ (undecodable)", id, name as NSString))
+        }
+    }
+
+case "sound":
+    guard args.count == 3 || args.count == 4, let id = Int(args[2]) else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do { game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    guard let snd = game.sound(id) else {
+        FileHandle.standardError.write(Data("error: snd \(id) missing or undecodable\n".utf8)); exit(1)
+    }
+    let outPath = args.count == 4 ? args[3] : "\(id).wav"
+    do {
+        try snd.wavData().write(to: URL(fileURLWithPath: outPath))
+        print(String(format: "wrote %@  (%.0f Hz, %d samples, %.2fs)",
+                     outPath, snd.sampleRate, snd.frameCount, snd.duration))
+    } catch {
+        FileHandle.standardError.write(Data("error writing WAV: \(error)\n".utf8)); exit(1)
+    }
+
+case "raw":
+    // Dev tool: dump a resource body as signed 16-bit big-endian words, to
+    // reverse-check field offsets against the EV Nova Bible.
+    //   evnova-extract raw <baseDir> <TYPE> <id>
+    guard args.count == 4, let type = FourCharCode(args[2]), let id = Int(args[3]) else { usage() }
+    let rawBaseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let rawCol: ResourceCollection
+    do { rawCol = try GameLibrary.merge(baseFiles: rawBaseFiles) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    guard let r = rawCol.resource(type, id) else {
+        FileHandle.standardError.write(Data("error: no \(type.stringValue) #\(id)\n".utf8)); exit(1)
+    }
+    print("\(type.stringValue) #\(r.id) \"\(r.name)\"  \(r.data.count) bytes")
+    let rd = r.data
+    func rawWord(_ off: Int) -> Int {
+        let b = rd.startIndex + off
+        let v = (Int(rd[b]) << 8) | Int(rd[b + 1])
+        return v >= 0x8000 ? v - 0x10000 : v
+    }
+    var rawOff = 0
+    var rawLine = ""
+    while rawOff + 2 <= rd.count {
+        if rawOff % 16 == 0 { rawLine += String(format: "\n  @%-4d ", rawOff) }
+        rawLine += String(format: "%6d ", rawWord(rawOff))
+        rawOff += 2
+    }
+    print(rawLine)
+    // ASCII view: printable bytes as-is, others as '.', 64 cols, offset-labelled.
+    print("\n  --- ascii ---")
+    var aOff = 0
+    var aLine = ""
+    while aOff < rd.count {
+        if aOff % 64 == 0 { aLine += String(format: "\n  @%-4d ", aOff) }
+        let byte = rd[rd.startIndex + aOff]
+        aLine += (byte >= 32 && byte < 127) ? String(UnicodeScalar(byte)) : "."
+        aOff += 1
+    }
+    print(aLine)
+
+case "tmpl":
+    // Dev tool: parse a ResForge/EVN TMPL resource (label PString + 4-char type
+    // code pairs) and print each field with its running byte offset. Authoritative
+    // field layout for the on-disk resource bodies.
+    //   evnova-extract tmpl <Templates.rsrc> <id>
+    guard args.count == 3, let id = Int(args[2]) else { usage() }
+    let (tcol, _) = loadCollection(args[1])
+    guard let tr = tcol.resource(FourCharCode("TMPL")!, id) else {
+        FileHandle.standardError.write(Data("error: no TMPL #\(id)\n".utf8)); exit(1)
+    }
+    // Byte size of a template field type code (variable ones return nil).
+    func tmplSize(_ code: String) -> Int? {
+        switch code {
+        case "DBYT", "UBYT", "HBYT", "CHAR", "BFLG", "FBYT": return 1
+        case "DWRD", "UWRD", "HWRD", "BOOL", "WFLG", "FWRD", "RSID", "AWRD": return 2
+        case "DLNG", "ULNG", "HLNG", "LFLG", "FLNG", "PNT ", "TNAM", "KEYB": return 4
+        case "RECT": return 8
+        default:
+            if code.first == "C", let n = Int(code.dropFirst(), radix: 16) { return n } // Cnnn fixed C string
+            if code.first == "P", let n = Int(code.dropFirst(), radix: 16) { return n + 1 } // Pnnn pascal
+            return nil // PSTR/CSTR/HEXD/OCNT/LSTB/LSTE/ZCNT etc — variable/structural
+        }
+    }
+    let tdata = tr.data
+    var tp = tdata.startIndex
+    var tByteOff = 0
+    print("TMPL #\(tr.id) \"\(tr.name)\" — field layout (offset, type, label):")
+    while tp < tdata.endIndex {
+        let len = Int(tdata[tp]); tp += 1
+        guard tp + len + 4 <= tdata.endIndex else { break }
+        let label = String(data: tdata[tp..<tp+len], encoding: .macOSRoman) ?? "?"
+        tp += len
+        let code = String(data: tdata[tp..<tp+4], encoding: .macOSRoman) ?? "????"
+        tp += 4
+        let sz = tmplSize(code)
+        let offStr = sz == nil ? "  ?  " : String(format: "%5d", tByteOff)
+        print("  @\(offStr)  \(code)  \(label)")
+        if let s = sz { tByteOff += s }
     }
 
 default:

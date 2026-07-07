@@ -13,6 +13,10 @@ final class AppModel: ObservableObject {
     @Published var bindings: KeyBindings = .load()
     @Published var data = GameDataController()
 
+    /// Shared audio system: SFX + music, driven by `settings`. Used by the game
+    /// scene (flight/combat SFX) and the launcher (UI clicks, music, sound test).
+    let audio = GameAudio()
+
     private var dataObserver: AnyCancellable?
 
     init() {
@@ -20,11 +24,25 @@ final class AppModel: ObservableObject {
         dataObserver = data.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        audio.apply(settings: settings)
     }
 
-    /// Persist settings whenever they change materially.
-    func commitSettings() { settings.save() }
+    /// Persist settings whenever they change materially, and push audio changes live.
+    func commitSettings() {
+        settings.save()
+        audio.apply(settings: settings)
+    }
     func commitBindings() { bindings.save() }
+
+    /// Make sure data is loaded and the audio system is wired to it (music track +
+    /// decoded SFX). Safe to call repeatedly.
+    func prepareAudioAndData() {
+        data.reloadIfNeeded()
+        audio.attach(game: data.game)
+        audio.setMusic(url: data.musicTrackURL())
+        audio.apply(settings: settings)
+        audio.startMusicIfEnabled()
+    }
 
     /// Enter the game via a brief loading screen (loads/merges data off the main flow).
     func startGame() {
@@ -32,7 +50,7 @@ final class AppModel: ObservableObject {
     }
 
     func finishLoadingIntoGame() {
-        data.reloadIfNeeded()
+        prepareAudioAndData()
         screen = .game
     }
 
