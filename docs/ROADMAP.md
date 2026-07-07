@@ -34,8 +34,13 @@ works vs. what is stubbed.
    asteroids, the star background; hyperspace **jump** between systems; galaxy **map**.
 2. **Interaction**: **land** on planets → spaceport, **commodity trading**/economy,
    **outfitting**, **shipyard**; save/load pilot files (`.plt`).
-3. **Combat**: weapons (`wëap`) firing + projectiles/beams, shields/armor/damage,
-   `bööm` explosions, energy/fuel, afterburners, ammo.
+3. **Combat & ship system** — ✅ *core built* (`docs/SHIP_SYSTEM.md`): the full
+   ship system — hull + **outfit** aggregation (`oütf` → effective stats), real
+   shields/armor + recharge, **fuel** (100/jump) + hyperjump/afterburner drain,
+   **cargo/storage**, resolved **weapon loadouts** with reload/ammo, projectiles/
+   beams and shield-then-armor damage. Driven entirely from the user's data
+   (`evnova-extract ship`/`outfit`), unit-tested, and surfaced on the HUD. ⏭ still
+   to add: `bööm` explosion art, per-weapon `snd `, ion/heat/cloak simulation.
 4. **AI** — ✅ *core built* (`docs/AI.md`, `EVNovaEngine`): NPC ships spawned from
    real `düde`/`flët`/`sÿst` tables, government (`gövt`) class-based standings &
    relations, warship patrols, trader travel + jump-out, escorts adopting a

@@ -86,7 +86,9 @@ public final class Galaxy {
         if let cached = shipCache[id] { return cached }
         guard let s = game.ship(id) else { return nil }
 
-        let frames = game.shan(id).map { $0.baseSetCount > 0 ? $0.baseSetCount : 36 } ?? 36
+        // EV Nova hulls rotate through 36 headings (shän's counts are animation
+        // sets, not headings) — must match SpriteTextures.rotationFrames.
+        let frames = 36
         let stats = ShipStats(speed: s.speed, acceleration: s.acceleration,
                               turnRate: s.turnRate, rotationFrames: frames, tuning: flightTuning)
         let radius: Double = game.shan(id).map { max(10, Double(max($0.baseWidth, $0.baseHeight)) / 2) } ?? 18

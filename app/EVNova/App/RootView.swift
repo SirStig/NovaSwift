@@ -24,6 +24,13 @@ struct RootView: View {
             // Wire audio to the data and start menu music (if the player enabled it
             // and their data ships a track). Music carries through into the game.
             model.prepareAudioAndData()
+            // Dev: EVNOVA_AUTOPLAY jumps straight into the game scene, so the live
+            // system (with AI ships) can be inspected without clicking through the
+            // launcher.
+            if ProcessInfo.processInfo.environment["EVNOVA_AUTOPLAY"] != nil,
+               model.data.hasBaseData {
+                model.finishLoadingIntoGame()
+            }
         }
     }
 }

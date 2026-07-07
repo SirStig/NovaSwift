@@ -53,7 +53,7 @@ public struct SpinRes {
 public struct ShanRes {
     public let id: Int
     public let baseSpriteID: Int   // → spïn id for the hull sprite
-    public let baseSetCount: Int   // rotation frames per set
+    public let baseSetCount: Int   // number of animation *sets* (banking/lit variants), NOT headings; hulls rotate through 36 headings
     public let baseWidth: Int
     public let baseHeight: Int
 

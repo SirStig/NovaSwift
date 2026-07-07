@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		AA000000000000000000F3 /* EVNovaKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F1 /* EVNovaKit */; };
 		AA000000000000000000F4 /* EVNovaEngine in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F2 /* EVNovaEngine */; };
+		AA000000000000000000F6 /* EVNovaStory in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F5 /* EVNovaStory */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 			files = (
 				AA000000000000000000F3 /* EVNovaKit in Frameworks */,
 				AA000000000000000000F4 /* EVNovaEngine in Frameworks */,
+				AA000000000000000000F6 /* EVNovaStory in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +72,7 @@
 			packageProductDependencies = (
 				AA000000000000000000F1 /* EVNovaKit */,
 				AA000000000000000000F2 /* EVNovaEngine */,
+				AA000000000000000000F5 /* EVNovaStory */,
 			);
 			productName = EVNova;
 			productReference = AA000000000000000000E5 /* EVNova.app */;
@@ -276,6 +279,10 @@
 		AA000000000000000000F2 /* EVNovaEngine */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = EVNovaEngine;
+		};
+		AA000000000000000000F5 /* EVNovaStory */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EVNovaStory;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -174,8 +174,11 @@ extension Galaxy {
         guard let lo = loadout(shipID: shipID, extraOutfits: extraOutfits) else {
             return makeShip(shipID, government: govt, at: position, angle: angle)
         }
+        // EV Nova hulls rotate through 36 headings. (shän's other counts are
+        // *animation sets* — banking / lit variants — not headings, so we must NOT
+        // use them here; this count must match SpriteTextures.rotationFrames.)
         let shan = game.shan(shipID)
-        let frames = shan.map { $0.baseSetCount > 0 ? $0.baseSetCount : 36 } ?? 36
+        let frames = 36
         let radius: Double = shan.map { max(10, Double(max($0.baseWidth, $0.baseHeight)) / 2) } ?? 18
         let stats = ShipStats(speed: lo.speed, acceleration: lo.acceleration,
                               turnRate: lo.turnRate, rotationFrames: frames, tuning: flightTuning)

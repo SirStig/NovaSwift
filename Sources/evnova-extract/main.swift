@@ -20,7 +20,8 @@ func usage() -> Never {
       \(name) list    <file> <TYPE>
       \(name) sprites <file> [outDir]     Decode rlëD sprites → PNG sheets
       \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
-      \(name) ship    <baseDir> [id]      Decode ship stats + resolve its sprite → PNG
+      \(name) ship    <baseDir> [id]      Decode ship stats + full loadout + sprite → PNG
+      \(name) outfit  <baseDir> [id]      List outfits, or one outfit's modifiers
       \(name) system  <baseDir> [id]      List a system's planets + resolve sprites
       \(name) sounds  <baseDir>           List all snd resources (id, name, rate, length)
       \(name) sound   <baseDir> <id> [out] Decode one snd → WAV (default: <id>.wav)
@@ -644,6 +645,44 @@ case "story":
     }
     print("\nservices log:")
     for line in services.log { print("  · \(line)") }
+
+case "storylines":
+    // Reconstruct every campaign from the mission bit-graph and show a pilot's
+    // progress + next-step guidance (the data behind the in-game story guide).
+    //   evnova-extract storylines <baseDir> [setBits: b350,b6666,...]
+    guard args.count >= 2 else { usage() }
+    let slBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let slGame: NovaGame
+    do { slGame = NovaGame(try GameLibrary.merge(baseFiles: slBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    var slPlayer = PlayerState(currentSystem: 128)
+    if args.count >= 3 {
+        for tok in args[2].split(separator: ",") where tok.hasPrefix("b") {
+            if let n = Int(tok.dropFirst()) { slPlayer.setBit(n) }
+        }
+    }
+    let analyzer = StorylineAnalyzer(game: slGame)
+    let lines = analyzer.storylines(for: slPlayer)
+    print("reconstructed \(lines.count) storylines (+\(analyzer.untaggedMissionCount) untagged one-off missions)\n")
+    for s in lines.prefix(args.count >= 3 ? 40 : 16) {
+        let bar = String(repeating: "█", count: Int(s.progressFraction * 10))
+            + String(repeating: "░", count: 10 - Int(s.progressFraction * 10))
+        print("▐ \(s.title)  [\(bar)] \(s.completedCount)/\(s.totalCount)")
+        if let cur = s.currentStepID, let step = s.steps.first(where: { $0.missionID == cur }) {
+            print("    → next: #\(step.missionID) “\(step.displayName)”  [\(step.status.rawValue)]")
+            if step.status == .available {
+                print("      get it at: \(step.offeredAt)")
+                print("      objective: \(step.objective)   reward: \(step.reward)")
+            } else if step.status == .locked, !step.blockers.isEmpty {
+                for b in step.blockers.prefix(3) {
+                    let need = b.needsSet ? "set" : "clear"
+                    let via = b.unlockedBy.first?.hint ?? "an as-yet-unknown event"
+                    print("      blocked: needs b\(b.bit) \(need) — via \(via)")
+                }
+            }
+        }
+    }
 
 default:
     usage()

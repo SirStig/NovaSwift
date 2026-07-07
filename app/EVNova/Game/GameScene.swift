@@ -42,6 +42,14 @@ final class GameScene: SKScene {
     private var hudClock: TimeInterval = 0
     private let radarRange: CGFloat = 8000
 
+    // NPC rendering: the catalog for per-hull sprites, a layer for NPC ships, a
+    // layer for transient effects (explosions / beams), and the live node pool.
+    private var galaxy: Galaxy?
+    private let npcLayer = SKNode()
+    private let effectsLayer = SKNode()
+    private var npcNodes: [Int: NPCNode] = [:]
+    private var npcTextureCache: [Int: [SKTexture]] = [:]
+
     private final class StarLayer {
         let container = SKNode()
         var stars: [SKSpriteNode] = []
@@ -51,13 +59,38 @@ final class GameScene: SKScene {
         init(parallax: CGFloat, tile: CGFloat) { self.parallax = parallax; self.tile = tile }
     }
 
+    /// The SpriteKit nodes backing one live NPC ship: hull (real sprite or a
+    /// faction-tinted placeholder), an engine plume, and a damage bar.
+    private final class NPCNode {
+        let container = SKNode()
+        var sprite: SKSpriteNode?
+        var placeholder: SKShapeNode?
+        var thruster: SKNode?
+        var healthFill: SKShapeNode?
+        var healthBar: SKNode?
+        var textures: [SKTexture] = []
+        var radius: CGFloat = 16
+        var lastArmor: Double = -1
+    }
+
     // MARK: Setup
 
     func configure(player ship: Ship, textures: [SKTexture], settings: GameSettings,
                    input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
                    audio: GameAudio? = nil,
-                   planets: [PlanetVisual] = [], systemName: String = "") {
-        self.world = World(player: ship)
+                   planets: [PlanetVisual] = [], systemName: String = "",
+                   game: NovaGame? = nil, systemID: Int = 0, galaxy: Galaxy? = nil) {
+        // With game data we build a fully-wired, *populated* world (diplomacy +
+        // spawner + system geometry) so the system fills with NPC traders, patrols
+        // and pirates. Without it we fall back to a lone-ship physics world.
+        if let game, systemID != 0 {
+            let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID,
+                                                player: ship, galaxy: galaxy)
+            self.world = w
+            self.galaxy = gx
+        } else {
+            self.world = World(player: ship)
+        }
         self.rotationTextures = textures
         self.settings = settings
         self.input = input
@@ -75,8 +108,12 @@ final class GameScene: SKScene {
         addChild(cameraNode)
         buildStarfield()
         buildPlanets()
-        projectileLayer.zPosition = 8
+        npcLayer.zPosition = 9
+        addChild(npcLayer)
+        projectileLayer.zPosition = 11
         addChild(projectileLayer)
+        effectsLayer.zPosition = 12
+        addChild(effectsLayer)
         buildShip()
         // Arriving in the system.
         audio?.play(.hyperspaceArrive)
@@ -205,12 +242,25 @@ final class GameScene: SKScene {
         // ammo). We drain its events for SFX and render the live projectiles it
         // spawned, so firing reflects the real weapon system, not the raw input.
         for event in world.drainEvents() {
-            if case let .weaponFired(shooterID, at, _) = event, shooterID == 0 {
-                audio?.play(208, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+            switch event {
+            case let .weaponFired(shooterID, at, _):
+                // The player's shots report right at the listener; NPC fire is
+                // positional and quieter so a busy system doesn't roar.
+                if shooterID == 0 {
+                    audio?.play(208, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                }
+            case let .beam(from, to, hit):
+                spawnBeam(from: CGPoint(x: from.x, y: from.y),
+                          to: CGPoint(x: to.x, y: to.y), hit: hit)
+            case let .explosion(at, radius):
+                spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
+            default:
+                break
             }
         }
         wasFiring = intent.firePrimary
         syncProjectiles()
+        syncNPCs()
         shipNode.position = scenePos
 
         if let sprite = shipSprite, !rotationTextures.isEmpty {
@@ -263,6 +313,170 @@ final class GameScene: SKScene {
                 node.isHidden = true
             }
         }
+    }
+
+    // MARK: NPC ships
+
+    /// Reconcile the scene's NPC nodes with the world's live NPC roster: spawn
+    /// nodes for arrivals, update transforms/plume/damage for the living, and
+    /// remove nodes for ships that died or jumped out.
+    private func syncNPCs() {
+        var seen = Set<Int>()
+        for npc in world.npcs {
+            seen.insert(npc.entityID)
+            let node = npcNodes[npc.entityID] ?? makeNPCNode(for: npc)
+            node.container.position = CGPoint(x: npc.position.x, y: npc.position.y)
+            if let sprite = node.sprite, !node.textures.isEmpty {
+                sprite.texture = node.textures[min(npc.spriteFrame, node.textures.count - 1)]
+            } else if let tri = node.placeholder {
+                tri.zRotation = -CGFloat(npc.angle)
+            }
+            updateNPCThruster(node, npc: npc)
+            updateNPCHealth(node, npc: npc)
+        }
+        for (id, node) in npcNodes where !seen.contains(id) {
+            node.container.removeFromParent()
+            npcNodes[id] = nil
+        }
+    }
+
+    private func makeNPCNode(for npc: Ship) -> NPCNode {
+        let n = NPCNode()
+        n.container.zPosition = 9
+
+        let textures = npcTextures(for: npc.shipTypeID)
+        n.textures = textures
+        if let first = textures.first {
+            let sprite = SKSpriteNode(texture: first)
+            sprite.texture?.filteringMode = .nearest
+            n.container.addChild(sprite)
+            n.sprite = sprite
+            n.radius = max(first.size().width, first.size().height) / 2
+        } else {
+            // Faction-tinted arrowhead when we can't resolve the hull sprite.
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: 0, y: 14))
+            path.addLine(to: CGPoint(x: -10, y: -11))
+            path.addLine(to: CGPoint(x: 0, y: -4))
+            path.addLine(to: CGPoint(x: 10, y: -11))
+            path.closeSubpath()
+            let tri = SKShapeNode(path: path)
+            tri.fillColor = factionColor(for: npc)
+            tri.strokeColor = SKColor(white: 1, alpha: 0.5)
+            tri.lineWidth = 1
+            n.container.addChild(tri)
+            n.placeholder = tri
+            n.radius = CGFloat(npc.radius)
+        }
+
+        let thruster = makeThruster()
+        thruster.isHidden = true
+        thruster.setScale(0.8)
+        n.container.addChild(thruster)
+        n.thruster = thruster
+
+        // A slim armor/shield bar that only appears once the ship is hurt.
+        let barWidth: CGFloat = max(20, n.radius * 1.6)
+        let barBG = SKShapeNode(rectOf: CGSize(width: barWidth, height: 3), cornerRadius: 1.5)
+        barBG.fillColor = SKColor(white: 0, alpha: 0.5)
+        barBG.strokeColor = .clear
+        let fill = SKShapeNode(rectOf: CGSize(width: barWidth, height: 3), cornerRadius: 1.5)
+        fill.fillColor = SKColor(red: 0.3, green: 0.9, blue: 0.4, alpha: 1)
+        fill.strokeColor = .clear
+        let barHolder = SKNode()
+        barHolder.position = CGPoint(x: 0, y: n.radius + 8)
+        barHolder.addChild(barBG)
+        barHolder.addChild(fill)
+        barHolder.isHidden = true
+        n.container.addChild(barHolder)
+        n.healthBar = barHolder
+        n.healthFill = fill
+
+        npcLayer.addChild(n.container)
+        npcNodes[npc.entityID] = n
+        return n
+    }
+
+    private func updateNPCThruster(_ n: NPCNode, npc: Ship) {
+        guard let thruster = n.thruster else { return }
+        // We don't see the NPC's intent, so infer "thrusting" from moving forward
+        // near its own heading at a decent clip.
+        let heading = (sin(npc.angle), cos(npc.angle))
+        let forward = npc.velocity.x * heading.0 + npc.velocity.y * heading.1
+        let active = npc.velocity.length > npc.stats.maxSpeed * 0.25 && forward > 0
+        thruster.isHidden = !active
+        guard active else { return }
+        let tail = CGPoint(x: sin(npc.angle) * -Double(n.radius) * 0.7,
+                           y: cos(npc.angle) * -Double(n.radius) * 0.7)
+        thruster.position = tail
+        thruster.zRotation = -CGFloat(npc.angle)
+        thruster.alpha = .random(in: 0.6...0.9)
+    }
+
+    private func updateNPCHealth(_ n: NPCNode, npc: Ship) {
+        guard let holder = n.healthBar, let fill = n.healthFill else { return }
+        let frac = max(0, min(1, npc.healthFraction))
+        // Only redraw when it actually changed; hide the bar at full health.
+        if npc.armor == n.lastArmor { return }
+        n.lastArmor = npc.armor
+        holder.isHidden = frac >= 0.999
+        fill.xScale = CGFloat(max(0.001, frac))
+        // Green when healthy, through amber, to red when critical.
+        fill.fillColor = SKColor(red: CGFloat(1 - frac) * 0.9 + 0.1,
+                                 green: CGFloat(frac) * 0.9,
+                                 blue: 0.25, alpha: 1)
+    }
+
+    /// The rotation textures for a hull id, decoded from the player's data once
+    /// and cached (many NPCs share a hull).
+    private func npcTextures(for shipTypeID: Int) -> [SKTexture] {
+        if let cached = npcTextureCache[shipTypeID] { return cached }
+        var textures: [SKTexture] = []
+        if shipTypeID >= 128, let sheet = galaxy?.game.shipSprite(shipTypeID) {
+            textures = SpriteTextures.rotationFrames(from: sheet)
+        }
+        npcTextureCache[shipTypeID] = textures
+        return textures
+    }
+
+    /// Blue for friends, red for anyone hostile to the player, grey otherwise.
+    private func factionColor(for npc: Ship) -> SKColor {
+        if world.diplomacy?.isHostileToPlayer(npc.government) == true {
+            return SKColor(red: 0.95, green: 0.35, blue: 0.3, alpha: 1)
+        }
+        return SKColor(red: 0.55, green: 0.75, blue: 1.0, alpha: 1)
+    }
+
+    // MARK: Combat effects
+
+    /// A brief bright line for an instant-hit beam.
+    private func spawnBeam(from: CGPoint, to: CGPoint, hit: Bool) {
+        let path = CGMutablePath()
+        path.move(to: from)
+        path.addLine(to: to)
+        let line = SKShapeNode(path: path)
+        line.strokeColor = hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 0.9)
+                                : SKColor(white: 0.8, alpha: 0.6)
+        line.lineWidth = hit ? 2.5 : 1.5
+        line.blendMode = .add
+        line.zPosition = 12
+        effectsLayer.addChild(line)
+        line.run(.sequence([.fadeOut(withDuration: 0.12), .removeFromParent()]))
+    }
+
+    /// An expanding, fading flash for an explosion.
+    private func spawnExplosion(at point: CGPoint, radius: CGFloat) {
+        let flash = SKShapeNode(circleOfRadius: max(10, radius * 0.6))
+        flash.position = point
+        flash.fillColor = SKColor(red: 1.0, green: 0.7, blue: 0.3, alpha: 0.9)
+        flash.strokeColor = SKColor(red: 1.0, green: 0.9, blue: 0.6, alpha: 0.9)
+        flash.blendMode = .add
+        flash.zPosition = 13
+        effectsLayer.addChild(flash)
+        flash.run(.sequence([
+            .group([.scale(to: 2.2, duration: 0.35), .fadeOut(withDuration: 0.35)]),
+            .removeFromParent()
+        ]))
     }
 
     private func updateStarfield(cameraAt cam: CGPoint) {
@@ -323,6 +537,15 @@ final class GameScene: SKScene {
             var dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
             let m = (dx * dx + dy * dy).squareRoot()
             if m > 1 { dx /= m; dy /= m } // clamp to the rim
+            return CGPoint(x: dx, y: dy)
+        }
+        // Ship contacts: every live NPC, relative to the player and clamped to the
+        // scope rim.
+        hud.blips = world.npcs.map { npc in
+            var dx = (npc.position.x - shipPos.x) / Double(radarRange)
+            var dy = -(npc.position.y - shipPos.y) / Double(radarRange)
+            let m = (dx * dx + dy * dy).squareRoot()
+            if m > 1 { dx /= m; dy /= m }
             return CGPoint(x: dx, y: dy)
         }
     }

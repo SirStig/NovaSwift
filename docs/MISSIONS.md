@@ -161,6 +161,42 @@ engine.advanceOneDay()            // crons, deadlines, salaries
 
 `engine.player` is the `Codable` save file — persist it directly.
 
+## In-game Pilot window + aftermarket Story Guide
+
+A new **`StorylineAnalyzer`** (`EVNovaStory`) reconstructs the campaigns straight
+from the mission bit-graph — no hand-authored guide. It links "who sets bit N"
+(a mission's `OnSuccess`/`OnShipDone`/`OnAccept`, or a cron's `OnStart`/`OnEnd`)
+to "who needs bit N" (`AvailBits`), groups missions by EV Nova's `"Name; TagN"`
+convention, and for any pilot reports each step's status plus — for the current
+locked step — **exactly what to do to unlock it**.
+
+Proven on the real game: `evnova-extract storylines <baseDir> [b350,b6666,…]`
+reconstructs all 23 campaigns (Fed 37, Polaris 36, Auroran 28, Vell-os 29, …) and
+prints next-step guidance like *"needs b208 set — via Complete 'Find and Return
+with Bazara'"*.
+
+The SwiftUI UI lives in `app/EVNova/Story/`:
+- **`PilotInfoView`** — the Pilot window: credits, ship, combat rating, ranks,
+  government standings, active missions, escorts (original-game info window).
+- **`StorylineBrowserView`** — the *aftermarket* EV-Bible-style browser: every
+  storyline with a progress bar, each step's status, a "YOU ARE HERE" marker, and
+  the unlock hint for the locked next step.
+- **`StoryGuideView`** — a tabbed container of the two.
+
+They render in Xcode Previews via `StoryGuideModel.sample`. To show over the real
+loaded game (one line, from whichever view owns the interactive menu):
+
+```swift
+@State private var showGuide = false
+Button("Pilot Log") { showGuide = true }
+    .storyGuideSheet(isPresented: $showGuide,
+                     model: .over(dataController.game!))   // pass the live pilot once it exists
+```
+
+`StoryGuideModel.over(game:player:)` accepts the pilot's live `PlayerState` once
+the running game owns one; until then it uses a starter pilot so the guide is
+browsable immediately.
+
 ## Not yet wired (needs the other systems)
 
 - Special/auxiliary **ship spawning** and destruction reporting (needs combat/AI

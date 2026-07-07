@@ -70,6 +70,27 @@ public struct NCBTest: Sendable {
         Self.eval(root, ctx)
     }
 
+    /// Every control bit referenced by this expression, with the polarity it
+    /// appears in: `negated == false` means "generally needs bN **set**",
+    /// `true` means "generally needs bN **clear**". Used by the storyline
+    /// analyzer to explain *why* a mission is locked and point at what sets the
+    /// missing bit. (Best-effort for arbitrary boolean formulae — it reports the
+    /// atoms and their nesting under `!`, which is what human guidance needs.)
+    public var referencedBits: [(bit: Int, negated: Bool)] {
+        var out: [(Int, Bool)] = []
+        Self.collectBits(root, negated: false, into: &out)
+        return out
+    }
+
+    private static func collectBits(_ node: Node, negated: Bool, into out: inout [(Int, Bool)]) {
+        switch node {
+        case .bit(let n): out.append((n, negated))
+        case .not(let inner): collectBits(inner, negated: !negated, into: &out)
+        case .and(let ns), .or(let ns): ns.forEach { collectBits($0, negated: negated, into: &out) }
+        case .outfit, .explored, .genderMale, .unregisteredAtMost, .constant: break
+        }
+    }
+
     private static func eval(_ node: Node, _ ctx: NCBTestContext) -> Bool {
         switch node {
         case .bit(let n):                return ctx.isBitSet(n)
