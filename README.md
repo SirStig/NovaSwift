@@ -12,8 +12,17 @@ This repo contains **only** open reimplementation code and tooling. It contains
 
 ## Status
 
-🚧 **Bootstrapping.** Deciding the engine foundation and standing up the
-data-extraction pipeline. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+🟢 **M1 complete — the data layer works on real game files.** `EVNovaKit` reads
+both classic resource forks / `.ndat` and the modern `BRGR` `.rez` container, and
+the `evnova-extract` CLI dumps ships/outfits/weapons/systems from real plug-ins.
+Engine foundation decided (native Swift + Metal/SpriteKit). Next: decode
+resource bodies and render sprites. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+```bash
+swift build && swift test                    # build the core + run tests
+scripts/fetch-plugins.sh                      # grab free community plug-ins (test data)
+.build/debug/evnova-extract types "data/plugins/The Frozen Heart/Nova Files/E3 Data.rez"
+```
 
 ## Goals
 
