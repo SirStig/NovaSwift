@@ -72,7 +72,7 @@ struct GameContainerView: View {
                 TouchControlsOverlay(input: host.input)
                 #endif
 
-                topBar
+                rightRail
 
                 if nav.showingMap {
                     GalaxyMapView(nav: nav) { nav.showingMap = false }
@@ -117,16 +117,19 @@ struct GameContainerView: View {
         }
     }
 
-    private var topBar: some View {
-        VStack {
-            HStack(spacing: 10) {
-                navButton("map", "map.fill") { nav.showingMap.toggle() }
-                navButton("jump", "sparkles") { nav.showingMap = true }
-                Spacer()
-                navButton("exit", "xmark") { model.exitToLauncher() }
-            }
-            .padding()
+    // A compact vertical control rail on the right edge, clear of the HUD's
+    // top-left status panel and top-right radar.
+    private var rightRail: some View {
+        HStack {
             Spacer()
+            VStack(spacing: 12) {
+                navButton("Map", "map.fill") { nav.showingMap.toggle() }
+                navButton("Jump", "sparkles") { nav.showingMap = true }
+                navButton("Menu", "xmark") { model.exitToLauncher() }
+            }
+            .padding(10)
+            .background(.black.opacity(0.25), in: Capsule())
+            .padding(.trailing, 12)
         }
     }
 

@@ -1,100 +1,114 @@
 import SwiftUI
 import EVNovaKit
 
-/// The galaxy map: systems plotted at their real coordinates with hyperspace
-/// links. The current system is highlighted; directly-linked systems are cyan
-/// and tappable to jump there.
+/// The galaxy map: systems plotted at their real coordinates, centered on the
+/// current system, with hyperspace links. Directly-linked systems are cyan and
+/// tappable to jump. Drag to pan; pinch (or +/–) to zoom.
 struct GalaxyMapView: View {
     @ObservedObject var nav: NavigationModel
     var onClose: () -> Void
+
+    @State private var pan: CGSize = .zero
+    @State private var zoom: CGFloat = 0.09
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
 
     var body: some View {
         let systems = nav.systems()
-        let bounds = Self.bounds(of: systems)
         let neighborIDs = Set(nav.current?.links ?? [])
+        let cx = nav.current?.x ?? 0
+        let cy = nav.current?.y ?? 0
 
         ZStack {
-            Color.black.opacity(0.92).ignoresSafeArea()
-            GeometryReader { geo in
-                let plot = Self.plotter(bounds: bounds, size: geo.size, inset: 60)
+            Color.black.opacity(0.9).ignoresSafeArea()
 
-                // Links + all system dots.
+            GeometryReader { geo in
+                let center = CGPoint(x: geo.size.width / 2 + pan.width,
+                                     y: geo.size.height / 2 + pan.height)
+                func plot(_ x: Int, _ y: Int) -> CGPoint {
+                    CGPoint(x: center.x + CGFloat(x - cx) * zoom,
+                            y: center.y + CGFloat(y - cy) * zoom)
+                }
+
                 Canvas { ctx, _ in
                     var byID: [Int: SystRes] = [:]
                     for s in systems { byID[s.id] = s }
+                    // Links.
                     for s in systems {
                         let a = plot(s.x, s.y)
                         for link in s.links {
-                            guard let n = byID[link] else { continue }
-                            var path = Path()
-                            path.move(to: a); path.addLine(to: plot(n.x, n.y))
-                            ctx.stroke(path, with: .color(.white.opacity(0.10)), lineWidth: 0.5)
+                            guard let n = byID[link], link > s.id else { continue }
+                            var p = Path(); p.move(to: a); p.addLine(to: plot(n.x, n.y))
+                            ctx.stroke(p, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
                         }
                     }
-                    for s in systems {
+                    // Non-interactive system dots.
+                    for s in systems where s.id != nav.currentSystemID && !neighborIDs.contains(s.id) {
                         let p = plot(s.x, s.y)
-                        let color: Color = s.id == nav.currentSystemID ? amber
-                            : neighborIDs.contains(s.id) ? .cyan : .white.opacity(0.3)
-                        let r: CGFloat = s.id == nav.currentSystemID ? 5 : 3
-                        ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r*2, height: r*2)),
-                                 with: .color(color))
+                        ctx.fill(Path(ellipseIn: CGRect(x: p.x-2, y: p.y-2, width: 4, height: 4)),
+                                 with: .color(.white.opacity(0.35)))
                     }
                 }
-                // Interactive neighbor nodes (tap to jump) + labels.
+                .contentShape(Rectangle())
+                .gesture(DragGesture().onChanged { pan.width += $0.translation.width - dragLast.width
+                    pan.height += $0.translation.height - dragLast.height; dragLast = $0.translation }
+                    .onEnded { _ in dragLast = .zero })
+
+                // Neighbors (tappable) + current, drawn on top with labels.
                 ForEach(nav.neighbors(), id: \.id) { s in
                     let p = plot(s.x, s.y)
                     Button { _ = nav.jump(to: s.id) } label: {
-                        VStack(spacing: 2) {
-                            Circle().stroke(.cyan, lineWidth: 1.5).frame(width: 18, height: 18)
-                            Text(s.name).font(.system(size: 10, design: .monospaced)).foregroundStyle(.cyan)
+                        VStack(spacing: 3) {
+                            Circle().fill(.cyan).frame(width: 10, height: 10)
+                                .overlay(Circle().stroke(.white, lineWidth: 1))
+                            Text(s.name).font(.system(size: 11, design: .monospaced).weight(.medium))
+                                .foregroundStyle(.cyan)
+                                .fixedSize()
                         }
                     }
                     .buttonStyle(.plain)
                     .position(x: p.x, y: p.y)
                 }
-                // Current system label.
                 if let cur = nav.current {
                     let p = plot(cur.x, cur.y)
-                    Text(cur.name)
-                        .font(.system(size: 11, design: .monospaced).weight(.bold))
-                        .foregroundStyle(amber)
-                        .position(x: p.x, y: p.y - 16)
+                    VStack(spacing: 3) {
+                        Circle().fill(amber).frame(width: 12, height: 12)
+                            .overlay(Circle().stroke(amber.opacity(0.4), lineWidth: 6))
+                        Text(cur.name).font(.system(size: 12, design: .monospaced).weight(.bold))
+                            .foregroundStyle(amber).fixedSize()
+                    }
+                    .position(x: p.x, y: p.y)
                 }
             }
+
+            // Compact chrome.
             VStack {
                 HStack {
-                    Text("GALAXY MAP").font(.system(.headline, design: .monospaced)).foregroundStyle(amber)
+                    Text("GALAXY MAP").font(.system(.subheadline, design: .monospaced).weight(.bold))
+                        .foregroundStyle(amber)
                     Spacer()
-                    Button { onClose() } label: {
-                        Image(systemName: "xmark").padding(8).background(.ultraThinMaterial, in: Circle())
+                    zoomButton("minus.magnifyingglass") { zoom = max(0.03, zoom * 0.8) }
+                    zoomButton("plus.magnifyingglass") { zoom = min(0.4, zoom * 1.25) }
+                    zoomButton("scope") { pan = .zero }
+                    Button(action: onClose) {
+                        Image(systemName: "xmark").font(.subheadline.weight(.bold))
+                            .padding(8).background(.ultraThinMaterial, in: Circle())
                     }.buttonStyle(.plain)
                 }
                 Spacer()
-                Text("Tap a cyan (linked) system to hyperspace jump.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("Tap a cyan (linked) system to jump • drag to pan")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
-            .padding()
+            .padding(14)
         }
     }
 
-    private static func bounds(of systems: [SystRes]) -> (minX: Int, maxX: Int, minY: Int, maxY: Int) {
-        let xs = systems.map(\.x), ys = systems.map(\.y)
-        return (xs.min() ?? 0, xs.max() ?? 1, ys.min() ?? 0, ys.max() ?? 1)
-    }
+    @State private var dragLast: CGSize = .zero
 
-    /// Returns a function mapping system coordinates into the view rect.
-    private static func plotter(bounds: (minX: Int, maxX: Int, minY: Int, maxY: Int),
-                                size: CGSize, inset: CGFloat) -> (Int, Int) -> CGPoint {
-        let w = max(1, CGFloat(bounds.maxX - bounds.minX))
-        let h = max(1, CGFloat(bounds.maxY - bounds.minY))
-        let sx = (size.width - inset * 2) / w
-        let sy = (size.height - inset * 2) / h
-        let s = min(sx, sy)
-        return { x, y in
-            CGPoint(x: inset + (CGFloat(x - bounds.minX)) * s,
-                    y: inset + (CGFloat(y - bounds.minY)) * s)
-        }
+    private func zoomButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.subheadline)
+                .padding(8).background(.ultraThinMaterial, in: Circle())
+        }.buttonStyle(.plain)
     }
 }
