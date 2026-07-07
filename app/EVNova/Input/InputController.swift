@@ -1,31 +1,43 @@
 import Foundation
 import EVNovaEngine
 
-/// Shared input sink. Touch controls, hardware keyboard, and (later) game
-/// controllers all write into this; the `GameScene` reads `intent` each frame.
-/// This is the concrete home of the `ControlIntent` abstraction.
+/// Shared input sink. Each input source (keyboard, touch, game controller, mouse)
+/// keeps its own intent; the combined `intent` the scene reads is their OR-merge,
+/// so sources never clobber one another. This is the concrete home of the
+/// `ControlIntent` abstraction.
 final class InputController {
-    private(set) var intent = ControlIntent()
+    var keyboard = ControlIntent()
+    var touch = ControlIntent()
+    var controller = ControlIntent()
+    var mouse = ControlIntent()
 
-    func setTurnLeft(_ on: Bool) { intent.turnLeft = on }
-    func setTurnRight(_ on: Bool) { intent.turnRight = on }
-    func setThrust(_ on: Bool) { intent.thrust = on }
-    func setReverse(_ on: Bool) { intent.reverse = on }
-    func setFirePrimary(_ on: Bool) { intent.firePrimary = on }
-    func setFireSecondary(_ on: Bool) { intent.fireSecondary = on }
+    /// The merged intent the simulation consumes.
+    var intent: ControlIntent {
+        ControlIntent.combined(keyboard, touch, controller, mouse)
+    }
 
-    func reset() { intent = ControlIntent() }
+    func reset() {
+        keyboard = ControlIntent(); touch = ControlIntent()
+        controller = ControlIntent(); mouse = ControlIntent()
+    }
 
-    /// Map a WASD / space character to an intent (arrow keys are handled by the
-    /// view via `KeyEquivalent`). Returns true if the key was handled.
+    // MARK: Keyboard
+
+    func setKeyTurnLeft(_ on: Bool) { keyboard.turnLeft = on }
+    func setKeyTurnRight(_ on: Bool) { keyboard.turnRight = on }
+    func setKeyThrust(_ on: Bool) { keyboard.thrust = on }
+    func setKeyReverse(_ on: Bool) { keyboard.reverse = on }
+    func setKeyFire(_ on: Bool) { keyboard.firePrimary = on }
+
+    /// Map a WASD / space character (arrow keys are handled via KeyEquivalent).
     @discardableResult
     func handleKeyChar(_ c: Character, pressed: Bool) -> Bool {
         switch c {
-        case "a", "A": setTurnLeft(pressed); return true
-        case "d", "D": setTurnRight(pressed); return true
-        case "w", "W": setThrust(pressed); return true
-        case "s", "S": setReverse(pressed); return true
-        case " ": setFirePrimary(pressed); return true
+        case "a", "A": keyboard.turnLeft = pressed; return true
+        case "d", "D": keyboard.turnRight = pressed; return true
+        case "w", "W": keyboard.thrust = pressed; return true
+        case "s", "S": keyboard.reverse = pressed; return true
+        case " ": keyboard.firePrimary = pressed; return true
         default: return false
         }
     }

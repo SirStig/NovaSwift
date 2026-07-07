@@ -46,6 +46,32 @@ final class FlightTests: XCTestCase {
         XCTAssertEqual(world.player.position.y, 100, accuracy: 1e-9)
     }
 
+    func testDesiredHeadingRotatesToward() {
+        let world = makeWorld() // turnRate = π rad/s (180°/s)
+        world.intent.desiredHeading = .pi / 2 // aim right (east)
+        world.step(0.25) // can turn up to 45°; needs 90°, so partial
+        XCTAssertEqual(world.player.angle, .pi / 4, accuracy: 1e-9)
+        world.step(1.0) // plenty to finish
+        XCTAssertEqual(world.player.angle, .pi / 2, accuracy: 1e-9)
+    }
+
+    func testDiscreteTurnBeatsDesiredHeading() {
+        let world = makeWorld()
+        world.intent.desiredHeading = .pi        // aim behind
+        world.intent.turnLeft = true             // but also hold left
+        world.step(0.5)                          // discrete wins: -90°
+        XCTAssertEqual(world.player.angle, -.pi / 2, accuracy: 1e-9)
+    }
+
+    func testCombinedMergesSources() {
+        var kb = ControlIntent(); kb.thrust = true
+        var pad = ControlIntent(); pad.desiredHeading = 1.0; pad.firePrimary = true
+        let merged = ControlIntent.combined(kb, pad)
+        XCTAssertTrue(merged.thrust)
+        XCTAssertTrue(merged.firePrimary)
+        XCTAssertEqual(merged.desiredHeading, 1.0)
+    }
+
     func testStatsFromNovaUnits() {
         let s = ShipStats(speed: 300, acceleration: 500, turnRate: 40)
         XCTAssertEqual(s.maxSpeed, 300 * 3.2, accuracy: 1e-9)

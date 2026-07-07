@@ -21,10 +21,10 @@ struct TouchControlsOverlay: View {
 
     private var turnPad: some View {
         HStack(spacing: 16) {
-            HoldButton(onChange: input.setTurnLeft) {
+            HoldButton(onChange: { input.touch.turnLeft = $0 }) {
                 ControlGlyph(system: "arrow.turn.up.left")
             }
-            HoldButton(onChange: input.setTurnRight) {
+            HoldButton(onChange: { input.touch.turnRight = $0 }) {
                 ControlGlyph(system: "arrow.turn.up.right")
             }
         }
@@ -32,11 +32,11 @@ struct TouchControlsOverlay: View {
 
     private var actionPad: some View {
         HStack(spacing: 16) {
-            HoldButton(onChange: input.setFirePrimary) {
-                ControlGlyph(system: "flame.fill", tint: .orange)
+            HoldButton(onChange: { input.touch.firePrimary = $0 }) {
+                ControlGlyph(system: "bolt.fill", tint: Color(red: 1, green: 0.7, blue: 0.25))
             }
-            HoldButton(onChange: input.setThrust) {
-                ControlGlyph(system: "chevron.up.circle.fill", tint: .cyan, size: 88)
+            HoldButton(onChange: { input.touch.thrust = $0 }) {
+                ControlGlyph(system: "chevron.up.circle.fill", tint: .white, size: 88)
             }
         }
     }

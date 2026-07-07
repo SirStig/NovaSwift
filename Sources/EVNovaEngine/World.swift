@@ -10,7 +10,28 @@ public struct ControlIntent: Equatable {
     public var reverse = false      // reverse thrust / brake-to-stop assist
     public var firePrimary = false
     public var fireSecondary = false
+    /// Absolute heading (radians, compass) to rotate toward — used by mouse and
+    /// analog-stick aiming. When set, it drives turning unless a discrete
+    /// turnLeft/turnRight is also active (discrete input wins).
+    public var desiredHeading: Double?
     public init() {}
+
+    /// OR-merge several input sources into one intent (keyboard + touch +
+    /// controller + mouse). Discrete turns win; otherwise the first supplied
+    /// `desiredHeading` is used.
+    public static func combined(_ sources: ControlIntent...) -> ControlIntent {
+        var r = ControlIntent()
+        for s in sources {
+            r.turnLeft = r.turnLeft || s.turnLeft
+            r.turnRight = r.turnRight || s.turnRight
+            r.thrust = r.thrust || s.thrust
+            r.reverse = r.reverse || s.reverse
+            r.firePrimary = r.firePrimary || s.firePrimary
+            r.fireSecondary = r.fireSecondary || s.fireSecondary
+            if r.desiredHeading == nil { r.desiredHeading = s.desiredHeading }
+        }
+        return r
+    }
 }
 
 /// Tuning that maps EV Nova's integer stat units into simulation units. Kept in
@@ -77,8 +98,18 @@ public final class Ship {
     }
 
     func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning) {
-        if intent.turnLeft { angle -= stats.turnRate * dt }
-        if intent.turnRight { angle += stats.turnRate * dt }
+        let maxTurn = stats.turnRate * dt
+        if intent.turnLeft || intent.turnRight {
+            if intent.turnLeft { angle -= maxTurn }
+            if intent.turnRight { angle += maxTurn }
+        } else if let target = intent.desiredHeading {
+            // Rotate toward the target heading, clamped to this frame's turn budget.
+            let twoPi = 2 * Double.pi
+            var delta = (target - angle).truncatingRemainder(dividingBy: twoPi)
+            if delta > .pi { delta -= twoPi }
+            if delta < -.pi { delta += twoPi }
+            angle += max(-maxTurn, min(maxTurn, delta))
+        }
 
         let heading = Vec2.heading(angle)
         if intent.thrust { velocity += heading * (stats.acceleration * dt) }
