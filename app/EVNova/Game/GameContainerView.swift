@@ -22,12 +22,17 @@ final class GameHost {
         var textures: [SKTexture] = []
         var planets: [PlanetVisual] = []
         var systemName = ""
+        var aiGame: NovaGame?
+        var aiGalaxy: Galaxy?
+        var aiSystemID = 0
 
         if let game = model.data.game, let res = model.data.defaultPlayerShip() {
             // Build the player's ship through the loadout system: hull stats +
             // preinstalled outfits → real shields/armor/fuel/afterburner/cargo and
             // a resolved weapon set. Falls back to bare flight stats if needed.
             let galaxy = Galaxy(game: game)
+            aiGame = game
+            aiGalaxy = galaxy
             ship = galaxy.makeLoadedShip(res.id)
                 ?? Ship(name: res.name,
                         stats: ShipStats(speed: res.speed, acceleration: res.acceleration,
@@ -40,6 +45,7 @@ final class GameHost {
             let targetSystem = systemID.flatMap { game.system($0) } ?? game.startingSystem()
             if let system = targetSystem {
                 systemName = system.name
+                aiSystemID = system.id
                 planets = game.stellarObjects(in: system.id).map { entry in
                     let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
                     let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
@@ -58,7 +64,8 @@ final class GameHost {
         hud.systemName = systemName
         scene.configure(player: ship, textures: textures, settings: model.settings,
                         input: input, controller: controller, hud: hud, audio: model.audio,
-                        planets: planets, systemName: systemName)
+                        planets: planets, systemName: systemName,
+                        game: aiGame, systemID: aiSystemID, galaxy: aiGalaxy)
     }
 
     /// Decode the authentic status bar: the ïntf interface definition + its
@@ -79,6 +86,7 @@ struct GameContainerView: View {
     @State private var host: GameHost?
     @StateObject private var nav = NavigationModel(game: nil, startSystemID: 128)
     @State private var navReady = false
+    @State private var showMenu = false
 
     var body: some View {
         ZStack {
@@ -94,11 +102,17 @@ struct GameContainerView: View {
                 TouchControlsOverlay(input: host.input)
                 #endif
 
-                rightRail
+                topLeftMenuButton
 
                 if nav.showingMap {
                     GalaxyMapView(nav: nav) { nav.showingMap = false }
                         .transition(.opacity)
+                }
+
+                if showMenu {
+                    GameMenuView(hud: host.hud,
+                                 onResume: { showMenu = false },
+                                 onOpenMap: { nav.showingMap = true })
                 }
             } else {
                 Color.black.ignoresSafeArea()
@@ -106,6 +120,8 @@ struct GameContainerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMenu)
+        .onChange(of: showMenu) { _, open in host?.scene.isPaused = open }
         .task {
             if host == nil {
                 nav.configure(game: model.data.game,
@@ -134,35 +150,37 @@ struct GameContainerView: View {
 
     private func handleDiscrete(_ action: GameAction) {
         switch action {
-        case .galaxyMap, .hyperjump: nav.showingMap.toggle()
-        default: break
+        case .openMenu, .pauseGame:
+            if nav.showingMap { nav.showingMap = false } else { showMenu.toggle() }
+        case .galaxyMap:
+            nav.showingMap.toggle()
+        case .hyperjump:
+            nav.showingMap = true
+        default:
+            break
         }
     }
 
-    // A compact vertical control rail on the right edge, clear of the HUD's
-    // top-left status panel and top-right radar.
-    private var rightRail: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 12) {
-                navButton("Map", "map.fill") { nav.showingMap.toggle() }
-                navButton("Jump", "sparkles") { nav.showingMap = true }
-                navButton("Menu", "xmark") { model.exitToLauncher() }
+    // The single in-game entry point: one unobtrusive button in the top-left
+    // (clear of the right-edge status bar) that opens the consolidated menu.
+    private var topLeftMenuButton: some View {
+        VStack {
+            HStack {
+                Button { showMenu = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.title3.weight(.semibold))
+                        .padding(11)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 14)
+                .padding(.top, 12)
+                .opacity(showMenu ? 0 : 1)
+                Spacer()
             }
-            .padding(10)
-            .background(.black.opacity(0.25), in: Capsule())
-            .padding(.trailing, 12)
+            Spacer()
         }
-    }
-
-    private func navButton(_ label: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.headline).padding(10)
-                .background(.ultraThinMaterial, in: Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
     }
 }
 
