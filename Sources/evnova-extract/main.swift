@@ -17,6 +17,7 @@ func usage() -> Never {
       \(name) types   <file>
       \(name) list    <file> <TYPE>
       \(name) sprites <file> [outDir]     Decode rlëD sprites → PNG sheets
+      \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
 
     <TYPE> is a four-char resource code, e.g. shïp  wëap  oütf  sÿst  spöb
     (paste the exact code including accents).
@@ -112,6 +113,37 @@ case "sprites":
         }
     }
     print("done: \(ok) written, \(failed) failed")
+
+case "library":
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let baseDir = URL(fileURLWithPath: args[1])
+    let baseFiles = GameLibrary.discoverResourceFiles(in: baseDir)
+    print("base data: \(baseFiles.count) resource file(s) under \(baseDir.lastPathComponent)/")
+    for f in baseFiles { print("  · \(f.lastPathComponent)") }
+
+    var plugins: [PluginBundle] = []
+    if args.count == 3 {
+        plugins = GameLibrary.discoverPlugins(in: URL(fileURLWithPath: args[2]))
+        print("\nplug-ins discovered: \(plugins.count)")
+        for p in plugins {
+            print("  [\(p.kind == .unknown ? GameLibrary.classify(p) : p.kind)]  \(p.name)  (\(p.fileURLs.count) file(s))")
+        }
+    }
+
+    do {
+        let baseOnly = try GameLibrary.merge(baseFiles: baseFiles)
+        print("\nbase only:            \(baseOnly.totalCount) resources, \(baseOnly.types.count) types")
+        if !plugins.isEmpty {
+            // Enable every discovered plug-in to demonstrate the override chain.
+            let enabled = plugins.map { var p = $0; p.isEnabled = true; return p }
+            let merged = try GameLibrary.merge(baseFiles: baseFiles, plugins: enabled)
+            let delta = merged.totalCount - baseOnly.totalCount
+            print("base + all plug-ins:  \(merged.totalCount) resources, \(merged.types.count) types  (\(delta >= 0 ? "+" : "")\(delta) net after overrides)")
+        }
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+        exit(1)
+    }
 
 default:
     usage()

@@ -29,6 +29,16 @@ Swift `EVNovaKit` container layer complete:
   `spïn`/`shän` so a sprite's frame geometry & rotation count are read from data
   rather than inferred.
 
+## M2.5 — Plug-in library & data loading ✅
+- ✅ `GameLibrary`: discover base resource files + plug-in bundles (folders or
+  loose `.rez`/`.ndat`), auto-classify (total conversion / patch / gameplay),
+  and merge base + **enabled** plug-ins into one `ResourceCollection` via the
+  `(type,id)` override chain. `PluginBundle` is Codable (persistable enabled set).
+- ✅ `evnova-extract library <base> <plugins>` shows the override effect.
+- ✅ Verified on the full free catalog (12 plug-ins/TCs incl. **ARPIA2**,
+  Polycon, Frozen Heart): base 8,362 → 11,585 resources with all enabled.
+- ✅ Mobile/launcher/plug-in design captured in `docs/MOBILE_AND_PLUGINS.md`.
+
 ## M3 — Fly a ship
 - SwiftUI + SpriteKit skeleton on iOS & macOS.
 - Starfield, one ship sprite cycling its rotation frames, Newtonian thrust/turn.
@@ -45,6 +55,16 @@ Swift `EVNovaKit` container layer complete:
 - Weapons + combat + shields/armor + damage + explosions (`bööm`).
 - Save/load pilot files.
 - **Demo:** buy a ship, outfit it, trade for profit, win a dogfight.
+
+## M-Launcher — Menu, settings & mobile controls (parallel track)
+See `docs/MOBILE_AND_PLUGINS.md`.
+- SwiftUI launcher: Play/Continue/New Pilot, Scenario+Plug-in toggles, Settings,
+  Import Data, About/Legal.
+- `ControlIntent` input abstraction; touch scheme (turn/thrust/fire zones,
+  tap-to-target), MFi/controller, keyboard — all feed the same intents.
+- Settings model (controls/graphics/audio/gameplay/accessibility), persisted.
+- **Base-data import flow** (BYO owned data via Files/share-sheet/AirDrop) — the
+  mobile answer to "no drop-in plug-in folder"; plug-ins ship prebundled + toggle.
 
 ## M6 — Story
 - Mission engine (`mïsn`): bar missions, cargo/escort/combat, `crön` background
