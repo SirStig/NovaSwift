@@ -30,7 +30,6 @@ struct GameMenuView: View {
                 .overlay(alignment: .trailing) {
                     Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
                 }
-                .ignoresSafeArea(edges: .vertical)
                 .transition(.move(edge: .leading).combined(with: .opacity))
         }
         .sheet(isPresented: $showSettings) {
@@ -67,7 +66,7 @@ struct GameMenuView: View {
 
                     sectionGap
                     row("Main Menu", "rectangle.portrait.and.arrow.right", tint: .red) {
-                        model.exitToLauncher()
+                        model.returnToMainMenu()
                     }
                 }
                 .padding(12)

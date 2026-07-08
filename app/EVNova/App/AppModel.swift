@@ -6,7 +6,7 @@ import EVNovaKit
 /// (base data + plug-in catalog with enabled state).
 @MainActor
 final class AppModel: ObservableObject {
-    enum Screen: Equatable { case launcher, loading, game }
+    enum Screen: Equatable { case launcher, mainMenu, loading, game }
 
     @Published var screen: Screen = .launcher
     @Published var settings: GameSettings = .load()
@@ -44,8 +44,15 @@ final class AppModel: ObservableObject {
         audio.startMusicIfEnabled()
     }
 
-    /// Enter the game via a brief loading screen (loads/merges data off the main flow).
+    /// From the port's native launcher, "Play" opens the authentic EV Nova main
+    /// menu (when game data is present); without data it drops straight into the
+    /// demo via the loading screen.
     func startGame() {
+        screen = data.hasBaseData ? .mainMenu : .loading
+    }
+
+    /// From the authentic main menu, New Pilot / Enter Ship begins play.
+    func beginPlay() {
         screen = .loading
     }
 
@@ -54,5 +61,11 @@ final class AppModel: ObservableObject {
         screen = .game
     }
 
+    /// Back to the authentic EV Nova main menu (e.g. from the in-game pause menu).
+    func returnToMainMenu() {
+        screen = data.hasBaseData ? .mainMenu : .launcher
+    }
+
+    /// All the way out to the port's native launcher.
     func exitToLauncher() { screen = .launcher }
 }
