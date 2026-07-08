@@ -3,16 +3,31 @@ import EVNovaKit
 
 /// The authentic EV Nova main menu, rendered from the player's own assets: the
 /// full-screen background picture (PICT 8000), the game logo (rlëD 8010) and the
-/// six real menu buttons (rlëD 8050–8055, each with an up + highlighted frame).
-/// Reached from the port's native launcher via "Play".
+/// six real menu buttons (rlëD 8050–8055, each with an up + highlighted frame),
+/// placed at the exact coordinates the game's data defines. Reached from the
+/// port's native launcher via "Play".
 enum MainMenuAction: CaseIterable { case newPilot, openPilot, enterShip, setPrefs, aboutNova, quitNova }
 
 struct MainMenuAssets {
-    struct ButtonArt { let action: MainMenuAction; let normal: CGImage; let pressed: CGImage; let size: CGSize }
+    struct ButtonArt {
+        let action: MainMenuAction
+        let normal: CGImage
+        let pressed: CGImage
+        let size: CGSize
+        /// Top-left position in the 1024×768 design space (from the cölr resource).
+        let origin: CGPoint
+    }
     let background: CGImage?
     let logo: CGImage?
     let logoSize: CGSize
     let buttons: [ButtonArt]
+
+    // Authentic button top-left positions (cölr resource), in spïn 600–605 order:
+    // two columns of three — New/Open/Quit and Enter/Prefs/About.
+    private static let positions: [CGPoint] = [
+        CGPoint(x: 349, y: 400), CGPoint(x: 344, y: 464), CGPoint(x: 345, y: 528),
+        CGPoint(x: 555, y: 401), CGPoint(x: 581, y: 464), CGPoint(x: 580, y: 528),
+    ]
 
     static func load(_ game: NovaGame?) -> MainMenuAssets? {
         guard let game else { return nil }
@@ -26,17 +41,17 @@ struct MainMenuAssets {
             return s.makeCGImage()
         }
 
-        // Column-major order (spïn 600–605): col 1 New/Open/Quit, col 2 Enter/Prefs/About.
         let specs: [(MainMenuAction, Int)] = [
             (.newPilot, 8050), (.openPilot, 8051), (.quitNova, 8052),
             (.enterShip, 8053), (.setPrefs, 8054), (.aboutNova, 8055),
         ]
         var buttons: [ButtonArt] = []
-        for (action, id) in specs {
-            guard let sheet = rle(id),
+        for (i, spec) in specs.enumerated() {
+            guard let sheet = rle(spec.1),
                   let n = sheet.frameCGImage(0), let p = sheet.frameCGImage(1) else { continue }
-            buttons.append(.init(action: action, normal: n, pressed: p,
-                                 size: CGSize(width: sheet.frameWidth, height: sheet.frameHeight)))
+            buttons.append(.init(action: spec.0, normal: n, pressed: p,
+                                 size: CGSize(width: sheet.frameWidth, height: sheet.frameHeight),
+                                 origin: positions[min(i, positions.count - 1)]))
         }
         guard !buttons.isEmpty else { return nil }
 
@@ -61,30 +76,23 @@ struct AuthenticMainMenuView: View {
 
     var body: some View {
         GeometryReader { geo in
+            // Aspect-fit the 1024×768 title art so button coordinates line up 1:1.
             let scale = min(geo.size.width / base.width, geo.size.height / base.height)
+            let ox = (geo.size.width - base.width * scale) / 2
+            let oy = (geo.size.height - base.height * scale) / 2
+            let place: (CGFloat, CGFloat) -> CGPoint = { x, y in CGPoint(x: ox + x * scale, y: oy + y * scale) }
 
-            ZStack {
-                // Background, aspect-filled so it always covers the window.
+            ZStack(alignment: .topLeading) {
+                Color.black.ignoresSafeArea()
+
                 if let bg = assets.background {
                     Image(decorative: bg, scale: 1)
                         .resizable().interpolation(.medium)
-                        .scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                } else {
-                    Color.black
+                        .frame(width: base.width * scale, height: base.height * scale)
+                        .position(place(base.width / 2, base.height / 2))
                 }
-                LinearGradient(colors: [.black.opacity(0.35), .clear, .black.opacity(0.45)],
-                               startPoint: .top, endPoint: .bottom)
 
-                VStack(spacing: 0) {
-                    Spacer().frame(height: geo.size.height * 0.10)
-                    logo(scale: scale)
-                    Spacer().frame(height: geo.size.height * 0.05)
-                    buttonColumns(scale: scale)
-                    Spacer()   // empty space falls below the buttons, keeping them high
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
+                buttons(scale: scale, place: place)
             }
         }
         .ignoresSafeArea()
@@ -105,51 +113,27 @@ struct AuthenticMainMenuView: View {
         }
     }
 
-    @ViewBuilder
-    private func logo(scale: CGFloat) -> some View {
-        if let logo = assets.logo {
-            Image(decorative: logo, scale: 1)
-                .resizable().interpolation(.medium)
-                .frame(width: assets.logoSize.width * scale, height: assets.logoSize.height * scale)
+    private func buttons(scale: CGFloat, place: @escaping (CGFloat, CGFloat) -> CGPoint) -> some View {
+        ForEach(Array(assets.buttons.enumerated()), id: \.offset) { i, art in
+            MenuSpriteButton(art: art, scale: scale,
+                             onRollover: { model.audio.play(.uiSelect) },
+                             action: { activate(art.action) })
+                .position(place(CGFloat(art.origin.x) + art.size.width / 2,
+                                CGFloat(art.origin.y) + art.size.height / 2))
                 .opacity(appeared ? 1 : 0)
-                .scaleEffect(appeared ? 1 : 0.94)
-                .animation(.spring(response: 0.6, dampingFraction: 0.85), value: appeared)
-        }
-    }
-
-    private func buttonColumns(scale: CGFloat) -> some View {
-        // The six buttons in column order: [New, Open, Quit] | [Enter, Prefs, About].
-        let col1 = Array(assets.buttons.prefix(3))
-        let col2 = Array(assets.buttons.dropFirst(3))
-        return HStack(alignment: .top, spacing: 40 * scale) {
-            column(col1, startIndex: 0, scale: scale)
-            column(col2, startIndex: 3, scale: scale)
-        }
-    }
-
-    private func column(_ arts: [MainMenuAssets.ButtonArt], startIndex: Int, scale: CGFloat) -> some View {
-        VStack(spacing: 14 * scale) {
-            ForEach(Array(arts.enumerated()), id: \.offset) { i, art in
-                let index = startIndex + i
-                MenuSpriteButton(art: art, scale: scale,
-                                 onRollover: { model.audio.play(.uiSelect) },
-                                 action: { activate(art.action) })
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 26)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.8)
-                        .delay(0.12 + Double(index) * 0.06), value: appeared)
-            }
+                .offset(y: appeared ? 0 : 22)
+                .animation(.spring(response: 0.5, dampingFraction: 0.8)
+                    .delay(0.10 + Double(i) * 0.06), value: appeared)
         }
     }
 
     private func activate(_ action: MainMenuAction) {
         model.audio.play(.uiSelect)
         switch action {
-        case .newPilot, .enterShip: model.beginPlay()
-        case .openPilot: model.beginPlay()          // continues to the game for now
+        case .newPilot, .enterShip, .openPilot: model.beginPlay()
         case .setPrefs: sheet = .settings
         case .aboutNova: sheet = .about
-        case .quitNova: model.exitToLauncher()      // back to the port's native launcher
+        case .quitNova: model.exitToLauncher()
         }
     }
 }
@@ -174,7 +158,7 @@ private struct MenuSpriteButton: View {
             .contentShape(Rectangle())
             .onHover { h in
                 hovering = h
-                if h { onRollover() }   // rollover sound, as in EV Nova
+                if h { onRollover() }
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
