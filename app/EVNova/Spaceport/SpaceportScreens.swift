@@ -136,8 +136,8 @@ struct OutfitterView: View {
     var body: some View {
         if let frame = graphics.frame(.outfit) {
             NovaMenu(frame: frame, overlay: true) { space in
-                grid.frame(width: 318, height: 300).novaPlace(space, -373, -153)
-                detail.frame(width: 205, height: 300).novaPlace(space, -27, -150)
+                grid.frame(width: 318, height: 250).clipped().novaPlace(space, -373, -153)
+                detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
                 if let o = selected, let pic = graphics.outfitPicture(o) {
                     Image(decorative: pic, scale: 1).interpolation(.high).resizable().scaledToFit()
                         .frame(width: 190, height: 185).novaPlace(space, 178, -150)
@@ -193,19 +193,19 @@ struct OutfitterView: View {
 
     private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
-        return HStack(spacing: 40) {
+        return HStack(spacing: 14) {
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                       width: 60, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) } ?? false) {
+                       width: 52, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) } ?? false) {
                 if let o { pilot.buyOutfit(o, galaxy: galaxy) }
             }
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
-                       width: 60, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
+                       width: 52, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
                 if let o { pilot.sellOutfit(o) }
             }
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: 60, action: onDone)
+                       width: 52, action: onDone)
         }
-        .novaPlace(space, 100, 122)
+        .novaPlace(space, 62, 128)
     }
 
     private var fallback: some View {
