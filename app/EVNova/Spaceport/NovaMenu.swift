@@ -45,7 +45,11 @@ struct NovaMenu<Content: View>: View {
         let nw = CGFloat(frame.width), nh = CGFloat(frame.height)
         let space = NovaSpace(width: nw, height: nh)
         GeometryReader { geo in
-            let ref = overlay ? Self.reference : CGSize(width: nw, height: nh)
+            // Every spaceport screen (hub + dialogs) shares one design scale
+            // (1024×768), so the landing frame renders at its true proportions
+            // centered — not fit-scaled up to fill the window — and dialogs overlay
+            // it at a matching scale.
+            let ref = Self.reference
             let scale = min(min(geo.size.width / ref.width, geo.size.height / ref.height), maxScale)
             ZStack(alignment: .topLeading) {
                 Image(decorative: frame, scale: 1)

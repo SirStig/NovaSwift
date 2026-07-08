@@ -103,8 +103,18 @@ public enum PICT {
         }
 
         let packed = rowBytes >= 8 && packType >= 3
-        if rowBytes < 8 { packType = 1 }               // argb, unpacked
-        else if packType == 0 || packType == 2 { rowBytes = width * 3 } // rgb, unpacked
+        if !packed {
+            // Unpacked pixels: the on-disk format follows the pixel depth, not the
+            // pack type. Small images (rowBytes < 8, e.g. a 2px button-middle slice)
+            // are never packed — treating a 16-bit one as 32-bit argb turns it
+            // magenta, which is what made every three-slice button purple.
+            switch pixelSize {
+            case 16: packType = 3; rowBytes = width * 2   // 1-5-5-5 words
+            case 24: packType = 2; rowBytes = width * 3   // rgb
+            case 32: packType = 1                         // argb (rowBytes already width*4)
+            default: break
+            }
+        }
 
         for y in 0..<height {
             let row: [UInt8]
