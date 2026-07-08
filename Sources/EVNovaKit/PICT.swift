@@ -50,7 +50,18 @@ public enum PICT {
             switch op {
             case 0x0000: continue                        // nop
             case 0x0001: try skipRegion(r)               // clip region
-            case 0x001E: continue                        // defHilite (no data)
+            case 0x0011: try r.advance(1)                // version
+            case 0x001C, 0x001E: continue                // hiliteMode / defHilite (no data)
+            case 0x001A, 0x001B, 0x001D, 0x001F:         // rgb fg/bg/hilite/op colors (6 bytes)
+                try r.advance(6)
+            case 0x0003, 0x0004, 0x0005, 0x0008, 0x000D, 0x0015, 0x0016:
+                try r.advance(2)                         // txFont/txFace/txMode/pnMode/txSize/… (2-byte)
+            case 0x0007, 0x0009, 0x000B: try r.advance(4) // pnSize / ovSize / origin etc.
+            case 0x00A0: try r.advance(2)                // short comment: kind
+            case 0x00A1:                                 // long comment: kind + size + data
+                try r.advance(2)
+                let size = Int(try r.readU16())
+                try r.advance(size)
             case 0x009A, 0x009B:                          // DirectBitsRect / region
                 try decodeDirectBits(r, into: &rgba, frameW: frameW, frameH: frameH,
                                      hasRegion: op == 0x009B)
