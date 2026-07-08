@@ -15,7 +15,7 @@ struct SpaceportView: View {
     var onDepart: () -> Void
 
     @State private var screen: Screen = .hub
-    enum Screen { case hub, trade, outfit, shipyard, bar }
+    enum Screen { case hub, trade, outfit, shipyard, bar, missions }
 
     private var game: NovaGame { graphics.game }
 
@@ -43,6 +43,7 @@ struct SpaceportView: View {
                     case .shipyard: ShipyardView(graphics: graphics, spob: spob, pilot: pilot,
                                                  galaxy: galaxy, onDone: { screen = .hub })
                     case .bar:      BarView(graphics: graphics, spob: spob, onDone: { screen = .hub })
+                    case .missions: MissionBBSView(graphics: graphics, spob: spob, onDone: { screen = .hub })
                     }
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
@@ -105,11 +106,21 @@ struct SpaceportView: View {
         if spob.hasBar {
             items.append((graphics.buttonLabel(SpaceportLabel.bar, fallback: "Bar"), { screen = .bar }))
         }
+        // Mission BBS — a standard spaceport service at inhabited ports.
+        if !spob.isUninhabited {
+            items.append((graphics.buttonLabel(SpaceportLabel.missionBBS, fallback: "Mission BBS"),
+                          { screen = .missions }))
+        }
         items.append((graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), onDepart))
 
+        // Vertically centre the column of service buttons within the frame, so
+        // they fit regardless of how many the spöb offers.
+        let btnH: CGFloat = 25, gap: CGFloat = 9
+        let totalH = CGFloat(items.count) * btnH + CGFloat(items.count - 1) * gap
+        let firstTop = -totalH / 2   // relative to the frame's vertical centre
         return ForEach(Array(items.enumerated()), id: \.offset) { i, item in
             NovaButton(graphics: graphics, title: item.0, width: 120, action: item.1)
-                .novaPlace(space, 160, 74 + CGFloat(i) * 42)
+                .novaPlace(space, 150, firstTop + CGFloat(i) * (btnH + gap))
         }
     }
 
@@ -134,5 +145,32 @@ struct SpaceportView: View {
     private func credits(_ n: Int) -> String {
         let f = NumberFormatter(); f.numberStyle = .decimal
         return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
+    }
+}
+
+/// The Mission BBS (bulletin board) at a spaceport. Rendered on the mission-BBS
+/// frame PICT (8505) as a dialog. The mission runtime is being built separately;
+/// this presents the authentic frame and a placeholder until missions are wired.
+struct MissionBBSView: View {
+    let graphics: SpaceportGraphics
+    let spob: SpobRes
+    var onDone: () -> Void
+
+    var body: some View {
+        if let frame = graphics.frame(.missionBBS) {
+            NovaMenu(frame: frame, overlay: true) { space in
+                NovaText("Mission BBS", size: 16, color: .white, width: 300, align: .center)
+                    .novaPlace(space, -150, -150)
+                NovaText("No missions available at this time.",
+                         size: 12, color: Color(white: 0.7), width: 300, align: .center)
+                    .novaPlace(space, -150, -110)
+                NovaButton(graphics: graphics,
+                           title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                           width: 60, action: onDone)
+                    .novaPlace(space, -43, 120)
+            }
+        } else {
+            VStack { Text("Mission BBS").foregroundStyle(.white); Button("Done", action: onDone) }.padding()
+        }
     }
 }

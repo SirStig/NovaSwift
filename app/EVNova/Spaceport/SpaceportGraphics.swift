@@ -1,0 +1,81 @@
+import SwiftUI
+import EVNovaKit
+
+/// Decodes and caches the EV Nova interface graphics the spaceport screens draw
+/// themselves from — **all from the player's own data**, never our own artwork:
+///   • frame PICTs (Spaceport 8500, Shipyard 8501, Outfit 8502, Bar 8503/8504,
+///     Trade 8510, Mission BBS 8505),
+///   • the three-slice button PICTs (7500–7508),
+///   • the button labels (`STR# 150`),
+///   • per-planet landscape PICTs and per-item outfit/ship pictures.
+///
+/// One instance is built per play session and shared by every spaceport screen.
+@MainActor
+final class SpaceportGraphics {
+    let game: NovaGame
+    private var cache: [Int: CGImage] = [:]
+    private var missed: Set<Int> = []
+
+    init(game: NovaGame) { self.game = game }
+
+    // MARK: Frame + interface PICT ids (from the real data's PICT names)
+    enum Frame: Int {
+        case spaceport = 8500, shipyard = 8501, outfit = 8502
+        case bar = 8503, barPict = 8504, missionBBS = 8505, trade = 8510
+    }
+
+    /// Decode any PICT resource by id → CGImage (cached). Returns nil if the
+    /// resource is missing or uses an encoding we can't decode yet.
+    func pict(_ id: Int) -> CGImage? {
+        if let c = cache[id] { return c }
+        if missed.contains(id) { return nil }
+        guard let data = game.resources.resource(NovaType.pict, id)?.data,
+              let sheet = try? PICT.decode(data), let cg = sheet.makeCGImage() else {
+            missed.insert(id); return nil
+        }
+        cache[id] = cg
+        return cg
+    }
+
+    func frame(_ f: Frame) -> CGImage? { pict(f.rawValue) }
+
+    // MARK: Buttons — three-slice PICTs (left cap / tiling middle / right cap)
+    enum ButtonState { case normal, clicked, grey }
+
+    /// (left, middle, right) PICT ids for a button state.
+    func buttonSlices(_ state: ButtonState) -> (left: CGImage?, middle: CGImage?, right: CGImage?) {
+        let base: Int
+        switch state {
+        case .normal:  base = 7500
+        case .clicked: base = 7503
+        case .grey:    base = 7506
+        }
+        return (pict(base), pict(base + 1), pict(base + 2))
+    }
+
+    /// A label from `STR# 150` ("button labels"): Leave, Buy, Sell, Buy Ship,
+    /// Done, Recharge, Trade Center, Outfitter, Shipyard, Bar, Gamble, Holovid.
+    func buttonLabel(_ index1: Int, fallback: String) -> String {
+        game.stringList(150)?.string(at: index1) ?? fallback
+    }
+
+    // MARK: Per-item pictures
+
+    /// A planet's landing landscape PICT (10000-range), if it defines one.
+    func landscape(for spob: SpobRes) -> CGImage? {
+        let id = spob.landingPictID
+        guard id > 0, id != 0xFFFF else { return nil }
+        return pict(id)
+    }
+
+    /// An outfit's outfitter picture (`pictID = id − 128 + 6000`).
+    func outfitPicture(_ outfit: OutfRes) -> CGImage? {
+        pict(outfit.id - 128 + 6000)
+    }
+}
+
+/// Standard EV Nova button-label indices in `STR# 150`.
+enum SpaceportLabel {
+    static let leave = 1, buy = 2, sell = 3, buyShip = 4, done = 5, recharge = 6
+    static let tradeCenter = 7, outfitter = 8, shipyard = 9, bar = 10, missionBBS = 11
+}
