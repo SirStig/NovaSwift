@@ -85,40 +85,40 @@ struct AuthenticMainMenuView: View {
 
     @State private var appeared = false
     @State private var sheet: Sheet?
-    private enum Sheet: String, Identifiable { case newPilot, openPilot, settings, about; var id: String { rawValue } }
+    private enum Sheet: String, Identifiable {
+        case newPilot, openPilot, settings, about, plugins, importData
+        var id: String { rawValue }
+    }
 
     private let base = CGSize(width: 1024, height: 768)
 
     var body: some View {
-        GeometryReader { geo in
-            // Aspect-fit the 1024×768 title art so button coordinates line up 1:1.
-            let scale = min(geo.size.width / base.width, geo.size.height / base.height)
-            let ox = (geo.size.width - base.width * scale) / 2
-            let oy = (geo.size.height - base.height * scale) / 2
-            let place: (CGFloat, CGFloat) -> CGPoint = { x, y in CGPoint(x: ox + x * scale, y: oy + y * scale) }
-
+        // The whole menu lives in EV Nova's 1024×768 design space via the shared
+        // NovaCanvas — every element positions at exact game coordinates.
+        NovaCanvas(design: base, fit: .fit) { layout in
             ZStack(alignment: .topLeading) {
-                Color.black.ignoresSafeArea()
+                Color.black
 
                 if let bg = assets.background {
                     Image(decorative: bg, scale: 1)
                         .resizable().interpolation(.medium)
-                        .frame(width: base.width * scale, height: base.height * scale)
-                        .position(place(base.width / 2, base.height / 2))
+                        .novaPlace(layout, x: 0, y: 0, w: base.width, h: base.height)
                 }
 
                 if let logo = assets.logo, assets.logoSize.height > 0 {
                     Image(decorative: logo, scale: 1)
                         .resizable().interpolation(.medium)
-                        .frame(width: assets.logoSize.width * scale,
-                               height: assets.logoSize.height * scale)
-                        .position(place(base.width / 2, assets.logoSize.height / 2 + 60))
+                        .blendMode(.screen)   // logo art is on black; screen drops the box
+                        .novaPlace(layout,
+                                   x: (base.width - assets.logoSize.width) / 2, y: 46,
+                                   w: assets.logoSize.width, h: assets.logoSize.height)
                         .opacity(appeared ? 1 : 0)
                         .scaleEffect(appeared ? 1 : 0.94)
                         .animation(.spring(response: 0.6, dampingFraction: 0.85), value: appeared)
                 }
 
-                buttons(scale: scale, place: place)
+                buttons(layout: layout)
+                modernExtras   // port-added features not in the original menu
             }
         }
         .ignoresSafeArea()
@@ -131,8 +131,12 @@ struct AuthenticMainMenuView: View {
         .sheet(item: $sheet) { which in
             NavigationStack {
                 switch which {
+                case .newPilot: NewPilotView()
+                case .openPilot: PilotListView()
                 case .settings: SettingsView()
                 case .about: AboutView()
+                case .plugins: PluginsView()
+                case .importData: ImportDataView()
                 }
             }
             .frame(minWidth: 420, minHeight: 520)
@@ -140,13 +144,44 @@ struct AuthenticMainMenuView: View {
         }
     }
 
-    private func buttons(scale: CGFloat, place: @escaping (CGFloat, CGFloat) -> CGPoint) -> some View {
+    /// Modern, port-only affordances (features EV Nova never had): the plug-in
+    /// manager and data import. Kept visually distinct from the game's own buttons,
+    /// tucked in the bottom-left so they don't intrude on the authentic menu.
+    private var modernExtras: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 12) {
+                extraButton("Plug-ins", "puzzlepiece.extension.fill") { sheet = .plugins }
+                extraButton("Import Data", "square.and.arrow.down.fill") { sheet = .importData }
+                Spacer()
+            }
+            .padding(.leading, 20)
+            .padding(.bottom, 18)
+        }
+        .opacity(appeared ? 1 : 0)
+        .animation(.easeOut(duration: 0.4).delay(0.5), value: appeared)
+    }
+
+    private func extraButton(_ label: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button { model.audio.play(.uiSelect); action() } label: {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                Text(label).font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white.opacity(0.85))
+    }
+
+    private func buttons(layout: NovaLayout) -> some View {
         ForEach(Array(assets.buttons.enumerated()), id: \.offset) { i, art in
-            MenuSpriteButton(art: art, scale: scale,
+            MenuSpriteButton(art: art,
                              onRollover: { model.audio.play(.uiSelect) },
                              action: { activate(art.action) })
-                .position(place(CGFloat(art.origin.x) + art.size.width / 2,
-                                CGFloat(art.origin.y) + art.size.height / 2))
+                .novaPlace(layout, origin: art.origin, size: art.size)
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared ? 0 : 22)
                 .animation(.spring(response: 0.5, dampingFraction: 0.8)
@@ -157,10 +192,15 @@ struct AuthenticMainMenuView: View {
     private func activate(_ action: MainMenuAction) {
         model.audio.play(.uiSelect)
         switch action {
-        case .newPilot, .enterShip, .openPilot: model.beginPlay()
+        case .newPilot: sheet = .newPilot
+        case .openPilot: sheet = .openPilot
+        case .enterShip: model.continueMostRecent()
         case .setPrefs: sheet = .settings
         case .aboutNova: sheet = .about
-        case .quitNova: model.exitToLauncher()
+        case .quitNova:
+            #if os(macOS)
+            NSApplication.shared.terminate(nil)
+            #endif
         }
     }
 }
@@ -169,17 +209,16 @@ struct AuthenticMainMenuView: View {
 /// highlighted frame on hover (rollover) or press.
 private struct MenuSpriteButton: View {
     let art: MainMenuAssets.ButtonArt
-    let scale: CGFloat
     var onRollover: () -> Void = {}
     let action: () -> Void
     @State private var hovering = false
     @State private var pressing = false
 
+    // The button is sized/positioned by novaPlace; the resizable image fills it.
     var body: some View {
         let highlighted = hovering || pressing
         Image(decorative: highlighted ? art.pressed : art.normal, scale: 1)
             .resizable().interpolation(.medium)
-            .frame(width: art.size.width * scale, height: art.size.height * scale)
             .scaleEffect(pressing ? 0.96 : 1)
             .animation(.easeOut(duration: 0.1), value: highlighted)
             .contentShape(Rectangle())
@@ -190,12 +229,7 @@ private struct MenuSpriteButton: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in pressing = true }
-                    .onEnded { g in
-                        pressing = false
-                        let inside = abs(g.translation.width) < art.size.width * scale
-                            && abs(g.translation.height) < art.size.height * scale
-                        if inside { action() }
-                    }
+                    .onEnded { _ in pressing = false; action() }
             )
     }
 }
