@@ -72,6 +72,14 @@ final class SpaceportGraphics {
     func outfitPicture(_ outfit: OutfRes) -> CGImage? {
         pict(outfit.id - 128 + 6000)
     }
+
+    /// A ship's shipyard display picture (`pictID = id − 128 + 5000`) — a large,
+    /// dedicated piece of art distinct from the small in-flight `rlëD` sprite.
+    /// Using the flight sprite here (e.g. a Shuttle's 24×24 frame) stretched to
+    /// fill the shipyard panel is what made ships look blurry/pixelated.
+    func shipPicture(_ ship: ShipRes) -> CGImage? {
+        pict(ship.id - 128 + 5000)
+    }
 }
 
 /// Standard EV Nova button-label indices in `STR# 150`.

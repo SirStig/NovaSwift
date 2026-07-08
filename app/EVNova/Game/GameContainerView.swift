@@ -177,10 +177,13 @@ struct GameContainerView: View {
         .animation(.easeInOut(duration: 0.2), value: landedSpobID)
         .onChange(of: showMenu) { _, open in
             host?.scene.isPaused = open
-            if !open { isSceneFocused = true }   // menu closed: hand keyboard control back to flight
+            // Deferred a tick: setting `@FocusState` in the same transaction that
+            // dismisses the overlay stealing focus can silently lose the race on
+            // macOS — the scene view has to actually reclaim key status first.
+            if !open { DispatchQueue.main.async { isSceneFocused = true } }
         }
         .onChange(of: nav.showingMap) { _, open in
-            if !open { isSceneFocused = true }   // map closed: same
+            if !open { DispatchQueue.main.async { isSceneFocused = true } }   // map closed: same
         }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding/quitting is the one moment a manual save/jump/land
@@ -197,7 +200,7 @@ struct GameContainerView: View {
                     model.autosave(reason: .land)               // EV Nova saves on every landing
                 }
             } else {
-                isSceneFocused = true   // departed the spaceport: back to flight
+                DispatchQueue.main.async { isSceneFocused = true }   // departed the spaceport: back to flight
             }
         }
         .task {
@@ -210,9 +213,17 @@ struct GameContainerView: View {
                     ?? model.data.game?.startingSystem()?.id ?? 128
                 nav.configure(game: model.data.game, startSystemID: startSystem)
                 host = GameHost(model: model, systemID: nav.currentSystemID)
+                host?.scene.isPaused = false   // never start frozen (nothing should set this true yet, but be sure)
                 syncNav(host)
                 navReady = true
-                isSceneFocused = true   // grab keyboard focus for flight on first appear
+                // Deferred a tick: `host` becoming non-nil and `sceneLayer`
+                // actually entering the view tree happen in this same
+                // transaction, so grabbing focus in the same breath as creating
+                // it can silently lose — the focusable view has to exist first.
+                // This is the single most common cause of "ship can't be flown
+                // at all" on a fresh pilot: no error, the key events just never
+                // arrive because nothing ever became key.
+                DispatchQueue.main.async { isSceneFocused = true }
             }
         }
         .onChange(of: nav.currentSystemID) { _, newID in
@@ -233,8 +244,14 @@ struct GameContainerView: View {
                 model.pilot.save()
                 model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump
                 host = GameHost(model: model, systemID: newID, arrivedViaJump: true) // rebuild on jump
+                host?.scene.isPaused = false
                 syncNav(host)
-                isSceneFocused = true   // the scene view was just rebuilt; reassert focus
+                // A second deferred tick, same reason as the `.task` case above:
+                // `host` just changed identity, so the new `sceneLayer` view
+                // needs its own transaction to enter the tree before it can
+                // become key — reasserting focus in the same breath it's
+                // rebuilt in loses the race.
+                DispatchQueue.main.async { isSceneFocused = true }
             }
         }
     }
@@ -248,7 +265,13 @@ struct GameContainerView: View {
         model.pilot.save()
         model.autosave(reason: .manual)   // catch any shopping done during this landing
         host = GameHost(model: model, systemID: nav.currentSystemID)
+        host?.scene.isPaused = false
         syncNav(host)
+        // `landedSpobID = nil` above also fires `onChange(of: landedSpobID)`,
+        // which reasserts focus — but that fires against the *old* host/scene
+        // since this rebuild hasn't landed yet. Defer once more here so focus
+        // is grabbed after the just-rebuilt scene view actually exists.
+        DispatchQueue.main.async { isSceneFocused = true }
     }
 
     /// Reattach `nav`'s live-fuel/multi-jump sources to the current session's
@@ -397,7 +420,16 @@ private struct KeyboardControls: ViewModifier {
             case .fireSecondary: input.keyboard.fireSecondary = pressed
             case .none:
                 // Discrete action (map / jump / target / …): fire once on key-down.
-                if pressed { onDiscrete(action) }
+                // `onDiscrete` ends up mutating `@State`/`@Published` (showMenu,
+                // nav.showingMap, nav.currentSystemID via a jump, landedSpobID…).
+                // Doing that synchronously here publishes changes while SwiftUI
+                // is still mid-dispatch of this very key event — "Publishing
+                // changes from within view updates", which doesn't just warn on
+                // this path, it corrupts the attribute graph and crashes/hangs
+                // the scene (see GeometryReader/AttributeInvalidatingSubscriber
+                // in the crash trace). Defer to the next run-loop tick so the
+                // key event's own update finishes first.
+                if pressed { DispatchQueue.main.async { onDiscrete(action) } }
             }
             return .handled
         }

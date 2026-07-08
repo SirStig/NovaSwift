@@ -232,7 +232,7 @@ struct ShipyardView: View {
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: 318, height: 300).novaPlace(space, -373, -153)
                 detail.frame(width: 205, height: 150).novaPlace(space, -27, -150)
-                if let s = selected, let sheet = game.shipSprite(s.id), let cg = sheet.frameCGImage(0) {
+                if let s = selected, let cg = shipImage(s) {
                     Image(decorative: cg, scale: 1).interpolation(.high).resizable().scaledToFit()
                         .frame(width: 190, height: 185).novaPlace(space, 178, -152)
                 }
@@ -248,8 +248,7 @@ struct ShipyardView: View {
         ScrollView(showsIndicators: false) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 4)], spacing: 4) {
                 ForEach(stock, id: \.id) { s in
-                    let sheet = game.shipSprite(s.id)
-                    ItemTile(name: s.name, image: sheet?.frameCGImage(0),
+                    ItemTile(name: s.name, image: shipImage(s),
                              quantity: s.id == pilot.state.shipType ? 1 : 0,
                              selected: (selectedID ?? stock.first?.id) == s.id)
                         .onTapGesture { selectedID = s.id }
@@ -257,6 +256,12 @@ struct ShipyardView: View {
             }
             .padding(4)
         }
+    }
+
+    /// The shipyard's dedicated display picture for a hull, falling back to the
+    /// small in-flight sprite only if a plug-in ship doesn't define one.
+    private func shipImage(_ s: ShipRes) -> CGImage? {
+        graphics.shipPicture(s) ?? game.shipSprite(s.id)?.frameCGImage(0)
     }
 
     private var detail: some View {

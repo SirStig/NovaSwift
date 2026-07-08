@@ -35,6 +35,13 @@ struct AuthenticHUDView: View {
                 shipLabel
                     .novaPlace(layout, origin: origin(style.intf.targetArea),
                                size: CGSize(width: style.intf.targetArea.width, height: 40))
+
+                weaponReadout
+                    .novaPlace(layout, origin: origin(style.intf.weaponArea), size: size(style.intf.weaponArea))
+                navReadout
+                    .novaPlace(layout, origin: origin(style.intf.navArea), size: size(style.intf.navArea))
+                cargoReadout
+                    .novaPlace(layout, origin: origin(style.intf.cargoArea), size: size(style.intf.cargoArea))
             }
         }
         .allowsHitTesting(false)
@@ -56,6 +63,45 @@ struct AuthenticHUDView: View {
             }
         }
         .foregroundStyle(color(style.intf.brightText))
+    }
+
+    /// Active weapon + remaining ammo (blank when unarmed — an empty box here
+    /// reads as "no weapon selected", matching an unarmed shuttle).
+    private var weaponReadout: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if !model.weaponName.isEmpty {
+                Text(model.weaponName).font(.system(size: 10, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(color(style.intf.brightText))
+                if model.weaponAmmo >= 0 {
+                    Text("\(model.weaponAmmo) rounds").font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(color(style.intf.dimText))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Speed/heading readout — the nav computer's rect. (No live target-lock
+    /// system yet, so this shows flight data rather than a targeted contact.)
+    private var navReadout: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("SPD \(model.speed)").font(.system(size: 9, design: .monospaced))
+            Text("HDG \(Int(model.headingDegrees))°").font(.system(size: 9, design: .monospaced))
+        }
+        .foregroundStyle(color(style.intf.dimText))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Cargo hold usage — hidden entirely for holds with no capacity (e.g. an
+    /// unmodified shuttle), matching how the bar areas above stay blank too.
+    @ViewBuilder
+    private var cargoReadout: some View {
+        if model.cargoCapacity > 0 {
+            Text("CARGO \(model.cargoUsed)/\(model.cargoCapacity)t")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(color(style.intf.dimText))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func origin(_ r: NovaRect) -> CGPoint { CGPoint(x: r.left, y: r.top) }

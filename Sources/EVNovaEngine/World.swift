@@ -104,6 +104,14 @@ public final class Ship {
     public var shieldRechargePerSec: Double = 8
     public var armorRechargePerSec: Double = 0
     public var weapons: [WeaponMount] = []
+    /// EV Nova's `shïp.Strength` — relative combat power, used for the
+    /// combat-odds check (`gövt.MaxOdds`) before an AI picks a fight.
+    public var combatStrength: Double = 1
+    /// Fraction of max armor at which a lethal hit disables this ship instead of
+    /// destroying it outright. EV Nova: 33% by default, 10% if `shïp.Flags`
+    /// bit 0x0010 is set. A one-time state transition, not a random roll —
+    /// only ships not already disabled can cross it.
+    public var disableArmorFraction: Double = 0.33
 
     // Fuel — EV Nova's blue gauge. Spent by hyperspace jumps (100 per jump) and
     // by the afterburner; regenerates only if the hull/outfits grant it.

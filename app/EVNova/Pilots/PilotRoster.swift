@@ -80,6 +80,33 @@ final class PilotRoster: ObservableObject {
         refresh()
     }
 
+    // MARK: Save history (many saves, one pilot)
+
+    /// One past save point in a pilot's history: a full snapshot plus the
+    /// backup file it lives in (needed to restore it).
+    struct HistoryEntry: Identifiable {
+        let url: URL
+        let save: PilotSave
+        var id: URL { url }
+    }
+
+    /// This pilot's past save points (auto-backed-up on land/jump/manual save),
+    /// newest first — lets the player rewind to an earlier point in the *same*
+    /// pilot's story instead of every playthrough needing its own roster entry.
+    func history(for id: UUID) -> [HistoryEntry] {
+        archive.loadBackups(for: id).map { HistoryEntry(url: $0.url, save: $0.save) }
+    }
+
+    /// Roll `id` back to an earlier save point (backing up the current state
+    /// first, so this itself is undoable). The pilot's identity/id is unchanged
+    /// — it stays the same roster row, just with older progress.
+    @discardableResult
+    func restore(_ id: UUID, from entry: HistoryEntry) -> PilotSave? {
+        let restored = try? archive.restore(id: id, from: entry.url)
+        refresh()
+        return restored
+    }
+
     /// A coarse fingerprint of the loaded data set, so a save records which data
     /// produced it (a full-parity check is a later concern).
     static func fingerprint(for game: NovaGame) -> String {

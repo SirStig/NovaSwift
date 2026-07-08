@@ -72,6 +72,21 @@ struct PilotListView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            let history = model.roster.history(for: save.id)
+            if !history.isEmpty {
+                Menu("Load Earlier Save") {
+                    ForEach(history) { entry in
+                        Button {
+                            model.audio.play(.uiSelect)
+                            if let restored = model.roster.restore(save.id, from: entry) {
+                                dismiss(); model.play(restored)
+                            }
+                        } label: {
+                            Text("\(entry.save.snapshot.systemName.isEmpty ? "—" : entry.save.snapshot.systemName) · \(relative(entry.save.updatedAt))")
+                        }
+                    }
+                }
+            }
             Button { model.roster.duplicate(save.id) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
             Button(role: .destructive) { pendingDelete = save } label: { Label("Delete", systemImage: "trash") }
         }

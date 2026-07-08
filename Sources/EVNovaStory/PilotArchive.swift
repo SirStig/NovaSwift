@@ -166,6 +166,17 @@ public final class PilotArchive {
             .sorted { backupOrder($0) < backupOrder($1) }
     }
 
+    /// This pilot's backups, decoded and paired with their file, newest-first —
+    /// the "many saves for one pilot" history: each is a full snapshot from a
+    /// past land/jump/manual save, so the player can jump back to an earlier
+    /// point without it cluttering the main roster (which only ever shows one
+    /// row per pilot identity). The URL is what `restore(id:from:)` needs.
+    public func loadBackups(for id: UUID) -> [(url: URL, save: PilotSave)] {
+        backups(for: id).reversed().compactMap { url in
+            (try? decode(contentsOf: url)).map { (url, $0) }
+        }
+    }
+
     /// Restore a pilot from one of its backup files (backing up the current first).
     @discardableResult
     public func restore(id: UUID, from backupURL: URL) throws -> PilotSave {
