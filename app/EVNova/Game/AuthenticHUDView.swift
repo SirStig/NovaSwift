@@ -1,10 +1,11 @@
 import SwiftUI
 import EVNovaKit
 
-/// The authentic EV Nova status bar, rendered from the player's own data: the
-/// `ïntf` resource's backdrop PICT drawn on the right edge, with the radar,
-/// shield / armor / fuel bars painted at the exact rectangles and colors the
-/// game defines. Falls back to `GameHUDView` when the data has no `ïntf`.
+/// The authentic EV Nova status bar, rendered from the player's own data via the
+/// shared `NovaCanvas` layout: the `ïntf` backdrop PICT anchored to the right
+/// edge, with the radar, shield / armor / fuel bars painted at the exact `ïntf`
+/// rectangles and colors — the same coordinate system every other authentic
+/// screen uses. Falls back to `GameHUDView` when the data has no `ïntf`.
 struct AuthenticHUDStyle {
     let image: CGImage          // decoded backdrop PICT (e.g. #700)
     let intf: IntfRes
@@ -16,79 +17,87 @@ struct AuthenticHUDView: View {
     let style: AuthenticHUDStyle
 
     var body: some View {
-        GeometryReader { geo in
-            let scale = min(1.0, geo.size.height / style.nativeSize.height)
-            let w = style.nativeSize.width * scale
-            let h = style.nativeSize.height * scale
-
+        // The status bar's design space is the backdrop PICT; anchor it to the
+        // right edge and scale to fill the height.
+        NovaCanvas(design: style.nativeSize, fit: .right) { layout in
             ZStack(alignment: .topLeading) {
                 Image(decorative: style.image, scale: 1)
-                    .interpolation(.none)
-                    .resizable()
-                    .frame(width: w, height: h)
+                    .interpolation(.none).resizable()
+                    .novaPlace(layout, x: 0, y: 0, w: style.nativeSize.width, h: style.nativeSize.height)
 
-                radarOverlay(scale: scale)
-                bar(style.intf.shieldArea, model.shield, style.intf.shieldColor, scale)
-                bar(style.intf.armorArea, model.armor, style.intf.armorColor, scale)
-                bar(style.intf.fuelArea, model.fuel, style.intf.fuelFull, scale)
-                shipLabel(scale: scale)
+                bar(layout, style.intf.shieldArea, model.shield, style.intf.shieldColor)
+                bar(layout, style.intf.armorArea, model.armor, style.intf.armorColor)
+                bar(layout, style.intf.fuelArea, model.fuel, style.intf.fuelFull)
+
+                RadarContactsView(model: model,
+                                  bright: color(style.intf.brightRadar),
+                                  dim: color(style.intf.dimRadar))
+                    .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
+
+                shipLabel
+                    .novaPlace(layout, origin: origin(style.intf.targetArea),
+                               size: CGSize(width: style.intf.targetArea.width, height: 40))
             }
-            .frame(width: w, height: h)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         }
         .allowsHitTesting(false)
     }
 
-    // A status bar drawn left-anchored inside its rect, filled to `value` (0…1).
-    private func bar(_ rect: NovaRect, _ value: Double, _ color: NovaColor, _ scale: CGFloat) -> some View {
-        Rectangle()
-            .fill(swiftColor(color))
-            .frame(width: max(0, CGFloat(rect.width) * scale * CGFloat(min(1, max(0, value)))),
-                   height: CGFloat(rect.height) * scale)
-            .position(x: CGFloat(rect.left) * scale + CGFloat(rect.width) * scale * CGFloat(min(1, max(0, value))) / 2,
-                      y: CGFloat(rect.top) * scale + CGFloat(rect.height) * scale / 2)
+    /// A status bar drawn left-anchored inside its rect, filled to `value` (0…1).
+    private func bar(_ layout: NovaLayout, _ r: NovaRect, _ value: Double, _ c: NovaColor) -> some View {
+        let v = CGFloat(min(1, max(0, value)))
+        return Rectangle().fill(color(c))
+            .novaPlace(layout, x: CGFloat(r.left), y: CGFloat(r.top),
+                       w: CGFloat(r.width) * v, h: CGFloat(r.height))
     }
 
-    // Radar contacts + heading, inside the interface's radar rectangle.
-    private func radarOverlay(scale: CGFloat) -> some View {
-        let r = style.intf.radarArea
-        let cx = (CGFloat(r.left) + CGFloat(r.width) / 2) * scale
-        let cy = (CGFloat(r.top) + CGFloat(r.height) / 2) * scale
-        let radius = CGFloat(r.width) / 2 * scale - 2
-        return ZStack {
-            ForEach(Array(model.planetBlips.enumerated()), id: \.offset) { _, b in
-                Circle().fill(swiftColor(style.intf.dimRadar))
-                    .frame(width: 4, height: 4)
-                    .position(x: cx + b.x * radius, y: cy + b.y * radius)
-            }
-            ForEach(Array(model.blips.enumerated()), id: \.offset) { _, b in
-                Circle().fill(swiftColor(style.intf.brightRadar))
-                    .frame(width: 4, height: 4)
-                    .position(x: cx + b.x * radius, y: cy + b.y * radius)
-            }
-            Image(systemName: "triangle.fill")
-                .font(.system(size: 6 * scale + 4))
-                .foregroundStyle(swiftColor(style.intf.brightRadar))
-                .rotationEffect(.degrees(model.headingDegrees))
-                .position(x: cx, y: cy)
-        }
-    }
-
-    // Ship name / system in the interface's bright text color, near the top.
-    private func shipLabel(scale: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(model.shipName)
-                .font(.system(size: 11, design: .monospaced).weight(.bold))
+    private var shipLabel: some View {
+        VStack(spacing: 1) {
+            Text(model.shipName).font(.system(size: 11, design: .monospaced).weight(.bold))
             if !model.systemName.isEmpty {
                 Text(model.systemName).font(.system(size: 9, design: .monospaced))
             }
         }
-        .foregroundStyle(swiftColor(style.intf.brightText))
-        .position(x: style.nativeSize.width * scale / 2,
-                  y: (CGFloat(style.intf.targetArea.top) + 14) * scale)
+        .foregroundStyle(color(style.intf.brightText))
     }
 
-    private func swiftColor(_ c: NovaColor) -> Color {
+    private func origin(_ r: NovaRect) -> CGPoint { CGPoint(x: r.left, y: r.top) }
+    private func size(_ r: NovaRect) -> CGSize { CGSize(width: r.width, height: r.height) }
+    private func color(_ c: NovaColor) -> Color {
         Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+    }
+}
+
+/// Radar contacts + player heading, drawn in the placed radar rect's local space.
+/// Stellars are the larger dim dots, ships the small bright ones (hostiles red).
+private struct RadarContactsView: View {
+    @ObservedObject var model: GameHUDModel
+    let bright: Color
+    let dim: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let cx = geo.size.width / 2, cy = geo.size.height / 2
+            let radius = min(geo.size.width, geo.size.height) / 2 - 2
+            ZStack {
+                Canvas { ctx, _ in
+                    for b in model.planetBlips {
+                        let r = CGRect(x: cx + b.x * radius - 2.5, y: cy + b.y * radius - 2.5, width: 5, height: 5)
+                        ctx.fill(Path(ellipseIn: r), with: .color(dim))
+                    }
+                    for b in model.blips {
+                        let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
+                        ctx.fill(Path(ellipseIn: r),
+                                 with: .color(b.hostile ? Color(red: 0.95, green: 0.3, blue: 0.25) : bright))
+                    }
+                }
+                ZStack {
+                    RadarPlayerArrow().fill(bright)
+                    RadarPlayerArrow().stroke(.white.opacity(0.7), lineWidth: 0.5)
+                }
+                .frame(width: 9, height: 12)
+                .rotationEffect(.degrees(model.headingDegrees))
+                .position(x: cx, y: cy)
+            }
+        }
     }
 }
