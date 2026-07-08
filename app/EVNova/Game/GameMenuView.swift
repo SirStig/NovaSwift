@@ -58,14 +58,20 @@ struct GameMenuView: View {
 
                     sectionGap
                     row("Save Pilot", "square.and.arrow.down") {
-                        info = "Saving pilots is coming soon."
+                        model.autosave(reason: .manual)
+                        info = model.pilot.rosterID != nil
+                            ? "Pilot saved (\(model.pilot.state.pilotName))."
+                            : "This session isn't a roster pilot yet — start one from the main menu to save."
                     }
                     row("Load Pilot", "folder") {
-                        info = "Loading pilots is coming soon."
+                        // Loading a different pilot means returning to the roster.
+                        model.autosave(reason: .manual)
+                        model.returnToMainMenu()
                     }
 
                     sectionGap
                     row("Main Menu", "rectangle.portrait.and.arrow.right", tint: .red) {
+                        model.autosave(reason: .manual)   // save on the way out
                         model.returnToMainMenu()
                     }
                 }

@@ -75,6 +75,9 @@ public struct Loadout {
 
     /// Jumps of hyperspace fuel this loadout can hold.
     public var jumpRange: Int { Int((maxFuel / ShipFuel.perJump).rounded(.down)) }
+    /// Hyperlane hops a single hyperspace jump command can cross (1 = standard
+    /// single-jump; higher only with a multi-jump outfit installed).
+    public var maxJumpHops: Int
 }
 
 extension Galaxy {
@@ -100,6 +103,7 @@ extension Galaxy {
         var maxGuns = s.maxGuns, maxTurrets = s.maxTurrets
         var usedMass = 0
         var afterburnerFuel = 0
+        var multiJumpBonus = 0
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
@@ -122,6 +126,7 @@ extension Galaxy {
                 case .maxGuns:         maxGuns += v
                 case .maxTurrets:      maxTurrets += v
                 case .afterburner:     afterburnerFuel += value   // fuel cost per unit
+                case .multiJump:       multiJumpBonus += v        // extra hops per hyperjump
                 case .weapon:          grantedWeapons[value, default: 0] += count
                 case .ammunition:      ammoAdds[value, default: 0] += count
                 default: break
@@ -160,7 +165,8 @@ extension Galaxy {
             cargoCapacity: max(0, cargo),
             massCapacity: s.freeMass + usedMass, usedMass: usedMass,
             maxGuns: maxGuns, maxTurrets: maxTurrets,
-            outfits: outfitCounts, weapons: weapons)
+            outfits: outfitCounts, weapons: weapons,
+            maxJumpHops: max(1, 1 + multiJumpBonus))
     }
 
     /// Build a live ship with its **full loadout** applied: outfit-modified flight

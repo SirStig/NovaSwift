@@ -154,6 +154,20 @@ public final class Ship {
     /// The brain requests hyperspace departure; the world despawns it past the
     /// system edge.
     public var wantsToDepart = false
+    /// The brain has flown this ship into a stellar object to land; the world
+    /// removes it (into the planet) and fires a `shipLanded` event.
+    public var wantsToLand = false
+    /// The stellar object being landed on (paired with `wantsToLand`).
+    public var landingSpob: Int?
+
+    /// A drifting hulk: armor was knocked out but the ship wasn't destroyed. It
+    /// carries no thrust or weapons and other ships leave it be; further damage
+    /// finishes it off. Set by the world's damage handler.
+    public var disabled = false
+    /// Idle tumble (rad/sec) applied to a disabled hulk so it drifts believably.
+    public var disableSpin: Double = 0
+    /// Seconds a hulk has been drifting; the world eventually clears cold wrecks.
+    public var disabledClock: Double = 0
 
     public var isPlayer: Bool { entityID == 0 }
     public var isAlive: Bool { armor > 0 }
@@ -304,13 +318,25 @@ public final class World {
         return npcs.first { $0.entityID == id }
     }
 
+    /// How a new NPC came into being, so the renderer can play the right effect:
+    /// a mid-system populate (no effect), a hyperspace jump-in (warp streak at the
+    /// edge), or a lift-off from a planet (grows out of the stellar).
+    public enum ArrivalMode { case populate, hyperspace, launch }
+
     /// Add an NPC, assigning it a fresh entity id. Returns the id.
     @discardableResult
-    public func addNPC(_ ship: Ship) -> Int {
+    public func addNPC(_ ship: Ship, arrival: ArrivalMode = .populate) -> Int {
         ship.entityID = nextEntityID
         nextEntityID += 1
         npcs.append(ship)
-        events.append(.shipArrived(entityID: ship.entityID))
+        switch arrival {
+        case .populate:
+            events.append(.shipArrived(entityID: ship.entityID, at: ship.position, fromHyperspace: false))
+        case .hyperspace:
+            events.append(.shipArrived(entityID: ship.entityID, at: ship.position, fromHyperspace: true))
+        case .launch:
+            events.append(.shipLaunched(entityID: ship.entityID, at: ship.position))
+        }
         return ship.entityID
     }
 
@@ -331,17 +357,25 @@ public final class World {
         fireWeapons(from: player, intent: intent)
         player.step(dt, intent: intent, tuning: tuning)
 
-        // NPCs: each brain decides an intent.
+        // NPCs: each brain decides an intent. Disabled hulks don't think — they
+        // just tumble and bleed off speed until they cool and drift away.
         for npc in npcs where npc.isAlive {
+            if npc.disabled {
+                npc.disabledClock += dt
+                npc.velocity = npc.velocity * max(0, 1 - 0.35 * dt)
+                npc.angle += npc.disableSpin * dt
+                npc.position += npc.velocity * dt
+                continue
+            }
             let npcIntent = npc.brain?.think(ship: npc, world: self, dt: dt) ?? ControlIntent()
             fireWeapons(from: npc, intent: npcIntent)
             npc.step(dt, intent: npcIntent, tuning: tuning)
         }
 
-        // Cooldowns & regen.
+        // Cooldowns & regen (hulks recover nothing).
         for s in allShips {
             for w in s.weapons { w.tick(dt) }
-            s.regen(dt)
+            if !s.disabled { s.regen(dt) }
         }
 
         stepProjectiles(dt)
@@ -479,7 +513,36 @@ public final class World {
         if !ship.isPlayer, ship.brain?.targetID == nil, ownerID != 0 {
             // (no-op hook for future player-side AI/escorts)
         }
-        if killed { ship.armor = 0 }
+
+        if killed {
+            // A mortal blow disables rather than destroys some ships (freighters
+            // and lighter craft especially) — EV Nova leaves boardable hulks in
+            // space instead of vaporising everything. The player is never disabled
+            // here (the app owns player death). Already-disabled ships die for real.
+            if !ship.isPlayer, !ship.disabled, rng.double(in: 0...1) < disableChance(for: ship) {
+                ship.disabled = true
+                ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
+                ship.shield = 0
+                ship.disableSpin = rng.double(in: -0.5...0.5)
+                ship.wantsToDepart = false
+                ship.currentTargetID = nil
+                ship.brain?.targetID = nil
+                clearTarget(ship.entityID)               // everyone stops shooting it
+                events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
+            } else {
+                ship.armor = 0
+            }
+        }
+    }
+
+    /// Probability that a killing hit merely disables `ship` instead of destroying
+    /// it. Traders/civilians cripple easily; warships tend to blow up fighting.
+    private func disableChance(for ship: Ship) -> Double {
+        switch ship.brain?.aiType {
+        case .wimpyTrader, .braveTrader: return 0.6
+        case .warship, .interceptor:     return 0.18
+        default:                         return 0.35
+        }
     }
 
     // MARK: Despawn
@@ -495,14 +558,26 @@ public final class World {
                 clearTarget(npc.entityID)
                 continue
             }
+            // Landed on a stellar object → vanished into the spaceport (no wreck).
+            if npc.wantsToLand, let sid = npc.landingSpob {
+                events.append(.shipLanded(entityID: npc.entityID, spobID: sid, at: npc.position))
+                clearTarget(npc.entityID)
+                continue
+            }
             // Departed past the system edge → gone to hyperspace.
             if npc.wantsToDepart {
                 let d = (npc.position - systemContext.center).length
                 if d >= systemContext.jumpRadius {
-                    events.append(.shipDeparted(entityID: npc.entityID))
+                    events.append(.shipDeparted(entityID: npc.entityID, at: npc.position,
+                                                heading: npc.angle))
                     clearTarget(npc.entityID)
                     continue
                 }
+            }
+            // A cold hulk that's drifted long enough is quietly retired.
+            if npc.disabled && npc.disabledClock > 25 {
+                clearTarget(npc.entityID)
+                continue
             }
             survivors.append(npc)
         }

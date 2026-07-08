@@ -136,17 +136,23 @@ public final class Galaxy {
     public func systemContext(for systemID: Int) -> SystemContext {
         guard let sys = game.system(systemID) else { return SystemContext() }
         var bodies: [StellarBody] = []
-        var maxExtent: Double = 1000
         for spobID in sys.spobs {
             guard let s = game.spob(spobID) else { continue }
             let pos = Vec2(Double(s.x), Double(s.y))
-            maxExtent = max(maxExtent, pos.length + 400)
             // Landability: a spob you can dock/land on (has a landing picture) is a
             // trader destination. Fall back to "any body" if flags are unclear.
             let canLand = s.landingPictID > 0 || (s.flags & 0x0001) != 0
             bodies.append(StellarBody(id: spobID, position: pos, radius: 90, canLand: canLand))
         }
-        let jumpRadius = max(2600, maxExtent * 1.6)
+        // Hyperspace edge: base it on the *bulk* of the system (80th-percentile
+        // stellar distance), not the single farthest object — some systems park a
+        // lone stellar tens of thousands of units out, which otherwise stretched
+        // the jump radius so far the system felt empty and traffic took forever to
+        // cross. Clamp to a sane band so density stays believable everywhere.
+        let dists = bodies.map { $0.position.length }.sorted()
+        let ref: Double = dists.isEmpty ? 1200
+            : dists[min(dists.count - 1, Int((Double(dists.count - 1) * 0.8).rounded()))]
+        let jumpRadius = min(6000, max(2600, ref * 1.5 + 700))
         return SystemContext(bodies: bodies, center: Vec2(),
                              jumpRadius: jumpRadius, spawnRadius: jumpRadius * 0.85)
     }

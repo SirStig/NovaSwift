@@ -130,28 +130,8 @@ extension SpobRes {
     }
 }
 
-// MARK: - chär — the starting pilot template
-
-/// The scenario's new-game defaults: which hull the player starts in, how many
-/// credits, and where. (Enough to bootstrap a fresh pilot; ranks/bits/date are
-/// applied by the story layer.)
-public struct CharRes: Sendable {
-    public let id: Int
-    public let startingCredits: Int   // @0  int32
-    public let startingShip: Int      // @4  shïp id
-    public let startingSystems: [Int] // @6/8/10/12 (first valid is the start)
-
-    public init(_ r: Resource) {
-        id = r.id
-        let d = r.data
-        startingCredits = be32(d, 0)
-        startingShip = be16(d, 4)
-        startingSystems = [6, 8, 10, 12].map { be16(d, $0) }.filter { $0 >= 128 }
-    }
-
-    /// The system the pilot begins in (first valid starting system, else 128).
-    public var startingSystem: Int { startingSystems.first ?? 128 }
-}
+// The full `chär` starting-scenario decoder (`CharRes`) lives in
+// CharacterModels.swift; `startingChar()` below returns it.
 
 // MARK: - NovaGame economy accessors
 

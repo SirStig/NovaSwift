@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import EVNovaKit
+import EVNovaStory
 
 /// Top-level app state: current screen, settings, and the game data library
 /// (base data + plug-in catalog with enabled state).
@@ -17,11 +18,34 @@ final class AppModel: ObservableObject {
     /// scene (flight/combat SFX) and the launcher (UI clicks, music, sound test).
     let audio = GameAudio()
 
+    /// The persistent player pilot (credits, cargo, outfits, hull, location). The
+    /// spaceport shops against it; it saves/resumes to disk. This is the live
+    /// in-session pilot.
+    let pilot = PilotStore()
+
+    /// The durable library of all saved pilots (many `.evpilot` files + backups).
+    let roster = PilotRoster()
+
+    /// Why a save is being written — drives whether a rotating backup is taken.
+    enum SaveReason { case manual, land, jump, timer
+        var wantsBackup: Bool { self == .land || self == .manual }
+    }
+
+    /// Authentic-UI graphics (real button / frame / backdrop PICTs) for menus and
+    /// dialogs presented outside a play session. Built lazily from the loaded data
+    /// and invalidated when the data changes.
+    private var _uiGraphics: SpaceportGraphics?
+    var uiGraphics: SpaceportGraphics? {
+        if _uiGraphics == nil, let game = data.game { _uiGraphics = SpaceportGraphics(game: game) }
+        return _uiGraphics
+    }
+
     private var dataObserver: AnyCancellable?
 
     init() {
         // Re-publish when the data controller changes so views observing AppModel refresh.
         dataObserver = data.objectWillChange.sink { [weak self] _ in
+            self?._uiGraphics = nil          // rebuild authentic-UI art against new data
             self?.objectWillChange.send()
         }
         audio.apply(settings: settings)
@@ -58,7 +82,48 @@ final class AppModel: ObservableObject {
 
     func finishLoadingIntoGame() {
         prepareAudioAndData()
+        if let game = data.game { pilot.ensureStarted(game: game) }
         screen = .game
+    }
+
+    /// Begin a fresh pilot from the scenario `chär`, discarding any prior save.
+    func startNewPilot() {
+        prepareAudioAndData()
+        if let game = data.game { pilot.reset(); pilot.newGame(game: game) }
+    }
+
+    // MARK: Multi-pilot flow (roster + scenarios)
+
+    /// Create a new pilot from a chosen starting scenario and adopt it as the
+    /// live pilot. Does not change the screen — the new-pilot UI shows the intro
+    /// and then calls `beginPlay()`.
+    @discardableResult
+    func createPilot(name: String, isMale: Bool, scenario: CharRes) -> CharRes? {
+        prepareAudioAndData()
+        guard let game = data.game else { return nil }
+        let save = roster.create(name: name, isMale: isMale, scenario: scenario, game: game)
+        pilot.begin(state: save.player, rosterID: save.id)
+        return scenario
+    }
+
+    /// Resume a saved pilot from the roster and enter the game.
+    func play(_ save: PilotSave) {
+        prepareAudioAndData()
+        pilot.begin(state: save.player, rosterID: save.id)
+        beginPlay()
+    }
+
+    /// "Enter Ship" — continue the most recently played pilot, if any.
+    func continueMostRecent() {
+        if let recent = roster.mostRecent { play(recent) }
+        else { beginPlay() }   // no roster pilot yet: fall back to the demo/default start
+    }
+
+    /// Persist the live pilot into its durable roster file (+ backup on land /
+    /// manual save). Safe to call when no roster pilot is bound (no-op).
+    func autosave(reason: SaveReason) {
+        guard let id = pilot.rosterID else { return }
+        roster.persist(id: id, state: pilot.state, game: data.game, backup: reason.wantsBackup)
     }
 
     /// Back to the authentic EV Nova main menu (e.g. from the in-game pause menu).

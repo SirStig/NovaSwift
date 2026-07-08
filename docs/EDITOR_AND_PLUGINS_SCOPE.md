@@ -141,6 +141,30 @@ app/EVNova/Editor/
 
 ---
 
+## 3.4 Native pilot save system — **BUILT** (2026-07-08)
+
+The multi-pilot save system is implemented and shipping ahead of the editor, using our
+**own native `.evpilot` format** (versioned JSON around `PlayerState`), *not* the obfuscated
+`.plt`. It is deliberately editor-ready: the future pilot editor mutates these same Codable
+types with an automatic pre-edit backup.
+
+- `EVNovaKit/CharacterModels.swift` — `CharRes`, the full `chär` starting-scenario decoder
+  (verified byte-exact vs real base #128 ".Trader"). `NovaGame.characters()/selectableScenarios()`.
+- `EVNovaStory/PilotSave.swift` — versioned envelope (metadata + list snapshot + `PlayerState`),
+  resilient decoding. `EVNovaStory/PilotArchive.swift` — many `<uuid>.evpilot` files, rotating
+  auto-backups (keep newest N + first), atomic writes, pluggable **iCloud-ready** storage root.
+  `EVNovaStory/PilotFactory.swift` — scenario → `PlayerState` (random start system, cash/ship/
+  standings/date + OnStart NCB through the real SET executor).
+- App: `Pilots/PilotRoster.swift` (roster/create/select/delete/duplicate) + `NewPilotView`,
+  `PilotListView`, `IntroSequenceView` (scenario picker + gender/name + story intro slideshow),
+  wired into the authentic main menu (New / Open / Enter Ship). Autosave on hyperjump, save +
+  rotating backup on **every landing** and manual save; `AppModel.autosave(reason:)`.
+- CLI `evnova-extract char <baseDir> [id]`; tests: `CharacterModelTests`, `PilotFactoryTests`,
+  `PilotStoreTests`.
+
+**Still pending here:** real `.plt`/`NpïL` binary import/export (§4 research spike), the full
+pilot *editor UI* (Milestone G), and flipping on live iCloud sync (entitlement/Xcode capability).
+
 ## 4. Save-game (pilot) editing — the unknown that needs research first
 
 EV Nova pilot files are a resource fork containing the pilot resources, **obfuscated** (a

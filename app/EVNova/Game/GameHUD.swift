@@ -20,10 +20,34 @@ final class GameHUDModel: ObservableObject {
     @Published var weaponAmmo = -1      // rounds left; -1 = unlimited / n/a
     @Published var cargoUsed = 0
     @Published var cargoCapacity = 0
-    /// Hostile/ship contacts in normalized [-1, 1] radar space (none until NPCs exist).
-    @Published var blips: [CGPoint] = []
+    /// Non-empty while a landable stellar object is in reach (shown as a prompt).
+    @Published var landPrompt = ""
+    /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
+    @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
     @Published var planetBlips: [CGPoint] = []
+}
+
+/// One ship on the radar scope, in normalized [-1, 1] space.
+struct RadarContact {
+    var x: CGFloat
+    var y: CGFloat
+    var hostile: Bool
+}
+
+/// The player marker at the centre of the radar: a slim needle arrow pointing
+/// "up" in its rect, meant to be rotated to the ship's heading.
+struct RadarPlayerArrow: Shape {
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))                // nose
+        p.addLine(to: CGPoint(x: rect.minX + w * 0.88, y: rect.minY + h * 0.92))
+        p.addLine(to: CGPoint(x: rect.midX, y: rect.minY + h * 0.68)) // tail notch
+        p.addLine(to: CGPoint(x: rect.minX + w * 0.12, y: rect.minY + h * 0.92))
+        p.closeSubpath()
+        return p
+    }
 }
 
 /// An original, EV-style flight HUD (our own artwork — not EV Nova's interface):
@@ -95,23 +119,29 @@ struct GameHUDView: View {
             Circle().fill(panel)
             Circle().strokeBorder(amber.opacity(0.5), lineWidth: 1)
             Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1).scaleEffect(0.6)
-            // Player at center.
-            Image(systemName: "location.north.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(.cyan)
-                .rotationEffect(.degrees(model.headingDegrees))
-            // Contacts.
-            GeometryReader { geo in
-                let r = min(geo.size.width, geo.size.height) / 2 - 4
-                ForEach(Array(model.planetBlips.enumerated()), id: \.offset) { _, b in
-                    Circle().fill(.cyan).frame(width: 5, height: 5)
-                        .position(x: geo.size.width/2 + b.x * r, y: geo.size.height/2 + b.y * r)
+            // Contacts, drawn crisply in one pass.
+            Canvas { ctx, size in
+                let c = CGPoint(x: size.width / 2, y: size.height / 2)
+                let r = min(size.width, size.height) / 2 - 5
+                for b in model.planetBlips {
+                    let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5,
+                                      width: 5, height: 5)
+                    ctx.fill(Path(ellipseIn: rect), with: .color(.cyan.opacity(0.9)))
                 }
-                ForEach(Array(model.blips.enumerated()), id: \.offset) { _, b in
-                    Circle().fill(.red).frame(width: 4, height: 4)
-                        .position(x: geo.size.width/2 + b.x * r, y: geo.size.height/2 + b.y * r)
+                for b in model.blips {
+                    let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5,
+                                      width: 3, height: 3)
+                    ctx.fill(Path(ellipseIn: rect),
+                             with: .color(b.hostile ? .red : .white.opacity(0.85)))
                 }
             }
+            // Player at center.
+            ZStack {
+                RadarPlayerArrow().fill(.cyan)
+                RadarPlayerArrow().stroke(.white.opacity(0.8), lineWidth: 0.5)
+            }
+            .frame(width: 9, height: 12)
+            .rotationEffect(.degrees(model.headingDegrees))
         }
         .frame(width: 108, height: 108)
     }

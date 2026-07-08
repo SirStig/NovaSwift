@@ -1,5 +1,14 @@
 # Missions & Story (`EVNovaStory`)
 
+> ⚠️ **Status: BUILT, NOT WIRED.** This module is fully implemented and tested,
+> but the running app does **not** drive it — the only live consumer is the
+> `evnova-extract` CLI and unit tests, plus a **read-only** `StorylineAnalyzer`
+> that computes a static guide. **No app type conforms to `GameServices`**, and
+> the app never instantiates `StoryEngine` for play, so the player cannot yet
+> accept or progress missions. Wiring this in is roadmap **P0**. See
+> [STATUS.md](STATUS.md) and [ROADMAP.md](ROADMAP.md). "Done" below means "the
+> library works," not "the player experiences it."
+
 The story layer — bar/computer missions, the control-bit ("NCB") scripting
 language, background `crön` events, ranks, and the campaign save-state. It is a
 **self-contained module** (`Sources/EVNovaStory`) that depends only on

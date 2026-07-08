@@ -109,6 +109,89 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertTrue(world.events.contains { if case .shipDeparted = $0 { return true } else { return false } })
     }
 
+    func testDisabledHulkIsIgnoredAndDrifts() {
+        // A hostile warship should leave a disabled hulk alone, and the hulk should
+        // bleed off its momentum instead of flying under power.
+        let hunter = warship("Hunter", govt: 210, at: Vec2(0, -300), angle: 0)
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [
+            govt(210, classes: [10], enemies: [11]),
+            govt(211, classes: [11], enemies: [10]),
+        ])
+        hunter.brain = AIBrain(aiType: .warship, govt: 210)
+        world.addNPC(hunter)
+
+        let hulk = warship("Hulk", govt: 211, at: Vec2(0, 100), armed: false)
+        hulk.brain = AIBrain(aiType: .braveTrader, govt: 211)
+        hulk.disabled = true
+        hulk.velocity = Vec2(120, 0)
+        let startSpeed = hulk.velocity.length
+        world.addNPC(hulk)
+
+        for _ in 0..<60 { world.step(1.0 / 30.0) }
+        XCTAssertNotEqual(hunter.brain?.state, .attacking, "nobody attacks a helpless hulk")
+        XCTAssertTrue(world.npcs.contains { $0 === hulk }, "a fresh hulk lingers in space")
+        XCTAssertLessThan(hulk.velocity.length, startSpeed, "a hulk drifts to a stop")
+    }
+
+    func testLethalDamageCanDisableOrDestroy() {
+        // Across seeds, a killing blow on a trader sometimes leaves a boardable
+        // hulk and sometimes destroys it — proving both branches are reachable.
+        func bigGun() -> WeaponSpec {
+            WeaponSpec(id: 129, name: "Cannon", shieldDamage: 500, armorDamage: 500, reloadSeconds: 0.1,
+                       projectileSpeed: 3000, range: 6000, accuracyRadians: 0, isBeam: false,
+                       isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0)
+        }
+        var disabled = 0, destroyed = 0
+        for seed in 0..<40 {
+            let player = Ship(name: "Gunner", stats: ShipStats(maxSpeed: 10, acceleration: 10, turnRate: 3),
+                              position: Vec2())
+            player.weapons = [WeaponMount(spec: bigGun())]
+            let world = World(player: player)
+            world.rng = SplitMix64(seed: UInt64(seed) &* 0x9E37 &+ 1)
+            world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
+
+            let trader = warship("Freighter", govt: 202, at: Vec2(0, 120), armed: false)
+            trader.maxArmor = 60; trader.armor = 60; trader.maxShield = 0; trader.shield = 0
+            trader.brain = AIBrain(aiType: .wimpyTrader, govt: 202)
+            world.addNPC(trader)
+            player.currentTargetID = trader.entityID
+            world.intent.firePrimary = true
+
+            for _ in 0..<200 {
+                world.step(1.0 / 30.0)
+                if trader.disabled { disabled += 1; break }
+                if !world.npcs.contains(where: { $0 === trader }) { destroyed += 1; break }
+            }
+        }
+        XCTAssertGreaterThan(disabled, 0, "some killing blows should merely disable")
+        XCTAssertGreaterThan(destroyed, 0, "some killing blows should destroy outright")
+    }
+
+    func testTraderLandsAndVanishesIntoSpaceport() {
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 900), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000)
+
+        let trader = warship("Trader", govt: 202, at: Vec2(), armed: false)
+        trader.brain = AIBrain(aiType: .braveTrader, govt: 202)
+        world.addNPC(trader)
+
+        var landed = false
+        for _ in 0..<600 {                                     // up to 20s
+            world.step(1.0 / 30.0)
+            if world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }) {
+                landed = true; break
+            }
+        }
+        XCTAssertTrue(landed, "a trader should reach a planet and set down")
+        XCTAssertFalse(world.npcs.contains { $0 === trader }, "a landed ship vanishes into the spaceport")
+    }
+
     func testDeterministicDuelResolves() {
         // Two mutually hostile warships, armed, closing head-on. Pure AI + combat.
         let a = warship("A", govt: 210, at: Vec2(0, -500), angle: 0)         // facing north (+y)

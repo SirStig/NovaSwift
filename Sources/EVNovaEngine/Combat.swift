@@ -131,6 +131,16 @@ public enum WorldEvent {
     case armorHit(at: Vec2)
     case explosion(at: Vec2, radius: Double)
     case shipDestroyed(entityID: Int, shipTypeID: Int, at: Vec2)
-    case shipArrived(entityID: Int)
-    case shipDeparted(entityID: Int)
+    /// A ship appeared. `fromHyperspace` distinguishes an inbound hyperspace jump
+    /// (warp-in effect, at the system edge) from an internal/populate spawn.
+    case shipArrived(entityID: Int, at: Vec2, fromHyperspace: Bool)
+    /// A ship left via the hyperspace edge; `heading` is its outbound facing so the
+    /// renderer can streak it out the right way.
+    case shipDeparted(entityID: Int, at: Vec2, heading: Double)
+    /// A ship set down on a stellar object (flew into it and docked).
+    case shipLanded(entityID: Int, spobID: Int, at: Vec2)
+    /// A ship lifted off from a stellar object.
+    case shipLaunched(entityID: Int, at: Vec2)
+    /// A ship's armor was knocked out but it survived as a drifting hulk.
+    case shipDisabled(entityID: Int, at: Vec2)
 }

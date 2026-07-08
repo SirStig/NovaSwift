@@ -69,6 +69,11 @@ public struct PlayerState: Codable, Sendable {
     // Position & exploration
     public var currentSystem: Int
     public var exploredSystems: Set<Int>
+    /// Current hyperspace fuel, in the engine's units (100 = one jump). `nil`
+    /// means "uninitialized" — treated as a full tank until the first jump/save.
+    /// Optional (rather than defaulted) so older saves without this field decode
+    /// via `decodeIfPresent` instead of failing `Codable` decode entirely.
+    public var fuel: Double?
 
     // Reputation
     public var combatRating: Int

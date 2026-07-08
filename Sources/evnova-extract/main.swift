@@ -23,6 +23,7 @@ func usage() -> Never {
       \(name) ship    <baseDir> [id]      Decode ship stats + full loadout + sprite → PNG
       \(name) outfit  <baseDir> [id]      List outfits, or one outfit's modifiers
       \(name) system  <baseDir> [id]      List a system's planets + resolve sprites
+      \(name) char    <baseDir> [id]      List starting scenarios (chär), or preview a new pilot
       \(name) sounds  <baseDir>           List all snd resources (id, name, rate, length)
       \(name) sound   <baseDir> <id> [out] Decode one snd → WAV (default: <id>.wav)
 
@@ -267,6 +268,51 @@ case "system":
                      spob.id, spob.name as NSString, spob.x, spob.y, spob.graphicSpinID, spr))
     }
 
+case "char":
+    // List every starting scenario (chär), or with an id, fully decode one and
+    // preview the pilot PilotFactory would create from it.
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do { game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    func printScenario(_ ch: CharRes) {
+        print("chär #\(ch.id) \"\(ch.name)\"  (\(ch.displayName))\(ch.isDefault ? "  [default]" : "")\(ch.isHidden ? "  [hidden]" : "")")
+        print("  credits:   \(ch.cash)")
+        let shipName = game.ship(ch.shipID)?.name ?? "?"
+        print("  ship:      shïp #\(ch.shipID) \(shipName)")
+        let sysNames = ch.startSystems.map { "\($0)(\(game.system($0)?.name ?? "?"))" }
+        print("  start sys: \(sysNames.joined(separator: ", "))  (random pick)")
+        print("  date:      \(ch.startDay)/\(ch.startMonth)/\(ch.startYear)\(ch.dateSuffix)")
+        print("  kills:     \(ch.kills)  (\(CombatRating.title(forRating: ch.kills)))")
+        if !ch.govtStatuses.isEmpty {
+            let gs = ch.govtStatuses.map { "\($0.govt)(\(game.govt($0.govt)?.name ?? "?"))=\($0.status)" }
+            print("  standings: \(gs.joined(separator: ", "))")
+        }
+        if !ch.introSlides.isEmpty {
+            let sl = ch.introSlides.map { "PICT \($0.pictID)@\($0.delaySeconds)s" }
+            print("  intro:     \(sl.joined(separator: ", "))\(ch.introTextID.map { "  text dësc \($0)" } ?? "")")
+        }
+        if !ch.onStart.isEmpty { print("  onStart:   \(ch.onStart)") }
+    }
+
+    if args.count == 3, let id = Int(args[2]) {
+        guard let ch = game.character(id) else {
+            FileHandle.standardError.write(Data("error: no chär \(id)\n".utf8)); exit(1)
+        }
+        printScenario(ch)
+        let pilot = PilotFactory.make(name: "Test Pilot", isMale: true, scenario: ch, game: game)
+        print("\n  → new pilot: \(pilot.pilotName), \(pilot.credits)cr, ship #\(pilot.shipType) \"\(pilot.shipName)\", "
+              + "system \(pilot.currentSystem) (\(game.system(pilot.currentSystem)?.name ?? "?")), "
+              + "date \(pilot.date), bits set: \(pilot.setBits.count)")
+    } else {
+        let all = game.characters().sorted { $0.id < $1.id }
+        print("\(all.count) starting scenario(s):\n")
+        for ch in all { printScenario(ch); print("") }
+        print("selectable in a new-pilot picker: \(game.selectableScenarios().map(\.displayName).joined(separator: ", "))")
+    }
+
 case "sounds":
     guard args.count == 2 else { usage() }
     let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
@@ -470,6 +516,7 @@ case "ai":
     print("populated with \(world.npcs.count) NPC(s); jumpRadius \(Int(world.systemContext.jumpRadius))")
 
     var arrivals = 0, departures = 0, kills = 0, shots = 0, beams = 0
+    var landings = 0, launches = 0, disables = 0, jumpIns = 0
     var stateHistogram: [String: Int] = [:]
     let dt = 1.0 / 30.0
     let steps = Int(seconds / dt)
@@ -477,8 +524,11 @@ case "ai":
         world.step(dt)
         for e in world.events {
             switch e {
-            case .shipArrived: arrivals += 1
+            case let .shipArrived(_, _, fromHyperspace): arrivals += 1; if fromHyperspace { jumpIns += 1 }
             case .shipDeparted: departures += 1
+            case .shipLanded: landings += 1
+            case .shipLaunched: launches += 1
+            case .shipDisabled: disables += 1
             case .shipDestroyed: kills += 1
             case .weaponFired: shots += 1
             case .beam(_, _, let hit): if hit { beams += 1 }
@@ -492,8 +542,8 @@ case "ai":
 
     print(String(repeating: "-", count: 44))
     print("after \(Int(seconds))s:  live NPCs \(world.npcs.count)   projectiles \(world.projectiles.count)")
-    print("  arrivals \(arrivals)   departures \(departures)   kills \(kills)")
-    print("  shots fired \(shots)   beam hits \(beams)")
+    print("  arrivals \(arrivals) (jump-in \(jumpIns), launch \(launches))   departures \(departures)   landings \(landings)")
+    print("  kills \(kills)   disabled \(disables)   shots fired \(shots)   beam hits \(beams)")
     let hist = stateHistogram.sorted { $0.value > $1.value }
         .map { "\($0.key)×\($0.value)" }.joined(separator: "  ")
     print("  behavior samples: \(hist)")
@@ -501,10 +551,13 @@ case "ai":
     for npc in world.npcs.prefix(8) {
         let gov = aiGame.govt(npc.government)?.name ?? "indep"
         let tgt = npc.currentTargetID.map { " → target #\($0)" } ?? ""
-        print(String(format: "    #%-3d %-22@ [%@] %@  shield %3.0f/%3.0f armor %3.0f/%3.0f%@",
+        let ab = npc.afterburner != nil ? " AB" : ""
+        let fit = String(format: "wpn %d fuel %3.0f spd %3.0f%@",
+                         npc.weapons.count, npc.maxFuel, npc.stats.maxSpeed, ab)
+        print(String(format: "    #%-3d %-22@ [%@] %@  sh %3.0f ar %3.0f  %@%@",
                      npc.entityID, npc.name as NSString, gov as NSString,
                      npc.brain?.state.rawValue ?? "?",
-                     npc.shield, npc.maxShield, npc.armor, npc.maxArmor, tgt))
+                     npc.maxShield, npc.maxArmor, fit as NSString, tgt))
     }
 
 case "mission":

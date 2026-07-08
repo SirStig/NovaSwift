@@ -40,7 +40,22 @@ final class GameScene: SKScene {
     private var systemName = ""
     private var lastUpdate: TimeInterval = 0
     private var hudClock: TimeInterval = 0
-    private let radarRange: CGFloat = 8000
+    // Radar scope radius in world units. Stellar objects sit within ~900 units
+    // of the system centre (p90 across the base data) and combat happens within
+    // a couple of thousand, so 3000 keeps the scope readable edge to edge.
+    private let radarRange: CGFloat = 3000
+
+    // Landing: the nearest landable stellar object, and whether the player is
+    // close/slow enough to set down on it right now. `attemptLand()` (called by
+    // the container on the Land action) returns that spöb id when landing is
+    // allowed; the HUD shows `landPrompt` while a pad is in reach.
+    private(set) var nearestLandableID: Int?
+    private(set) var canLandNow = false
+    private let landingSpeedLimit: Double = 130
+    /// Read-only handle to the live player ship (fuel top-up / cargo sync on land).
+    var playerShip: Ship? { world?.player }
+    /// The spöb to land on if the player may set down this instant, else nil.
+    func attemptLand() -> Int? { canLandNow ? nearestLandableID : nil }
 
     // NPC rendering: the catalog for per-hull sprites, a layer for NPC ships, a
     // layer for transient effects (explosions / beams), and the live node pool.
@@ -49,6 +64,10 @@ final class GameScene: SKScene {
     private let effectsLayer = SKNode()
     private var npcNodes: [Int: NPCNode] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
+    // An arrival effect to play when a node is first built for a ship that just
+    // jumped in from hyperspace (warp streak) or lifted off a planet (grow out).
+    private enum EntranceFX { case warpIn, launch }
+    private var pendingEntrance: [Int: EntranceFX] = [:]
 
     private final class StarLayer {
         let container = SKNode()
@@ -254,6 +273,18 @@ final class GameScene: SKScene {
                           to: CGPoint(x: to.x, y: to.y), hit: hit)
             case let .explosion(at, radius):
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
+            case let .shipArrived(entityID, _, fromHyperspace):
+                // Only inbound hyperspace jumps get the warp effect (played when the
+                // node is built); mid-system populate spawns appear silently.
+                if fromHyperspace { pendingEntrance[entityID] = .warpIn }
+            case let .shipLaunched(entityID, _):
+                pendingEntrance[entityID] = .launch
+            case let .shipDeparted(entityID, at, heading):
+                warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
+            case let .shipLanded(entityID, spobID, at):
+                landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
+            case let .shipDisabled(_, at):
+                spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
             default:
                 break
             }
@@ -274,7 +305,31 @@ final class GameScene: SKScene {
 
         cameraNode.position = scenePos
         updateStarfield(cameraAt: scenePos)
+        updateLanding(player: p)
         updateHUD(dt: dt)
+    }
+
+    /// Find the nearest landable stellar body and decide whether the player is in
+    /// range and slow enough to land. Sets the HUD's land prompt accordingly.
+    private func updateLanding(player p: Ship) {
+        var bestID: Int?
+        var bestDist = Double.greatestFiniteMagnitude
+        var bestReach = 0.0
+        for body in world.systemContext.bodies where body.canLand {
+            let d = (body.position - p.position).length
+            if d < bestDist { bestDist = d; bestID = body.id; bestReach = body.radius + 55 }
+        }
+        nearestLandableID = bestID
+        let inReach = bestID != nil && bestDist <= bestReach
+        canLandNow = inReach && p.velocity.length <= landingSpeedLimit
+        if let id = bestID, inReach {
+            let name = world.systemContext.bodies.first { $0.id == id }
+                .flatMap { _ in planetVisuals.first { $0.id == id }?.name } ?? "the spaceport"
+            hud?.landPrompt = canLandNow ? "Press L to land on \(name)"
+                                         : "Slow down to land on \(name)"
+        } else {
+            hud?.landPrompt = ""
+        }
     }
 
     private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
@@ -331,8 +386,16 @@ final class GameScene: SKScene {
             } else if let tri = node.placeholder {
                 tri.zRotation = -CGFloat(npc.angle)
             }
-            updateNPCThruster(node, npc: npc)
-            updateNPCHealth(node, npc: npc)
+            if npc.disabled {
+                // A drifting hulk: dimmed, engines dead, no health readout.
+                setDisabledLook(node, on: true)
+                node.thruster?.isHidden = true
+                node.healthBar?.isHidden = true
+            } else {
+                setDisabledLook(node, on: false)
+                updateNPCThruster(node, npc: npc)
+                updateNPCHealth(node, npc: npc)
+            }
         }
         for (id, node) in npcNodes where !seen.contains(id) {
             node.container.removeFromParent()
@@ -394,7 +457,117 @@ final class GameScene: SKScene {
 
         npcLayer.addChild(n.container)
         npcNodes[npc.entityID] = n
+        if let fx = pendingEntrance.removeValue(forKey: npc.entityID) {
+            applyEntrance(fx, to: n.container,
+                          at: CGPoint(x: npc.position.x, y: npc.position.y), heading: npc.angle)
+        }
         return n
+    }
+
+    /// Dim (or restore) a node to read as a powered-down hulk.
+    private func setDisabledLook(_ n: NPCNode, on: Bool) {
+        let a: CGFloat = on ? 0.45 : 1.0
+        n.sprite?.alpha = a
+        n.placeholder?.alpha = a
+        if let sprite = n.sprite {
+            sprite.colorBlendFactor = on ? 0.5 : 0
+            sprite.color = SKColor(white: 0.2, alpha: 1)
+        }
+    }
+
+    // MARK: Jump / landing effects
+
+    /// Fade + scale a freshly-built node in, either as a hyperspace jump-in (a
+    /// quick bright pop) or a launch that grows up out of a planet.
+    private func applyEntrance(_ fx: EntranceFX, to container: SKNode, at point: CGPoint, heading: Double) {
+        switch fx {
+        case .warpIn:
+            container.alpha = 0
+            container.setScale(0.6)
+            container.run(.group([.fadeIn(withDuration: 0.18),
+                                  .sequence([.scale(to: 1.12, duration: 0.14),
+                                             .scale(to: 1.0, duration: 0.1)])]))
+            spawnWarpStreak(at: point, heading: heading)
+        case .launch:
+            container.alpha = 0
+            container.setScale(0.08)
+            container.run(.group([.fadeIn(withDuration: 0.4),
+                                  .scale(to: 1.0, duration: 0.5)]))
+        }
+    }
+
+    /// A bright hyperspace streak: a stretched additive flash along `heading`
+    /// (random if nil, e.g. an inbound jump whose facing we don't stress about).
+    private func spawnWarpStreak(at point: CGPoint, heading: Double?) {
+        let ang = heading ?? Double.random(in: 0..<(2 * .pi))
+        let len: CGFloat = 220
+        let dir = CGPoint(x: sin(ang), y: cos(ang))
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: -dir.x * len, y: -dir.y * len))
+        path.addLine(to: CGPoint(x: dir.x * len, y: dir.y * len))
+        let streak = SKShapeNode(path: path)
+        streak.position = point
+        streak.strokeColor = SKColor(red: 0.7, green: 0.85, blue: 1.0, alpha: 0.9)
+        streak.lineWidth = 3
+        streak.blendMode = .add
+        streak.zPosition = 12
+        streak.xScale = 0.2
+        effectsLayer.addChild(streak)
+        streak.run(.sequence([.group([.scaleX(to: 1.0, y: 0.2, duration: 0.18),
+                                      .fadeOut(withDuration: 0.22)]),
+                              .removeFromParent()]))
+    }
+
+    /// Streak a departing ship out to hyperspace: detach its node, zip it forward
+    /// along `heading`, and flash out. (The world already removed the ship.)
+    private func warpOutNode(id: Int, at point: CGPoint, heading: Double) {
+        let streak = { self.spawnWarpStreak(at: point, heading: heading) }
+        guard let container = detachNPCNode(id) else { streak(); return }
+        let dir = CGVector(dx: sin(heading) * 1600, dy: cos(heading) * 1600)
+        effectsLayer.addChild(container)
+        container.run(.sequence([.group([.move(by: dir, duration: 0.24),
+                                         .fadeOut(withDuration: 0.24)]),
+                                 .removeFromParent()]))
+        streak()
+    }
+
+    /// Set a landing ship down into its spaceport: detach its node and shrink +
+    /// fade it into the planet's centre.
+    private func landNode(id: Int, spobID: Int, at point: CGPoint) {
+        guard let container = detachNPCNode(id) else { return }
+        let target = planetVisuals.first { $0.id == spobID }.map { $0.position } ?? point
+        effectsLayer.addChild(container)
+        container.run(.sequence([.group([.move(to: target, duration: 0.5),
+                                         .scale(to: 0.05, duration: 0.5),
+                                         .fadeOut(withDuration: 0.5)]),
+                                 .removeFromParent()]))
+    }
+
+    /// A brief electric crackle where a ship was disabled.
+    private func spawnDisableFlash(at point: CGPoint) {
+        let ring = SKShapeNode(circleOfRadius: 14)
+        ring.position = point
+        ring.strokeColor = SKColor(red: 0.6, green: 0.8, blue: 1.0, alpha: 0.9)
+        ring.fillColor = .clear
+        ring.lineWidth = 2
+        ring.blendMode = .add
+        ring.zPosition = 13
+        effectsLayer.addChild(ring)
+        ring.run(.sequence([.group([.scale(to: 2.0, duration: 0.3),
+                                    .fadeOut(withDuration: 0.3)]),
+                            .removeFromParent()]))
+    }
+
+    /// Pull a live NPC's node out of the pool so subsequent syncs won't touch it,
+    /// handing the caller its container to animate independently.
+    private func detachNPCNode(_ id: Int) -> SKNode? {
+        guard let n = npcNodes.removeValue(forKey: id) else { return nil }
+        n.thruster?.isHidden = true
+        n.healthBar?.isHidden = true
+        // Reparenting requires no existing parent; npcLayer and effectsLayer share
+        // the scene's coordinate space so the world position carries over.
+        n.container.removeFromParent()
+        return n.container
     }
 
     private func updateNPCThruster(_ n: NPCNode, npc: Ship) {
@@ -529,8 +702,10 @@ final class GameScene: SKScene {
         if deg < 0 { deg += 360 }
         hud.headingDegrees = deg
 
-        // Radar: planets relative to the ship, normalized and clamped to the scope.
-        // Screen north is up, so world +y maps to radar -y.
+        // Radar: planets relative to the ship, normalized. Stellars beyond the
+        // scope clamp to the rim (you can always steer toward a planet); ships
+        // beyond it simply drop off, as in the original. Screen north is up, so
+        // world +y maps to radar -y.
         let shipPos = p.position
         hud.planetBlips = planetVisuals.map { pv in
             var dx = (Double(pv.position.x) - shipPos.x) / Double(radarRange)
@@ -539,14 +714,12 @@ final class GameScene: SKScene {
             if m > 1 { dx /= m; dy /= m } // clamp to the rim
             return CGPoint(x: dx, y: dy)
         }
-        // Ship contacts: every live NPC, relative to the player and clamped to the
-        // scope rim.
-        hud.blips = world.npcs.map { npc in
-            var dx = (npc.position.x - shipPos.x) / Double(radarRange)
-            var dy = -(npc.position.y - shipPos.y) / Double(radarRange)
-            let m = (dx * dx + dy * dy).squareRoot()
-            if m > 1 { dx /= m; dy /= m }
-            return CGPoint(x: dx, y: dy)
+        hud.blips = world.npcs.compactMap { npc in
+            let dx = (npc.position.x - shipPos.x) / Double(radarRange)
+            let dy = -(npc.position.y - shipPos.y) / Double(radarRange)
+            guard dx * dx + dy * dy <= 1 else { return nil }
+            let hostile = world.diplomacy?.isHostileToPlayer(npc.government) == true
+            return RadarContact(x: dx, y: dy, hostile: hostile)
         }
     }
 }

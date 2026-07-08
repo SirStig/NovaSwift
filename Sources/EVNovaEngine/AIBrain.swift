@@ -6,6 +6,7 @@ import EVNovaKit
 public enum AIState: String, Sendable {
     case spawning      // just arrived; pick an initial goal
     case traveling     // trader heading to a planet
+    case landing       // trader on final approach, diving into the spaceport
     case patrolling    // warship roaming, watching for hostiles
     case attacking     // engaged with a target
     case fleeing       // hurt / outmatched; running for the hyperspace edge
@@ -33,11 +34,17 @@ public final class AIBrain {
     public var provokedByPlayer = false
     /// Fleet leader to escort, if any.
     public var leaderID: Int?
+    /// This escort's slot in the leader's formation (0-based), for tidy wings.
+    public var formationSlot = 0
 
     // Tunables (world units).
     public var scanRange: Double = 1500
     /// A steady wander/travel destination for non-combat states.
     var destination: Vec2?
+    /// The stellar object id a trader is travelling to / landing on.
+    var destSpob: Int?
+    /// Which stop on the patrol beat we're heading to next.
+    var patrolIndex = 0
     var stateClock: Double = 0
     var repathClock: Double = 0
 
@@ -48,9 +55,10 @@ public final class AIBrain {
 
     // MARK: Perception
 
-    /// Is `other` an enemy of this ship right now?
+    /// Is `other` an enemy of this ship right now? Disabled hulks are helpless and
+    /// no longer count as threats or targets.
     func isHostile(_ me: Ship, _ other: Ship, _ world: World) -> Bool {
-        guard other.isAlive, other.entityID != me.entityID else { return false }
+        guard other.isAlive, !other.disabled, other.entityID != me.entityID else { return false }
         if other.isPlayer {
             if provokedByPlayer { return true }
             return world.diplomacy?.isHostileToPlayer(me.government) ?? false
@@ -141,6 +149,7 @@ public final class AIBrain {
         case .attacking:  return attack(me, world)
         case .fleeing:    return flee(me, world)
         case .traveling:  return travel(me, world)
+        case .landing:    return land(me, world)
         case .patrolling: return patrol(me, world, dt)
         case .departing:  return depart(me, world)
         case .escorting:  return escort(me, world)
@@ -158,9 +167,16 @@ public final class AIBrain {
 
     // MARK: Behaviors
 
+    /// True if the ship has a working afterburner and enough fuel to justify a
+    /// burn (we leave a reserve so ships don't strand themselves bone-dry).
+    private func canBurn(_ me: Ship) -> Bool {
+        me.afterburner != nil && me.fuel > me.maxFuel * 0.15
+    }
+
     /// Close to weapon range, lead the target, and fire when lined up.
     private func attack(_ me: Ship, _ world: World) -> ControlIntent {
-        guard let tid = targetID, let target = world.ship(id: tid), target.isAlive else {
+        guard let tid = targetID, let target = world.ship(id: tid),
+              target.isAlive, !target.disabled else {
             enter(aiType.isTrader ? .traveling : .patrolling)
             return ControlIntent()
         }
@@ -181,7 +197,13 @@ public final class AIBrain {
         let standoff = aiType == .interceptor ? range * 0.5 : range * 0.7
         if dist > standoff {
             // Thrust when roughly pointed the right way, so we actually close.
-            if aimError < .pi / 2 { intent.thrust = true }
+            if aimError < .pi / 2 {
+                intent.thrust = true
+                // Interceptors light the afterburner to run a fleeing quarry down
+                // when it's far and we're pointed dead at it.
+                if aiType == .interceptor && dist > range * 1.5
+                    && aimError < 0.5 && canBurn(me) { intent.afterburner = true }
+            }
         } else if dist < standoff * 0.6 {
             // Too close — ease off the throttle (simple strafing feel).
             intent.thrust = false
@@ -206,7 +228,11 @@ public final class AIBrain {
             out = (out.normalized + away.normalized)
         }
         intent.desiredHeading = out.angle
-        if abs(angleDelta(from: me.angle, to: out.angle)) < .pi / 2 { intent.thrust = true }
+        if abs(angleDelta(from: me.angle, to: out.angle)) < .pi / 2 {
+            intent.thrust = true
+            // Panic burn: when running and pointed away, empty the tank to escape.
+            if canBurn(me) { intent.afterburner = true }
+        }
         // Once clear of pursuers and near the edge, this becomes a plain depart.
         if threat == nil { enter(.departing) }
         return intent
@@ -220,42 +246,77 @@ public final class AIBrain {
         return seek(me, to: me.position + out.normalized * world.systemContext.jumpRadius)
     }
 
-    /// Trader travel: fly to a planet, "land", then leave the system.
+    /// Trader travel: pick a planet and cruise toward it, then hand off to a
+    /// landing approach. With nowhere to land, just cross the system and leave.
     private func travel(_ me: Ship, _ world: World) -> ControlIntent {
         if destination == nil {
-            destination = pickPlanet(world) ?? edgePoint(me, world)
+            if let body = pickPlanetBody(world) {
+                destSpob = body.id
+                destination = body.position
+            } else {
+                enter(.departing)
+                return depart(me, world)
+            }
         }
         guard let dest = destination else { return depart(me, world) }
-        let intent = arrive(me, to: dest, slowRadius: 220)
-        if (dest - me.position).length < 160 {
-            // Arrived (landed) — off to hyperspace.
-            destination = nil
-            enter(.departing)
-        }
-        return intent
+        // Begin the landing dive once we're on the doorstep.
+        if (dest - me.position).length < 340 { enter(.landing) }
+        return arrive(me, to: dest, slowRadius: 260)
     }
 
-    /// Warship patrol: loiter around waypoints, watching for hostiles.
+    /// Final approach: settle onto the pad, then dock. Setting `wantsToLand` lets
+    /// the world remove the ship into the spaceport and fire a `shipLanded` event.
+    private func land(_ me: Ship, _ world: World) -> ControlIntent {
+        guard let sid = destSpob,
+              let body = world.systemContext.bodies.first(where: { $0.id == sid }) else {
+            destination = nil; destSpob = nil
+            enter(aiType.isTrader ? .traveling : .patrolling)
+            return ControlIntent()
+        }
+        let dist = (body.position - me.position).length
+        let slowEnough = me.velocity.length < me.stats.maxSpeed * 0.35
+        // Touch down when we're over the pad and slow — or give up circling and
+        // set down anyway after a while, so no trader gets stuck orbiting.
+        if (dist < body.radius + 40 && slowEnough) || stateClock > 14 {
+            me.landingSpob = sid
+            me.wantsToLand = true
+            return ControlIntent()
+        }
+        return arrive(me, to: body.position, slowRadius: max(160, body.radius + 120))
+    }
+
+    /// Warship patrol: walk a beat between the system's stellar objects, with the
+    /// occasional deliberate sweep past the player — so patrols read as *on duty*,
+    /// not drifting at random.
     private func patrol(_ me: Ship, _ world: World, _ dt: Double) -> ControlIntent {
-        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 200 {
+        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 220 {
             destination = pickPatrolPoint(me, world)
-            repathClock = 6
+            repathClock = 7
         }
         return arrive(me, to: destination ?? me.position, slowRadius: 160)
     }
 
-    /// Escort: keep formation near the leader.
+    /// Escort: hold a numbered slot in a V-wing behind the leader, rotated to the
+    /// leader's heading, so a fleet flies as a tidy formation instead of a swarm.
     private func escort(_ me: Ship, _ world: World) -> ControlIntent {
-        guard let lid = leaderID, let leader = world.ship(id: lid), leader.isAlive else {
+        guard let lid = leaderID, let leader = world.ship(id: lid),
+              leader.isAlive, !leader.disabled else {
             leaderID = nil
             enter(aiType.isTrader ? .traveling : .patrolling)
             return ControlIntent()
         }
-        // Sit off the leader's flank.
-        let offset = Vec2(sin(Double(me.entityID)) * 120, cos(Double(me.entityID)) * 120)
-        let station = leader.position + offset
-        if (station - me.position).length < 90 { return ControlIntent() }
-        return arrive(me, to: station, slowRadius: 140)
+        // Slot → (side, rank): even slots to the right, odd to the left, stepping
+        // further back and out each rank.
+        let side: Double = (formationSlot % 2 == 0) ? 1 : -1
+        let rank = Double(formationSlot / 2 + 1)
+        let lateral = side * 90 * rank   // right of the leader (+) / left (−)
+        let behind = -110 * rank         // trailing the leader
+        // Leader frame: forward = (sin a, cos a); right = (cos a, −sin a).
+        let fwd = Vec2(sin(leader.angle), cos(leader.angle))
+        let right = Vec2(cos(leader.angle), -sin(leader.angle))
+        let station = leader.position + fwd * behind + right * lateral
+        if (station - me.position).length < 70 { return ControlIntent() }
+        return arrive(me, to: station, slowRadius: 130)
     }
 
     // MARK: Steering primitives (each returns a ControlIntent)
@@ -293,26 +354,39 @@ public final class AIBrain {
 
     // MARK: Waypoint helpers
 
-    private func pickPlanet(_ world: World) -> Vec2? {
+    /// A landable stellar object for a trader to head for (nil if none).
+    private func pickPlanetBody(_ world: World) -> StellarBody? {
         let landable = world.systemContext.bodies.filter { $0.canLand }
-        guard !landable.isEmpty else { return world.systemContext.bodies.first?.position }
-        var rng = world.rng
-        let choice = landable[rng.int(in: 0...(landable.count - 1))]
-        world.rng = rng
-        return choice.position
+        let pool = landable.isEmpty ? world.systemContext.bodies : landable
+        guard !pool.isEmpty else { return nil }
+        return pool[world.rng.int(in: 0...(pool.count - 1))]
     }
 
+    /// The next stop on a patrol beat: usually the following stellar object in the
+    /// system (a believable circuit), and now and then a pass over the player so
+    /// police/warships visibly "check out" passing traffic.
     private func pickPatrolPoint(_ me: Ship, _ world: World) -> Vec2 {
-        var rng = world.rng
-        let r = world.systemContext.jumpRadius * 0.6
-        let p = Vec2(rng.double(in: -r...r), rng.double(in: -r...r)) + world.systemContext.center
-        world.rng = rng
-        return p
-    }
+        let ctx = world.systemContext
 
-    private func edgePoint(_ me: Ship, _ world: World) -> Vec2 {
-        var out = me.position - world.systemContext.center
-        if out.length < 1 { out = Vec2(0, 1) }
-        return world.systemContext.center + out.normalized * world.systemContext.jumpRadius
+        // ~1 leg in 4: sweep past where the player is heading.
+        if world.rng.double(in: 0...1) < 0.25 {
+            let p = world.player
+            let ahead = p.velocity.length > 20 ? p.velocity.normalized * 260 : Vec2()
+            let jitter = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
+            return p.position + ahead + jitter
+        }
+
+        // Otherwise advance around the ring of stellar objects.
+        let stops = ctx.bodies
+        if !stops.isEmpty {
+            patrolIndex = (patrolIndex + 1) % stops.count
+            let b = stops[patrolIndex]
+            let off = Vec2(world.rng.double(in: -170...170), world.rng.double(in: -170...170))
+            return b.position + off
+        }
+
+        // Empty system: loiter somewhere inside the jump radius.
+        let r = ctx.jumpRadius * 0.5
+        return ctx.center + Vec2(world.rng.double(in: -r...r), world.rng.double(in: -r...r))
     }
 }

@@ -287,6 +287,18 @@ public struct NovaGame {
     public func outfit(_ id: Int) -> OutfRes? { resources.resource(NovaType.outfit, id).map(OutfRes.init) }
     public func outfits() -> [OutfRes] { resources.resources(of: NovaType.outfit).map(OutfRes.init) }
 
+    // Starting scenarios (chär). Base ships one; plug-ins add more.
+    public func character(_ id: Int) -> CharRes? { resources.resource(NovaType.char, id).map(CharRes.init) }
+    public func characters() -> [CharRes] { resources.resources(of: NovaType.char).map(CharRes.init) }
+    /// Scenarios to show in a new-pilot picker: hidden ("."-prefixed) scenarios are
+    /// dropped when at least one visible scenario exists; otherwise all are shown.
+    /// Sorted by id (the default character first if flagged).
+    public func selectableScenarios() -> [CharRes] {
+        let all = characters().sorted { ($0.isDefault ? 0 : 1, $0.id) < ($1.isDefault ? 0 : 1, $1.id) }
+        let visible = all.filter { !$0.isHidden }
+        return visible.isEmpty ? all : visible
+    }
+
     // Story / mission resources (see MissionModels.swift).
     public func mission(_ id: Int) -> MissionRes? { resources.resource(NovaType.mission, id).map(MissionRes.init) }
     public func missions() -> [MissionRes] { resources.resources(of: NovaType.mission).map(MissionRes.init) }
