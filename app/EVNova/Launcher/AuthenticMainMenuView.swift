@@ -78,18 +78,21 @@ struct AuthenticMainMenuView: View {
                                startPoint: .top, endPoint: .bottom)
 
                 VStack(spacing: 0) {
-                    Spacer().frame(height: geo.size.height * 0.09)
-                    logo(scale: scale)
-                    Spacer()
-                    buttonColumns(scale: scale)
                     Spacer().frame(height: geo.size.height * 0.10)
+                    logo(scale: scale)
+                    Spacer().frame(height: geo.size.height * 0.05)
+                    buttonColumns(scale: scale)
+                    Spacer()   // empty space falls below the buttons, keeping them high
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
             }
         }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
-        .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true } }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
+            model.audio.play(.uiSelect)   // menu appears
+        }
         .sheet(item: $sheet) { which in
             NavigationStack {
                 switch which {
@@ -128,7 +131,9 @@ struct AuthenticMainMenuView: View {
         VStack(spacing: 14 * scale) {
             ForEach(Array(arts.enumerated()), id: \.offset) { i, art in
                 let index = startIndex + i
-                MenuSpriteButton(art: art, scale: scale) { activate(art.action) }
+                MenuSpriteButton(art: art, scale: scale,
+                                 onRollover: { model.audio.play(.uiSelect) },
+                                 action: { activate(art.action) })
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 26)
                     .animation(.spring(response: 0.5, dampingFraction: 0.8)
@@ -154,6 +159,7 @@ struct AuthenticMainMenuView: View {
 private struct MenuSpriteButton: View {
     let art: MainMenuAssets.ButtonArt
     let scale: CGFloat
+    var onRollover: () -> Void = {}
     let action: () -> Void
     @State private var hovering = false
     @State private var pressing = false
@@ -166,7 +172,10 @@ private struct MenuSpriteButton: View {
             .scaleEffect(pressing ? 0.96 : 1)
             .animation(.easeOut(duration: 0.1), value: highlighted)
             .contentShape(Rectangle())
-            .onHover { hovering = $0 }
+            .onHover { h in
+                hovering = h
+                if h { onRollover() }   // rollover sound, as in EV Nova
+            }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in pressing = true }
