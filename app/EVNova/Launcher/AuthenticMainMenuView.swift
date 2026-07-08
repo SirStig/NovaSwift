@@ -55,12 +55,27 @@ struct MainMenuAssets {
         }
         guard !buttons.isEmpty else { return nil }
 
-        let logoSheet = rle(8010)
-        return MainMenuAssets(background: pict(8000),
-                              logo: logoSheet?.frameCGImage(0),
-                              logoSize: CGSize(width: logoSheet?.frameWidth ?? 0,
-                                               height: logoSheet?.frameHeight ?? 0),
-                              buttons: buttons)
+        // Logo: spïn 606 ("Main screen logo") → sprite id. In EV Nova's data this
+        // is a PICT sheet of 7 stacked frames (654×209 each); we take the last
+        // frame (the settled logo). Some data may store it as rlëD instead.
+        var logo: CGImage?
+        var logoSize = CGSize.zero
+        if let spin = game.spin(606) {
+            let tileW = spin.tileWidth, tileH = spin.tileHeight
+            if let sheet = rle(spin.spriteID), let f = sheet.frameCGImage(0) {
+                logo = f
+                logoSize = CGSize(width: sheet.frameWidth, height: sheet.frameHeight)
+            } else if let full = pict(spin.spriteID) {
+                let w = tileW > 0 ? min(tileW, full.width) : full.width
+                let h = tileH > 0 ? min(tileH, full.height) : full.height
+                let lastFrame = max(0, spin.tilesDown - 1)
+                let y = min(lastFrame * h, max(0, full.height - h))
+                logo = full.cropping(to: CGRect(x: 0, y: y, width: w, height: h)) ?? full
+                logoSize = CGSize(width: logo?.width ?? w, height: logo?.height ?? h)
+            }
+        }
+
+        return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons)
     }
 }
 
@@ -70,7 +85,7 @@ struct AuthenticMainMenuView: View {
 
     @State private var appeared = false
     @State private var sheet: Sheet?
-    private enum Sheet: String, Identifiable { case settings, about; var id: String { rawValue } }
+    private enum Sheet: String, Identifiable { case newPilot, openPilot, settings, about; var id: String { rawValue } }
 
     private let base = CGSize(width: 1024, height: 768)
 
@@ -92,6 +107,17 @@ struct AuthenticMainMenuView: View {
                         .position(place(base.width / 2, base.height / 2))
                 }
 
+                if let logo = assets.logo, assets.logoSize.height > 0 {
+                    Image(decorative: logo, scale: 1)
+                        .resizable().interpolation(.medium)
+                        .frame(width: assets.logoSize.width * scale,
+                               height: assets.logoSize.height * scale)
+                        .position(place(base.width / 2, assets.logoSize.height / 2 + 60))
+                        .opacity(appeared ? 1 : 0)
+                        .scaleEffect(appeared ? 1 : 0.94)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.85), value: appeared)
+                }
+
                 buttons(scale: scale, place: place)
             }
         }
@@ -99,7 +125,8 @@ struct AuthenticMainMenuView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
-            model.audio.play(.uiSelect)   // menu appears
+            model.audio.play(.uiSelect)         // menu appears
+            model.prepareAudioAndData()         // ensure main-menu background music is playing
         }
         .sheet(item: $sheet) { which in
             NavigationStack {
