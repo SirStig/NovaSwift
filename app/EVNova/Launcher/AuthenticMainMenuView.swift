@@ -70,12 +70,47 @@ struct MainMenuAssets {
                 let h = tileH > 0 ? min(tileH, full.height) : full.height
                 let lastFrame = max(0, spin.tilesDown - 1)
                 let y = min(lastFrame * h, max(0, full.height - h))
-                logo = full.cropping(to: CGRect(x: 0, y: y, width: w, height: h)) ?? full
+                let cropped = full.cropping(to: CGRect(x: 0, y: y, width: w, height: h)) ?? full
+                logo = keyOutBlack(cropped)
                 logoSize = CGSize(width: logo?.width ?? w, height: logo?.height ?? h)
             }
         }
 
         return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons)
+    }
+
+    /// PICT-sourced logo art is opaque with a black backing box (PICT has no
+    /// alpha channel). Derive alpha from luminance and un-premultiply the
+    /// color so the glow composites naturally over the starfield behind it —
+    /// a `.screen` blend on the raw opaque art double-brightens every pixel
+    /// where the glow overlaps a bright star instead of just masking the box.
+    private static func keyOutBlack(_ image: CGImage) -> CGImage? {
+        let width = image.width, height = image.height
+        guard width > 0, height > 0 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: &pixels, width: width, height: height,
+                                   bitsPerComponent: 8, bytesPerRow: width * 4,
+                                   space: colorSpace,
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let r = pixels[i], g = pixels[i + 1], b = pixels[i + 2]
+            let alpha = max(r, max(g, b))
+            if alpha == 0 {
+                pixels[i + 3] = 0
+            } else {
+                pixels[i] = UInt8(min(255, Int(r) * 255 / Int(alpha)))
+                pixels[i + 1] = UInt8(min(255, Int(g) * 255 / Int(alpha)))
+                pixels[i + 2] = UInt8(min(255, Int(b) * 255 / Int(alpha)))
+                pixels[i + 3] = alpha
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: width * 4, space: colorSpace,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 }
 
@@ -108,7 +143,6 @@ struct AuthenticMainMenuView: View {
                 if let logo = assets.logo, assets.logoSize.height > 0 {
                     Image(decorative: logo, scale: 1)
                         .resizable().interpolation(.medium)
-                        .blendMode(.screen)   // logo art is on black; screen drops the box
                         .novaPlace(layout,
                                    x: (base.width - assets.logoSize.width) / 2, y: 168,
                                    w: assets.logoSize.width, h: assets.logoSize.height)

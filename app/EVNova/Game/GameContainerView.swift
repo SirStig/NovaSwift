@@ -26,6 +26,7 @@ final class GameHost {
         let pilot = model.pilot.state
         let ship: Ship
         var textures: [SKTexture] = []
+        var engineTextures: [SKTexture] = []
         var planets: [PlanetVisual] = []
         var systemName = ""
         var aiGame: NovaGame?
@@ -54,6 +55,11 @@ final class GameHost {
             hud.shipName = pilot.shipName.isEmpty ? (res?.name ?? "") : pilot.shipName
             if let sheet = game.shipSprite(shipID) {
                 textures = SpriteTextures.rotationFrames(from: sheet)
+            }
+            // The ship's own authored engine-glow overlay, if this hull has one
+            // (real per-hull thruster art from the shän engine layer).
+            if let glow = game.engineGlowSprite(shipID) {
+                engineTextures = SpriteTextures.rotationFrames(from: glow)
             }
             // Load the requested system (or the pilot's current one — every call
             // site passes an explicit systemID today, but this stays as a safe
@@ -87,7 +93,8 @@ final class GameHost {
         self.galaxy = aiGalaxy
         self.graphics = aiGame.map { SpaceportGraphics(game: $0) }
         hud.systemName = systemName
-        scene.configure(player: ship, textures: textures, settings: model.settings,
+        scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
+                        settings: model.settings,
                         input: input, controller: controller, hud: hud, audio: model.audio,
                         planets: planets, systemName: systemName,
                         game: aiGame, systemID: aiSystemID, galaxy: aiGalaxy,

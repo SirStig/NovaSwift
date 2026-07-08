@@ -36,6 +36,12 @@ final class GameScene: SKScene {
     /// Smoothed (not raw-random-per-frame) flame alpha/scale — see `NPCNode`.
     private var thrusterAlpha: CGFloat = 0.85
     private var thrusterFlameScale: CGFloat = 1.0
+    /// The hull's own authored engine-glow overlay (shän engine layer), when
+    /// the data has one — real per-ship thruster art, indexed by the same
+    /// rotation frame as the hull sprite. Additively blended, centred on the
+    /// hull. Falls back to the synthetic `thruster` flame when absent.
+    private var engineGlowTextures: [SKTexture] = []
+    private var engineGlowSprite: SKSpriteNode?
     private var shipRadius: CGFloat = 16
 
     private var starLayers: [StarLayer] = []
@@ -81,6 +87,7 @@ final class GameScene: SKScene {
     private let effectsLayer = SKNode()
     private var npcNodes: [Int: NPCNode] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
+    private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
     // An arrival effect to play when a node is first built for a ship that just
     // jumped in from hyperspace (warp streak) or lifted off a planet (grow out).
     private enum EntranceFX { case warpIn, launch }
@@ -102,6 +109,8 @@ final class GameScene: SKScene {
         var sprite: SKSpriteNode?
         var placeholder: SKShapeNode?
         var thruster: SKNode?
+        var engineGlow: SKSpriteNode?
+        var engineGlowTextures: [SKTexture] = []
         var healthFill: SKShapeNode?
         var healthBar: SKNode?
         var textures: [SKTexture] = []
@@ -115,7 +124,8 @@ final class GameScene: SKScene {
 
     // MARK: Setup
 
-    func configure(player ship: Ship, textures: [SKTexture], settings: GameSettings,
+    func configure(player ship: Ship, textures: [SKTexture], engineTextures: [SKTexture] = [],
+                   settings: GameSettings,
                    input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
                    audio: GameAudio? = nil,
                    planets: [PlanetVisual] = [], systemName: String = "",
@@ -133,6 +143,7 @@ final class GameScene: SKScene {
             self.world = World(player: ship)
         }
         self.rotationTextures = textures
+        self.engineGlowTextures = engineTextures
         self.settings = settings
         self.input = input
         self.controllerInput = controller
@@ -229,6 +240,16 @@ final class GameScene: SKScene {
     private func buildShip() {
         let node = SKNode()
         node.zPosition = 10
+
+        // Real engine-glow art, added first so it renders behind the hull.
+        if let first = engineGlowTextures.first {
+            let glow = SKSpriteNode(texture: first)
+            glow.texture?.filteringMode = .nearest
+            glow.blendMode = .add
+            glow.isHidden = true
+            node.addChild(glow)
+            engineGlowSprite = glow
+        }
 
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
@@ -339,6 +360,9 @@ final class GameScene: SKScene {
         } else if let tri = placeholder {
             tri.zRotation = -CGFloat(p.angle)
         }
+        if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
+            glow.texture = engineGlowTextures[min(p.spriteFrame, engineGlowTextures.count - 1)]
+        }
 
         updateThruster(active: intent.thrust || p.afterburnerActive, angle: p.angle,
                        boosted: p.afterburnerActive)
@@ -373,6 +397,18 @@ final class GameScene: SKScene {
     }
 
     private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
+        // Real per-hull engine-glow art (when the data has one) replaces the
+        // synthetic flame entirely rather than layering both.
+        if let glow = engineGlowSprite {
+            glow.isHidden = !active
+            if active {
+                let targetAlpha: CGFloat = boosted ? .random(in: 0.85...1.0) : .random(in: 0.6...0.85)
+                thrusterAlpha = thrusterAlpha * 0.85 + targetAlpha * 0.15
+                glow.alpha = thrusterAlpha
+            }
+            thruster.isHidden = true
+            return
+        }
         thruster.isHidden = !active
         guard active else { return }
         // Sit at the tail (opposite heading) and point backward, with a flicker.
@@ -433,10 +469,14 @@ final class GameScene: SKScene {
             } else if let tri = node.placeholder {
                 tri.zRotation = -CGFloat(npc.angle)
             }
+            if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {
+                glow.texture = node.engineGlowTextures[min(npc.spriteFrame, node.engineGlowTextures.count - 1)]
+            }
             if npc.disabled {
                 // A drifting hulk: dimmed, engines dead, no health readout.
                 setDisabledLook(node, on: true)
                 node.thruster?.isHidden = true
+                node.engineGlow?.isHidden = true
                 node.healthBar?.isHidden = true
             } else {
                 setDisabledLook(node, on: false)
@@ -453,6 +493,18 @@ final class GameScene: SKScene {
     private func makeNPCNode(for npc: Ship) -> NPCNode {
         let n = NPCNode()
         n.container.zPosition = 9
+
+        // Real engine-glow art, added first so it renders behind the hull.
+        let glowTextures = npcEngineGlowTextures(for: npc.shipTypeID)
+        n.engineGlowTextures = glowTextures
+        if let first = glowTextures.first {
+            let glow = SKSpriteNode(texture: first)
+            glow.texture?.filteringMode = .nearest
+            glow.blendMode = .add
+            glow.isHidden = true
+            n.container.addChild(glow)
+            n.engineGlow = glow
+        }
 
         let textures = npcTextures(for: npc.shipTypeID)
         n.textures = textures
@@ -611,6 +663,7 @@ final class GameScene: SKScene {
     private func detachNPCNode(_ id: Int) -> SKNode? {
         guard let n = npcNodes.removeValue(forKey: id) else { return nil }
         n.thruster?.isHidden = true
+        n.engineGlow?.isHidden = true
         n.healthBar?.isHidden = true
         // Reparenting requires no existing parent; npcLayer and effectsLayer share
         // the scene's coordinate space so the world position carries over.
@@ -619,12 +672,24 @@ final class GameScene: SKScene {
     }
 
     private func updateNPCThruster(_ n: NPCNode, npc: Ship) {
-        guard let thruster = n.thruster else { return }
         // We don't see the NPC's intent, so infer "thrusting" from moving forward
         // near its own heading at a decent clip.
         let heading = (sin(npc.angle), cos(npc.angle))
         let forward = npc.velocity.x * heading.0 + npc.velocity.y * heading.1
         let active = npc.velocity.length > npc.stats.maxSpeed * 0.25 && forward > 0
+
+        // Real per-hull engine-glow art replaces the synthetic flame entirely.
+        if let glow = n.engineGlow {
+            glow.isHidden = !active
+            if active {
+                let target: CGFloat = .random(in: 0.55...0.8)
+                n.thrusterAlpha = n.thrusterAlpha * 0.85 + target * 0.15
+                glow.alpha = n.thrusterAlpha
+            }
+            n.thruster?.isHidden = true
+            return
+        }
+        guard let thruster = n.thruster else { return }
         thruster.isHidden = !active
         guard active else { return }
         let tail = CGPoint(x: sin(npc.angle) * -Double(n.radius) * 0.7,
@@ -660,6 +725,18 @@ final class GameScene: SKScene {
             textures = SpriteTextures.rotationFrames(from: sheet)
         }
         npcTextureCache[shipTypeID] = textures
+        return textures
+    }
+
+    /// That hull's own authored engine-glow overlay, if it has one — same
+    /// per-hull-art principle as `npcTextures`, cached the same way.
+    private func npcEngineGlowTextures(for shipTypeID: Int) -> [SKTexture] {
+        if let cached = npcEngineGlowCache[shipTypeID] { return cached }
+        var textures: [SKTexture] = []
+        if shipTypeID >= 128, let sheet = galaxy?.game.engineGlowSprite(shipTypeID) {
+            textures = SpriteTextures.rotationFrames(from: sheet)
+        }
+        npcEngineGlowCache[shipTypeID] = textures
         return textures
     }
 

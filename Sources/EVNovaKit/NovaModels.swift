@@ -48,14 +48,44 @@ public struct SpinRes {
     }
 }
 
-// MARK: shän — ship animation (references the base sprite among others)
+// MARK: shän — ship animation (base hull + engine glow/light/weapon overlay
+// layers, and real per-hull weapon exit points). Full 192-byte layout verified
+// byte-for-byte against ResForge's Shan Editor (`ShanWindowController.load()`,
+// third_party/ResForge/Plugins/Sources/NovaTools/Shan Editor/) and cross-checked
+// against real base-game data (e.g. shän #131 "Leviathan": engine layer 1406/
+// 1407/180×180 distinct from the 1006/1007/144×144 base layer; beamPoints show
+// a genuine symmetric (±20, 40) dual-turret mount pair).
+
+/// One weapon exit point on a hull, in the ship's own sprite-space coordinates
+/// (origin at the hull's centre; +y is "up" in the unrotated sprite, i.e. the
+/// nose direction). `z` is QuickDraw draw-order depth (front/behind the hull),
+/// not a third spatial axis.
+public struct ShanExitPoint {
+    public let x: Int
+    public let y: Int
+    public let z: Int
+}
 
 public struct ShanRes {
     public let id: Int
-    public let baseSpriteID: Int   // → spïn id for the hull sprite
+    public let baseSpriteID: Int   // → rlëD id directly (spïn indirection is a fallback; see NovaGame.shipSpriteData)
     public let baseSetCount: Int   // number of animation *sets* (banking/lit variants), NOT headings; hulls rotate through 36 headings
     public let baseWidth: Int
     public let baseHeight: Int
+    /// The ship's own authored engine-glow overlay sprite (→ rlëD id), drawn
+    /// centred on the hull and additively blended — real per-hull thruster
+    /// art, not a synthesized effect. <= 0 means this hull has none (rare;
+    /// most warship/freighter hulls do).
+    public let engineSpriteID: Int
+    public let engineWidth: Int
+    public let engineHeight: Int
+    /// Real weapon mount points, up to 4 per kind (unused slots repeat a
+    /// placeholder position — callers should cross-reference `ShipRes.maxGuns`/
+    /// `maxTurrets`/weapon count to know how many are actually meaningful).
+    public let gunPoints: [ShanExitPoint]
+    public let turretPoints: [ShanExitPoint]
+    public let guidedPoints: [ShanExitPoint]
+    public let beamPoints: [ShanExitPoint]
 
     public init(_ r: Resource) {
         id = r.id
@@ -64,6 +94,21 @@ public struct ShanRes {
         baseSetCount = i16(d, 4)
         baseWidth = i16(d, 6)
         baseHeight = i16(d, 8)
+        engineSpriteID = i16(d, 22)
+        engineWidth = i16(d, 26)
+        engineHeight = i16(d, 28)
+
+        func points(xBase: Int, yBase: Int, zBase: Int) -> [ShanExitPoint] {
+            (0..<4).map { i in
+                ShanExitPoint(x: i16(d, xBase + i * 2), y: i16(d, yBase + i * 2), z: i16(d, zBase + i * 2))
+            }
+        }
+        // x's then y's per point-kind (@72), then compress factors (@136-143),
+        // then z's per point-kind (@144) — matches the on-disk field order.
+        gunPoints = points(xBase: 72, yBase: 80, zBase: 144)
+        turretPoints = points(xBase: 88, yBase: 96, zBase: 152)
+        guidedPoints = points(xBase: 104, yBase: 112, zBase: 160)
+        beamPoints = points(xBase: 120, yBase: 128, zBase: 168)
     }
 }
 
@@ -334,6 +379,15 @@ public struct NovaGame {
     /// Decode a ship's base hull sprite sheet, if available.
     public func shipSprite(_ shipID: Int) -> SpriteSheet? {
         guard let (_, rle) = shipSpriteData(shipID) else { return nil }
+        return try? RLED.decode(rle)
+    }
+
+    /// Decode a ship's real, per-hull-authored engine-glow overlay sprite (the
+    /// `shän` engine layer), if this hull has one. Same rotation-frame layout
+    /// as the base hull sprite — index it with the same `spriteFrame`.
+    public func engineGlowSprite(_ shipID: Int) -> SpriteSheet? {
+        guard let shan = shan(shipID), shan.engineSpriteID > 0,
+              let rle = resources.resource(NovaType.rleD, shan.engineSpriteID)?.data else { return nil }
         return try? RLED.decode(rle)
     }
 

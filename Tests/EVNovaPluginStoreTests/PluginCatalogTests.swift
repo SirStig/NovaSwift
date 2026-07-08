@@ -31,7 +31,7 @@ final class PluginCatalogTests: XCTestCase {
         // Guards against PluginCatalog.load()'s silent-empty-array fallback
         // masking a JSON typo: the real bundled catalog should have every
         // seeded entry, each with non-empty prose and a valid source URL.
-        XCTAssertEqual(PluginCatalog.all.count, 13)
+        XCTAssertEqual(PluginCatalog.all.count, 23)
         for entry in PluginCatalog.all {
             XCTAssertFalse(entry.summary.isEmpty, entry.id)
             XCTAssertFalse(entry.description.isEmpty, entry.id)
