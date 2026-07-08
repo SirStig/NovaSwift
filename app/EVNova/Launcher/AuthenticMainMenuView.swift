@@ -110,7 +110,7 @@ struct AuthenticMainMenuView: View {
                         .resizable().interpolation(.medium)
                         .blendMode(.screen)   // logo art is on black; screen drops the box
                         .novaPlace(layout,
-                                   x: (base.width - assets.logoSize.width) / 2, y: 46,
+                                   x: (base.width - assets.logoSize.width) / 2, y: 150,
                                    w: assets.logoSize.width, h: assets.logoSize.height)
                         .opacity(appeared ? 1 : 0)
                         .scaleEffect(appeared ? 1 : 0.94)
