@@ -109,6 +109,32 @@ final class GameDataController: ObservableObject {
         reload()
     }
 
+    /// Whether `plugin` lives in the app-bundled `Plugins/` dir (shipped with
+    /// the app, can only be enabled/disabled) as opposed to anywhere the user
+    /// or the store installed it (deletable). Prebundled plugins have no
+    /// delete affordance in the Plug-in Manager.
+    func isPrebundled(_ plugin: PluginBundle) -> Bool {
+        guard let bundled = bundledPluginsDir, let first = plugin.fileURLs.first else { return false }
+        return first.path.hasPrefix(bundled.path)
+    }
+
+    /// Removes an installed (non-prebundled) plug-in's on-disk folder/file and
+    /// reloads. No-op if `plugin` is prebundled — callers should check
+    /// `isPrebundled` first to avoid showing a delete affordance at all.
+    func deletePlugin(_ plugin: PluginBundle) {
+        guard !isPrebundled(plugin) else { return }
+        let fm = FileManager.default
+        // A plugin is either its own containing folder (importedPluginsDir/<id>)
+        // or, for a loose imported .rez/.ndat, the file itself.
+        let folder = importedPluginsDir.appendingPathComponent(plugin.id, isDirectory: true)
+        if fm.fileExists(atPath: folder.path) {
+            try? fm.removeItem(at: folder)
+        } else {
+            for url in plugin.fileURLs { try? fm.removeItem(at: url) }
+        }
+        reload()
+    }
+
     /// Pick a reasonable player ship: the first ship the data defines (usually the
     /// Shuttle, id 128), else nil so the scene falls back to a placeholder.
     func defaultPlayerShip() -> ShipRes? {

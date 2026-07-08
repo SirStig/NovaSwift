@@ -25,14 +25,32 @@ final class GameHUDModel: ObservableObject {
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
-    @Published var planetBlips: [CGPoint] = []
+    @Published var planetBlips: [RadarContact] = []
 }
 
-/// One ship on the radar scope, in normalized [-1, 1] space.
+/// How a radar contact relates to the player, driving its dot color: red for a
+/// hostile, yellow for a neutral that's neither friend nor foe, green for
+/// something the player owns/is allied with, grey for anything disabled,
+/// uninhabited, or otherwise non-functional (drifting hulks, dead stations).
+enum RadarRelationship {
+    case hostile, neutral, friendlyOrOwned, disabled
+
+    var color: Color {
+        switch self {
+        case .hostile: return Color(red: 0.95, green: 0.3, blue: 0.25)
+        case .neutral: return Color(red: 0.95, green: 0.85, blue: 0.25)
+        case .friendlyOrOwned: return Color(red: 0.4, green: 0.9, blue: 0.4)
+        case .disabled: return Color(white: 0.55)
+        }
+    }
+}
+
+/// One contact (ship or stellar object) on the radar scope, in normalized
+/// [-1, 1] space.
 struct RadarContact {
     var x: CGFloat
     var y: CGFloat
-    var hostile: Bool
+    var relationship: RadarRelationship
 }
 
 /// The player marker at the centre of the radar: a slim needle arrow pointing
@@ -126,13 +144,12 @@ struct GameHUDView: View {
                 for b in model.planetBlips {
                     let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5,
                                       width: 5, height: 5)
-                    ctx.fill(Path(ellipseIn: rect), with: .color(.cyan.opacity(0.9)))
+                    ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                 }
                 for b in model.blips {
                     let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5,
                                       width: 3, height: 3)
-                    ctx.fill(Path(ellipseIn: rect),
-                             with: .color(b.hostile ? .red : .white.opacity(0.85)))
+                    ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                 }
             }
             // Player at center.

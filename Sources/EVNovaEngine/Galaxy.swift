@@ -139,21 +139,34 @@ public final class Galaxy {
         for spobID in sys.spobs {
             guard let s = game.spob(spobID) else { continue }
             let pos = Vec2(Double(s.x), Double(s.y))
-            // Landability: a spob you can dock/land on (has a landing picture) is a
-            // trader destination. Fall back to "any body" if flags are unclear.
-            let canLand = s.landingPictID > 0 || (s.flags & 0x0001) != 0
-            bodies.append(StellarBody(id: spobID, position: pos, radius: 90, canLand: canLand))
+            // Match the same sprite-derived size the renderer uses (GameContainerView's
+            // PlanetVisual), so landing/collision geometry agrees with what's on screen
+            // instead of every body sharing one hardcoded radius.
+            let radius = Double(game.spobSprite(spobID)?.frameWidth ?? 48) / 2
+            bodies.append(StellarBody(id: spobID, position: pos, radius: radius, canLand: s.isLandable))
+        }
+        // The system's actual centre of mass — not the world origin, which a
+        // system's stellar objects don't necessarily cluster around. Everything
+        // below (jump radius, spawn ring, patrol loiter, player start) is expressed
+        // relative to this centre.
+        let center: Vec2
+        if bodies.isEmpty {
+            center = Vec2()
+        } else {
+            let sum = bodies.reduce(Vec2()) { $0 + $1.position }
+            center = sum * (1.0 / Double(bodies.count))
         }
         // Hyperspace edge: base it on the *bulk* of the system (80th-percentile
-        // stellar distance), not the single farthest object — some systems park a
-        // lone stellar tens of thousands of units out, which otherwise stretched
-        // the jump radius so far the system felt empty and traffic took forever to
-        // cross. Clamp to a sane band so density stays believable everywhere.
-        let dists = bodies.map { $0.position.length }.sorted()
+        // stellar distance from centre), not the single farthest object — some
+        // systems park a lone stellar tens of thousands of units out, which
+        // otherwise stretched the jump radius so far the system felt empty and
+        // traffic took forever to cross. Clamp to a sane band so density stays
+        // believable everywhere.
+        let dists = bodies.map { ($0.position - center).length }.sorted()
         let ref: Double = dists.isEmpty ? 1200
             : dists[min(dists.count - 1, Int((Double(dists.count - 1) * 0.8).rounded()))]
         let jumpRadius = min(6000, max(2600, ref * 1.5 + 700))
-        return SystemContext(bodies: bodies, center: Vec2(),
+        return SystemContext(bodies: bodies, center: center,
                              jumpRadius: jumpRadius, spawnRadius: jumpRadius * 0.85)
     }
 }

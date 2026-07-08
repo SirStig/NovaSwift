@@ -74,8 +74,8 @@ final class FlightTests: XCTestCase {
 
     func testStatsFromNovaUnits() {
         let s = ShipStats(speed: 300, acceleration: 500, turnRate: 40)
-        XCTAssertEqual(s.maxSpeed, 300 * 3.2, accuracy: 1e-9)
-        XCTAssertEqual(s.acceleration, 500 * 3.2, accuracy: 1e-9)
+        XCTAssertEqual(s.maxSpeed, 300 * 1.0, accuracy: 1e-9)
+        XCTAssertEqual(s.acceleration, 500 * 1.0, accuracy: 1e-9)
         XCTAssertGreaterThan(s.turnRate, 0)
     }
 }

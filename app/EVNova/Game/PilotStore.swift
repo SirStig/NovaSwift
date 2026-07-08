@@ -41,6 +41,7 @@ final class PilotStore: ObservableObject {
            let loaded = try? JSONDecoder().decode(PlayerState.self, from: data) {
             state = loaded
             started = true
+            rosterID = loaded.rosterID   // restore across relaunch, not just in-session
         } else {
             state = PlayerState()   // placeholder until `newGame` / `ensureStarted`
             started = false
@@ -83,8 +84,19 @@ final class PilotStore: ObservableObject {
     /// `state`, so this is all that's needed to "play as" a roster pilot.
     func begin(state: PlayerState, rosterID: UUID) {
         self.state = state
+        self.state.rosterID = rosterID
         self.rosterID = rosterID
         self.started = true
+        save()
+    }
+
+    /// Bind this session to a durable roster id after the fact (e.g. the first
+    /// autosave attempt for a session that started outside the normal
+    /// create/play flow, like the no-data demo path). No-op if already bound.
+    func bind(rosterID: UUID) {
+        guard self.rosterID == nil else { return }
+        self.rosterID = rosterID
+        self.state.rosterID = rosterID
         save()
     }
 

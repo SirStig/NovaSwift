@@ -66,6 +66,15 @@ public struct PlayerState: Codable, Sendable {
     public var outfits: [Int: Int]        // outfit id → quantity owned
     public var cargo: [Int: Int]          // cargo/commodity type → tons held
 
+    // Persistence
+    /// The durable `PilotRoster`/`PilotArchive` save this pilot belongs to, once
+    /// bound. `nil` for a session that hasn't been adopted into the roster yet
+    /// (e.g. the no-data demo path) — round-tripping it through `pilot.json`
+    /// lets such a session still sync to the archive on its next autosave rather
+    /// than being silently stuck un-persisted for the whole session.
+    /// Optional so older saves without this field still decode (like `fuel`).
+    public var rosterID: UUID?
+
     // Position & exploration
     public var currentSystem: Int
     public var exploredSystems: Set<Int>

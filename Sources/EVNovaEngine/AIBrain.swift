@@ -47,6 +47,9 @@ public final class AIBrain {
     var patrolIndex = 0
     var stateClock: Double = 0
     var repathClock: Double = 0
+    /// Cooldown before another "sweep past the player" patrol leg can be picked,
+    /// so a ship can't get yanked across the system on back-to-back rolls.
+    var sweepCooldown: Double = 0
 
     public init(aiType: AIType, govt: Int) {
         self.aiType = aiType
@@ -88,6 +91,7 @@ public final class AIBrain {
     public func think(ship me: Ship, world: World, dt: Double) -> ControlIntent {
         stateClock += dt
         repathClock -= dt
+        sweepCooldown -= dt
 
         // Validate / refresh combat target.
         if let tid = targetID, let t = world.ship(id: tid), t.isAlive,
@@ -368,12 +372,18 @@ public final class AIBrain {
     private func pickPatrolPoint(_ me: Ship, _ world: World) -> Vec2 {
         let ctx = world.systemContext
 
-        // ~1 leg in 4: sweep past where the player is heading.
-        if world.rng.double(in: 0...1) < 0.25 {
+        // ~1 leg in 4: sweep past where the player is heading — but never on
+        // consecutive picks, and only if the player isn't absurdly far away, so
+        // patrols read as "checking you out" rather than teleporting cross-system.
+        if sweepCooldown <= 0, world.rng.double(in: 0...1) < 0.25 {
             let p = world.player
-            let ahead = p.velocity.length > 20 ? p.velocity.normalized * 260 : Vec2()
-            let jitter = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
-            return p.position + ahead + jitter
+            let toPlayer = p.position - me.position
+            if toPlayer.length < ctx.jumpRadius {
+                sweepCooldown = 30
+                let ahead = p.velocity.length > 20 ? p.velocity.normalized * 260 : Vec2()
+                let jitter = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
+                return p.position + ahead + jitter
+            }
         }
 
         // Otherwise advance around the ring of stellar objects.

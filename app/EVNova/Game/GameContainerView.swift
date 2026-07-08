@@ -18,7 +18,7 @@ final class GameHost {
     let galaxy: Galaxy?
     let graphics: SpaceportGraphics?
 
-    init(model: AppModel, systemID: Int? = nil) {
+    init(model: AppModel, systemID: Int? = nil, arrivedViaJump: Bool = false) {
         controller = GameControllerInput(input: input)
         hudStyle = GameHost.makeHUDStyle(model.data.game)
         scene.scaleMode = .resizeFill
@@ -55,7 +55,9 @@ final class GameHost {
             if let sheet = game.shipSprite(shipID) {
                 textures = SpriteTextures.rotationFrames(from: sheet)
             }
-            // Load the requested system (or the pilot's current one).
+            // Load the requested system (or the pilot's current one — every call
+            // site passes an explicit systemID today, but this stays as a safe
+            // default if that ever changes).
             let target = systemID ?? pilot.currentSystem
             let targetSystem = game.system(target) ?? game.startingSystem()
             if let system = targetSystem {
@@ -66,10 +68,15 @@ final class GameHost {
                     let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
                     return PlanetVisual(id: entry.spob.id, name: entry.spob.name,
                                         position: CGPoint(x: entry.spob.x, y: entry.spob.y),
-                                        texture: tex, radius: radius)
+                                        texture: tex, radius: radius,
+                                        government: entry.spob.government,
+                                        isUninhabited: entry.spob.isUninhabited)
                 }
-                // Start the player a little "south" of the system centre so planets are in view.
-                ship.position = Vec2(0, -700)
+                // Start the player a little "south" of the system's actual centre
+                // (the centroid of its stellar bodies, not necessarily world origin)
+                // so planets are in view.
+                let sysCenter = galaxy.systemContext(for: system.id).center
+                ship.position = sysCenter + Vec2(0, -700)
             }
         } else {
             ship = Ship(name: "Test Craft",
@@ -83,7 +90,8 @@ final class GameHost {
         scene.configure(player: ship, textures: textures, settings: model.settings,
                         input: input, controller: controller, hud: hud, audio: model.audio,
                         planets: planets, systemName: systemName,
-                        game: aiGame, systemID: aiSystemID, galaxy: aiGalaxy)
+                        game: aiGame, systemID: aiSystemID, galaxy: aiGalaxy,
+                        arrivedViaJump: arrivedViaJump)
     }
 
     /// Decode the authentic status bar: the ïntf interface definition + its
@@ -101,17 +109,25 @@ final class GameHost {
 /// (touch on iOS/iPadOS; keyboard + mouse on macOS; game controller on both).
 struct GameContainerView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var host: GameHost?
     @StateObject private var nav = NavigationModel(game: nil, startSystemID: 128)
     @State private var navReady = false
     @State private var showMenu = false
     /// The spöb the player is currently landed on (nil = flying).
     @State private var landedSpobID: Int?
+    /// Keyboard focus for the flight scene. `.focusable()` alone never actually
+    /// grabs focus — without binding + explicitly setting this, `.onKeyPress` in
+    /// `KeyboardControls` silently never fires and the ship can't be flown at
+    /// all. Re-asserted whenever a menu/map/spaceport overlay that took focus
+    /// away closes back to flight.
+    @FocusState private var isSceneFocused: Bool
 
     var body: some View {
         ZStack {
             if let host {
                 sceneLayer(host)
+                    .focused($isSceneFocused)
                 if let style = host.hudStyle {
                     AuthenticHUDView(model: host.hud, style: style)   // real EV Nova status bar
                 } else {
@@ -152,7 +168,20 @@ struct GameContainerView: View {
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMenu)
         .animation(.easeInOut(duration: 0.2), value: landedSpobID)
-        .onChange(of: showMenu) { _, open in host?.scene.isPaused = open }
+        .onChange(of: showMenu) { _, open in
+            host?.scene.isPaused = open
+            if !open { isSceneFocused = true }   // menu closed: hand keyboard control back to flight
+        }
+        .onChange(of: nav.showingMap) { _, open in
+            if !open { isSceneFocused = true }   // map closed: same
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Backgrounding/quitting is the one moment a manual save/jump/land
+            // won't have already caught — e.g. shopping at a spaceport and then
+            // leaving the app without departing again. Durable-save whatever the
+            // live pilot has right now so it isn't lost.
+            if phase != .active { model.autosave(reason: .timer) }
+        }
         .onChange(of: landedSpobID) { _, id in
             host?.scene.isPaused = (id != nil)
             if id != nil {
@@ -160,15 +189,23 @@ struct GameContainerView: View {
                     refuel()                                   // landing tops off the tank, free
                     model.autosave(reason: .land)               // EV Nova saves on every landing
                 }
+            } else {
+                isSceneFocused = true   // departed the spaceport: back to flight
             }
         }
         .task {
             if host == nil {
-                nav.configure(game: model.data.game,
-                              startSystemID: model.data.game?.startingSystem()?.id ?? 128)
+                // Resume where the pilot actually left off — `pilot.state` is
+                // guaranteed populated by now (finishLoadingIntoGame always calls
+                // ensureStarted before this screen shows). Only fall back to the
+                // scenario's generic default if that's somehow unresolvable.
+                let startSystem = model.data.game?.system(model.pilot.state.currentSystem)?.id
+                    ?? model.data.game?.startingSystem()?.id ?? 128
+                nav.configure(game: model.data.game, startSystemID: startSystem)
                 host = GameHost(model: model, systemID: nav.currentSystemID)
                 syncNav(host)
                 navReady = true
+                isSceneFocused = true   // grab keyboard focus for flight on first appear
             }
         }
         .onChange(of: nav.currentSystemID) { _, newID in
@@ -188,8 +225,9 @@ struct GameContainerView: View {
                 model.pilot.state.exploredSystems.insert(newID)
                 model.pilot.save()
                 model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump
-                host = GameHost(model: model, systemID: newID) // rebuild the system on jump
+                host = GameHost(model: model, systemID: newID, arrivedViaJump: true) // rebuild on jump
                 syncNav(host)
+                isSceneFocused = true   // the scene view was just rebuilt; reassert focus
             }
         }
     }
@@ -200,6 +238,8 @@ struct GameContainerView: View {
     /// (landing already topped it off; taking off doesn't spend or grant any).
     private func depart() {
         landedSpobID = nil
+        model.pilot.save()
+        model.autosave(reason: .manual)   // catch any shopping done during this landing
         host = GameHost(model: model, systemID: nav.currentSystemID)
         syncNav(host)
     }
@@ -229,19 +269,36 @@ struct GameContainerView: View {
     /// map's JUMP button or the `J` key: spends fuel and advances `nav` together.
     @discardableResult
     private func attemptJump() -> Bool {
-        nav.jumpAlongRoute()
+        let didJump = nav.jumpAlongRoute()
+        if didJump { model.audio.play(.hyperspaceCharge) }   // spin-up, before the scene rebuild
+        return didJump
     }
 
     @ViewBuilder
     private func sceneLayer(_ host: GameHost) -> some View {
         // Flight is driven by keybindings (keyboard) + controller + touch.
         // The mouse is reserved for UI/targeting (no auto-follow steering).
-        SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
-            .ignoresSafeArea()
-            .focusable()
-            .focusEffectDisabled()
-            .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
-                                       onDiscrete: handleDiscrete))
+        GeometryReader { geo in
+            // The authentic status bar reserves screen width on the right, the
+            // same way the original game's play area never extended under its
+            // sidebar. Shrink the play viewport to match instead of letting the
+            // SpriteKit scene (and its ship-centred camera) fill the whole
+            // window with the sidebar drawn over the top of it.
+            let sidebarWidth: CGFloat = {
+                guard let style = host.hudStyle, style.nativeSize.height > 0 else { return 0 }
+                let scale = geo.size.height / style.nativeSize.height
+                return style.nativeSize.width * scale
+            }()
+            let playWidth = max(0, geo.size.width - sidebarWidth)
+            SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
+                .frame(width: playWidth, height: geo.size.height)
+                .position(x: playWidth / 2, y: geo.size.height / 2)
+        }
+        .ignoresSafeArea()
+        .focusable()
+        .focusEffectDisabled()
+        .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
+                                   onDiscrete: handleDiscrete))
     }
 
     private func handleDiscrete(_ action: GameAction) {

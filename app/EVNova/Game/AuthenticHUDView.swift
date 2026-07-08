@@ -29,9 +29,7 @@ struct AuthenticHUDView: View {
                 bar(layout, style.intf.armorArea, model.armor, style.intf.armorColor)
                 bar(layout, style.intf.fuelArea, model.fuel, style.intf.fuelFull)
 
-                RadarContactsView(model: model,
-                                  bright: color(style.intf.brightRadar),
-                                  dim: color(style.intf.dimRadar))
+                RadarContactsView(model: model, playerMarker: color(style.intf.brightRadar))
                     .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
 
                 shipLabel
@@ -68,11 +66,12 @@ struct AuthenticHUDView: View {
 }
 
 /// Radar contacts + player heading, drawn in the placed radar rect's local space.
-/// Stellars are the larger dim dots, ships the small bright ones (hostiles red).
+/// Stellars are the larger dots, ships the small ones; both colored by relationship
+/// to the player — red hostile, yellow neutral, green friendly/owned, grey disabled
+/// or non-functional.
 private struct RadarContactsView: View {
     @ObservedObject var model: GameHUDModel
-    let bright: Color
-    let dim: Color
+    let playerMarker: Color
 
     var body: some View {
         GeometryReader { geo in
@@ -82,16 +81,15 @@ private struct RadarContactsView: View {
                 Canvas { ctx, _ in
                     for b in model.planetBlips {
                         let r = CGRect(x: cx + b.x * radius - 2.5, y: cy + b.y * radius - 2.5, width: 5, height: 5)
-                        ctx.fill(Path(ellipseIn: r), with: .color(dim))
+                        ctx.fill(Path(ellipseIn: r), with: .color(b.relationship.color))
                     }
                     for b in model.blips {
                         let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
-                        ctx.fill(Path(ellipseIn: r),
-                                 with: .color(b.hostile ? Color(red: 0.95, green: 0.3, blue: 0.25) : bright))
+                        ctx.fill(Path(ellipseIn: r), with: .color(b.relationship.color))
                     }
                 }
                 ZStack {
-                    RadarPlayerArrow().fill(bright)
+                    RadarPlayerArrow().fill(playerMarker)
                     RadarPlayerArrow().stroke(.white.opacity(0.7), lineWidth: 0.5)
                 }
                 .frame(width: 9, height: 12)

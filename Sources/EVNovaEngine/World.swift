@@ -45,7 +45,7 @@ public struct FlightTuning {
     public var turnScale: Double       // stat → deg/sec
     public var dragPerSecond: Double   // gentle space drag so ships settle (0 = pure Newtonian)
 
-    public static let `default` = FlightTuning(speedScale: 3.2, accelScale: 3.2,
+    public static let `default` = FlightTuning(speedScale: 1.0, accelScale: 1.0,
                                                turnScale: 3.0, dragPerSecond: 0.0)
 }
 

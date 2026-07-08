@@ -8,7 +8,7 @@ import EVNovaKit
 public struct CombatTuning {
     /// Stat "speed unit" → px/sec. Matches `FlightTuning.speedScale` so a shot
     /// from a fast ship still outruns it.
-    public var unitToPxPerSec: Double = 3.2
+    public var unitToPxPerSec: Double = 1.0
     /// The rate EV Nova ticks weapon durations/reloads at.
     public var framesPerSecond: Double = 30
     /// Global multiplier on all weapon damage (difficulty / feel).

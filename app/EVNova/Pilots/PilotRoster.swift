@@ -44,6 +44,20 @@ final class PilotRoster: ObservableObject {
         return save
     }
 
+    /// Adopt an already-live pilot state that was never created through this
+    /// roster (e.g. the no-data-required demo path, or a dev autoplay session)
+    /// into the durable archive for the first time, so it has a roster id and
+    /// autosave stops silently no-oping for it. Returns the new save.
+    @discardableResult
+    func adopt(state: PlayerState, game: NovaGame?) -> PilotSave {
+        var save = PilotSave(displayName: state.pilotName.isEmpty ? "Captain" : state.pilotName,
+                             scenarioName: "", player: state, game: game,
+                             dataFingerprint: game.map(Self.fingerprint(for:)) ?? "")
+        save = (try? archive.save(save, backup: false)) ?? save
+        refresh()
+        return save
+    }
+
     /// Update the durable save for `id` from the live pilot state. Called on
     /// landing / hyperjump / manual save / the autosave tick; backs up on the
     /// meaningful events so a stuck or corrupted pilot can be rolled back.

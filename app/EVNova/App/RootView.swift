@@ -41,11 +41,18 @@ struct RootView: View {
             // Wire audio to the data and start menu music (if the player enabled it
             // and their data ships a track). Music carries through into the game.
             model.prepareAudioAndData()
+            #if DEBUG
             if ProcessInfo.processInfo.environment["EVNOVA_AUTOPLAY"] != nil,
                model.data.hasBaseData {
-                // Dev: jump straight into the game scene.
+                // Dev-only: jump straight into the game scene, skipping the main
+                // menu. Never available in Release builds — a leftover exported
+                // env var in a dev shell must not be able to bypass the menu for
+                // a shipped app.
                 model.finishLoadingIntoGame()
-            } else if model.data.hasBaseData, model.screen == .launcher {
+                return
+            }
+            #endif
+            if model.data.hasBaseData, model.screen == .launcher {
                 // With game data present, the authentic EV Nova menu IS the main
                 // menu — skip the native launcher (that's only the no-data import gate).
                 model.screen = .mainMenu

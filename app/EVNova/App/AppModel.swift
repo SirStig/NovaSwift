@@ -14,6 +14,9 @@ final class AppModel: ObservableObject {
     @Published var bindings: KeyBindings = .load()
     @Published var data = GameDataController()
 
+    /// Catalog browse/install state for the plug-in store (see `Store/`).
+    let store = PluginStoreModel()
+
     /// Shared audio system: SFX + music, driven by `settings`. Used by the game
     /// scene (flight/combat SFX) and the launcher (UI clicks, music, sound test).
     let audio = GameAudio()
@@ -45,10 +48,13 @@ final class AppModel: ObservableObject {
     init() {
         // Re-publish when the data controller changes so views observing AppModel refresh.
         dataObserver = data.objectWillChange.sink { [weak self] _ in
-            self?._uiGraphics = nil          // rebuild authentic-UI art against new data
-            self?.objectWillChange.send()
+            guard let self else { return }
+            _uiGraphics = nil                // rebuild authentic-UI art against new data
+            store.refresh(data: data)
+            objectWillChange.send()
         }
         audio.apply(settings: settings)
+        store.refresh(data: data)
     }
 
     /// Persist settings whenever they change materially, and push audio changes live.
@@ -120,9 +126,13 @@ final class AppModel: ObservableObject {
     }
 
     /// Persist the live pilot into its durable roster file (+ backup on land /
-    /// manual save). Safe to call when no roster pilot is bound (no-op).
+    /// manual save). A session that never went through `createPilot`/`play`
+    /// (the no-data demo path, or a dev autoplay run) has no roster id yet —
+    /// adopt it into the roster now instead of leaving it un-persisted for the
+    /// whole session.
     func autosave(reason: SaveReason) {
-        guard let id = pilot.rosterID else { return }
+        let id = pilot.rosterID ?? roster.adopt(state: pilot.state, game: data.game).id
+        if pilot.rosterID == nil { pilot.bind(rosterID: id) }
         roster.persist(id: id, state: pilot.state, game: data.game, backup: reason.wantsBackup)
     }
 

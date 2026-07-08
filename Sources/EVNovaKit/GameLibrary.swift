@@ -9,6 +9,30 @@ public enum PluginKind: String, Codable, Sendable {
     case gameplay
     case patch
     case unknown
+
+    /// Display label shared by the launcher's Installed list and the plug-in
+    /// store, so both agree on wording.
+    public var label: String {
+        switch self {
+        case .base: return "Base"
+        case .totalConversion: return "Total conversion"
+        case .patch: return "Content patch"
+        case .gameplay: return "Gameplay tweak"
+        case .unknown: return "Plug-in"
+        }
+    }
+
+    /// SF Symbol used as a generic placeholder tile when a catalog entry has
+    /// no bundled screenshot.
+    public var symbolName: String {
+        switch self {
+        case .base: return "globe"
+        case .totalConversion: return "sparkles"
+        case .patch: return "paintbrush.fill"
+        case .gameplay: return "slider.horizontal.3"
+        case .unknown: return "puzzlepiece.extension.fill"
+        }
+    }
 }
 
 /// One installable unit of content: the base game, a total conversion, or a

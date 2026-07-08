@@ -150,7 +150,11 @@ public final class Spawner {
                 let offset = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
                 guard let e = galaxy.makeLoadedShip(escort.shipID, government: govt,
                                                     at: pos + offset, angle: ang) else { continue }
-                let brain = AIBrain(aiType: .interceptor, govt: govt)
+                // Escorts fly their own hull's disposition so that, if the flagship
+                // dies, they fall back to hull-appropriate behavior rather than
+                // always reverting to a generic interceptor.
+                let escortAI = galaxy.game.ship(escort.shipID).map { AIType(raw: $0.inherentAI) } ?? .interceptor
+                let brain = AIBrain(aiType: escortAI == .unknown ? .interceptor : escortAI, govt: govt)
                 brain.leaderID = leadID
                 brain.formationSlot = slot
                 e.brain = brain

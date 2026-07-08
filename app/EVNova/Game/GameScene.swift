@@ -9,6 +9,9 @@ struct PlanetVisual {
     let position: CGPoint     // in-system coordinates
     let texture: SKTexture?
     let radius: CGFloat
+    let government: Int
+    /// A dead rock / derelict station with no functioning population — greyed on radar.
+    let isUninhabited: Bool
 }
 
 /// The live game scene. Runs the `EVNovaEngine` simulation and draws it: an
@@ -30,6 +33,9 @@ final class GameScene: SKScene {
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
     private var thruster: SKNode!
+    /// Smoothed (not raw-random-per-frame) flame alpha/scale — see `NPCNode`.
+    private var thrusterAlpha: CGFloat = 0.85
+    private var thrusterFlameScale: CGFloat = 1.0
     private var shipRadius: CGFloat = 16
 
     private var starLayers: [StarLayer] = []
@@ -38,12 +44,23 @@ final class GameScene: SKScene {
     private let projectileLayer = SKNode()
     private var projectileNodes: [SKShapeNode] = []
     private var systemName = ""
+    /// True when this scene was just built because the player jumped in from
+    /// hyperspace (not a fresh game start, a landing depart, or a load) — the
+    /// only case that should show the player's own warp-in effect.
+    private var arrivedViaJump = false
     private var lastUpdate: TimeInterval = 0
     private var hudClock: TimeInterval = 0
     // Radar scope radius in world units. Stellar objects sit within ~900 units
     // of the system centre (p90 across the base data) and combat happens within
     // a couple of thousand, so 3000 keeps the scope readable edge to edge.
     private let radarRange: CGFloat = 3000
+    // Ship art is native-pixel-sized (authored for 640×480-era screens) and the
+    // camera previously ran at SpriteKit's default scale of 1.0 (1 world unit =
+    // 1 screen point), so on a modern window the play area showed only a tiny
+    // sliver of the system — far less than `radarRange` implies — while making
+    // everything feel crowded/too-close. Zooming the camera out widens the
+    // visible world per window without touching any world-space simulation math.
+    private let cameraZoom: CGFloat = 1.75
 
     // Landing: the nearest landable stellar object, and whether the player is
     // close/slow enough to set down on it right now. `attemptLand()` (called by
@@ -90,6 +107,10 @@ final class GameScene: SKScene {
         var textures: [SKTexture] = []
         var radius: CGFloat = 16
         var lastArmor: Double = -1
+        /// Smoothed (not raw-random-per-frame) flame alpha/scale so the plume
+        /// reads as a flicker, not a strobe.
+        var thrusterAlpha: CGFloat = 0.8
+        var thrusterFlameScale: CGFloat = 1.0
     }
 
     // MARK: Setup
@@ -98,7 +119,8 @@ final class GameScene: SKScene {
                    input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
                    audio: GameAudio? = nil,
                    planets: [PlanetVisual] = [], systemName: String = "",
-                   game: NovaGame? = nil, systemID: Int = 0, galaxy: Galaxy? = nil) {
+                   game: NovaGame? = nil, systemID: Int = 0, galaxy: Galaxy? = nil,
+                   arrivedViaJump: Bool = false) {
         // With game data we build a fully-wired, *populated* world (diplomacy +
         // spawner + system geometry) so the system fills with NPC traders, patrols
         // and pirates. Without it we fall back to a lone-ship physics world.
@@ -118,12 +140,14 @@ final class GameScene: SKScene {
         self.audio = audio
         self.planetVisuals = planets
         self.systemName = systemName
+        self.arrivedViaJump = arrivedViaJump
     }
 
     override func didMove(to view: SKView) {
         backgroundColor = SKColor(red: 0.02, green: 0.02, blue: 0.06, alpha: 1)
         scaleMode = .resizeFill
         camera = cameraNode
+        cameraNode.setScale(cameraZoom)
         addChild(cameraNode)
         buildStarfield()
         buildPlanets()
@@ -134,6 +158,17 @@ final class GameScene: SKScene {
         effectsLayer.zPosition = 12
         addChild(effectsLayer)
         buildShip()
+        if arrivedViaJump {
+            // The player just jumped in: place the ship/camera immediately (don't
+            // wait a frame) and play the same warp-in pop + streak NPCs get on
+            // hyperspace arrival, so a jump reads as arriving somewhere, not a
+            // silent scene swap.
+            let p = world.player
+            let scenePos = CGPoint(x: p.position.x, y: p.position.y)
+            shipNode.position = scenePos
+            cameraNode.position = scenePos
+            applyEntrance(.warpIn, to: shipNode, at: scenePos, heading: p.angle)
+        }
         // Arriving in the system.
         audio?.play(.hyperspaceArrive)
     }
@@ -195,11 +230,6 @@ final class GameScene: SKScene {
         let node = SKNode()
         node.zPosition = 10
 
-        // Engine exhaust plume (behind the hull). Hidden unless thrusting.
-        thruster = makeThruster()
-        thruster.isHidden = true
-        node.addChild(thruster)
-
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = .nearest
@@ -221,12 +251,22 @@ final class GameScene: SKScene {
             placeholder = tri
             shipRadius = 16
         }
+
+        // Engine exhaust plume (behind the hull). Hidden unless thrusting. Sized
+        // relative to the hull (16 = the old fixed placeholder radius, kept as
+        // the reference scale so default-sized ships look unchanged).
+        thruster = makeThruster(scale: max(0.5, shipRadius / 16))
+        thruster.isHidden = true
+        node.addChild(thruster)
+
         addChild(node)
         shipNode = node
     }
 
-    /// A simple additive flame: an outer amber and inner white teardrop.
-    private func makeThruster() -> SKNode {
+    /// A simple additive flame: an outer amber and inner white teardrop. `scale`
+    /// sizes it relative to the hull it's mounted on (a fighter and a capital
+    /// ship shouldn't get the same absolute-size flame).
+    private func makeThruster(scale: CGFloat = 1.0) -> SKNode {
         let container = SKNode()
         func flame(_ w: CGFloat, _ h: CGFloat, _ color: SKColor) -> SKShapeNode {
             let p = CGMutablePath()
@@ -237,8 +277,8 @@ final class GameScene: SKScene {
             s.fillColor = color; s.strokeColor = .clear; s.blendMode = .add
             return s
         }
-        container.addChild(flame(7, 26, SKColor(red: 1.0, green: 0.5, blue: 0.15, alpha: 0.9)))
-        container.addChild(flame(3.5, 16, SKColor(red: 1.0, green: 0.95, blue: 0.8, alpha: 0.95)))
+        container.addChild(flame(7 * scale, 26 * scale, SKColor(red: 1.0, green: 0.5, blue: 0.15, alpha: 0.9)))
+        container.addChild(flame(3.5 * scale, 16 * scale, SKColor(red: 1.0, green: 0.95, blue: 0.8, alpha: 0.95)))
         return container
     }
 
@@ -340,10 +380,17 @@ final class GameScene: SKScene {
         let tail = CGPoint(x: sin(angle) * -shipRadius * 0.7, y: cos(angle) * -shipRadius * 0.7)
         thruster.position = tail
         thruster.zRotation = CGFloat(back)
-        // The afterburner plume is longer and brighter than normal thrust.
-        let base: CGFloat = boosted ? 1.5 : 1.0
-        thruster.setScale(base * .random(in: 0.85...1.15))
-        thruster.alpha = boosted ? .random(in: 0.9...1.0) : .random(in: 0.75...1.0)
+        // The afterburner plume is longer and brighter than normal thrust. Flame
+        // size follows the hull's own radius (set once in buildShip) so a fighter
+        // and a capital ship don't get the same-sized flame. The jitter is
+        // low-pass filtered (blend toward a new random target each frame, not
+        // snapped straight to it) so it reads as a flicker, not a strobe.
+        let boostMul: CGFloat = boosted ? 1.5 : 1.0
+        thrusterFlameScale = thrusterFlameScale * 0.85 + CGFloat.random(in: 0.85...1.15) * 0.15
+        thruster.setScale(boostMul * thrusterFlameScale)
+        let targetAlpha: CGFloat = boosted ? .random(in: 0.9...1.0) : .random(in: 0.75...1.0)
+        thrusterAlpha = thrusterAlpha * 0.85 + targetAlpha * 0.15
+        thruster.alpha = thrusterAlpha
     }
 
     /// Mirror the world's live projectiles into a pool of dot nodes (reusing nodes
@@ -432,9 +479,10 @@ final class GameScene: SKScene {
             n.radius = CGFloat(npc.radius)
         }
 
-        let thruster = makeThruster()
+        // Sized relative to this hull (16 = the old fixed placeholder radius,
+        // kept as the reference scale) instead of one fixed size for every ship.
+        let thruster = makeThruster(scale: max(0.5, n.radius / 16) * 0.8)
         thruster.isHidden = true
-        thruster.setScale(0.8)
         n.container.addChild(thruster)
         n.thruster = thruster
 
@@ -583,7 +631,10 @@ final class GameScene: SKScene {
                            y: cos(npc.angle) * -Double(n.radius) * 0.7)
         thruster.position = tail
         thruster.zRotation = -CGFloat(npc.angle)
-        thruster.alpha = .random(in: 0.6...0.9)
+        // Low-pass filtered flicker (see updateThruster) so it doesn't strobe.
+        let target: CGFloat = .random(in: 0.6...0.9)
+        n.thrusterAlpha = n.thrusterAlpha * 0.85 + target * 0.15
+        thruster.alpha = n.thrusterAlpha
     }
 
     private func updateNPCHealth(_ n: NPCNode, npc: Ship) {
@@ -612,12 +663,38 @@ final class GameScene: SKScene {
         return textures
     }
 
-    /// Blue for friends, red for anyone hostile to the player, grey otherwise.
-    private func factionColor(for npc: Ship) -> SKColor {
-        if world.diplomacy?.isHostileToPlayer(npc.government) == true {
-            return SKColor(red: 0.95, green: 0.35, blue: 0.3, alpha: 1)
+    /// This ship's relationship to the player: hostile / neutral / friendly-or-
+    /// owned / disabled. Drives both the minimap dot color and the placeholder
+    /// hull tint, so the two stay consistent.
+    private func relationship(for npc: Ship) -> RadarRelationship {
+        if npc.disabled { return .disabled }
+        if world.diplomacy?.isHostileToPlayer(npc.government) == true { return .hostile }
+        if npc.government == world.player.government
+            || world.diplomacy?.areAllied(npc.government, world.player.government) == true {
+            return .friendlyOrOwned
         }
-        return SKColor(red: 0.55, green: 0.75, blue: 1.0, alpha: 1)
+        return .neutral
+    }
+
+    /// A stellar object's relationship to the player, for radar coloring: grey
+    /// for uninhabited/non-functional bodies, otherwise by owning government.
+    private func relationship(forPlanet pv: PlanetVisual) -> RadarRelationship {
+        if pv.isUninhabited { return .disabled }
+        if world.diplomacy?.isHostileToPlayer(pv.government) == true { return .hostile }
+        if pv.government == world.player.government
+            || world.diplomacy?.areAllied(pv.government, world.player.government) == true {
+            return .friendlyOrOwned
+        }
+        return .neutral
+    }
+
+    private func factionColor(for npc: Ship) -> SKColor {
+        switch relationship(for: npc) {
+        case .hostile: return SKColor(red: 0.95, green: 0.3, blue: 0.25, alpha: 1)
+        case .neutral: return SKColor(red: 0.95, green: 0.85, blue: 0.25, alpha: 1)
+        case .friendlyOrOwned: return SKColor(red: 0.4, green: 0.9, blue: 0.4, alpha: 1)
+        case .disabled: return SKColor(white: 0.55, alpha: 1)
+        }
     }
 
     // MARK: Combat effects
@@ -712,14 +789,13 @@ final class GameScene: SKScene {
             var dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
             let m = (dx * dx + dy * dy).squareRoot()
             if m > 1 { dx /= m; dy /= m } // clamp to the rim
-            return CGPoint(x: dx, y: dy)
+            return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv))
         }
         hud.blips = world.npcs.compactMap { npc in
             let dx = (npc.position.x - shipPos.x) / Double(radarRange)
             let dy = -(npc.position.y - shipPos.y) / Double(radarRange)
             guard dx * dx + dy * dy <= 1 else { return nil }
-            let hostile = world.diplomacy?.isHostileToPlayer(npc.government) == true
-            return RadarContact(x: dx, y: dy, hostile: hostile)
+            return RadarContact(x: dx, y: dy, relationship: relationship(for: npc))
         }
     }
 }
