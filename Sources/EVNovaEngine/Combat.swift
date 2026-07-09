@@ -185,7 +185,15 @@ public final class Projectile {
 /// entities (ships, projectiles) are read directly off the world instead.
 public enum WorldEvent {
     case weaponFired(shooterID: Int, at: Vec2, heading: Double, soundID: Int?)
-    case beam(from: Vec2, to: Vec2, hit: Bool, soundID: Int?)
+    /// `mountIndex` lets the renderer correlate this shot with an active
+    /// `beamLoopStart` on the same mount (continuous beams reposition one
+    /// persistent line instead of spawning a fresh flash node every tick).
+    case beam(shooterID: Int, mountIndex: Int, from: Vec2, to: Vec2, hit: Bool, soundID: Int?)
+    /// A `loopSound` beam mount started/stopped continuous fire (trigger
+    /// held/released, independent of the reload tick) — the renderer should
+    /// start/stop a real looping voice rather than retrigger a one-shot per tick.
+    case beamLoopStart(shooterID: Int, mountIndex: Int, soundID: Int?)
+    case beamLoopStop(shooterID: Int, mountIndex: Int)
     case shieldHit(at: Vec2)
     case armorHit(at: Vec2)
     case explosion(at: Vec2, radius: Double, soundID: Int?)

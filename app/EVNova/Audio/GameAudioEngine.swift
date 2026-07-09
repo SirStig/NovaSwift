@@ -26,6 +26,12 @@ final class GameAudioEngine {
     private var nextVoice = 0
     private let musicPlayer = AVAudioPlayerNode()
 
+    /// Persistent looping voices, keyed by caller-chosen id (e.g. one per
+    /// firing ship+mount), separate from the one-shot round-robin pool above —
+    /// these live until explicitly stopped rather than being subject to
+    /// stealing by unrelated one-shot SFX.
+    private var loopVoices: [String: AVAudioPlayerNode] = [:]
+
     private var started = false
     private var musicURL: URL?
 
@@ -71,6 +77,8 @@ final class GameAudioEngine {
         guard started else { return }
         musicPlayer.stop()
         voices.forEach { $0.stop() }
+        loopVoices.values.forEach { $0.stop(); engine.detach($0) }
+        loopVoices.removeAll()
         engine.stop()
         started = false
         #if os(iOS)
@@ -102,13 +110,65 @@ final class GameAudioEngine {
     func play(_ buffer: AVAudioPCMBuffer, volume: Float = 1, pan: Float = 0) {
         if !started { start() }
         guard started else { return }
-        let voice = voices[nextVoice]
-        nextVoice = (nextVoice + 1) % voices.count
+        // Prefer a voice that's actually free over blindly stealing the next
+        // one in rotation — with more concurrent SFX than the pool size (easy
+        // to hit in a multi-ship fight), blind round-robin truncates whatever
+        // still-audible sound happens to be on the next slot, which is exactly
+        // what reads as "sounds keep cutting off." Only steal (oldest-first)
+        // when every voice is genuinely busy.
+        var chosen = nextVoice
+        for offset in 0..<voices.count {
+            let idx = (nextVoice + offset) % voices.count
+            if !voices[idx].isPlaying { chosen = idx; break }
+        }
+        nextVoice = (chosen + 1) % voices.count
+        let voice = voices[chosen]
         voice.stop()                 // reuse this voice, interrupting whatever it played
         voice.volume = max(0, min(1, volume))
         voice.pan = max(-1, min(1, pan))
         voice.scheduleBuffer(buffer, at: nil, options: [.interrupts], completionHandler: nil)
         voice.play()
+    }
+
+    // MARK: Looping SFX (continuous-fire weapons, etc.)
+
+    /// Start (or, if already looping under this `id`, just re-level) a real
+    /// gapless loop of `buffer` on a dedicated voice. Use for `loopSound`
+    /// weapons instead of retriggering `play()` every reload tick — retriggering
+    /// restarts the sample from frame 0 each time and can steal a voice from an
+    /// unrelated in-flight sound.
+    func playLoop(id: String, buffer: AVAudioPCMBuffer, volume: Float = 1, pan: Float = 0) {
+        if !started { start() }
+        guard started else { return }
+        if let existing = loopVoices[id] {
+            existing.volume = max(0, min(1, volume))
+            existing.pan = max(-1, min(1, pan))
+            return
+        }
+        let voice = AVAudioPlayerNode()
+        engine.attach(voice)
+        engine.connect(voice, to: sfxBus, format: Self.canonicalFormat)
+        voice.volume = max(0, min(1, volume))
+        voice.pan = max(-1, min(1, pan))
+        voice.scheduleBuffer(buffer, at: nil, options: [.loops], completionHandler: nil)
+        voice.play()
+        loopVoices[id] = voice
+    }
+
+    /// Re-level an already-playing loop (distance attenuation/pan as the
+    /// shooter or listener moves). No-op if `id` isn't currently looping.
+    func updateLoop(id: String, volume: Float, pan: Float) {
+        guard let voice = loopVoices[id] else { return }
+        voice.volume = max(0, min(1, volume))
+        voice.pan = max(-1, min(1, pan))
+    }
+
+    /// Stop and release a loop started by `playLoop`. No-op if not looping.
+    func stopLoop(id: String) {
+        guard let voice = loopVoices.removeValue(forKey: id) else { return }
+        voice.stop()
+        engine.disconnectNodeOutput(voice)
+        engine.detach(voice)
     }
 
     // MARK: Music playback (streamed from a file, seamless loop)

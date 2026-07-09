@@ -112,6 +112,14 @@ final class GameScene: SKScene {
     private var lockedShipBracketID: Int?
     private var lockedPlanetBracketID: Int?
     private var npcNodes: [Int: NPCNode] = [:]
+    /// Active `loopSound` beam voices, keyed by "`shooterID`:`mountIndex`" —
+    /// repositioned every frame in `update(_:)` so a firing ship's continuous
+    /// beam loop pans/attenuates as it (or the player) moves, and stopped when
+    /// the world emits `.beamLoopStop` or the shooter no longer resolves.
+    private var activeBeamLoops: [String: (shooterID: Int, soundID: Int)] = [:]
+    /// One persistent line node per active beam loop (same keys as
+    /// `activeBeamLoops`), repositioned every tick instead of respawned.
+    private var beamLoopNodes: [String: SKShapeNode] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
     private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
     // An arrival effect to play when a node is first built for a ship that just
@@ -414,16 +422,38 @@ final class GameScene: SKScene {
                 if let soundID {
                     audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 }
-            case let .beam(from, to, hit, soundID):
-                spawnBeam(from: CGPoint(x: from.x, y: from.y),
-                          to: CGPoint(x: to.x, y: to.y), hit: hit)
-                // Beams re-fire every reload tick while held; only retrigger the
-                // player's own beam sound on the rising edge (fresh key-down) so
-                // a held trigger doesn't stutter. NPC beams aren't gated by the
-                // player's `wasFiring`, so they still sound each time they fire.
-                if let soundID, !wasFiring {
-                    audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
+            case let .beam(shooterID, mountIndex, from, to, hit, soundID):
+                let loopKey = "\(shooterID):\(mountIndex)"
+                if let line = beamLoopNodes[loopKey] {
+                    // Continuous-fire beam: reposition the one persistent line
+                    // instead of spawning a fresh flash node every reload tick
+                    // (up to 10×/sec per beam mount) — that per-tick spawn was
+                    // real allocation + scene-graph + SKAction churn that
+                    // scaled directly with how many ships were fighting.
+                    updatePersistentBeam(line, from: CGPoint(x: from.x, y: from.y),
+                                         to: CGPoint(x: to.x, y: to.y), hit: hit)
+                } else {
+                    spawnBeam(from: CGPoint(x: from.x, y: from.y),
+                              to: CGPoint(x: to.x, y: to.y), hit: hit)
+                    // Beams re-fire every reload tick while held; only retrigger the
+                    // player's own beam sound on the rising edge (fresh key-down) so
+                    // a held trigger doesn't stutter. NPC beams aren't gated by the
+                    // player's `wasFiring`, so they still sound each time they fire.
+                    if let soundID, !wasFiring {
+                        audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
+                    }
                 }
+            case let .beamLoopStart(shooterID, mountIndex, soundID):
+                let key = "\(shooterID):\(mountIndex)"
+                if let soundID {
+                    activeBeamLoops[key] = (shooterID, soundID)
+                }
+                beamLoopNodes[key] = makePersistentBeamNode()
+            case let .beamLoopStop(shooterID, mountIndex):
+                let key = "\(shooterID):\(mountIndex)"
+                activeBeamLoops.removeValue(forKey: key)
+                audio?.stopLoop(key: key)
+                beamLoopNodes.removeValue(forKey: key)?.removeFromParent()
             case let .explosion(at, radius, soundID):
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
                 audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
@@ -456,6 +486,7 @@ final class GameScene: SKScene {
             }
         }
         wasFiring = intent.firePrimary
+        updateBeamLoopPositions(listener: scenePos)
         syncProjectiles()
         syncNPCs()
         updateSelectionBrackets()
@@ -1093,6 +1124,24 @@ final class GameScene: SKScene {
 
     // MARK: Combat effects
 
+    /// Reposition every active beam loop against the shooter's current
+    /// position each frame (positional volume/pan), and clean up any whose
+    /// shooter no longer resolves — a defensive fallback for the normal case
+    /// of the world sending an explicit `.beamLoopStop`.
+    private func updateBeamLoopPositions(listener: CGPoint) {
+        guard !activeBeamLoops.isEmpty else { return }
+        for (key, loop) in activeBeamLoops {
+            guard let shooter = world.ship(id: loop.shooterID) else {
+                activeBeamLoops.removeValue(forKey: key)
+                audio?.stopLoop(key: key)
+                continue
+            }
+            audio?.startOrUpdateLoop(key: key, soundID: loop.soundID,
+                                     at: CGPoint(x: shooter.position.x, y: shooter.position.y),
+                                     listener: listener)
+        }
+    }
+
     /// A brief bright line for an instant-hit beam.
     private func spawnBeam(from: CGPoint, to: CGPoint, hit: Bool) {
         let path = CGMutablePath()
@@ -1106,6 +1155,29 @@ final class GameScene: SKScene {
         line.zPosition = 12
         effectsLayer.addChild(line)
         line.run(.sequence([.fadeOut(withDuration: 0.12), .removeFromParent()]))
+    }
+
+    /// A bare, un-animated line node for a continuous `loopSound` beam — added
+    /// once per loop and repositioned every tick by `updatePersistentBeam`
+    /// instead of respawning a flash node on every reload tick.
+    private func makePersistentBeamNode() -> SKShapeNode {
+        let line = SKShapeNode()
+        line.lineWidth = 2.5
+        line.blendMode = .add
+        line.zPosition = 12
+        line.alpha = 0.9
+        effectsLayer.addChild(line)
+        return line
+    }
+
+    /// Reposition a persistent continuous-beam line for this tick's shot.
+    private func updatePersistentBeam(_ line: SKShapeNode, from: CGPoint, to: CGPoint, hit: Bool) {
+        let path = CGMutablePath()
+        path.move(to: from)
+        path.addLine(to: to)
+        line.path = path
+        line.strokeColor = hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 0.9)
+                                : SKColor(white: 0.8, alpha: 0.6)
     }
 
     /// An expanding, fading flash for an explosion.

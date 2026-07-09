@@ -15,6 +15,15 @@ private func creditString(_ n: Int) -> String {
 /// held); we step by a handful so trading a full hold isn't a hundred taps.
 private let tradeStep = 10
 
+/// Outfitter/Shipyard item-grid metrics, verified against the vendored NovaJS
+/// reference (`nova/src/spaceport/item_grid.ts`: `TILE_SIZE = [83, 54]`,
+/// `BOX_COUNT = [4, 5]`) — a fixed, paged 4×5 grid of 83×54 tiles, not a
+/// freeform wrapping scroll.
+private let gridTileSize = CGSize(width: 83, height: 54)
+private let gridCols = 4
+private let gridRows = 5
+private let gridPageSize = gridCols * gridRows
+
 // MARK: - Trade Center (commodity exchange)
 
 struct TradeCenterView: View {
@@ -144,6 +153,7 @@ struct OutfitterView: View {
     var onDone: () -> Void
 
     @State private var selectedID: Int?
+    @State private var page = 0
     private var game: NovaGame { graphics.game }
     private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
@@ -163,7 +173,9 @@ struct OutfitterView: View {
     var body: some View {
         if let frame = graphics.frame(.outfit) {
             NovaMenu(frame: frame, overlay: true) { space in
-                grid.frame(width: 318, height: 250).clipped().novaPlace(space, -373, -153)
+                grid.frame(width: gridTileSize.width * CGFloat(gridCols),
+                           height: gridTileSize.height * CGFloat(gridRows))
+                    .clipped().novaPlace(space, -373, -153)
                 detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
                 if let o = selected, let pic = graphics.outfitPicture(o) {
                     Image(decorative: pic, scale: 1).interpolation(.high).resizable().scaledToFit()
@@ -177,18 +189,35 @@ struct OutfitterView: View {
         }
     }
 
+    private var pageCount: Int { max(1, (stock.count + gridPageSize - 1) / gridPageSize) }
+    private var currentPage: Int { min(page, pageCount - 1) }
+    /// One fixed page of exactly `gridCols`×`gridRows` slots (nil-padded), matching
+    /// the authentic paged grid rather than a continuous scroll.
+    private var pageItems: [OutfRes?] {
+        let start = currentPage * gridPageSize
+        let end = min(start + gridPageSize, stock.count)
+        var items: [OutfRes?] = start < end ? stock[start..<end].map { $0 } : []
+        items += Array(repeating: nil, count: gridPageSize - items.count)
+        return items
+    }
+
     private var grid: some View {
-        ScrollView(showsIndicators: false) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 4)], spacing: 4) {
-                ForEach(stock, id: \.id) { o in
-                    ItemTile(name: o.name, image: graphics.outfitPicture(o),
-                             quantity: pilot.owned(outfit: o.id),
-                             selected: (selectedID ?? stock.first?.id) == o.id,
-                             locked: lockState(for: o) == .locked)
-                        .onTapGesture { selectedID = o.id }
+        VStack(spacing: 0) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
+                ForEach(Array(pageItems.enumerated()), id: \.offset) { _, o in
+                    if let o {
+                        ItemTile(name: o.name, image: graphics.outfitPicture(o),
+                                 quantity: pilot.owned(outfit: o.id),
+                                 selected: (selectedID ?? stock.first?.id) == o.id,
+                                 locked: lockState(for: o) == .locked)
+                            .onTapGesture { selectedID = o.id }
+                    } else {
+                        Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
+                    }
                 }
             }
-            .padding(4)
+            Spacer(minLength: 0)
+            GridPager(page: currentPage, pageCount: pageCount) { page = $0 }
         }
     }
 
@@ -202,9 +231,13 @@ struct OutfitterView: View {
 
     private func info(_ space: NovaSpace) -> some View {
         let o = selected
+        // "You Have" is the player's credit balance (matching the Shipyard's
+        // info panel and the real game, e.g. "You Have: 2.34M cr") — NOT the
+        // owned-quantity of the selected item, which is instead shown as the
+        // small badge on the item's grid tile.
         return VStack(alignment: .leading, spacing: 10) {
             infoRow("Item Price:", o.map { creditString($0.cost) } ?? "—")
-            infoRow("You Have:", o.map { "\(pilot.owned(outfit: $0.id))" } ?? "0")
+            infoRow("You Have:", creditString(pilot.state.credits))
             infoRow("Item Mass:", o.map { "\($0.mass) tons" } ?? "—")
             infoRow("Available:", "\(pilot.freeMass(galaxy: galaxy)) tons")
         }
@@ -272,6 +305,7 @@ struct ShipyardView: View {
     var onDone: () -> Void
 
     @State private var selectedID: Int?
+    @State private var page = 0
     private var game: NovaGame { graphics.game }
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
     /// hulls that opt into full hiding (Bible `shïp.Flags3` 0x0100/0x0200)
@@ -288,7 +322,9 @@ struct ShipyardView: View {
     var body: some View {
         if let frame = graphics.frame(.shipyard) {
             NovaMenu(frame: frame, overlay: true) { space in
-                grid.frame(width: 318, height: 300).novaPlace(space, -373, -153)
+                grid.frame(width: gridTileSize.width * CGFloat(gridCols),
+                           height: gridTileSize.height * CGFloat(gridRows))
+                    .novaPlace(space, -373, -153)
                 detail.frame(width: 205, height: 150).novaPlace(space, -27, -150)
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
@@ -302,20 +338,35 @@ struct ShipyardView: View {
         }
     }
 
+    private var pageCount: Int { max(1, (stock.count + gridPageSize - 1) / gridPageSize) }
+    private var currentPage: Int { min(page, pageCount - 1) }
+    private var pageItems: [ShipRes?] {
+        let start = currentPage * gridPageSize
+        let end = min(start + gridPageSize, stock.count)
+        var items: [ShipRes?] = start < end ? stock[start..<end].map { $0 } : []
+        items += Array(repeating: nil, count: gridPageSize - items.count)
+        return items
+    }
+
     private var grid: some View {
-        ScrollView(showsIndicators: false) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 4)], spacing: 4) {
-                ForEach(stock, id: \.id) { s in
-                    let picture = shipPicture(s)
-                    ItemTile(name: s.name, image: picture?.image,
-                             pixelated: picture?.isDedicated == false,
-                             quantity: s.id == pilot.state.shipType ? 1 : 0,
-                             selected: (selectedID ?? stock.first?.id) == s.id,
-                             locked: lockState(for: s) == .locked)
-                        .onTapGesture { selectedID = s.id }
+        VStack(spacing: 0) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
+                ForEach(Array(pageItems.enumerated()), id: \.offset) { _, s in
+                    if let s {
+                        let picture = shipPicture(s)
+                        ItemTile(name: s.name, image: picture?.image,
+                                 pixelated: picture?.isDedicated == false,
+                                 quantity: s.id == pilot.state.shipType ? 1 : 0,
+                                 selected: (selectedID ?? stock.first?.id) == s.id,
+                                 locked: lockState(for: s) == .locked)
+                            .onTapGesture { selectedID = s.id }
+                    } else {
+                        Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
+                    }
                 }
             }
-            .padding(4)
+            Spacer(minLength: 0)
+            GridPager(page: currentPage, pageCount: pageCount) { page = $0 }
         }
     }
 
@@ -467,31 +518,66 @@ struct ItemTile: View {
     /// right now. Dimmed the way the Bible's `cölr.GridDim` describes.
     var locked: Bool = false
 
+    // Tile chrome matches the vendored NovaJS reference (`item_grid.ts`
+    // `ItemTile.draw()`): a black-filled 83×54 cell with a thin border — dim
+    // gray (0x404040) unselected, bright red (0xFF0000) selected — not a
+    // translucent white overlay.
     var body: some View {
-        VStack(spacing: 2) {
-            ZStack {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+            VStack(spacing: 0) {
                 if let image {
                     Image(decorative: image, scale: 1)
                         .interpolation(pixelated ? .none : .high)
                         .resizable().scaledToFit()
+                        .padding(.top, 1)
                 } else {
                     Image(systemName: "shippingbox").foregroundStyle(.gray)
                 }
+                Spacer(minLength: 0)
+                NovaText(name, size: 10, width: gridTileSize.width, align: .center)
             }
-            .frame(width: 88, height: 34)
-            NovaText(name, size: 9, width: 88, align: .center)
-        }
-        .frame(width: 92, height: 54)
-        .background(selected ? Color.white.opacity(0.18) : Color.white.opacity(0.03))
-        .overlay(alignment: .topTrailing) {
             if quantity > 0 {
-                NovaText("\(quantity)", size: 9, color: Color(red: 1, green: 0.85, blue: 0.4))
-                    .padding(2)
+                NovaText("\(quantity)", size: 10, align: .trailing)
+                    .padding(.trailing, 2).padding(.top, 1)
             }
         }
-        .overlay(Rectangle().strokeBorder(selected ? Color.white.opacity(0.5) : .clear))
+        .frame(width: gridTileSize.width, height: gridTileSize.height)
+        .overlay(Rectangle().strokeBorder(selected ? Color(red: 1, green: 0, blue: 0) : Color(white: 0.25), lineWidth: 1))
         .opacity(locked ? 0.45 : 1)
         .saturation(locked ? 0 : 1)
         .contentShape(Rectangle())
+    }
+}
+
+/// Discrete-page up/down control for the Outfitter/Shipyard grids. The real
+/// game's paging arrows are a small clickable control near the grid's bottom
+/// edge; the exact baked icon asset wasn't identified in the base data
+/// (`cicn` 10000–10023 are cursor graphics, not scroll arrows), so this uses
+/// plain chevrons in the game's button-red accent rather than invented art.
+private struct GridPager: View {
+    let page: Int
+    let pageCount: Int
+    let onChange: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            arrow("chevron.up", enabled: page > 0) { onChange(page - 1) }
+            arrow("chevron.down", enabled: page < pageCount - 1) { onChange(page + 1) }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 2).padding(.top, 2)
+    }
+
+    private func arrow(_ systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 9, weight: .bold))
+                .frame(width: 16, height: 16)
+                .foregroundStyle(enabled ? .white : .white.opacity(0.3))
+                .background(Circle().fill(enabled ? Color(red: 0.75, green: 0.15, blue: 0.15) : Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 }

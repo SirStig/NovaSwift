@@ -403,17 +403,29 @@ struct GameContainerView: View {
     /// (landing already topped it off; taking off doesn't spend or grant any).
     private func depart() {
         landedSpobID = nil
-        model.pilot.save()
-        model.autosave(reason: .manual)   // catch any shopping done during this landing
-        host = GameHost(model: model, systemID: nav.currentSystemID)
-        hostSystemID = nav.currentSystemID
-        setScenePaused(false, reason: "depart")
-        syncNav(host)
-        // `landedSpobID = nil` above also fires `onChange(of: landedSpobID)`,
-        // which reasserts focus — but that fires against the *old* host/scene
-        // since this rebuild hasn't landed yet. Defer once more here so focus
-        // is grabbed after the just-rebuilt scene view actually exists.
-        grabSceneFocus(reason: "depart")
+        // Deferred a tick, same reason as the jump-rebuild block below:
+        // `landedSpobID = nil` above fires its own `onChange` (against the
+        // *old* host, since this rebuild hasn't run yet — see that handler's
+        // comment) in the same transaction the SpaceportView's
+        // `.transition(.opacity)` removal belongs to. Rebuilding `host` here
+        // — which swaps the `SpriteView`'s `scene` — inside that same
+        // transaction was the "left a planet and the game froze" bug: the
+        // new scene came back with `isPaused == false` (logged correctly)
+        // but was never actually re-presented, so the SKView kept showing
+        // the old, still-paused scene forever. `update(_:)`'s heartbeat
+        // simply stops appearing — no crash, no error — while native mouse/
+        // key events (routed to whatever the SKView *is* presenting) keep
+        // working, which is what made this look like a silent freeze rather
+        // than a crash.
+        DispatchQueue.main.async {
+            model.pilot.save()
+            model.autosave(reason: .manual)   // catch any shopping done during this landing
+            host = GameHost(model: model, systemID: nav.currentSystemID)
+            hostSystemID = nav.currentSystemID
+            setScenePaused(false, reason: "depart")
+            syncNav(host)
+            grabSceneFocus(reason: "depart")
+        }
     }
 
     /// Reattach `nav`'s live-fuel/multi-jump sources to the current session's

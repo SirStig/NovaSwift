@@ -190,6 +190,11 @@ public final class Ship {
     /// The entity this ship is currently aiming at (for turrets / guided shots
     /// and HUD). Set by the brain each think().
     public var currentTargetID: Int?
+    /// Indices into `weapons` of `loopSound` beam mounts currently held down —
+    /// drives `.beamLoopStart`/`.beamLoopStop` so the renderer plays one real
+    /// continuous loop per mount instead of retriggering a one-shot every
+    /// reload tick (up to 10×/sec) while the trigger is held.
+    var activeBeamLoopMounts: Set<Int> = []
     /// The brain requests hyperspace departure; the world despawns it past the
     /// system edge.
     public var wantsToDepart = false
@@ -410,17 +415,32 @@ public final class World {
         self.tuning = tuning
         self.combatTuning = combatTuning
         player.entityID = 0
+        refreshRoster()
     }
 
     // MARK: Roster
 
-    /// Every live ship, player first. Handy for AI perception.
-    public var allShips: [Ship] { [player] + npcs }
+    /// Every live ship, player first. Handy for AI perception. Refreshed once
+    /// per `step()` by `refreshRoster()` rather than recomputed on each access —
+    /// this is read many times per frame (every NPC's perception, every
+    /// projectile/beam hit-scan), and rebuilding `[player] + npcs` on every one
+    /// of those reads was a real per-frame allocation cost with several ships
+    /// in a fight.
+    public private(set) var allShips: [Ship] = []
+    private var shipByID: [Int: Ship] = [:]
 
-    public func ship(id: Int) -> Ship? {
-        if id == 0 { return player }
-        return npcs.first { $0.entityID == id }
+    /// Rebuild the cached roster + id index. Call after anything that can add
+    /// or remove ships this frame (spawner, despawn) and before any code reads
+    /// `allShips`/`ship(id:)`.
+    private func refreshRoster() {
+        allShips = [player] + npcs
+        shipByID = Dictionary(uniqueKeysWithValues: allShips.map { ($0.entityID, $0) })
     }
+
+    /// O(1) id → ship lookup (was a linear scan over `npcs`, called from
+    /// several hot per-frame sites: AI target validation, fire-weapons target
+    /// lookup, guided-projectile steering).
+    public func ship(id: Int) -> Ship? { shipByID[id] }
 
     /// How a new NPC came into being, so the renderer can play the right effect:
     /// a mid-system populate (no effect), a hyperspace jump-in (warp streak at the
@@ -441,6 +461,7 @@ public final class World {
         case .launch:
             events.append(.shipLaunched(entityID: ship.entityID, at: ship.position))
         }
+        refreshRoster()
         return ship.entityID
     }
 
@@ -456,6 +477,7 @@ public final class World {
         events.removeAll(keepingCapacity: true)
 
         spawner?.update(dt, world: self)
+        refreshRoster()
 
         // Player: outside intent.
         fireWeapons(from: player, intent: intent)
@@ -525,11 +547,13 @@ public final class World {
     // MARK: Weapons
 
     private func fireWeapons(from ship: Ship, intent: ControlIntent) {
-        guard intent.firePrimary || intent.fireSecondary else { return }
+        let held = intent.firePrimary || intent.fireSecondary
+        updateBeamLoops(for: ship, held: held)
+        guard held else { return }
         guard ship.isAlive else { return }
         let target = ship.currentTargetID.flatMap { self.ship(id: $0) }
 
-        for mount in ship.weapons {
+        for (mountIndex, mount) in ship.weapons.enumerated() {
             // Reload not ready / dry on ammo: the classic invisible "why didn't
             // my weapon fire" bug. Logged once per block-reason transition —
             // see `WeaponMount.logBlockedIfNeeded` — not every held-fire frame.
@@ -553,7 +577,7 @@ public final class World {
             }
 
             if spec.isBeam {
-                fireBeam(from: ship, spec: spec, aim: aim, target: target)
+                fireBeam(from: ship, mountIndex: mountIndex, spec: spec, aim: aim, target: target)
             } else {
                 let dir = Vec2.heading(aim)
                 let muzzle = ship.position + dir * (ship.radius + 4)
@@ -568,15 +592,45 @@ public final class World {
                                    vulnerableToPD: spec.vulnerableToPD, ionization: spec.ionization)
                 projectiles.append(p)
                 events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID))
-                Log.combat.debug("\(ship.name) [\(ship.entityID)] fired \(spec.name)\(target.map { " at \($0.name) [\($0.entityID)]" } ?? "")")
             }
             mount.didFire()
         }
     }
 
+    /// Start/stop a real audio loop for each `loopSound` beam mount as its
+    /// ship's trigger is held/released — independent of the reload tick, so a
+    /// continuous-fire beam sounds like one sustained loop rather than a
+    /// one-shot sample retriggered up to 10×/sec while held.
+    private func updateBeamLoops(for ship: Ship, held: Bool) {
+        for (idx, mount) in ship.weapons.enumerated() where mount.spec.isBeam && mount.spec.loopSound {
+            let looping = ship.activeBeamLoopMounts.contains(idx)
+            if held && ship.isAlive {
+                if !looping {
+                    ship.activeBeamLoopMounts.insert(idx)
+                    events.append(.beamLoopStart(shooterID: ship.entityID, mountIndex: idx,
+                                                 soundID: mount.spec.fireSoundID))
+                }
+            } else if looping {
+                ship.activeBeamLoopMounts.remove(idx)
+                events.append(.beamLoopStop(shooterID: ship.entityID, mountIndex: idx))
+            }
+        }
+    }
+
+    /// Stop any beam loops still active on `ship` — called wherever a ship
+    /// stops being simulated (disabled, destroyed, landed, departed) since
+    /// `fireWeapons` (the only other place loops stop) won't run for it again.
+    private func stopAllBeamLoops(for ship: Ship) {
+        guard !ship.activeBeamLoopMounts.isEmpty else { return }
+        for idx in ship.activeBeamLoopMounts {
+            events.append(.beamLoopStop(shooterID: ship.entityID, mountIndex: idx))
+        }
+        ship.activeBeamLoopMounts.removeAll()
+    }
+
     /// Instant-hit beam: damage the aimed target if it's within range and roughly
     /// in the beam's path.
-    private func fireBeam(from ship: Ship, spec: WeaponSpec, aim: Double, target: Ship?) {
+    private func fireBeam(from ship: Ship, mountIndex: Int, spec: WeaponSpec, aim: Double, target: Ship?) {
         let dir = Vec2.heading(aim)
         let origin = ship.position + dir * (ship.radius + 2)
         var endPoint = origin + dir * spec.range
@@ -599,8 +653,11 @@ public final class World {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization)
         }
-        events.append(.beam(from: origin, to: endPoint, hit: hitShip != nil, soundID: spec.fireSoundID))
-        Log.combat.debug("\(ship.name) [\(ship.entityID)] fired beam \(spec.name)\(hitShip.map { " hit \($0.name) [\($0.entityID)]" } ?? " (no hit)")")
+        // `loopSound` weapons get their audio from the beamLoopStart/Stop
+        // events above instead — carrying the one-shot id here too would
+        // double up (a continuous loop plus a retriggered one-shot every tick).
+        events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: origin, to: endPoint,
+                            hit: hitShip != nil, soundID: spec.loopSound ? nil : spec.fireSoundID))
     }
 
     // MARK: Projectiles
@@ -656,12 +713,18 @@ public final class World {
     private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
                           ionization: Double = 0) {
         let hadShield = ship.shield > 0
-        let killed = ship.applyDamage(shield: shield, armor: armor)
+        // Per-hit logging isn't gated like everything else in this file (no
+        // "log on change/transition" here — every hit is its own event), and
+        // splash damage can call this several times in the same instant for a
+        // clustered group. Destroy/disable transitions already get their own
+        // log lines below/at despawn, so a routine chip-damage hit doesn't
+        // need one too — this was real, uncapped log volume that scaled
+        // directly with how many ships were fighting.
+        _ = ship.applyDamage(shield: shield, armor: armor)
         if ionization > 0, ship.ionizeMax > 0 {
             ship.ionCharge = min(ship.ionizeMax, ship.ionCharge + ionization)
         }
         events.append(hadShield ? .shieldHit(at: ship.position) : .armorHit(at: ship.position))
-        Log.combat.debug("\(ship.name) [\(ship.entityID)] hit by #\(ownerID): shieldDmg=\(shield, format: .fixed(precision: 1)) armorDmg=\(armor, format: .fixed(precision: 1)) -> shield=\(ship.shield, format: .fixed(precision: 1)) armor=\(ship.armor, format: .fixed(precision: 1))\(killed ? " [LETHAL]" : "")")
 
         // Player fire provokes the victim and dents the player's record.
         if ownerID == 0 && !ship.isPlayer {
@@ -690,6 +753,7 @@ public final class World {
             ship.currentTargetID = nil
             ship.brain?.targetID = nil
             clearTarget(ship.entityID)               // everyone stops shooting it
+            stopAllBeamLoops(for: ship)               // a hulk doesn't fire — stop its beam loop
             events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
             Log.combat.debug("\(ship.name) [\(ship.entityID)] disabled (armor at/below \(Int(ship.disableArmorFraction * 100))% threshold) — now a drifting hulk")
         }
@@ -708,12 +772,14 @@ public final class World {
                 Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
                 // Clear any targeting of the dead ship.
                 clearTarget(npc.entityID)
+                stopAllBeamLoops(for: npc)
                 continue
             }
             // Landed on a stellar object → vanished into the spaceport (no wreck).
             if npc.wantsToLand, let sid = npc.landingSpob {
                 events.append(.shipLanded(entityID: npc.entityID, spobID: sid, at: npc.position))
                 clearTarget(npc.entityID)
+                stopAllBeamLoops(for: npc)
                 continue
             }
             // Departed past the system edge → gone to hyperspace.
@@ -723,17 +789,20 @@ public final class World {
                     events.append(.shipDeparted(entityID: npc.entityID, at: npc.position,
                                                 heading: npc.angle))
                     clearTarget(npc.entityID)
+                    stopAllBeamLoops(for: npc)
                     continue
                 }
             }
             // A cold hulk that's drifted long enough is quietly retired.
             if npc.disabled && npc.disabledClock > 25 {
                 clearTarget(npc.entityID)
+                stopAllBeamLoops(for: npc)
                 continue
             }
             survivors.append(npc)
         }
         npcs = survivors
+        refreshRoster()
         // Player death is left to the app (respawn / game-over UI).
     }
 

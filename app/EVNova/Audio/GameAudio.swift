@@ -141,6 +141,25 @@ final class GameAudio: ObservableObject {
         engine.play(buffer, volume: atten, pan: pan)
     }
 
+    /// Start (or reposition) a continuous positional loop, keyed by a
+    /// caller-chosen id (e.g. one per firing ship+mount) — for `loopSound`
+    /// weapons, so a held beam trigger sounds like one sustained loop instead
+    /// of a one-shot sample retriggered every reload tick. Stops the loop if
+    /// it's fully attenuated by distance.
+    func startOrUpdateLoop(key: String, soundID: Int, at source: CGPoint, listener: CGPoint, range: CGFloat = 3000) {
+        guard !settings.muteAll, let buffer = library.buffer(for: soundID) else { return }
+        let dx = source.x - listener.x
+        let dy = source.y - listener.y
+        let dist = (dx * dx + dy * dy).squareRoot()
+        let atten = Float(max(0, 1 - dist / max(1, range)))
+        let pan = Float(max(-1, min(1, dx / max(1, range)))) * 0.85
+        guard atten > 0.001 else { engine.stopLoop(id: key); return }
+        engine.playLoop(id: key, buffer: buffer, volume: atten, pan: pan)
+    }
+
+    /// Stop a loop started by `startOrUpdateLoop`. No-op if not looping.
+    func stopLoop(key: String) { engine.stopLoop(id: key) }
+
     // MARK: Hailing
 
     /// Play a hailed government's voice line — the "Acknowledge" bank normally,
