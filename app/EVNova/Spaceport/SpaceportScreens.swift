@@ -495,7 +495,7 @@ struct BarView: View {
             }
         }
         .sheet(isPresented: $showGambling) {
-            GamblingView(pilot: pilot, onDone: { showGambling = false })
+            GamblingView(graphics: graphics, pilot: pilot, onDone: { showGambling = false })
         }
     }
 }

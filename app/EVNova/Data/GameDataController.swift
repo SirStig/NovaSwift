@@ -222,4 +222,19 @@ final class GameDataController: ObservableObject {
         // Prefer a file that looks like the main music track.
         return tracks.first { $0.lastPathComponent.lowercased().contains("music") } ?? tracks.first
     }
+
+    /// The Galaxy Racing Network holovid for race outcome `index` (1-4), shipped
+    /// alongside the base data as "Race 1.mov".."Race 4.mov" — each video's
+    /// winning ship colour is confirmed to match its index (1=Blue, 2=Green,
+    /// 3=Yellow, 4=Red, per PICT 8530-8533/8550-8553's colour order). Backs the
+    /// Bar's authentic Gambling screen (`STR# 150` #11/14/15: Gamble/Bet 1000/
+    /// Bet 5000).
+    func raceVideoURL(index: Int) -> URL? {
+        guard let baseDir = resolveBaseDir() else { return nil }
+        let name = "Race \(index).mov"
+        let direct = baseDir.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: direct.path) { return direct }
+        guard let e = FileManager.default.enumerator(at: baseDir, includingPropertiesForKeys: nil) else { return nil }
+        return e.compactMap { $0 as? URL }.first { $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame }
+    }
 }
