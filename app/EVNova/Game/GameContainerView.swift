@@ -440,16 +440,13 @@ struct GameContainerView: View {
             // window with the sidebar drawn over the top of it.
             let sidebarWidth = Self.sidebarWidth(in: geo.size, style: host.hudStyle)
             let playWidth = max(0, geo.size.width - sidebarWidth)
+            // Click/tap a ship to target it, a planet to set it as the nav
+            // destination, or empty space to clear both selections — handled
+            // natively in `GameScene.mouseDown`/`touchesBegan`, not via a
+            // SwiftUI gesture (unreliable layered on `SpriteView`'s native view).
             SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
                 .frame(width: playWidth, height: geo.size.height)
                 .position(x: playWidth / 2, y: geo.size.height / 2)
-                // Click/tap a ship to target it, a planet to set it as the nav
-                // destination, or empty space to clear both selections. The
-                // gesture is on the SpriteView itself so its gesture-local
-                // point already matches what `convertPoint(fromView:)` expects.
-                .gesture(SpatialTapGesture().onEnded { value in
-                    host.scene.selectAt(scenePoint: host.scene.convertPoint(fromView: value.location))
-                })
         }
         .ignoresSafeArea()
         .focusable()

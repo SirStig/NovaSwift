@@ -29,6 +29,17 @@ import Foundation
     return Int(Int32(bitPattern: v))
 }
 
+/// A single 64-bit big-endian flag field (EV Nova's `Contribute`/`Require`
+/// pairs — ResForge's `QB64` template type reads them as one 8-byte value,
+/// not two independent Int32s).
+@inline(__always) private func au64(_ d: Data, _ off: Int) -> UInt64 {
+    guard off >= 0, off + 8 <= d.count else { return 0 }
+    let b = d.startIndex + off
+    var v: UInt64 = 0
+    for i in 0..<8 { v = (v << 8) | UInt64(d[b + i]) }
+    return v
+}
+
 /// Read a NUL-terminated Mac Roman C-string from a fixed-size field at `off`,
 /// reading at most `maxLen` bytes. Trailing garbage after the NUL is ignored.
 @inline(__always) private func acstr(_ d: Data, _ off: Int, _ maxLen: Int) -> String {
@@ -127,6 +138,20 @@ public struct OutfRes {
     /// (`.none`/`.unknown`) are stripped.
     public let modifiers: [(type: OutfitModType, value: Int)]
 
+    // Mission/story-gated availability (Nova Bible; offsets verified against
+    // ResForge's `oütf` TMPL — see docs/DATA_FORMAT.md). Distinct from
+    // `techLevel`, which fully hides an item; these instead default to
+    // "shown, greyed, unpurchasable" (see `Flags` 0x0100/0x4000 below).
+    public let flags: UInt16        // @12  0x0008 can't-sell · 0x0100/0x4000 hide-rules · 0x0800 sell-anywhere-ignore-reqs
+    public let contribute: UInt64   // @30  bits this outfit contributes toward other items' Require
+    public let require: UInt64      // @38  bits that must be met (via ship/outfit Contribute) to buy this
+    public let availBits: String    // @46  NCB control-bit test expression gating purchase
+    /// Which governments' stellars `require`'s bits apply at: -1 = everywhere;
+    /// see the Bible's `RequireGovt` range encoding (128-383 this govt/allies
+    /// only, 1128-1383 + independent, 2128-2383 all-but, 3128-3383 all-but +
+    /// independent). @1010.
+    public let requireGovt: Int
+
     public init(_ r: Resource) {
         id = r.id
         name = r.name.isEmpty ? "Outfit \(r.id)" : r.name
@@ -135,6 +160,7 @@ public struct OutfRes {
         mass = ai16(d, 2)
         techLevel = ai16(d, 4)
         maxInstallable = ai16(d, 10)
+        flags = au16(d, 12)
         cost = ai32(d, 14)
         // Four modifier slots at 6, 18, 22, 26 — each is (Int16 type, Int16 value).
         var mods: [(OutfitModType, Int)] = []
@@ -144,7 +170,19 @@ public struct OutfRes {
             mods.append((t, ai16(d, pos + 2)))
         }
         modifiers = mods
+        contribute = au64(d, 30)
+        require = au64(d, 38)
+        availBits = acstr(d, 46, 255)
+        requireGovt = ai16(d, 1010)
     }
+
+    /// Full-hide opt-ins (Bible `oütf.Flags`): normally a locked item still
+    /// shows greyed-out; these bits mean "omit it from the list entirely"
+    /// unless the player already owns one.
+    public var hidesWhenLocked: Bool { flags & 0x0100 != 0 || flags & 0x4000 != 0 }
+    /// "This item can be sold anywhere, regardless of tech level,
+    /// requirements, or mission bits" (Bible, `Flags` 0x0800).
+    public var ignoresRequirements: Bool { flags & 0x0800 != 0 }
 
     /// Sum of one modifier kind across this outfit's slots (0 if absent).
     public func value(of kind: OutfitModType) -> Int {

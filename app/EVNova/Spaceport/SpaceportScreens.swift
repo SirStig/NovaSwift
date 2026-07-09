@@ -145,9 +145,18 @@ struct OutfitterView: View {
 
     @State private var selectedID: Int?
     private var game: NovaGame { graphics.game }
-    private var stock: [OutfRes] { game.outfitsSold(at: spob) }
+    private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
+    /// Tech-level-eligible stock, with any items that opt into full hiding
+    /// (Bible `oütf.Flags` 0x0100/0x4000) dropped when the player doesn't meet
+    /// their Availability/Require and doesn't already own one.
+    private var stock: [OutfRes] {
+        game.outfitsSold(at: spob).filter { lockState(for: $0) != .hidden }
+    }
     private var selected: OutfRes? {
         stock.first { $0.id == selectedID } ?? stock.first
+    }
+    private func lockState(for o: OutfRes) -> LockState {
+        game.lockState(for: o, pilot: pilot.state, at: spob, diplomacy: diplomacy)
     }
 
     var body: some View {
@@ -173,7 +182,8 @@ struct OutfitterView: View {
                 ForEach(stock, id: \.id) { o in
                     ItemTile(name: o.name, image: graphics.outfitPicture(o),
                              quantity: pilot.owned(outfit: o.id),
-                             selected: (selectedID ?? stock.first?.id) == o.id)
+                             selected: (selectedID ?? stock.first?.id) == o.id,
+                             locked: lockState(for: o) == .locked)
                         .onTapGesture { selectedID = o.id }
                 }
             }
@@ -216,7 +226,7 @@ struct OutfitterView: View {
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                   width: 60, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) } ?? false) {
+                   width: 60, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) && lockState(for: $0) == .available } ?? false) {
             guard let o else {
                 Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
@@ -262,8 +272,16 @@ struct ShipyardView: View {
 
     @State private var selectedID: Int?
     private var game: NovaGame { graphics.game }
-    private var stock: [ShipRes] { game.shipsSold(at: spob) }
+    /// Tech-level-eligible stock, with any hulls that opt into full hiding
+    /// (Bible `shïp.Flags3` 0x0100/0x0200) dropped when the player doesn't
+    /// meet their Availability/Require and don't already fly one.
+    private var stock: [ShipRes] {
+        game.shipsSold(at: spob).filter { lockState(for: $0) != .hidden }
+    }
     private var selected: ShipRes? { stock.first { $0.id == selectedID } ?? stock.first }
+    private func lockState(for s: ShipRes) -> LockState {
+        game.lockState(for: s, pilot: pilot.state)
+    }
 
     var body: some View {
         if let frame = graphics.frame(.shipyard) {
@@ -288,7 +306,8 @@ struct ShipyardView: View {
                 ForEach(stock, id: \.id) { s in
                     ItemTile(name: s.name, image: shipImage(s),
                              quantity: s.id == pilot.state.shipType ? 1 : 0,
-                             selected: (selectedID ?? stock.first?.id) == s.id)
+                             selected: (selectedID ?? stock.first?.id) == s.id,
+                             locked: lockState(for: s) == .locked)
                         .onTapGesture { selectedID = s.id }
                 }
             }
@@ -341,7 +360,10 @@ struct ShipyardView: View {
     // ~110-150px to the right of its authentic position.
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
-        let canBuy = s.map { $0.id != pilot.state.shipType && pilot.state.credits >= pilot.netPrice(of: $0, game: game) } ?? false
+        let canBuy = s.map {
+            $0.id != pilot.state.shipType && pilot.state.credits >= pilot.netPrice(of: $0, game: game)
+                && lockState(for: $0) == .available
+        } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
                    width: 60, enabled: canBuy) {
             guard let s else {
@@ -406,6 +428,9 @@ struct ItemTile: View {
     let image: CGImage?
     var quantity: Int = 0
     var selected: Bool = false
+    /// Mission/story-gated: still shown (Bible default), but can't be bought
+    /// right now. Dimmed the way the Bible's `cölr.GridDim` describes.
+    var locked: Bool = false
 
     var body: some View {
         VStack(spacing: 2) {
@@ -428,6 +453,8 @@ struct ItemTile: View {
             }
         }
         .overlay(Rectangle().strokeBorder(selected ? Color.white.opacity(0.5) : .clear))
+        .opacity(locked ? 0.45 : 1)
+        .saturation(locked ? 0 : 1)
         .contentShape(Rectangle())
     }
 }

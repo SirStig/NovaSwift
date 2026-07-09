@@ -1,6 +1,11 @@
 import SpriteKit
 import EVNovaKit
 import EVNovaEngine
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// A stellar object to render in the scene (planet / station / wormhole).
 struct PlanetVisual {
@@ -96,6 +101,16 @@ final class GameScene: SKScene {
     private var galaxy: Galaxy?
     private let npcLayer = SKNode()
     private let effectsLayer = SKNode()
+
+    // Animated targeting brackets: one reusable node for the ship target, one
+    // for the planet nav-selection, positioned/recolored straight from live
+    // sim data every frame (not tied to `npcNodes`/`planetNodes` render-node
+    // lifecycle, so they can never desync from what's actually selected).
+    private let selectionLayer = SKNode()
+    private let shipBracket = SKShapeNode()
+    private let planetBracket = SKShapeNode()
+    private var lockedShipBracketID: Int?
+    private var lockedPlanetBracketID: Int?
     private var npcNodes: [Int: NPCNode] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
     private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
@@ -179,6 +194,14 @@ final class GameScene: SKScene {
         addChild(projectileLayer)
         effectsLayer.zPosition = 12
         addChild(effectsLayer)
+        selectionLayer.zPosition = 13
+        for bracket in [shipBracket, planetBracket] {
+            bracket.fillColor = .clear
+            bracket.lineWidth = 1.5
+            bracket.isHidden = true
+            selectionLayer.addChild(bracket)
+        }
+        addChild(selectionLayer)
         buildShip()
         if arrivedViaJump {
             // The player just jumped in: place the ship/camera immediately (don't
@@ -194,6 +217,24 @@ final class GameScene: SKScene {
         // Arriving in the system.
         audio?.play(.hyperspaceArrive)
     }
+
+    // MARK: Click/tap-to-select
+    //
+    // Handled natively here (not via a SwiftUI `.gesture()` on the hosting
+    // `SpriteView`) because a SwiftUI gesture layered on top of the real
+    // `NSView`/`UIView` a `SpriteView` wraps is unreliable — the native
+    // view's own responder chain competes with SwiftUI's gesture bridging
+    // for the same event. `location(in:)` is camera-aware, so this needs no
+    // manual camera-transform math.
+    #if os(macOS)
+    override func mouseDown(with event: NSEvent) {
+        selectAt(scenePoint: event.location(in: self))
+    }
+    #else
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let t = touches.first { selectAt(scenePoint: t.location(in: self)) }
+    }
+    #endif
 
     private func buildPlanets() {
         for p in planetVisuals {

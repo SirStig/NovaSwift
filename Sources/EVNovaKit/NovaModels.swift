@@ -25,6 +25,33 @@ import Foundation
     return (UInt32(d[b]) << 24) | (UInt32(d[b + 1]) << 16) | (UInt32(d[b + 2]) << 8) | UInt32(d[b + 3])
 }
 
+/// A single 64-bit big-endian flag field (`Contribute`/`Require` — ResForge's
+/// `QB64` template type reads them as one 8-byte value, not two Int32s).
+@inline(__always) private func u64(_ d: Data, _ off: Int) -> UInt64 {
+    guard off >= 0, off + 8 <= d.count else { return 0 }
+    let b = d.startIndex + off
+    var v: UInt64 = 0
+    for i in 0..<8 { v = (v << 8) | UInt64(d[b + i]) }
+    return v
+}
+
+/// Read a NUL-terminated Mac Roman C-string from a fixed-size field at `off`,
+/// reading at most `maxLen` bytes. Trailing garbage after the NUL is ignored.
+@inline(__always) private func cstr(_ d: Data, _ off: Int, _ maxLen: Int) -> String {
+    guard off >= 0, off < d.count else { return "" }
+    let start = d.startIndex + off
+    let end = min(start + maxLen, d.endIndex)
+    var bytes: [UInt8] = []
+    var i = start
+    while i < end {
+        let b = d[i]
+        if b == 0 { break }
+        bytes.append(b)
+        i += 1
+    }
+    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+}
+
 // MARK: spïn — sprite descriptor (which rlëD, and its tile grid)
 
 public struct SpinRes {
@@ -196,6 +223,17 @@ public struct ShipRes {
     /// weapons on top of the hull's stock weapons.
     public let outfits: [(id: Int, count: Int)]
 
+    // Mission/story-gated availability (Nova Bible; offsets verified against
+    // ResForge's `shïp` TMPL — see docs/DATA_FORMAT.md). Distinct from
+    // `techLevel`, which fully hides a hull; these default to "shown, greyed,
+    // unpurchasable" (see `Flags3` 0x0100/0x0200 below). Unlike outfits, ships
+    // have no documented `RequireGovt` — the Bible's shïp section never
+    // mentions govt-scoped requirements, so `require` applies everywhere.
+    public let contribute: UInt64   // @100 bits this hull contributes toward outfits'/ships' Require
+    public let availBits: String    // @108 NCB control-bit test expression gating purchase
+    public let require: UInt64      // @896 bits that must be met (via owned outfits/current ship) to buy
+    public let flags3: UInt16       // @1830  0x0100 hide-if-unavailable · 0x0200 hide-if-require-unmet
+
     public init(_ r: Resource) {
         id = r.id
         name = r.name.isEmpty ? "Ship \(r.id)" : r.name
@@ -230,6 +268,10 @@ public struct ShipRes {
         flags2 = UInt16(truncatingIfNeeded: u16(d, 98))
         deionize = i16(d, 874)
         ionizeMax = i16(d, 876)
+        contribute = u64(d, 100)
+        availBits = cstr(d, 108, 255)
+        require = u64(d, 896)
+        flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))
 
         // Stock weapons: 4 primary slots (ids @18, counts @26, ammo @34) plus
         // 4 extended slots stored far down the resource (ids @1742, …).
@@ -256,6 +298,11 @@ public struct ShipRes {
         }
         outfits = o
     }
+
+    /// Full-hide opt-ins (Bible `shïp.Flags3`): normally a locked hull still
+    /// shows greyed-out; these bits mean "omit it from the shipyard list
+    /// entirely" instead.
+    public var hidesWhenLocked: Bool { flags3 & 0x0100 != 0 || flags3 & 0x0200 != 0 }
 }
 
 // MARK: sÿst — star system (map position, hyperspace links, stellar objects)
