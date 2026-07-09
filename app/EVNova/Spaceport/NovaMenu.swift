@@ -56,7 +56,7 @@ struct NovaMenu<Content: View>: View {
                     .interpolation(.high)
                     .resizable()
                     .frame(width: nw, height: nh)
-                content(space)
+                content(space).novaTextScale(1)
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .scaleEffect(scale)
@@ -88,7 +88,7 @@ struct NovaText: View {
 
     var body: some View {
         Text(text)
-            .font(.custom("Geneva", size: size).weight(weight))
+            .font(.custom(NovaFontRole.body.family, size: size).weight(weight))
             .foregroundStyle(color)
             .multilineTextAlignment(align)
             .frame(width: width,
@@ -132,9 +132,8 @@ struct NovaButtonStyle: ButtonStyle {
         .frame(width: 26 + width, height: 25)
         .overlay(
             Text(title)
-                .font(.custom("Geneva", size: 12))
+                .novaFont(.button)
                 .foregroundStyle(labelColor(state))
-                .lineLimit(1)
         )
         .contentShape(Rectangle())
     }

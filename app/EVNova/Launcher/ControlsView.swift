@@ -12,7 +12,7 @@ struct ControlsView: View {
         List {
             Section {
                 Text("Tap a key to rebind, then press the new key (Esc cancels). These match EV Nova's scheme and drive keyboard play.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .novaFont(.caption).foregroundStyle(.secondary)
             }
             ForEach(GameAction.Category.allCases) { category in
                 Section(category.rawValue) {
@@ -30,6 +30,7 @@ struct ControlsView: View {
                 }
             }
         }
+        .novaResponsive()
         .navigationTitle("Controls")
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .focusable()
@@ -50,13 +51,13 @@ struct ControlsView: View {
 
     private func row(_ action: GameAction) -> some View {
         HStack {
-            Text(action.title)
+            Text(action.title).novaFont(.body)
             Spacer()
             Button {
                 capturing = (capturing == action) ? nil : action
             } label: {
                 Text(capturing == action ? "Press a key…" : KeyToken.label(model.bindings.token(for: action)))
-                    .font(.system(.callout, design: .monospaced).weight(.semibold))
+                    .novaFont(.hud, weight: .semibold)
                     .foregroundStyle(capturing == action ? Color.accentColor : .primary)
                     .frame(minWidth: 64)
                     .padding(.vertical, 5).padding(.horizontal, 10)

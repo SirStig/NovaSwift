@@ -28,6 +28,7 @@ struct PluginsView: View {
             case .store: PluginStoreView()
             }
         }
+        .novaResponsive()
         .navigationTitle("Plug-ins")
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
@@ -53,8 +54,8 @@ struct PluginsView: View {
         let prebundled = model.data.isPrebundled(plugin)
         return HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(plugin.name).font(.headline)
-                Text(kind.label).font(.caption).foregroundStyle(.secondary)
+                Text(plugin.name).novaFont(.heading)
+                Text(kind.label).novaFont(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if !prebundled {
@@ -82,8 +83,8 @@ struct ContentUnavailableViewCompat: View {
         VStack(spacing: 8) {
             Image(systemName: "puzzlepiece.extension")
                 .font(.largeTitle).foregroundStyle(.secondary)
-            Text(title).font(.headline)
-            Text(message).font(.caption).foregroundStyle(.secondary)
+            Text(title).novaFont(.heading)
+            Text(message).novaFont(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)

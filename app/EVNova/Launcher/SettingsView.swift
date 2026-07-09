@@ -24,6 +24,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .novaResponsive()
         .navigationTitle("Settings")
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .onAppear {
@@ -106,7 +107,7 @@ struct SettingsView: View {
         let ids = model.audio.availableSoundIDs()
         if ids.isEmpty {
             Text("Import game data to preview sounds.")
-                .font(.caption).foregroundStyle(.secondary)
+                .novaFont(.caption).foregroundStyle(.secondary)
         } else {
             Picker("Preview sound", selection: $previewSoundID) {
                 ForEach(ids, id: \.self) { id in
@@ -168,10 +169,10 @@ struct SettingsView: View {
                            disabled: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title).font(.subheadline)
+                Text(title).novaFont(.body)
                 Spacer()
                 Text("\(Int((value.wrappedValue) * 100))%")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .novaFont(.caption).monospacedDigit().foregroundStyle(.secondary)
             }
             Slider(value: value, in: range)
         }

@@ -91,6 +91,7 @@ public final class Galaxy {
 
     private var weaponCache: [Int: WeaponSpec] = [:]
     private var shipCache: [Int: ShipSpec] = [:]
+    private var diplomacyCache: Diplomacy?
 
     public init(game: NovaGame, flightTuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
@@ -99,8 +100,14 @@ public final class Galaxy {
         self.combatTuning = combatTuning
     }
 
-    /// The diplomacy table for every government the data defines.
-    public func makeDiplomacy() -> Diplomacy { Diplomacy(govts: game.govts()) }
+    /// The diplomacy table for every government the data defines. Built once
+    /// and cached — every AI decision this session reads it repeatedly.
+    public func makeDiplomacy() -> Diplomacy {
+        if let cached = diplomacyCache { return cached }
+        let d = Diplomacy(govts: game.govts())
+        diplomacyCache = d
+        return d
+    }
 
     // MARK: Specs
 

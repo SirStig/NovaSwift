@@ -84,6 +84,7 @@ struct GalaxyMapView: View {
 
             chrome
         }
+        .novaResponsive()
         .onAppear { rebuildGovtColors() }
     }
 
@@ -172,6 +173,7 @@ struct GalaxyMapView: View {
 
         let neighborIDs = Set(cur.links)
         let showLabels = zoom >= 1.1
+        let labelSize = NovaFontRole.hud.baseSize * min(min(size.width / 1024, size.height / 768), 2.2)
 
         for s in systems {
             let vis = visibility[s.id] ?? .unknown
@@ -224,7 +226,7 @@ struct GalaxyMapView: View {
                     : .white.opacity(0.4)
                 let weight: Font.Weight = isCurrent || isDestination ? .bold : .regular
                 ctx.draw(
-                    Text(name).font(.system(size: 10, design: .monospaced).weight(weight))
+                    Text(name).font(.custom(NovaFontRole.hud.family, size: labelSize).weight(weight))
                         .foregroundStyle(color),
                     at: CGPoint(x: p.x, y: p.y + r + 9)
                 )
@@ -286,7 +288,7 @@ struct GalaxyMapView: View {
     private var chrome: some View {
         VStack {
             HStack {
-                Text("GALAXY MAP").font(.system(.subheadline, design: .monospaced).weight(.bold))
+                Text("GALAXY MAP").novaFont(.heading, weight: .bold)
                     .foregroundStyle(amber)
                 Spacer()
                 zoomButton("minus.magnifyingglass") { setZoom(zoom / 1.4) }
@@ -319,15 +321,15 @@ struct GalaxyMapView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("COURSE: \(destName) — \(nav.route.count) JUMP\(nav.route.count == 1 ? "" : "S")")
-                        .font(.system(size: 11, design: .monospaced).weight(.semibold))
+                        .novaFont(.hud, weight: .semibold)
                         .foregroundStyle(nav.route.count <= nav.availableJumps ? routeGreen : routeWarn)
                     Text("FUEL: \(Int(nav.currentFuel))/\(Int(nav.shipMaxFuel))  (\(nav.availableJumps) jump\(nav.availableJumps == 1 ? "" : "s"))")
-                        .font(.system(size: 9, design: .monospaced))
+                        .novaFont(.hud).monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
                 Button(action: onJump) {
                     Text(canGo ? (hops > 1 ? "JUMP ×\(hops)" : "JUMP") : "NO FUEL")
-                        .font(.system(size: 11, design: .monospaced).weight(.bold))
+                        .novaFont(.button, weight: .bold)
                         .padding(.horizontal, 14).padding(.vertical, 6)
                         .background((canGo ? routeGreen : routeWarn).opacity(0.18), in: Capsule())
                         .overlay(Capsule().strokeBorder((canGo ? routeGreen : routeWarn).opacity(0.6)))
@@ -340,7 +342,7 @@ struct GalaxyMapView: View {
             .background(.black.opacity(0.5), in: Capsule())
         } else {
             Text("Click a system to plot a course • drag to pan • pinch or +/− to zoom")
-                .font(.caption2).foregroundStyle(.secondary)
+                .novaFont(.caption).foregroundStyle(.secondary)
         }
     }
 

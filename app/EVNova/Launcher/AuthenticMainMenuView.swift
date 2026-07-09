@@ -189,10 +189,10 @@ struct AuthenticMainMenuView: View {
         if let save = model.roster.mostRecent {
             VStack(spacing: 3) {
                 Text("Continue as \(save.displayName)")
-                    .font(.custom("Geneva", size: 13)).fontWeight(.bold)
+                    .novaFont(.heading, weight: .bold)
                     .foregroundStyle(novaAmber)
                 Text("\(save.snapshot.shipName) · \(save.snapshot.systemName.isEmpty ? "—" : save.snapshot.systemName) · \(save.snapshot.credits.formatted()) cr")
-                    .font(.custom("Geneva", size: 11))
+                    .novaFont(.caption)
                     .foregroundStyle(novaAmber.opacity(0.6))
             }
             .multilineTextAlignment(.center)

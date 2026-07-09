@@ -36,13 +36,14 @@ struct StoryGuideView: View {
         .frame(minWidth: 460, minHeight: 560)
         .background(EVTheme.panel)
         .foregroundStyle(EVTheme.text)
+        .novaResponsive()
     }
 
     private var header: some View {
         HStack {
             Image(systemName: "person.crop.circle.badge.questionmark")
                 .foregroundStyle(EVTheme.accent)
-            Text("Pilot Log").font(.headline)
+            Text("Pilot Log").novaFont(.heading)
             Spacer()
             if let onClose {
                 Button(action: onClose) { Image(systemName: "xmark.circle.fill") }
@@ -64,7 +65,7 @@ struct PilotInfoView: View {
             VStack(alignment: .leading, spacing: 18) {
                 // Headline stats
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(pilot.name).font(.title2.bold())
+                    Text(pilot.name).novaFont(.heading, weight: .bold)
                     HStack(spacing: 16) {
                         stat("Credits", "\(pilot.credits.formatted()) cr")
                         stat("Ship", pilot.shipName)
@@ -79,22 +80,22 @@ struct PilotInfoView: View {
                 if !pilot.ranks.isEmpty {
                     section("Ranks & Titles") {
                         ForEach(pilot.ranks, id: \.self) { r in
-                            Label(r, systemImage: "rosette").font(.callout)
+                            Label(r, systemImage: "rosette").novaFont(.body)
                         }
                     }
                 }
 
                 section("Standings") {
                     if pilot.relations.isEmpty {
-                        Text("No notable reputations yet.").foregroundStyle(.secondary).font(.callout)
+                        Text("No notable reputations yet.").foregroundStyle(.secondary).novaFont(.body)
                     } else {
                         ForEach(pilot.relations) { rel in
                             HStack {
-                                Text(rel.govt)
+                                Text(rel.govt).novaFont(.body)
                                 Spacer()
                                 Text(standingText(rel.standing))
                                     .foregroundStyle(rel.standing >= 0 ? .green : .red)
-                                    .font(.callout.monospacedDigit())
+                                    .novaFont(.body).monospacedDigit()
                             }
                         }
                     }
@@ -102,13 +103,13 @@ struct PilotInfoView: View {
 
                 section("Active Missions") {
                     if pilot.activeMissions.isEmpty {
-                        Text("No active missions.").foregroundStyle(.secondary).font(.callout)
+                        Text("No active missions.").foregroundStyle(.secondary).novaFont(.body)
                     } else {
                         ForEach(pilot.activeMissions) { m in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(m.name).font(.callout.bold())
-                                Text(m.objective).font(.caption).foregroundStyle(.secondary)
-                                Text("Reward: \(m.reward)").font(.caption2).foregroundStyle(EVTheme.accent)
+                                Text(m.name).novaFont(.body, weight: .bold)
+                                Text(m.objective).novaFont(.caption).foregroundStyle(.secondary)
+                                Text("Reward: \(m.reward)").novaFont(.caption).foregroundStyle(EVTheme.accent)
                             }
                             .padding(.vertical, 2)
                         }
@@ -116,7 +117,7 @@ struct PilotInfoView: View {
                 }
 
                 section("Escorts") {
-                    Text("No escorts hired.").foregroundStyle(.secondary).font(.callout)
+                    Text("No escorts hired.").foregroundStyle(.secondary).novaFont(.body)
                 }
             }
             .padding(16)
@@ -126,14 +127,14 @@ struct PilotInfoView: View {
 
     private func stat(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label.uppercased()).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.callout.bold())
+            Text(label.uppercased()).novaFont(.caption).foregroundStyle(.secondary)
+            Text(value).novaFont(.body, weight: .bold)
         }
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.subheadline.bold()).foregroundStyle(EVTheme.accent)
+            Text(title).novaFont(.body, weight: .bold).foregroundStyle(EVTheme.accent)
             content()
         }
     }

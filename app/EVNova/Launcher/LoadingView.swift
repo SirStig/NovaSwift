@@ -22,29 +22,34 @@ struct LoadingView: View {
             VStack(spacing: 22) {
                 AppMark().frame(width: 96, height: 96)
                 Text("EV NOVA")
-                    .font(.system(size: 34, weight: .heavy, design: .rounded)).tracking(6)
+                    .novaFont(.title, weight: .heavy, size: 34).tracking(6)
                     .foregroundStyle(.white)
                 ProgressView(value: progress)
                     .frame(width: 240)
                     .tint(amber)
                 Text(model.data.status)
-                    .font(.caption).foregroundStyle(.secondary)
+                    .novaFont(.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 320)
                 Text(tips.randomElement() ?? "")
-                    .font(.footnote.italic()).foregroundStyle(.tertiary)
+                    .novaFont(.caption).italic().foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
                     .padding(.top, 6)
             }
             .padding(40)
         }
+        .novaResponsive()
         .task {
             withAnimation(.easeOut(duration: 0.3)) { progress = 0.35 }
             // Load/merge the data set (base + enabled plug-ins).
             model.data.reloadIfNeeded()
-            withAnimation(.easeOut(duration: 0.4)) { progress = 1.0 }
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            withAnimation(.easeOut(duration: 0.7)) { progress = 0.7 }
+            // Fully decode the catalog + hull sprites now, off the main thread,
+            // so gameplay never pays that cost lazily mid-frame (first Shipyard/
+            // Outfitter visit, first time a hull is seen after a jump).
+            await model.data.prewarm()
+            withAnimation(.easeOut(duration: 0.3)) { progress = 1.0 }
             model.finishLoadingIntoGame()
         }
     }

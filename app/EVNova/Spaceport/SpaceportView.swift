@@ -42,8 +42,8 @@ struct SpaceportView: View {
                                                   galaxy: galaxy, onDone: { screen = .hub })
                     case .shipyard: ShipyardView(graphics: graphics, spob: spob, pilot: pilot,
                                                  galaxy: galaxy, onDone: { screen = .hub })
-                    case .bar:      BarView(graphics: graphics, spob: spob, onDone: { screen = .hub })
-                    case .missions: MissionBBSView(graphics: graphics, spob: spob, onDone: { screen = .hub })
+                    case .bar:      BarView(graphics: graphics, spob: spob, pilot: pilot, onDone: { screen = .hub })
+                    case .missions: MissionBBSView(graphics: graphics, spob: spob, pilot: pilot, onDone: { screen = .hub })
                     }
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
@@ -78,9 +78,11 @@ struct SpaceportView: View {
                 }
                 .frame(width: 301, height: 175)
                 .novaPlace(space, -149, 70)
-                // Player readout on the left panel.
-                leftPanel.novaPlace(space, -300, 62)
-                // Service buttons on the right panel.
+                // Service buttons flank the description panel left and right
+                // (confirmed by PICT 8500's symmetric left/right button
+                // panels — see `buttonColumn`). Ship name/credits are no
+                // longer duplicated here since the HUD sidebar stays visible
+                // while landed.
                 buttonColumn(space)
             }
         } else {
@@ -89,36 +91,25 @@ struct SpaceportView: View {
         }
     }
 
-    private var leftPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            NovaText(pilot.state.shipName.isEmpty ? game.ship(pilot.state.shipType)?.name ?? "" : pilot.state.shipName,
-                     size: 11, color: Color(white: 0.85), width: 130, align: .leading)
-            NovaText(credits(pilot.state.credits), size: 11, color: Color(red: 1, green: 0.85, blue: 0.4),
-                     width: 130, align: .leading)
-        }
-    }
+    /// Fixed per-role slot offsets (relative to the frame's centre). `shipyard`,
+    /// `outfitter`, and `leave` (right column, x=160) are verified against the
+    /// vendored NovaJS reference (`third_party/NovaJS/nova/src/spaceport/spaceport.ts`).
+    /// PICT 8500 itself confirms a second, symmetric button panel on the left
+    /// (x ≈ −309…−153, mirroring the right panel at x ≈ +154…+309) — `STR# 150`
+    /// (`SpaceportGraphics.swift`) independently confirms Trade Center/Bar/
+    /// Mission BBS each have their own authentic button label, so they take
+    /// that left column at the same 42px pitch as the right column's first
+    /// two slots, each role at a fixed position regardless of what else the
+    /// spöb offers (a planet missing a Shipyard doesn't shift Outfitter up).
+    private static let rightSlotY: [String: CGFloat] = ["shipyard": 74, "outfitter": 116, "leave": 200]
+    private static let leftSlotY: [String: CGFloat] = ["tradeCenter": 74, "bar": 116, "missionBBS": 158]
+    private static let leftX: CGFloat = -304
+    private static let rightX: CGFloat = 160
 
-    /// Fixed per-role slot Y offsets (relative to the frame's vertical centre),
-    /// matching the real game's layout: each service button lives at its own
-    /// constant position regardless of what else the spöb offers, so a planet
-    /// missing e.g. a Shipyard doesn't shift every other button up. `shipyard`,
-    /// `outfitter`, and `leave` are verified against the vendored NovaJS
-    /// reference (`third_party/NovaJS/nova/src/spaceport/spaceport.ts`); the
-    /// unimplemented-in-NovaJS `tradeCenter`/`bar`/`missionBBS` slots are a
-    /// best-effort extrapolation of the confirmed 42px pitch.
-    private static let slotY: [String: CGFloat] = [
-        "shipyard": 74, "outfitter": 116, "tradeCenter": 158,
-        "bar": 200, "missionBBS": 242, "leave": 284,
-    ]
+    private typealias ButtonItem = (key: String, title: String, action: () -> Void)
 
-    private func buttonColumn(_ space: NovaSpace) -> some View {
-        var items: [(key: String, title: String, action: () -> Void)] = []
-        if spob.hasShipyard {
-            items.append(("shipyard", graphics.buttonLabel(SpaceportLabel.shipyard, fallback: "Shipyard"), { screen = .shipyard }))
-        }
-        if spob.hasOutfitter {
-            items.append(("outfitter", graphics.buttonLabel(SpaceportLabel.outfitter, fallback: "Outfitter"), { screen = .outfit }))
-        }
+    private var leftButtonItems: [ButtonItem] {
+        var items: [ButtonItem] = []
         if spob.hasCommodityExchange {
             items.append(("tradeCenter", graphics.buttonLabel(SpaceportLabel.tradeCenter, fallback: "Trade Center"), { screen = .trade }))
         }
@@ -130,11 +121,29 @@ struct SpaceportView: View {
             items.append(("missionBBS", graphics.buttonLabel(SpaceportLabel.missionBBS, fallback: "Mission BBS"),
                           { screen = .missions }))
         }
-        items.append(("leave", graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), onDepart))
+        return items
+    }
 
-        return ForEach(items, id: \.key) { item in
+    private var rightButtonItems: [ButtonItem] {
+        var items: [ButtonItem] = []
+        if spob.hasShipyard {
+            items.append(("shipyard", graphics.buttonLabel(SpaceportLabel.shipyard, fallback: "Shipyard"), { screen = .shipyard }))
+        }
+        if spob.hasOutfitter {
+            items.append(("outfitter", graphics.buttonLabel(SpaceportLabel.outfitter, fallback: "Outfitter"), { screen = .outfit }))
+        }
+        items.append(("leave", graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), onDepart))
+        return items
+    }
+
+    @ViewBuilder private func buttonColumn(_ space: NovaSpace) -> some View {
+        ForEach(leftButtonItems, id: \.key) { item in
             NovaButton(graphics: graphics, title: item.title, width: 120, action: item.action)
-                .novaPlace(space, 150, Self.slotY[item.key] ?? 74)
+                .novaPlace(space, Self.leftX, Self.leftSlotY[item.key] ?? 74)
+        }
+        ForEach(rightButtonItems, id: \.key) { item in
+            NovaButton(graphics: graphics, title: item.title, width: 120, action: item.action)
+                .novaPlace(space, Self.rightX, Self.rightSlotY[item.key] ?? 74)
         }
     }
 
@@ -142,8 +151,8 @@ struct SpaceportView: View {
 
     private var fallbackHub: some View {
         VStack(spacing: 16) {
-            Text(spob.name).font(.title.bold()).foregroundStyle(.white)
-            ScrollView { Text(game.descText(spob.id)).foregroundStyle(.white.opacity(0.85)) }
+            Text(spob.name).novaFont(.title, weight: .bold).foregroundStyle(.white)
+            ScrollView { Text(game.descText(spob.id)).novaFont(.body).foregroundStyle(.white.opacity(0.85)) }
                 .frame(maxHeight: 300)
             HStack {
                 if spob.hasShipyard { Button("Shipyard") { screen = .shipyard } }
@@ -154,37 +163,42 @@ struct SpaceportView: View {
             }
         }
         .padding(40)
-    }
-
-    private func credits(_ n: Int) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal
-        return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
+        .novaResponsive()
     }
 }
 
-/// The Mission BBS (bulletin board) at a spaceport. Rendered on the mission-BBS
-/// frame PICT (8505) as a dialog. The mission runtime is being built separately;
-/// this presents the authentic frame and a placeholder until missions are wired.
+/// The Mission BBS (bulletin board) at a spaceport — `mïsn.AvailLoc ==
+/// .missionComputer` (0). Rendered on the mission-BBS frame PICT (8505),
+/// listing real offers from `StoryEngine` via `MissionBoardView`.
 struct MissionBBSView: View {
     let graphics: SpaceportGraphics
     let spob: SpobRes
+    @ObservedObject var pilot: PilotStore
     var onDone: () -> Void
+
+    private var game: NovaGame { graphics.game }
 
     var body: some View {
         if let frame = graphics.frame(.missionBBS) {
             NovaMenu(frame: frame, overlay: true) { space in
                 NovaText("Mission BBS", size: 16, color: .white, width: 300, align: .center)
                     .novaPlace(space, -150, -150)
-                NovaText("No missions available at this time.",
-                         size: 12, color: Color(white: 0.7), width: 300, align: .center)
-                    .novaPlace(space, -150, -110)
+                ScrollView(showsIndicators: false) {
+                    MissionBoardView(game: game, pilot: pilot, spob: spob, location: .missionComputer, width: 300)
+                }
+                .frame(width: 300, height: 220)
+                .novaPlace(space, -150, -110)
                 NovaButton(graphics: graphics,
                            title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                            width: 60, action: onDone)
                     .novaPlace(space, -43, 120)
             }
         } else {
-            VStack { Text("Mission BBS").foregroundStyle(.white); Button("Done", action: onDone) }.padding()
+            VStack {
+                Text("Mission BBS").foregroundStyle(.white)
+                MissionBoardView(game: game, pilot: pilot, spob: spob, location: .missionComputer)
+                Button("Done", action: onDone)
+            }.padding()
         }
     }
 }

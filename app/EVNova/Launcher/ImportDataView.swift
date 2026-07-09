@@ -15,26 +15,29 @@ struct ImportDataView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Label("Bring your own data", systemImage: "externaldrive.badge.person.crop")
-                    .font(.title3.bold())
-                Text("EV Nova's game data is copyrighted and not included. To play, import your own legally-obtained EV Nova data — pick the game's **Nova Files** folder (or a .rez/.ndat file).")
+                    .novaFont(.heading, weight: .bold)
+                Text("EV Nova's game data is copyrighted and not included. To play, import your own legally-obtained EV Nova install — pick the top-level game folder (or a .rez/.ndat file). Picking the whole folder, not just **Nova Files**, also picks up the original Charcoal/Geneva fonts and soundtrack if your copy includes them.")
+                    .novaFont(.body)
                 Text("On iPhone/iPad you can bring it in via the Files app, AirDrop, or “Open in”. Community plug-ins are already bundled and can be toggled under Plug-ins.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .novaFont(.caption).foregroundStyle(.secondary)
 
                 Button {
                     importing = true
                 } label: {
                     Label("Choose data…", systemImage: "folder.fill.badge.plus")
+                        .novaFont(.button)
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                 }
                 .buttonStyle(.borderedProminent)
 
                 if let message {
-                    Text(message).font(.callout).foregroundStyle(.secondary)
+                    Text(message).novaFont(.caption).foregroundStyle(.secondary)
                 }
-                Text(model.data.status).font(.footnote).foregroundStyle(.secondary)
+                Text(model.data.status).novaFont(.caption).foregroundStyle(.secondary)
             }
             .padding()
         }
+        .novaResponsive()
         .navigationTitle("Import Data")
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .fileImporter(isPresented: $importing,
@@ -57,13 +60,15 @@ struct ImportDataView: View {
 }
 
 /// Copies resource files (`.rez`/`.ndat`) — and any bundled soundtrack file
-/// (e.g. `Nova Music.mp3`) — from a chosen folder or file into the app's
-/// base-data directory. Handles iOS security-scoped URLs.
+/// (e.g. `Nova Music.mp3`) or original fonts (`Charcoal.ttf`/`Geneva.ttf`) —
+/// from a chosen folder or file into the app's base-data directory. Handles
+/// iOS security-scoped URLs.
 ///
 /// `GameLibrary.discoverResourceFiles` deliberately only looks at resource
-/// containers, so without also copying audio files here, `GameDataController.
-/// musicTrackURL()` would search a sandbox copy that never had music in it —
-/// even the player's own EV Nova install ships one right alongside the `.rez`s.
+/// containers, so without also copying audio/font files here, `GameDataController.
+/// musicTrackURL()`/`registerFonts(from:)` would search a sandbox copy that
+/// never had them in it — even the player's own EV Nova install ships them
+/// right alongside the `.rez`s.
 enum DataImporter {
     @discardableResult
     static func importBase(from src: URL, into destDir: URL) throws -> Int {
@@ -75,7 +80,9 @@ enum DataImporter {
 
         var sources: [URL] = []
         if (try? src.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-            sources = GameLibrary.discoverResourceFiles(in: src) + GameDataController.discoverAudioFiles(in: src)
+            sources = GameLibrary.discoverResourceFiles(in: src)
+                + GameDataController.discoverAudioFiles(in: src)
+                + GameDataController.discoverFontFiles(in: src)
         } else {
             sources = [src]
         }

@@ -38,11 +38,12 @@ struct PluginStoreView: View {
                         NavigationLink { PluginDetailView(entry: entry) } label: { row(entry) }
                     }
                     if filtered.isEmpty {
-                        Text("No plug-ins match “\(query)”.").foregroundStyle(.secondary)
+                        Text("No plug-ins match “\(query)”.").novaFont(.body).foregroundStyle(.secondary)
                     }
                 }
             }
         }
+        .novaResponsive()
         .searchable(text: $query, prompt: "Search plug-ins")
         .navigationTitle("Store")
     }
@@ -60,9 +61,9 @@ struct PluginStoreView: View {
         HStack(spacing: 12) {
             thumbnail(for: entry).frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.name).font(.headline)
-                Text(entry.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                Text(entry.kind.label).font(.caption2).foregroundStyle(.tertiary)
+                Text(entry.name).novaFont(.heading)
+                Text(entry.summary).novaFont(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(entry.kind.label).novaFont(.caption).foregroundStyle(.tertiary)
             }
             Spacer()
             statusBadge(for: entry)
@@ -74,7 +75,7 @@ struct PluginStoreView: View {
     private func statusBadge(for entry: PluginCatalogEntry) -> some View {
         switch model.store.state(for: entry) {
         case .notInstalled:
-            Text("Get").font(.caption.weight(.semibold)).foregroundStyle(.tint)
+            Text("Get").novaFont(.button, weight: .semibold).foregroundStyle(.tint)
         case .downloading(let progress):
             if let progress {
                 ProgressView(value: progress).frame(width: 36)

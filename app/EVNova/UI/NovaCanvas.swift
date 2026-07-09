@@ -68,7 +68,8 @@ struct NovaCanvas<Content: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            content(NovaLayout(design: design, viewSize: geo.size, fit: fit))
+            let layout = NovaLayout(design: design, viewSize: geo.size, fit: fit)
+            content(layout).novaTextScale(layout.scale)
         }
     }
 }

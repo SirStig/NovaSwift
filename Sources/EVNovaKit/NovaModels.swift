@@ -398,14 +398,37 @@ public struct SpobRes {
 
 // MARK: High-level accessor over a resolved ResourceCollection
 
+/// Decode results shared by every copy of a `NovaGame` built from the same
+/// `ResourceCollection`. Parsing a resource's raw bytes into its typed `...Res`
+/// form (and decoding RLE sprite sheets) is pure and idempotent, so it only
+/// ever needs to happen once — without this, views that read e.g. `outfits()`
+/// several times per render (the Outfitter/Shipyard grids) re-parse the whole
+/// catalog on every read. A class (not a `var` on the struct) so the cache
+/// survives `NovaGame` being copied around by value.
+private final class NovaGameCache {
+    let lock = NSLock()
+    var ships: [ShipRes]?
+    var outfits: [OutfRes]?
+    var govts: [GovtRes]?
+    var shipSprites: [Int: SpriteSheet?] = [:]
+    var engineGlowSprites: [Int: SpriteSheet?] = [:]
+}
+
 /// Typed, indexed view of a merged `ResourceCollection`. Decodes resource bodies
 /// on demand and resolves cross-references (e.g. a ship → its sprite).
 public struct NovaGame {
     public let resources: ResourceCollection
+    private let cache = NovaGameCache()
     public init(_ resources: ResourceCollection) { self.resources = resources }
 
     public func ship(_ id: Int) -> ShipRes? { resources.resource(NovaType.ship, id).map(ShipRes.init) }
-    public func ships() -> [ShipRes] { resources.resources(of: NovaType.ship).map(ShipRes.init) }
+    public func ships() -> [ShipRes] {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.ships { return cached }
+        let v = resources.resources(of: NovaType.ship).map(ShipRes.init)
+        cache.ships = v
+        return v
+    }
     public func spin(_ id: Int) -> SpinRes? { resources.resource(NovaType.spin, id).map(SpinRes.init) }
     public func shan(_ id: Int) -> ShanRes? { resources.resource(NovaType.shan, id).map(ShanRes.init) }
     public func system(_ id: Int) -> SystRes? { resources.resource(NovaType.syst, id).map(SystRes.init) }
@@ -414,7 +437,13 @@ public struct NovaGame {
 
     // AI-driving resources.
     public func govt(_ id: Int) -> GovtRes? { resources.resource(NovaType.govt, id).map(GovtRes.init) }
-    public func govts() -> [GovtRes] { resources.resources(of: NovaType.govt).map(GovtRes.init) }
+    public func govts() -> [GovtRes] {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.govts { return cached }
+        let v = resources.resources(of: NovaType.govt).map(GovtRes.init)
+        cache.govts = v
+        return v
+    }
     public func dude(_ id: Int) -> DudeRes? { resources.resource(NovaType.dude, id).map(DudeRes.init) }
     public func dudes() -> [DudeRes] { resources.resources(of: NovaType.dude).map(DudeRes.init) }
     public func fleet(_ id: Int) -> FleetRes? { resources.resource(NovaType.fleet, id).map(FleetRes.init) }
@@ -432,7 +461,13 @@ public struct NovaGame {
             .first
     }
     public func outfit(_ id: Int) -> OutfRes? { resources.resource(NovaType.outfit, id).map(OutfRes.init) }
-    public func outfits() -> [OutfRes] { resources.resources(of: NovaType.outfit).map(OutfRes.init) }
+    public func outfits() -> [OutfRes] {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.outfits { return cached }
+        let v = resources.resources(of: NovaType.outfit).map(OutfRes.init)
+        cache.outfits = v
+        return v
+    }
 
     // Starting scenarios (chär). Base ships one; plug-ins add more.
     public func character(_ id: Int) -> CharRes? { resources.resource(NovaType.char, id).map(CharRes.init) }
@@ -478,19 +513,38 @@ public struct NovaGame {
         return nil
     }
 
-    /// Decode a ship's base hull sprite sheet, if available.
+    /// Decode a ship's base hull sprite sheet, if available. Cached per hull —
+    /// RLE decode is real work, and this is called repeatedly for the same
+    /// hull (every jump/land rebuilds the scene's own texture cache from
+    /// scratch, and the Shipyard's fallback thumbnail calls this per tile,
+    /// per render).
     public func shipSprite(_ shipID: Int) -> SpriteSheet? {
-        guard let (_, rle) = shipSpriteData(shipID) else { return nil }
-        return try? RLED.decode(rle)
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.shipSprites[shipID] { return cached }
+        guard let (_, rle) = shipSpriteData(shipID) else {
+            cache.shipSprites[shipID] = .some(nil)
+            return nil
+        }
+        let v = try? RLED.decode(rle)
+        cache.shipSprites[shipID] = .some(v)
+        return v
     }
 
     /// Decode a ship's real, per-hull-authored engine-glow overlay sprite (the
     /// `shän` engine layer), if this hull has one. Same rotation-frame layout
-    /// as the base hull sprite — index it with the same `spriteFrame`.
+    /// as the base hull sprite — index it with the same `spriteFrame`. Cached
+    /// for the same reason as `shipSprite`.
     public func engineGlowSprite(_ shipID: Int) -> SpriteSheet? {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.engineGlowSprites[shipID] { return cached }
         guard let shan = shan(shipID), shan.engineSpriteID > 0,
-              let rle = resources.resource(NovaType.rleD, shan.engineSpriteID)?.data else { return nil }
-        return try? RLED.decode(rle)
+              let rle = resources.resource(NovaType.rleD, shan.engineSpriteID)?.data else {
+            cache.engineGlowSprites[shipID] = .some(nil)
+            return nil
+        }
+        let v = try? RLED.decode(rle)
+        cache.engineGlowSprites[shipID] = .some(v)
+        return v
     }
 
     // MARK: Stellar objects
@@ -540,5 +594,28 @@ public struct NovaGame {
     public func sound(_ id: Int) -> NovaSound? {
         guard let r = resources.resource(NovaType.snd, id) else { return nil }
         return try? SndDecoder.decode(r.data)
+    }
+
+    // MARK: Prewarming
+
+    /// Eagerly decodes the catalog data + sprites that would otherwise be
+    /// parsed lazily on first access (e.g. the first Shipyard/Outfitter visit,
+    /// or the first time a hull is seen after a jump), populating the caches
+    /// above so gameplay only ever hits warm reads. Intended to run once,
+    /// off the main thread, while a loading screen is shown — safe to call
+    /// from any thread. `onProgress` is called periodically (not every
+    /// iteration) with a human-readable status string.
+    public func prewarm(onProgress: (String) -> Void = { _ in }) {
+        let allShips = ships()
+        onProgress("Decoding \(allShips.count) ship type(s)…")
+        for (i, ship) in allShips.enumerated() {
+            _ = shipSprite(ship.id)
+            _ = engineGlowSprite(ship.id)
+            if i % 10 == 0 { onProgress("Decoding ship sprites… \(i)/\(allShips.count)") }
+        }
+        let allOutfits = outfits()
+        onProgress("Decoded \(allOutfits.count) outfit(s).")
+        let allGovts = govts()
+        onProgress("Decoded \(allGovts.count) government(s).")
     }
 }

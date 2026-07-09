@@ -65,24 +65,24 @@ struct AuthenticHUDView: View {
         VStack(alignment: .leading, spacing: 1) {
             if !model.targetName.isEmpty {
                 Text(model.targetName)
-                    .font(.system(size: 11, design: .monospaced).weight(.bold))
+                    .novaFont(.hud, weight: .bold)
                     .foregroundStyle(model.targetHostile ? Color.red : color(style.intf.brightText))
                 if !model.targetGovtLabel.isEmpty {
-                    Text(model.targetGovtLabel).font(.system(size: 9, design: .monospaced))
+                    Text(model.targetGovtLabel).novaFont(.hud)
                         .foregroundStyle(color(style.intf.dimText))
                 }
                 Text("Shield \(Int(model.targetShield * 100))%")
-                    .font(.system(size: 9, design: .monospaced))
+                    .novaFont(.hud).monospacedDigit()
                     .foregroundStyle(color(style.intf.dimText))
             } else if !model.navTargetName.isEmpty {
                 Text(model.navTargetName)
-                    .font(.system(size: 11, design: .monospaced).weight(.bold))
+                    .novaFont(.hud, weight: .bold)
                     .foregroundStyle(color(style.intf.brightText))
                 Text(model.navTargetLandable ? "Landable" : "No landing clearance")
-                    .font(.system(size: 9, design: .monospaced))
+                    .novaFont(.hud)
                     .foregroundStyle(color(style.intf.dimText))
             } else {
-                Text("No Target").font(.system(size: 10, design: .monospaced))
+                Text("No Target").novaFont(.hud)
                     .foregroundStyle(color(style.intf.dimText))
             }
         }
@@ -94,10 +94,10 @@ struct AuthenticHUDView: View {
     private var weaponReadout: some View {
         VStack(alignment: .leading, spacing: 1) {
             if !model.weaponName.isEmpty {
-                Text(model.weaponName).font(.system(size: 10, design: .monospaced).weight(.semibold))
+                Text(model.weaponName).novaFont(.hud, weight: .semibold)
                     .foregroundStyle(color(style.intf.brightText))
                 if model.weaponAmmo >= 0 {
-                    Text("\(model.weaponAmmo) rounds").font(.system(size: 8, design: .monospaced))
+                    Text("\(model.weaponAmmo) rounds").novaFont(.hud).monospacedDigit()
                         .foregroundStyle(color(style.intf.dimText))
                 }
             }
@@ -112,16 +112,16 @@ struct AuthenticHUDView: View {
     /// the real interface data has no field for at all.
     private var navReadout: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(model.shipName).font(.system(size: 10, design: .monospaced).weight(.semibold))
+            Text(model.shipName).novaFont(.hud, weight: .semibold)
                 .foregroundStyle(color(style.intf.brightText))
             if !model.systemName.isEmpty {
-                Text(model.systemName).font(.system(size: 9, design: .monospaced))
+                Text(model.systemName).novaFont(.hud)
                     .foregroundStyle(color(style.intf.dimText))
             }
             if !model.navCourseSystemName.isEmpty {
-                Text("Course: \(model.navCourseSystemName)").font(.system(size: 9, design: .monospaced))
+                Text("Course: \(model.navCourseSystemName)").novaFont(.hud)
                 Text("\(model.navCourseJumps) jump\(model.navCourseJumps == 1 ? "" : "s")")
-                    .font(.system(size: 9, design: .monospaced))
+                    .novaFont(.hud).monospacedDigit()
             }
         }
         .foregroundStyle(color(style.intf.dimText))
@@ -134,7 +134,7 @@ struct AuthenticHUDView: View {
     private var cargoReadout: some View {
         if model.cargoCapacity > 0 {
             Text("CARGO \(model.cargoUsed)/\(model.cargoCapacity)t")
-                .font(.system(size: 9, design: .monospaced))
+                .novaFont(.hud).monospacedDigit()
                 .foregroundStyle(color(style.intf.dimText))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

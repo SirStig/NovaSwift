@@ -377,7 +377,7 @@ struct ShipyardView: View {
     /// sized for the real, much larger shipyard art.
     private func shipPicture(_ s: ShipRes) -> (image: CGImage, isDedicated: Bool)? {
         if let pic = graphics.shipPicture(s) { return (pic, true) }
-        if let frame = game.shipSprite(s.id)?.frameCGImage(0) { return (frame, false) }
+        if let frame = graphics.shipFallbackPicture(s) { return (frame, false) }
         Log.spaceport.error("Shipyard: no shipyard picture or flight sprite for ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) — tile will show placeholder icon")
         return nil
     }
@@ -450,8 +450,10 @@ struct ShipyardView: View {
 struct BarView: View {
     let graphics: SpaceportGraphics
     let spob: SpobRes
+    @ObservedObject var pilot: PilotStore
     var onDone: () -> Void
 
+    @State private var showGambling = false
     private var game: NovaGame { graphics.game }
     /// EV Nova's bar description lives at `dësc` (spöb id + 9872).
     private var barText: String {
@@ -460,19 +462,40 @@ struct BarView: View {
     }
 
     var body: some View {
-        if let frame = graphics.frame(.bar) {
-            NovaMenu(frame: frame, overlay: true) { space in
-                ScrollView(showsIndicators: false) {
-                    NovaText(barText, size: 11, width: 220, align: .leading)
+        Group {
+            if let frame = graphics.frame(.bar) {
+                NovaMenu(frame: frame, overlay: true) { space in
+                    ScrollView(showsIndicators: false) {
+                        NovaText(barText, size: 11, width: 220, align: .leading)
+                    }
+                    .frame(width: 220, height: 60)
+                    .novaPlace(space, -112, -80)
+                    // Patrons occasionally have work — mïsn.AvailLoc == .bar.
+                    ScrollView(showsIndicators: false) {
+                        MissionBoardView(game: game, pilot: pilot, spob: spob, location: .bar, width: 220)
+                    }
+                    .frame(width: 220, height: 60)
+                    .novaPlace(space, -112, -14)
+                    NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.gamble, fallback: "Gamble"),
+                               width: 60) { showGambling = true }
+                        .novaPlace(space, -70, 62)
+                    NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Leave"),
+                               width: 60, action: onDone)
+                        .novaPlace(space, 20, 62)
                 }
-                .frame(width: 220, height: 120)
-                .novaPlace(space, -112, -80)
-                NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Leave"),
-                           width: 60, action: onDone)
-                    .novaPlace(space, -43, 62)
+            } else {
+                VStack {
+                    Text(barText).foregroundStyle(.white).padding()
+                    MissionBoardView(game: game, pilot: pilot, spob: spob, location: .bar)
+                    HStack {
+                        Button("Gamble") { showGambling = true }
+                        Button("Leave", action: onDone)
+                    }
+                }
             }
-        } else {
-            VStack { Text(barText).foregroundStyle(.white).padding(); Button("Leave", action: onDone) }
+        }
+        .sheet(isPresented: $showGambling) {
+            GamblingView(pilot: pilot, onDone: { showGambling = false })
         }
     }
 }

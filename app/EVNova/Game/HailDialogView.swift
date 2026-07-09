@@ -55,6 +55,7 @@ struct HailDialogView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(novaAmber.opacity(0.35)))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .novaResponsive()
     }
 
     private var panel: some View {
@@ -68,14 +69,15 @@ struct HailDialogView: View {
                         .overlay(Rectangle().strokeBorder(.white.opacity(0.2)))
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    NovaText(state.name, size: 15, color: novaAmber, weight: .bold)
+                    Text(state.name).novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
                     if !state.govtLabel.isEmpty {
-                        NovaText(state.govtLabel, size: 11, color: state.hostile ? .red : Color(white: 0.65))
+                        Text(state.govtLabel).novaFont(.caption)
+                            .foregroundStyle(state.hostile ? .red : Color(white: 0.65))
                     }
                 }
                 Spacer(minLength: 0)
             }
-            NovaText(state.responseText, size: 13, color: .white)
+            Text(state.responseText).novaFont(.body).foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Spacer()
@@ -102,7 +104,7 @@ struct HailDialogView: View {
                 model.audio.play(.uiSelect)
                 action()
             } label: {
-                Text(title).font(.custom("Geneva", size: 12)).foregroundStyle(.white)
+                Text(title).novaFont(.button).foregroundStyle(.white)
                     .frame(width: 26 + width, height: 25)
                     .background(Color(white: 0.25), in: RoundedRectangle(cornerRadius: 4))
             }

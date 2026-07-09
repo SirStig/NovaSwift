@@ -20,13 +20,14 @@ struct PluginDetailView: View {
                 header
                 if !entry.screenshotNames.isEmpty { screenshots }
                 if let videoURL = entry.videoURL { videoLink(videoURL) }
-                Text(entry.description).font(.body)
+                Text(entry.description).novaFont(.body)
                 metadataSection
                 actionButton
                 legalNote
             }
             .padding()
         }
+        .novaResponsive()
         .navigationTitle(entry.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
@@ -35,15 +36,15 @@ struct PluginDetailView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(entry.name).font(.title2.bold())
-            Text("by \(entry.author)").font(.subheadline).foregroundStyle(.secondary)
+            Text(entry.name).novaFont(.heading, weight: .bold)
+            Text("by \(entry.author)").novaFont(.body).foregroundStyle(.secondary)
             HStack(spacing: 6) {
                 Label(entry.kind.label, systemImage: entry.kind.symbolName)
                 if let size = entry.approxSizeMB {
                     Text("· \(formatted(size))")
                 }
             }
-            .font(.caption).foregroundStyle(.secondary)
+            .novaFont(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -82,11 +83,11 @@ struct PluginDetailView: View {
     private var metadataSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             if !entry.tags.isEmpty {
-                Text(entry.tags.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                Text(entry.tags.joined(separator: " · ")).novaFont(.caption).foregroundStyle(.secondary)
             }
             if entry.requiresBase {
                 Label("Requires your own EV Nova data", systemImage: "externaldrive.badge.person.crop")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .novaFont(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -111,7 +112,7 @@ struct PluginDetailView: View {
         case .installed:
             VStack(spacing: 10) {
                 if entry.prebundled {
-                    Text("Included with the app").font(.caption).foregroundStyle(.secondary)
+                    Text("Included with the app").novaFont(.caption).foregroundStyle(.secondary)
                 } else if let bundle = installedBundle {
                     Toggle("Enabled", isOn: Binding(
                         get: { bundle.isEnabled },
@@ -130,7 +131,7 @@ struct PluginDetailView: View {
         case .failed(let message):
             VStack(alignment: .leading, spacing: 8) {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.orange)
+                    .novaFont(.caption).foregroundStyle(.orange)
                 Button("Retry") { model.store.install(entry, data: model.data) }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
@@ -142,7 +143,7 @@ struct PluginDetailView: View {
         Text(entry.prebundled
              ? "Bundled with this app with the author's permission."
              : "Downloaded directly from \(entry.sourceHost.displayName). You must own EV Nova to play it.")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .novaFont(.caption).foregroundStyle(.tertiary)
     }
 
     private func formatted(_ mb: Double) -> String {

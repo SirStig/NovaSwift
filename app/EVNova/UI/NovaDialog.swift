@@ -36,7 +36,7 @@ struct NovaDialog<Content: View>: View {
 
             // Content in a centred, readable column; the surface behind is full-bleed.
             VStack(alignment: .leading, spacing: 16) {
-                NovaText(title, size: 15, color: novaAmber, weight: .bold)
+                Text(title).novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
                 content()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 HStack(spacing: 10) {
@@ -48,6 +48,7 @@ struct NovaDialog<Content: View>: View {
             .frame(maxWidth: width)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .novaResponsive()
     }
 
     // A clean EV-Nova-style pill button: grey (or amber for the default action),
@@ -56,7 +57,7 @@ struct NovaDialog<Content: View>: View {
     private func footerButton(_ b: NovaDialogButton) -> some View {
         Button { model.audio.play(.uiSelect); b.action() } label: {
             Text(b.title)
-                .font(.custom("Geneva", size: 12))
+                .novaFont(.button)
                 .foregroundStyle(!b.enabled ? Color(white: 0.45)
                                  : (b.isDefault ? .black : .white))
                 .padding(.horizontal, 18).padding(.vertical, 7)
@@ -94,9 +95,9 @@ struct NovaTextField: View {
 
     var body: some View {
         TextField("", text: $text, prompt: Text(placeholder)
-            .font(.custom("Geneva", size: 13)).foregroundColor(.secondary))
+            .font(.custom("Geneva", size: NovaFontRole.body.baseSize)).foregroundColor(.secondary))
             .textFieldStyle(.plain)
-            .font(.custom("Geneva", size: 13))
+            .novaFont(.body)
             .foregroundStyle(.white)
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(Color(white: 0.04), in: RoundedRectangle(cornerRadius: 5))

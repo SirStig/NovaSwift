@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CoreText
 import EVNovaKit
 
 /// Locates game data and the plug-in catalog, tracks which plug-ins are enabled,
@@ -54,6 +55,40 @@ final class GameDataController: ObservableObject {
         return e.compactMap { $0 as? URL }.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
     }
 
+    /// The game's original fonts (Charcoal.ttf, Geneva.ttf) — copyrighted, so
+    /// like audio they're not part of `GameLibrary.resourceExtensions` and must
+    /// be discovered/copied separately by the importer, then registered with
+    /// CoreText at runtime (see `registerFonts(from:)`) rather than bundled.
+    nonisolated static let fontExtensions: Set<String> = ["ttf", "otf"]
+
+    /// Recursively find font files under `directory` (they ship a folder up
+    /// from "Nova Files", alongside the .exe, in the CE Windows distribution).
+    nonisolated static func discoverFontFiles(in directory: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
+                                    options: [.skipsHiddenFiles]) else { return [] }
+        return e.compactMap { $0 as? URL }.filter { fontExtensions.contains($0.pathExtension.lowercased()) }
+    }
+
+    /// Registers any imported font files with CoreText for this process, so
+    /// `Font.custom("Charcoal"/"Geneva", size:)` resolves to the game's actual
+    /// fonts instead of silently falling back to a system font. Safe to call
+    /// repeatedly (e.g. on every `reload()`) — duplicate registration errors
+    /// are expected and ignored.
+    nonisolated static func registerFonts(from directory: URL) {
+        for url in discoverFontFiles(in: directory) {
+            var error: Unmanaged<CFError>?
+            let ok = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+            if !ok, let error {
+                let nsError = error.takeUnretainedValue() as Error as NSError
+                // kCTFontManagerErrorAlreadyRegistered — expected on repeat calls.
+                if nsError.code != CTFontManagerError.alreadyRegistered.rawValue {
+                    Log.data.error("Font registration failed for \(url.lastPathComponent, privacy: .public): \(nsError, privacy: .public)")
+                }
+            }
+        }
+    }
+
     /// Resolve the base "Nova Files" directory from the available sources.
     private func resolveBaseDir() -> URL? {
         let fm = FileManager.default
@@ -85,6 +120,21 @@ final class GameDataController: ObservableObject {
 
     func reloadIfNeeded() { if !loaded { reload() } }
 
+    /// Eagerly decodes the catalog (ships/outfits/governments) and every hull's
+    /// sprites off the main thread, reporting progress through `status` — see
+    /// `NovaGame.prewarm`. Meant to run once on the loading screen between
+    /// picking/creating a pilot and entering the game, so the first Shipyard/
+    /// Outfitter visit and the first time a hull is seen never pay decode cost
+    /// mid-frame. No-op if data hasn't loaded. Safe to await from the main actor.
+    func prewarm() async {
+        guard let game else { return }
+        await Task.detached(priority: .userInitiated) { [weak self] in
+            game.prewarm { text in
+                Task { @MainActor in self?.status = text }
+            }
+        }.value
+    }
+
     func reload() {
         loaded = true
         // Discover plug-ins (catalog is available even before base data).
@@ -108,6 +158,7 @@ final class GameDataController: ObservableObject {
             return
         }
         Log.data.info("reload: using base data at \(baseDir.path, privacy: .public)")
+        Self.registerFonts(from: baseDir)
         let baseFiles = GameLibrary.discoverResourceFiles(in: baseDir)
         do {
             let merged = try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins)

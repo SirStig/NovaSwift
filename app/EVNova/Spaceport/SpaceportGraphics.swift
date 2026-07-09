@@ -15,6 +15,7 @@ final class SpaceportGraphics {
     let game: NovaGame
     private var cache: [Int: CGImage] = [:]
     private var missed: Set<Int> = []
+    private var shipFallbackCache: [Int: CGImage?] = [:]
 
     init(game: NovaGame) {
         self.game = game
@@ -95,10 +96,29 @@ final class SpaceportGraphics {
     func shipPicture(_ ship: ShipRes) -> CGImage? {
         pict(ship.id - 128 + 5000)
     }
+
+    /// The small in-flight sprite's frame 0, standing in for a ship's shipyard
+    /// picture when it doesn't define dedicated `5000`-series art. Cached —
+    /// `SpriteSheet.frameCGImage` rebuilds a full `CGImage` (copying the whole
+    /// sprite sheet's pixel buffer) on every call, and the Shipyard grid calls
+    /// this once per visible tile, every render.
+    func shipFallbackPicture(_ ship: ShipRes) -> CGImage? {
+        if let c = shipFallbackCache[ship.id] { return c }
+        let image = game.shipSprite(ship.id)?.frameCGImage(0)
+        shipFallbackCache[ship.id] = .some(image)
+        return image
+    }
 }
 
-/// Standard EV Nova button-label indices in `STR# 150`.
+/// Standard EV Nova button-label indices in `STR# 150`, verified directly
+/// against the real resource (`evnova-extract raw data/base 'STR#' 150`):
+/// Leave, Buy, Sell, Buy Ship, Done, Recharge, Trade Center, Outfitter,
+/// Shipyard, Bar, Gamble, Holovid, Hire Escort, Bet 1000, Bet 5000, Mission
+/// BBS, … `missionBBS` was previously mis-set to 11 (actually "Gamble") —
+/// the two are 5 apart, not adjacent.
 enum SpaceportLabel {
     static let leave = 1, buy = 2, sell = 3, buyShip = 4, done = 5, recharge = 6
-    static let tradeCenter = 7, outfitter = 8, shipyard = 9, bar = 10, missionBBS = 11
+    static let tradeCenter = 7, outfitter = 8, shipyard = 9, bar = 10
+    static let gamble = 11, holovid = 12, hireEscort = 13, bet1000 = 14, bet5000 = 15
+    static let missionBBS = 16
 }

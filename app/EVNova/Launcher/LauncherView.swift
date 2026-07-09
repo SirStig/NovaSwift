@@ -29,6 +29,7 @@ struct LauncherView: View {
             .padding(.horizontal, 32)
             .padding(.vertical, 28)
         }
+        .novaResponsive()
         .sheet(item: $sheet) { which in
             NavigationStack {
                 switch which {
@@ -51,14 +52,14 @@ struct LauncherView: View {
                     Circle().fill(amber.opacity(0.18)).blur(radius: 40).frame(width: 200, height: 200)
                 )
             Text("EV NOVA")
-                .font(.system(size: 52, weight: .heavy, design: .rounded))
+                .novaFont(.title, weight: .heavy, size: 52)
                 .tracking(8)
                 .foregroundStyle(
                     LinearGradient(colors: [.white, amber.opacity(0.85)],
                                    startPoint: .top, endPoint: .bottom))
                 .shadow(color: amber.opacity(0.35), radius: 12)
             Text("an unofficial port")
-                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .novaFont(.caption, weight: .semibold)
                 .tracking(3)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
@@ -75,7 +76,7 @@ struct LauncherView: View {
                     Image(systemName: "play.fill")
                     Text(model.data.hasBaseData ? "Play" : "Play Demo")
                 }
-                .font(.title3.weight(.bold))
+                .novaFont(.heading, weight: .bold)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
             }
@@ -100,7 +101,7 @@ struct LauncherView: View {
         Button { model.audio.play(.uiSelect); action() } label: {
             VStack(spacing: 8) {
                 Image(systemName: icon).font(.title3)
-                Text(title).font(.caption.weight(.medium))
+                Text(title).novaFont(.caption, weight: .medium)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -113,7 +114,7 @@ struct LauncherView: View {
 
     private var statusPill: some View {
         Text(model.data.status)
-            .font(.caption)
+            .novaFont(.caption)
             .multilineTextAlignment(.center)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16).padding(.vertical, 8)
@@ -123,7 +124,7 @@ struct LauncherView: View {
 
     private var footer: some View {
         Text("Unaffiliated with Ambrosia Software / ATMOS. Bring your own game data.")
-            .font(.system(size: 10))
+            .novaFont(.caption)
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(.center)
     }

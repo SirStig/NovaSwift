@@ -253,11 +253,21 @@ struct GameContainerView: View {
                 }
 
                 // The landed spaceport, drawn from the player's own EV Nova data.
+                // Constrained to the same play-viewport width `sceneLayer` uses
+                // (not the full window) so the status-bar HUD on the right stays
+                // visible — the real game never hides the ship's own readout
+                // behind the landing screen.
                 if let id = landedSpobID, let graphics = host.graphics,
                    let galaxy = host.galaxy, let spob = host.game?.spob(id) {
-                    SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob,
-                                  pilot: model.pilot, onDepart: depart)
-                        .transition(.opacity)
+                    GeometryReader { geo in
+                        let sidebarWidth = Self.sidebarWidth(in: geo.size, style: host.hudStyle)
+                        let playWidth = max(0, geo.size.width - sidebarWidth)
+                        SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob,
+                                      pilot: model.pilot, onDepart: depart)
+                            .frame(width: playWidth, height: geo.size.height)
+                            .position(x: playWidth / 2, y: geo.size.height / 2)
+                    }
+                    .transition(.opacity)
                 }
             } else {
                 Color.black.ignoresSafeArea()
@@ -296,13 +306,15 @@ struct GameContainerView: View {
         }
         .onChange(of: landedSpobID) { _, id in
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
-            if id != nil {
+            if let id {
                 DispatchQueue.main.async {
                     refuel()                                   // landing tops off the tank, free
                     model.autosave(reason: .land)               // EV Nova saves on every landing
                 }
+                model.audio.startAmbient(soundID: host?.game?.spob(id)?.ambientSoundID)
             } else {
                 grabSceneFocus(reason: "departed spaceport")   // departed the spaceport: back to flight
+                model.audio.stopAmbient()
             }
         }
         .task {
@@ -650,7 +662,7 @@ private struct LandPromptView: View {
             Spacer()
             if !hud.landPrompt.isEmpty {
                 Text(hud.landPrompt)
-                    .font(.system(.callout, design: .monospaced).weight(.semibold))
+                    .novaFont(.hud, weight: .semibold)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(.ultraThinMaterial, in: Capsule())
@@ -659,6 +671,7 @@ private struct LandPromptView: View {
                     .transition(.opacity)
             }
         }
+        .novaResponsive()
         .animation(.easeInOut(duration: 0.15), value: hud.landPrompt)
         .allowsHitTesting(false)
     }
@@ -677,7 +690,7 @@ private struct HailBannerView: View {
             HStack {
                 if !hud.hailMessage.isEmpty {
                     Text(hud.hailMessage)
-                        .font(.system(.callout, design: .monospaced).weight(.semibold))
+                        .novaFont(.hud, weight: .semibold)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(.ultraThinMaterial, in: Capsule())
@@ -688,6 +701,7 @@ private struct HailBannerView: View {
             }
             .padding(.leading, 16).padding(.bottom, 24)
         }
+        .novaResponsive()
         .animation(.easeInOut(duration: 0.2), value: hud.hailMessage)
         .allowsHitTesting(false)
     }

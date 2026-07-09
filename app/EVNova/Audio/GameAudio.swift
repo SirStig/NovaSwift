@@ -160,6 +160,24 @@ final class GameAudio: ObservableObject {
     /// Stop a loop started by `startOrUpdateLoop`. No-op if not looping.
     func stopLoop(key: String) { engine.stopLoop(id: key) }
 
+    /// Key for the landed-spaceport ambience loop (`SpobRes.ambientSoundID`) —
+    /// unlike weapon loops this isn't positional (no in-world source/listener),
+    /// it's just "on" for as long as the player is landed.
+    private static let ambientLoopKey = "spaceport-ambient"
+
+    /// Start (or switch) the ambient loop for the spöb the player just landed
+    /// on. No-op if that spöb has no `ambientSoundID` (`-1`/nil in the data).
+    func startAmbient(soundID: Int?) {
+        guard !settings.muteAll, let soundID, soundID >= 0, let buffer = library.buffer(for: soundID) else {
+            engine.stopLoop(id: Self.ambientLoopKey)
+            return
+        }
+        engine.playLoop(id: Self.ambientLoopKey, buffer: buffer, volume: Float(settings.sfxVolume), pan: 0)
+    }
+
+    /// Stop the landed-spaceport ambience — called on takeoff.
+    func stopAmbient() { engine.stopLoop(id: Self.ambientLoopKey) }
+
     // MARK: Hailing
 
     /// Play a hailed government's voice line — the "Acknowledge" bank normally,

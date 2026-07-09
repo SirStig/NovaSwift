@@ -39,6 +39,7 @@ struct IntroSequenceView: View {
             }
             skipButton
         }
+        .novaResponsive()
         .contentShape(Rectangle())
         .onTapGesture { advance() }
         .animation(.easeInOut(duration: 0.4), value: index)
@@ -63,7 +64,7 @@ struct IntroSequenceView: View {
         } else {
             ScrollView {
                 Text(introText)
-                    .font(.system(.body, design: .serif))
+                    .novaFont(.body)
                     .foregroundStyle(.white)
                     .lineSpacing(5)
                     .padding(32)
@@ -81,7 +82,7 @@ struct IntroSequenceView: View {
                     model.audio.play(.uiSelect); onFinish()
                 }
                 .buttonStyle(.plain)
-                .font(.custom("Geneva", size: 13))
+                .novaFont(.button)
                 .foregroundStyle(isLastPage ? .black : .white)
                 .padding(.horizontal, 20).padding(.vertical, 9)
                 .background(

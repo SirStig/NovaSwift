@@ -32,6 +32,7 @@ struct GameMenuView: View {
                 }
                 .transition(.move(edge: .leading).combined(with: .opacity))
         }
+        .novaResponsive()
         .sheet(isPresented: $showSettings) {
             NavigationStack { SettingsView() }
                 .frame(minWidth: 420, minHeight: 520)
@@ -85,9 +86,9 @@ struct GameMenuView: View {
             AppMark().frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(hud.shipName.isEmpty ? "EV NOVA" : hud.shipName)
-                    .font(.headline).foregroundStyle(amber).lineLimit(1)
+                    .novaFont(.heading).foregroundStyle(amber)
                 if !hud.systemName.isEmpty {
-                    Text(hud.systemName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(hud.systemName).novaFont(.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer()
@@ -115,7 +116,7 @@ struct GameMenuView: View {
                     .font(.body)
                     .frame(width: 26)
                     .foregroundStyle(tint == .white ? amber : tint)
-                Text(title).font(.body.weight(.medium)).foregroundStyle(tint)
+                Text(title).novaFont(.button, weight: .medium).foregroundStyle(tint)
                 Spacer()
             }
             .padding(.vertical, 12)
