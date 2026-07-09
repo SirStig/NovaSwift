@@ -180,9 +180,17 @@ struct GameContainerView: View {
     /// all. Re-asserted whenever a menu/map/spaceport overlay that took focus
     /// away closes back to flight.
     @FocusState private var isSceneFocused: Bool
-    /// Bumped on every hail so a stale fade-timer from an earlier hail can't
-    /// clear a newer `hud.hailMessage`.
-    @State private var hailMessageToken = 0
+    /// The open hail/communication dialog, if any (nil = closed).
+    @State private var hailDialogState: HailDialogState?
+    /// Credit cost of "Request Assistance" by how the hailed crew feels about
+    /// the player (`GameScene.AssistanceTier`) — allies help for free; a
+    /// crew that dislikes the player (negative but not-yet-hostile legal
+    /// record) charges a premium and only sometimes agrees at all. No
+    /// distance/danger scaling beyond this tier — a deliberate scope cut.
+    private let assistanceCostNeutral = 300
+    private let assistanceCostWary = 900
+    /// Chance a "wary" (dislikes-you-but-not-hostile) crew agrees at all.
+    private let assistanceWaryAcceptChance = 0.5
 
     var body: some View {
         ZStack {
@@ -221,6 +229,10 @@ struct GameContainerView: View {
 
                 LandPromptView(hud: host.hud)
                 HailBannerView(hud: host.hud)
+
+                if let state = hailDialogState {
+                    hailDialogView(state)
+                }
 
                 if showMenu {
                     GameMenuView(hud: host.hud,
@@ -486,24 +498,88 @@ struct GameContainerView: View {
 
     /// Hail whatever `GameScene.attemptHail()` resolves to — the locked ship
     /// target, else the click-selected planet, else the nearest ship in
-    /// range — and show a bottom-left banner for a few seconds. Silently does
-    /// nothing with no valid target — matches `attemptLand()`'s "no prompt,
-    /// no action" pattern.
+    /// range — and open the communication dialog. Silently does nothing with
+    /// no valid target — matches `attemptLand()`'s "no prompt, no action" pattern.
     private func hail() {
         guard let scene = host?.scene, let result = scene.attemptHail() else { return }
         switch result {
-        case let .ship(govt, hostile):
+        case let .ship(entityID, name, shipTypeID, govt, hostile):
             model.audio.playHailVoice(govt: govt, hostile: hostile)
-            host?.hud.hailMessage = "The \(govt.commName) hails you."
-        case let .planet(name, _):
-            // No voice line for a stellar hail — this is the exact phrasing
-            // the manual uses for "you hailed a planet/station."
-            host?.hud.hailMessage = "Channel open to \(name)."
+            hailDialogState = HailDialogState(
+                kind: .ship(entityID: entityID, shipTypeID: shipTypeID),
+                name: name, govtLabel: govt.targetCode, hostile: hostile,
+                responseText: hostile ? "They aren't interested in talking." : "This is \(name). Go ahead.")
+        case let .planet(name, govt, landable):
+            hailDialogState = HailDialogState(
+                kind: .planet, name: name, govtLabel: govt?.targetCode ?? "", hostile: false,
+                // "Channel open to X" is the manual's own wording for a stellar hail.
+                responseText: landable ? "Channel open to \(name)."
+                                       : "Channel open to \(name). Landing clearance is not currently granted.")
         }
-        hailMessageToken += 1
-        let token = hailMessageToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            if hailMessageToken == token { host?.hud.hailMessage = "" }
+    }
+
+    /// Deduct credits and send the hailed ship over to dock with the player
+    /// (see `AIBrain.assist`/`World.deliverAssistance`), or decline in-dialog
+    /// if the player can't afford it.
+    private func requestAssistance(entityID: Int) {
+        guard var state = hailDialogState else { return }
+        guard model.pilot.state.credits >= assistanceCost else {
+            state.responseText = "You don't have enough credits for that."
+            hailDialogState = state
+            return
+        }
+        model.pilot.state.credits -= assistanceCost
+        host?.scene.requestAssistance(entityID: entityID)
+        state.assistRequested = true
+        state.responseText = "They're on their way."
+        hailDialogState = state
+    }
+
+    /// Button list for the hail dialog — a plain (non-`@ViewBuilder`) helper,
+    /// since `@ViewBuilder` reinterprets `if`/`switch` as conditional *View*
+    /// content even when their body has no view in it, which breaks ordinary
+    /// imperative array-building like this.
+    private func hailButtons(for state: HailDialogState) -> [NovaDialogButton] {
+        var buttons: [NovaDialogButton] = [
+            NovaDialogButton(title: "Greetings") {
+                hailDialogState?.responseText = state.hostile
+                    ? "They don't seem interested in talking."
+                    : "Just a routine hail, nothing more."
+            },
+        ]
+        if case let .ship(entityID, _) = state.kind {
+            let canAssist = !state.assistRequested && (host?.scene.canRequestAssistance(entityID: entityID) ?? false)
+            buttons.append(NovaDialogButton(title: "Request Assistance", enabled: canAssist) {
+                requestAssistance(entityID: entityID)
+            })
+        }
+        buttons.append(NovaDialogButton(title: "Close Channel", isDefault: true) { hailDialogState = nil })
+        return buttons
+    }
+
+    /// The communication dialog: portrait (ships only — no per-government art
+    /// exists in the data), name/government, a response line, and up to three
+    /// choices (Greetings / Request Assistance / Close Channel).
+    @ViewBuilder
+    private func hailDialogView(_ state: HailDialogState) -> some View {
+        NovaDialog(title: state.name, width: 420, buttons: hailButtons(for: state)) {
+            HStack(alignment: .top, spacing: 14) {
+                if case let .ship(_, shipTypeID) = state.kind,
+                   let res = host?.game?.ship(shipTypeID), let portrait = host?.graphics?.shipPicture(res) {
+                    Image(decorative: portrait, scale: 1)
+                        .resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
+                        .frame(width: 96, height: 96)
+                        .background(Color.black.opacity(0.3))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.15)))
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    if !state.govtLabel.isEmpty {
+                        NovaText(state.govtLabel, size: 12, color: state.hostile ? .red : .secondary)
+                    }
+                    NovaText(state.responseText, size: 13)
+                }
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -554,9 +630,11 @@ private struct LandPromptView: View {
     }
 }
 
-/// A brief bottom-left banner shown after hailing a ship — the government's
-/// `commName`, e.g. "The Federation hails you." Fades on its own; `GameContainerView`
-/// clears `hud.hailMessage` a few seconds after setting it.
+/// A brief bottom-left banner for ambient, non-interactive system messages —
+/// currently just "`<ally>` transfers fuel and makes repairs." after a paid
+/// assist delivers (`GameScene`'s `.assistanceDelivered` handler sets and
+/// self-clears `hud.hailMessage`). Interactive hailing opens `HailDialogState`
+/// instead, not this banner.
 private struct HailBannerView: View {
     @ObservedObject var hud: GameHUDModel
     var body: some View {
@@ -579,6 +657,22 @@ private struct HailBannerView: View {
         .animation(.easeInOut(duration: 0.2), value: hud.hailMessage)
         .allowsHitTesting(false)
     }
+}
+
+/// State for the open hail/communication dialog (`GameContainerView.hailDialogView`).
+/// `responseText`/`assistRequested` mutate in place as the player clicks buttons,
+/// so the dialog updates without closing.
+private struct HailDialogState {
+    enum Kind {
+        case ship(entityID: Int, shipTypeID: Int)
+        case planet
+    }
+    let kind: Kind
+    let name: String
+    let govtLabel: String
+    let hostile: Bool
+    var responseText: String
+    var assistRequested = false
 }
 
 /// Routes hardware-keyboard presses into flight intents using the user's

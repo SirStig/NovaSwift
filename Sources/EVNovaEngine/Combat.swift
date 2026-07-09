@@ -204,4 +204,7 @@ public enum WorldEvent {
     case shipLaunched(entityID: Int, at: Vec2)
     /// A ship's armor was knocked out but it survived as a drifting hulk.
     case shipDisabled(entityID: Int, at: Vec2)
+    /// A paid "Request Assistance" ally docked with the player and delivered
+    /// fuel/repairs — `entityID` is the ally, for the renderer's banner text.
+    case assistanceDelivered(entityID: Int)
 }

@@ -437,6 +437,14 @@ final class GameScene: SKScene {
                 if entityID == 0 { audio?.play(.docking) }
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
+            case let .assistanceDelivered(entityID):
+                let name = world.ship(id: entityID)?.name ?? "Ally"
+                let msg = "\(name) transfers fuel and makes repairs."
+                hud?.hailMessage = msg
+                audio?.play(.docking)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak hud] in
+                    if hud?.hailMessage == msg { hud?.hailMessage = "" }
+                }
             default:
                 break
             }
@@ -444,6 +452,7 @@ final class GameScene: SKScene {
         wasFiring = intent.firePrimary
         syncProjectiles()
         syncNPCs()
+        updateSelectionBrackets()
         shipNode.position = scenePos
 
         if let sprite = shipSprite, !rotationTextures.isEmpty {
@@ -511,22 +520,53 @@ final class GameScene: SKScene {
     /// fallback) the nearest ship in hail range — so hailing still works for
     /// players who haven't discovered click-targeting.
     enum HailResult {
-        case ship(govt: GovtRes, hostile: Bool)
-        case planet(name: String, govt: GovtRes?)
+        case ship(entityID: Int, name: String, shipTypeID: Int, govt: GovtRes, hostile: Bool)
+        case planet(name: String, govt: GovtRes?, landable: Bool)
     }
 
     func attemptHail() -> HailResult? {
-        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid),
-           let game = galaxy?.game, let govt = game.govt(ship.government) {
-            return .ship(govt: govt, hostile: world.diplomacy?.isHostileToPlayer(ship.government) == true)
+        func shipResult(_ ship: Ship) -> HailResult? {
+            guard let game = galaxy?.game, let govt = game.govt(ship.government) else { return nil }
+            return .ship(entityID: ship.entityID, name: ship.name, shipTypeID: ship.shipTypeID,
+                        govt: govt, hostile: world.diplomacy?.isHostileToPlayer(ship.government) == true)
+        }
+        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid), let r = shipResult(ship) {
+            return r
         }
         if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
-            return .planet(name: pv.name, govt: galaxy?.game.govt(pv.government))
+            let landable = world.systemContext.bodies.first { $0.id == pid }?.canLand ?? false
+            return .planet(name: pv.name, govt: galaxy?.game.govt(pv.government), landable: landable)
         }
-        if let ship = world.nearestHailable(), let game = galaxy?.game, let govt = game.govt(ship.government) {
-            return .ship(govt: govt, hostile: world.diplomacy?.isHostileToPlayer(ship.government) == true)
+        if let ship = world.nearestHailable(), let r = shipResult(ship) {
+            return r
         }
         return nil
+    }
+
+    /// How willing `entityID` is to help, driving both eligibility and price
+    /// in `GameContainerView`: allies help for free, a truly neutral crew
+    /// wants paying, a crew that's come to dislike the player (a negative but
+    /// not-yet-hostile legal record) will only sometimes agree and charges
+    /// more for the risk, and an outright hostile/busy/untalkative ship won't
+    /// help at all.
+    enum AssistanceTier { case ally, neutral, wary, unavailable }
+
+    func assistanceTier(entityID: Int) -> AssistanceTier {
+        guard let ship = world.ship(id: entityID), ship.isAlive, !ship.disabled,
+              world.diplomacy?.isHostileToPlayer(ship.government) != true,
+              let govt = galaxy?.game.govt(ship.government), !govt.nonTalkative,
+              let brain = ship.brain,
+              ![.attacking, .fleeing, .departing, .landing, .assisting].contains(brain.state)
+        else { return .unavailable }
+        if world.diplomacy?.areAllied(ship.government, world.player.government) == true { return .ally }
+        let record = world.diplomacy?.playerRecord[ship.government] ?? 0
+        return record < 0 ? .wary : .neutral
+    }
+
+    /// Start a paid assist run: the ship flies to the player, docks, and
+    /// delivers fuel/repairs (see `AIBrain.assist`/`World.deliverAssistance`).
+    func requestAssistance(entityID: Int) {
+        world.ship(id: entityID)?.brain?.beginAssisting()
     }
 
     func selectNearestTarget() { world.selectNearestTarget(hostileOnly: false) }
@@ -962,6 +1002,76 @@ final class GameScene: SKScene {
         case .neutral: return SKColor(red: 0.95, green: 0.85, blue: 0.25, alpha: 1)
         case .friendlyOrOwned: return SKColor(red: 0.4, green: 0.9, blue: 0.4, alpha: 1)
         case .disabled: return SKColor(white: 0.55, alpha: 1)
+        }
+    }
+
+    // MARK: Selection brackets
+
+    /// Four disconnected L-shaped corner marks around a `size`-wide square —
+    /// the classic viewfinder/targeting-bracket look.
+    private func bracketPath(size: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        let half = size / 2
+        let arm = max(4, size * 0.22)
+        let corners: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+            (-half, half, 1, -1), (half, half, -1, -1),
+            (-half, -half, 1, 1), (half, -half, -1, 1),
+        ]
+        for (x, y, dx, dy) in corners {
+            path.move(to: CGPoint(x: x, y: y))
+            path.addLine(to: CGPoint(x: x + arm * dx, y: y))
+            path.move(to: CGPoint(x: x, y: y))
+            path.addLine(to: CGPoint(x: x, y: y + arm * dy))
+        }
+        return path
+    }
+
+    /// A gentle "locked on" pulse, restarted only when a bracket first
+    /// attaches to a new target (not every frame).
+    private func restartPulse(_ node: SKShapeNode) {
+        node.removeAllActions()
+        node.setScale(1.0)
+        let pulse = SKAction.sequence([.scale(to: 1.08, duration: 0.55), .scale(to: 1.0, duration: 0.55)])
+        pulse.timingMode = .easeInEaseOut
+        node.run(.repeatForever(pulse))
+    }
+
+    /// Track the current ship target + planet nav-selection every frame:
+    /// position, color (relationship for ships; landable blue / not-landable
+    /// red for planets, matching the manual), and a lock-on pulse that only
+    /// restarts when the locked id actually changes.
+    private func updateSelectionBrackets() {
+        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
+            let radius = npcNodes[tid]?.radius ?? CGFloat(ship.radius)
+            shipBracket.position = CGPoint(x: ship.position.x, y: ship.position.y)
+            shipBracket.isHidden = false
+            shipBracket.strokeColor = factionColor(for: ship)
+            if lockedShipBracketID != tid {
+                lockedShipBracketID = tid
+                shipBracket.path = bracketPath(size: radius * 2 + 14)
+                restartPulse(shipBracket)
+            }
+        } else if lockedShipBracketID != nil {
+            lockedShipBracketID = nil
+            shipBracket.isHidden = true
+            shipBracket.removeAllActions()
+        }
+
+        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
+            let landable = world.systemContext.bodies.first { $0.id == pid }?.canLand ?? false
+            planetBracket.position = pv.position
+            planetBracket.isHidden = false
+            planetBracket.strokeColor = landable ? SKColor(red: 0.35, green: 0.6, blue: 1.0, alpha: 1)
+                                                  : SKColor(red: 0.95, green: 0.3, blue: 0.25, alpha: 1)
+            if lockedPlanetBracketID != pid {
+                lockedPlanetBracketID = pid
+                planetBracket.path = bracketPath(size: pv.radius * 2 + 18)
+                restartPulse(planetBracket)
+            }
+        } else if lockedPlanetBracketID != nil {
+            lockedPlanetBracketID = nil
+            planetBracket.isHidden = true
+            planetBracket.removeAllActions()
         }
     }
 

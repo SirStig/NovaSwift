@@ -816,6 +816,16 @@ public final class World {
             .filter { ($0.position - player.position).length <= range }
             .min { ($0.position - player.position).length < ($1.position - player.position).length }
     }
+
+    /// Apply a paid "Request Assistance" ally's delivery once it docks with
+    /// the player: one jump's worth of fuel, and armor topped up to a safe
+    /// floor if it's currently lower (never reduced if already healthier).
+    public func deliverAssistance(from shipID: Int) {
+        player.fuel = min(player.maxFuel, player.fuel + ShipFuel.perJump)
+        let safeArmor = player.maxArmor * 0.4
+        if player.armor < safeArmor { player.armor = safeArmor }
+        events.append(.assistanceDelivered(entityID: shipID))
+    }
 }
 
 // MARK: - Small vector angle helpers used across the AI/combat code

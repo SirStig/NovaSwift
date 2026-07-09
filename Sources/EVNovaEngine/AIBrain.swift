@@ -15,6 +15,10 @@ public enum AIState: String, Sendable {
     case fleeing       // hurt / outmatched; running for the hyperspace edge
     case departing     // leaving the system (heading to the jump edge)
     case escorting     // sticking with a fleet leader
+    /// Answering the player's paid "Request Assistance" hail: fly to the
+    /// player, dock and deliver fuel/repairs, then optionally help fight
+    /// whatever the player currently has targeted before moving on.
+    case assisting
 }
 
 /// The decision-maker for one NPC ship. Each frame it perceives the world,
@@ -39,6 +43,9 @@ public final class AIBrain {
     public var leaderID: Int?
     /// This escort's slot in the leader's formation (0-based), for tidy wings.
     public var formationSlot = 0
+    /// Set once this assist run has docked with the player and delivered
+    /// fuel/repairs — reset every time `beginAssisting()` starts a new run.
+    public var assistDelivered = false
 
     // Tunables (world units).
     public var scanRange: Double = 1500
@@ -67,6 +74,14 @@ public final class AIBrain {
     public init(aiType: AIType, govt: Int) {
         self.aiType = aiType
         self.homeGovt = govt
+    }
+
+    /// Start (or restart) a paid assist run: fly to the player and dock. Called
+    /// from the app layer when the player accepts a "Request Assistance" hail.
+    public func beginAssisting() {
+        assistDelivered = false
+        state = .assisting
+        stateClock = 0
     }
 
     // MARK: Perception
@@ -261,6 +276,7 @@ public final class AIBrain {
         case .orbiting:   return orbit(me, world, dt)
         case .departing:  return depart(me, world)
         case .escorting:  return escort(me, world)
+        case .assisting:  return assist(me, world)
         case .spawning:   return ControlIntent()
         }
     }
@@ -454,6 +470,35 @@ public final class AIBrain {
         let station = leader.position + fwd * behind + right * lateral
         if (station - me.position).length < 70 { return ControlIntent() }
         return arrive(me, to: station, slowRadius: 130)
+    }
+
+    /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
+    /// applied once via `World.deliverAssistance`). After delivering: if the
+    /// player currently has a hostile ship targeted and we're armed, pitch in
+    /// against it (reusing `attack()` wholesale — once that target is gone,
+    /// `.attacking`'s own cleanup releases us back to our own business);
+    /// otherwise linger briefly, then depart.
+    private func assist(_ me: Ship, _ world: World) -> ControlIntent {
+        let player = world.player
+        if !assistDelivered {
+            let dist = (player.position - me.position).length
+            if dist < 90 {
+                world.deliverAssistance(from: me.entityID)
+                assistDelivered = true
+                stateClock = 0
+            }
+            return arrive(me, to: player.position, slowRadius: 140)
+        }
+        if weaponRange(me) > 0, let tid = player.currentTargetID, let target = world.ship(id: tid),
+           target.isAlive, !target.disabled,
+           world.diplomacy?.isHostileToPlayer(target.government) == true,
+           (target.position - me.position).length <= scanRange {
+            targetID = tid
+            enter(.attacking)
+            return attack(me, world)
+        }
+        if stateClock > 4 { enter(.departing) }
+        return arrive(me, to: player.position, slowRadius: 200)
     }
 
     // MARK: Steering primitives (each returns a ControlIntent)

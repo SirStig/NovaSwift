@@ -1,39 +1,56 @@
 # EV Nova — Apple Platforms Port (unofficial)
 
-A non-commercial, fan project to recreate **EV Nova** (Escape Velocity Nova,
-originally by Ambrosia Software / ATMOS) as faithfully as possible as a native
-app for modern **iOS, iPadOS, and macOS** — playing the player's own game data
-and the community plug-in ecosystem.
+**Escape Velocity Nova**, rebuilt from scratch in native Swift, so it can run
+properly on a modern Mac, iPad, or iPhone.
 
-> **The one goal:** reproduce the original EV Nova, the same game and the same
-> feel, driven entirely by the **player's own legally-owned data**. We ship
-> code; you bring EV Nova. Read the authoritative
-> **[Project Charter](docs/CHARTER.md)** first — it governs everything else.
+## What this is
 
-This repo contains **only** open reimplementation code and tooling. It contains
-**no copyrighted game data**. See [Legal](#legal).
+EV Nova (Ambrosia Software / ATMOS, 2002) is a 2D space trading, combat, and
+mission game with one of the deepest campaigns and plug-in ecosystems ever
+built for a niche Mac title. The original binary is PowerPC/Carbon-era code —
+it doesn't run natively on Apple Silicon, has no iOS build, and the one
+serious open-source revival effort (Kestrel, C++) is desktop-only and has been
+dormant since 2023.
 
----
+So this project reimplements the whole thing: the resource-file parser, the
+flight and combat sim, the AI, the mission/story engine, the economy, the UI —
+all of it, from the ground up in Swift, targeting Metal/SpriteKit so it runs
+natively on iOS, iPadOS, and macOS. Not a wrapper, not an emulator — a genuine
+port that reads the *original game's data files* and reproduces the original
+game as faithfully as possible, with modern platform support layered on top.
 
-## Status
+**The one rule that shapes everything else:** we ship code, you bring the
+game. EV Nova was commercial shareware and its data is still owned by ATMOS —
+this repo contains zero copyrighted game content, and never will. Instead,
+`EVNovaKit` reads your own legally-owned copy of the game at runtime (classic
+resource forks, `.ndat`, or the modern `BRGR .rez` container) the same way
+projects like OpenMW or OpenRA work: engine and tooling are open source, data
+is bring-your-own. The full reasoning lives in **[docs/CHARTER.md](docs/CHARTER.md)**
+— read that first, it governs every other decision in this repo.
 
-We have a **real, connected vertical slice** running on real game data: fly with
-the original flight model, fight AI ships spawned from the real fleet tables,
-navigate the real galaxy map, jump between systems, land, and trade / outfit /
-buy ships in the spaceport against a persistent pilot.
+## Status — what actually works right now
 
-**Not yet wired for the player:** the mission/story runtime (built as a library,
-not yet connected to the live game), fuel-gated travel, player death/stakes, and
-pilot management. The honest, verified breakdown of what's **wired vs. built-but-
-not-wired vs. missing** lives in **[docs/STATUS.md](docs/STATUS.md)** — start
-there to understand the real state.
+This is a real, playable vertical slice, not a tech demo. On your own game
+data you can today:
 
-Foundation in place: `EVNovaKit` reads classic resource forks / `.ndat` and the
-modern `BRGR .rez` container and decodes `rlëD`/`PICT` art (verified on a full
-owned copy — 288+ ships, 545 systems, 411 planets). `EVNovaEngine` runs the live
-flight/combat/AI sim. `EVNovaStory` implements the mission/NCB engine (wiring
-pending). Native Swift + Metal/SpriteKit; engine decision is final — see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Fly with the original Newtonian flight model, fight AI ships spawned from
+  the real fleet tables, and get hit with real ionization, combat-odds AI
+  decision-making, and target-lock.
+- Navigate the real galaxy map, plot a course, and jump between systems —
+  jumps now cost real fuel, gated by the ship's actual tank.
+- Land, and trade / outfit / buy ships in the spaceport against a persistent
+  pilot save, with mission-gated item availability (an outfit you haven't
+  unlocked yet is genuinely locked, not just hidden).
+- Browse and install community plug-ins from an in-app store.
+
+The part that's still missing is the part that makes it *feel like a
+finished game*: the mission/story campaign isn't driving play yet (there's a
+Mission BBS button and window, but it's a placeholder — the underlying
+`StoryEngine` runs only under the CLI and tests, not in the app), and there's
+no way to actually lose — no player death, no game over, no paid repairs. See
+**[docs/STATUS.md](docs/STATUS.md)** for the full, honestly-audited
+wired-vs-built-vs-missing breakdown — that document, not this README, is the
+source of truth for what's real.
 
 ```bash
 swift build && swift test                    # build the core + run tests
@@ -49,37 +66,39 @@ See the **[Charter](docs/CHARTER.md)** for the full statement. In short:
 
 - **Fidelity first** — match the original EV Nova's flight, combat, economy,
   missions, AI, and UI, reconstructed from the real data. Modern additions
-  (resolution, touch, controllers, QoL) are opt-in and additive.
-- **Bring your own data** — nothing copyrighted is bundled; everything at runtime
-  is decoded from the player's own files. Nothing hardcoded or mocked in the
-  shipping game.
-- **Native Apple app** — Metal-backed, touch-first on iPhone/iPad, keyboard/mouse
-  + controller on macOS. Runs the base game and arbitrary plug-ins / total
-  conversions.
+  (resolution, touch, controllers, QoL) are opt-in and additive, never a
+  substitute for the real thing.
+- **Bring your own data** — nothing copyrighted is bundled; everything at
+  runtime is decoded from the player's own files. Nothing hardcoded or mocked
+  in the shipping game.
+- **Native Apple app** — Metal-backed, touch-first on iPhone/iPad, keyboard/
+  mouse + controller on macOS. Runs the base game and arbitrary plug-ins /
+  total conversions.
 
 ## Repository layout
 
 ```
-docs/               Charter, status, architecture, data-format reference, roadmap
+docs/                   Charter, status, architecture, data-format reference, roadmap
 Sources/
-  EVNovaKit/        Data layer — resource parsing, typed decoders, sprite/PICT decode
-  EVNovaEngine/     Live simulation — flight, combat, AI, spawning, diplomacy
-  EVNovaStory/      Mission/story runtime — mïsn/crön/NCB engine (wiring in progress)
-  evnova-extract/   CLI inspector/harness (drives the libraries end-to-end)
-Tests/              Unit tests for each library target
-app/EVNova/         The multiplatform SwiftUI/SpriteKit app (the game itself)
-  App/ Game/ Spaceport/ Pilots/ Story/ Launcher/ Input/ Audio/ UI/ Data/
+  EVNovaKit/            Data layer — resource parsing, typed decoders, sprite/PICT decode
+  EVNovaEngine/         Live simulation — flight, combat, AI, spawning, diplomacy
+  EVNovaStory/          Mission/story runtime — mïsn/crön/NCB engine (wiring in progress)
+  EVNovaPluginStore/    Plug-in catalog metadata + download/install pipeline
+  evnova-extract/       CLI inspector/harness (drives the libraries end-to-end)
+Tests/                  Unit tests for each library target
+app/EVNova/             The multiplatform SwiftUI/SpriteKit app (the game itself)
+  App/ Game/ Spaceport/ Pilots/ Story/ Store/ Launcher/ Input/ Audio/ UI/ Data/
 app/EVNova.xcodeproj
-assets/             This project's own art (icon, placeholders) — no game data
-scripts/            Setup / fetch / build helpers
-data/base/          ⬅ YOU place your legally-owned EV Nova data here (git-ignored)
-data/plugins/       Community plug-ins & total conversions (git-ignored)
-data/converted/     Extractor output (git-ignored)
-third_party/        Vendored open-source deps (fetched by scripts, not committed)
+assets/                 This project's own art (icon, placeholders) — no game data
+scripts/                Setup / fetch / build helpers
+data/base/              ⬅ YOU place your legally-owned EV Nova data here (git-ignored)
+data/plugins/           Community plug-ins & total conversions (git-ignored)
+data/converted/         Extractor output (git-ignored)
+third_party/            Vendored open-source deps (fetched by scripts, not committed)
 ```
 
-(`engine/` and `tools/` are legacy empty placeholders from an earlier layout and
-will be removed; the real code is the Swift package above.)
+(`engine/` and `tools/` are legacy empty placeholders from an earlier layout
+and will be removed; the real code is the Swift package above.)
 
 ## Getting started
 
@@ -111,14 +130,14 @@ Detailed data steps live in [docs/GET_THE_DATA.md](docs/GET_THE_DATA.md). Open
 ## Legal
 
 EV Nova and its game data are **copyrighted**. This project does **not** and
-**will not** redistribute the base game's data files. To use this port you must
-supply your own legally-obtained copy of EV Nova.
+**will not** redistribute the base game's data files. To use this port you
+must supply your own legally-obtained copy of EV Nova.
 
-- **Base game data** → you must own EV Nova; the repo helps you *extract* from
-  your own copy. It is never bundled here.
+- **Base game data** → you must own EV Nova; the repo helps you *extract*
+  from your own copy. It is never bundled here.
 - **Community plug-ins / total conversions** → freely distributed by their
-  authors; the fetch script only pulls ones offered for free download, and
-  their own licenses/readmes apply.
+  authors; the fetch script and in-app store only pull ones offered for free
+  download, and their own licenses/readmes apply.
 - **This project's code** → open source (see [LICENSE](LICENSE)).
 
 This is an interoperability / preservation effort in the spirit of engine
