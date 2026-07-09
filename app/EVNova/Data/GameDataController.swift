@@ -39,6 +39,21 @@ final class GameDataController: ObservableObject {
         Bundle.main.url(forResource: "Plugins", withExtension: nil)
     }
 
+    /// Audio file extensions EV Nova's shipped soundtrack might use (e.g. the
+    /// Community Edition's `Nova Music.mp3`). Shared with `DataImporter` so the
+    /// import step actually copies the track alongside the `.rez`/`.ndat` files
+    /// — `GameLibrary.discoverResourceFiles` deliberately excludes it.
+    static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "aiff", "aif", "wav"]
+
+    /// Recursively find audio files under `directory` (music lives a folder
+    /// down from wherever the resource files are, e.g. "Nova Files/Nova Music.mp3").
+    static func discoverAudioFiles(in directory: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
+                                    options: [.skipsHiddenFiles]) else { return [] }
+        return e.compactMap { $0 as? URL }.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
+    }
+
     /// Resolve the base "Nova Files" directory from the available sources.
     private func resolveBaseDir() -> URL? {
         let fm = FileManager.default
@@ -152,11 +167,7 @@ final class GameDataController: ObservableObject {
     /// Sound *effects* come from `snd ` resources; music is an external audio file.
     func musicTrackURL() -> URL? {
         guard let baseDir = resolveBaseDir() else { return nil }
-        let audioExts: Set<String> = ["mp3", "m4a", "aac", "aiff", "aif", "wav"]
-        let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(at: baseDir, includingPropertiesForKeys: nil,
-                                                      options: [.skipsHiddenFiles]) else { return nil }
-        let tracks = items.filter { audioExts.contains($0.pathExtension.lowercased()) }
+        let tracks = Self.discoverAudioFiles(in: baseDir)
         // Prefer a file that looks like the main music track.
         return tracks.first { $0.lastPathComponent.lowercased().contains("music") } ?? tracks.first
     }

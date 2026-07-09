@@ -38,17 +38,27 @@ public struct WeaponSpec {
     public let turnRate: Double          // rad/sec, guided munitions
     public let blastRadius: Double       // px, 0 = direct hit only
     public let ammoPerShot: Int          // 0/1 typically; drains mount ammo
+    /// `snd ` id played when this weapon fires, or nil if silent.
+    public let fireSoundID: Int?
+    /// `bööm` id detonated on impact/expiry, or nil if this weapon has no explosion.
+    public let explosionBoomID: Int?
+    /// Continuous-fire weapons (typically beams) trigger their sound once per
+    /// firing burst rather than once per simulation frame.
+    public let loopSound: Bool
 
     public init(id: Int, name: String, shieldDamage: Double, armorDamage: Double,
                 reloadSeconds: Double, projectileSpeed: Double, range: Double,
                 accuracyRadians: Double, isBeam: Bool, isGuided: Bool,
-                turnRate: Double, blastRadius: Double, ammoPerShot: Int) {
+                turnRate: Double, blastRadius: Double, ammoPerShot: Int,
+                fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false) {
         self.id = id; self.name = name
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.reloadSeconds = reloadSeconds; self.projectileSpeed = projectileSpeed
         self.range = range; self.accuracyRadians = accuracyRadians
         self.isBeam = isBeam; self.isGuided = isGuided; self.turnRate = turnRate
         self.blastRadius = blastRadius; self.ammoPerShot = ammoPerShot
+        self.fireSoundID = fireSoundID; self.explosionBoomID = explosionBoomID
+        self.loopSound = loopSound
     }
 
     /// Convert a decoded weapon into simulation units.
@@ -67,6 +77,9 @@ public struct WeaponSpec {
         turnRate = Double(w.turnRate) * 3.0 * .pi / 180.0
         blastRadius = Double(w.blastRadius)
         ammoPerShot = w.maxAmmo > 0 ? 1 : 0
+        fireSoundID = w.fireSoundID
+        explosionBoomID = w.explosionBoomID
+        loopSound = w.loopSound
     }
 }
 
@@ -142,11 +155,13 @@ public final class Projectile {
 /// world appends them during `step`; the scene drains them after. Persistent
 /// entities (ships, projectiles) are read directly off the world instead.
 public enum WorldEvent {
-    case weaponFired(shooterID: Int, at: Vec2, heading: Double)
-    case beam(from: Vec2, to: Vec2, hit: Bool)
+    case weaponFired(shooterID: Int, at: Vec2, heading: Double, soundID: Int?)
+    case beam(from: Vec2, to: Vec2, hit: Bool, soundID: Int?)
     case shieldHit(at: Vec2)
     case armorHit(at: Vec2)
-    case explosion(at: Vec2, radius: Double)
+    case explosion(at: Vec2, radius: Double, soundID: Int?)
+    /// The player locked a new target (via targetNearest/targetNext/nearestHostile).
+    case targetAcquired(entityID: Int)
     case shipDestroyed(entityID: Int, shipTypeID: Int, at: Vec2)
     /// A ship appeared. `fromHyperspace` distinguishes an inbound hyperspace jump
     /// (warp-in effect, at the system edge) from an internal/populate spawn.

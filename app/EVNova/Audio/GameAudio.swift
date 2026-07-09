@@ -26,14 +26,21 @@ final class GameAudio: ObservableObject {
         case uiSelect            // menu/button click
         case uiError             // rejected action
         case targetLock          // acquired a target
+        case lowShieldWarning    // shields/hull crossed below a safe threshold
+        case criticalHullWarning // hull critically low
+        case docking             // player set down on a spöb
+        case launch              // player lifted off from a spöb
 
         var soundID: Int {
             switch self {
-            case .hyperspaceCharge: return 128   // "Warp up"
-            case .hyperspaceArrive: return 130   // "Warp out"
-            case .uiSelect:         return 150   // "Beep1"
-            case .uiError:          return 152   // "Beep3"
-            case .targetLock:       return 151   // "Beep2"
+            case .hyperspaceCharge:    return 128   // "Warp up"
+            case .hyperspaceArrive:    return 130   // "Warp out"
+            case .uiSelect:            return 150   // "Beep1"
+            case .uiError:             return 152   // "Beep3"
+            case .targetLock:          return 151   // "Beep2"
+            case .lowShieldWarning:    return 371   // "Klaxxon"
+            case .criticalHullWarning: return 370   // "Red Alert"
+            case .docking, .launch:    return 390   // "Airlock"
             }
         }
     }
@@ -70,7 +77,12 @@ final class GameAudio: ObservableObject {
     func startMusicIfEnabled() { updateMusicState() }
 
     private func updateMusicState() {
-        guard let url = musicURL, settings.musicEnabled, !settings.muteAll, settings.musicVolume > 0 else {
+        guard let url = musicURL else {
+            Log.audio.debug("updateMusicState: no music track found (musicTrackURL() returned nil)")
+            engine.stopMusic(); return
+        }
+        guard settings.musicEnabled, !settings.muteAll, settings.musicVolume > 0 else {
+            Log.audio.debug("updateMusicState: music suppressed by settings (enabled=\(self.settings.musicEnabled, privacy: .public) muteAll=\(self.settings.muteAll, privacy: .public) volume=\(self.settings.musicVolume, privacy: .public))")
             engine.stopMusic(); return
         }
         engine.startMusic(url: url)
@@ -94,7 +106,11 @@ final class GameAudio: ObservableObject {
     /// Play a `snd ` id centred (no attenuation/pan). Combat/UI systems use this
     /// with a weapon's own sound id.
     func playSound(_ id: Int, volume: Float = 1) {
-        guard !settings.muteAll, let buffer = library.buffer(for: id) else { return }
+        guard !settings.muteAll else { return }
+        guard let buffer = library.buffer(for: id) else {
+            Log.audio.debug("playSound(\(id, privacy: .public)): no buffer (missing snd or undecodable)")
+            return
+        }
         engine.play(buffer, volume: volume)
     }
 
@@ -111,6 +127,21 @@ final class GameAudio: ObservableObject {
         // Pan by horizontal offset, softened so far-left/right isn't fully mono-side.
         let pan = Float(max(-1, min(1, dx / max(1, range)))) * 0.85
         engine.play(buffer, volume: atten, pan: pan)
+    }
+
+    // MARK: Hailing
+
+    /// Play a hailed government's voice line — the "Acknowledge" bank normally,
+    /// "Target" if that government is hostile to the player — picking a random
+    /// real variant. No-op for governments that can't be hailed or have nothing
+    /// to say (`gövt.cantBeHailed` / `nonTalkative`).
+    func playHailVoice(govt: GovtRes, hostile: Bool) {
+        guard !govt.cantBeHailed, !govt.nonTalkative else { return }
+        let base = 1000 + govt.voiceType * 100 + (hostile ? 10 : 0)
+        let available = Set(availableSoundIDs())
+        let variants = (0...9).map { base + $0 }.filter { available.contains($0) }
+        guard let id = variants.randomElement() else { return }
+        playSound(id, volume: Float(settings.uiVolume))
     }
 
     // MARK: Sound test (Settings)

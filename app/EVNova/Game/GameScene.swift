@@ -26,6 +26,11 @@ final class GameScene: SKScene {
     private var settings = GameSettings()
     private var audio: GameAudio?
     private var wasFiring = false
+    // Edge-triggered warning state: true once the klaxon/red-alert for that
+    // threshold has played, reset only after recovering with a little hysteresis
+    // so crossing back and forth right at the line doesn't retrigger every frame.
+    private var shieldWarned = false
+    private var hullWarned = false
 
     private let cameraNode = SKCameraNode()
     private var shipNode: SKNode!
@@ -350,27 +355,40 @@ final class GameScene: SKScene {
         // spawned, so firing reflects the real weapon system, not the raw input.
         for event in world.drainEvents() {
             switch event {
-            case let .weaponFired(shooterID, at, _):
-                // The player's shots report right at the listener; NPC fire is
-                // positional and quieter so a busy system doesn't roar.
-                if shooterID == 0 {
-                    audio?.play(208, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+            case let .weaponFired(_, at, _, soundID):
+                // Positional for every shooter — the player's own shots report
+                // right at the listener (near-zero distance = full volume), NPC
+                // fire attenuates/pans naturally by distance.
+                if let soundID {
+                    audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 }
-            case let .beam(from, to, hit):
+            case let .beam(from, to, hit, soundID):
                 spawnBeam(from: CGPoint(x: from.x, y: from.y),
                           to: CGPoint(x: to.x, y: to.y), hit: hit)
-            case let .explosion(at, radius):
+                // Beams re-fire every reload tick while held; only retrigger the
+                // player's own beam sound on the rising edge (fresh key-down) so
+                // a held trigger doesn't stutter. NPC beams aren't gated by the
+                // player's `wasFiring`, so they still sound each time they fire.
+                if let soundID, !wasFiring {
+                    audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
+                }
+            case let .explosion(at, radius, soundID):
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
+                audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+            case .targetAcquired:
+                audio?.play(.targetLock)
             case let .shipArrived(entityID, _, fromHyperspace):
                 // Only inbound hyperspace jumps get the warp effect (played when the
                 // node is built); mid-system populate spawns appear silently.
                 if fromHyperspace { pendingEntrance[entityID] = .warpIn }
             case let .shipLaunched(entityID, _):
                 pendingEntrance[entityID] = .launch
+                if entityID == 0 { audio?.play(.launch) }
             case let .shipDeparted(entityID, at, heading):
                 warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
             case let .shipLanded(entityID, spobID, at):
                 landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
+                if entityID == 0 { audio?.play(.docking) }
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
             default:
@@ -421,6 +439,57 @@ final class GameScene: SKScene {
         } else {
             hud?.landPrompt = ""
         }
+    }
+
+    /// Edge-triggered low-shield/critical-hull klaxons. Fires once per crossing
+    /// below the threshold; a little hysteresis on the recovery side (threshold
+    /// + 5%) keeps a value hovering right at the line from retriggering every
+    /// ~12 Hz HUD tick.
+    private func updateWarnings(shieldFraction: Double, armorFraction: Double) {
+        if shieldFraction <= 0.25 {
+            if !shieldWarned { audio?.play(.lowShieldWarning); shieldWarned = true }
+        } else if shieldFraction > 0.30 {
+            shieldWarned = false
+        }
+        if armorFraction <= 0.15 {
+            if !hullWarned { audio?.play(.criticalHullWarning); hullWarned = true }
+        } else if armorFraction > 0.20 {
+            hullWarned = false
+        }
+    }
+
+    // MARK: Hailing + target-lock
+
+    /// The nearest hailable ship's government, if any is in range. `GameContainerView`
+    /// drives this off the `.hailTarget` action: plays the government's voice line and
+    /// shows its `commName` as a brief HUD banner.
+    func attemptHail() -> GovtRes? {
+        guard let ship = world.nearestHailable(), let game = galaxy?.game else { return nil }
+        return game.govt(ship.government)
+    }
+
+    /// Whether the nearest hailable ship is hostile to the player (drives which
+    /// voice bank — Acknowledge vs. Target — plays for the hail).
+    func nearestHailableIsHostile() -> Bool {
+        guard let ship = world.nearestHailable() else { return false }
+        return world.diplomacy?.isHostileToPlayer(ship.government) == true
+    }
+
+    func selectNearestTarget() { world.selectNearestTarget(hostileOnly: false) }
+    func selectNearestHostile() { world.selectNearestTarget(hostileOnly: true) }
+    func cycleTarget() { world.cycleTarget() }
+    func clearTarget() { world.clearPlayerTarget() }
+
+    private func updateTargetHUD(_ target: Ship?) {
+        guard let hud else { return }
+        guard let target else {
+            hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0; hud.targetHostile = false
+            return
+        }
+        hud.targetName = target.name
+        hud.targetShield = target.maxShield > 0 ? target.shield / target.maxShield : 0
+        hud.targetArmor = target.maxArmor > 0 ? target.armor / target.maxArmor : 1
+        hud.targetHostile = world.diplomacy?.isHostileToPlayer(target.government) == true
     }
 
     private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
@@ -869,6 +938,8 @@ final class GameScene: SKScene {
         hud.armor = p.maxArmor > 0 ? p.armor / p.maxArmor : 1
         hud.fuel = p.maxFuel > 0 ? p.fuel / p.maxFuel : 0
         hud.jumps = Int((p.fuel / 100).rounded(.down))
+        updateWarnings(shieldFraction: hud.shield, armorFraction: hud.armor)
+        updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
         hud.cargoUsed = p.cargoUsed
         hud.cargoCapacity = p.cargoCapacity
         if let mount = p.weapons.first {

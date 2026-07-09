@@ -134,6 +134,12 @@ public struct ShipRes {
     public let shieldRecharge: Int  // @16 shield regen stat (→ pts/sec via ×FPS/1000)
     public let armor: Int           // @14 max armor
     public let armorRecharge: Int   // @54 armor regen stat (0 for most hulls)
+    /// `bööm` id for the mid-death "breaking up" explosion, or nil if none.
+    public let breakupExplosionBoomID: Int?  // @56
+    /// `bööm` id for the final death explosion — drives the kill-sound the
+    /// player actually hears when a ship dies. Falls back to
+    /// `breakupExplosionBoomID` when absent.
+    public let finalExplosionBoomID: Int?    // @58
 
     // Flight
     public let acceleration: Int    // @4
@@ -189,6 +195,8 @@ public struct ShipRes {
         cost = i16(d, 50)
         deathDelay = i16(d, 52)
         armorRecharge = i16(d, 54)
+        breakupExplosionBoomID = boomID(raw: i16(d, 56))
+        finalExplosionBoomID = boomID(raw: i16(d, 58))
         mass = i16(d, 62)
         length = i16(d, 64)
         inherentAI = i16(d, 66)
@@ -286,6 +294,11 @@ public struct SpobRes {
     public let techLevel: Int
     public let government: Int
     public let landingPictID: Int
+    /// Custom ambient `snd ` id for this stellar's spaceport (e.g. a station's
+    /// own hum), or nil to use no special ambience. Verified empirically: Holpa
+    /// Station (#299, government #129 "Auroran Empire") carries id 10033,
+    /// "Auroran station.SFIL" — a real, thematically-correct pairing.
+    public let ambientSoundID: Int?
 
     public init(_ r: Resource) {
         id = r.id
@@ -301,6 +314,8 @@ public struct SpobRes {
         techLevel = i16(d, 12)
         government = i16(d, 20)
         landingPictID = u16(d, 24)
+        let rawAmbient = i16(d, 26)
+        ambientSoundID = rawAmbient == -1 ? nil : rawAmbient
     }
 }
 
@@ -329,6 +344,16 @@ public struct NovaGame {
     public func fleets() -> [FleetRes] { resources.resources(of: NovaType.fleet).map(FleetRes.init) }
     public func weapon(_ id: Int) -> WeapRes? { resources.resource(NovaType.weapon, id).map(WeapRes.init) }
     public func weapons() -> [WeapRes] { resources.resources(of: NovaType.weapon).map(WeapRes.init) }
+    public func boom(_ id: Int) -> BoomRes? { resources.resource(NovaType.boom, id).map(BoomRes.init) }
+
+    /// A hull's death-explosion `snd` id: prefers the final explosion's sound,
+    /// falling back to the breakup explosion's if the final one has none.
+    public func deathExplosionSoundID(_ ship: ShipRes) -> Int? {
+        [ship.finalExplosionBoomID, ship.breakupExplosionBoomID]
+            .compactMap { $0 }
+            .compactMap { boom($0)?.soundID }
+            .first
+    }
     public func outfit(_ id: Int) -> OutfRes? { resources.resource(NovaType.outfit, id).map(OutfRes.init) }
     public func outfits() -> [OutfRes] { resources.resources(of: NovaType.outfit).map(OutfRes.init) }
 

@@ -106,6 +106,9 @@ public final class Ship {
     /// `shipTypeID`, which is the `shïp` resource id used for the sprite.
     public var entityID: Int = 0
     public var shipTypeID: Int = -1
+    /// This hull's death-explosion `snd` id (from `shïp`'s breakup/final
+    /// explosion → `bööm`), or nil if it has none.
+    public var explosionSoundID: Int?
     /// Faction/government. Drives who this ship will fight (see `Diplomacy`).
     public var government: Int = independentGovt
     /// Collision radius (px). Set from the sprite size where known.
@@ -512,7 +515,7 @@ public final class World {
                                    turnRate: spec.turnRate, speed: spec.projectileSpeed,
                                    targetID: spec.isGuided ? ship.currentTargetID : nil)
                 projectiles.append(p)
-                events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim))
+                events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID))
                 Log.combat.debug("\(ship.name) [\(ship.entityID)] fired \(spec.name)\(target.map { " at \($0.name) [\($0.entityID)]" } ?? "")")
             }
             mount.didFire()
@@ -543,7 +546,7 @@ public final class World {
             endPoint = origin + dir * bestT
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID)
         }
-        events.append(.beam(from: origin, to: endPoint, hit: hitShip != nil))
+        events.append(.beam(from: origin, to: endPoint, hit: hitShip != nil, soundID: spec.fireSoundID))
         Log.combat.debug("\(ship.name) [\(ship.entityID)] fired beam \(spec.name)\(hitShip.map { " hit \($0.name) [\($0.entityID)]" } ?? " (no hit)")")
     }
 
@@ -639,7 +642,8 @@ public final class World {
         var survivors: [Ship] = []
         for npc in npcs {
             if !npc.isAlive {
-                events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5)))
+                events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
+                                         soundID: npc.explosionSoundID))
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
                                              at: npc.position))
                 Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
@@ -680,6 +684,66 @@ public final class World {
             s.currentTargetID = nil
             s.brain?.targetID = nil
         }
+    }
+
+    // MARK: Player target-lock
+
+    /// Range (px) within which the player can lock a target — matches the
+    /// default positional-audio falloff range, a reasonable "nearby" radius.
+    public static let targetLockRange: Double = 3000
+
+    /// Lock the nearest eligible ship within range (`hostileOnly` narrows to
+    /// ships `diplomacy` considers hostile to the player). Reuses
+    /// `player.currentTargetID`, so locking a target also makes the player's
+    /// guided weapons track it. Returns the newly-locked ship, if any.
+    @discardableResult
+    public func selectNearestTarget(hostileOnly: Bool) -> Ship? {
+        let candidates = npcs.filter { npc in
+            npc.isAlive && !npc.disabled
+                && (!hostileOnly || diplomacy?.isHostileToPlayer(npc.government) == true)
+        }
+        guard let nearest = candidates.min(by: {
+            ($0.position - player.position).length < ($1.position - player.position).length
+        }), (nearest.position - player.position).length <= Self.targetLockRange else {
+            return nil
+        }
+        player.currentTargetID = nearest.entityID
+        events.append(.targetAcquired(entityID: nearest.entityID))
+        return nearest
+    }
+
+    /// Cycle to the next in-range ship past the current target (wrapping),
+    /// ordered by distance so repeated presses sweep outward-then-around.
+    /// Falls back to `selectNearestTarget` if nothing is currently locked.
+    @discardableResult
+    public func cycleTarget() -> Ship? {
+        let inRange = npcs.filter {
+            $0.isAlive && !$0.disabled && (($0.position - player.position).length <= Self.targetLockRange)
+        }.sorted { ($0.position - player.position).length < ($1.position - player.position).length }
+        guard !inRange.isEmpty else { return nil }
+        guard let currentID = player.currentTargetID,
+              let idx = inRange.firstIndex(where: { $0.entityID == currentID }) else {
+            return selectNearestTarget(hostileOnly: false)
+        }
+        let next = inRange[(idx + 1) % inRange.count]
+        player.currentTargetID = next.entityID
+        events.append(.targetAcquired(entityID: next.entityID))
+        return next
+    }
+
+    /// Drop the player's current target lock, if any.
+    public func clearPlayerTarget() {
+        player.currentTargetID = nil
+    }
+
+    /// The nearest ship within hail range, regardless of relationship — hailing
+    /// doesn't require a prior target lock. `range` is deliberately shorter than
+    /// `targetLockRange`: hailing is a close-range action in the real game.
+    public func nearestHailable(range: Double = 900) -> Ship? {
+        let candidates = npcs.filter { $0.isAlive }
+        return candidates
+            .filter { ($0.position - player.position).length <= range }
+            .min { ($0.position - player.position).length < ($1.position - player.position).length }
     }
 }
 

@@ -57,8 +57,14 @@ final class GameAudioEngine {
         try? session.setActive(true)
         #endif
         engine.prepare()
-        do { try engine.start(); started = true }
-        catch { NSLog("EVNova audio: engine failed to start: \(error)") }
+        do {
+            try engine.start()
+            started = true
+            Log.audio.debug("engine started: outputVolume=\(self.engine.mainMixerNode.outputVolume, privacy: .public) isRunning=\(self.engine.isRunning, privacy: .public)")
+        }
+        catch {
+            Log.audio.error("engine failed to start: \(error, privacy: .public)")
+        }
     }
 
     func stop() {
@@ -111,17 +117,28 @@ final class GameAudioEngine {
     /// if already playing that track).
     func startMusic(url: URL) {
         if !started { start() }
-        guard started else { return }
-        if musicURL == url && musicPlayer.isPlaying { return }
+        guard started else {
+            Log.audio.error("startMusic: engine not started, cannot play \(url.lastPathComponent, privacy: .public)")
+            return
+        }
+        if musicURL == url && musicPlayer.isPlaying {
+            Log.audio.debug("startMusic: already playing \(url.lastPathComponent, privacy: .public)")
+            return
+        }
         musicURL = url
-        guard let file = try? AVAudioFile(forReading: url) else {
-            NSLog("EVNova audio: cannot open music \(url.lastPathComponent)"); return
+        let file: AVAudioFile
+        do {
+            file = try AVAudioFile(forReading: url)
+        } catch {
+            Log.audio.error("startMusic: cannot open \(url.path, privacy: .public): \(error, privacy: .public)")
+            return
         }
         musicPlayer.stop()
         engine.disconnectNodeOutput(musicPlayer)
         engine.connect(musicPlayer, to: musicBus, format: file.processingFormat)
         scheduleMusicLoop(file)
         musicPlayer.play()
+        Log.audio.debug("startMusic: playing \(url.lastPathComponent, privacy: .public) busVolume=\(self.musicBus.outputVolume, privacy: .public) isPlaying=\(self.musicPlayer.isPlaying, privacy: .public)")
     }
 
     func stopMusic() {

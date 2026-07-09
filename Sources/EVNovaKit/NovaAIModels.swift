@@ -29,6 +29,31 @@ import Foundation
     return Int(Int32(bitPattern: v))
 }
 
+/// Read a NUL-terminated Mac Roman C-string from a fixed-size field at `off`,
+/// reading at most `maxLen` bytes. Trailing garbage after the NUL is ignored.
+@inline(__always) private func acstr(_ d: Data, _ off: Int, _ maxLen: Int) -> String {
+    guard off >= 0, off < d.count else { return "" }
+    let start = d.startIndex + off
+    let end = min(start + maxLen, d.endIndex)
+    var bytes: [UInt8] = []
+    var i = start
+    while i < end {
+        let b = d[i]
+        if b == 0 { break }
+        bytes.append(b)
+        i += 1
+    }
+    return String(bytes: bytes, encoding: .macOSRoman) ?? ""
+}
+
+/// Resolve a `wëap`/`shïp` "explosion" field to a `bööm` resource id: raw `-1` =
+/// none; raw `≥1000` is the "explosion + sparks" variant (bööm id = raw − 1000 +
+/// base); otherwise bööm id = raw + base. `base` is 128 for both fields.
+@inline(__always) func boomID(raw: Int, base: Int = 128) -> Int? {
+    guard raw != -1 else { return nil }
+    return raw >= 1000 ? raw - 1000 + base : raw + base
+}
+
 // MARK: oütf — outfit (equipment sold at outfitters; modifies the ship)
 
 /// What an outfit *does* to the ship it's installed on. These are EV Nova's
@@ -168,6 +193,12 @@ public struct GovtRes {
     /// Classes this government is hostile to.
     public let enemies: [Int]
     public let shipSpeedFactor: Int
+    /// "The short string to show for ships of this government when they are
+    /// hailed by the player" (EV Nova Bible). Falls back to `name` when blank.
+    public let commName: String
+    /// "The short string to show in the player's target display when a ship of
+    /// this government is targeted." Falls back to `name` when blank.
+    public let targetCode: String
 
     // Flags 1 (behavior)
     public var xenophobic: Bool       { flags1 & 0x0001 != 0 } // attacks everyone except allies
@@ -177,7 +208,11 @@ public struct GovtRes {
     public var warshipsRetreat: Bool  { flags1 & 0x0010 != 0 } // retreat below 25% shields
     public var neverAttacksPlayer: Bool { flags1 & 0x0040 != 0 }
     public var warshipsTakeBribes: Bool { flags1 & 0x0200 != 0 }
+    public var cantBeHailed: Bool     { flags1 & 0x0400 != 0 }
     public var plundersBeforeKilling: Bool { flags1 & 0x1000 != 0 }
+    /// "Can't Request Assist/Mercy, non-talkative" — never has anything to say
+    /// when hailed even though `cantBeHailed` is false.
+    public var nonTalkative: Bool     { flags2 & 0x0001 != 0 }
 
     public init(_ r: Resource) {
         id = r.id
@@ -199,6 +234,10 @@ public struct GovtRes {
         allies  = (0..<4).map { ai16(d, 32 + $0 * 2) }.filter { $0 != -1 }
         enemies = (0..<4).map { ai16(d, 40 + $0 * 2) }.filter { $0 != -1 }
         shipSpeedFactor = ai16(d, 48)
+        let rawName = acstr(d, 52, 16)
+        commName = rawName.isEmpty ? name : rawName
+        let rawTarget = acstr(d, 68, 16).trimmingCharacters(in: .whitespaces)
+        targetCode = rawTarget.isEmpty ? name : rawTarget
     }
 }
 
@@ -332,6 +371,14 @@ public struct WeapRes {
     public let ammoType: Int        // −1 = no ammo; ≥0 draws from that ammo
     public let accuracy: Int        // spread in degrees (0 = perfect)
     public let impact: Int
+    /// `snd ` id played when this weapon fires, or nil if it's silent.
+    public let fireSoundID: Int?
+    /// `bööm` id detonated on impact/expiry (drives the hit/explosion sound and
+    /// sprite), or nil if this weapon has no explosion.
+    public let explosionBoomID: Int?
+    /// Continuous-fire weapons (typically beams) loop their fire sound instead of
+    /// retriggering it every simulation frame while held.
+    public let loopSound: Bool
     public let proxRadius: Int
     public let blastRadius: Int
     public let beamLength: Int
@@ -364,12 +411,41 @@ public struct WeapRes {
         speed = ai16(d, 10)
         ammoType = ai16(d, 12)
         accuracy = abs(ai16(d, 16))
+        let rawSound = ai16(d, 18)
+        fireSoundID = rawSound == -1 ? nil : rawSound + 200
         impact = ai16(d, 20)
+        explosionBoomID = boomID(raw: ai16(d, 22))
+        let flags = au16(d, 28)
+        loopSound = flags & 0x0010 != 0
         proxRadius = ai16(d, 24)
         blastRadius = ai16(d, 26)
         beamLength = ai16(d, 48)
         turnRate = ai16(d, 106)
         maxAmmo = ai16(d, 108)
         count = ai16(d, 118)
+    }
+}
+
+// MARK: bööm — an explosion (sprite + sound), referenced by wëap/shïp explosion fields
+
+/// A decoded `bööm` resource: the animation and sound played when a weapon's
+/// shot detonates or a ship breaks up. Offsets verified against `Templates.rsrc`
+/// TMPL #500 and cross-checked with NovaJS's `BoomResource.ts`.
+public struct BoomRes {
+    public let id: Int
+    public let name: String
+    public let animationRate: Int
+    /// `snd ` id played on detonation, or nil if this explosion is silent.
+    public let soundID: Int?
+    public let graphicSpinID: Int
+
+    public init(_ r: Resource) {
+        id = r.id
+        name = r.name.isEmpty ? "Boom \(r.id)" : r.name
+        let d = r.data
+        animationRate = ai16(d, 0)
+        let rawSound = ai16(d, 2)
+        soundID = rawSound == -1 ? nil : rawSound + 300
+        graphicSpinID = ai16(d, 4) + 400
     }
 }

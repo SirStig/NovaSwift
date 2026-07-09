@@ -22,6 +22,14 @@ final class GameHUDModel: ObservableObject {
     @Published var cargoCapacity = 0
     /// Non-empty while a landable stellar object is in reach (shown as a prompt).
     @Published var landPrompt = ""
+    /// Non-empty briefly after hailing a ship (bottom-left banner), e.g. "The
+    /// Federation hails you." Cleared on a fade timer by whoever sets it.
+    @Published var hailMessage = ""
+    /// The player's locked target, if any (empty name = no target locked).
+    @Published var targetName = ""
+    @Published var targetShield = 1.0   // 0…1
+    @Published var targetArmor = 1.0    // 0…1
+    @Published var targetHostile = false
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.

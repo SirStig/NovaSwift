@@ -156,6 +156,21 @@ struct GameContainerView: View {
     @State private var host: GameHost?
     @StateObject private var nav = NavigationModel(game: nil, startSystemID: 128)
     @State private var navReady = false
+    /// The system id `host` was actually built for. `nav.configure(...)` in the
+    /// initial `.task` sets `nav.currentSystemID` synchronously, but SwiftUI
+    /// delivers `.onChange(of: nav.currentSystemID)` on the *next* update cycle
+    /// — by then `navReady` is already `true`, so that guard alone doesn't
+    /// stop the initial configure from being misread as a jump. That spurious
+    /// "jump rebuild" created a *second* `GameHost` (own `GameScene` +
+    /// `InputController`) moments after the first, while `KeyboardControls`
+    /// bound to whichever host was current when SwiftUI re-ran `body` — a
+    /// stale/duplicate `InputController` split exactly matching "ship won't
+    /// move" (keys write to one instance, the ticking/visible scene reads
+    /// from the other — confirmed via the `ObjectIdentifier` logging in
+    /// `KeyboardControls` vs. `GameScene.update`'s heartbeat). Comparing
+    /// against the system the current host already represents makes the
+    /// rebuild idempotent regardless of that delivery-order race.
+    @State private var hostSystemID: Int?
     @State private var showMenu = false
     /// The spöb the player is currently landed on (nil = flying).
     @State private var landedSpobID: Int?
@@ -165,6 +180,9 @@ struct GameContainerView: View {
     /// all. Re-asserted whenever a menu/map/spaceport overlay that took focus
     /// away closes back to flight.
     @FocusState private var isSceneFocused: Bool
+    /// Bumped on every hail so a stale fade-timer from an earlier hail can't
+    /// clear a newer `hud.hailMessage`.
+    @State private var hailMessageToken = 0
 
     var body: some View {
         ZStack {
@@ -191,6 +209,7 @@ struct GameContainerView: View {
                 }
 
                 LandPromptView(hud: host.hud)
+                HailBannerView(hud: host.hud)
 
                 if showMenu {
                     GameMenuView(hud: host.hud,
@@ -254,6 +273,7 @@ struct GameContainerView: View {
                     ?? model.data.game?.startingSystem()?.id ?? 128
                 nav.configure(game: model.data.game, startSystemID: startSystem)
                 host = GameHost(model: model, systemID: nav.currentSystemID)
+                hostSystemID = nav.currentSystemID
                 setScenePaused(false, reason: "initial host build")   // never start frozen (nothing should set this true yet, but be sure)
                 syncNav(host)
                 navReady = true
@@ -268,7 +288,12 @@ struct GameContainerView: View {
             }
         }
         .onChange(of: nav.currentSystemID) { _, newID in
-            guard navReady else { return }
+            // `navReady` alone doesn't catch the initial `nav.configure(...)`
+            // notification racing this handler (see `hostSystemID`'s doc
+            // comment) — skip if `host` already represents this system,
+            // whether that's the real reason (redundant delivery) or not.
+            guard navReady, newID != hostSystemID else { return }
+            hostSystemID = newID
             // The rebuild below touches three different ObservableObjects
             // (pilot, nav, and `host` itself) — piling that onto the same
             // transaction that's still delivering the currentSystemID change
@@ -339,13 +364,14 @@ struct GameContainerView: View {
         model.pilot.save()
         model.autosave(reason: .manual)   // catch any shopping done during this landing
         host = GameHost(model: model, systemID: nav.currentSystemID)
-        host?.scene.isPaused = false
+        hostSystemID = nav.currentSystemID
+        setScenePaused(false, reason: "depart")
         syncNav(host)
         // `landedSpobID = nil` above also fires `onChange(of: landedSpobID)`,
         // which reasserts focus — but that fires against the *old* host/scene
         // since this rebuild hasn't landed yet. Defer once more here so focus
         // is grabbed after the just-rebuilt scene view actually exists.
-        DispatchQueue.main.async { isSceneFocused = true }
+        grabSceneFocus(reason: "depart")
     }
 
     /// Reattach `nav`'s live-fuel/multi-jump sources to the current session's
@@ -419,8 +445,33 @@ struct GameContainerView: View {
             // With a course plotted, J engages the hyperdrive along it; with no
             // course, it opens the map so you can plot one.
             if !attemptJump() { nav.showingMap = true }
+        case .targetNearest:
+            host?.scene.selectNearestTarget()
+        case .nearestHostile:
+            host?.scene.selectNearestHostile()
+        case .targetNext:
+            host?.scene.cycleTarget()
+        case .clearTarget:
+            host?.scene.clearTarget()
+        case .hailTarget:
+            hail()
         default:
             break
+        }
+    }
+
+    /// Hail the nearest ship in range: play its government's voice line
+    /// (Acknowledge, or Target if it's hostile) and show a bottom-left banner
+    /// with its `commName` for a few seconds. Silently does nothing with no
+    /// ship in range — matches `attemptLand()`'s "no prompt, no action" pattern.
+    private func hail() {
+        guard let scene = host?.scene, let govt = scene.attemptHail() else { return }
+        model.audio.playHailVoice(govt: govt, hostile: scene.nearestHailableIsHostile())
+        host?.hud.hailMessage = "The \(govt.commName) hails you."
+        hailMessageToken += 1
+        let token = hailMessageToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            if hailMessageToken == token { host?.hud.hailMessage = "" }
         }
     }
 
@@ -467,6 +518,33 @@ private struct LandPromptView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: hud.landPrompt)
+        .allowsHitTesting(false)
+    }
+}
+
+/// A brief bottom-left banner shown after hailing a ship — the government's
+/// `commName`, e.g. "The Federation hails you." Fades on its own; `GameContainerView`
+/// clears `hud.hailMessage` a few seconds after setting it.
+private struct HailBannerView: View {
+    @ObservedObject var hud: GameHUDModel
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack {
+                if !hud.hailMessage.isEmpty {
+                    Text(hud.hailMessage)
+                        .font(.system(.callout, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+                        .transition(.opacity)
+                }
+                Spacer()
+            }
+            .padding(.leading, 16).padding(.bottom, 24)
+        }
+        .animation(.easeInOut(duration: 0.2), value: hud.hailMessage)
         .allowsHitTesting(false)
     }
 }

@@ -531,7 +531,7 @@ case "ai":
             case .shipDisabled: disables += 1
             case .shipDestroyed: kills += 1
             case .weaponFired: shots += 1
-            case .beam(_, _, let hit): if hit { beams += 1 }
+            case .beam(_, _, let hit, _): if hit { beams += 1 }
             default: break
             }
         }

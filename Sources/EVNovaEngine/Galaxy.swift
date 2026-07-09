@@ -51,6 +51,9 @@ public struct ShipSpec {
     public let disableArmorFraction: Double
     /// (weapon spec, ammo) mounts. A stock weapon with count N becomes N mounts.
     public let mounts: [(spec: WeaponSpec, ammo: Int)]
+    /// `snd ` id for this hull's death explosion (final explosion, falling back
+    /// to the breakup explosion), or nil if neither resolves to a sound.
+    public let explosionSoundID: Int?
 }
 
 /// The catalog that turns decoded EV Nova resources into simulation objects:
@@ -122,7 +125,8 @@ public final class Galaxy {
             shieldRechargePerSec: max(2, Double(s.shieldRecharge) * 0.05),
             armorRechargePerSec: Double(s.armorRecharge) * 0.03,
             radius: radius, government: s.inherentGovt, strength: s.strength,
-            disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, mounts: mounts)
+            disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, mounts: mounts,
+            explosionSoundID: game.deathExplosionSoundID(s))
         shipCache[id] = spec
         return spec
     }
@@ -137,6 +141,7 @@ public final class Galaxy {
         guard let spec = shipSpec(shipID) else { return nil }
         let ship = Ship(name: spec.name, stats: spec.stats, position: position, angle: angle)
         ship.shipTypeID = shipID
+        ship.explosionSoundID = spec.explosionSoundID
         ship.government = govt ?? spec.government
         ship.radius = spec.radius
         ship.maxShield = spec.maxShield; ship.shield = spec.maxShield

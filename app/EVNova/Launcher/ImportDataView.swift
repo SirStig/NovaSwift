@@ -56,8 +56,14 @@ struct ImportDataView: View {
     }
 }
 
-/// Copies resource files (`.rez`/`.ndat`) from a chosen folder or file into the
-/// app's base-data directory. Handles iOS security-scoped URLs.
+/// Copies resource files (`.rez`/`.ndat`) — and any bundled soundtrack file
+/// (e.g. `Nova Music.mp3`) — from a chosen folder or file into the app's
+/// base-data directory. Handles iOS security-scoped URLs.
+///
+/// `GameLibrary.discoverResourceFiles` deliberately only looks at resource
+/// containers, so without also copying audio files here, `GameDataController.
+/// musicTrackURL()` would search a sandbox copy that never had music in it —
+/// even the player's own EV Nova install ships one right alongside the `.rez`s.
 enum DataImporter {
     @discardableResult
     static func importBase(from src: URL, into destDir: URL) throws -> Int {
@@ -69,7 +75,7 @@ enum DataImporter {
 
         var sources: [URL] = []
         if (try? src.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-            sources = GameLibrary.discoverResourceFiles(in: src)
+            sources = GameLibrary.discoverResourceFiles(in: src) + GameDataController.discoverAudioFiles(in: src)
         } else {
             sources = [src]
         }

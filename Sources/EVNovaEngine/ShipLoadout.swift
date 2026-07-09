@@ -206,6 +206,7 @@ extension Galaxy {
         let shipRes = game.ship(shipID)
         let ship = Ship(name: lo.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
+        ship.explosionSoundID = shipRes.flatMap { game.deathExplosionSoundID($0) }
         ship.government = govt ?? shipRes?.inherentGovt ?? independentGovt
         ship.radius = radius
         ship.combatStrength = Double(max(1, shipRes?.strength ?? 1))

@@ -15,4 +15,5 @@ enum Log {
     static let spaceport = Logger(subsystem: subsystem, category: "Spaceport")
     static let settings = Logger(subsystem: subsystem, category: "Settings")
     static let data = Logger(subsystem: subsystem, category: "Data")
+    static let audio = Logger(subsystem: subsystem, category: "Audio")
 }
