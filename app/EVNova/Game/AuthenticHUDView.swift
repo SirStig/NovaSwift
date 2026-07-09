@@ -105,9 +105,11 @@ struct AuthenticHUDView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The nav computer's rect: the player's own ship name/system (moved here
-    /// once `targetArea` took on its intended job — the real target-lock
-    /// display, see `targetReadout`), plus speed/heading.
+    /// The nav computer's rect: the player's own ship name/system, plus the
+    /// plotted hyperspace course (`ïntf.NavArea` — the real "navigation
+    /// display" per the Bible) when one is set. Replaces an earlier
+    /// placeholder that showed fabricated speed/heading readouts here, which
+    /// the real interface data has no field for at all.
     private var navReadout: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(model.shipName).font(.system(size: 10, design: .monospaced).weight(.semibold))
@@ -116,8 +118,11 @@ struct AuthenticHUDView: View {
                 Text(model.systemName).font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(color(style.intf.dimText))
             }
-            Text("SPD \(model.speed)").font(.system(size: 9, design: .monospaced))
-            Text("HDG \(Int(model.headingDegrees))°").font(.system(size: 9, design: .monospaced))
+            if !model.navCourseSystemName.isEmpty {
+                Text("Course: \(model.navCourseSystemName)").font(.system(size: 9, design: .monospaced))
+                Text("\(model.navCourseJumps) jump\(model.navCourseJumps == 1 ? "" : "s")")
+                    .font(.system(size: 9, design: .monospaced))
+            }
         }
         .foregroundStyle(color(style.intf.dimText))
         .frame(maxWidth: .infinity, alignment: .leading)

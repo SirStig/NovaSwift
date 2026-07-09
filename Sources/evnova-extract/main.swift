@@ -482,6 +482,26 @@ case "pict":
         FileHandle.standardError.write(Data("error decoding PICT \(id): \(error)\n".utf8)); exit(1)
     }
 
+case "cicn":
+    guard args.count == 3 || args.count == 4 else { usage() }
+    let (collection, _) = loadCollection(args[1])
+    guard let id = Int(args[2]), let res = collection.resource(FourCharCode("cicn")!, id) else {
+        FileHandle.standardError.write(Data("error: no cicn \(args[2]) in \(args[1])\n".utf8)); exit(1)
+    }
+    do {
+        let img = try CICN.decode(res.data)
+        let out = args.count == 4 ? args[3] : "data/converted/cicn_\(id).png"
+        try? FileManager.default.createDirectory(atPath: URL(fileURLWithPath: out).deletingLastPathComponent().path,
+                                                 withIntermediateDirectories: true)
+        if img.writePNG(to: URL(fileURLWithPath: out)) {
+            print("cicn \(id): \(img.frameWidth)x\(img.frameHeight) → \(out)")
+        } else {
+            print("cicn \(id): decoded \(img.frameWidth)x\(img.frameHeight) but PNG write failed")
+        }
+    } catch {
+        FileHandle.standardError.write(Data("error decoding cicn \(id): \(error)\n".utf8)); exit(1)
+    }
+
 case "ai":
     // Headless AI simulation: load a real system, populate it with NPCs from its
     // düde/flët spawn table, run the full engine (diplomacy + behaviors + combat)

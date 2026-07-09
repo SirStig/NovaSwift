@@ -228,11 +228,17 @@ final class GameScene: SKScene {
     // manual camera-transform math.
     #if os(macOS)
     override func mouseDown(with event: NSEvent) {
-        selectAt(scenePoint: event.location(in: self))
+        let p = event.location(in: self)
+        Log.input.debug("mouseDown -> scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public))")
+        selectAt(scenePoint: p)
     }
     #else
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let t = touches.first { selectAt(scenePoint: t.location(in: self)) }
+        if let t = touches.first {
+            let p = t.location(in: self)
+            Log.input.debug("touchesBegan -> scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public))")
+            selectAt(scenePoint: p)
+        }
     }
     #endif
 
@@ -580,6 +586,16 @@ final class GameScene: SKScene {
     @discardableResult
     func selectAt(scenePoint: CGPoint) -> Bool {
         let p = Vec2(Double(scenePoint.x), Double(scenePoint.y))
+        var nearestShipDist = -1.0
+        for npc in world.npcs { nearestShipDist = min(nearestShipDist < 0 ? .greatestFiniteMagnitude : nearestShipDist, (npc.position - p).length) }
+        var nearestPlanetDist = -1.0
+        for pv in planetVisuals {
+            let dx = Double(pv.position.x) - p.x, dy = Double(pv.position.y) - p.y
+            let d = (dx * dx + dy * dy).squareRoot()
+            nearestPlanetDist = min(nearestPlanetDist < 0 ? .greatestFiniteMagnitude : nearestPlanetDist, d)
+        }
+        let playerPos = world.player.position
+        Log.input.debug("selectAt scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public)) playerPos=(\(playerPos.x, privacy: .public),\(playerPos.y, privacy: .public)) nearestShipDist=\(nearestShipDist, privacy: .public) nearestPlanetDist=\(nearestPlanetDist, privacy: .public)")
         if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + 10 })
             .min(by: { ($0.position - p).length < ($1.position - p).length }) {
             world.selectTarget(id: ship.entityID)

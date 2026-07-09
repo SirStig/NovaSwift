@@ -10,6 +10,8 @@ data/converted/**
 !data/converted/.gitkeep
 assets/converted/**
 !assets/converted/.gitkeep
+# Full original game install (used locally for asset/data extraction reference)
+data/EV Nova/
 
 # --- Build artifacts ---
 build/

@@ -232,7 +232,7 @@ struct GameContainerView: View {
 
                 if let state = hailDialogState {
                     HailDialogView(
-                        state: state, portrait: hailPortrait(state),
+                        state: state, portrait: hailPortrait(state), graphics: host.graphics,
                         showAssistButton: hailShowsAssistButton(state),
                         assistEnabled: hailAssistEnabled(state),
                         onGreetings: {
@@ -279,6 +279,9 @@ struct GameContainerView: View {
         }
         .onChange(of: nav.showingMap) { _, open in
             if !open { grabSceneFocus(reason: "map closed") }   // map closed: same
+        }
+        .onChange(of: nav.route) { _, _ in
+            syncNavCourseToHUD(host)
         }
         .onChange(of: hailDialogState != nil) { _, open in
             setScenePaused(open, reason: "hailDialogState=\(open)")
@@ -420,6 +423,22 @@ struct GameContainerView: View {
         nav.attachShip(host?.scene.playerShip)
         if let galaxy = host?.galaxy {
             nav.maxJumpHops = model.pilot.maxJumpHops(galaxy: galaxy)
+        }
+        syncNavCourseToHUD(host)
+    }
+
+    /// Pushes the plotted hyperspace course (if any) into the HUD's Nav
+    /// readout — needed both whenever `host` is rebuilt (a fresh `hud` starts
+    /// with no course) and whenever the course itself changes (plotted,
+    /// advanced, or cleared from the map) without a host rebuild.
+    private func syncNavCourseToHUD(_ host: GameHost?) {
+        guard let hud = host?.hud else { return }
+        if let destID = nav.destinationID, let name = nav.system(destID)?.name {
+            hud.navCourseSystemName = name
+            hud.navCourseJumps = nav.route.count
+        } else {
+            hud.navCourseSystemName = ""
+            hud.navCourseJumps = 0
         }
     }
 

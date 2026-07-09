@@ -36,6 +36,11 @@ final class GameHUDModel: ObservableObject {
     /// of the ship target above (empty name = none selected).
     @Published var navTargetName = ""
     @Published var navTargetLandable = false
+    /// The plotted hyperspace course, if any — the real `ïntf.NavArea` "navigation
+    /// display" (Nova Bible), distinct from `navTargetName` above (a nearby
+    /// planet/station selection for landing, not a hyperspace destination).
+    @Published var navCourseSystemName = ""
+    @Published var navCourseJumps = 0
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
