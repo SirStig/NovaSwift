@@ -151,6 +151,10 @@ public struct OutfRes {
     /// only, 1128-1383 + independent, 2128-2383 all-but, 3128-3383 all-but +
     /// independent). @1010.
     public let requireGovt: Int
+    /// "The percent chance that an item of this type will be available for
+    /// purchase on a given day, from 1-100. Values less than 1 or greater
+    /// than 100 are interpreted as 100" (Bible). @1008.
+    public let buyRandom: Int
 
     public init(_ r: Resource) {
         id = r.id
@@ -174,6 +178,7 @@ public struct OutfRes {
         require = au64(d, 38)
         availBits = acstr(d, 46, 255)
         requireGovt = ai16(d, 1010)
+        buyRandom = ai16(d, 1008)
     }
 
     /// Full-hide opt-ins (Bible `oütf.Flags`): normally a locked item still

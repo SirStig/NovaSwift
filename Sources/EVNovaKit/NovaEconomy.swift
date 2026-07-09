@@ -178,19 +178,56 @@ extension NovaGame {
     }
 
     /// The outfits for sale at `spob`, ordered as EV Nova's outfitter lists them
-    /// (by display weight, then id). Empty when there's no outfitter.
-    public func outfitsSold(at spob: SpobRes) -> [OutfRes] {
+    /// (by display weight, then id). Empty when there's no outfitter. `day`
+    /// (an absolute day count, e.g. `GameDate.julianDay`) applies `BuyRandom`
+    /// — the Bible's "not everything shows every time" per-day stocking roll;
+    /// pass `nil` to skip it (e.g. tooling that wants the full catalog).
+    public func outfitsSold(at spob: SpobRes, day: Int? = nil) -> [OutfRes] {
         guard spob.hasOutfitter else { return [] }
         return outfits()
             .filter { sells(techLevel: $0.techLevel, at: spob) }
+            .filter { outfit in
+                guard let day else { return true }
+                return onOfferToday(buyRandom: outfit.buyRandom, neverIfZero: false,
+                                     spobID: spob.id, itemID: outfit.id, day: day)
+            }
             .sorted { ($0.displayWeight, $0.id) < ($1.displayWeight, $1.id) }
     }
 
-    /// The hulls for sale at `spob`, cheapest first. Empty when there's no shipyard.
-    public func shipsSold(at spob: SpobRes) -> [ShipRes] {
+    /// The hulls for sale at `spob`, cheapest first. Empty when there's no
+    /// shipyard. `day` applies `BuyRandom` the same way as `outfitsSold` —
+    /// except for ships a `BuyRandom` of exactly 0 means *never* stocked, not
+    /// always (the Bible documents the two fields with opposite zero-behavior).
+    public func shipsSold(at spob: SpobRes, day: Int? = nil) -> [ShipRes] {
         guard spob.hasShipyard else { return [] }
         return ships()
             .filter { $0.cost > 0 && sells(techLevel: $0.techLevel, at: spob) }
+            .filter { ship in
+                guard let day else { return true }
+                return onOfferToday(buyRandom: ship.buyRandom, neverIfZero: true,
+                                     spobID: spob.id, itemID: ship.id, day: day)
+            }
             .sorted { ($0.cost, $0.id) < ($1.cost, $1.id) }
+    }
+
+    /// Whether a `BuyRandom`-gated item is stocked today: a deterministic roll
+    /// seeded by (day, spöb, item) — stable within one in-game day (reopening
+    /// the outfitter, or relaunching the app, on the same day shows the same
+    /// stock), and re-rolls only when the day changes. Not persisted state;
+    /// just a stable hash compared against the percent chance, so it needs no
+    /// save-file support. `neverIfZero` selects the Bible's per-type zero
+    /// behavior (outfits: 0/negative → always; ships: 0 → never).
+    private func onOfferToday(buyRandom: Int, neverIfZero: Bool, spobID: Int, itemID: Int, day: Int) -> Bool {
+        if buyRandom <= 0 { return !neverIfZero }
+        let percent = min(buyRandom, 100)
+        var hash: UInt64 = 14_695_981_039_346_656_037            // FNV-1a offset basis
+        for value in [day, spobID, itemID] {
+            for byte in withUnsafeBytes(of: Int64(value).bigEndian, Array.init) {
+                hash ^= UInt64(byte)
+                hash = hash &* 1_099_511_628_211                 // FNV-1a prime
+            }
+        }
+        let roll = Int(hash % 100) + 1                           // 1...100
+        return roll <= percent
     }
 }

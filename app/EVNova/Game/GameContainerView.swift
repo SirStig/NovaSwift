@@ -231,7 +231,19 @@ struct GameContainerView: View {
                 HailBannerView(hud: host.hud)
 
                 if let state = hailDialogState {
-                    hailDialogView(state)
+                    HailDialogView(
+                        state: state, portrait: hailPortrait(state),
+                        showAssistButton: hailShowsAssistButton(state),
+                        assistEnabled: hailAssistEnabled(state),
+                        onGreetings: {
+                            hailDialogState?.responseText = state.hostile
+                                ? "They don't seem interested in talking."
+                                : "Just a routine hail, nothing more."
+                        },
+                        onRequestAssistance: {
+                            if case let .ship(entityID, _) = state.kind { requestAssistance(entityID: entityID) }
+                        },
+                        onClose: { hailDialogState = nil })
                 }
 
                 if showMenu {
@@ -267,6 +279,10 @@ struct GameContainerView: View {
         }
         .onChange(of: nav.showingMap) { _, open in
             if !open { grabSceneFocus(reason: "map closed") }   // map closed: same
+        }
+        .onChange(of: hailDialogState != nil) { _, open in
+            setScenePaused(open, reason: "hailDialogState=\(open)")
+            if !open { grabSceneFocus(reason: "hail dialog closed") }
         }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding/quitting is the one moment a manual save/jump/land
@@ -518,69 +534,56 @@ struct GameContainerView: View {
         }
     }
 
+    /// Price of asking `tier` for assistance, or nil if it won't help at all.
+    private func assistanceCost(for tier: GameScene.AssistanceTier) -> Int? {
+        switch tier {
+        case .ally: return 0
+        case .neutral: return assistanceCostNeutral
+        case .wary: return assistanceCostWary
+        case .unavailable: return nil
+        }
+    }
+
     /// Deduct credits and send the hailed ship over to dock with the player
-    /// (see `AIBrain.assist`/`World.deliverAssistance`), or decline in-dialog
-    /// if the player can't afford it.
+    /// (see `AIBrain.assist`/`World.deliverAssistance`) — free for allies,
+    /// paid for a neutral crew, and only sometimes accepted (at a premium,
+    /// charged only on acceptance) by a crew that dislikes the player but
+    /// isn't outright hostile. Declines in-dialog if the player can't afford
+    /// it or the crew turns the request down.
     private func requestAssistance(entityID: Int) {
-        guard var state = hailDialogState else { return }
-        guard model.pilot.state.credits >= assistanceCost else {
+        guard var state = hailDialogState,
+              let tier = host?.scene.assistanceTier(entityID: entityID),
+              let cost = assistanceCost(for: tier) else { return }
+        guard model.pilot.state.credits >= cost else {
             state.responseText = "You don't have enough credits for that."
             hailDialogState = state
             return
         }
-        model.pilot.state.credits -= assistanceCost
+        if tier == .wary, Double.random(in: 0..<1) > assistanceWaryAcceptChance {
+            state.responseText = "Not interested. Try hailing someone who actually likes you."
+            hailDialogState = state
+            return   // declined — no charge
+        }
+        model.pilot.state.credits -= cost
         host?.scene.requestAssistance(entityID: entityID)
         state.assistRequested = true
-        state.responseText = "They're on their way."
+        state.responseText = cost == 0 ? "Of course — they're on their way." : "They're on their way."
         hailDialogState = state
     }
 
-    /// Button list for the hail dialog — a plain (non-`@ViewBuilder`) helper,
-    /// since `@ViewBuilder` reinterprets `if`/`switch` as conditional *View*
-    /// content even when their body has no view in it, which breaks ordinary
-    /// imperative array-building like this.
-    private func hailButtons(for state: HailDialogState) -> [NovaDialogButton] {
-        var buttons: [NovaDialogButton] = [
-            NovaDialogButton(title: "Greetings") {
-                hailDialogState?.responseText = state.hostile
-                    ? "They don't seem interested in talking."
-                    : "Just a routine hail, nothing more."
-            },
-        ]
-        if case let .ship(entityID, _) = state.kind {
-            let canAssist = !state.assistRequested && (host?.scene.canRequestAssistance(entityID: entityID) ?? false)
-            buttons.append(NovaDialogButton(title: "Request Assistance", enabled: canAssist) {
-                requestAssistance(entityID: entityID)
-            })
-        }
-        buttons.append(NovaDialogButton(title: "Close Channel", isDefault: true) { hailDialogState = nil })
-        return buttons
+    private func hailShowsAssistButton(_ state: HailDialogState) -> Bool {
+        if case .ship = state.kind { return true }
+        return false
     }
 
-    /// The communication dialog: portrait (ships only — no per-government art
-    /// exists in the data), name/government, a response line, and up to three
-    /// choices (Greetings / Request Assistance / Close Channel).
-    @ViewBuilder
-    private func hailDialogView(_ state: HailDialogState) -> some View {
-        NovaDialog(title: state.name, width: 420, buttons: hailButtons(for: state)) {
-            HStack(alignment: .top, spacing: 14) {
-                if case let .ship(_, shipTypeID) = state.kind,
-                   let res = host?.game?.ship(shipTypeID), let portrait = host?.graphics?.shipPicture(res) {
-                    Image(decorative: portrait, scale: 1)
-                        .resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
-                        .frame(width: 96, height: 96)
-                        .background(Color.black.opacity(0.3))
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.15)))
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    if !state.govtLabel.isEmpty {
-                        NovaText(state.govtLabel, size: 12, color: state.hostile ? .red : .secondary)
-                    }
-                    NovaText(state.responseText, size: 13)
-                }
-                Spacer(minLength: 0)
-            }
-        }
+    private func hailAssistEnabled(_ state: HailDialogState) -> Bool {
+        guard case let .ship(entityID, _) = state.kind, !state.assistRequested else { return false }
+        return (host?.scene.assistanceTier(entityID: entityID) ?? .unavailable) != .unavailable
+    }
+
+    private func hailPortrait(_ state: HailDialogState) -> CGImage? {
+        guard case let .ship(_, shipTypeID) = state.kind, let res = host?.game?.ship(shipTypeID) else { return nil }
+        return host?.graphics?.shipPicture(res)
     }
 
     // The single in-game entry point: one unobtrusive button in the top-left
@@ -659,10 +662,10 @@ private struct HailBannerView: View {
     }
 }
 
-/// State for the open hail/communication dialog (`GameContainerView.hailDialogView`).
+/// State for the open hail/communication dialog (`HailDialogView`).
 /// `responseText`/`assistRequested` mutate in place as the player clicks buttons,
 /// so the dialog updates without closing.
-private struct HailDialogState {
+struct HailDialogState {
     enum Kind {
         case ship(entityID: Int, shipTypeID: Int)
         case planet

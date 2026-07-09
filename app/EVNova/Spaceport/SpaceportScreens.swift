@@ -146,11 +146,12 @@ struct OutfitterView: View {
     @State private var selectedID: Int?
     private var game: NovaGame { graphics.game }
     private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
-    /// Tech-level-eligible stock, with any items that opt into full hiding
-    /// (Bible `oütf.Flags` 0x0100/0x4000) dropped when the player doesn't meet
-    /// their Availability/Require and doesn't already own one.
+    /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
+    /// items that opt into full hiding (Bible `oütf.Flags` 0x0100/0x4000)
+    /// dropped when the player doesn't meet their Availability/Require and
+    /// doesn't already own one.
     private var stock: [OutfRes] {
-        game.outfitsSold(at: spob).filter { lockState(for: $0) != .hidden }
+        game.outfitsSold(at: spob, day: pilot.state.date.julianDay).filter { lockState(for: $0) != .hidden }
     }
     private var selected: OutfRes? {
         stock.first { $0.id == selectedID } ?? stock.first
@@ -272,11 +273,12 @@ struct ShipyardView: View {
 
     @State private var selectedID: Int?
     private var game: NovaGame { graphics.game }
-    /// Tech-level-eligible stock, with any hulls that opt into full hiding
-    /// (Bible `shïp.Flags3` 0x0100/0x0200) dropped when the player doesn't
-    /// meet their Availability/Require and don't already fly one.
+    /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
+    /// hulls that opt into full hiding (Bible `shïp.Flags3` 0x0100/0x0200)
+    /// dropped when the player doesn't meet their Availability/Require and
+    /// don't already fly one.
     private var stock: [ShipRes] {
-        game.shipsSold(at: spob).filter { lockState(for: $0) != .hidden }
+        game.shipsSold(at: spob, day: pilot.state.date.julianDay).filter { lockState(for: $0) != .hidden }
     }
     private var selected: ShipRes? { stock.first { $0.id == selectedID } ?? stock.first }
     private func lockState(for s: ShipRes) -> LockState {
@@ -288,8 +290,8 @@ struct ShipyardView: View {
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: 318, height: 300).novaPlace(space, -373, -153)
                 detail.frame(width: 205, height: 150).novaPlace(space, -27, -150)
-                if let s = selected, let cg = shipImage(s) {
-                    Image(decorative: cg, scale: 1).interpolation(.high).resizable().scaledToFit()
+                if let s = selected, let picture = shipPicture(s) {
+                    ShipyardPictureView(picture: picture)
                         .frame(width: 190, height: 185).novaPlace(space, 178, -152)
                 }
                 info(space)
@@ -304,7 +306,9 @@ struct ShipyardView: View {
         ScrollView(showsIndicators: false) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 4)], spacing: 4) {
                 ForEach(stock, id: \.id) { s in
-                    ItemTile(name: s.name, image: shipImage(s),
+                    let picture = shipPicture(s)
+                    ItemTile(name: s.name, image: picture?.image,
+                             pixelated: picture?.isDedicated == false,
                              quantity: s.id == pilot.state.shipType ? 1 : 0,
                              selected: (selectedID ?? stock.first?.id) == s.id,
                              locked: lockState(for: s) == .locked)
@@ -317,9 +321,12 @@ struct ShipyardView: View {
 
     /// The shipyard's dedicated display picture for a hull, falling back to the
     /// small in-flight sprite only if a plug-in ship doesn't define one.
-    private func shipImage(_ s: ShipRes) -> CGImage? {
-        if let pic = graphics.shipPicture(s) { return pic }
-        if let frame = game.shipSprite(s.id)?.frameCGImage(0) { return frame }
+    /// `isDedicated` distinguishes the two so callers can render the (tiny,
+    /// pixel-art) fallback sprite crisply instead of blurring it to fill a box
+    /// sized for the real, much larger shipyard art.
+    private func shipPicture(_ s: ShipRes) -> (image: CGImage, isDedicated: Bool)? {
+        if let pic = graphics.shipPicture(s) { return (pic, true) }
+        if let frame = game.shipSprite(s.id)?.frameCGImage(0) { return (frame, false) }
         Log.spaceport.error("Shipyard: no shipyard picture or flight sprite for ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) — tile will show placeholder icon")
         return nil
     }
@@ -419,6 +426,29 @@ struct BarView: View {
     }
 }
 
+/// The shipyard's large ship-preview picture. Dedicated shipyard art (large,
+/// meant to fill the panel) scales smoothly to fit as before; the small
+/// in-flight sprite fallback is instead capped to a modest integer upscale
+/// and drawn with crisp, pixel-art (nearest-neighbor) sampling so a 24×24
+/// sprite reads as a small crisp ship icon instead of a blurry, blown-up smear.
+private struct ShipyardPictureView: View {
+    let picture: (image: CGImage, isDedicated: Bool)
+
+    var body: some View {
+        if picture.isDedicated {
+            Image(decorative: picture.image, scale: 1)
+                .interpolation(.high).resizable().scaledToFit()
+        } else {
+            let native = CGSize(width: picture.image.width, height: picture.image.height)
+            let cappedScale: CGFloat = 4
+            let size = CGSize(width: native.width * cappedScale, height: native.height * cappedScale)
+            Image(decorative: picture.image, scale: 1)
+                .interpolation(.none).resizable()
+                .frame(width: size.width, height: size.height)
+        }
+    }
+}
+
 // MARK: - Shared item tile
 
 /// One tile in an outfitter/shipyard grid: the item's picture (or a placeholder),
@@ -426,6 +456,11 @@ struct BarView: View {
 struct ItemTile: View {
     let name: String
     let image: CGImage?
+    /// True when `image` is a small in-flight sprite standing in for missing
+    /// dedicated art (see `ShipyardView.shipPicture`) — sampled with crisp
+    /// nearest-neighbor scaling instead of the blur smooth interpolation gives
+    /// a tiny sprite stretched to fill this tile.
+    var pixelated: Bool = false
     var quantity: Int = 0
     var selected: Bool = false
     /// Mission/story-gated: still shown (Bible default), but can't be bought
@@ -436,7 +471,9 @@ struct ItemTile: View {
         VStack(spacing: 2) {
             ZStack {
                 if let image {
-                    Image(decorative: image, scale: 1).interpolation(.high).resizable().scaledToFit()
+                    Image(decorative: image, scale: 1)
+                        .interpolation(pixelated ? .none : .high)
+                        .resizable().scaledToFit()
                 } else {
                     Image(systemName: "shippingbox").foregroundStyle(.gray)
                 }

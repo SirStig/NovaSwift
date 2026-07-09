@@ -233,6 +233,11 @@ public struct ShipRes {
     public let availBits: String    // @108 NCB control-bit test expression gating purchase
     public let require: UInt64      // @896 bits that must be met (via owned outfits/current ship) to buy
     public let flags3: UInt16       // @1830  0x0100 hide-if-unavailable · 0x0200 hide-if-require-unmet
+    /// "The percent chance that a ship of this type will be available for
+    /// purchase on a given day... A BuyRandom of 0 means this ship will never
+    /// be made available for purchase" (Bible). @904. Unlike outfits, 0 means
+    /// never here, not always.
+    public let buyRandom: Int
 
     public init(_ r: Resource) {
         id = r.id
@@ -272,6 +277,7 @@ public struct ShipRes {
         availBits = cstr(d, 108, 255)
         require = u64(d, 896)
         flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))
+        buyRandom = i16(d, 904)
 
         // Stock weapons: 4 primary slots (ids @18, counts @26, ammo @34) plus
         // 4 extended slots stored far down the resource (ids @1742, …).
