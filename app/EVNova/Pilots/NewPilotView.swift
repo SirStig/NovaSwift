@@ -15,12 +15,11 @@ struct NewPilotView: View {
     @State private var name = ""
     @State private var isMale = true
     @State private var scenarioIndex = 0
-    @State private var introScenario: CharRes?
 
     private var scenarios: [CharRes] { model.data.game?.selectableScenarios() ?? [] }
 
     var body: some View {
-        ZStack {
+        Group {
             if scenarios.isEmpty {
                 noDataDialog
             } else {
@@ -29,17 +28,7 @@ struct NewPilotView: View {
                 case .name:     nameDialog
                 }
             }
-            if let scenario = introScenario {
-                IntroSequenceView(scenario: scenario) {
-                    introScenario = nil
-                    dismiss()
-                    model.beginPlay()
-                }
-                .transition(.opacity)
-                .zIndex(2)
-            }
         }
-        .animation(.easeInOut(duration: 0.3), value: introScenario != nil)
         .animation(.easeInOut(duration: 0.2), value: step)
         .onAppear { if scenarios.count <= 1 { step = .name } }
     }
@@ -110,10 +99,13 @@ struct NewPilotView: View {
 
     private func start(_ scenario: CharRes) {
         _ = model.createPilot(name: name, isMale: isMale, scenario: scenario)
+        dismiss()
         if scenario.introSlides.isEmpty && scenario.introTextID == nil {
-            dismiss(); model.beginPlay()
+            model.beginPlay()
         } else {
-            introScenario = scenario
+            // Presented full-screen at the RootView level, outside this dialog's
+            // sheet frame — see AppModel.pendingIntro.
+            model.pendingIntro = scenario
         }
     }
 

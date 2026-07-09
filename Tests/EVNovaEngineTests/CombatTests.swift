@@ -88,6 +88,57 @@ final class CombatTests: XCTestCase {
         XCTAssertFalse(target.isAlive, "damage after disable actually destroys the hulk")
     }
 
+    func testPointDefenseShootsDownIncomingGuidedProjectile() {
+        // Guidance 9/10 (Bible): "fires automatically at incoming guided
+        // weapons" — independent of the defender's own currentTargetID.
+        let missile = WeaponSpec(id: 140, name: "Missile", shieldDamage: 50, armorDamage: 50,
+                                 reloadSeconds: 1, projectileSpeed: 400, range: 3000,
+                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 2,
+                                 blastRadius: 0, ammoPerShot: 0)
+        let pd = WeaponSpec(id: 141, name: "Point Defense", shieldDamage: 5, armorDamage: 5,
+                            reloadSeconds: 0.1, projectileSpeed: 0, range: 800,
+                            accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
+                            blastRadius: 0, ammoPerShot: 0, isPointDefense: true)
+
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        let defender = makeShip("B", govt: 2, at: Vec2(0, 400))    // within the PD mount's 800px range
+        let did = world.addNPC(defender)
+        defender.weapons = [WeaponMount(spec: pd)]
+        attacker.weapons = [WeaponMount(spec: missile)]
+        attacker.currentTargetID = did
+        world.intent.firePrimary = true
+
+        world.step(1.0 / 30.0)
+        XCTAssertTrue(world.projectiles.isEmpty, "point defense should shoot the incoming missile down")
+        XCTAssertEqual(defender.shield, 100, "the intercepted missile never reaches the defender")
+    }
+
+    func testPointDefenseIgnoresPDImmuneProjectiles() {
+        // wëap.Flags 0x0080 -> vulnerableToPD = false: some guided weapons
+        // simply can't be shot down.
+        let missile = WeaponSpec(id: 140, name: "Missile", shieldDamage: 50, armorDamage: 50,
+                                 reloadSeconds: 1, projectileSpeed: 400, range: 3000,
+                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 2,
+                                 blastRadius: 0, ammoPerShot: 0, vulnerableToPD: false)
+        let pd = WeaponSpec(id: 141, name: "Point Defense", shieldDamage: 5, armorDamage: 5,
+                            reloadSeconds: 0.1, projectileSpeed: 0, range: 800,
+                            accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
+                            blastRadius: 0, ammoPerShot: 0, isPointDefense: true)
+
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        let defender = makeShip("B", govt: 2, at: Vec2(0, 400))
+        let did = world.addNPC(defender)
+        defender.weapons = [WeaponMount(spec: pd)]
+        attacker.weapons = [WeaponMount(spec: missile)]
+        attacker.currentTargetID = did
+        world.intent.firePrimary = true
+
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(world.projectiles.isEmpty, "a PD-immune missile should survive point defense")
+    }
+
     func testNoFriendlyFire() {
         let attacker = makeShip("A", govt: 5, at: Vec2())
         attacker.government = 5

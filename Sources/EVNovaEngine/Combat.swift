@@ -45,12 +45,27 @@ public struct WeaponSpec {
     /// Continuous-fire weapons (typically beams) trigger their sound once per
     /// firing burst rather than once per simulation frame.
     public let loopSound: Bool
+    /// Guidance 9/10: "fires automatically at incoming guided weapons and
+    /// nearby ships" (Bible) — driven by a separate targeting loop, see
+    /// `World.runPointDefense`.
+    public let isPointDefense: Bool
+    /// Whether a *guided* shot from this weapon can be shot down by point
+    /// defense (`wëap.Flags` 0x0080 inverted). Ignored for non-guided weapons.
+    public let vulnerableToPD: Bool
+    /// "The amount of ionization energy to add to the ship that gets hit by
+    /// this weapon" (Bible) — added to the victim's `Ship.ionCharge` on hit.
+    public let ionization: Double
+    /// Seeker 0x0020: this (guided) weapon refuses to fire while its own ship
+    /// is ionized.
+    public let cantFireWhileIonized: Bool
 
     public init(id: Int, name: String, shieldDamage: Double, armorDamage: Double,
                 reloadSeconds: Double, projectileSpeed: Double, range: Double,
                 accuracyRadians: Double, isBeam: Bool, isGuided: Bool,
                 turnRate: Double, blastRadius: Double, ammoPerShot: Int,
-                fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false) {
+                fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false,
+                isPointDefense: Bool = false, vulnerableToPD: Bool = true,
+                ionization: Double = 0, cantFireWhileIonized: Bool = false) {
         self.id = id; self.name = name
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.reloadSeconds = reloadSeconds; self.projectileSpeed = projectileSpeed
@@ -59,6 +74,8 @@ public struct WeaponSpec {
         self.blastRadius = blastRadius; self.ammoPerShot = ammoPerShot
         self.fireSoundID = fireSoundID; self.explosionBoomID = explosionBoomID
         self.loopSound = loopSound
+        self.isPointDefense = isPointDefense; self.vulnerableToPD = vulnerableToPD
+        self.ionization = ionization; self.cantFireWhileIonized = cantFireWhileIonized
     }
 
     /// Convert a decoded weapon into simulation units.
@@ -80,6 +97,10 @@ public struct WeaponSpec {
         fireSoundID = w.fireSoundID
         explosionBoomID = w.explosionBoomID
         loopSound = w.loopSound
+        isPointDefense = w.isPointDefense
+        vulnerableToPD = w.vulnerableToPD
+        ionization = Double(w.ionization)
+        cantFireWhileIonized = w.cantFireWhileIonized
     }
 }
 
@@ -138,16 +159,24 @@ public final class Projectile {
     public let speed: Double
     public var targetID: Int?            // for guided munitions
     public var alive = true
+    /// Whether point defense can shoot this shot down (`wëap.Flags` 0x0080
+    /// inverted) — only meaningful for guided shots; see `World.runPointDefense`.
+    public let vulnerableToPD: Bool
+    /// Ionization energy this shot adds to whatever it hits.
+    public let ionization: Double
 
     public init(position: Vec2, velocity: Vec2, life: Double,
                 shieldDamage: Double, armorDamage: Double, blastRadius: Double,
                 ownerID: Int, ownerGovt: Int, guided: Bool, turnRate: Double,
-                speed: Double, targetID: Int?) {
+                speed: Double, targetID: Int?, vulnerableToPD: Bool = true,
+                ionization: Double = 0) {
         self.position = position; self.velocity = velocity; self.life = life
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.blastRadius = blastRadius; self.ownerID = ownerID; self.ownerGovt = ownerGovt
         self.guided = guided; self.turnRate = turnRate; self.speed = speed
         self.targetID = targetID
+        self.ionization = ionization
+        self.vulnerableToPD = vulnerableToPD
     }
 }
 

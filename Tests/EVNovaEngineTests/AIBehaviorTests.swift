@@ -63,6 +63,44 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertLessThan(player.shield, 100, "an engaged warship should be scoring hits")
     }
 
+    func testAmmoExhaustedWarshipFleesOrDocksInsteadOfFighting() {
+        // Bible: "AI ships of this type will run away/dock if out of ammo for
+        // all ammo-using weapons" (shïp.Flags2 0x0080).
+        // With a hostile present, it should flee rather than attack.
+        do {
+            let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                              position: Vec2(0, 400))
+            let world = World(player: player)
+            world.diplomacy = Diplomacy(govts: [govt(200, classes: [1], flags1: 0x0004)])
+            let npc = warship("Raider", govt: 200, at: Vec2())
+            npc.fleeWhenOutOfAmmo = true
+            npc.weapons = [WeaponMount(spec: npc.weapons[0].spec, ammo: 0)]   // dry
+            npc.brain = AIBrain(aiType: .warship, govt: 200)
+            world.addNPC(npc)
+
+            world.step(1.0 / 30.0)
+            XCTAssertEqual(npc.brain?.state, .fleeing, "out of ammo with a hostile present -> run, not fight")
+        }
+        // With nothing chasing it, it should head off to dock (travel/land),
+        // not just keep patrolling empty-handed.
+        do {
+            let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                           position: Vec2(9_000, 9_000)))
+            world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])   // nobody hostile
+            world.systemContext = SystemContext(
+                bodies: [StellarBody(id: 128, position: Vec2(0, 900), radius: 90, canLand: true)],
+                center: Vec2(), jumpRadius: 6000, spawnRadius: 5000)
+            let npc = warship("Patrol", govt: 202, at: Vec2())
+            npc.fleeWhenOutOfAmmo = true
+            npc.weapons = [WeaponMount(spec: npc.weapons[0].spec, ammo: 0)]
+            npc.brain = AIBrain(aiType: .warship, govt: 202)
+            world.addNPC(npc)
+
+            world.step(1.0 / 30.0)
+            XCTAssertEqual(npc.brain?.state, .traveling, "out of ammo with nothing chasing it -> dock to rearm")
+        }
+    }
+
     func testWarshipDeclinesUnfavorableOdds() {
         // gövt.MaxOdds = 100 means "won't fight unless as strong or stronger."
         // A lone warship facing three equal-strength hostiles is outnumbered
@@ -119,6 +157,89 @@ final class AIBehaviorTests: XCTestCase {
         world.step(1.0 / 30.0)
         XCTAssertEqual(trader.brain?.state, .fleeing)
         XCTAssertTrue(trader.wantsToDepart)
+    }
+
+    func testBraveTraderFightsInRangeButFleesOutOfRange() {
+        // Bible: brave traders "fight back when attacked, but run away when
+        // their attacker is out of range" — not a hull-damage threshold.
+        func shortGun() -> WeaponSpec {
+            WeaponSpec(id: 130, name: "Short Gun", shieldDamage: 20, armorDamage: 20, reloadSeconds: 0.1,
+                       projectileSpeed: 1500, range: 300, accuracyRadians: 0, isBeam: false,
+                       isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0)
+        }
+        // Out of the trader's 300px weapon range (but within its scan range) —
+        // should flee rather than close in and fight.
+        do {
+            let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                              position: Vec2(0, 900))
+            let world = World(player: player)
+            world.diplomacy = Diplomacy(govts: [govt(201, classes: [2], flags1: 0x0004)])
+            let trader = warship("Freighter", govt: 201, at: Vec2())
+            trader.weapons = [WeaponMount(spec: shortGun())]
+            trader.brain = AIBrain(aiType: .braveTrader, govt: 201)
+            world.addNPC(trader)
+
+            world.step(1.0 / 30.0)
+            XCTAssertEqual(trader.brain?.state, .fleeing, "attacker is well outside the trader's weapon range")
+        }
+        // Well within the trader's 300px weapon range — should fight back.
+        do {
+            let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                              position: Vec2(0, 150))
+            let world = World(player: player)
+            world.diplomacy = Diplomacy(govts: [govt(201, classes: [2], flags1: 0x0004)])
+            let trader = warship("Freighter", govt: 201, at: Vec2())
+            trader.weapons = [WeaponMount(spec: shortGun())]
+            trader.brain = AIBrain(aiType: .braveTrader, govt: 201)
+            world.addNPC(trader)
+
+            world.step(1.0 / 30.0)
+            XCTAssertEqual(trader.brain?.state, .attacking, "attacker is well within the trader's weapon range")
+        }
+    }
+
+    func testInterceptorOrbitsInsteadOfPatrollingWhenIdle() {
+        // Bible: interceptors "park in orbit around a planet" if they can't
+        // find any enemies — not walk the warship patrol beat.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [govt(220, classes: [20])])   // nobody hostile
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 1200), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000)
+
+        let interceptor = warship("Watchdog", govt: 220, at: Vec2(0, 900))
+        interceptor.brain = AIBrain(aiType: .interceptor, govt: 220)
+        world.addNPC(interceptor)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(interceptor.brain?.state, .orbiting, "an idle interceptor holds orbit, not a patrol beat")
+    }
+
+    func testInterceptorActsAsPiracyPolice() {
+        // Bible: interceptors act as "piracy police" — attacking any ship
+        // that fires on/targets another, non-enemy ship while watching, even
+        // if that aggressor isn't normally the interceptor's own enemy.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [
+            govt(220, classes: [20]),   // the interceptor's own govt: no declared enemies
+            govt(221, classes: [21]),   // aggressor's govt
+            govt(222, classes: [22]),   // victim's govt — not an enemy of anyone here
+        ])
+        let interceptor = warship("Watchdog", govt: 220, at: Vec2(0, -300), angle: 0)
+        interceptor.brain = AIBrain(aiType: .interceptor, govt: 220)
+        world.addNPC(interceptor)
+
+        let victim = warship("Trader", govt: 222, at: Vec2(0, 200), armed: false)
+        world.addNPC(victim)
+        let aggressor = warship("Raider", govt: 221, at: Vec2(0, 150))
+        aggressor.currentTargetID = victim.entityID   // actively firing on a non-enemy
+        world.addNPC(aggressor)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(interceptor.brain?.state, .attacking, "should intervene against the aggressor")
+        XCTAssertEqual(interceptor.brain?.targetID, aggressor.entityID)
     }
 
     func testTraderTravelsTowardPlanet() {

@@ -49,11 +49,35 @@ public struct ShipSpec {
     /// Fraction of max armor at which this hull disables instead of being
     /// destroyed outright (`shïp.Flags` 0x0010 → 10%, else the default 33%).
     public let disableArmorFraction: Double
+    /// `shïp.SkillVar` (0-50, percent) — per-instance pilot-skill jitter on
+    /// acceleration/turn rate. See `jitteredStats(_:skillVar:roll:)`.
+    public let skillVar: Int
+    /// `shïp.Flags2` 0x0080 — flees/docks once every ammo-using weapon is dry.
+    public let fleeWhenOutOfAmmo: Bool
+    /// `shïp.IonizeMax` — charge at which this hull is "fully ionized."
+    public let ionizeMax: Double
+    /// `shïp.Deionize`, converted to charge points dissipated per second.
+    public let deionizePerSec: Double
     /// (weapon spec, ammo) mounts. A stock weapon with count N becomes N mounts.
     public let mounts: [(spec: WeaponSpec, ammo: Int)]
     /// `snd ` id for this hull's death explosion (final explosion, falling back
     /// to the breakup explosion), or nil if neither resolves to a sound.
     public let explosionSoundID: Int?
+}
+
+/// EV Nova's `shïp.SkillVar`: "the amount (in percent) to which this ship's
+/// pilots' skill varies... a skill variance of 10% would make each ship of a
+/// given type up to 10% slower or faster than stock" (Bible) — applied to
+/// acceleration and turn rate alike (one pilot-skill roll, not two independent
+/// ones), so ships of the same class aren't all identical. `roll` is a value
+/// in −1...1 (typically `world.rng.double(in: -1...1)` at spawn time); nil
+/// means no jitter (e.g. the player's own ship, or deterministic test fixtures).
+func jitteredStats(_ stats: ShipStats, skillVar: Int, roll: Double?) -> ShipStats {
+    guard let roll, skillVar > 0 else { return stats }
+    let variance = Double(min(50, max(0, skillVar))) / 100.0
+    let factor = 1 + max(-1, min(1, roll)) * variance
+    return ShipStats(maxSpeed: stats.maxSpeed, acceleration: stats.acceleration * factor,
+                     turnRate: stats.turnRate * factor, rotationFrames: stats.rotationFrames)
 }
 
 /// The catalog that turns decoded EV Nova resources into simulation objects:
@@ -125,8 +149,10 @@ public final class Galaxy {
             shieldRechargePerSec: max(2, Double(s.shieldRecharge) * 0.05),
             armorRechargePerSec: Double(s.armorRecharge) * 0.03,
             radius: radius, government: s.inherentGovt, strength: s.strength,
-            disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, mounts: mounts,
-            explosionSoundID: game.deathExplosionSoundID(s))
+            disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, skillVar: s.skillVar,
+            fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo,
+            ionizeMax: Double(max(0, s.ionizeMax)), deionizePerSec: Double(max(0, s.deionize)) * 0.3,
+            mounts: mounts, explosionSoundID: game.deathExplosionSoundID(s))
         shipCache[id] = spec
         return spec
     }
@@ -137,9 +163,11 @@ public final class Galaxy {
     /// weapon loadout is installed. Government defaults to the hull's inherent one
     /// unless overridden. No brain is attached (that's the spawner's / player's job).
     public func makeShip(_ shipID: Int, government govt: Int? = nil,
-                         at position: Vec2 = Vec2(), angle: Double = 0) -> Ship? {
+                         at position: Vec2 = Vec2(), angle: Double = 0,
+                         skillRoll: Double? = nil) -> Ship? {
         guard let spec = shipSpec(shipID) else { return nil }
-        let ship = Ship(name: spec.name, stats: spec.stats, position: position, angle: angle)
+        let stats = jitteredStats(spec.stats, skillVar: spec.skillVar, roll: skillRoll)
+        let ship = Ship(name: spec.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
         ship.explosionSoundID = spec.explosionSoundID
         ship.government = govt ?? spec.government
@@ -151,6 +179,9 @@ public final class Galaxy {
         ship.weapons = spec.mounts.map { WeaponMount(spec: $0.spec, ammo: $0.ammo) }
         ship.combatStrength = Double(max(1, spec.strength))
         ship.disableArmorFraction = spec.disableArmorFraction
+        ship.fleeWhenOutOfAmmo = spec.fleeWhenOutOfAmmo
+        ship.ionizeMax = spec.ionizeMax
+        ship.deionizePerSec = spec.deionizePerSec
         return ship
     }
 

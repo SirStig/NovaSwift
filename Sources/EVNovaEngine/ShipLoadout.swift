@@ -186,13 +186,14 @@ extension Galaxy {
     /// hull can't be found.
     public func makeLoadedShip(_ shipID: Int, government govt: Int? = nil,
                                extraOutfits: [Int: Int] = [:],
-                               at position: Vec2 = Vec2(), angle: Double = 0) -> Ship? {
+                               at position: Vec2 = Vec2(), angle: Double = 0,
+                               skillRoll: Double? = nil) -> Ship? {
         guard let lo = loadout(shipID: shipID, extraOutfits: extraOutfits) else {
             // Falls back to an un-equipped hull (`makeShip`) — if this fires
             // for the player's own ship, they'll fly with none of their
             // fitted outfits and no other clue why.
             Log.world.error("Galaxy.makeLoadedShip: loadout(\(shipID)) failed — falling back to an unequipped makeShip(\(shipID))")
-            return makeShip(shipID, government: govt, at: position, angle: angle)
+            return makeShip(shipID, government: govt, at: position, angle: angle, skillRoll: skillRoll)
         }
         // EV Nova hulls rotate through 36 headings. (shän's other counts are
         // *animation sets* — banking / lit variants — not headings, so we must NOT
@@ -200,10 +201,10 @@ extension Galaxy {
         let shan = game.shan(shipID)
         let frames = 36
         let radius: Double = shan.map { max(10, Double(max($0.baseWidth, $0.baseHeight)) / 2) } ?? 18
-        let stats = ShipStats(speed: lo.speed, acceleration: lo.acceleration,
-                              turnRate: lo.turnRate, rotationFrames: frames, tuning: flightTuning)
-
         let shipRes = game.ship(shipID)
+        let baseStats = ShipStats(speed: lo.speed, acceleration: lo.acceleration,
+                                  turnRate: lo.turnRate, rotationFrames: frames, tuning: flightTuning)
+        let stats = jitteredStats(baseStats, skillVar: shipRes?.skillVar ?? 0, roll: skillRoll)
         let ship = Ship(name: lo.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
         ship.explosionSoundID = shipRes.flatMap { game.deathExplosionSoundID($0) }
@@ -211,6 +212,9 @@ extension Galaxy {
         ship.radius = radius
         ship.combatStrength = Double(max(1, shipRes?.strength ?? 1))
         ship.disableArmorFraction = (shipRes.map { $0.flags & 0x0010 != 0 } ?? false) ? 0.10 : 0.33
+        ship.fleeWhenOutOfAmmo = shipRes?.fleeWhenOutOfAmmo ?? false
+        ship.ionizeMax = Double(max(0, shipRes?.ionizeMax ?? 0))
+        ship.deionizePerSec = Double(max(0, shipRes?.deionize ?? 0)) * 0.3
         ship.maxShield = lo.maxShield; ship.shield = lo.maxShield
         ship.maxArmor = lo.maxArmor; ship.armor = lo.maxArmor
         ship.shieldRechargePerSec = lo.shieldRechargePerSec

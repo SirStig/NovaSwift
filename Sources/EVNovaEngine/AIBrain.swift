@@ -8,6 +8,9 @@ public enum AIState: String, Sendable {
     case traveling     // trader heading to a planet
     case landing       // trader on final approach, diving into the spaceport
     case patrolling    // warship roaming, watching for hostiles
+    /// Interceptor idle default: holds a slow orbit near a stellar object,
+    /// buzzing passing ships, instead of walking the warship patrol beat.
+    case orbiting
     case attacking     // engaged with a target
     case fleeing       // hurt / outmatched; running for the hyperspace edge
     case departing     // leaving the system (heading to the jump edge)
@@ -54,9 +57,12 @@ public final class AIBrain {
     /// our target (in range + aimed) — flips are exactly the "why didn't my
     /// weapon fire" moments for AI-controlled ships.
     private var hadFiringSolution: Bool?
-    /// Cooldown before another "sweep past the player" patrol leg can be picked,
+    /// Cooldown before another "sweep past the player" patrol leg (or, for an
+    /// orbiting interceptor, another "buzz a passing ship" leg) can be picked,
     /// so a ship can't get yanked across the system on back-to-back rolls.
     var sweepCooldown: Double = 0
+    /// Slow rotation used to walk an interceptor's holding-pattern orbit.
+    var orbitAngle: Double = 0
 
     public init(aiType: AIType, govt: Int) {
         self.aiType = aiType
@@ -91,6 +97,44 @@ public final class AIBrain {
     /// This ship's longest weapon reach (0 if unarmed).
     func weaponRange(_ me: Ship) -> Double {
         me.weapons.map { $0.spec.range }.max() ?? 0
+    }
+
+    /// True once every ammo-*using* weapon mount is dry (`ammo == 0`). Ships
+    /// that carry only unlimited-ammo weapons (`ammo == -1`, e.g. most guns
+    /// and beams) never trigger this — there's nothing to run dry on.
+    func outOfAmmo(_ me: Ship) -> Bool {
+        let ammoMounts = me.weapons.filter { $0.ammo >= 0 }
+        guard !ammoMounts.isEmpty else { return false }
+        return ammoMounts.allSatisfy { $0.ammo == 0 }
+    }
+
+    /// Interceptor-only "piracy police" perception: the Bible has interceptors
+    /// "attacking any ship that fires on or attempts to board another,
+    /// non-enemy ship while the interceptor is watching." (Boarding isn't
+    /// modeled in this engine, so this checks active targeting only.) Finds
+    /// the nearest ship currently targeting some third ship that ISN'T one of
+    /// *my* enemies — i.e. an ordinary ship picking a fight it shouldn't.
+    func pickPirateInterventionTarget(_ me: Ship, _ world: World) -> Ship? {
+        var best: Ship?
+        var bestDist = scanRange
+        for aggressor in world.allShips
+        where aggressor.entityID != me.entityID && aggressor.isAlive && !aggressor.disabled {
+            guard let victimID = aggressor.currentTargetID, victimID != me.entityID,
+                  let victim = world.ship(id: victimID), victim.isAlive, !victim.disabled,
+                  victim.government != aggressor.government,
+                  !isHostile(me, victim, world) else { continue }
+            let d = (aggressor.position - me.position).length
+            if d < bestDist { bestDist = d; best = aggressor }
+        }
+        return best
+    }
+
+    /// Where a disposition idles when it has nothing better to do: traders
+    /// travel, interceptors hold orbit (park/scan/piracy-police), everyone
+    /// else walks the warship patrol beat.
+    private var defaultIdleState: AIState {
+        if aiType.isTrader { return .traveling }
+        return aiType == .interceptor ? .orbiting : .patrolling
     }
 
     /// EV Nova's combat-odds check (`gövt.MaxOdds`): before picking a fight, a
@@ -144,19 +188,35 @@ public final class AIBrain {
         // Retreat conditions by disposition.
         let govt = world.diplomacy?.govt(me.government)
         let warshipRetreat = (govt?.warshipsRetreat ?? false) && me.shieldFraction < 0.25
-        let traderHurt = me.armorFraction < 0.4
+        // Bible: "AI ships of this type will run away/dock if out of ammo for
+        // all ammo-using weapons" (`shïp.Flags2` 0x0080) — checked regardless
+        // of disposition; dock (head to a planet) if nothing's chasing us,
+        // otherwise run for the edge.
+        let ammoExhausted = me.fleeWhenOutOfAmmo && outOfAmmo(me)
 
         switch aiType {
         case .wimpyTrader:
             if threat != nil { enter(.fleeing) }
         case .braveTrader:
-            if let th = threat, armed, !traderHurt { targetID = th.entityID; enter(.attacking) }
-            else if threat != nil && traderHurt { enter(.fleeing) }
-            else if threat != nil && !armed { enter(.fleeing) }
+            if ammoExhausted {
+                enter(threat != nil ? .fleeing : .traveling)
+            } else if let th = threat, armed, (th.position - me.position).length <= weaponRange(me) {
+                // Bible: "fights back when attacked, but runs away when his
+                // attacker is out of range" — not a hull-% threshold.
+                targetID = th.entityID; enter(.attacking)
+            } else if threat != nil {
+                enter(.fleeing)
+            }
         case .warship, .interceptor:
-            if warshipRetreat { enter(.fleeing) }
+            if ammoExhausted {
+                enter(threat != nil ? .fleeing : .traveling)
+            } else if warshipRetreat { enter(.fleeing) }
             else if let th = threat, armed, state == .attacking || favorableOdds(me, world) {
                 targetID = th.entityID; enter(.attacking)
+            } else if aiType == .interceptor, armed, let culprit = pickPirateInterventionTarget(me, world) {
+                // No direct threat of our own — but someone's picking on a
+                // non-enemy while we're watching. Piracy police intervenes.
+                targetID = culprit.entityID; enter(.attacking)
             }
         case .unknown:
             if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
@@ -178,12 +238,16 @@ public final class AIBrain {
 
         // First goal after spawning.
         if state == .spawning {
-            enter(aiType.isTrader ? .traveling : .patrolling)
+            enter(defaultIdleState)
         }
 
-        // Drop out of combat if the target is gone.
-        if state == .attacking && (targetID == nil || threat == nil) {
-            enter(aiType.isTrader ? .traveling : .patrolling)
+        // Drop out of combat if the target is gone. Re-resolves `targetID`
+        // fresh here rather than reusing the pre-switch `threat` snapshot —
+        // `threat` only tracks ordinary diplomatic hostiles, so it's nil for
+        // a piracy-police intervention target the switch just picked this
+        // same frame, which would otherwise immediately undo it.
+        if state == .attacking, targetID == nil || world.ship(id: targetID ?? -999)?.isAlive != true {
+            enter(defaultIdleState)
         }
 
         me.currentTargetID = (state == .attacking) ? targetID : nil
@@ -194,6 +258,7 @@ public final class AIBrain {
         case .traveling:  return travel(me, world)
         case .landing:    return land(me, world)
         case .patrolling: return patrol(me, world, dt)
+        case .orbiting:   return orbit(me, world, dt)
         case .departing:  return depart(me, world)
         case .escorting:  return escort(me, world)
         case .spawning:   return ControlIntent()
@@ -206,7 +271,7 @@ public final class AIBrain {
         Log.ai.debug("\(tag) AI state \(from.rawValue) -> \(s.rawValue)")
         state = s
         stateClock = 0
-        if s == .traveling || s == .patrolling { destination = nil }
+        if s == .traveling || s == .patrolling || s == .orbiting { destination = nil }
         if s == .fleeing || s == .departing { /* set outbound below */ }
     }
 
@@ -226,7 +291,7 @@ public final class AIBrain {
             // stops fighting/sits there" fallback path.
             let tag = shipTag, fallback = aiType.isTrader ? "traveling" : "patrolling"
             Log.ai.debug("\(tag) attack target invalid or gone — falling back to \(fallback)")
-            enter(aiType.isTrader ? .traveling : .patrolling)
+            enter(defaultIdleState)
             return ControlIntent()
         }
         var intent = ControlIntent()
@@ -327,7 +392,7 @@ public final class AIBrain {
             let tag = shipTag, spobDesc = destSpob.map(String.init) ?? "nil"
             Log.ai.debug("\(tag) landing target spob \(spobDesc) no longer resolves — aborting approach")
             destination = nil; destSpob = nil
-            enter(aiType.isTrader ? .traveling : .patrolling)
+            enter(defaultIdleState)
             return ControlIntent()
         }
         let dist = (body.position - me.position).length
@@ -353,6 +418,19 @@ public final class AIBrain {
         return arrive(me, to: destination ?? me.position, slowRadius: 160)
     }
 
+    /// Interceptor idle default: hold a slow orbit near a stellar object — the
+    /// Bible's "parks in orbit around a planet if he can't find any [enemies]"
+    /// — occasionally peeling off to buzz the nearest passing ship ("scan them
+    /// for illegal cargo"; we model the flyby, not cargo-legality consequences,
+    /// since this engine has no illegal-cargo/ScanMask system yet).
+    private func orbit(_ me: Ship, _ world: World, _ dt: Double) -> ControlIntent {
+        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 160 {
+            destination = pickOrbitPoint(me, world)
+            repathClock = 6
+        }
+        return arrive(me, to: destination ?? me.position, slowRadius: 150)
+    }
+
     /// Escort: hold a numbered slot in a V-wing behind the leader, rotated to the
     /// leader's heading, so a fleet flies as a tidy formation instead of a swarm.
     private func escort(_ me: Ship, _ world: World) -> ControlIntent {
@@ -361,7 +439,7 @@ public final class AIBrain {
             let tag = shipTag, leaderDesc = leaderID.map(String.init) ?? "nil"
             Log.ai.debug("\(tag) escort leader [\(leaderDesc)] gone — reverting to own disposition")
             leaderID = nil
-            enter(aiType.isTrader ? .traveling : .patrolling)
+            enter(defaultIdleState)
             return ControlIntent()
         }
         // Slot → (side, rank): even slots to the right, odd to the left, stepping
@@ -453,5 +531,36 @@ public final class AIBrain {
         // Empty system: loiter somewhere inside the jump radius.
         let r = ctx.jumpRadius * 0.5
         return ctx.center + Vec2(world.rng.double(in: -r...r), world.rng.double(in: -r...r))
+    }
+
+    /// Either the next point along a slow circular holding pattern around the
+    /// nearest stellar object, or — occasionally — a flyby aim point on the
+    /// nearest non-hostile ship (a "buzz": a close pass, not an attack).
+    private func pickOrbitPoint(_ me: Ship, _ world: World) -> Vec2 {
+        let ctx = world.systemContext
+
+        // ~1 leg in 3: buzz the nearest ship that isn't already an enemy.
+        if sweepCooldown <= 0, world.rng.double(in: 0...1) < 0.34 {
+            let candidates = world.allShips.filter {
+                $0.entityID != me.entityID && $0.isAlive && !$0.disabled && !isHostile(me, $0, world)
+            }
+            if let nearest = candidates.min(by: {
+                ($0.position - me.position).length < ($1.position - me.position).length
+            }), (nearest.position - me.position).length < ctx.jumpRadius {
+                sweepCooldown = 20
+                let ahead = nearest.velocity.length > 20 ? nearest.velocity.normalized * 200 : Vec2()
+                return nearest.position + ahead
+            }
+        }
+
+        // Otherwise hold a slow orbit around the nearest stellar object (or
+        // the system centre, in an empty system).
+        orbitAngle += 0.12
+        let hub = ctx.bodies.min(by: {
+            ($0.position - me.position).length < ($1.position - me.position).length
+        })
+        let center = hub?.position ?? ctx.center
+        let radius = (hub?.radius ?? 200) + 260
+        return center + Vec2(sin(orbitAngle), cos(orbitAngle)) * radius
     }
 }

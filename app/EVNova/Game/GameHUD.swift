@@ -30,6 +30,12 @@ final class GameHUDModel: ObservableObject {
     @Published var targetShield = 1.0   // 0…1
     @Published var targetArmor = 1.0    // 0…1
     @Published var targetHostile = false
+    /// The target's government, e.g. "Trader" (`gövt.TargetCode`).
+    @Published var targetGovtLabel = ""
+    /// The click-selected planet/station nav destination, if any — independent
+    /// of the ship target above (empty name = none selected).
+    @Published var navTargetName = ""
+    @Published var navTargetLandable = false
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
@@ -91,7 +97,10 @@ struct GameHUDView: View {
                 HStack(alignment: .top) {
                     statusPanel
                     Spacer()
-                    if showRadar { radar }
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if showRadar { radar }
+                        targetPanel
+                    }
                 }
                 Spacer()
                 velocityStrip
@@ -125,6 +134,41 @@ struct GameHUDView: View {
         .padding(12)
         .background(panel, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.12)))
+    }
+
+    /// The selected ship (name/govt/shield/armor) or, if only a planet is
+    /// selected, the nav-destination readout. Empty when nothing is selected.
+    @ViewBuilder
+    private var targetPanel: some View {
+        if !model.targetName.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(model.targetName.uppercased())
+                    .font(.system(.caption, design: .monospaced).weight(.bold))
+                    .foregroundStyle(model.targetHostile ? Color(red: 0.95, green: 0.35, blue: 0.3) : .white)
+                if !model.targetGovtLabel.isEmpty {
+                    Text(model.targetGovtLabel)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                bar("SHIELD", model.targetShield, Color.cyan)
+                bar("ARMOR", model.targetArmor, amber)
+            }
+            .padding(10)
+            .background(panel, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.12)))
+        } else if !model.navTargetName.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.navTargetName.uppercased())
+                    .font(.system(.caption, design: .monospaced).weight(.bold))
+                Text(model.navTargetLandable ? "Landable" : "No landing clearance")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(width: 140, alignment: .leading)
+            .background(panel, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.12)))
+        }
     }
 
     private func bar(_ label: String, _ value: Double, _ color: Color) -> some View {

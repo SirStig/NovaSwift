@@ -13,9 +13,11 @@ struct KeyBindings: Codable, Equatable {
         .afterburner: "shift",
         .firePrimary: "space", .fireSecondary: "return",
         .selectSecondaryPrev: "[", .selectSecondaryNext: "]",
-        .targetNearest: "tab", .targetNext: "t", .nearestHostile: "r", .clearTarget: "u",
+        // Matches the real game's default control scheme: Tab cycles targets
+        // ("Target Select"), R snaps to the closest ("Closest Targ"), Y hails.
+        .targetNearest: "r", .targetNext: "tab", .nearestHostile: "t", .clearTarget: "u",
         .land: "l", .hyperjump: "j", .galaxyMap: "m", .autopilot: "a",
-        .hailTarget: "h", .board: "b",
+        .hailTarget: "y", .board: "b",
         .pauseGame: "p", .openMenu: "escape",
     ]
 

@@ -77,7 +77,7 @@ struct SpaceportView: View {
                     NovaText(game.descText(spob.id), size: 11, width: 301, align: .leading)
                 }
                 .frame(width: 301, height: 175)
-                .novaPlace(space, -149, 66)
+                .novaPlace(space, -149, 70)
                 // Player readout on the left panel.
                 leftPanel.novaPlace(space, -300, 62)
                 // Service buttons on the right panel.
@@ -98,35 +98,43 @@ struct SpaceportView: View {
         }
     }
 
+    /// Fixed per-role slot Y offsets (relative to the frame's vertical centre),
+    /// matching the real game's layout: each service button lives at its own
+    /// constant position regardless of what else the spöb offers, so a planet
+    /// missing e.g. a Shipyard doesn't shift every other button up. `shipyard`,
+    /// `outfitter`, and `leave` are verified against the vendored NovaJS
+    /// reference (`third_party/NovaJS/nova/src/spaceport/spaceport.ts`); the
+    /// unimplemented-in-NovaJS `tradeCenter`/`bar`/`missionBBS` slots are a
+    /// best-effort extrapolation of the confirmed 42px pitch.
+    private static let slotY: [String: CGFloat] = [
+        "shipyard": 74, "outfitter": 116, "tradeCenter": 158,
+        "bar": 200, "missionBBS": 242, "leave": 284,
+    ]
+
     private func buttonColumn(_ space: NovaSpace) -> some View {
-        var items: [(String, () -> Void)] = []
+        var items: [(key: String, title: String, action: () -> Void)] = []
         if spob.hasShipyard {
-            items.append((graphics.buttonLabel(SpaceportLabel.shipyard, fallback: "Shipyard"), { screen = .shipyard }))
+            items.append(("shipyard", graphics.buttonLabel(SpaceportLabel.shipyard, fallback: "Shipyard"), { screen = .shipyard }))
         }
         if spob.hasOutfitter {
-            items.append((graphics.buttonLabel(SpaceportLabel.outfitter, fallback: "Outfitter"), { screen = .outfit }))
+            items.append(("outfitter", graphics.buttonLabel(SpaceportLabel.outfitter, fallback: "Outfitter"), { screen = .outfit }))
         }
         if spob.hasCommodityExchange {
-            items.append((graphics.buttonLabel(SpaceportLabel.tradeCenter, fallback: "Trade Center"), { screen = .trade }))
+            items.append(("tradeCenter", graphics.buttonLabel(SpaceportLabel.tradeCenter, fallback: "Trade Center"), { screen = .trade }))
         }
         if spob.hasBar {
-            items.append((graphics.buttonLabel(SpaceportLabel.bar, fallback: "Bar"), { screen = .bar }))
+            items.append(("bar", graphics.buttonLabel(SpaceportLabel.bar, fallback: "Bar"), { screen = .bar }))
         }
         // Mission BBS — a standard spaceport service at inhabited ports.
         if !spob.isUninhabited {
-            items.append((graphics.buttonLabel(SpaceportLabel.missionBBS, fallback: "Mission BBS"),
+            items.append(("missionBBS", graphics.buttonLabel(SpaceportLabel.missionBBS, fallback: "Mission BBS"),
                           { screen = .missions }))
         }
-        items.append((graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), onDepart))
+        items.append(("leave", graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), onDepart))
 
-        // Vertically centre the column of service buttons within the frame, so
-        // they fit regardless of how many the spöb offers.
-        let btnH: CGFloat = 25, gap: CGFloat = 9
-        let totalH = CGFloat(items.count) * btnH + CGFloat(items.count - 1) * gap
-        let firstTop = -totalH / 2   // relative to the frame's vertical centre
-        return ForEach(Array(items.enumerated()), id: \.offset) { i, item in
-            NovaButton(graphics: graphics, title: item.0, width: 120, action: item.1)
-                .novaPlace(space, 150, firstTop + CGFloat(i) * (btnH + gap))
+        return ForEach(items, id: \.key) { item in
+            NovaButton(graphics: graphics, title: item.title, width: 120, action: item.action)
+                .novaPlace(space, 150, Self.slotY[item.key] ?? 74)
         }
     }
 

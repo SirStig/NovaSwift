@@ -130,6 +130,19 @@ public final class Ship {
     /// bit 0x0010 is set. A one-time state transition, not a random roll —
     /// only ships not already disabled can cross it.
     public var disableArmorFraction: Double = 0.33
+    /// `shïp.Flags2` 0x0080: "AI ships of this type will run away/dock if out
+    /// of ammo for all ammo-using weapons."
+    public var fleeWhenOutOfAmmo: Bool = false
+
+    // Ionization: weapons can add `wëap.Ionization` charge on hit; once it
+    // reaches `ionizeMax` the ship is "fully ionized" and "nearly immobilized"
+    // (Bible) until the charge dissipates at `deionizePerSec`.
+    public var ionCharge: Double = 0
+    /// `shïp.IonizeMax` — 0 means this hull doesn't define the field (never
+    /// considered ionized, rather than trivially "always ionized").
+    public var ionizeMax: Double = 0
+    public var deionizePerSec: Double = 0
+    public var isIonized: Bool { ionizeMax > 0 && ionCharge >= ionizeMax }
 
     // Fuel — EV Nova's blue gauge. Spent by hyperspace jumps (100 per jump) and
     // by the afterburner; regenerates only if the hull/outfits grant it.
@@ -260,6 +273,7 @@ public final class Ship {
         if fuel < maxFuel && fuelRegenPerSec > 0 {
             fuel = min(maxFuel, fuel + fuelRegenPerSec * dt)
         }
+        if ionCharge > 0 { ionCharge = max(0, ionCharge - deionizePerSec * dt) }
         logFuelTransitions()
     }
 
@@ -313,11 +327,15 @@ public final class Ship {
     }
 
     func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning) {
+        // Fully ionized: "nearly immobilized" (Bible) — no active turning or
+        // thrust until the charge dissipates below `ionizeMax`. Existing
+        // momentum still coasts (drag/speed-clamp/position below still run).
+        let controllable = !isIonized
         let maxTurn = stats.turnRate * dt
-        if intent.turnLeft || intent.turnRight {
+        if controllable, intent.turnLeft || intent.turnRight {
             if intent.turnLeft { angle -= maxTurn }
             if intent.turnRight { angle += maxTurn }
-        } else if let target = intent.desiredHeading {
+        } else if controllable, let target = intent.desiredHeading {
             // Rotate toward the target heading, clamped to this frame's turn budget.
             let twoPi = 2 * Double.pi
             var delta = (target - angle).truncatingRemainder(dividingBy: twoPi)
@@ -331,7 +349,7 @@ public final class Ship {
         var accel = stats.acceleration
         var topSpeed = stats.maxSpeed
         afterburnerActive = false
-        if intent.afterburner, let ab = afterburner, fuel > 0 {
+        if controllable, intent.afterburner, let ab = afterburner, fuel > 0 {
             afterburnerActive = true
             accel *= ab.accelMultiplier
             topSpeed *= ab.speedMultiplier
@@ -340,8 +358,8 @@ public final class Ship {
         }
 
         let heading = Vec2.heading(angle)
-        if intent.thrust { velocity += heading * (accel * dt) }
-        if intent.reverse { velocity += heading * (-stats.acceleration * 0.5 * dt) }
+        if controllable, intent.thrust { velocity += heading * (accel * dt) }
+        if controllable, intent.reverse { velocity += heading * (-stats.acceleration * 0.5 * dt) }
 
         if tuning.dragPerSecond > 0 {
             let k = max(0, 1 - tuning.dragPerSecond * dt)
@@ -470,8 +488,38 @@ public final class World {
             if !s.disabled { s.regen(dt) }
         }
 
+        runPointDefense()
         stepProjectiles(dt)
         despawnDepartedAndDead()
+    }
+
+    /// Guidance 9/10 mounts (`WeapRes.isPointDefense`): "fires automatically at
+    /// incoming guided weapons and nearby ships" (Bible) — a targeting loop
+    /// independent of the ship's own `currentTargetID`. Simplified to an
+    /// instant intercept (destroys the incoming shot outright) rather than
+    /// simulating a PD sub-projectile chasing it down; a shot's `Durability`
+    /// (hits-to-kill) isn't modeled.
+    private func runPointDefense() {
+        for ship in allShips where ship.isAlive && !ship.disabled {
+            for mount in ship.weapons where mount.spec.isPointDefense {
+                guard mount.ready else { mount.logBlockedIfNeeded(for: ship); continue }
+                let incoming = projectiles.filter { p in
+                    p.alive && p.guided && p.vulnerableToPD
+                        && canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: ship)
+                        && (p.position - ship.position).length <= mount.spec.range
+                }
+                guard let target = incoming.min(by: {
+                    ($0.position - ship.position).length < ($1.position - ship.position).length
+                }) else { continue }
+                target.alive = false
+                mount.didFire()
+                events.append(.weaponFired(shooterID: ship.entityID, at: ship.position,
+                                           heading: (target.position - ship.position).angle,
+                                           soundID: mount.spec.fireSoundID))
+                events.append(.explosion(at: target.position, radius: 10, soundID: nil))
+                Log.combat.debug("\(ship.name) [\(ship.entityID)] point defense shot down an incoming projectile")
+            }
+        }
     }
 
     // MARK: Weapons
@@ -490,6 +538,9 @@ public final class World {
                 continue
             }
             let spec = mount.spec
+            // Seeker 0x0020: this guided weapon refuses to fire while its own
+            // ship is fully ionized.
+            if spec.cantFireWhileIonized && ship.isIonized { continue }
             // Aim: turrets/guided track the target; fixed guns fire along heading.
             var aim = ship.angle
             if let t = target, spec.isBeam || spec.isGuided || mount.spec.turnRate > 0 || target != nil {
@@ -513,7 +564,8 @@ public final class World {
                                    blastRadius: spec.blastRadius, ownerID: ship.entityID,
                                    ownerGovt: ship.government, guided: spec.isGuided,
                                    turnRate: spec.turnRate, speed: spec.projectileSpeed,
-                                   targetID: spec.isGuided ? ship.currentTargetID : nil)
+                                   targetID: spec.isGuided ? ship.currentTargetID : nil,
+                                   vulnerableToPD: spec.vulnerableToPD, ionization: spec.ionization)
                 projectiles.append(p)
                 events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID))
                 Log.combat.debug("\(ship.name) [\(ship.entityID)] fired \(spec.name)\(target.map { " at \($0.name) [\($0.entityID)]" } ?? "")")
@@ -544,7 +596,8 @@ public final class World {
         }
         if let h = hitShip {
             endPoint = origin + dir * bestT
-            applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID)
+            applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
+                     ionization: spec.ionization)
         }
         events.append(.beam(from: origin, to: endPoint, hit: hitShip != nil, soundID: spec.fireSoundID))
         Log.combat.debug("\(ship.name) [\(ship.entityID)] fired beam \(spec.name)\(hitShip.map { " hit \($0.name) [\($0.entityID)]" } ?? " (no hit)")")
@@ -570,14 +623,16 @@ public final class World {
             for other in allShips where other.isAlive {
                 if !canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) { continue }
                 if (other.position - p.position).length <= other.radius {
-                    applyHit(to: other, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID)
+                    applyHit(to: other, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
+                             ionization: p.ionization)
                     // Splash damage.
                     if p.blastRadius > 0 {
                         for splash in allShips where splash.entityID != other.entityID && splash.isAlive {
                             if canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: splash),
                                (splash.position - p.position).length <= p.blastRadius {
                                 applyHit(to: splash, shield: p.shieldDamage * 0.5,
-                                         armor: p.armorDamage * 0.5, ownerID: p.ownerID)
+                                         armor: p.armorDamage * 0.5, ownerID: p.ownerID,
+                                         ionization: p.ionization * 0.5)
                             }
                         }
                     }
@@ -598,9 +653,13 @@ public final class World {
         return true
     }
 
-    private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int) {
+    private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
+                          ionization: Double = 0) {
         let hadShield = ship.shield > 0
         let killed = ship.applyDamage(shield: shield, armor: armor)
+        if ionization > 0, ship.ionizeMax > 0 {
+            ship.ionCharge = min(ship.ionizeMax, ship.ionCharge + ionization)
+        }
         events.append(hadShield ? .shieldHit(at: ship.position) : .armorHit(at: ship.position))
         Log.combat.debug("\(ship.name) [\(ship.entityID)] hit by #\(ownerID): shieldDmg=\(shield, format: .fixed(precision: 1)) armorDmg=\(armor, format: .fixed(precision: 1)) -> shield=\(ship.shield, format: .fixed(precision: 1)) armor=\(ship.armor, format: .fixed(precision: 1))\(killed ? " [LETHAL]" : "")")
 
@@ -734,6 +793,18 @@ public final class World {
     /// Drop the player's current target lock, if any.
     public func clearPlayerTarget() {
         player.currentTargetID = nil
+    }
+
+    /// Lock a specific ship by id (click-to-select). Unlike
+    /// `selectNearestTarget`, this allows disabled hulks (still valid targets
+    /// for boarding) and has no range gate — if it's on screen, it's
+    /// selectable.
+    @discardableResult
+    public func selectTarget(id: Int) -> Ship? {
+        guard let ship = npcs.first(where: { $0.entityID == id }), ship.isAlive else { return nil }
+        player.currentTargetID = id
+        events.append(.targetAcquired(entityID: id))
+        return ship
     }
 
     /// The nearest ship within hail range, regardless of relationship — hailing

@@ -385,6 +385,15 @@ public struct WeapRes {
     public let turnRate: Int        // for guided munitions
     public let maxAmmo: Int
     public let count: Int           // rounds consumed / fired per shot
+    /// Raw `Flags` field (@28). Offset verified against novaparse `WeapResource.ts`.
+    public let flagsRaw: UInt16
+    /// Raw "Seeker" field (@30, guided-weapon behavior flags). Offset verified
+    /// against novaparse `WeapResource.ts` (`guidedFlags`).
+    public let seekerFlagsRaw: Int
+    /// "The amount of ionization energy to add to the ship that gets hit by
+    /// this weapon" (EV Nova Bible). Offset verified against novaparse
+    /// `WeapResource.ts` (`ionization`).
+    public let ionization: Int      // @74
 
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
     public var isBeam: Bool { guidance == .beam || guidance == .beamTurret || guidance == .pointDefenseBeam }
@@ -392,6 +401,16 @@ public struct WeapRes {
         switch guidance { case .guided, .rocket, .frontQuadrant, .rearQuadrant: return true; default: return false }
     }
     public var isTurret: Bool { guidance == .turret || guidance == .beamTurret }
+    /// "Seeker" 0x0020: "Can't fire if ship is ionized" — a per-weapon flag,
+    /// not automatic for all guided weapons.
+    public var cantFireWhileIonized: Bool { seekerFlagsRaw & 0x0020 != 0 }
+    /// "Guidance = 9/10... fires automatically at incoming guided weapons and
+    /// nearby ships" (EV Nova Bible).
+    public var isPointDefense: Bool { guidance == .pointDefense || guidance == .pointDefenseBeam }
+    /// "Weapon can't be targeted by point defense systems (works only for
+    /// homing weapons)" is `Flags` 0x0080; this is the inverse (matches
+    /// novaparse's `vulnerableToPD = (flags & 0x80) == 0`).
+    public var vulnerableToPD: Bool { flagsRaw & 0x0080 == 0 }
     /// Effective reach in world pixels. Beams use their length; projectiles use
     /// speed × lifetime (the game runs the projectile sim at 30 fps).
     public var range: Double {
@@ -417,6 +436,9 @@ public struct WeapRes {
         explosionBoomID = boomID(raw: ai16(d, 22))
         let flags = au16(d, 28)
         loopSound = flags & 0x0010 != 0
+        flagsRaw = flags
+        seekerFlagsRaw = ai16(d, 30)
+        ionization = ai16(d, 74)
         proxRadius = ai16(d, 24)
         blastRadius = ai16(d, 26)
         beamLength = ai16(d, 48)

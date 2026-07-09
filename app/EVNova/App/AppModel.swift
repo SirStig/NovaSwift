@@ -9,7 +9,14 @@ import EVNovaStory
 final class AppModel: ObservableObject {
     enum Screen: Equatable { case launcher, mainMenu, loading, game }
 
-    @Published var screen: Screen = .launcher
+    @Published var screen: Screen = .launcher {
+        didSet { audio.setMusicAllowed(screen == .mainMenu) }
+    }
+
+    /// A newly-created pilot whose scenario intro is playing. Presented
+    /// full-screen at the `RootView` level (not nested in any dialog sheet) so
+    /// the intro slideshow always covers the whole window.
+    @Published var pendingIntro: CharRes?
     @Published var settings: GameSettings = .load()
     @Published var bindings: KeyBindings = .load()
     @Published var data = GameDataController()

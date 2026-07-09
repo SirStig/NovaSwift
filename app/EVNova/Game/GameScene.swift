@@ -80,6 +80,11 @@ final class GameScene: SKScene {
     // allowed; the HUD shows `landPrompt` while a pad is in reach.
     private(set) var nearestLandableID: Int?
     private(set) var canLandNow = false
+    /// The click-selected nav destination (planet/station) — independent of
+    /// `nearestLandableID`, which stays proximity-only and keeps driving the
+    /// land prompt. A ship target and a planet nav-selection can coexist, as
+    /// in the real game.
+    private(set) var selectedPlanetID: Int?
     private let landingSpeedLimit: Double = 130
     /// Read-only handle to the live player ship (fuel top-up / cargo sync on land).
     var playerShip: Ship? { world?.player }
@@ -460,19 +465,27 @@ final class GameScene: SKScene {
 
     // MARK: Hailing + target-lock
 
-    /// The nearest hailable ship's government, if any is in range. `GameContainerView`
-    /// drives this off the `.hailTarget` action: plays the government's voice line and
-    /// shows its `commName` as a brief HUD banner.
-    func attemptHail() -> GovtRes? {
-        guard let ship = world.nearestHailable(), let game = galaxy?.game else { return nil }
-        return game.govt(ship.government)
+    /// Who `.hailTarget` reaches: the locked ship target if any, else the
+    /// click-selected planet/station nav destination, else (unchanged
+    /// fallback) the nearest ship in hail range — so hailing still works for
+    /// players who haven't discovered click-targeting.
+    enum HailResult {
+        case ship(govt: GovtRes, hostile: Bool)
+        case planet(name: String, govt: GovtRes?)
     }
 
-    /// Whether the nearest hailable ship is hostile to the player (drives which
-    /// voice bank — Acknowledge vs. Target — plays for the hail).
-    func nearestHailableIsHostile() -> Bool {
-        guard let ship = world.nearestHailable() else { return false }
-        return world.diplomacy?.isHostileToPlayer(ship.government) == true
+    func attemptHail() -> HailResult? {
+        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid),
+           let game = galaxy?.game, let govt = game.govt(ship.government) {
+            return .ship(govt: govt, hostile: world.diplomacy?.isHostileToPlayer(ship.government) == true)
+        }
+        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
+            return .planet(name: pv.name, govt: galaxy?.game.govt(pv.government))
+        }
+        if let ship = world.nearestHailable(), let game = galaxy?.game, let govt = game.govt(ship.government) {
+            return .ship(govt: govt, hostile: world.diplomacy?.isHostileToPlayer(ship.government) == true)
+        }
+        return nil
     }
 
     func selectNearestTarget() { world.selectNearestTarget(hostileOnly: false) }
@@ -480,16 +493,57 @@ final class GameScene: SKScene {
     func cycleTarget() { world.cycleTarget() }
     func clearTarget() { world.clearPlayerTarget() }
 
+    /// Click/tap hit-test in scene space (== world space here): nearest ship
+    /// first, then nearest planet; clears both selections if nothing was hit.
+    /// Called by `GameContainerView` off a tap gesture on the `SpriteView`.
+    @discardableResult
+    func selectAt(scenePoint: CGPoint) -> Bool {
+        let p = Vec2(Double(scenePoint.x), Double(scenePoint.y))
+        if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + 10 })
+            .min(by: { ($0.position - p).length < ($1.position - p).length }) {
+            world.selectTarget(id: ship.entityID)
+            return true
+        }
+        if let planet = planetVisuals.filter({ pv in
+            let dx = Double(pv.position.x) - p.x, dy = Double(pv.position.y) - p.y
+            return (dx * dx + dy * dy).squareRoot() <= Double(pv.radius) + 15
+        }).min(by: { a, b in
+            let da = Double(a.position.x) - p.x, db = Double(a.position.y) - p.y
+            let ea = Double(b.position.x) - p.x, eb = Double(b.position.y) - p.y
+            return (da * da + db * db) < (ea * ea + eb * eb)
+        }) {
+            selectedPlanetID = planet.id
+            return true
+        }
+        world.clearPlayerTarget()
+        selectedPlanetID = nil
+        return false
+    }
+
     private func updateTargetHUD(_ target: Ship?) {
         guard let hud else { return }
         guard let target else {
-            hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0; hud.targetHostile = false
+            hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0
+            hud.targetHostile = false; hud.targetGovtLabel = ""
             return
         }
         hud.targetName = target.name
         hud.targetShield = target.maxShield > 0 ? target.shield / target.maxShield : 0
         hud.targetArmor = target.maxArmor > 0 ? target.armor / target.maxArmor : 1
         hud.targetHostile = world.diplomacy?.isHostileToPlayer(target.government) == true
+        hud.targetGovtLabel = galaxy?.game.govt(target.government)?.targetCode ?? ""
+    }
+
+    /// The click-selected planet/station nav destination, if any (independent
+    /// of the ship target above — the two coexist, as in the real game).
+    private func updateNavTargetHUD() {
+        guard let hud else { return }
+        guard let id = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == id }) else {
+            hud.navTargetName = ""; hud.navTargetLandable = false
+            return
+        }
+        hud.navTargetName = pv.name
+        hud.navTargetLandable = world.systemContext.bodies.first { $0.id == id }?.canLand ?? false
     }
 
     private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
@@ -940,6 +994,7 @@ final class GameScene: SKScene {
         hud.jumps = Int((p.fuel / 100).rounded(.down))
         updateWarnings(shieldFraction: hud.shield, armorFraction: hud.armor)
         updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
+        updateNavTargetHUD()
         hud.cargoUsed = p.cargoUsed
         hud.cargoCapacity = p.cargoCapacity
         if let mount = p.weapons.first {

@@ -35,7 +35,7 @@ struct AuthenticHUDView: View {
                         .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
                 }
 
-                shipLabel
+                targetReadout
                     .novaPlace(layout, origin: origin(style.intf.targetArea),
                                size: CGSize(width: style.intf.targetArea.width, height: 40))
 
@@ -58,14 +58,35 @@ struct AuthenticHUDView: View {
                        w: CGFloat(r.width) * v, h: CGFloat(r.height))
     }
 
-    private var shipLabel: some View {
-        VStack(spacing: 1) {
-            Text(model.shipName).font(.system(size: 11, design: .monospaced).weight(.bold))
-            if !model.systemName.isEmpty {
-                Text(model.systemName).font(.system(size: 9, design: .monospaced))
+    /// The real target-lock display: the selected ship's name, government,
+    /// and shield %, or the selected planet's name, or a dim "No Target".
+    @ViewBuilder
+    private var targetReadout: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if !model.targetName.isEmpty {
+                Text(model.targetName)
+                    .font(.system(size: 11, design: .monospaced).weight(.bold))
+                    .foregroundStyle(model.targetHostile ? Color.red : color(style.intf.brightText))
+                if !model.targetGovtLabel.isEmpty {
+                    Text(model.targetGovtLabel).font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(color(style.intf.dimText))
+                }
+                Text("Shield \(Int(model.targetShield * 100))%")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(color(style.intf.dimText))
+            } else if !model.navTargetName.isEmpty {
+                Text(model.navTargetName)
+                    .font(.system(size: 11, design: .monospaced).weight(.bold))
+                    .foregroundStyle(color(style.intf.brightText))
+                Text(model.navTargetLandable ? "Landable" : "No landing clearance")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(color(style.intf.dimText))
+            } else {
+                Text("No Target").font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(color(style.intf.dimText))
             }
         }
-        .foregroundStyle(color(style.intf.brightText))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Active weapon + remaining ammo (blank when unarmed — an empty box here
@@ -84,10 +105,17 @@ struct AuthenticHUDView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Speed/heading readout — the nav computer's rect. (No live target-lock
-    /// system yet, so this shows flight data rather than a targeted contact.)
+    /// The nav computer's rect: the player's own ship name/system (moved here
+    /// once `targetArea` took on its intended job — the real target-lock
+    /// display, see `targetReadout`), plus speed/heading.
     private var navReadout: some View {
         VStack(alignment: .leading, spacing: 1) {
+            Text(model.shipName).font(.system(size: 10, design: .monospaced).weight(.semibold))
+                .foregroundStyle(color(style.intf.brightText))
+            if !model.systemName.isEmpty {
+                Text(model.systemName).font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(color(style.intf.dimText))
+            }
             Text("SPD \(model.speed)").font(.system(size: 9, design: .monospaced))
             Text("HDG \(Int(model.headingDegrees))°").font(.system(size: 9, design: .monospaced))
         }

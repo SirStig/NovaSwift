@@ -117,7 +117,8 @@ public final class Spawner {
         // Equip NPCs from their real hull loadout (preinstalled outfits: afterburner,
         // extra shields/weapons, fuel) — the same aggregation the player uses — so a
         // spawned ship matches its authentic EV Nova fit, not a bare hull.
-        guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang) else { return nil }
+        guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang,
+                                               skillRoll: world.rng.double(in: -1...1)) else { return nil }
         let brain = AIBrain(aiType: dude.aiType, govt: govt)
         brain.leaderID = leaderID
         ship.brain = brain
@@ -134,7 +135,8 @@ public final class Spawner {
                  : (galaxy.shipSpec(fleet.leadShip)?.government ?? table.systemGovt)
 
         let (pos, ang, arrival) = spawnPose(world, origin: origin)
-        guard let lead = galaxy.makeLoadedShip(fleet.leadShip, government: govt, at: pos, angle: ang) else { return }
+        guard let lead = galaxy.makeLoadedShip(fleet.leadShip, government: govt, at: pos, angle: ang,
+                                               skillRoll: world.rng.double(in: -1...1)) else { return }
         // The flagship acts on its own hull's disposition (a freighter convoy leader
         // trades; a warfleet's leader fights) rather than always being a warship.
         let leadAI = galaxy.game.ship(fleet.leadShip).map { AIType(raw: $0.inherentAI) } ?? .warship
@@ -149,7 +151,8 @@ public final class Spawner {
                 guard world.npcs.count < maxPopulation else { return }
                 let offset = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
                 guard let e = galaxy.makeLoadedShip(escort.shipID, government: govt,
-                                                    at: pos + offset, angle: ang) else { continue }
+                                                    at: pos + offset, angle: ang,
+                                                    skillRoll: world.rng.double(in: -1...1)) else { continue }
                 // Escorts fly their own hull's disposition so that, if the flagship
                 // dies, they fall back to hull-appropriate behavior rather than
                 // always reverting to a generic interceptor.

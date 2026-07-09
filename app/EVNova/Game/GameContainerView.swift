@@ -423,6 +423,13 @@ struct GameContainerView: View {
             SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
                 .frame(width: playWidth, height: geo.size.height)
                 .position(x: playWidth / 2, y: geo.size.height / 2)
+                // Click/tap a ship to target it, a planet to set it as the nav
+                // destination, or empty space to clear both selections. The
+                // gesture is on the SpriteView itself so its gesture-local
+                // point already matches what `convertPoint(fromView:)` expects.
+                .gesture(SpatialTapGesture().onEnded { value in
+                    host.scene.selectAt(scenePoint: host.scene.convertPoint(fromView: value.location))
+                })
         }
         .ignoresSafeArea()
         .focusable()
@@ -460,14 +467,22 @@ struct GameContainerView: View {
         }
     }
 
-    /// Hail the nearest ship in range: play its government's voice line
-    /// (Acknowledge, or Target if it's hostile) and show a bottom-left banner
-    /// with its `commName` for a few seconds. Silently does nothing with no
-    /// ship in range — matches `attemptLand()`'s "no prompt, no action" pattern.
+    /// Hail whatever `GameScene.attemptHail()` resolves to — the locked ship
+    /// target, else the click-selected planet, else the nearest ship in
+    /// range — and show a bottom-left banner for a few seconds. Silently does
+    /// nothing with no valid target — matches `attemptLand()`'s "no prompt,
+    /// no action" pattern.
     private func hail() {
-        guard let scene = host?.scene, let govt = scene.attemptHail() else { return }
-        model.audio.playHailVoice(govt: govt, hostile: scene.nearestHailableIsHostile())
-        host?.hud.hailMessage = "The \(govt.commName) hails you."
+        guard let scene = host?.scene, let result = scene.attemptHail() else { return }
+        switch result {
+        case let .ship(govt, hostile):
+            model.audio.playHailVoice(govt: govt, hostile: hostile)
+            host?.hud.hailMessage = "The \(govt.commName) hails you."
+        case let .planet(name, _):
+            // No voice line for a stellar hail — this is the exact phrasing
+            // the manual uses for "you hailed a planet/station."
+            host?.hud.hailMessage = "Channel open to \(name)."
+        }
         hailMessageToken += 1
         let token = hailMessageToken
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {

@@ -28,8 +28,20 @@ struct RootView: View {
                 GameContainerView()
                     .transition(.opacity)
             }
+
+            // A new pilot's scenario intro, full-screen and outside any dialog's
+            // sheet frame — see AppModel.pendingIntro.
+            if let scenario = model.pendingIntro {
+                IntroSequenceView(scenario: scenario) {
+                    model.pendingIntro = nil
+                    model.beginPlay()
+                }
+                .transition(.opacity)
+                .zIndex(10)
+            }
         }
         .animation(.easeInOut(duration: 0.25), value: model.screen)
+        .animation(.easeInOut(duration: 0.3), value: model.pendingIntro != nil)
         .task(id: model.data.hasBaseData) {
             // Decode the authentic main-menu assets from the player's data (once).
             if menuAssets == nil, model.data.game != nil {

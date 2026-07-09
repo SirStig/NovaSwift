@@ -169,6 +169,26 @@ public struct ShipRes {
     /// Government this hull "belongs" to when spawned outside a `düde`.
     public let inherentGovt: Int    // @72
     public let flags: UInt16        // @74
+    /// "The amount (in percent) to which this ship's pilots' skill varies" —
+    /// EV Nova Bible. Applied as a per-instance jitter to acceleration/turn
+    /// rate (one pilot-skill roll affects both) so ships of the same class
+    /// aren't all identical. 0 = no variance. Offset verified against
+    /// novaparse `ShipResource.ts` (`skillVariation`).
+    public let skillVar: Int        // @96
+    /// Second flags field. Offset verified against novaparse `ShipResource.ts`
+    /// (`flags2N`).
+    public let flags2: UInt16       // @98
+    /// "AI ships of this type will run away/dock if out of ammo for all
+    /// ammo-using weapons" (EV Nova Bible, `shïp.Flags2` 0x0080).
+    public var fleeWhenOutOfAmmo: Bool { flags2 & 0x0080 != 0 }
+    /// "The rate at which this ship type dissipates ionization charge. A
+    /// value of 100 equals 1 point of ion energy per 1/30th of a second"
+    /// (Bible). Offset verified against novaparse `ShipResource.ts` (`deionize`).
+    public let deionize: Int        // @874
+    /// "The amount of ion charge at which a ship of this type will be
+    /// considered 'fully ionized'" (Bible's IonizeMax). Offset verified
+    /// against novaparse `ShipResource.ts` (`ionization`).
+    public let ionizeMax: Int       // @876
 
     /// Built-in weapons: (weapon id, count, ammo). Drives NPC + starting loadouts.
     public let weapons: [(id: Int, count: Int, ammo: Int)]
@@ -206,6 +226,10 @@ public struct ShipRes {
         flags = UInt16(truncatingIfNeeded: u16(d, 74))
         podCount = i16(d, 76)
         fuelRegen = i16(d, 94)
+        skillVar = i16(d, 96)
+        flags2 = UInt16(truncatingIfNeeded: u16(d, 98))
+        deionize = i16(d, 874)
+        ionizeMax = i16(d, 876)
 
         // Stock weapons: 4 primary slots (ids @18, counts @26, ammo @34) plus
         // 4 extended slots stored far down the resource (ids @1742, …).

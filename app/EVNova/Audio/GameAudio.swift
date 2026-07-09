@@ -16,6 +16,7 @@ final class GameAudio: ObservableObject {
     private let library = NovaSoundLibrary()
     private var settings = GameSettings()
     private var musicURL: URL?
+    private var screenAllowsMusic = false
 
     /// Fixed sounds not carried by weapon/outfit data. The default ids are real
     /// EV Nova base resources (verified present in the shipping data); a plug-in
@@ -76,7 +77,18 @@ final class GameAudio: ObservableObject {
     /// Start (or keep) music according to the current settings.
     func startMusicIfEnabled() { updateMusicState() }
 
+    /// The authentic EV Nova main menu is the only screen background music
+    /// plays over; it stops the moment the player enters the launcher, a
+    /// loading screen, or gameplay.
+    func setMusicAllowed(_ allowed: Bool) {
+        screenAllowsMusic = allowed
+        updateMusicState()
+    }
+
     private func updateMusicState() {
+        guard screenAllowsMusic else {
+            engine.stopMusic(); return
+        }
         guard let url = musicURL else {
             Log.audio.debug("updateMusicState: no music track found (musicTrackURL() returned nil)")
             engine.stopMusic(); return

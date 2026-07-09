@@ -90,6 +90,31 @@ final class ShipSystemTests: XCTestCase {
         XCTAssertEqual(ship.weapons.count, 2, "two resolved weapon mounts")
     }
 
+    func testSkillVarJittersAccelAndTurnByRoll() throws {
+        // shïp.SkillVar (Bible): "up to X% slower or faster than stock" —
+        // applied to acceleration and turn rate together via one per-instance
+        // roll, and only when a roll is actually supplied.
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 4, 200)   // accel
+        put16(&ship, 6, 300)   // speed
+        put16(&ship, 8, 30)    // turn
+        put16(&ship, 96, 20)   // SkillVar: 20%
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+        let galaxy = Galaxy(game: NovaGame(col))
+
+        let stock = try XCTUnwrap(galaxy.makeShip(128))
+        XCTAssertEqual(stock.stats.acceleration, 200, "no roll supplied -> no jitter")
+
+        let ace = try XCTUnwrap(galaxy.makeShip(128, skillRoll: 1.0))
+        XCTAssertEqual(ace.stats.acceleration, 240, accuracy: 1e-9, "+20% at roll = 1.0")
+        XCTAssertEqual(ace.stats.turnRate, stock.stats.turnRate * 1.2, accuracy: 1e-9)
+
+        let rookie = try XCTUnwrap(galaxy.makeShip(128, skillRoll: -1.0))
+        XCTAssertEqual(rookie.stats.acceleration, 160, accuracy: 1e-9, "-20% at roll = -1.0")
+        XCTAssertEqual(rookie.stats.maxSpeed, stock.stats.maxSpeed, "SkillVar doesn't touch top speed")
+    }
+
     // MARK: fuel / jumps
 
     func testHyperspaceFuelConsumption() throws {

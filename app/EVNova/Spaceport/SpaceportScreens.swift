@@ -208,37 +208,42 @@ struct OutfitterView: View {
         }
     }
 
-    private func buttons(_ space: NovaSpace) -> some View {
+    // Buy/Sell/Done are each placed independently (matching the vendored
+    // NovaJS reference `nova/src/spaceport/outfitter.ts`: buy@(-100,126),
+    // sell@(0,126), done@(100,126), width 60) rather than as one offset
+    // HStack group, which had drifted the whole row ~150px to the right of
+    // its authentic position.
+    @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
-        return HStack(spacing: 14) {
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                       width: 52, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) } ?? false) {
-                guard let o else {
-                    Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
-                    return
-                }
-                if pilot.buyOutfit(o, galaxy: galaxy) {
-                    Log.spaceport.debug("Bought outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
-                } else {
-                    Log.spaceport.notice("Outfitter buy no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) cost=\(o.cost, privacy: .public) credits=\(pilot.state.credits, privacy: .public) freeMass=\(pilot.freeMass(galaxy: galaxy), privacy: .public) — insufficient credits, mass, or max-installed reached")
-                }
+        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
+                   width: 60, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) } ?? false) {
+            guard let o else {
+                Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
+                return
             }
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
-                       width: 52, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
-                guard let o else {
-                    Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
-                    return
-                }
-                if pilot.sellOutfit(o) {
-                    Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
-                } else {
-                    Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")
-                }
+            if pilot.buyOutfit(o, galaxy: galaxy) {
+                Log.spaceport.debug("Bought outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
+            } else {
+                Log.spaceport.notice("Outfitter buy no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) cost=\(o.cost, privacy: .public) credits=\(pilot.state.credits, privacy: .public) freeMass=\(pilot.freeMass(galaxy: galaxy), privacy: .public) — insufficient credits, mass, or max-installed reached")
             }
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: 52, action: onDone)
         }
-        .novaPlace(space, 62, 128)
+        .novaPlace(space, -100, 126)
+        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
+                   width: 60, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
+            guard let o else {
+                Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
+                return
+            }
+            if pilot.sellOutfit(o) {
+                Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
+            } else {
+                Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")
+            }
+        }
+        .novaPlace(space, 0, 126)
+        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                   width: 60, action: onDone)
+            .novaPlace(space, 100, 126)
     }
 
     private var fallback: some View {
@@ -330,26 +335,29 @@ struct ShipyardView: View {
         }
     }
 
-    private func buttons(_ space: NovaSpace) -> some View {
+    // Buy/Done placed independently (matching the vendored NovaJS reference
+    // `nova/src/spaceport/shipyard.ts`: buy@(-20,126), done@(100,126), width 60)
+    // rather than as one offset HStack group, which had drifted the whole row
+    // ~110-150px to the right of its authentic position.
+    @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
         let canBuy = s.map { $0.id != pilot.state.shipType && pilot.state.credits >= pilot.netPrice(of: $0, game: game) } ?? false
-        return HStack(spacing: 30) {
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
-                       width: 70, enabled: canBuy) {
-                guard let s else {
-                    Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
-                    return
-                }
-                if pilot.buyShip(s, game: game) {
-                    Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(pilot.netPrice(of: s, game: game), privacy: .public)cr")
-                } else {
-                    Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
-                }
+        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
+                   width: 60, enabled: canBuy) {
+            guard let s else {
+                Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
+                return
             }
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: 60, action: onDone)
+            if pilot.buyShip(s, game: game) {
+                Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(pilot.netPrice(of: s, game: game), privacy: .public)cr")
+            } else {
+                Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
+            }
         }
-        .novaPlace(space, 90, 122)
+        .novaPlace(space, -20, 126)
+        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                   width: 60, action: onDone)
+            .novaPlace(space, 100, 126)
     }
 
     private var fallback: some View {
