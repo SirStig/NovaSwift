@@ -86,6 +86,35 @@ public final class AIBrain {
         me.weapons.map { $0.spec.range }.max() ?? 0
     }
 
+    /// EV Nova's combat-odds check (`gövt.MaxOdds`): before picking a fight, a
+    /// government-minded ship weighs the summed `shïp.Strength` of nearby
+    /// enemies (scaled 30%-100% by each ship's current shield fraction)
+    /// against the summed strength of nearby friends (itself included). A
+    /// `MaxOdds` of 100 means "won't fight unless as strong or stronger";
+    /// 200 tolerates being outnumbered 2-to-1, etc. Ships with no government
+    /// entry (independents) always fight — Nova only gates this for ships
+    /// that belong to a government with the field set.
+    func favorableOdds(_ me: Ship, _ world: World) -> Bool {
+        guard let dip = world.diplomacy, let gov = dip.govt(me.government) else { return true }
+        // A MaxOdds of 0 means the field isn't in play for this government (no
+        // stock/plugin data sets it to a real threshold) — don't let an unset
+        // field make every ship of that govt permanently passive.
+        guard gov.maxOdds > 0 else { return true }
+        func power(_ s: Ship) -> Double { s.combatStrength * (0.3 + 0.7 * s.shieldFraction) }
+        var enemyStrength = 0.0
+        var friendlyStrength = power(me)
+        for other in world.allShips where other.entityID != me.entityID && other.isAlive && !other.disabled {
+            if isHostile(me, other, world) {
+                enemyStrength += power(other)
+            } else if other.government == me.government || dip.areAllied(me.government, other.government) {
+                friendlyStrength += power(other)
+            }
+        }
+        guard enemyStrength > 0 else { return true }
+        let tolerated = friendlyStrength * (Double(gov.maxOdds) / 100.0)
+        return enemyStrength <= tolerated
+    }
+
     // MARK: Decide
 
     public func think(ship me: Ship, world: World, dt: Double) -> ControlIntent {
@@ -118,7 +147,9 @@ public final class AIBrain {
             else if threat != nil && !armed { enter(.fleeing) }
         case .warship, .interceptor:
             if warshipRetreat { enter(.fleeing) }
-            else if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
+            else if let th = threat, armed, state == .attacking || favorableOdds(me, world) {
+                targetID = th.entityID; enter(.attacking)
+            }
         case .unknown:
             if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
         }

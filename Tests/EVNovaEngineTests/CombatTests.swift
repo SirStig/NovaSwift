@@ -40,6 +40,9 @@ final class CombatTests: XCTestCase {
         let world = World(player: attacker)
         let target = makeShip("B", govt: 2, at: Vec2(0, 300))       // 300px north
         let tid = world.addNPC(target)
+        // Already disabled (crossed the 33%-armor threshold earlier): the next
+        // hit that zeroes its armor is a real kill, not another disable roll.
+        target.disabled = true
         target.armor = 20; target.shield = 0                        // one solid hit kills
 
         attacker.weapons = [WeaponMount(spec: gun())]
@@ -55,6 +58,34 @@ final class CombatTests: XCTestCase {
         }
         XCTAssertTrue(destroyed, "projectile should have reached and destroyed the target")
         XCTAssertTrue(world.npcs.isEmpty, "dead ship is removed from the roster")
+    }
+
+    func testHitCrossingArmorThresholdDisablesNotDestroys() {
+        // EV Nova disables a ship the instant its armor crosses a fixed
+        // percentage of max armor (33% by default) — deterministically, not by
+        // a random roll — and only *then* can a further hit actually kill it.
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        let target = makeShip("B", govt: 2, at: Vec2(0, 300))
+        _ = world.addNPC(target)
+        target.armor = 40; target.maxArmor = 100; target.shield = 0   // 40% — above the 33% floor
+        XCTAssertEqual(target.disableArmorFraction, 0.33, accuracy: 1e-9)
+
+        attacker.angle = 0                                             // facing north, toward target
+        attacker.weapons = [WeaponMount(spec: gun(armor: 15, beam: true))]  // 40% -> 25%: crosses 33%
+        attacker.currentTargetID = target.entityID
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)
+
+        XCTAssertTrue(target.disabled, "crossing the armor threshold disables the ship")
+        XCTAssertTrue(target.isAlive, "a disabled ship is a hulk, not a kill")
+        XCTAssertTrue(world.npcs.contains { $0 === target }, "the hulk stays in the world")
+
+        // A further hit on the already-disabled hulk is a real kill.
+        target.armor = 5
+        attacker.weapons[0].cooldown = 0
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(target.isAlive, "damage after disable actually destroys the hulk")
     }
 
     func testNoFriendlyFire() {

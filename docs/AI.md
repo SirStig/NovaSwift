@@ -63,11 +63,22 @@ Independent ships (`gövt` −1) are hostile to no one unless provoked.
 |---|---|
 | Wimpy Trader | Bolts for the hyperspace edge at the first sign of a threat |
 | Brave Trader | Trades blows if armed and healthy; runs when hull drops below 40% |
-| Warship | Patrols; hunts and engages hostiles; retreats if its government flag says so and shields fall below 25% |
+| Warship | Patrols; hunts and engages hostiles it can actually win against; retreats if its government flag says so and shields fall below 25% |
 | Interceptor | Aggressive warship — closes distance and presses the attack |
 
 Fleet escorts adopt their flagship's target and fight for it; if the flagship
 dies they fall back to their own disposition.
+
+A warship/interceptor won't *initiate* a fight against odds its government
+wouldn't accept: `Diplomacy`'s `gövt.MaxOdds` is checked against the summed
+`shïp.Strength` of nearby hostiles vs. friends (each shield-scaled 30–100%) —
+see `AIBrain.favorableOdds`. Once already engaged, it fights it out.
+
+> Several items in this table (Brave Trader's flee condition, and especially
+> Interceptor, which is really "piracy police" — orbit-park, scan traffic,
+> defend third parties — not "close and press") are known-wrong against the
+> real game and not yet fixed. See `docs/AI_GROUND_TRUTH.md` for the full,
+> Bible-sourced correction list and priority order.
 
 ## Behavior state machine
 
@@ -102,8 +113,14 @@ Steering primitives turn a goal into a `ControlIntent`:
 - Firing spawns a **`Projectile`** (guided rounds steer toward the target) or, for
   beams, does an **instant hitscan** along the aim ray. No self-hits, no friendly
   fire within a government.
-- Armor ≤ 0 destroys the ship: the world emits an explosion + `shipDestroyed`
-  event and clears anyone targeting it.
+- A ship is **disabled**, not destroyed, the instant its armor crosses a fixed
+  percentage of max armor — 33% by default, 10% if `shïp.Flags` bit 0x0010 is
+  set (`Ship.disableArmorFraction`). This is a deterministic one-time state
+  transition, not a random roll: it becomes a drifting, weaponless hulk
+  (`shipDisabled` event) that everyone stops targeting. Only a ship that's
+  *already* disabled is actually destroyed when a further hit zeroes its
+  armor (`shipDestroyed` event). The player is never disabled this way — the
+  app owns player death.
 
 ## Population — the `Spawner`
 

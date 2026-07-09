@@ -507,7 +507,7 @@ public final class World {
 
     private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int) {
         let hadShield = ship.shield > 0
-        let killed = ship.applyDamage(shield: shield, armor: armor)
+        _ = ship.applyDamage(shield: shield, armor: armor)
         events.append(hadShield ? .shieldHit(at: ship.position) : .armorHit(at: ship.position))
 
         // Player fire provokes the victim and dents the player's record.
@@ -522,34 +522,22 @@ public final class World {
             // (no-op hook for future player-side AI/escorts)
         }
 
-        if killed {
-            // A mortal blow disables rather than destroys some ships (freighters
-            // and lighter craft especially) — EV Nova leaves boardable hulks in
-            // space instead of vaporising everything. The player is never disabled
-            // here (the app owns player death). Already-disabled ships die for real.
-            if !ship.isPlayer, !ship.disabled, rng.double(in: 0...1) < disableChance(for: ship) {
-                ship.disabled = true
-                ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
-                ship.shield = 0
-                ship.disableSpin = rng.double(in: -0.5...0.5)
-                ship.wantsToDepart = false
-                ship.currentTargetID = nil
-                ship.brain?.targetID = nil
-                clearTarget(ship.entityID)               // everyone stops shooting it
-                events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
-            } else {
-                ship.armor = 0
-            }
-        }
-    }
-
-    /// Probability that a killing hit merely disables `ship` instead of destroying
-    /// it. Traders/civilians cripple easily; warships tend to blow up fighting.
-    private func disableChance(for ship: Ship) -> Double {
-        switch ship.brain?.aiType {
-        case .wimpyTrader, .braveTrader: return 0.6
-        case .warship, .interceptor:     return 0.18
-        default:                         return 0.35
+        // EV Nova disables a ship the moment its armor crosses a fixed threshold
+        // (`shïp.Flags` 0x0010 → 10%, otherwise 33% of max armor) — a one-time
+        // deterministic state transition, not a random roll. Once already
+        // disabled, further damage that zeroes armor is a real kill (handled by
+        // `isAlive`/`despawnDepartedAndDead`, not here). The player is never
+        // disabled this way (the app owns player death).
+        if !ship.isPlayer, !ship.disabled, ship.armor <= ship.maxArmor * ship.disableArmorFraction {
+            ship.disabled = true
+            ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
+            ship.shield = 0
+            ship.disableSpin = rng.double(in: -0.5...0.5)
+            ship.wantsToDepart = false
+            ship.currentTargetID = nil
+            ship.brain?.targetID = nil
+            clearTarget(ship.entityID)               // everyone stops shooting it
+            events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
         }
     }
 

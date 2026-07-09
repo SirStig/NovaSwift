@@ -178,9 +178,22 @@ sources on top of the base 4-type model:
 
 ## 6. Priority read for implementation (rough order)
 
-1. Combat-odds gating (`MaxOdds` vs. summed `Strength`×shield-scaled friend/foe) —
-   biggest behavioral lever, data already decoded, just unused.
-2. Deterministic 33%/10% armor disable threshold, replacing the random roll.
+1. ✅ **Done (2026-07-08).** Combat-odds gating: `AIBrain.favorableOdds` sums
+   nearby `shïp.Strength` (shield-scaled 30–100%) for friends vs. enemies and
+   compares to `gövt.MaxOdds`; gates whether a warship/interceptor *initiates*
+   an attack (an already-engaged fight continues). `MaxOdds <= 0` (unset data)
+   is treated as "no limit," not "never fight." `Ship.combatStrength` now
+   carries `shïp.Strength` from `Galaxy.makeShip`/`makeLoadedShip`.
+2. ✅ **Done (2026-07-08).** Deterministic 33%/10% armor disable threshold
+   (`Ship.disableArmorFraction`, from `shïp.Flags` 0x0010), replacing the old
+   random `disableChance` roll in `World.applyHit`. Sanity-checked against
+   real game data across ~10 systems (Alphara, Nesre Primus/Secundus,
+   Kerella, Wolf 359, Nesre Secundus fleet system, NGC-2051) — combat,
+   disabling, and kills all still occur; odds-gating doesn't just suppress
+   everything. Tests: `AIBehaviorTests.testWarshipDeclinesUnfavorableOdds` /
+   `testWarshipEngagesFavorableOdds` /
+   `testLethalDamageDisablesAtThresholdThenDestroysOnFurtherDamage`,
+   `CombatTests.testHitCrossingArmorThresholdDisablesNotDestroys`.
 3. Interceptor real behavior (park/scan/piracy-police) — currently
    mislabeled as "aggressive warship."
 4. Brave Trader flee-on-out-of-range instead of hull-%.
@@ -194,6 +207,3 @@ sources on top of the base 4-type model:
 10. Bribery escape valve.
 11. Ionization modeling.
 12. Mission ShipBehav overrides (only matters once missions drive spawns).
-
-This list is ground truth, not yet a plan — next step is deciding how much of
-this to actually implement now vs. defer.

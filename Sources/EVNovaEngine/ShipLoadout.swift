@@ -189,10 +189,13 @@ extension Galaxy {
         let stats = ShipStats(speed: lo.speed, acceleration: lo.acceleration,
                               turnRate: lo.turnRate, rotationFrames: frames, tuning: flightTuning)
 
+        let shipRes = game.ship(shipID)
         let ship = Ship(name: lo.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
-        ship.government = govt ?? game.ship(shipID)?.inherentGovt ?? independentGovt
+        ship.government = govt ?? shipRes?.inherentGovt ?? independentGovt
         ship.radius = radius
+        ship.combatStrength = Double(max(1, shipRes?.strength ?? 1))
+        ship.disableArmorFraction = (shipRes.map { $0.flags & 0x0010 != 0 } ?? false) ? 0.10 : 0.33
         ship.maxShield = lo.maxShield; ship.shield = lo.maxShield
         ship.maxArmor = lo.maxArmor; ship.armor = lo.maxArmor
         ship.shieldRechargePerSec = lo.shieldRechargePerSec

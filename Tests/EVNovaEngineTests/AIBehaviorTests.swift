@@ -8,7 +8,7 @@ final class AIBehaviorTests: XCTestCase {
 
     // MARK: helpers
 
-    private func govtData(classes: [Int], enemies: [Int] = [], flags1: UInt16 = 0) -> Data {
+    private func govtData(classes: [Int], enemies: [Int] = [], flags1: UInt16 = 0, maxOdds: Int = 0) -> Data {
         var d = [UInt8](repeating: 0, count: 60)
         func putW(_ off: Int, _ v: Int) {
             let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
@@ -19,11 +19,12 @@ final class AIBehaviorTests: XCTestCase {
         for i in 0..<4 { putW(40 + i * 2, i < enemies.count ? enemies[i] : -1) }
         putW(2, Int(flags1))
         putW(18, 2)
+        putW(22, maxOdds)
         return Data(d)
     }
-    private func govt(_ id: Int, classes: [Int], enemies: [Int] = [], flags1: UInt16 = 0) -> GovtRes {
+    private func govt(_ id: Int, classes: [Int], enemies: [Int] = [], flags1: UInt16 = 0, maxOdds: Int = 0) -> GovtRes {
         GovtRes(Resource(type: NovaType.govt, id: id, name: "G\(id)",
-                         data: govtData(classes: classes, enemies: enemies, flags1: flags1)))
+                         data: govtData(classes: classes, enemies: enemies, flags1: flags1, maxOdds: maxOdds)))
     }
 
     private func gun() -> WeaponSpec {
@@ -60,6 +61,48 @@ final class AIBehaviorTests: XCTestCase {
 
         for _ in 0..<60 { world.step(1.0 / 30.0) }
         XCTAssertLessThan(player.shield, 100, "an engaged warship should be scoring hits")
+    }
+
+    func testWarshipDeclinesUnfavorableOdds() {
+        // gövt.MaxOdds = 100 means "won't fight unless as strong or stronger."
+        // A lone warship facing three equal-strength hostiles is outnumbered
+        // 3-to-1 and should hold its ground instead of charging in.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [
+            govt(210, classes: [10], enemies: [11], maxOdds: 100),
+            govt(211, classes: [11], enemies: [10]),
+        ])
+        let defender = warship("Defender", govt: 210, at: Vec2(0, -300), angle: 0)
+        defender.brain = AIBrain(aiType: .warship, govt: 210)
+        world.addNPC(defender)
+        for i in 0..<3 {
+            let raider = warship("Raider\(i)", govt: 211, at: Vec2(Double(i) * 40, 0))
+            world.addNPC(raider)
+        }
+
+        world.step(1.0 / 30.0)
+        XCTAssertNotEqual(defender.brain?.state, .attacking,
+                          "outnumbered 3-to-1 against a MaxOdds-100 govt, it shouldn't pick the fight")
+    }
+
+    func testWarshipEngagesFavorableOdds() {
+        // Same setup, but only one hostile: 1-to-1 is exactly the odds a
+        // MaxOdds-100 government will accept.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [
+            govt(210, classes: [10], enemies: [11], maxOdds: 100),
+            govt(211, classes: [11], enemies: [10]),
+        ])
+        let defender = warship("Defender", govt: 210, at: Vec2(0, -300), angle: 0)
+        defender.brain = AIBrain(aiType: .warship, govt: 210)
+        world.addNPC(defender)
+        let raider = warship("Raider", govt: 211, at: Vec2(0, 0))
+        world.addNPC(raider)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(defender.brain?.state, .attacking, "1-to-1 odds are acceptable — it should engage")
     }
 
     func testWimpyTraderFlees() {
@@ -135,38 +178,44 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertLessThan(hulk.velocity.length, startSpeed, "a hulk drifts to a stop")
     }
 
-    func testLethalDamageCanDisableOrDestroy() {
-        // Across seeds, a killing blow on a trader sometimes leaves a boardable
-        // hulk and sometimes destroys it — proving both branches are reachable.
+    func testLethalDamageDisablesAtThresholdThenDestroysOnFurtherDamage() {
+        // EV Nova disables a ship the instant its armor crosses a fixed
+        // percentage of max armor (33% default) — a deterministic threshold, not
+        // a random roll — and only a *further* hit on the now-disabled hulk
+        // actually destroys it.
         func bigGun() -> WeaponSpec {
             WeaponSpec(id: 129, name: "Cannon", shieldDamage: 500, armorDamage: 500, reloadSeconds: 0.1,
                        projectileSpeed: 3000, range: 6000, accuracyRadians: 0, isBeam: false,
                        isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0)
         }
-        var disabled = 0, destroyed = 0
-        for seed in 0..<40 {
-            let player = Ship(name: "Gunner", stats: ShipStats(maxSpeed: 10, acceleration: 10, turnRate: 3),
-                              position: Vec2())
-            player.weapons = [WeaponMount(spec: bigGun())]
-            let world = World(player: player)
-            world.rng = SplitMix64(seed: UInt64(seed) &* 0x9E37 &+ 1)
-            world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
+        let player = Ship(name: "Gunner", stats: ShipStats(maxSpeed: 10, acceleration: 10, turnRate: 3),
+                          position: Vec2())
+        player.weapons = [WeaponMount(spec: bigGun())]
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
 
-            let trader = warship("Freighter", govt: 202, at: Vec2(0, 120), armed: false)
-            trader.maxArmor = 60; trader.armor = 60; trader.maxShield = 0; trader.shield = 0
-            trader.brain = AIBrain(aiType: .wimpyTrader, govt: 202)
-            world.addNPC(trader)
-            player.currentTargetID = trader.entityID
-            world.intent.firePrimary = true
+        let trader = warship("Freighter", govt: 202, at: Vec2(0, 120), armed: false)
+        trader.maxArmor = 60; trader.armor = 60; trader.maxShield = 0; trader.shield = 0
+        trader.brain = AIBrain(aiType: .wimpyTrader, govt: 202)
+        world.addNPC(trader)
+        player.currentTargetID = trader.entityID
+        world.intent.firePrimary = true
 
-            for _ in 0..<200 {
-                world.step(1.0 / 30.0)
-                if trader.disabled { disabled += 1; break }
-                if !world.npcs.contains(where: { $0 === trader }) { destroyed += 1; break }
-            }
+        var disabledAt: Int?
+        for frame in 0..<200 {
+            world.step(1.0 / 30.0)
+            if trader.disabled { disabledAt = frame; break }
+            XCTAssertTrue(world.npcs.contains(where: { $0 === trader }),
+                          "the trader shouldn't be destroyed before ever being disabled")
         }
-        XCTAssertGreaterThan(disabled, 0, "some killing blows should merely disable")
-        XCTAssertGreaterThan(destroyed, 0, "some killing blows should destroy outright")
+        XCTAssertNotNil(disabledAt, "the first blow through the 33% armor floor should disable, not destroy")
+        XCTAssertTrue(trader.isAlive, "a disabled ship is a hulk, not a kill")
+
+        for _ in 0..<200 {
+            world.step(1.0 / 30.0)
+            if !world.npcs.contains(where: { $0 === trader }) { return }
+        }
+        XCTFail("further damage on an already-disabled hulk should destroy it outright")
     }
 
     func testTraderLandsAndVanishesIntoSpaceport() {

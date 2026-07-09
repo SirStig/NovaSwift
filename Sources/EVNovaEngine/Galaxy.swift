@@ -46,6 +46,9 @@ public struct ShipSpec {
     public let radius: Double
     public let government: Int
     public let strength: Int
+    /// Fraction of max armor at which this hull disables instead of being
+    /// destroyed outright (`shïp.Flags` 0x0010 → 10%, else the default 33%).
+    public let disableArmorFraction: Double
     /// (weapon spec, ammo) mounts. A stock weapon with count N becomes N mounts.
     public let mounts: [(spec: WeaponSpec, ammo: Int)]
 }
@@ -107,7 +110,8 @@ public final class Galaxy {
             maxArmor: Double(max(1, s.armor)) * combatTuning.hpScale,
             shieldRechargePerSec: max(2, Double(s.shieldRecharge) * 0.05),
             armorRechargePerSec: Double(s.armorRecharge) * 0.03,
-            radius: radius, government: s.inherentGovt, strength: s.strength, mounts: mounts)
+            radius: radius, government: s.inherentGovt, strength: s.strength,
+            disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, mounts: mounts)
         shipCache[id] = spec
         return spec
     }
@@ -129,6 +133,8 @@ public final class Galaxy {
         ship.shieldRechargePerSec = spec.shieldRechargePerSec
         ship.armorRechargePerSec = spec.armorRechargePerSec
         ship.weapons = spec.mounts.map { WeaponMount(spec: $0.spec, ammo: $0.ammo) }
+        ship.combatStrength = Double(max(1, spec.strength))
+        ship.disableArmorFraction = spec.disableArmorFraction
         return ship
     }
 
