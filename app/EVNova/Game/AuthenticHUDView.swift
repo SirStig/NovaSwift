@@ -15,6 +15,7 @@ struct AuthenticHUDStyle {
 struct AuthenticHUDView: View {
     @ObservedObject var model: GameHUDModel
     let style: AuthenticHUDStyle
+    var showRadar: Bool = true
 
     var body: some View {
         // The status bar's design space is the backdrop PICT; anchor it to the
@@ -29,8 +30,10 @@ struct AuthenticHUDView: View {
                 bar(layout, style.intf.armorArea, model.armor, style.intf.armorColor)
                 bar(layout, style.intf.fuelArea, model.fuel, style.intf.fuelFull)
 
-                RadarContactsView(model: model, playerMarker: color(style.intf.brightRadar))
-                    .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
+                if showRadar {
+                    RadarContactsView(model: model, playerMarker: color(style.intf.brightRadar))
+                        .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
+                }
 
                 shipLabel
                     .novaPlace(layout, origin: origin(style.intf.targetArea),
@@ -124,6 +127,18 @@ private struct RadarContactsView: View {
             let cx = geo.size.width / 2, cy = geo.size.height / 2
             let radius = min(geo.size.width, geo.size.height) / 2 - 2
             ZStack {
+                Color.clear.onAppear {
+                    // The one runtime check static analysis can't do: whether the
+                    // rect this view actually got placed at (via `.novaPlace`,
+                    // driven by the decoded `ïntf.radarArea`) resolved to a real
+                    // on-screen size. If this logs ~0×0, the radar is invisible
+                    // even though the view hierarchy and data are otherwise fine.
+                    if geo.size.width < 2 || geo.size.height < 2 {
+                        Log.radar.error("RadarContactsView got a degenerate size \(geo.size.width, privacy: .public)x\(geo.size.height, privacy: .public) — radar will render invisibly")
+                    } else {
+                        Log.radar.debug("RadarContactsView size=\(geo.size.width, privacy: .public)x\(geo.size.height, privacy: .public) planetBlips=\(model.planetBlips.count, privacy: .public) blips=\(model.blips.count, privacy: .public)")
+                    }
+                }
                 Canvas { ctx, _ in
                     for b in model.planetBlips {
                         let r = CGRect(x: cx + b.x * radius - 2.5, y: cy + b.y * radius - 2.5, width: 5, height: 5)

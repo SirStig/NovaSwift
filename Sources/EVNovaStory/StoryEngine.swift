@@ -40,10 +40,18 @@ public final class StoryEngine {
     /// Parse and apply a control-bit SET expression (mission OnAccept/OnSuccess,
     /// cron OnStart/OnEnd, …).
     public func apply(set expr: String) {
-        for op in NCBSet.parse(expr) { execute(op) }
+        let ops = NCBSet.parse(expr)
+        if ops.isEmpty, !expr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Every token in a non-empty SET expression was unrecognized/skipped —
+            // this silently no-ops rather than throwing, so flag it: it usually
+            // means a data-parsing gap or a malformed resource.
+            Log.ncb.error("NCB apply: expression yielded no operations: \"\(expr, privacy: .public)\"")
+        }
+        for op in ops { execute(op) }
     }
 
     private func execute(_ op: NCBSetOp) {
+        Log.ncb.debug("NCB execute: \(String(describing: op), privacy: .public)")
         switch op {
         case .setBit(let n):    player.setBit(n)
         case .clearBit(let n):  player.clearBit(n)
@@ -138,10 +146,12 @@ public final class StoryEngine {
     /// The missions on offer at a spot, after applying each mission's random
     /// appearance chance. Deterministic given the engine's RNG state.
     public func missionsOffered(at location: MissionOfferLocation, spob spobID: Int?) -> [MissionRes] {
-        game.missions()
+        let offered = game.missions()
             .filter { isEligible($0, at: location, spobID: spobID) }
             .filter { $0.availRandom <= 0 ? true : rng.chance(percent: $0.availRandom) }
             .sorted { $0.displayWeight > $1.displayWeight }
+        Log.mission.debug("missionsOffered: location=\(String(describing: location), privacy: .public) spob=\(spobID ?? -1) -> \(offered.count) mission(s)")
+        return offered
     }
 
     /// Build a presentable offer (resolving briefing text + buttons) and hand it
@@ -179,8 +189,15 @@ public final class StoryEngine {
     /// tracking, spawns special ships if the objective needs them.
     @discardableResult
     public func accept(_ missionID: Int) -> Bool {
-        guard let m = game.mission(missionID),
-              !player.isMissionActive(missionID) else { return false }
+        guard let m = game.mission(missionID) else {
+            Log.mission.error("accept: unknown mission id \(missionID)")
+            return false
+        }
+        guard !player.isMissionActive(missionID) else {
+            Log.mission.debug("accept: mission \(missionID) (\"\(m.name, privacy: .public)\") already active; ignoring")
+            return false
+        }
+        Log.mission.notice("accept: mission \(missionID) (\"\(m.name, privacy: .public)\") accepted")
 
         let deadline = m.timeLimit > 0 ? player.date.adding(days: m.timeLimit) : nil
         let cargoAtStart = m.cargoPickup == .atStart
@@ -211,18 +228,26 @@ public final class StoryEngine {
 
     /// The player declined an offered mission (applies OnRefuse).
     public func decline(_ missionID: Int) {
-        guard let m = game.mission(missionID) else { return }
+        guard let m = game.mission(missionID) else {
+            Log.mission.error("decline: unknown mission id \(missionID)")
+            return
+        }
+        Log.mission.debug("decline: mission \(missionID) (\"\(m.name, privacy: .public)\") declined")
         apply(set: m.onRefuse)
     }
 
     /// The player (or a SET op) aborted an active mission.
     public func abortMission(_ missionID: Int, silent: Bool = false) {
         guard let idx = player.activeMissions.firstIndex(where: { $0.missionID == missionID })
-        else { return }
+        else {
+            Log.mission.debug("abortMission: mission \(missionID) not active; ignoring")
+            return
+        }
         let m = game.mission(missionID)
         releaseCargo(for: m)
         player.activeMissions.remove(at: idx)
         if let m { apply(set: m.onAbort) }
+        Log.mission.notice("abortMission: mission \(missionID) (\"\(m?.name ?? "?", privacy: .public)\") aborted (silent=\(silent))")
         if !silent, let m {
             services?.notify(.missionAborted(missionID: missionID, name: m.name))
         }
@@ -237,7 +262,11 @@ public final class StoryEngine {
     /// completion text, advance the galaxy clock by its DatePostIncrement.
     public func completeMission(_ missionID: Int) {
         guard let idx = player.activeMissions.firstIndex(where: { $0.missionID == missionID }),
-              let m = game.mission(missionID) else { return }
+              let m = game.mission(missionID) else {
+            Log.mission.error("completeMission: mission \(missionID) not active or unknown; ignoring")
+            return
+        }
+        Log.mission.notice("completeMission: mission \(missionID) (\"\(m.name, privacy: .public)\") completed, pay=\(m.pay)")
 
         releaseCargo(for: m)
         player.activeMissions.remove(at: idx)
@@ -264,7 +293,11 @@ public final class StoryEngine {
     /// Fail an active mission (deadline missed, cargo lost, escort destroyed …).
     public func failMission(_ missionID: Int) {
         guard let idx = player.activeMissions.firstIndex(where: { $0.missionID == missionID }),
-              let m = game.mission(missionID) else { return }
+              let m = game.mission(missionID) else {
+            Log.mission.error("failMission: mission \(missionID) not active or unknown; ignoring")
+            return
+        }
+        Log.mission.notice("failMission: mission \(missionID) (\"\(m.name, privacy: .public)\") failed")
         releaseCargo(for: m)
         player.activeMissions.remove(at: idx)
         player.failedMissions.insert(missionID)
@@ -322,8 +355,14 @@ public final class StoryEngine {
     /// The player's escort/target for a mission was destroyed when it shouldn't
     /// have been (e.g. an escort you were protecting) — fails the mission.
     public func missionShipLost(missionID: Int) {
-        guard let m = game.mission(missionID) else { return }
-        if m.shipGoal == .escort || m.shipGoal == .rescue { failMission(missionID) }
+        guard let m = game.mission(missionID) else {
+            Log.mission.error("missionShipLost: unknown mission id \(missionID)")
+            return
+        }
+        if m.shipGoal == .escort || m.shipGoal == .rescue {
+            Log.mission.debug("missionShipLost: mission \(missionID) escort/rescue target lost; failing")
+            failMission(missionID)
+        }
     }
 
     private func decrementShipObjective(_ missionID: Int) {
@@ -381,6 +420,7 @@ public final class StoryEngine {
             // End an active event whose duration has elapsed.
             if rt.isActive, let end = rt.endDate, player.date >= end {
                 apply(set: c.onEnd)
+                Log.mission.debug("cron \(c.id) ended on \(String(describing: self.player.date), privacy: .public)")
                 services?.notify(.cronEnded(cronID: c.id))
                 rt.startedDate = nil
                 rt.endDate = nil
@@ -400,6 +440,7 @@ public final class StoryEngine {
             if c.random > 0, !rng.chance(percent: c.random) { player.cronRuntime[c.id] = rt; continue }
 
             apply(set: c.onStart)
+            Log.mission.debug("cron \(c.id) started on \(String(describing: self.player.date), privacy: .public)")
             services?.notify(.cronStarted(cronID: c.id))
             rt.startedDate = player.date
             rt.endDate = player.date.adding(days: max(0, c.duration))

@@ -83,23 +83,29 @@ final class GameDataController: ObservableObject {
             discovered[i].isEnabled = true
         }
         plugins = discovered
+        Log.data.debug("reload: \(discovered.count, privacy: .public) plug-in(s) discovered, \(discovered.filter(\.isEnabled).count, privacy: .public) enabled")
 
         guard let baseDir = resolveBaseDir() else {
             hasBaseData = false
             game = nil
             status = "No EV Nova data found. Import your game data to play. \(plugins.count) plug-in(s) ready."
+            Log.data.notice("reload: no base game data found (checked \(self.importedBaseDir.path, privacy: .public) and EVNOVA_DATA) — \(self.plugins.count, privacy: .public) plug-in(s) ready but nothing to play")
             return
         }
+        Log.data.info("reload: using base data at \(baseDir.path, privacy: .public)")
         let baseFiles = GameLibrary.discoverResourceFiles(in: baseDir)
         do {
             let merged = try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins)
             game = NovaGame(merged)
             hasBaseData = true
             status = "Loaded \(merged.totalCount) resources from base + \(plugins.filter(\.isEnabled).count) plug-in(s)."
+            let byType = merged.typeCounts.map { "\($0.type)=\($0.count)" }.joined(separator: ", ")
+            Log.data.info("reload: loaded \(merged.totalCount, privacy: .public) resource(s) from base (\(baseFiles.count, privacy: .public) file(s)) + \(self.plugins.filter(\.isEnabled).count, privacy: .public) plug-in(s) — by type: \(byType, privacy: .public)")
         } catch {
             hasBaseData = false
             game = nil
             status = "Failed to load data: \(error)"
+            Log.data.error("reload: failed to merge game data from \(baseDir.path, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
 

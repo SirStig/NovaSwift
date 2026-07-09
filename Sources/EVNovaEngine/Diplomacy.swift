@@ -19,11 +19,32 @@ public final class Diplomacy {
     /// Record at or below which a government turns on the player.
     public var hostileThreshold = -1
 
+    /// Government ids we've already warned about missing from the table, so a
+    /// per-frame AI lookup (`favorableOdds`, `isHostile`, etc.) doesn't spam
+    /// the same "unknown government" warning every tick.
+    private var warnedMissingGovt: Set<Int> = []
+
     public init(govts: [GovtRes]) {
         self.govts = Dictionary(uniqueKeysWithValues: govts.map { ($0.id, $0) })
     }
 
-    public func govt(_ id: Int) -> GovtRes? { govts[id] }
+    public func govt(_ id: Int) -> GovtRes? {
+        let g = govts[id]
+        if g == nil { warnMissingGovt(id) }
+        return g
+    }
+
+    /// `id == independentGovt` (−1) is the documented "no government entry"
+    /// case and is expected — don't warn on it. Anything else missing means a
+    /// ship/data reference points at a government id the table never loaded
+    /// (a real content/data bug), and every caller silently treats it as "no
+    /// relations" (peaceful/never-hostile), which can look exactly like
+    /// "NPCs never fight" or "NPCs never turn hostile" with no other clue.
+    private func warnMissingGovt(_ id: Int) {
+        guard id != independentGovt, !warnedMissingGovt.contains(id) else { return }
+        warnedMissingGovt.insert(id)
+        Log.world.error("Diplomacy: no govt record for id \(id) — treating as no-government fallback (peaceful / never hostile)")
+    }
 
     // MARK: Government ↔ government
 
@@ -32,7 +53,10 @@ public final class Diplomacy {
     /// `areEnemies`.
     public func considersHostile(_ a: Int, toward b: Int) -> Bool {
         guard a != b else { return false }
-        guard let ga = govts[a] else { return false }        // independent / unknown: peaceful
+        guard let ga = govts[a] else {
+            warnMissingGovt(a)                                // independent / unknown: peaceful
+            return false
+        }
         let bClasses = govts[b]?.classes ?? []
         if !Set(ga.enemies).isDisjoint(with: bClasses) { return true }
         if ga.xenophobic {                                    // attacks all non-allies
@@ -65,7 +89,10 @@ public final class Diplomacy {
 
     /// Does government `g` want to attack the player right now?
     public func isHostileToPlayer(_ g: Int) -> Bool {
-        guard let gov = govts[g] else { return false }
+        guard let gov = govts[g] else {
+            warnMissingGovt(g)
+            return false
+        }
         if gov.neverAttacksPlayer { return false }
         if gov.alwaysAttacksPlayer { return true }
         if gov.xenophobic { return true }

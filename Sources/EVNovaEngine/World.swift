@@ -33,8 +33,23 @@ public struct ControlIntent: Equatable {
             r.fireSecondary = r.fireSecondary || s.fireSecondary
             if r.desiredHeading == nil { r.desiredHeading = s.desiredHeading }
         }
+        // Two input sources disagreeing on turn direction cancel out in
+        // `Ship.step` (net-zero turn) — this reads to a player as "turning is
+        // broken" with nothing else to go on, so flag it. Log on change only:
+        // this is a per-frame computed property (`InputController.intent`) and
+        // would otherwise flood the log while the conflict persists.
+        if r.turnLeft && r.turnRight {
+            if !loggedTurnConflict {
+                loggedTurnConflict = true
+                Log.physics.debug("ControlIntent.combined: turnLeft and turnRight both set across combined sources — they cancel out to a net-zero turn")
+            }
+        } else {
+            loggedTurnConflict = false
+        }
         return r
     }
+    /// One-shot flag backing the conflicting-turn-input log above.
+    private static var loggedTurnConflict = false
 }
 
 /// Tuning that maps EV Nova's integer stat units into simulation units. Kept in
@@ -177,6 +192,13 @@ public final class Ship {
     /// Seconds a hulk has been drifting; the world eventually clears cold wrecks.
     public var disabledClock: Double = 0
 
+    // Diagnostics: last known-good motion state (NaN/Infinity guard) and
+    // one-shot flags so we log state *transitions*, never every frame.
+    private var lastFinitePosition = Vec2()
+    private var loggedFuelEmpty = false
+    private var loggedCanJump: Bool?
+    private var loggedNoBrain = false
+
     public var isPlayer: Bool { entityID == 0 }
     public var isAlive: Bool { armor > 0 }
     /// 0…1 overall health, shields included, for morale/retreat decisions.
@@ -193,6 +215,7 @@ public final class Ship {
         self.position = position
         self.velocity = Vec2()
         self.angle = angle
+        self.lastFinitePosition = position
     }
 
     /// The sprite frame index (0..<rotationFrames) for the current heading.
@@ -234,6 +257,56 @@ public final class Ship {
         if fuel < maxFuel && fuelRegenPerSec > 0 {
             fuel = min(maxFuel, fuel + fuelRegenPerSec * dt)
         }
+        logFuelTransitions()
+    }
+
+    /// Log-on-change fuel/jump-capability transitions — called after anything
+    /// that can move `fuel` (afterburner drain in `step`, regen here). Cheap
+    /// per-call comparison against stored previous state, not per-frame spam.
+    private func logFuelTransitions() {
+        let shipName = name, shipID = entityID
+        if fuel <= 0 {
+            if !loggedFuelEmpty {
+                loggedFuelEmpty = true
+                Log.physics.debug("Ship \(shipName) [\(shipID)] fuel depleted (0)")
+            }
+        } else {
+            loggedFuelEmpty = false
+        }
+        let nowCanJump = canJump
+        if loggedCanJump != nowCanJump {
+            loggedCanJump = nowCanJump
+            let curFuel = fuel
+            Log.physics.debug("Ship \(shipName) [\(shipID)] canJump -> \(nowCanJump) (fuel=\(curFuel))")
+        }
+    }
+
+    /// NaN/Infinity guard. A silent non-finite position or velocity presents
+    /// with no other symptom than "ship won't move" or "ship flies off
+    /// forever" — this is the single most valuable physics log there is. Logs
+    /// loudly and recovers to the last known-good position rather than let a
+    /// NaN silently propagate through the whole simulation.
+    private func guardFiniteMotion() {
+        if position.x.isFinite, position.y.isFinite,
+           velocity.x.isFinite, velocity.y.isFinite {
+            lastFinitePosition = position
+            return
+        }
+        let shipName = name, shipID = entityID
+        let badPos = position, badVel = velocity
+        Log.physics.error("Ship \(shipName) [\(shipID)] non-finite motion detected — position=(\(badPos.x), \(badPos.y)) velocity=(\(badVel.x), \(badVel.y)); resetting to last known-good position and zeroing velocity")
+        position = lastFinitePosition
+        velocity = Vec2()
+    }
+
+    /// One-shot: an NPC with no `AIBrain` drifts under zero control input
+    /// forever — exactly the "NPC just sits there" symptom. Called by
+    /// `World.step` the first time it finds a brainless, living NPC.
+    func logNoBrainOnce() {
+        guard !loggedNoBrain else { return }
+        loggedNoBrain = true
+        let shipName = name, shipID = entityID
+        Log.ai.debug("NPC \(shipName) [\(shipID)] has no AIBrain attached — will drift with zero control input")
     }
 
     func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning) {
@@ -260,6 +333,7 @@ public final class Ship {
             accel *= ab.accelMultiplier
             topSpeed *= ab.speedMultiplier
             fuel = max(0, fuel - ab.fuelPerSecond * dt)
+            logFuelTransitions()
         }
 
         let heading = Vec2.heading(angle)
@@ -276,6 +350,7 @@ public final class Ship {
             velocity = velocity.normalized * topSpeed
         }
         position += velocity * dt
+        guardFiniteMotion()
     }
 }
 
@@ -375,7 +450,13 @@ public final class World {
                 npc.position += npc.velocity * dt
                 continue
             }
-            let npcIntent = npc.brain?.think(ship: npc, world: self, dt: dt) ?? ControlIntent()
+            let npcIntent: ControlIntent
+            if let brain = npc.brain {
+                npcIntent = brain.think(ship: npc, world: self, dt: dt)
+            } else {
+                npc.logNoBrainOnce()
+                npcIntent = ControlIntent()
+            }
             fireWeapons(from: npc, intent: npcIntent)
             npc.step(dt, intent: npcIntent, tuning: tuning)
         }
@@ -397,7 +478,14 @@ public final class World {
         guard ship.isAlive else { return }
         let target = ship.currentTargetID.flatMap { self.ship(id: $0) }
 
-        for mount in ship.weapons where mount.ready {
+        for mount in ship.weapons {
+            // Reload not ready / dry on ammo: the classic invisible "why didn't
+            // my weapon fire" bug. Logged once per block-reason transition —
+            // see `WeaponMount.logBlockedIfNeeded` — not every held-fire frame.
+            guard mount.ready else {
+                mount.logBlockedIfNeeded(for: ship)
+                continue
+            }
             let spec = mount.spec
             // Aim: turrets/guided track the target; fixed guns fire along heading.
             var aim = ship.angle
@@ -425,6 +513,7 @@ public final class World {
                                    targetID: spec.isGuided ? ship.currentTargetID : nil)
                 projectiles.append(p)
                 events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim))
+                Log.combat.debug("\(ship.name) [\(ship.entityID)] fired \(spec.name)\(target.map { " at \($0.name) [\($0.entityID)]" } ?? "")")
             }
             mount.didFire()
         }
@@ -455,6 +544,7 @@ public final class World {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID)
         }
         events.append(.beam(from: origin, to: endPoint, hit: hitShip != nil))
+        Log.combat.debug("\(ship.name) [\(ship.entityID)] fired beam \(spec.name)\(hitShip.map { " hit \($0.name) [\($0.entityID)]" } ?? " (no hit)")")
     }
 
     // MARK: Projectiles
@@ -507,8 +597,9 @@ public final class World {
 
     private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int) {
         let hadShield = ship.shield > 0
-        _ = ship.applyDamage(shield: shield, armor: armor)
+        let killed = ship.applyDamage(shield: shield, armor: armor)
         events.append(hadShield ? .shieldHit(at: ship.position) : .armorHit(at: ship.position))
+        Log.combat.debug("\(ship.name) [\(ship.entityID)] hit by #\(ownerID): shieldDmg=\(shield, format: .fixed(precision: 1)) armorDmg=\(armor, format: .fixed(precision: 1)) -> shield=\(ship.shield, format: .fixed(precision: 1)) armor=\(ship.armor, format: .fixed(precision: 1))\(killed ? " [LETHAL]" : "")")
 
         // Player fire provokes the victim and dents the player's record.
         if ownerID == 0 && !ship.isPlayer {
@@ -538,6 +629,7 @@ public final class World {
             ship.brain?.targetID = nil
             clearTarget(ship.entityID)               // everyone stops shooting it
             events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
+            Log.combat.debug("\(ship.name) [\(ship.entityID)] disabled (armor at/below \(Int(ship.disableArmorFraction * 100))% threshold) — now a drifting hulk")
         }
     }
 
@@ -550,6 +642,7 @@ public final class World {
                 events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5)))
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
                                              at: npc.position))
+                Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
                 // Clear any targeting of the dead ship.
                 clearTarget(npc.entityID)
                 continue

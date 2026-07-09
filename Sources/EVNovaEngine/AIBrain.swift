@@ -47,6 +47,13 @@ public final class AIBrain {
     var patrolIndex = 0
     var stateClock: Double = 0
     var repathClock: Double = 0
+    /// "name [id]" tag for logging, refreshed at the top of every `think()` so
+    /// state-transition/fallback logs can identify which ship they're about.
+    private var shipTag = "NPC"
+    /// Log-on-change: whether we currently have a valid firing solution on
+    /// our target (in range + aimed) — flips are exactly the "why didn't my
+    /// weapon fire" moments for AI-controlled ships.
+    private var hadFiringSolution: Bool?
     /// Cooldown before another "sweep past the player" patrol leg can be picked,
     /// so a ship can't get yanked across the system on back-to-back rolls.
     var sweepCooldown: Double = 0
@@ -118,6 +125,7 @@ public final class AIBrain {
     // MARK: Decide
 
     public func think(ship me: Ship, world: World, dt: Double) -> ControlIntent {
+        shipTag = "\(me.name) [\(me.entityID)]"
         stateClock += dt
         repathClock -= dt
         sweepCooldown -= dt
@@ -194,6 +202,8 @@ public final class AIBrain {
 
     private func enter(_ s: AIState) {
         guard s != state else { return }
+        let tag = shipTag, from = state
+        Log.ai.debug("\(tag) AI state \(from.rawValue) -> \(s.rawValue)")
         state = s
         stateClock = 0
         if s == .traveling || s == .patrolling { destination = nil }
@@ -212,6 +222,10 @@ public final class AIBrain {
     private func attack(_ me: Ship, _ world: World) -> ControlIntent {
         guard let tid = targetID, let target = world.ship(id: tid),
               target.isAlive, !target.disabled else {
+            // No valid target to press the attack on — this is the "NPC just
+            // stops fighting/sits there" fallback path.
+            let tag = shipTag, fallback = aiType.isTrader ? "traveling" : "patrolling"
+            Log.ai.debug("\(tag) attack target invalid or gone — falling back to \(fallback)")
             enter(aiType.isTrader ? .traveling : .patrolling)
             return ControlIntent()
         }
@@ -244,7 +258,13 @@ public final class AIBrain {
             intent.thrust = false
         }
         // Fire when the target is within reach and in the firing arc.
-        if dist <= range && aimError < 0.22 {
+        let inFiringSolution = dist <= range && aimError < 0.22
+        if hadFiringSolution != inFiringSolution {
+            hadFiringSolution = inFiringSolution
+            let tag = shipTag
+            Log.ai.debug("\(tag) firing solution \(inFiringSolution ? "acquired" : "lost") on target [\(tid)] (dist=\(Int(dist)) range=\(Int(range)) aimError=\(aimError, format: .fixed(precision: 2)))")
+        }
+        if inFiringSolution {
             intent.firePrimary = true
         }
         return intent
@@ -304,6 +324,8 @@ public final class AIBrain {
     private func land(_ me: Ship, _ world: World) -> ControlIntent {
         guard let sid = destSpob,
               let body = world.systemContext.bodies.first(where: { $0.id == sid }) else {
+            let tag = shipTag, spobDesc = destSpob.map(String.init) ?? "nil"
+            Log.ai.debug("\(tag) landing target spob \(spobDesc) no longer resolves — aborting approach")
             destination = nil; destSpob = nil
             enter(aiType.isTrader ? .traveling : .patrolling)
             return ControlIntent()
@@ -336,6 +358,8 @@ public final class AIBrain {
     private func escort(_ me: Ship, _ world: World) -> ControlIntent {
         guard let lid = leaderID, let leader = world.ship(id: lid),
               leader.isAlive, !leader.disabled else {
+            let tag = shipTag, leaderDesc = leaderID.map(String.init) ?? "nil"
+            Log.ai.debug("\(tag) escort leader [\(leaderDesc)] gone — reverting to own disposition")
             leaderID = nil
             enter(aiType.isTrader ? .traveling : .patrolling)
             return ControlIntent()

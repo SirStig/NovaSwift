@@ -72,6 +72,7 @@ struct RadarPlayerArrow: Shape {
 /// status bars on the left, a radar scope on the right, a heading/velocity strip.
 struct GameHUDView: View {
     @ObservedObject var model: GameHUDModel
+    var showRadar: Bool = true
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
     private let panel = Color.black.opacity(0.35)
@@ -82,7 +83,7 @@ struct GameHUDView: View {
                 HStack(alignment: .top) {
                     statusPanel
                     Spacer()
-                    radar
+                    if showRadar { radar }
                 }
                 Spacer()
                 velocityStrip

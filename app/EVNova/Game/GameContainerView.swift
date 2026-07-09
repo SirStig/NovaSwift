@@ -102,12 +102,48 @@ final class GameHost {
     }
 
     /// Decode the authentic status bar: the ïntf interface definition + its
-    /// backdrop PICT, from the player's own data. Returns nil if unavailable.
+    /// backdrop PICT, from the player's own data. Returns nil if unavailable
+    /// (the container then falls back to `GameHUDView`, our own non-authentic HUD).
     static func makeHUDStyle(_ game: NovaGame?) -> AuthenticHUDStyle? {
-        guard let game, let intf = game.interface(),
-              let pictData = game.resources.resource(NovaType.pict, intf.backgroundPictID)?.data,
-              let sheet = try? PICT.decode(pictData),
-              let cg = sheet.makeCGImage() else { return nil }
+        guard let game else {
+            Log.hud.debug("makeHUDStyle: no game loaded — falling back to GameHUDView")
+            return nil
+        }
+        guard let intf = game.interface() else {
+            Log.hud.error("makeHUDStyle: no ïntf(128) resource — falling back to GameHUDView")
+            return nil
+        }
+        guard let pictData = game.resources.resource(NovaType.pict, intf.backgroundPictID)?.data else {
+            Log.hud.error("makeHUDStyle: backdrop PICT #\(intf.backgroundPictID) missing — falling back to GameHUDView")
+            return nil
+        }
+        guard let sheet = try? PICT.decode(pictData) else {
+            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) failed to decode — falling back to GameHUDView")
+            return nil
+        }
+        guard let cg = sheet.makeCGImage() else {
+            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) decoded but makeCGImage() failed — falling back to GameHUDView")
+            return nil
+        }
+        // A radar/status rect with zero or negative width/height (a bad ïntf
+        // byte-offset decode against real game data, vs. the synthetic layout
+        // the unit tests use) silently collapses that element's SwiftUI frame
+        // to nothing — it renders, but is invisible. Log every rect once so a
+        // "minimap doesn't show anything" report is instantly diagnosable from
+        // Console instead of guessing.
+        let rects: [(String, NovaRect)] = [
+            ("radarArea", intf.radarArea), ("shieldArea", intf.shieldArea),
+            ("armorArea", intf.armorArea), ("fuelArea", intf.fuelArea),
+            ("navArea", intf.navArea), ("weaponArea", intf.weaponArea),
+            ("targetArea", intf.targetArea), ("cargoArea", intf.cargoArea),
+        ]
+        for (name, r) in rects {
+            if r.width <= 0 || r.height <= 0 {
+                Log.hud.error("makeHUDStyle: ïntf.\(name, privacy: .public) decoded to a degenerate rect \(String(describing: r), privacy: .public) (width=\(r.width, privacy: .public) height=\(r.height, privacy: .public)) — it will render invisibly")
+            } else {
+                Log.hud.debug("makeHUDStyle: ïntf.\(name, privacy: .public) = \(String(describing: r), privacy: .public)")
+            }
+        }
         return AuthenticHUDStyle(image: cg, intf: intf)
     }
 }
@@ -136,9 +172,11 @@ struct GameContainerView: View {
                 sceneLayer(host)
                     .focused($isSceneFocused)
                 if let style = host.hudStyle {
-                    AuthenticHUDView(model: host.hud, style: style)   // real EV Nova status bar
+                    AuthenticHUDView(model: host.hud, style: style, showRadar: model.settings.showRadar)   // real EV Nova status bar
+                        .opacity(model.settings.hudOpacity)
                 } else {
-                    GameHUDView(model: host.hud)                      // fallback (no ïntf in data)
+                    GameHUDView(model: host.hud, showRadar: model.settings.showRadar)                      // fallback (no ïntf in data)
+                        .opacity(model.settings.hudOpacity)
                 }
 
                 #if os(iOS)
@@ -175,15 +213,18 @@ struct GameContainerView: View {
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMenu)
         .animation(.easeInOut(duration: 0.2), value: landedSpobID)
+        .onChange(of: isSceneFocused) { _, focused in
+            Log.input.debug("isSceneFocused -> \(focused, privacy: .public)")
+        }
         .onChange(of: showMenu) { _, open in
-            host?.scene.isPaused = open
+            setScenePaused(open, reason: "showMenu=\(open)")
             // Deferred a tick: setting `@FocusState` in the same transaction that
             // dismisses the overlay stealing focus can silently lose the race on
             // macOS — the scene view has to actually reclaim key status first.
-            if !open { DispatchQueue.main.async { isSceneFocused = true } }
+            if !open { grabSceneFocus(reason: "menu closed") }
         }
         .onChange(of: nav.showingMap) { _, open in
-            if !open { DispatchQueue.main.async { isSceneFocused = true } }   // map closed: same
+            if !open { grabSceneFocus(reason: "map closed") }   // map closed: same
         }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding/quitting is the one moment a manual save/jump/land
@@ -193,14 +234,14 @@ struct GameContainerView: View {
             if phase != .active { model.autosave(reason: .timer) }
         }
         .onChange(of: landedSpobID) { _, id in
-            host?.scene.isPaused = (id != nil)
+            setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
             if id != nil {
                 DispatchQueue.main.async {
                     refuel()                                   // landing tops off the tank, free
                     model.autosave(reason: .land)               // EV Nova saves on every landing
                 }
             } else {
-                DispatchQueue.main.async { isSceneFocused = true }   // departed the spaceport: back to flight
+                grabSceneFocus(reason: "departed spaceport")   // departed the spaceport: back to flight
             }
         }
         .task {
@@ -213,7 +254,7 @@ struct GameContainerView: View {
                     ?? model.data.game?.startingSystem()?.id ?? 128
                 nav.configure(game: model.data.game, startSystemID: startSystem)
                 host = GameHost(model: model, systemID: nav.currentSystemID)
-                host?.scene.isPaused = false   // never start frozen (nothing should set this true yet, but be sure)
+                setScenePaused(false, reason: "initial host build")   // never start frozen (nothing should set this true yet, but be sure)
                 syncNav(host)
                 navReady = true
                 // Deferred a tick: `host` becoming non-nil and `sceneLayer`
@@ -223,7 +264,7 @@ struct GameContainerView: View {
                 // This is the single most common cause of "ship can't be flown
                 // at all" on a fresh pilot: no error, the key events just never
                 // arrive because nothing ever became key.
-                DispatchQueue.main.async { isSceneFocused = true }
+                grabSceneFocus(reason: "initial host build")
             }
         }
         .onChange(of: nav.currentSystemID) { _, newID in
@@ -244,14 +285,47 @@ struct GameContainerView: View {
                 model.pilot.save()
                 model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump
                 host = GameHost(model: model, systemID: newID, arrivedViaJump: true) // rebuild on jump
-                host?.scene.isPaused = false
+                setScenePaused(false, reason: "jump rebuild")
                 syncNav(host)
                 // A second deferred tick, same reason as the `.task` case above:
                 // `host` just changed identity, so the new `sceneLayer` view
                 // needs its own transaction to enter the tree before it can
                 // become key — reasserting focus in the same breath it's
                 // rebuilt in loses the race.
-                DispatchQueue.main.async { isSceneFocused = true }
+                grabSceneFocus(reason: "jump rebuild")
+            }
+        }
+    }
+
+    /// Sets `scene.isPaused` and logs the transition — this flag is the one
+    /// thing that can freeze the *entire* simulation loop (ship, NPCs, HUD all
+    /// stop updating), so any "nothing moves" report should start by checking
+    /// Console for an unexpected `true` here that never flips back.
+    private func setScenePaused(_ paused: Bool, reason: String) {
+        host?.scene.isPaused = paused
+        Log.scene.debug("isPaused -> \(paused, privacy: .public) (\(reason, privacy: .public))")
+    }
+
+    /// Requests keyboard focus for the flight scene, confirming a beat later
+    /// that it actually stuck and retrying (bounded) if not. A single
+    /// `DispatchQueue.main.async { isSceneFocused = true }` can still lose the
+    /// race if the focusable scene view hasn't finished entering the view
+    /// hierarchy on that tick — this is the fix for "ship won't move" reports
+    /// where keyboard input silently never reaches `KeyboardControls.onKeyPress`.
+    /// Logs every attempt/outcome (subsystem com.evnova.app, category Input) so
+    /// the failure mode is visible in Console without attaching a debugger.
+    private func grabSceneFocus(reason: String, attempt: Int = 0) {
+        DispatchQueue.main.async {
+            isSceneFocused = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                if isSceneFocused {
+                    Log.input.debug("grabSceneFocus(\(reason, privacy: .public)) confirmed, attempt \(attempt)")
+                } else if attempt < 5 {
+                    Log.input.debug("grabSceneFocus(\(reason, privacy: .public)) attempt \(attempt) didn't stick — retrying")
+                    grabSceneFocus(reason: reason, attempt: attempt + 1)
+                } else {
+                    Log.input.error("grabSceneFocus(\(reason, privacy: .public)) gave up after \(attempt) attempts — keyboard input will not reach the scene")
+                }
             }
         }
     }
@@ -409,7 +483,15 @@ private struct KeyboardControls: ViewModifier {
         content.onKeyPress(phases: [.down, .up]) { press in
             let pressed = press.phase == .down
             let token = KeyToken.from(press)
-            guard let action = bindings.action(for: token) else { return .ignored }
+            // If keys reach the scene at all but nothing binds, or nothing ever
+            // logs here on press, it confirms the ship-won't-move failure is
+            // upstream of this view (focus never grabbed — see grabSceneFocus)
+            // rather than a bad/missing keybinding.
+            guard let action = bindings.action(for: token) else {
+                Log.input.debug("key \(String(describing: token), privacy: .public) -> no binding")
+                return .ignored
+            }
+            Log.input.debug("key \(String(describing: token), privacy: .public) -> \(String(describing: action), privacy: .public) pressed=\(pressed, privacy: .public)")
             switch action.flightEffect {
             case .turnLeft: input.keyboard.turnLeft = pressed
             case .turnRight: input.keyboard.turnRight = pressed

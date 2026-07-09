@@ -70,12 +70,17 @@ public enum GameLibrary {
     public static func discoverResourceFiles(in directory: URL) -> [URL] {
         let fm = FileManager.default
         guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
-                                    options: [.skipsHiddenFiles]) else { return [] }
+                                    options: [.skipsHiddenFiles]) else {
+            Log.data.error("Could not enumerate \(directory.path, privacy: .public) for resource files")
+            return []
+        }
         var out: [URL] = []
         for case let url as URL in e where resourceExtensions.contains(url.pathExtension.lowercased()) {
             out.append(url)
         }
-        return out.sorted { $0.path < $1.path }
+        let sorted = out.sorted { $0.path < $1.path }
+        Log.data.debug("Found \(sorted.count, privacy: .public) resource file(s) under \(directory.path, privacy: .public)")
+        return sorted
     }
 
     /// Each top-level item in `directory` becomes one `PluginBundle`: a folder
@@ -85,14 +90,20 @@ public enum GameLibrary {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]) else { return [] }
+            options: [.skipsHiddenFiles]) else {
+            Log.data.debug("No plug-in directory at \(directory.path, privacy: .public) (or unreadable) — 0 plug-ins discovered")
+            return []
+        }
 
         var bundles: [PluginBundle] = []
         for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
             if isDir {
                 let files = discoverResourceFiles(in: entry)
-                guard !files.isEmpty else { continue }
+                guard !files.isEmpty else {
+                    Log.data.debug("Plug-in folder \(entry.lastPathComponent, privacy: .public) has no .rez/.ndat files — skipped")
+                    continue
+                }
                 bundles.append(PluginBundle(id: entry.lastPathComponent,
                                             name: entry.lastPathComponent,
                                             fileURLs: files))
@@ -102,6 +113,7 @@ public enum GameLibrary {
                                             fileURLs: [entry]))
             }
         }
+        Log.data.debug("Discovered \(bundles.count, privacy: .public) plug-in bundle(s) under \(directory.path, privacy: .public)")
         return bundles
     }
 
@@ -113,7 +125,10 @@ public enum GameLibrary {
     public static func classify(_ bundle: PluginBundle) -> PluginKind {
         var systems = 0, ships = 0, total = 0
         for url in bundle.fileURLs {
-            guard let col = try? ResourceFile.read(contentsOf: url) else { continue }
+            guard let col = try? ResourceFile.read(contentsOf: url) else {
+                Log.data.error("classify(\(bundle.id, privacy: .public)): failed to parse \(url.path, privacy: .public) — skipped, kind guess may be inaccurate")
+                continue
+            }
             systems += col.resources(of: NovaType.syst).count
             ships += col.resources(of: NovaType.ship).count
             total += col.totalCount
@@ -131,12 +146,24 @@ public enum GameLibrary {
     public static func merge(baseFiles: [URL], plugins: [PluginBundle] = []) throws -> ResourceCollection {
         var collection = ResourceCollection()
         for url in baseFiles.sorted(by: { $0.path < $1.path }) {
-            collection.overlay(try ResourceFile.read(contentsOf: url))
+            do {
+                collection.overlay(try ResourceFile.read(contentsOf: url))
+            } catch {
+                Log.data.error("merge: failed to load base file \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                throw error
+            }
         }
+        Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(baseFiles.count, privacy: .public) file(s)")
         for plugin in plugins where plugin.isEnabled {
             for url in plugin.fileURLs {
-                collection.overlay(try ResourceFile.read(contentsOf: url))
+                do {
+                    collection.overlay(try ResourceFile.read(contentsOf: url))
+                } catch {
+                    Log.data.error("merge: failed to load plug-in \(plugin.name, privacy: .public) file \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                    throw error
+                }
             }
+            Log.data.debug("merge: applied plug-in \(plugin.name, privacy: .public) (\(plugin.id, privacy: .public)) — collection now \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
         }
         return collection
     }

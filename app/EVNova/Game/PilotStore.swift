@@ -37,14 +37,25 @@ final class PilotStore: ObservableObject {
     // MARK: Lifecycle
 
     init() {
-        if let data = try? Data(contentsOf: PilotStore.saveURL),
-           let loaded = try? JSONDecoder().decode(PlayerState.self, from: data) {
-            state = loaded
-            started = true
-            rosterID = loaded.rosterID   // restore across relaunch, not just in-session
+        if let data = try? Data(contentsOf: PilotStore.saveURL) {
+            do {
+                let loaded = try JSONDecoder().decode(PlayerState.self, from: data)
+                state = loaded
+                started = true
+                rosterID = loaded.rosterID   // restore across relaunch, not just in-session
+                Log.pilot.notice("PilotStore.init: loaded live pilot save (rosterID=\(loaded.rosterID?.uuidString ?? "none", privacy: .public))")
+            } catch {
+                // The file exists but didn't decode — a real data-loss risk, not
+                // just "no save yet". Previously this silently fell through to a
+                // blank pilot with no trace of why.
+                Log.pilot.error("PilotStore.init: failed to decode live pilot save at \(PilotStore.saveURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
+                state = PlayerState()
+                started = false
+            }
         } else {
             state = PlayerState()   // placeholder until `newGame` / `ensureStarted`
             started = false
+            Log.pilot.debug("PilotStore.init: no live pilot save found on disk")
         }
     }
 
@@ -62,6 +73,9 @@ final class PilotStore: ObservableObject {
     /// credits and system).
     func newGame(game: NovaGame) {
         let ch = game.startingChar()
+        if ch == nil {
+            Log.pilot.error("PilotStore.newGame: no starting chär scenario in game data; using hardcoded fallback ship/system/credits")
+        }
         let shipID = ch?.startingShip ?? game.ships().first?.id ?? 128
         let shipName = game.ship(shipID)?.name ?? "Ship"
         let system = ch?.startingSystem ?? game.startingSystem()?.id ?? 128
@@ -71,12 +85,26 @@ final class PilotStore: ObservableObject {
                             credits: ch?.startingCredits ?? 10_000,
                             currentSystem: system)
         started = true
+        Log.pilot.notice("PilotStore.newGame: started new live pilot, ship=\(shipID) system=\(system) credits=\(self.state.credits)")
         save()
     }
 
     func save() {
-        guard started, let data = try? JSONEncoder().encode(state) else { return }
-        try? data.write(to: PilotStore.saveURL, options: .atomic)
+        guard started else { return }
+        guard let data = try? JSONEncoder().encode(state) else {
+            Log.pilot.error("PilotStore.save: failed to encode live pilot state; save skipped")
+            return
+        }
+        do {
+            try data.write(to: PilotStore.saveURL, options: .atomic)
+        } catch {
+            // NOTE: possible bug source — a write failure here (disk full,
+            // sandbox/permission issue) previously vanished silently; the player
+            // would keep playing believing they were autosaved. Now at least
+            // it's visible in the log; the underlying failure mode is still
+            // unhandled (no retry/user-facing warning).
+            Log.pilot.error("PilotStore.save: failed to write live pilot save to \(PilotStore.saveURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Adopt a pilot created or loaded by the multi-pilot roster as the live,
@@ -87,6 +115,7 @@ final class PilotStore: ObservableObject {
         self.state.rosterID = rosterID
         self.rosterID = rosterID
         self.started = true
+        Log.pilot.notice("PilotStore.begin: adopted roster pilot \(rosterID, privacy: .public) as the live pilot")
         save()
     }
 
@@ -94,18 +123,27 @@ final class PilotStore: ObservableObject {
     /// autosave attempt for a session that started outside the normal
     /// create/play flow, like the no-data demo path). No-op if already bound.
     func bind(rosterID: UUID) {
-        guard self.rosterID == nil else { return }
+        guard self.rosterID == nil else {
+            Log.pilot.debug("PilotStore.bind: already bound to roster \(self.rosterID!, privacy: .public); ignoring rebind to \(rosterID, privacy: .public)")
+            return
+        }
         self.rosterID = rosterID
         self.state.rosterID = rosterID
+        Log.pilot.notice("PilotStore.bind: bound previously-unbound live pilot to roster \(rosterID, privacy: .public)")
         save()
     }
 
     /// Wipe the save (for "New Pilot").
     func reset() {
-        try? FileManager.default.removeItem(at: PilotStore.saveURL)
+        do {
+            try FileManager.default.removeItem(at: PilotStore.saveURL)
+        } catch {
+            Log.pilot.debug("PilotStore.reset: no live save to remove, or removal failed: \(String(describing: error), privacy: .public)")
+        }
         state = PlayerState()
         started = false
         rosterID = nil
+        Log.pilot.notice("PilotStore.reset: live pilot save cleared")
     }
 
     // MARK: Derived, data-dependent queries

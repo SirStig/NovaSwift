@@ -41,10 +41,15 @@ public enum ResourceFile {
     public static func read(_ data: Data) throws -> ResourceCollection {
         switch detectFormat(data) {
         case .rez:
-            return try RezContainer.parse(data)
+            let collection = try RezContainer.parse(data)
+            Log.resource.debug("Parsed BRGR Rez container: \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
+            return collection
         case .classic:
-            return try ClassicResourceFork.parse(data)
+            let collection = try ClassicResourceFork.parse(data)
+            Log.resource.debug("Parsed classic resource fork: \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
+            return collection
         case nil:
+            Log.resource.error("Unrecognized resource container format (\(data.count, privacy: .public) bytes) — not a classic resource fork, .ndat, or BRGR Rez file")
             throw ResourceFileError.unrecognizedFormat
         }
     }
@@ -53,6 +58,11 @@ public enum ResourceFile {
     /// classic file whose resources live in the resource fork, pass a URL to
     /// `<path>/..namedfork/rsrc`).
     public static func read(contentsOf url: URL) throws -> ResourceCollection {
-        try read(try Data(contentsOf: url))
+        do {
+            return try read(try Data(contentsOf: url))
+        } catch {
+            Log.resource.error("Failed to load resource container at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 }

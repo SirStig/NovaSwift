@@ -19,11 +19,15 @@ final class PilotRoster: ObservableObject {
 
     init(archive: PilotArchive? = nil) {
         self.archive = archive ?? PilotArchive.resolveDefault(preferICloud: false)
+        Log.pilot.debug("PilotRoster.init: archive at \(self.archive.root.path, privacy: .public) (iCloud=\(self.archive.location.isCloud))")
         refresh()
     }
 
     /// Reload the roster from disk.
-    func refresh() { pilots = archive.list() }
+    func refresh() {
+        pilots = archive.list()
+        Log.pilot.debug("PilotRoster.refresh: \(self.pilots.count) pilot(s) in roster")
+    }
 
     var isEmpty: Bool { pilots.isEmpty }
     var mostRecent: PilotSave? { pilots.first }
@@ -39,7 +43,16 @@ final class PilotRoster: ObservableObject {
                              scenarioName: scenario.displayName,
                              player: player, game: game,
                              dataFingerprint: Self.fingerprint(for: game))
-        save = (try? archive.save(save, backup: false)) ?? save
+        do {
+            save = try archive.save(save, backup: false)
+            Log.pilot.notice("PilotRoster.create: created pilot \(save.id, privacy: .public) \"\(save.displayName, privacy: .public)\"")
+        } catch {
+            // NOTE: possible bug — if this write fails, `save` below is the
+            // in-memory PilotSave that was never actually persisted to disk, yet
+            // the caller receives it as if creation succeeded (and `refresh()`
+            // won't show it in the roster, since archive.list() reads from disk).
+            Log.pilot.error("PilotRoster.create: failed to persist new pilot \"\(save.displayName, privacy: .public)\": \(String(describing: error), privacy: .public)")
+        }
         refresh()
         return save
     }
@@ -53,7 +66,12 @@ final class PilotRoster: ObservableObject {
         var save = PilotSave(displayName: state.pilotName.isEmpty ? "Captain" : state.pilotName,
                              scenarioName: "", player: state, game: game,
                              dataFingerprint: game.map(Self.fingerprint(for:)) ?? "")
-        save = (try? archive.save(save, backup: false)) ?? save
+        do {
+            save = try archive.save(save, backup: false)
+            Log.pilot.notice("PilotRoster.adopt: adopted live pilot into roster as \(save.id, privacy: .public)")
+        } catch {
+            Log.pilot.error("PilotRoster.adopt: failed to persist adopted pilot \"\(save.displayName, privacy: .public)\": \(String(describing: error), privacy: .public)")
+        }
         refresh()
         return save
     }
@@ -62,21 +80,56 @@ final class PilotRoster: ObservableObject {
     /// landing / hyperjump / manual save / the autosave tick; backs up on the
     /// meaningful events so a stuck or corrupted pilot can be rolled back.
     func persist(id: UUID, state: PlayerState, game: NovaGame?, backup: Bool) {
-        guard var save = try? archive.load(id: id) else { return }
+        guard var save = try? archive.load(id: id) else {
+            // NOTE: possible bug — this silently no-ops the entire autosave for
+            // this tick (e.g. after landing or a hyperjump) if the on-disk save
+            // can't be loaded (missing/corrupt file). The player's in-session
+            // progress since the last successful persist is not written anywhere.
+            Log.pilot.error("PilotRoster.persist: failed to load pilot \(id, privacy: .public) for autosave; this update was NOT persisted")
+            return
+        }
         save.player = state
         save.refreshSnapshot(game: game)
-        _ = try? archive.save(save, backup: backup)
+        do {
+            _ = try archive.save(save, backup: backup)
+            Log.pilot.debug("PilotRoster.persist: persisted pilot \(id, privacy: .public) (backup=\(backup))")
+        } catch {
+            Log.pilot.error("PilotRoster.persist: failed to save pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
         refresh()
     }
 
     // MARK: Manage
 
-    func delete(_ id: UUID) { try? archive.delete(id: id); refresh() }
-    func duplicate(_ id: UUID) { _ = try? archive.duplicate(id: id); refresh() }
+    func delete(_ id: UUID) {
+        do {
+            try archive.delete(id: id)
+            Log.pilot.notice("PilotRoster.delete: deleted pilot \(id, privacy: .public)")
+        } catch {
+            Log.pilot.error("PilotRoster.delete: failed to delete pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+        refresh()
+    }
+    func duplicate(_ id: UUID) {
+        do {
+            let dup = try archive.duplicate(id: id)
+            Log.pilot.notice("PilotRoster.duplicate: duplicated pilot \(id, privacy: .public) as \(dup.id, privacy: .public)")
+        } catch {
+            Log.pilot.error("PilotRoster.duplicate: failed to duplicate pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+        refresh()
+    }
     func rename(_ id: UUID, to name: String, game: NovaGame?) {
-        guard var save = try? archive.load(id: id) else { return }
+        guard var save = try? archive.load(id: id) else {
+            Log.pilot.error("PilotRoster.rename: failed to load pilot \(id, privacy: .public) to rename")
+            return
+        }
         save.displayName = name
-        _ = try? archive.save(save, backup: false)
+        do {
+            _ = try archive.save(save, backup: false)
+        } catch {
+            Log.pilot.error("PilotRoster.rename: failed to save renamed pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
         refresh()
     }
 
@@ -103,6 +156,11 @@ final class PilotRoster: ObservableObject {
     @discardableResult
     func restore(_ id: UUID, from entry: HistoryEntry) -> PilotSave? {
         let restored = try? archive.restore(id: id, from: entry.url)
+        if restored == nil {
+            Log.pilot.error("PilotRoster.restore: failed to restore pilot \(id, privacy: .public) from \(entry.url.lastPathComponent, privacy: .public)")
+        } else {
+            Log.pilot.notice("PilotRoster.restore: restored pilot \(id, privacy: .public) from \(entry.url.lastPathComponent, privacy: .public)")
+        }
         refresh()
         return restored
     }

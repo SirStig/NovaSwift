@@ -43,7 +43,11 @@ public final class PilotArchive {
         self.location = location
         self.maxBackupsPerPilot = max(1, maxBackupsPerPilot)
         self.now = now
-        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        } catch {
+            Log.pilot.error("PilotArchive.init: failed to create pilot directory at \(self.root.path, privacy: .public) (iCloud=\(location.isCloud)): \(String(describing: error), privacy: .public)")
+        }
     }
 
     // MARK: Default roots
@@ -89,15 +93,34 @@ public final class PilotArchive {
     /// All saved pilots, most-recently-updated first. Unreadable files are skipped.
     public func list() -> [PilotSave] {
         guard let items = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil,
-                                                      options: [.skipsHiddenFiles]) else { return [] }
+                                                      options: [.skipsHiddenFiles]) else {
+            Log.pilot.error("PilotArchive.list: failed to read pilot directory at \(self.root.path, privacy: .public)")
+            return []
+        }
         let saves = items
             .filter { $0.pathExtension == PilotSave.fileExtension }
-            .compactMap { try? decode(contentsOf: $0) }
+            .compactMap { url -> PilotSave? in
+                do {
+                    return try decode(contentsOf: url)
+                } catch {
+                    // A corrupt/unreadable save silently drops that pilot from the
+                    // roster — worth surfacing, since the player would otherwise
+                    // just see a shorter list with no explanation.
+                    Log.pilot.error("PilotArchive.list: skipping unreadable pilot file \(url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+                    return nil
+                }
+            }
+        Log.pilot.debug("PilotArchive.list: loaded \(saves.count) pilot(s) from \(items.count) file(s)")
         return saves.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     public func load(id: UUID) throws -> PilotSave {
-        try decode(contentsOf: fileURL(for: id))
+        do {
+            return try decode(contentsOf: fileURL(for: id))
+        } catch {
+            Log.pilot.error("PilotArchive.load: failed to load pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     public func exists(id: UUID) -> Bool { fm.fileExists(atPath: fileURL(for: id).path) }
@@ -117,11 +140,24 @@ public final class PilotArchive {
         pilot.updatedAt = now()
         let url = fileURL(for: pilot.id)
         if backup, fm.fileExists(atPath: url.path) {
-            try? backUp(id: pilot.id, from: url)
+            do {
+                try backUp(id: pilot.id, from: url)
+            } catch {
+                // Non-fatal: we still proceed with the save itself, but a failed
+                // pre-save backup means the previous state is unrecoverable if
+                // this write goes wrong — worth knowing about.
+                Log.pilot.error("PilotArchive.save: pre-save backup failed for pilot \(pilot.id, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
         }
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
-        let data = try Self.encoder.encode(pilot)
-        try data.write(to: url, options: .atomic)
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            let data = try Self.encoder.encode(pilot)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            Log.pilot.error("PilotArchive.save: failed to save pilot \(pilot.id, privacy: .public) (\"\(pilot.displayName, privacy: .public)\"): \(String(describing: error), privacy: .public)")
+            throw error
+        }
+        Log.pilot.debug("PilotArchive.save: saved pilot \(pilot.id, privacy: .public) (\"\(pilot.displayName, privacy: .public)\")")
         return pilot
     }
 
@@ -129,22 +165,35 @@ public final class PilotArchive {
     /// pre-edit snapshot), independent of the normal save-time rotation.
     public func backUpNow(id: UUID) throws {
         let url = fileURL(for: id)
-        guard fm.fileExists(atPath: url.path) else { return }
-        try backUp(id: id, from: url)
+        guard fm.fileExists(atPath: url.path) else {
+            Log.pilot.debug("PilotArchive.backUpNow: no on-disk save for pilot \(id, privacy: .public); nothing to back up")
+            return
+        }
+        do {
+            try backUp(id: id, from: url)
+        } catch {
+            Log.pilot.error("PilotArchive.backUpNow: failed for pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     private func backUp(id: UUID, from url: URL) throws {
         let dir = backupDir(for: id)
-        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let stamp = Int(now().timeIntervalSince1970 * 1000)
-        var dest = dir.appendingPathComponent("\(stamp).\(PilotSave.fileExtension)")
-        // Guard against same-millisecond collisions.
-        var bump = 0
-        while fm.fileExists(atPath: dest.path) {
-            bump += 1
-            dest = dir.appendingPathComponent("\(stamp)-\(bump).\(PilotSave.fileExtension)")
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let stamp = Int(now().timeIntervalSince1970 * 1000)
+            var dest = dir.appendingPathComponent("\(stamp).\(PilotSave.fileExtension)")
+            // Guard against same-millisecond collisions.
+            var bump = 0
+            while fm.fileExists(atPath: dest.path) {
+                bump += 1
+                dest = dir.appendingPathComponent("\(stamp)-\(bump).\(PilotSave.fileExtension)")
+            }
+            try fm.copyItem(at: url, to: dest)
+        } catch {
+            Log.pilot.error("PilotArchive.backUp: failed to write backup for pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw error
         }
-        try fm.copyItem(at: url, to: dest)
         pruneBackups(id: id)
     }
 
@@ -173,16 +222,28 @@ public final class PilotArchive {
     /// row per pilot identity). The URL is what `restore(id:from:)` needs.
     public func loadBackups(for id: UUID) -> [(url: URL, save: PilotSave)] {
         backups(for: id).reversed().compactMap { url in
-            (try? decode(contentsOf: url)).map { (url, $0) }
+            do {
+                return (url, try decode(contentsOf: url))
+            } catch {
+                Log.pilot.error("PilotArchive.loadBackups: skipping unreadable backup \(url.lastPathComponent, privacy: .public) for pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+                return nil
+            }
         }
     }
 
     /// Restore a pilot from one of its backup files (backing up the current first).
     @discardableResult
     public func restore(id: UUID, from backupURL: URL) throws -> PilotSave {
-        var save = try decode(contentsOf: backupURL)
-        save.id = id   // keep the roster identity stable
-        return try self.save(save, backup: true)
+        do {
+            var save = try decode(contentsOf: backupURL)
+            save.id = id   // keep the roster identity stable
+            let restored = try self.save(save, backup: true)
+            Log.pilot.notice("PilotArchive.restore: restored pilot \(id, privacy: .public) from backup \(backupURL.lastPathComponent, privacy: .public)")
+            return restored
+        } catch {
+            Log.pilot.error("PilotArchive.restore: failed to restore pilot \(id, privacy: .public) from \(backupURL.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     /// The numeric millisecond timestamp encoded in a backup file's name.
@@ -198,19 +259,41 @@ public final class PilotArchive {
     // MARK: Delete / duplicate
 
     public func delete(id: UUID) throws {
-        try? fm.removeItem(at: fileURL(for: id))
-        try? fm.removeItem(at: backupDir(for: id))
+        let file = fileURL(for: id)
+        if fm.fileExists(atPath: file.path) {
+            do {
+                try fm.removeItem(at: file)
+            } catch {
+                Log.pilot.error("PilotArchive.delete: failed to remove pilot file for \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        let dir = backupDir(for: id)
+        if fm.fileExists(atPath: dir.path) {
+            do {
+                try fm.removeItem(at: dir)
+            } catch {
+                Log.pilot.error("PilotArchive.delete: failed to remove backups for pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        Log.pilot.notice("PilotArchive.delete: deleted pilot \(id, privacy: .public)")
     }
 
     /// Clone a pilot under a new id (and optional new name) — a "copy pilot" action.
     @discardableResult
     public func duplicate(id: UUID, newName: String? = nil) throws -> PilotSave {
-        var save = try load(id: id)
-        save.id = UUID()
-        if let newName { save.displayName = newName }
-        else { save.displayName += " Copy" }
-        save.createdAt = now()
-        return try self.save(save, backup: false)
+        do {
+            var save = try load(id: id)
+            save.id = UUID()
+            if let newName { save.displayName = newName }
+            else { save.displayName += " Copy" }
+            save.createdAt = now()
+            let duplicated = try self.save(save, backup: false)
+            Log.pilot.notice("PilotArchive.duplicate: duplicated pilot \(id, privacy: .public) as \(duplicated.id, privacy: .public)")
+            return duplicated
+        } catch {
+            Log.pilot.error("PilotArchive.duplicate: failed to duplicate pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     // MARK: Coders

@@ -50,6 +50,12 @@ struct SpaceportView: View {
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.86), value: screen)
+        .onAppear {
+            Log.spaceport.info("Landed at spöb \(spob.id, privacy: .public) (\(spob.name, privacy: .public)) — shipyard=\(spob.hasShipyard, privacy: .public) outfitter=\(spob.hasOutfitter, privacy: .public) trade=\(spob.hasCommodityExchange, privacy: .public) bar=\(spob.hasBar, privacy: .public) uninhabited=\(spob.isUninhabited, privacy: .public)")
+        }
+        .onChange(of: screen) { _, newValue in
+            Log.spaceport.debug("Spaceport screen -> \(String(describing: newValue), privacy: .public) at spöb \(spob.id, privacy: .public)")
+        }
     }
 
     // MARK: Hub (frame 8500)

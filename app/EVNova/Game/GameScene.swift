@@ -56,6 +56,7 @@ final class GameScene: SKScene {
     private var arrivedViaJump = false
     private var lastUpdate: TimeInterval = 0
     private var hudClock: TimeInterval = 0
+    private var moveDiagClock: TimeInterval = 0
     // Radar scope radius in world units. Stellar objects sit within ~900 units
     // of the system centre (p90 across the base data) and combat happens within
     // a couple of thousand, so 3000 keeps the scope readable edge to edge.
@@ -316,6 +317,25 @@ final class GameScene: SKScene {
         world.step(dt)
 
         let p = world.player
+
+        // Once-a-second heartbeat, independent of the throttled HUD readout —
+        // if this never appears in Console at all, `update(_:)` itself isn't
+        // running (the scene is effectively frozen despite `isPaused == false`
+        // being logged elsewhere); if it appears but `vel` stays exactly zero
+        // while `thrust=true`, the freeze is inside `Ship.step`/ship stats
+        // (e.g. zero acceleration) rather than the input pipeline.
+        moveDiagClock += dt
+        if moveDiagClock >= 1.0 {
+            moveDiagClock = 0
+            Log.scene.debug("""
+                update heartbeat: dt=\(dt, privacy: .public) thrust=\(intent.thrust, privacy: .public) \
+                turnL=\(intent.turnLeft, privacy: .public) turnR=\(intent.turnRight, privacy: .public) \
+                pos=(\(p.position.x, privacy: .public),\(p.position.y, privacy: .public)) \
+                vel=(\(p.velocity.x, privacy: .public),\(p.velocity.y, privacy: .public)) \
+                speed=\(p.velocity.length, privacy: .public) accel=\(p.stats.acceleration, privacy: .public) \
+                maxSpeed=\(p.stats.maxSpeed, privacy: .public)
+                """)
+        }
         let scenePos = CGPoint(x: p.position.x, y: p.position.y)
 
         // The world fires each ready weapon mount itself (respecting reload and

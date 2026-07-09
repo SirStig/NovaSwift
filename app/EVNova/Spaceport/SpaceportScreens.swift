@@ -90,13 +90,30 @@ struct TradeCenterView: View {
         return pilot.held(cargo: c.commodity.cargoID) > 0
     }
     private func buy() {
-        guard let c = current else { return }
-        pilot.buyCommodity(c.commodity, tons: tradeStep, unitPrice: c.price,
-                           cargoFree: pilot.cargoFree(galaxy: galaxy))
+        guard let c = current else {
+            Log.spaceport.error("Trade buy tapped with no commodity row selected at spöb \(spob.id, privacy: .public) — no-op")
+            return
+        }
+        let free = pilot.cargoFree(galaxy: galaxy)
+        let bought = pilot.buyCommodity(c.commodity, tons: tradeStep, unitPrice: c.price, cargoFree: free)
+        if bought == 0 {
+            Log.spaceport.notice("Trade buy no-op at spöb \(spob.id, privacy: .public): commodity=\(c.commodity.cargoID, privacy: .public) price=\(c.price, privacy: .public)cr/ton credits=\(pilot.state.credits, privacy: .public) cargoFree=\(free, privacy: .public)")
+        } else {
+            Log.spaceport.debug("Trade bought \(bought, privacy: .public)t of commodity \(c.commodity.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
+        }
     }
     private func sell() {
-        guard let c = current else { return }
-        pilot.sellCommodity(c.commodity, tons: tradeStep, unitPrice: c.price)
+        guard let c = current else {
+            Log.spaceport.error("Trade sell tapped with no commodity row selected at spöb \(spob.id, privacy: .public) — no-op")
+            return
+        }
+        let held = pilot.held(cargo: c.commodity.cargoID)
+        let sold = pilot.sellCommodity(c.commodity, tons: tradeStep, unitPrice: c.price)
+        if sold == 0 {
+            Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): commodity=\(c.commodity.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
+        } else {
+            Log.spaceport.debug("Trade sold \(sold, privacy: .public)t of commodity \(c.commodity.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
+        }
     }
     private func levelColor(_ l: PriceLevel) -> Color {
         switch l {
@@ -196,11 +213,27 @@ struct OutfitterView: View {
         return HStack(spacing: 14) {
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
                        width: 52, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) } ?? false) {
-                if let o { pilot.buyOutfit(o, galaxy: galaxy) }
+                guard let o else {
+                    Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
+                    return
+                }
+                if pilot.buyOutfit(o, galaxy: galaxy) {
+                    Log.spaceport.debug("Bought outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
+                } else {
+                    Log.spaceport.notice("Outfitter buy no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) cost=\(o.cost, privacy: .public) credits=\(pilot.state.credits, privacy: .public) freeMass=\(pilot.freeMass(galaxy: galaxy), privacy: .public) — insufficient credits, mass, or max-installed reached")
+                }
             }
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
                        width: 52, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
-                if let o { pilot.sellOutfit(o) }
+                guard let o else {
+                    Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
+                    return
+                }
+                if pilot.sellOutfit(o) {
+                    Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
+                } else {
+                    Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")
+                }
             }
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                        width: 52, action: onDone)
@@ -261,7 +294,10 @@ struct ShipyardView: View {
     /// The shipyard's dedicated display picture for a hull, falling back to the
     /// small in-flight sprite only if a plug-in ship doesn't define one.
     private func shipImage(_ s: ShipRes) -> CGImage? {
-        graphics.shipPicture(s) ?? game.shipSprite(s.id)?.frameCGImage(0)
+        if let pic = graphics.shipPicture(s) { return pic }
+        if let frame = game.shipSprite(s.id)?.frameCGImage(0) { return frame }
+        Log.spaceport.error("Shipyard: no shipyard picture or flight sprite for ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) — tile will show placeholder icon")
+        return nil
     }
 
     private var detail: some View {
@@ -300,7 +336,15 @@ struct ShipyardView: View {
         return HStack(spacing: 30) {
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
                        width: 70, enabled: canBuy) {
-                if let s { pilot.buyShip(s, game: game) }
+                guard let s else {
+                    Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
+                    return
+                }
+                if pilot.buyShip(s, game: game) {
+                    Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(pilot.netPrice(of: s, game: game), privacy: .public)cr")
+                } else {
+                    Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
+                }
             }
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                        width: 60, action: onDone)

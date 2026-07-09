@@ -21,19 +21,26 @@ struct PilotListView: View {
         .alert("Delete pilot?", isPresented: Binding(get: { pendingDelete != nil },
                                                      set: { if !$0 { pendingDelete = nil } })) {
             Button("Delete", role: .destructive) {
-                if let d = pendingDelete { model.roster.delete(d.id) }
+                if let d = pendingDelete {
+                    Log.pilot.notice("PilotListView: deleting pilot \(d.id, privacy: .public) \"\(d.displayName, privacy: .public)\"")
+                    model.roster.delete(d.id)
+                }
                 pendingDelete = nil
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
             Text("“\(pendingDelete?.displayName ?? "")” and its backups will be removed. This can't be undone.")
         }
-        .onAppear { model.roster.refresh() }
+        .onAppear {
+            model.roster.refresh()
+            Log.pilot.debug("PilotListView: appeared with \(model.roster.pilots.count) pilot(s)")
+        }
     }
 
     private var buttons: [NovaDialogButton] {
         [
             NovaDialogButton(title: "New Pilot", isDefault: model.roster.isEmpty) {
+                Log.pilot.debug("PilotListView: opening New Pilot sheet")
                 showNewPilot = true
             },
             NovaDialogButton(title: "Close") { dismiss() },
@@ -52,6 +59,7 @@ struct PilotListView: View {
 
     private func pilotRow(_ save: PilotSave) -> some View {
         Button {
+            Log.pilot.debug("PilotListView: play pilot \(save.id, privacy: .public) \"\(save.displayName, privacy: .public)\"")
             model.audio.play(.uiSelect); dismiss(); model.play(save)
         } label: {
             HStack(spacing: 12) {
@@ -78,6 +86,7 @@ struct PilotListView: View {
                     ForEach(history) { entry in
                         Button {
                             model.audio.play(.uiSelect)
+                            Log.pilot.debug("PilotListView: loading earlier save for pilot \(save.id, privacy: .public) from \(entry.url.lastPathComponent, privacy: .public)")
                             if let restored = model.roster.restore(save.id, from: entry) {
                                 dismiss(); model.play(restored)
                             }
@@ -87,7 +96,10 @@ struct PilotListView: View {
                     }
                 }
             }
-            Button { model.roster.duplicate(save.id) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+            Button {
+                Log.pilot.debug("PilotListView: duplicate pilot \(save.id, privacy: .public)")
+                model.roster.duplicate(save.id)
+            } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
             Button(role: .destructive) { pendingDelete = save } label: { Label("Delete", systemImage: "trash") }
         }
     }

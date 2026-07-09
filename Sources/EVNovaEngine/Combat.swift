@@ -76,6 +76,11 @@ public final class WeaponMount {
     public var cooldown: Double = 0      // seconds until it can fire again
     public var ammo: Int                 // -1 = unlimited
 
+    /// Which blocked-fire reason we last logged, so a held-down fire button
+    /// while reloading/dry doesn't spam the log every frame — only the frame
+    /// the reason first appears (or changes) gets a line.
+    private var loggedBlockReason: String?
+
     public init(spec: WeaponSpec, ammo: Int = -1) {
         self.spec = spec
         self.ammo = ammo
@@ -90,6 +95,18 @@ public final class WeaponMount {
     public func didFire() {
         cooldown = spec.reloadSeconds
         if ammo > 0 && spec.ammoPerShot > 0 { ammo = max(0, ammo - spec.ammoPerShot) }
+    }
+
+    /// Called when something tried to fire this mount but it wasn't `ready` —
+    /// the invisible "why didn't my weapon fire" case (reload not up yet, or
+    /// dry on ammo). Logs once per transition into/within a block reason.
+    func logBlockedIfNeeded(for ship: Ship) {
+        guard !ready else { loggedBlockReason = nil; return }
+        let reason = ammo == 0 ? "out of ammo" : "reloading"
+        guard loggedBlockReason != reason else { return }
+        loggedBlockReason = reason
+        let weaponName = spec.name
+        Log.combat.debug("\(ship.name) [\(ship.entityID)] weapon \(weaponName) did not fire: \(reason)")
     }
 }
 

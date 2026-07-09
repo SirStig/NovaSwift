@@ -87,7 +87,10 @@ extension Galaxy {
     /// same scales `Galaxy.shipSpec` uses for NPCs — so player and NPC ships stay
     /// on one footing.
     public func loadout(shipID: Int, extraOutfits: [Int: Int] = [:]) -> Loadout? {
-        guard let s = game.ship(shipID) else { return nil }
+        guard let s = game.ship(shipID) else {
+            Log.world.error("Galaxy.loadout: ship id \(shipID) not found in game data — returning nil loadout")
+            return nil
+        }
 
         // Merge preinstalled outfits with anything else installed.
         var outfitCounts: [Int: Int] = [:]
@@ -108,7 +111,14 @@ extension Galaxy {
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
         for (oid, count) in outfitCounts {
-            guard let o = game.outfit(oid) else { continue }
+            guard let o = game.outfit(oid) else {
+                // The ship (or the player's purchase record) references an
+                // outfit id the data doesn't have — it's silently skipped, so
+                // its stat modifiers/mass just vanish from the loadout with
+                // nothing else pointing at why.
+                Log.world.error("Galaxy.loadout: outfit id \(oid) (x\(count)) not found in game data for ship \(shipID) — skipped, its effects are missing from this loadout")
+                continue
+            }
             usedMass += o.mass * count
             for (type, value) in o.modifiers {
                 let v = value * count
@@ -178,6 +188,10 @@ extension Galaxy {
                                extraOutfits: [Int: Int] = [:],
                                at position: Vec2 = Vec2(), angle: Double = 0) -> Ship? {
         guard let lo = loadout(shipID: shipID, extraOutfits: extraOutfits) else {
+            // Falls back to an un-equipped hull (`makeShip`) — if this fires
+            // for the player's own ship, they'll fly with none of their
+            // fitted outfits and no other clue why.
+            Log.world.error("Galaxy.makeLoadedShip: loadout(\(shipID)) failed — falling back to an unequipped makeShip(\(shipID))")
             return makeShip(shipID, government: govt, at: position, angle: angle)
         }
         // EV Nova hulls rotate through 36 headings. (shän's other counts are

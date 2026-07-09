@@ -16,7 +16,10 @@ final class SpaceportGraphics {
     private var cache: [Int: CGImage] = [:]
     private var missed: Set<Int> = []
 
-    init(game: NovaGame) { self.game = game }
+    init(game: NovaGame) {
+        self.game = game
+        Log.spaceport.debug("SpaceportGraphics created for this session")
+    }
 
     // MARK: Frame + interface PICT ids (from the real data's PICT names)
     enum Frame: Int {
@@ -29,8 +32,12 @@ final class SpaceportGraphics {
     func pict(_ id: Int) -> CGImage? {
         if let c = cache[id] { return c }
         if missed.contains(id) { return nil }
-        guard let data = game.resources.resource(NovaType.pict, id)?.data,
-              let sheet = try? PICT.decode(data), let cg = sheet.makeCGImage() else {
+        guard let data = game.resources.resource(NovaType.pict, id)?.data else {
+            Log.spaceport.error("PICT \(id, privacy: .public) not found in loaded data — falling back to placeholder")
+            missed.insert(id); return nil
+        }
+        guard let sheet = try? PICT.decode(data), let cg = sheet.makeCGImage() else {
+            Log.spaceport.error("PICT \(id, privacy: .public) found (\(data.count, privacy: .public) bytes) but failed to decode — falling back to placeholder")
             missed.insert(id); return nil
         }
         cache[id] = cg
@@ -56,7 +63,15 @@ final class SpaceportGraphics {
     /// A label from `STR# 150` ("button labels"): Leave, Buy, Sell, Buy Ship,
     /// Done, Recharge, Trade Center, Outfitter, Shipyard, Bar, Gamble, Holovid.
     func buttonLabel(_ index1: Int, fallback: String) -> String {
-        game.stringList(150)?.string(at: index1) ?? fallback
+        guard let list = game.stringList(150) else {
+            Log.spaceport.error("STR# 150 (button labels) missing from loaded data — using fallback \"\(fallback, privacy: .public)\"")
+            return fallback
+        }
+        guard let s = list.string(at: index1) else {
+            Log.spaceport.error("STR# 150 has no entry at index \(index1, privacy: .public) — using fallback \"\(fallback, privacy: .public)\"")
+            return fallback
+        }
+        return s
     }
 
     // MARK: Per-item pictures

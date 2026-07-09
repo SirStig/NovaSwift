@@ -19,18 +19,31 @@ public enum PilotFactory {
     ///   - seed: RNG seed for the random start-system pick (deterministic in tests).
     public static func make(name: String, isMale: Bool, scenario: CharRes,
                             game: NovaGame, seed: UInt64 = 0x9E1_5EED) -> PlayerState {
+        Log.pilot.notice("PilotFactory.make: creating pilot \"\(name, privacy: .public)\" from scenario \(scenario.id) (\"\(scenario.displayName, privacy: .public)\")")
         var rng = StoryRNG(seed: seed)
 
         // Random start system among the scenario's candidates; sensible fallback.
         let system: Int
         if !scenario.startSystems.isEmpty {
             system = scenario.startSystems[rng.int(scenario.startSystems.count)]
+        } else if let fallback = game.startingSystem()?.id {
+            system = fallback
         } else {
-            system = game.startingSystem()?.id ?? 128
+            Log.pilot.error("PilotFactory.make: scenario \(scenario.id) has no start systems and game data has no starting system; falling back to hardcoded system 128")
+            system = 128
         }
 
         // Ship + its display name.
-        let shipID = scenario.shipID >= 128 ? scenario.shipID : (game.ships().first?.id ?? 128)
+        let shipID: Int
+        if scenario.shipID >= 128 {
+            shipID = scenario.shipID
+        } else if let fallback = game.ships().first?.id {
+            Log.pilot.error("PilotFactory.make: scenario \(scenario.id) has invalid shipID \(scenario.shipID); falling back to first available ship \(fallback)")
+            shipID = fallback
+        } else {
+            Log.pilot.error("PilotFactory.make: scenario \(scenario.id) has invalid shipID \(scenario.shipID) and game data has no ships; falling back to hardcoded ship 128")
+            shipID = 128
+        }
         let shipName = game.ship(shipID)?.name ?? ""
 
         // Calendar date (guard against empty/invalid scenario dates).
@@ -60,6 +73,7 @@ public enum PilotFactory {
             engine.apply(set: scenario.onStart)
             player = engine.player
         }
+        Log.pilot.debug("PilotFactory.make: pilot \"\(name, privacy: .public)\" started at system \(system) with ship \(shipID), credits=\(player.credits)")
         return player
     }
 
@@ -72,6 +86,7 @@ public enum PilotFactory {
             return make(name: name, isMale: isMale, scenario: scenario, game: game, seed: seed)
         }
         // No scenario in the data at all: a bare Shuttle start.
+        Log.pilot.error("PilotFactory.makeDefault: no chär scenario found in game data; falling back to bare Shuttle start")
         let shipID = game.ships().first?.id ?? 128
         return PlayerState(pilotName: name.isEmpty ? "Captain" : name, isMale: isMale,
                            shipType: shipID, shipName: game.ship(shipID)?.name ?? "",

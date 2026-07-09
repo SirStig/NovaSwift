@@ -79,7 +79,13 @@ public final class Galaxy {
 
     public func weaponSpec(_ id: Int) -> WeaponSpec? {
         if let cached = weaponCache[id] { return cached }
-        guard let w = game.weapon(id) else { return nil }
+        guard let w = game.weapon(id) else {
+            // Callers (e.g. `shipSpec`'s mount loop) silently drop the mount
+            // when this comes back nil — a ship ends up with fewer guns than
+            // its data says it should have, with no other symptom.
+            Log.world.error("Galaxy: weapon id \(id) not found in game data — any mount referencing it will be silently dropped")
+            return nil
+        }
         let spec = WeaponSpec(w, tuning: combatTuning)
         weaponCache[id] = spec
         return spec
@@ -87,7 +93,12 @@ public final class Galaxy {
 
     public func shipSpec(_ id: Int) -> ShipSpec? {
         if let cached = shipCache[id] { return cached }
-        guard let s = game.ship(id) else { return nil }
+        guard let s = game.ship(id) else {
+            // Callers (`makeShip`, `Spawner`, etc.) silently fail to spawn
+            // when this is nil — presents as "that NPC/ship type never shows up".
+            Log.world.error("Galaxy: ship id \(id) not found in game data — makeShip(\(id)) will silently return nil")
+            return nil
+        }
 
         // EV Nova hulls rotate through 36 headings (shän's counts are animation
         // sets, not headings) — must match SpriteTextures.rotationFrames.
@@ -140,7 +151,13 @@ public final class Galaxy {
 
     /// Build the system geometry for a given system id from real `spöb` positions.
     public func systemContext(for systemID: Int) -> SystemContext {
-        guard let sys = game.system(systemID) else { return SystemContext() }
+        guard let sys = game.system(systemID) else {
+            // Silent fallback to an empty system: no bodies to land on/patrol,
+            // default jump radius — reads as "system is a featureless void" or
+            // "NPCs immediately try to depart" with nothing pointing at why.
+            Log.world.error("Galaxy: system id \(systemID) not found in game data — falling back to an empty SystemContext (no stellar bodies)")
+            return SystemContext()
+        }
         var bodies: [StellarBody] = []
         for spobID in sys.spobs {
             guard let s = game.spob(spobID) else { continue }
