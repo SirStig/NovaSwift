@@ -43,11 +43,11 @@ final class GameDataController: ObservableObject {
     /// Community Edition's `Nova Music.mp3`). Shared with `DataImporter` so the
     /// import step actually copies the track alongside the `.rez`/`.ndat` files
     /// — `GameLibrary.discoverResourceFiles` deliberately excludes it.
-    static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "aiff", "aif", "wav"]
+    nonisolated static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "aiff", "aif", "wav"]
 
     /// Recursively find audio files under `directory` (music lives a folder
     /// down from wherever the resource files are, e.g. "Nova Files/Nova Music.mp3").
-    static func discoverAudioFiles(in directory: URL) -> [URL] {
+    nonisolated static func discoverAudioFiles(in directory: URL) -> [URL] {
         let fm = FileManager.default
         guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
                                     options: [.skipsHiddenFiles]) else { return [] }
