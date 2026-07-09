@@ -152,6 +152,7 @@ struct AuthenticMainMenuView: View {
                 }
 
                 buttons(layout: layout)
+                pilotStatus(layout: layout)
                 modernExtras   // port-added features not in the original menu
             }
         }
@@ -175,6 +176,29 @@ struct AuthenticMainMenuView: View {
             }
             .frame(minWidth: 420, minHeight: 520)
             .preferredColorScheme(.dark)
+        }
+    }
+
+    /// The current-pilot/ship status readout for "Enter Ship" — a bright/dim
+    /// two-tone line (echoing the `cölr` resource's `MenuColor1`/`MenuColor2`
+    /// "bright & dim colors for main menu" fields; exact position and literal
+    /// color aren't specified in the Nova Bible, so this is an authentic-styled
+    /// best-effort placement, not a byte-verified one) shown under the button
+    /// columns when a saved pilot exists to resume.
+    @ViewBuilder private func pilotStatus(layout: NovaLayout) -> some View {
+        if let save = model.roster.mostRecent {
+            VStack(spacing: 3) {
+                Text("Continue as \(save.displayName)")
+                    .font(.custom("Geneva", size: 13)).fontWeight(.bold)
+                    .foregroundStyle(novaAmber)
+                Text("\(save.snapshot.shipName) · \(save.snapshot.systemName.isEmpty ? "—" : save.snapshot.systemName) · \(save.snapshot.credits.formatted()) cr")
+                    .font(.custom("Geneva", size: 11))
+                    .foregroundStyle(novaAmber.opacity(0.6))
+            }
+            .multilineTextAlignment(.center)
+            .novaPlace(layout, x: (base.width - 400) / 2, y: 604, w: 400, h: 40)
+            .opacity(appeared ? 1 : 0)
+            .animation(.easeOut(duration: 0.4).delay(0.45), value: appeared)
         }
     }
 

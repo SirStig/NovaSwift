@@ -190,8 +190,19 @@ struct GameContainerView: View {
                 sceneLayer(host)
                     .focused($isSceneFocused)
                 if let style = host.hudStyle {
-                    AuthenticHUDView(model: host.hud, style: style, showRadar: model.settings.showRadar)   // real EV Nova status bar
-                        .opacity(model.settings.hudOpacity)
+                    // Constrained to the same capped sidebar width `sceneLayer`
+                    // reserves for it (see `Self.sidebarWidth`), and clipped, so
+                    // the two never disagree — without this the HUD's own
+                    // height-driven `.right` scale would still balloon past the
+                    // play viewport's edge on extreme portrait aspect ratios.
+                    GeometryReader { geo in
+                        AuthenticHUDView(model: host.hud, style: style, showRadar: model.settings.showRadar)
+                            .frame(width: Self.sidebarWidth(in: geo.size, style: style), height: geo.size.height,
+                                   alignment: .trailing)
+                            .clipped()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    }
+                    .opacity(model.settings.hudOpacity)
                 } else {
                     GameHUDView(model: host.hud, showRadar: model.settings.showRadar)                      // fallback (no ïntf in data)
                         .opacity(model.settings.hudOpacity)
@@ -404,6 +415,19 @@ struct GameContainerView: View {
         return didJump
     }
 
+    /// How much width the authentic status bar (`AuthenticHUDView`, whose own
+    /// `NovaCanvas(fit: .right)` scales to fill the window height) actually
+    /// occupies, capped to a fraction of the window so a height-driven scale
+    /// can never consume the whole window on extreme portrait aspect ratios
+    /// (iPhone). Shared by `sceneLayer` (to size the play viewport) and the
+    /// HUD layer itself (to actually constrain it) so the two always agree.
+    private static func sidebarWidth(in size: CGSize, style: AuthenticHUDStyle?) -> CGFloat {
+        guard let style, style.nativeSize.height > 0 else { return 0 }
+        let scale = size.height / style.nativeSize.height
+        let natural = style.nativeSize.width * scale
+        return min(natural, size.width * 0.35)
+    }
+
     @ViewBuilder
     private func sceneLayer(_ host: GameHost) -> some View {
         // Flight is driven by keybindings (keyboard) + controller + touch.
@@ -414,11 +438,7 @@ struct GameContainerView: View {
             // sidebar. Shrink the play viewport to match instead of letting the
             // SpriteKit scene (and its ship-centred camera) fill the whole
             // window with the sidebar drawn over the top of it.
-            let sidebarWidth: CGFloat = {
-                guard let style = host.hudStyle, style.nativeSize.height > 0 else { return 0 }
-                let scale = geo.size.height / style.nativeSize.height
-                return style.nativeSize.width * scale
-            }()
+            let sidebarWidth = Self.sidebarWidth(in: geo.size, style: host.hudStyle)
             let playWidth = max(0, geo.size.width - sidebarWidth)
             SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
                 .frame(width: playWidth, height: geo.size.height)

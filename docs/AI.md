@@ -62,9 +62,9 @@ Independent ships (`gövt` −1) are hostile to no one unless provoked.
 | AIType | Behavior |
 |---|---|
 | Wimpy Trader | Bolts for the hyperspace edge at the first sign of a threat |
-| Brave Trader | Trades blows if armed and healthy; runs when hull drops below 40% |
+| Brave Trader | Trades blows if armed and in range; runs once its attacker is out of its own weapon range |
 | Warship | Patrols; hunts and engages hostiles it can actually win against; retreats if its government flag says so and shields fall below 25% |
-| Interceptor | Aggressive warship — closes distance and presses the attack |
+| Interceptor | Hunts enemies same as a warship; when idle, holds a slow orbit near a stellar object instead of patrolling, occasionally buzzing passing traffic; also acts as **piracy police** — attacks whoever it sees targeting a non-enemy third party, even if that aggressor isn't normally its own enemy |
 
 Fleet escorts adopt their flagship's target and fight for it; if the flagship
 dies they fall back to their own disposition.
@@ -74,11 +74,13 @@ wouldn't accept: `Diplomacy`'s `gövt.MaxOdds` is checked against the summed
 `shïp.Strength` of nearby hostiles vs. friends (each shield-scaled 30–100%) —
 see `AIBrain.favorableOdds`. Once already engaged, it fights it out.
 
-> Several items in this table (Brave Trader's flee condition, and especially
-> Interceptor, which is really "piracy police" — orbit-park, scan traffic,
-> defend third parties — not "close and press") are known-wrong against the
-> real game and not yet fixed. See `docs/AI_GROUND_TRUTH.md` for the full,
-> Bible-sourced correction list and priority order.
+Any disposition with `shïp.Flags2` bit 0x0080 set (`Ship.fleeWhenOutOfAmmo`)
+flees or docks once every *ammo-using* weapon mount is dry (`AIBrain.outOfAmmo`)
+— ships that only carry unlimited-ammo guns/beams never trigger this.
+
+See `docs/AI_GROUND_TRUTH.md` for the full Bible-sourced field-by-field
+reference and what's still explicitly deferred (cloak-triggered AI, bribery,
+mission `ShipBehav` overrides, `gövt.SkillMult`) and why.
 
 ## Behavior state machine
 
@@ -87,9 +89,10 @@ see `AIBrain.favorableOdds`. Once already engaged, it fights it out.
 ```
 spawning ─▶ traveling ⇄ departing        (traders: fly to a planet, then jump out)
          ─▶ patrolling                     (warships: roam waypoints, scan)
+         ─▶ orbiting                       (interceptors: hold near a planet, buzz traffic)
               │
-              ▼ hostile in scan range
-           attacking ──▶ fleeing ──▶ departing   (hurt / outmatched → run → jump)
+              ▼ hostile in scan range (or, for interceptors, a piracy-police target)
+           attacking ──▶ fleeing ──▶ departing   (hurt / outmatched / out of ammo → run → jump)
            escorting  (fleet members stay on their leader, adopt its target)
 ```
 
@@ -101,6 +104,9 @@ Steering primitives turn a goal into a `ControlIntent`:
   within weapon range and inside a tight firing arc.
 - **flee / depart** — steer away from the threat toward the system edge and
   request a hyperspace jump; the world despawns the ship once it's past the edge.
+- **orbit** — a slow circular holding pattern around the nearest stellar
+  object, occasionally diverting to fly close past the nearest non-hostile
+  ship (a "buzz," not an attack) before resuming the orbit.
 
 ## Combat — what makes "attack" real
 
@@ -121,6 +127,19 @@ Steering primitives turn a goal into a `ControlIntent`:
   *already* disabled is actually destroyed when a further hit zeroes its
   armor (`shipDestroyed` event). The player is never disabled this way — the
   app owns player death.
+- **Point defense** (`wëap` Guidance 9/10, `WeapRes.isPointDefense`): a second
+  targeting loop (`World.runPointDefense`) independent of a ship's own
+  `currentTargetID` — each PD-equipped mount auto-targets the nearest
+  in-range, PD-vulnerable (`wëap.Flags` 0x0080 inverted) guided `Projectile`
+  and destroys it outright. Simplified: a real shot's `Durability` (PD hits
+  survived) isn't modeled.
+- **Ionization**: a hit adds `wëap.Ionization` to the victim's `Ship.ionCharge`
+  (capped at `shïp.IonizeMax`); it dissipates at `shïp.Deionize`-derived
+  `deionizePerSec` in `Ship.regen`. Once `ionCharge >= ionizeMax` the ship is
+  "nearly immobilized" (Bible) — `Ship.step` ignores turn/thrust/afterburner
+  input until it drops back below the threshold — and a weapon flagged
+  `cantFireWhileIonized` (`wëap.Seeker` 0x0020) refuses to fire while its own
+  ship is ionized.
 
 ## Population — the `Spawner`
 
@@ -150,10 +169,18 @@ identically. Coverage:
 
 - `DiplomacyTests` — class relations, xenophobes, player standing.
 - `CombatTests` — shield/armor bleed-through, projectile travel & kills, no
-  friendly fire, instant beams.
-- `AIBehaviorTests` — warship engages a hostile, wimpy trader flees, trader
-  travels to a planet, departing ships jump out, and a full deterministic duel
-  between two hostile interceptors resolves.
+  friendly fire, instant beams, disable-threshold determinism, point defense
+  (shoots down/ignores-immune guided shots), ionization (charge/dissipation/
+  immobilization/blocked-firing).
+- `AIBehaviorTests` — warship engages a hostile (and declines/accepts a fight
+  by `MaxOdds`), wimpy trader flees, brave trader fights in range but flees
+  out of range, interceptor orbits when idle and intervenes as piracy police,
+  ammo-exhausted ships flee or dock, trader travels to a planet, departing
+  ships jump out, and a full deterministic duel between two hostile
+  interceptors resolves.
+- `ShipSystemTests` — SkillVar jitters accel/turn by a supplied roll (and
+  leaves them alone with none).
 - Integration: `evnova-extract ai "…/Nova Files"` runs the whole thing on the
-  real game — e.g. Sol's traders come and go peacefully, while Kania and Auroran
-  space break into real dogfights.
+  real game — e.g. Sol's traders come and go peacefully, Kania and Auroran
+  space break into real dogfights, and interceptors visibly orbit/patrol
+  across dozens of real systems.

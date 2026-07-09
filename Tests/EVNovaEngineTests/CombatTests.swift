@@ -166,4 +166,69 @@ final class CombatTests: XCTestCase {
         XCTAssertLessThan(target.shield, 100, "beam damages on the same frame it fires")
         XCTAssertTrue(world.events.contains { if case .beam(_, _, let hit, _) = $0 { return hit } else { return false } })
     }
+
+    // MARK: ionization
+
+    func testWeaponHitAddsIonizationCharge() {
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        let target = makeShip("B", govt: 2, at: Vec2(0, 250))
+        _ = world.addNPC(target)
+        target.ionizeMax = 100
+
+        let ionBeam = WeaponSpec(id: 150, name: "Ion Cannon", shieldDamage: 0, armorDamage: 0,
+                                reloadSeconds: 1, projectileSpeed: 0, range: 600,
+                                accuracyRadians: 0, isBeam: true, isGuided: false, turnRate: 0,
+                                blastRadius: 0, ammoPerShot: 0, ionization: 40)
+        attacker.weapons = [WeaponMount(spec: ionBeam)]
+        attacker.currentTargetID = target.entityID
+        attacker.angle = 0
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)
+
+        XCTAssertEqual(target.ionCharge, 40, accuracy: 1e-9)
+        XCTAssertFalse(target.isIonized, "below IonizeMax — not yet fully ionized")
+    }
+
+    func testIonizedShipCannotThrustOrTurn() {
+        let s = makeShip("x", govt: 1, at: Vec2())
+        s.ionizeMax = 100
+        s.ionCharge = 100   // fully ionized
+        var intent = ControlIntent()
+        intent.thrust = true
+        intent.turnLeft = true
+        s.step(1.0, intent: intent, tuning: .default)
+        XCTAssertEqual(s.velocity.length, 0, "a fully-ionized ship can't thrust")
+        XCTAssertEqual(s.angle, 0, "a fully-ionized ship can't turn")
+    }
+
+    func testIonizationDissipatesOverTime() {
+        let s = makeShip("x", govt: 1, at: Vec2())
+        s.ionizeMax = 100
+        s.ionCharge = 100
+        s.deionizePerSec = 30
+        s.regen(1.0)
+        XCTAssertEqual(s.ionCharge, 70, accuracy: 1e-9)
+        XCTAssertFalse(s.isIonized, "charge dropped back below the threshold")
+    }
+
+    func testCantFireWhileIonizedWeaponIsBlocked() {
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        attacker.ionizeMax = 100
+        attacker.ionCharge = 100   // fully ionized
+        let world = World(player: attacker)
+        let target = makeShip("B", govt: 2, at: Vec2(0, 250))
+        let tid = world.addNPC(target)
+
+        let missile = WeaponSpec(id: 151, name: "Homing Missile", shieldDamage: 30, armorDamage: 30,
+                                 reloadSeconds: 0.1, projectileSpeed: 400, range: 3000,
+                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 1,
+                                 blastRadius: 0, ammoPerShot: 0, cantFireWhileIonized: true)
+        attacker.weapons = [WeaponMount(spec: missile)]
+        attacker.currentTargetID = tid
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)
+
+        XCTAssertTrue(world.projectiles.isEmpty, "a Seeker-0x0020 weapon should refuse to fire while its ship is ionized")
+    }
 }

@@ -156,11 +156,9 @@ sources on top of the base 4-type model:
 
 ## 5. Combat mechanics we don't model at all yet
 
-- **Point defense** (Guidance 9 turret / 10 beam): auto-fires at incoming
-  guided shots and nearby ships; separate from the main weapon-select loop.
-  Some guided weapons are explicitly PD-immune (`wëap.Flags 0x0080`).
-  PD damage to guided shots is "100% of mass damage plus 50% of energy
-  damage," and guided shots have a `Durability` (PD hits survived).
+- ~~Point defense~~ — ✅ done, see §6 item 9. Still missing: PD damage as
+  "100% of mass damage plus 50% of energy damage" (we just instant-kill the
+  shot) and a shot's `Durability` (PD hits survived before it's destroyed).
 - **Recoil** (`wëap.Recoil`): firing can thrust the ship, inversely
   proportional to mass — heavy weapons on light ships kick.
 - **Tractor beams** (`wëap.Impact` negative on a beam): pulls small ships in,
@@ -178,32 +176,94 @@ sources on top of the base 4-type model:
 
 ## 6. Priority read for implementation (rough order)
 
-1. ✅ **Done (2026-07-08).** Combat-odds gating: `AIBrain.favorableOdds` sums
-   nearby `shïp.Strength` (shield-scaled 30–100%) for friends vs. enemies and
+All items below are now either ✅ done, or explicitly deferred with a reason
+(not silently skipped). Done in this pass (2026-07-08 - 2026-07-09), all with
+tests and a real-data headless sanity sweep (`evnova-extract ai`) across many
+systems showing combat/disable/kills/orbiting all still occur:
+
+1. ✅ **Combat-odds gating.** `AIBrain.favorableOdds` sums nearby
+   `shïp.Strength` (shield-scaled 30–100%) for friends vs. enemies and
    compares to `gövt.MaxOdds`; gates whether a warship/interceptor *initiates*
    an attack (an already-engaged fight continues). `MaxOdds <= 0` (unset data)
    is treated as "no limit," not "never fight." `Ship.combatStrength` now
    carries `shïp.Strength` from `Galaxy.makeShip`/`makeLoadedShip`.
-2. ✅ **Done (2026-07-08).** Deterministic 33%/10% armor disable threshold
+   Tests: `testWarshipDeclinesUnfavorableOdds` / `testWarshipEngagesFavorableOdds`.
+2. ✅ **Deterministic 33%/10% armor disable threshold**
    (`Ship.disableArmorFraction`, from `shïp.Flags` 0x0010), replacing the old
-   random `disableChance` roll in `World.applyHit`. Sanity-checked against
-   real game data across ~10 systems (Alphara, Nesre Primus/Secundus,
-   Kerella, Wolf 359, Nesre Secundus fleet system, NGC-2051) — combat,
-   disabling, and kills all still occur; odds-gating doesn't just suppress
-   everything. Tests: `AIBehaviorTests.testWarshipDeclinesUnfavorableOdds` /
-   `testWarshipEngagesFavorableOdds` /
-   `testLethalDamageDisablesAtThresholdThenDestroysOnFurtherDamage`,
+   random `disableChance` roll in `World.applyHit`.
+   Tests: `testLethalDamageDisablesAtThresholdThenDestroysOnFurtherDamage`,
    `CombatTests.testHitCrossingArmorThresholdDisablesNotDestroys`.
-3. Interceptor real behavior (park/scan/piracy-police) — currently
-   mislabeled as "aggressive warship."
-4. Brave Trader flee-on-out-of-range instead of hull-%.
-5. Per-govt retreat-at-25%-shields as an opt-in flag (`warshipsRetreat`
-   already models this correctly — worth double-checking it's actually
-   flag-gated per govt and not applied as a blanket rule).
-6. SkillVar/SkillMult pilot-quality jitter — cheap, high variance payoff.
-7. Ammo-out retreat/dock flag.
-8. Cloak-triggered AI flags (for ships that carry cloaking devices).
-9. Point defense as a second targeting loop.
-10. Bribery escape valve.
-11. Ionization modeling.
-12. Mission ShipBehav overrides (only matters once missions drive spawns).
+3. ✅ **Interceptor real behavior**: new `.orbiting` `AIState` — holds a slow
+   circular holding pattern around the nearest stellar object when idle
+   (`AIBrain.orbit`/`pickOrbitPoint`), occasionally buzzing the nearest
+   non-hostile ship, and a `pickPirateInterventionTarget` perception helper
+   that makes it attack any ship currently targeting a non-enemy third party
+   ("piracy police") even when that aggressor isn't normally its own enemy.
+   Boarding isn't modeled in this engine, so only active targeting counts as
+   "attacking," not "attempts to board." Illegal-cargo scanning is flight
+   behavior only (no ScanMask/cargo-legality consequence — see below).
+   Tests: `testInterceptorOrbitsInsteadOfPatrollingWhenIdle`,
+   `testInterceptorActsAsPiracyPolice`.
+4. ✅ **Brave Trader flee-on-out-of-range** instead of hull-%: checks
+   `(attacker.position - me.position).length <= weaponRange(me)`.
+   Test: `testBraveTraderFightsInRangeButFleesOutOfRange`.
+5. Per-govt retreat-at-25%-shields as an opt-in flag — already correct
+   (`GovtRes.warshipsRetreat`, flag-gated, not a blanket rule); no change needed.
+6. ✅ **SkillVar pilot jitter**: `ShipRes.skillVar` (@96, verified via
+   novaparse `ShipResource.ts`) applied as one per-instance +/- roll to both
+   acceleration and turn rate (`Galaxy.jitteredStats`), rolled per spawn in
+   `Spawner.swift` (`world.rng.double(in: -1...1)`); `nil` roll (player ship,
+   test fixtures) = no jitter, so existing determinism is untouched.
+   **`gövt.SkillMult` skipped** — no verified byte offset in any vendored
+   reference (novaparse has no `GovtResource.ts`; ResForge's `Templates.rsrc`
+   TMPL is a binary resource-fork format `strings`/grep can't parse). Not
+   guessed at, to avoid corrupting a "verified offsets" codebase with an
+   invented one. Would need either disassembling `EV Nova.exe` or finding
+   another authoritative source.
+   Test: `ShipSystemTests.testSkillVarJittersAccelAndTurnByRoll`.
+7. ✅ **Ammo-out retreat/dock flag**: `ShipRes.flags2` (@98, verified via
+   novaparse `flags2N`) bit 0x0080 → `Ship.fleeWhenOutOfAmmo`;
+   `AIBrain.outOfAmmo` checks all *ammo-using* mounts (ammo >= 0) are dry;
+   when both are true the ship flees (threat present) or heads to `.traveling`
+   to dock (idle) — reuses the existing travel/land pipeline for "dock."
+   Test: `testAmmoExhaustedWarshipFleesOrDocksInsteadOfFighting`.
+8. **Deferred — cloak-triggered AI flags.** No cloak mechanic exists in this
+   engine at all yet (no `Ship.isCloaked`, no rendering/targeting-exclusion
+   support) — `OutfitModType.cloak` is decoded but inert. Implementing the 7
+   AI cloak-trigger flags meaningfully requires building the whole cloak
+   feature first (a real gameplay subsystem, not just an AI tweak); out of
+   scope for an AI-behavior pass. Do this once cloaking itself exists.
+9. ✅ **Point defense as a second targeting loop**: `WeapRes.isPointDefense`
+   (Guidance 9/10) + `vulnerableToPD` (Flags 0x0080 inverted, verified via
+   novaparse) drive `World.runPointDefense`, which independently auto-targets
+   the nearest in-range, PD-vulnerable *guided* `Projectile` each frame and
+   destroys it outright (simplified instant-intercept — a shot's `Durability`
+   hits-to-kill counter isn't modeled). Doesn't yet cover "and nearby ships"
+   (that's just the ship's normal attack loop for a PD-classified mount).
+   Tests: `testPointDefenseShootsDownIncomingGuidedProjectile`,
+   `testPointDefenseIgnoresPDImmuneProjectiles`.
+10. **Deferred — bribery escape valve.** Bribery is fundamentally a *player*
+    action (offer credits via a hail dialog to break off a fight), not
+    autonomous AI behavior — it needs a player-credits/economy hook and a
+    hail-dialog UI choice, neither of which exists in this headless engine
+    yet. `GovtRes` already decodes the relevant flags
+    (`warshipsTakeBribes` etc.); implement this once hailing has an
+    interactive UI to hang a "bribe" button off of.
+11. ✅ **Ionization modeling**: `ShipRes.deionize`/`ionizeMax` (@874/@876) and
+    `WeapRes.ionization` (@74)/`cantFireWhileIonized` (Seeker 0x0020, @30) —
+    all verified via novaparse. Hits add `wëap.Ionization` to
+    `Ship.ionCharge` (capped at `ionizeMax`); it dissipates at
+    `deionizePerSec` (`Deionize * 0.3`) in `Ship.regen`; a fully-ionized ship
+    ("`ionCharge >= ionizeMax`, and `ionizeMax > 0` so hulls that don't
+    define the field are never trivially 'ionized'") ignores turn/thrust/
+    afterburner input in `Ship.step` ("nearly immobilized"); a
+    `cantFireWhileIonized` weapon refuses to fire while its own ship is
+    ionized. Tests: `testWeaponHitAddsIonizationCharge`,
+    `testIonizedShipCannotThrustOrTurn`, `testIonizationDissipatesOverTime`,
+    `testCantFireWhileIonizedWeaponIsBlocked`.
+12. **Deferred — mission ShipBehav overrides.** Needs mission-driven ship
+    spawning wired through `EVNovaStory` into `AIBrain`/`Spawner`, and per
+    [[evnova-wiring-status]] the story runtime isn't wired to the game loop
+    at all yet (no `GameServices` conformer) — this is blocked on that larger,
+    separately-tracked wiring gap, not on anything AI-specific. Revisit once
+    missions can actually spawn special ships into a running `World`.
