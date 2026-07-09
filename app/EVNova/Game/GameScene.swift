@@ -327,8 +327,15 @@ final class GameScene: SKScene {
         moveDiagClock += dt
         if moveDiagClock >= 1.0 {
             moveDiagClock = 0
+            // Identity + raw per-source flag, to catch a stale/duplicate
+            // InputController capture: if this identity ever differs from the
+            // one `KeyboardControls` logs on keypress, the read and write sides
+            // are talking to two different objects and that's the whole bug.
+            let inputID = self.input.map { ObjectIdentifier($0).debugDescription } ?? "nil"
             Log.scene.debug("""
-                update heartbeat: dt=\(dt, privacy: .public) thrust=\(intent.thrust, privacy: .public) \
+                update heartbeat: dt=\(dt, privacy: .public) InputController#\(inputID, privacy: .public) \
+                rawKeyboardThrust=\(self.input?.keyboard.thrust ?? false, privacy: .public) \
+                thrust=\(intent.thrust, privacy: .public) \
                 turnL=\(intent.turnLeft, privacy: .public) turnR=\(intent.turnRight, privacy: .public) \
                 pos=(\(p.position.x, privacy: .public),\(p.position.y, privacy: .public)) \
                 vel=(\(p.velocity.x, privacy: .public),\(p.velocity.y, privacy: .public)) \

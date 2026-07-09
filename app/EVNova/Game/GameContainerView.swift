@@ -513,6 +513,14 @@ private struct KeyboardControls: ViewModifier {
                 // key event's own update finishes first.
                 if pressed { DispatchQueue.main.async { onDiscrete(action) } }
             }
+            // Read back immediately, off the same `input` reference this handler
+            // was given, tagged with its identity — if `GameScene.update`'s own
+            // heartbeat ever logs a *different* identity than this one, two
+            // separate `InputController` instances are in play (e.g. a stale
+            // capture across a host rebuild) and that's the whole bug.
+            if case .none = action.flightEffect {} else {
+                Log.input.debug("  -> wrote to InputController#\(ObjectIdentifier(input).debugDescription, privacy: .public) keyboard.thrust=\(input.keyboard.thrust, privacy: .public) intent.thrust=\(input.intent.thrust, privacy: .public)")
+            }
             return .handled
         }
     }
