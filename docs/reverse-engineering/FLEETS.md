@@ -110,19 +110,27 @@ re-rolled — see §7.
 | `Max` (×4) | "The maximum number of each type of escort to put in the fleet" | ✅ `escorts[].max` @18,20,22,24 |
 | `Govt` | "ID of the fleet's government, or -1 for none" | ✅ `govt` @26 |
 | `LinkSyst` | "Which systems the fleet can be created in" (ranges — see §3) | ✅ decoded as `linkSystem` @28, but **never read anywhere** — see §7 |
-| `AppearOn` | "A control bit test field that will cause a given fleet to appear only when the expression evaluates to true. If this field is left blank it will be ignored" | ❌ not decoded |
-| `Quote` | "Show a random string from the STR# resource with this ID when the fleet enters from hyperspace. Any occurrences of the character '#'… will be replaced with a random digit (0-9)" | ❌ not decoded |
-| `Flags` | `0x0001`: "Freighters (`InherentAI <= 2`) in this fleet will have random cargo when boarded" | ❌ not decoded |
+| `AppearOn` | "A control bit test field that will cause a given fleet to appear only when the expression evaluates to true. If this field is left blank it will be ignored" | ❌ not decoded — **offset now confirmed: `@30`, a 256-byte NCB test string** |
+| `Quote` | "Show a random string from the STR# resource with this ID when the fleet enters from hyperspace. Any occurrences of the character '#'… will be replaced with a random digit (0-9)" | ❌ not decoded — **offset now confirmed: `@286`, `RSID` (2 bytes)** |
+| `Flags` | `0x0001`: "Freighters (`InherentAI <= 2`) in this fleet will have random cargo when boarded" | ❌ not decoded — **offset now confirmed: `@288`, `WORV` (2 bytes)** |
 
 `FleetRes.init` (`Sources/EVNovaKit/NovaAIModels.swift:364-379`) only reads
-bytes 0–29 (through `LinkSyst` @28-29); the resource almost certainly
-continues past byte 30 for `AppearOn`/`Quote`/`Flags`, but neither the Bible
-(prose-only, no byte offsets) nor novaparse (no `FleetResource.ts` — the
-TypeScript port never parsed `flët` at all, confirmed by grepping
-`third_party/NovaJS` for "fleet": the only hit is a stray comment in its
-README) gives an authoritative offset for them. Treat those three fields as
-"known to exist, offset unverified" until a disassembly pass or another
-reference turns one up.
+bytes 0–29 (through `LinkSyst` @28-29). The remaining three fields' offsets
+are no longer unverified: decoding `flët`'s real TMPL (TMPL #506 in
+`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, via the
+now-fixed `evnova-extract tmpl`) gives `AppearOn@30`(`n100`= a 256-byte NCB
+test string, not a short field — much bigger than the 2-byte slot one might
+guess), `HailQuote@286`(`RSID`, 2B — this is the Bible's `Quote` field, named
+`Hail Quote` in the template), `Flags@288`(`WORV`, 2B), then 16 bytes of
+declared-`Unused` padding to a total of **306 bytes**. Confirmed against
+`swift run evnova-extract raw "data/EV Nova" flët 128` ("Small Federation
+Fleet"): real size is exactly 306 bytes, `LinkSyst@28=10000` (="any system of
+this fleet's own government" per §3's offset convention, `10000 + govtIndex`,
+consistent with `AffilGovt@26=128`= Federation, index 0), and `AppearOn`/
+`HailQuote`/`Flags` all read `0` (blank/unused) for this particular fleet —
+consistent with "if this field is left blank it will be ignored." A fleet
+using a non-blank `AppearOn` or `Quote` would need a scenario/plugin search
+to find a worked example; not attempted here.
 
 **Escort count roll.** The Bible doesn't state whether each escort count is
 independently rolled uniformly in `[Min, Max]` or something else (e.g.
@@ -217,7 +225,19 @@ mechanism itself has no decode path at all.** `sÿst.ReinfFleet` /
 `ReinfTime` / `ReinfIntrval` are not fields on `SystRes` (§1 table) — only
 `x`, `y`, `links`, `spobs`, `spawns`, `averageShips`, and `government` are
 decoded, all at byte offsets ≤102, and the Bible places `ReinfFleet` well
-after those (following `AstTypes`, near the end of the resource). So today:
+after those (following `AstTypes`, near the end of the resource).
+
+**Byte offsets now confirmed against real data.** Decoding `sÿst`'s real TMPL
+(`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc` TMPL #521,
+via the now-fixed `evnova-extract tmpl`) and cross-checking against
+`swift run evnova-extract raw "data/EV Nova" sÿst 128` ("Kania", 428 bytes,
+matching the TMPL's computed total exactly): `ReinfFleet@406`(RSID, 2B),
+`ReinfDelay@408`("frames", 2B — the Bible's `ReinfTime`), `ReinfRegen@410`
+("days", 2B — the Bible's `ReinfIntrval`), then 16 bytes of declared-`Unused`
+padding to 428. Kania's real record has `ReinfFleet=129` (a real, non-`-1`
+`flët` index — this system genuinely uses the mechanism),
+`ReinfDelay=900`(frames, = 30s at the Bible's "30 = one second" convention
+from the `AIBrain`/jamming docs), `ReinfRegen=2`(days). So today:
 
 - `AIBrain.favorableOdds` (`Sources/EVNovaEngine/AIBrain.swift:163-182`)
   correctly gates whether an *already-present* warship/interceptor picks a
@@ -262,21 +282,24 @@ than a `flët` reference.
 | Lead ship flies its own hull's inherent AI, not a fixed disposition | ✅ implemented, and *better* than a naive reading — Bible doesn't say this explicitly but it's consistent with `düde.AIType 0` "use the ship's own inherent AI" | `Spawner.swift:142-143` |
 | Escorts fly their own hull's inherent AI + hold formation slot | ✅ implemented (not Bible-specified either way) | `Spawner.swift:159-166`; formation math in `AIBrain.escort` (`AIBrain.swift:452-473`) |
 | `LinkSyst` (which systems a fleet may spawn in) | ⚠️ **decoded but dead** — `FleetRes.linkSystem` is parsed and then never read by `Spawner` or anything else. Eligibility today is entirely implicit: whichever `flët` ids a given `sÿst`'s own spawn table happens to list (§0/§3) | `NovaAIModels.swift:362,378`; confirm via `grep -rn linkSystem Sources/` — zero call sites |
-| `AppearOn` control-bit gate | ❌ not decoded, not evaluated. The `NCBTest` evaluator it needs already exists (`NCBExpression.swift`) but nothing decodes the field or calls it for fleets | n/a |
-| `Quote` (hyperspace-arrival STR# text, `#`→digit) | ❌ not decoded, no arrival-text event exists in `Spawner`/`World` at all for *any* spawn origin, fleet or dude | n/a — `Spawner.spawnPose` (`Spawner.swift:174-195`) returns an `ArrivalMode` (`.hyperspace`/`.launch`/`.populate`) that only drives visual/audio arrival *effects*, no text |
-| `Flags 0x0001` (random cargo on freighters when boarded) | ❌ not decoded; boarding isn't modeled in this engine at all | n/a |
+| `AppearOn` control-bit gate | ❌ not decoded, not evaluated. The `NCBTest` evaluator it needs already exists (`NCBExpression.swift`) but nothing decodes the field or calls it for fleets. **Offset confirmed: `@30`, 256-byte NCB string** — see §2 | n/a |
+| `Quote` (hyperspace-arrival STR# text, `#`→digit) | ❌ not decoded, no arrival-text event exists in `Spawner`/`World` at all for *any* spawn origin, fleet or dude. **Offset confirmed: `@286`, `RSID`** — see §2 | n/a — `Spawner.spawnPose` (`Spawner.swift:174-195`) returns an `ArrivalMode` (`.hyperspace`/`.launch`/`.populate`) that only drives visual/audio arrival *effects*, no text |
+| `Flags 0x0001` (random cargo on freighters when boarded) | ❌ not decoded; boarding isn't modeled in this engine at all. **Offset confirmed: `@288`, `WORV`** — see §2 | n/a |
 | `sÿst.AvgShips` "+/- 50%" live variance | ⚠️ partially implemented — `targetPopulation` derives once from `averageShips` (`min(maxPopulation, avg+2)`) but is a fixed number for the system's lifetime, not re-rolled per Bible's "+/- 50%" phrasing, and the `+2`/`maxPopulation=18` constants are the engine's own invention, not from the Bible | `Spawner.swift:36,44-45` |
 | `sÿst.DudeTypes`/`%Prob` weighted background traffic | ✅ implemented, matches the weighted-pick semantics | `Spawner.spawnOne`/`weightedPick` (`Spawner.swift:76-105`); `SystRes.dudeSpawns` (`NovaModels.swift:332-334`) |
-| `sÿst.ReinfFleet`/`ReinfTime`/`ReinfIntrval` (reactive reinforcement summon) | ❌ not decoded on `SystRes`, no reactive spawn-on-bad-odds mechanism exists; only the *pre-fight gating* half (`gövt.MaxOdds`) is implemented (see §5, and [AI_GROUND_TRUTH.md](AI_GROUND_TRUTH.md) §6 item 1) | n/a |
+| `sÿst.ReinfFleet`/`ReinfTime`/`ReinfIntrval` (reactive reinforcement summon) | ❌ not decoded on `SystRes`, no reactive spawn-on-bad-odds mechanism exists; only the *pre-fight gating* half (`gövt.MaxOdds`) is implemented (see §5, and [AI_GROUND_TRUTH.md](AI_GROUND_TRUTH.md) §6 item 1). **Offsets confirmed: `ReinfFleet@406`, `ReinfDelay@408`, `ReinfRegen@410`** — see §5; real system #128 "Kania" has a live, non-`-1` reinforcement fleet configured, proving the gap is a genuine live-data feature, not a theoretical one | n/a |
 | Fleets always arrive as a group at the hyperspace edge (never mid-system or launched from a planet) | ✅ implemented as a deliberate restriction | `Spawner.spawnOne`: `if origin != .planet, roll < fleetWeight` (`Spawner.swift:85`) — not from the Bible text (which doesn't say fleets *can't* appear via other origins), but a defensible reading of "enters from hyperspace" in the `Quote` field's own wording |
 | A ship-count cap so escorts can't overflow the system | ⚠️ engine invention, not in the Bible | `Spawner.swift:151`: `guard world.npcs.count < maxPopulation else { return }` mid-escort-loop — can silently truncate a fleet's escort count if the system is near its cap, with no Bible-documented equivalent behavior (real Nova likely has its own "Max Ships On Screen"-style constant not captured in this doc's source range) |
 
 ## 8. Open questions the Bible prose alone doesn't resolve
 
-1. **Exact byte offsets for `AppearOn`/`Quote`/`Flags`** in the `flët`
-   resource past byte 30 — no vendored source (novaparse, ResForge) decodes
-   this resource at all; would need either a `TMPL` resource dump from a real
-   `.rez`/plugin, or `EV Nova.exe` disassembly.
+1. ~~Exact byte offsets for `AppearOn`/`Quote`/`Flags`~~ — **resolved**, see
+   §2 and §7. `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`
+   turned out to have the authoritative `flët`/`sÿst` field layouts (TMPL
+   #506/#521) all along; `evnova-extract tmpl` just computed their offsets
+   wrong (didn't multiply `Rnnn` repeat groups, didn't size several field
+   types) until fixed in this pass. Confirmed against real `flët #128` and
+   `sÿst #128` records via `evnova-extract raw`.
 2. **`LinkSyst` vs. per-system spawn-table wiring** (§3): does `LinkSyst`
    gate/validate what a system's own `DudeTypes` table already pins, or does
    it independently drive spawn eligibility for fleets that *aren't*

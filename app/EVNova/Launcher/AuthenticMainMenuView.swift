@@ -21,16 +21,24 @@ struct MainMenuAssets {
     let logo: CGImage?
     let logoSize: CGSize
     let buttons: [ButtonArt]
+    /// The player data's live cölr #128 resource (colors, fonts, button/logo
+    /// layout) — nil only if the resource is missing, in which case callers fall
+    /// back to hand-coded values that mirror the base game's cölr contents.
+    let colr: ColrRes?
 
-    // Authentic button top-left positions (cölr resource), in spïn 600–605 order:
-    // two columns of three — New/Open/Quit and Enter/Prefs/About.
-    private static let positions: [CGPoint] = [
+    // Fallback button top-left positions, used only when `game.colr()` can't be
+    // decoded — matches cölr #128's Button1X/Y..Button6X/Y in the base game
+    // (spïn 600–605 order: two columns of three — New/Open/Quit and
+    // Enter/Prefs/About).
+    private static let fallbackPositions: [CGPoint] = [
         CGPoint(x: 349, y: 400), CGPoint(x: 344, y: 464), CGPoint(x: 345, y: 528),
         CGPoint(x: 555, y: 401), CGPoint(x: 581, y: 464), CGPoint(x: 580, y: 528),
     ]
 
     static func load(_ game: NovaGame?) -> MainMenuAssets? {
         guard let game else { return nil }
+        let colr = game.colr()
+        let positions = colr?.buttonPositions ?? fallbackPositions
         func rle(_ id: Int) -> SpriteSheet? {
             guard let d = game.resources.resource(NovaType.rleD, id)?.data else { return nil }
             return try? RLED.decode(d)
@@ -76,7 +84,7 @@ struct MainMenuAssets {
             }
         }
 
-        return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons)
+        return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons, colr: colr)
     }
 
     /// PICT-sourced logo art is opaque with a black backing box (PICT has no
@@ -141,10 +149,15 @@ struct AuthenticMainMenuView: View {
                 }
 
                 if let logo = assets.logo, assets.logoSize.height > 0 {
+                    // LogoX/LogoY (cölr #128 offsets 224–227); fall back to a centered
+                    // placement matching the base game's real values (191,162) if the
+                    // resource couldn't be decoded.
+                    let logoOrigin = assets.colr?.logo
+                        ?? CGPoint(x: (base.width - assets.logoSize.width) / 2, y: 168)
                     Image(decorative: logo, scale: 1)
                         .resizable().interpolation(.medium)
                         .novaPlace(layout,
-                                   x: (base.width - assets.logoSize.width) / 2, y: 168,
+                                   x: logoOrigin.x, y: logoOrigin.y,
                                    w: assets.logoSize.width, h: assets.logoSize.height)
                         .opacity(appeared ? 1 : 0)
                         .scaleEffect(appeared ? 1 : 0.94)
@@ -180,26 +193,44 @@ struct AuthenticMainMenuView: View {
     }
 
     /// The current-pilot/ship status readout for "Enter Ship" — a bright/dim
-    /// two-tone line (echoing the `cölr` resource's `MenuColor1`/`MenuColor2`
-    /// "bright & dim colors for main menu" fields; exact position and literal
-    /// color aren't specified in the Nova Bible, so this is an authentic-styled
-    /// best-effort placement, not a byte-verified one) shown under the button
-    /// columns when a saved pilot exists to resume.
+    /// two-tone line using the `cölr` resource's real `MenuColor1`/`MenuColor2`
+    /// ("bright & dim colors for main menu") and Geneva, the game's real main
+    /// menu font (`NovaFontRole.body`/`.caption`'s family — see NovaFont.swift),
+    /// backed by a plain dark plate outlined in the resource's `ProgOutline`
+    /// gray so it reads as period Mac OS chrome rather than a floating modern
+    /// overlay. Exact position isn't specified anywhere (the real main menu has
+    /// no such readout — this box is a pure port invention), so it stays where
+    /// it's always been, under the button columns. Falls back to the port's
+    /// generic amber styling if the player's data has no cölr resource.
     @ViewBuilder private func pilotStatus(layout: NovaLayout) -> some View {
         if let save = model.roster.mostRecent {
+            let bright = assets.colr.map { color($0.menuColor1) } ?? novaAmber
+            let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.6)
+            let border = assets.colr.map { color($0.progOutline) } ?? Color.white.opacity(0.15)
+
             VStack(spacing: 3) {
                 Text("Continue as \(save.displayName)")
-                    .novaFont(.heading, weight: .bold)
-                    .foregroundStyle(novaAmber)
+                    .novaFont(.body, weight: .bold)
+                    .foregroundStyle(bright)
                 Text("\(save.snapshot.shipName) · \(save.snapshot.systemName.isEmpty ? "—" : save.snapshot.systemName) · \(save.snapshot.credits.formatted()) cr")
                     .novaFont(.caption)
-                    .foregroundStyle(novaAmber.opacity(0.6))
+                    .foregroundStyle(dim)
             }
             .multilineTextAlignment(.center)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Color.black.opacity(0.55))
+            .overlay(Rectangle().strokeBorder(border, lineWidth: 1))
+            .fixedSize()
             .novaPlace(layout, x: (base.width - 400) / 2, y: 604, w: 400, h: 40)
             .opacity(appeared ? 1 : 0)
             .animation(.easeOut(duration: 0.4).delay(0.45), value: appeared)
         }
+    }
+
+    /// `NovaColor` (the `cölr` resource's raw 0x00RRGGBB fields) as a SwiftUI
+    /// `Color` — same conversion AuthenticHUDView.swift uses for `IntfRes` colors.
+    private func color(_ c: NovaColor) -> Color {
+        Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
     }
 
     /// Modern, port-only affordances (features EV Nova never had): the plug-in

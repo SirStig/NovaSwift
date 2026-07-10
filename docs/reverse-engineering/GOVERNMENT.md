@@ -393,14 +393,63 @@ evaluates either.
   Appendix II good/evil ladder anywhere in the codebase — the ratio-to-tier
   formula in §2 isn't implemented, so nothing can currently display "Wanted
   Criminal" / "Model Citizen" etc.
-- **`ränk.Contribute` is not decoded**, only commented:
-  `// 14: Contribute (8 bytes)` (`MissionModels.swift:385`, right where the
-  field sits per the verified 152-byte layout in
-  [MISSIONS.md](../MISSIONS.md#ränk--152-bytes)). A rank's ability to gate
-  purchases/missions (§4.4) is entirely unimplemented on the rank side.
-- **`mïsn.Require` is likewise not decoded** — `// 1622: Require (8 bytes)`
-  (`MissionModels.swift:247`). Mission availability today only checks
-  `AvailBits` (NCB test), never `Require`.
+- **`ränk.Contribute` is not decoded, but its offset is already known and
+  correctly commented** — this is a trivial fix, not an open-offset mystery.
+  `RankRes.init` (`MissionModels.swift:385`) has `// 14: Contribute (8
+  bytes)` right where the field actually sits, it's simply never assigned to
+  a struct property. Independent confirmation: the `ränk` TMPL
+  (`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, TMPL
+  #515, via `evnova-extract tmpl ... 515`) computes `Contribute@14` as an
+  8-byte `QB64` field, immediately followed by `Flags` — which matches
+  `RankRes.init` reading `flags = mu16(d, 22)` (14 + 8 = 22) exactly. The
+  TMPL's own computed total for the whole resource is 152 bytes, matching
+  both `MISSIONS.md`'s verified [ränk = 152 bytes](../MISSIONS.md#ränk--152-bytes)
+  figure and a real dump: `swift run evnova-extract raw "data/EV Nova" ränk
+  128` returns `ränk #128 "Federation Naval Rank of Commander;Fed 1"  152
+  bytes` on the nose. That real record also proves the field is *live data*,
+  not always blank: bytes 14–21 decode to a non-zero 64-bit value (word at
+  offset 16 = `123`, the rest of the 8 bytes zero), i.e. rank #128 actually
+  carries a real Contribute bitmask. So: offset known (14), width known (8
+  bytes, `QB64`), boundary confirmed by the following field's own working
+  offset, and real data shows it's exercised in the shipped game — the only
+  remaining work is adding a `contribute` property to `RankRes` and reading
+  `mi64`/equivalent at offset 14; no further reverse-engineering is needed.
+  A rank's ability to gate purchases/missions (§4.4) is entirely
+  unimplemented on the rank side until that one property is added.
+- **`mïsn.Require` is likewise not decoded, and the existing `1622` comment
+  is now independently confirmed correct**, the same pattern as
+  `ränk.Contribute` above. The `mïsn` TMPL (TMPL #510, via `evnova-extract
+  tmpl ... 510` — a large, 5819-byte-of-template-data dump, but clean:
+  no `KEYB`/nested-`TMPL` warning anywhere in it, only cosmetic `PACK`
+  name-alias entries with `@ ?` offsets for fields that already have a
+  concrete offset elsewhere in the same dump, which don't consume bytes and
+  don't affect the running total) computes `Require@1622` as an 8-byte
+  `QB64` field — exactly matching `MissionModels.swift:247`'s `// 1622:
+  Require (8 bytes)` comment. The field boundaries on both sides corroborate
+  this: the template shows `OnAbort` (a 255-byte NCB set) ending at
+  `1367 + 255 = 1622`, then `Require@1622` (8B), then `Date Post
+  Increment@1630` (`DWRD`, 2B) — which matches `MissionModels.swift:248`'s
+  own `datePostIncrement = mi16(d, 1630)` exactly, and `onShipDone@1632`
+  matches `MissionModels.swift:249`'s `cstr(d, 1632, 255)`. The template's
+  computed grand total (1970 bytes) also matches real data exactly: `swift
+  run evnova-extract list ".../Nova Data 1.rez" mïsn` shows all sampled
+  missions (e.g. #128–#133) at precisely `1970 bytes`. A raw spot-check
+  across ~190 real missions (`swift run evnova-extract raw "data/EV Nova"
+  mïsn <id>` for ids 128–133, 140–220 in steps of 10, and a further sweep of
+  128–315) found `Require` itself zero in every sampled record — consistent
+  with the Bible's own framing of it as a niche gate ("prevent the player
+  from... doing certain missions until achieving a certain rank," §4.4),
+  not evidence against the offset — but did turn up a live, sane value at
+  the *adjacent* field: mission `#172` has `Date Post Increment = 180`
+  (180 days) at offset 1630, which is exactly where the template says it
+  should be immediately after an 8-byte `Require`, further pinning down the
+  boundary empirically. In short: two independent sources (the community
+  TMPL and this codebase's own pre-existing comment) agree on `1622`, the
+  surrounding fields' offsets check out against real decoded data, and nothing
+  in ~190 sampled real missions contradicts it — high confidence this offset
+  is correct. Mission availability today only checks `AvailBits` (NCB test),
+  never `Require`; only a `require` property + `mi64` read at offset 1622 is
+  needed to close this gap.
 - **`gövt.Require` is not decoded at all** in `GovtRes` — no `require1`/
   `require2` field exists on the struct (`NovaAIModels.swift:216-244`), so
   government-scoped "travel permit" gating (landing gated on Contribute
@@ -426,24 +475,63 @@ evaluates either.
   `GameServices` — three more dead properties. `PriceMod`
   (`priceModifier`, `MissionModels.swift:364/382`) is decoded but never
   applied to shipyard/outfitter pricing anywhere.
-- **`GovtRes`'s own field coverage looks incomplete, possibly mislabeled.**
-  Per the file's header comment (`NovaAIModels.swift:6-8`), the decoder is
-  "verified against the real game data" only via a couple of spot checks
-  (`CommName` at offset 52 for govt 128). Counting Bible fields between
-  `Enemy1-Enemy4` (ending at offset 48 given the preceding fields' sizes) and
-  `CommName` (offset 52) leaves room for exactly one 2-byte field, yet the
-  Bible lists **seven** more fields in between (`Interface`, `NewsPic`,
-  `SkillMult`, `ScanMask`, `Require` (8 bytes), `InhJam1-4`, `MediumName`).
-  The Swift struct instead decodes a single mystery field at offset 48 named
-  `shipSpeedFactor` (`NovaAIModels.swift:238/279`) that has no counterpart of
-  that name anywhere in the Bible's `gövt` section. `SkillMult` is already
-  separately confirmed missing/unguessable in
-  [AI_GROUND_TRUTH.md §4.6](../AI_GROUND_TRUTH.md) (no `GovtResource.ts` in
-  novaparse to verify against). Recommend treating `shipSpeedFactor` as
-  suspect and auditing the real offset table (ResForge `Templates.rsrc` TMPL
-  or `EV Nova.exe` disassembly) before trusting any `GovtRes` field past
-  `Enemy4`, including `commName`/`targetCode` themselves — the whole tail of
-  the struct may be shifted.
+- **Correction (superseding an earlier draft of this doc): `GovtRes`'s
+  offsets 0–84 are byte-verified correct, not "suspect."** An earlier pass
+  flagged `shipSpeedFactor` at offset 48 as a "mystery field with no Bible
+  counterpart" on the theory that the Bible lists seven more fields between
+  `Enemy4` and `CommName`. That theory undercounted: the `gövt` TMPL in
+  `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc` (TMPL
+  #507 — the actual community-maintained field-layout authority, decoded via
+  `evnova-extract tmpl`) shows a **second** `Flags` word (`Flags 2`,
+  8 more behavior bits — `Can't Request Assist/Mercy`, `Doesn't use
+  hypergates`, `Prefers wormholes`, etc.) immediately after `Flags 1`, which
+  the Bible's prose glosses over but the template makes explicit. Re-deriving
+  every offset from the TMPL's field sizes and cross-checking against a raw
+  hex dump of the real `gövt #128` "Federation" record
+  (`swift run evnova-extract raw "data/EV Nova" gövt 128`, 192 bytes total)
+  confirms the *entire* struct byte-for-byte:
+  `voiceType@0, flags1@2, flags2@4, scanFine@6, crimeTolerance@8,
+  smugglePenalty@10, disablePenalty@12, boardPenalty@14, killPenalty@16,
+  shootPenalty@18, initialRecord@20, maxOdds@22, classes@24(×4),
+  allies@32(×4), enemies@40(×4), shipSpeedFactor@48, scanMask@50,
+  commName@52(16B), targetCode@68(16B)`, then (not yet decoded into the
+  struct) `require@84`(8B, `QB64`), `jamming1-4@92`(8B, `RECT`),
+  `mediumName@100`(64B, `C040` — a *second*, longer name field distinct from
+  `commName`), `mapColor@164`(4B), `shipColor@168`(4B), `interface@172`(2B),
+  `newsPic@174`(2B), 16 bytes of declared-`Unused` padding to 192. The real
+  Federation record's own values corroborate this exactly:
+  `maxOdds=200` ("2-to-1" — a whole, sane odds ratio only at this offset),
+  `shipSpeedFactor=100` (100% — the Bible's own "unmodified" convention),
+  and `commName`'s 16 bytes literally spell `"Federation"` padded with
+  nulls. **So `shipSpeedFactor` is real** (it's simply not documented by
+  name in the Bible's prose, only inferable from the TMPL), and `commName`/
+  `targetCode` are not shifted. The *actual* gap is narrower than the
+  original theory: `GovtRes` never decodes `Require` (to land — the same
+  land-gating mechanic as `ränk.Contribute`/`mïsn.Require`, see §1.1),
+  `InhJam1-4`, the long-form `MediumName`, `MapColor`/`ShipColor`, or
+  `Interface`/`NewsPic` — six fields genuinely missing from the struct, not
+  a misalignment. `SkillMult` remains separately confirmed
+  missing/unguessable in [AI_GROUND_TRUTH.md §4.6](../AI_GROUND_TRUTH.md)
+  (no `GovtResource.ts` in novaparse to verify against). A dedicated re-check
+  of the full TMPL #507 field list above (every `DWRD`/`WORV`/`CASE`/`CASR`
+  line, not just the struct-relevant ones) turns up no field resembling a
+  skill/pilot multiplier anywhere — the closest candidates by name or
+  position (`Ship Speed Factor`@48, `Maximum Combat Odds`@22) are already
+  independently accounted for elsewhere in this doc and the Bible text
+  itself describes them differently. A broader `grep -rni skillmult` across
+  both `third_party/ResForge` (the TMPL/editor source, community-maintained)
+  and `third_party/NovaJS` (a second independent reimplementation) returns
+  **zero hits in either** — the string `SkillMult` exists nowhere outside
+  this repo's own docs (`AI_GROUND_TRUTH.md`, `AI.md`, this file), which all
+  ultimately derive from the Bible's prose. That's two independent
+  community-maintained sources, one a byte-accurate field-layout template
+  and the other a from-scratch TypeScript port, agreeing that no such field
+  is read from disk. This is worth flagging as a genuine open mystery rather
+  than a plain "not yet found": either `SkillMult` is a Bible-documented but
+  never-shipped/aspirational field, or the real engine computes an
+  equivalent effect at runtime some other way (e.g. derived from `shïp` AI
+  fields rather than stored per-`gövt`) — not a byte offset this method can
+  recover, since there appears to be no byte for it.
 - **Story-layer govt-scoped selectors don't call `Diplomacy` at all.**
   `StellarMatch.spob`'s ally/enemy/class selector ranges (15000/25000/30000/
   31000, `StellarMatching.swift:35-40`) fall back to a plain govt-id match

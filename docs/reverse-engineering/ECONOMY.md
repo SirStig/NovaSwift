@@ -156,7 +156,7 @@ as the in-UI label shown to the player while it's active.
 | Field | Meaning |
 |---|---|
 | `Stellar` | Scope of the disaster. `128-1628`: a specific stellar object ID. `-1`: "Any planet or station (use sparingly)" — a galaxy-wide roll, presumably applied independently per qualifying stellar or globally per the Bible's own caution against overuse. `-2`: "Nothing (used for mission-related news)" — a no-op disaster that exists purely to drive news/flavor text, with no price effect at all. |
-| `Commodity` | Which of the six standard commodities to affect: 0 = food, 1 = industrial, etc. (the Bible's own example enumerates only the standard six; it does not state whether this field can index a `jünk` type instead — see open question below). |
+| `Commodity` | Which of the six standard commodities to affect: 0 = food, 1 = industrial, etc. (the Bible's own example enumerates only the standard six; empirically, every real `öops` record in the base game stays within 0–5 — see resolved question below). |
 | `PriceDelta` | The amount to raise or lower the affected commodity's price. Negative = price drop. Additive to the stellar's existing Low/Med/High price, not a replacement or a percentage. |
 | `Duration` | How many days the disaster lasts before its price effect reverts. |
 | `Freq` | **Percent chance per day that the disaster will occur.** This is a per-day Bernoulli roll, not a scheduled/deterministic trigger — every eligible day, there's an independent `Freq`% chance the disaster fires (and, presumably, is excluded from re-rolling while already active for its `Duration`, though the Bible doesn't state re-entrancy rules explicitly). |
@@ -168,13 +168,42 @@ hit, apply `PriceDelta` to `Commodity`'s price at `Stellar` for `Duration`
 days, and surface the `öops` resource's own name in the commodity-exchange
 dialog as the "what's happening here" label for the duration.
 
-**Open question the Bible text alone doesn't resolve:** whether `Commodity`
-can reference a `jünk` type (via some ID offset above 5) or is strictly
-limited to the six standard indices 0–5. Given "Max Disasters" is 256 (Part
-I) and junk types top out at 128, there's numeric headroom for either
-reading, but nothing in the `öops` section or elsewhere cross-references the
-two resource families. Treat `öops` as standard-commodity-only unless a
-counter-example turns up in actual scenario data.
+**Resolved (as far as this method can tell):** whether `Commodity` can
+reference a `jünk` type (via some ID offset above 5) or is strictly limited
+to the six standard indices 0–5. Two independent pieces of evidence now
+point the same way:
+
+1. **The TMPL itself is typed.** `öops`'s `Commodity` field (TMPL #512,
+   `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`) is a
+   `CASR` enum listing exactly six named cases, `Food=0` through
+   `Equipment=5` — no "or a jünk ID" case, no open-ended integer hint. The
+   editor's own authoring UI presents this as a closed six-way choice, not a
+   free-form resource-id picker (contrast with `Stellar`@0, which *is* typed
+   as a raw `RSID`/free integer).
+2. **Every real `öops` record in the base game stays in range.** All 19
+   `öops` resources that ship with EV Nova (`Nova Data 2.rez`, ids 128–146 —
+   the only `.rez` file that has any; see `swift run evnova-extract list
+   "data/EV Nova/Nova Files/Nova Data 2.rez" öops`) were dumped with
+   `swift run evnova-extract raw "data/EV Nova" öops <id>` for id in
+   128...146. `Commodity`@2 is 0, 1, 2, 3, 4, or 5 in every single one —
+   never higher. Several are semantically self-confirming, which is stronger
+   than a bare range check: #143 "The discovery of a new ore deposit" has
+   `Commodity`=4 (metal) with `PriceDelta`=-110; #144 "The discovery of a new
+   drug" has `Commodity`=2 (medical) with `PriceDelta`=-150; #134 "A spate of
+   break-downs" has `Commodity`=5 (equipment) with `PriceDelta`=+115; #128
+   "An enormous food surplus" has `Commodity`=0 (food) with `PriceDelta`=-15.
+   The disaster's own name and its `Commodity` index line up correctly every
+   time, which only makes sense if `Commodity` really is indexing the six
+   named goods, not some other resource family.
+
+Absence of evidence isn't proof — there is no `jünk`-referencing counter-example anywhere
+to point to, and the sample is limited to the 19 stock `öops` records (a
+third-party plugin could still choose to abuse the field with an
+out-of-range value the engine happens to tolerate). But between the TMPL's
+closed six-case enum and 19/19 real records staying in range with several
+showing exact name↔commodity semantic matches, this is as close to a
+confirmed "no" as the reverse-engineering method can produce without engine
+source. Treat `öops` as standard-commodity-only.
 
 ## 5. What's implemented vs. what's missing
 
@@ -184,11 +213,11 @@ counter-example turns up in actual scenario data.
 | Numeric credit values for Low/Medium/High | ⚠️ Implemented, but as **hardcoded Swift constants**, contradicted by the Bible's Appendix III entry that base prices are patchable `STR ` 9300-9305 scenario data | `Commodity.prices`, `Sources/EVNovaKit/NovaEconomy.swift:56-66`; the file's own header comment (lines 9-13, "the standard commodity prices themselves are engine constants — not stored in the scenario data") is the discrepancy — per the Bible, they *are* stored (as replaceable `STR ` strings), just not decoded from the user's data yet. Should read `STR# 9300-9305` (falling back to today's constants) the same way `commodityName` already reads `STR# 4000` (`NovaEconomy.swift:147-153`). |
 | Tech level does not gate commodity trading | ✅ Correctly not implemented as a gate (no code applies `techLevel` to `commodityMarket`) | `Sources/EVNovaKit/NovaEconomy.swift:171-178` |
 | Buy/sell spread | N/A per Bible (none specified) | Matches: `TradeCenterView.buy()`/`sell()` and `PilotStore.buyCommodity`/`sellCommodity` both transact at the single `c.price` — `app/EVNova/Spaceport/SpaceportScreens.swift:107,120`, `app/EVNova/Game/PilotStore.swift:182-203` |
-| `jünk` resource (salvage/specialty cargo) | ❌ Not implemented at all. The four-char code is registered (`Sources/EVNovaKit/FourCharCode.swift:67`, `.junk = "jünk"`) but there is no `JunkRes` model, no decoding of `SoldAt`/`BoughtAt`/`BasePrice`/`Flags`/`ScanMask`/`BuyOn`/`SellOn`, and no UI surfaces junk trading anywhere in `app/`. | — |
-| `öops` "disaster" price-event system | ❌ Not implemented at all. The four-char code is registered (`Sources/EVNovaKit/FourCharCode.swift:68`, `.oops = "öops"`) but there is no `OopsRes` model, no per-day `Freq` roll, no `PriceDelta` application, and no in-game clock/day-counter hook feeding it (the day-based `BuyRandom` roll in `NovaEconomy.swift:220-232` shows the engine already has a notion of "current day," so an `öops` roll could reuse the same day-seeded-hash pattern instead of true RNG, matching how `BuyRandom` was done). No UI shows a disaster name/label in the trade dialog. | — |
+| `jünk` resource (salvage/specialty cargo) | ⚠️ **Byte layout now fully reverse-engineered** (TMPL #509, `Templates.rsrc`, 676 bytes, no KEYB/union ambiguity), but still ❌ **not implemented in Swift**: no `JunkRes` model, no decoding, and no UI surfaces junk trading anywhere in `app/`. Confirmed layout (`swift run evnova-extract tmpl ".../Templates.rsrc" 509`, cross-checked against all 23 real records in `Nova Data 1.rez`, ids 128-150, via `swift run evnova-extract raw "data/EV Nova" jünk <id>`): `SoldAt1-8`@0 (8× `RSID`, 16B) `BoughtAt1-8`@16 (8× `RSID`, 16B) `BasePrice`@32 (`WORD`, 2B) `Flags`@34 (`WORV`, 2B) `ScanMask`@36 (`WB16`, 2B) `LCName`@38 (`C040`, 64B) `Abbrev`@102 (`C040`, 64B) `BuyOn`@166 (`n0FF`/NCB Test, 255B) `SellOn`@421 (`n0FF`/NCB Test, 255B) — **total 676 bytes**, matching the real record size exactly. Verified against #128 "Vrenna Ice Lizard Pelts": `SoldAt`={219, 449, -1×6}, `BoughtAt`={164, 175, 207, 242, 267, 345, -1, -1} (all real spöb ids), `BasePrice`=750 (sane credit value), `Flags`=0, `ScanMask`=2048 (0x0800); the ASCII view shows `"ice-lizard pelts"` and `"Pelts"` landing exactly at the computed `LCName`/`Abbrev` byte offsets. `BasePrice` sampled across all 23 real ids ranges 50-3000 credits (always plausible); `Flags` was 0 (no Tribbles/Perishable bit) in every one of the 23 base-game records sampled — no counter-example of those two flags actually in use was found in the stock data. | `Sources/EVNovaKit/FourCharCode.swift:67` (`.junk = "jünk"`); no `JunkRes` model exists yet |
+| `öops` "disaster" price-event system | ⚠️ **Byte layout now fully reverse-engineered** (TMPL #512, `Templates.rsrc`, 282 bytes, no KEYB/union ambiguity), but still ❌ **not implemented in Swift**: no `OopsRes` model, no per-day `Freq` roll, no `PriceDelta` application, and no in-game clock/day-counter hook feeding it (the day-based `BuyRandom` roll in `NovaEconomy.swift:220-232` shows the engine already has a notion of "current day," so an `öops` roll could reuse the same day-seeded-hash pattern instead of true RNG, matching how `BuyRandom` was done). No UI shows a disaster name/label in the trade dialog. Confirmed layout (`swift run evnova-extract tmpl ".../Templates.rsrc" 512`, cross-checked against all 19 real records in `Nova Data 2.rez`, ids 128-146, via `swift run evnova-extract raw "data/EV Nova" öops <id>`): `Stellar`@0 (`RSID`, 2B) `Commodity`@2 (`CASR` 6-case enum, 2B) `PriceDelta`@4 (2B) `Duration`@6 (2B) `Freq`@8 (2B) `ActivateOn`@10 (`n100`/NCB Test, 256B) `[unused]`@266 (`F010`, 16B) — **total 282 bytes**, matching the real record size exactly. Verified against #128 "An enormous food surplus": `Stellar`=137 (real spöb id), `Commodity`=0 (food — matches the disaster's own name), `PriceDelta`=-15 (a *surplus* correctly drops the price), `Duration`=30 days, `Freq`=35% (sane 0-100 range), `ActivateOn`=blank. All 19 real records show sane `Freq` (25-75%) and `Duration` (15-100 days) values; several show the `Commodity` index semantically matching the disaster's own name (#143 "discovery of a new ore deposit" → `Commodity`=4/metal; #144 "discovery of a new drug" → `Commodity`=2/medical; #134 "spate of break-downs" → `Commodity`=5/equipment). See §4 below for the resolved `Commodity`-range question. | `Sources/EVNovaKit/FourCharCode.swift:68` (`.oops = "öops"`); no `OopsRes` model exists yet |
 | Tribute payout when dominated | ❌ Not implemented — `spöb.Tribute` and the domination flag (`spöb` Flags2 `0x0020` "always dominated") aren't wired to any credits-per-day mechanic in `PilotStore` or `World`. | — |
 | `oütf.BuyRandom` / `shïp.BuyRandom` (per-day stock availability) | ✅ Implemented (most recent commit `ff8fc20`, "Enhance item availability mechanics with BuyRandom feature") — a deterministic FNV-1a hash of `(day, spobID, itemID)` compared against the percent chance, so stock is stable within a day and re-rolls only when the day advances. Correctly encodes the Bible's per-type zero-behavior asymmetry (outfits: `BuyRandom <= 0` → always available; ships: `BuyRandom == 0` → never available). | `Sources/EVNovaKit/NovaEconomy.swift:185-232`; fields decoded at `Sources/EVNovaKit/NovaModels.swift:240,280` (`ShipRes.buyRandom` @904) and `Sources/EVNovaKit/NovaAIModels.swift:157,181` (`OutfRes.buyRandom` @1008) |
-| `jünk`/`öops` equivalent of a "daily availability roll" | N/A — the Bible documents no `BuyRandom`-style field for junk; junk availability is purely the fixed `SoldAt`/`BoughtAt` stellar lists plus the boolean `BuyOn`/`SellOn` gates, so nothing is "missing" here beyond the junk resource itself not being decoded at all. | — |
+| `jünk`/`öops` equivalent of a "daily availability roll" | N/A — the Bible documents no `BuyRandom`-style field for junk; junk availability is purely the fixed `SoldAt`/`BoughtAt` stellar lists plus the boolean `BuyOn`/`SellOn` gates, confirmed absent from the byte layout above (no percent-chance field anywhere between `ScanMask`@36 and the two NCB test strings). | — |
 | Cargo-hold interaction (capacity, load/unload) | ✅ Implemented, standard commodities only — `ShipLoadout.cargoCapacity`, `PilotStore.cargoFree/cargoUsed/held/buyCommodity/sellCommodity`. Not yet extended to a junk inventory (no `JunkRes` to attach one to), and doesn't model Tribbles self-multiplication or Perishable decay (`jünk.Flags` 0x0001/0x0002) since no junk cargo exists in the pilot's cargo dictionary at all yet. | `Sources/EVNovaEngine/ShipLoadout.swift:62,105,135,175`; `app/EVNova/Game/PilotStore.swift:151-203` |
 
 ### Third-party reference check

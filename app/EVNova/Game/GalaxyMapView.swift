@@ -8,6 +8,13 @@ import EVNovaKit
 /// still reach and warning-red past that. Systems you've never visited (or
 /// aren't linked to one you have, or haven't charted with a map outfit) aren't
 /// drawn at all — real fog of war. Drag to pan; pinch, +/- to zoom.
+///
+/// Chrome is rebuilt from the real "Map" dialog, DITL #2000 (`evnova-extract
+/// ditl "data/EV Nova/Nova.rez" 2000`), drawn on its actual backdrop, PICT
+/// #8509 "Map" (`Nova Files/Nova Graphics 3.rez`) — see `Item` below for the
+/// verified rects. The starmap canvas, drag/pinch/tap interaction and route
+/// drawing (`drawMap`/`handleTap`) are unchanged; only their container size
+/// moved from full-screen to the dialog's own canvas rect.
 struct GalaxyMapView: View {
     @ObservedObject var nav: NavigationModel
     @ObservedObject var pilot: PilotStore
@@ -23,6 +30,11 @@ struct GalaxyMapView: View {
     /// Faction map colors, keyed by `gövt` id — built once per data load, since
     /// the resource format carries no color field of its own (see `rebuildGovtColors`).
     @State private var govtColors: [Int: Color] = [:]
+    /// Built locally (not threaded in from `GameContainerView`, which this
+    /// workstream doesn't touch) — cheap, and `SpaceportGraphics` already owns
+    /// the PICT/button-slice/label decode+cache this chrome needs.
+    @State private var graphics: SpaceportGraphics?
+    @State private var showingFinder = false
 
     static let defaultZoom: CGFloat = 2.4
     private let minZoom: CGFloat = 0.5    // whole galaxy (~945 units wide) in view
@@ -51,41 +63,60 @@ struct GalaxyMapView: View {
         ZStack {
             Color.black.opacity(0.94).ignoresSafeArea()
 
-            GeometryReader { geo in
-                TimelineView(.periodic(from: .now, by: 0.4)) { timeline in
-                    let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.4) % 2 == 0
-                    Canvas { ctx, size in
-                        drawMap(ctx: &ctx, size: size, blinkOn: blinkOn)
-                    }
-                }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture()
-                        .onChanged { g in
-                            pan.width += g.translation.width - dragLast.width
-                            pan.height += g.translation.height - dragLast.height
-                            dragLast = g.translation
-                        }
-                        .onEnded { _ in dragLast = .zero }
-                )
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            let base = pinchStartZoom ?? zoom
-                            pinchStartZoom = base
-                            setZoom(base * value)
-                        }
-                        .onEnded { _ in pinchStartZoom = nil }
-                )
-                .onTapGesture { location in
-                    handleTap(at: location, viewSize: geo.size)
-                }
+            if let graphics, let frame = graphics.pict(Self.frameID) {
+                authenticChrome(frame: frame)
+            } else {
+                // No Map PICT in the loaded data (or `SpaceportGraphics` hasn't
+                // resolved yet) — fall back to the prior full-bleed layout so
+                // the map still works.
+                mapCanvas
+                legacyChrome
             }
-
-            chrome
         }
         .novaResponsive()
-        .onAppear { rebuildGovtColors() }
+        .onAppear {
+            rebuildGovtColors()
+            if graphics == nil, let game = nav.game { graphics = SpaceportGraphics(game: game) }
+        }
+        .sheet(isPresented: $showingFinder) {
+            SystemFinderView(nav: nav, pilot: pilot) { system in centerOn(system) }
+        }
+    }
+
+    /// The starmap canvas itself — drag/pinch/tap-to-plot-course, unchanged
+    /// from before this workstream. Only its container size changed (from
+    /// full-screen to the dialog's canvas rect, DITL #2000 idx2).
+    private var mapCanvas: some View {
+        GeometryReader { geo in
+            TimelineView(.periodic(from: .now, by: 0.4)) { timeline in
+                let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.4) % 2 == 0
+                Canvas { ctx, size in
+                    drawMap(ctx: &ctx, size: size, blinkOn: blinkOn)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { g in
+                        pan.width += g.translation.width - dragLast.width
+                        pan.height += g.translation.height - dragLast.height
+                        dragLast = g.translation
+                    }
+                    .onEnded { _ in dragLast = .zero }
+            )
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        let base = pinchStartZoom ?? zoom
+                        pinchStartZoom = base
+                        setZoom(base * value)
+                    }
+                    .onEnded { _ in pinchStartZoom = nil }
+            )
+            .onTapGesture { location in
+                handleTap(at: location, viewSize: geo.size)
+            }
+        }
     }
 
     /// Sort known governments by id and assign each a distinct palette color.

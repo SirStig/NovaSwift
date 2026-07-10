@@ -121,6 +121,72 @@ The Bible documents a full escort acquisition economy, entirely on ordinary
 | `OnCapture` | NCB control-bit-set expression evaluated when the player captures a ship of this type |
 | `OnRetire` | NCB control-bit-set expression evaluated when the player sells/replaces a ship of this type (applies to escorts sold off too) |
 
+**Byte offsets now confirmed** (superseding the "unknown layout" framing this
+section previously had). Method: `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`
+TMPL #518 (`shïp`), decoded field-by-field via `swift run evnova-extract tmpl
+"third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc" 518`, gives a
+1860-byte total record. Cross-checked against real `shïp` records with
+`swift run evnova-extract raw "data/EV Nova" shïp <id>` for **12 ships**
+spanning fighters, medium ships, warships, carriers, and freighters (#128
+Shuttle, #129 Heavy Shuttle, #130 Cargo Drone, #135 Lightning, #137 Valkyrie,
+#141 Fed Destroyer, #142 Fed Patrol Boat, #143 Fed Carrier, #144 Fed Viper,
+#161 Manta, #164 Raven, #167 Viper), plus a scripted sweep of the offsets
+below over **284 of the ~288 base-game `shïp` records** (ids 128–415) to
+check for outliers — every one of the 284 is exactly 1860 bytes:
+
+| Bible field | Confirmed offset | Real type/size | Evidence |
+|---|---|---|---|
+| `HireRandom` | `@906` | `DWRD`, 2B | Sane 0–100 percentages across all 284 swept ships (208 are 0 = never hireable, e.g. Cargo Drone #130, Wraith variants #168-170 — matches non-combat/plot-only hulls; nonzero values cluster on fighters/mediums/warships, e.g. Viper #167 = 95, Valkyrie #137 = 50, Fed Viper #144 = 35) |
+| `EscortType` (doc's name; field is unlabeled `DWRD` in the TMPL — naming it `EscortCategory` here to match this doc's evidence-based convention) | `@1842` | `DWRD`, 2B | Distribution across the 284-ship sweep: 0=Fighter ×25, 1=Medium Ship ×105, 2=Warship ×106, 3=Freighter ×48 — and the assignments are sane per-hull: Viper #167/Manta #161/Fed Viper #144 → 0 (Fighter); Valkyrie #137/Fed Patrol Boat #142 → 1 (Medium); Shuttle #128/Heavy Shuttle #129/Cargo Drone #130 → 3 (Freighter). No ship in the sweep used -1 (Automatic) |
+| `UpgradeTo` | `@1832` | `RSID`, 2B | Every non-`(-1)` value in the sweep resolves to a **real `shïp` id with the same class name and equal-or-better stats** — e.g. Shuttle #128→#188 "Shuttle" (shield 30→35, armor 30→40), Fed Viper #144→#223 "Fed Viper" (shield 60→80), Valkyrie #137→#280 "Valkyrie" (armor 120→130), Fed Patrol Boat #142→#217 "Fed Patrol Boat" (shield 350→400), Viper #167→#335 "Viper" (shield 45→50), Manta #161→#315 "Manta" (shield 100→180) — confirmed with `swift run evnova-extract ship "data/EV Nova" <id>` on both ends of each chain. 133/284 swept ships are `-1` (not upgradeable), e.g. Cargo Drone #130, all three Wraith age-variants #168-170 |
+| `EscUpgrdCost` | `@1834` | `DLNG`, 4B | Sane, tier-scaled credit values across the sweep: Shuttle #128 = 5,000cr, Fed Viper #144 = 50,000cr, Fed Patrol Boat #142 = 70,000cr, up to Leviathan #131 = 1,000,000cr (a superfreighter — plausible top-end price). Zero negative/overflow values anywhere in the 284-ship sweep |
+| `EscSellValue` | `@1838` | `DLNG`, 4B | **Confirmed 0 on literally all 284 swept ships, with no exceptions.** Per the Bible's own text ("≤0 defaults to 10% of the ship's original `Cost`"), this means the retail game never overrides this field — every escort sale falls through to the automatic 10%-of-`Cost` default. (An earlier working note from this session misread ship #128's field at this offset as "3" — that was actually reading 4 bytes too far forward, into `EscortCategory@1842`'s value for that ship, which is legitimately 3 = Freighter. Re-verified byte-by-byte against the raw dump: `@1838`'s two 16-bit words are `0,0` for Shuttle, and `0,0` for every other ship checked.) |
+| `Crew` | already decoded | — | `crew` at `Sources/EVNovaKit/NovaModels.swift:189` (`@68`, per the TMPL field list) — unrelated to this session's new offsets, listed here for completeness since the Bible groups it with the hire/capture fields |
+| `OnCapture` | `@976` | `n0FF`, 255B (NCB Set) | Not spot-checked against real data this session (would require parsing/decoding an NCB control-bit-set expression, out of scope here) — offset is TMPL-derived only |
+| `OnRetire` | `@1231` | `n0FF`, 255B (NCB Set) | Same caveat as `OnCapture` |
+
+**Layout-confidence note: the `shïp` record's two weapon/outfit tables are
+real, not a template-parser artifact.** The TMPL dump shows what looks like a
+duplicate weapon table (4×`(RSID weapon, DWRD count, DWRD ammo)` at both
+`@18` and `@1742`) and a duplicate outfit table (4×`(RSID outfit, DWRD count)`
+at both `@78` and `@880`) — raising the question of whether this tool's
+lack of `KEYB`/union support was silently printing the same physical bytes
+twice under two labels (which would put every offset *after* the first
+occurrence, including all of §2.2's escort fields, in doubt). This was
+checked directly against real data across the same 12-ship sample:
+- **The second outfit table (`@880`) is empty (`-1,-1,-1,-1`, counts `0,0,0,0`)
+  on every one of the 12 ships checked**, including ships whose first table
+  (`@78`) *is* populated (e.g. Fed Patrol Boat #142: `@78` = `[197, 240, -1,
+  -1]` counts `[1, 1, 0, 0]` — a real afterburner-class outfit — vs. `@880` =
+  all empty). A pure duplicate-read bug would mirror `@78`'s content into
+  `@880`; it doesn't. This table appears to be a genuinely distinct,
+  currently-unused-in-retail-data field, not a misread.
+- **The second weapon table (`@1742`) is not a duplicate of `@18` either, and
+  is not always empty** — it holds real, *different* weapon ids on ships
+  whose primary 4-slot table (`@18`) is completely full: Fed Carrier #143's
+  `@18` = `[132, 135, 149, 150]` (4/4 slots used) and `@1742` = `[133, -1,
+  -1, -1]` (weapon 133, count 2) — a fifth weapon type absent from the
+  primary table. Same pattern on Fed Destroyer #141 (`@18` full with
+  `[131, 134, 128, 133]`, `@1742` = `[129, ...]`), Aurora Carrier #153
+  (`@18` full, `@1742` = `[144, ...]`), and Aurora Cruiser #154 (`@18` full,
+  `@1742` = `[162, ...]`). This is not a universal rule — Pirate Carrier #147
+  also has a full `@18` table but an empty `@1742` — and every ship checked
+  with a non-full primary table (Shuttle, Valkyrie, Manta, Viper, Raven,
+  Manticore, Arachnid, Fed Viper, Fed Patrol Boat) has an empty `@1742`
+  regardless of fill level. The evidence best supports **`@1742` being a real,
+  optional fifth weapon slot** used by a minority of heavily-armed hulls that
+  need more than four distinct weapon types, not a parser double-read.
+
+Practical upshot for this doc: since both "second table" regions sit
+*between* `EscUpgrdCost`/`EscSellValue`/`EscortCategory` (all `@1832+`) and
+have no bearing on whether the bytes *before* them (`@0`–`@904`, where
+`HireRandom` and `BuyRandom` live) are correctly located, and since the total
+record size (1860B) was independently confirmed exact across all 284 swept
+ships, this ambiguity does not undermine confidence in any offset cited in
+the table above — it was worth resolving on its own merits (per the shared
+open question from this reverse-engineering pass), and the answer is "two
+genuinely separate, TMPL-declared fields," not "one field misread as two."
+
 Capture odds themselves are computed from `Crew` plus the `oütf` ModType 25
 ("marines") outfit: "Adds the value in ModVal to your ship's effective crew
 complement when calculating capture odds ... -1 to -100: Increase the
@@ -306,8 +372,8 @@ a persistent escort roster, and does not touch `PersRes` in any way.
 | `PersRes` field decoder (LinkSyst, Govt, AIType, Aggress, Coward, ShipType, LinkMission, flags, activeOn, subtitle) | ✅ Decoded | `Sources/EVNovaKit/MissionModels.swift:317-351`; exposed via `game.pers(id)`/`game.persons()`, `Sources/EVNovaKit/NovaModels.swift:454-455` |
 | `përs` 5%-chance spawn-time creation, tied to ordinary ship spawns | ❌ Not wired | No caller of `PersRes`/`game.pers`/`game.persons()` exists anywhere outside the decoder file and its accessor (verified by repo-wide grep). `docs/MISSIONS.md`'s own "Not yet wired" section already flags this: "`përs` captains offering their linked missions in space (needs AI to place them; the decoder + `activeOn`/`linkMission` fields are ready)." |
 | `AIType 0` → `shïp.InherentAI` fallback for escorts | Partially decoded, not escort-specific | `inherentAI` decoded at `Sources/EVNovaKit/NovaModels.swift:193,265` (`@66`); `AIType(raw:)` fallback exists generically (see AI_GROUND_TRUTH.md §1) but nothing in the engine currently creates a "hired/captured escort using its hull's InherentAI" — the only consumer of `InherentAI` today is `Spawner.spawnFleet` picking a flagship/escort's *own* disposition for NPC-fleet ships (`Sources/EVNovaEngine/Spawner.swift:132-133,158-165`), not a player-owned escort |
-| `shïp.HireRandom` (bar hire availability) | ❌ Not decoded | No `hireRandom` field on `ShipRes` (`Sources/EVNovaKit/NovaModels.swift:151-311` — compare `buyRandom` at line 240, which *is* decoded per commit `ff8fc20`) |
-| `shïp.EscortType`/`UpgradeTo`/`EscUpgrdCost`/`EscSellValue` (escort-menu categorization, upgrades, resale) | ❌ Not decoded | Same struct; none of these four fields exist on `ShipRes` |
+| `shïp.HireRandom` (bar hire availability) | ❌ Not decoded, offset now confirmed | No `hireRandom` field on `ShipRes` (`Sources/EVNovaKit/NovaModels.swift:151-311` — compare `buyRandom` at line 240, which *is* decoded per commit `ff8fc20`, at the adjacent offset `@904`). Confirmed at `@906` (`DWRD`, 2B) via TMPL #518 + a 284-ship raw-data sweep — see §2.2's table |
+| `shïp.EscortType`/`UpgradeTo`/`EscUpgrdCost`/`EscSellValue` (escort-menu categorization, upgrades, resale) | ❌ Not decoded, offsets now confirmed | Same struct; none of these four fields exist on `ShipRes`. Confirmed offsets (§2.2): `UpgradeTo`(doc's name for `EscortUpgradesTo`)`@1832`(`RSID`,2B), `EscUpgrdCost@1834`(`DLNG`,4B), `EscSellValue@1838`(`DLNG`,4B, empirically always `0` in retail data — falls through to the Bible's documented 10%-of-`Cost` default), `EscortType@1842`(`DWRD`,2B, this doc's `EscortCategory`) — all byte-verified against 12 individually-inspected ships plus a 284-ship automated sweep, not just the single Shuttle (#128) spot-check from the earlier working pass |
 | "Requisition-escort" / "hire-escort" dialogs, escort control menu | ❌ Not built | No matching view in `app/EVNova/` (only `HailDialogView.swift`'s 3-button in-flight comm dialog exists, and it's unrelated — see §3) |
 | Persistent player escort roster (hired, captured, or mission-granted) | ❌ Not built | `PilotInfoView`'s "Escorts" section is a static placeholder: `app/EVNova/Story/StoryGuideView.swift:119-120` — `section("Escorts") { Text("No escorts hired.") ... }`, no backing data model, never populated |
 | `gövt.VoiceType` (per-government escort comm voice, 8 types × ack/target/victory `snd`) | ✅ Decoded, unused for escorts | `Sources/EVNovaKit/NovaAIModels.swift:220,264` decodes `voiceType`; not consumed anywhere for playing escort ack/targeting/victory audio (no escort feature exists to consume it) |

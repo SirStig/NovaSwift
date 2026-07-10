@@ -112,6 +112,8 @@ final class GameScene: SKScene {
     private var lockedShipBracketID: Int?
     private var lockedPlanetBracketID: Int?
     private var npcNodes: [Int: NPCNode] = [:]
+    private var asteroidNodes: [Int: AsteroidNode] = [:]
+    private var asteroidTextureCache: [Int: [SKTexture]] = [:]
     /// Active `loopSound` beam voices, keyed by "`shooterID`:`mountIndex`" —
     /// repositioned every frame in `update(_:)` so a firing ship's continuous
     /// beam loop pans/attenuates as it (or the player) moves, and stopped when
@@ -154,6 +156,14 @@ final class GameScene: SKScene {
         /// reads as a flicker, not a strobe.
         var thrusterAlpha: CGFloat = 0.8
         var thrusterFlameScale: CGFloat = 1.0
+    }
+
+    /// The SpriteKit node backing one live asteroid: just a rotating real-sprite
+    /// hull, no thruster/health-bar/engine glow (asteroids have none of those).
+    private final class AsteroidNode {
+        let container = SKNode()
+        var sprite: SKSpriteNode?
+        var textures: [SKTexture] = []
     }
 
     // MARK: Setup
@@ -278,6 +288,15 @@ final class GameScene: SKScene {
         }
     }
 
+    /// The world-space size a star tile needs to be to fully cover the visible
+    /// viewport (plus margin) at the current window size and camera zoom, so
+    /// the parallax wrap never leaves a gap or shows a seam. Previously a
+    /// fixed 1600×1600 tile could be smaller than the actual viewport on a
+    /// large window, which is why the starfield didn't "fit" the visible space.
+    private var requiredStarTile: CGFloat {
+        max(1600, max(size.width, size.height) * cameraZoom * 1.3)
+    }
+
     private func buildStarfield() {
         let density = max(0.2, settings.starfieldDensity)
         let specs: [(parallax: CGFloat, count: Int, size: CGFloat, brightness: CGFloat)] = [
@@ -285,14 +304,26 @@ final class GameScene: SKScene {
             (0.5,  Int(70 * density), 2.0, 0.55),
             (0.9,  Int(40 * density), 2.5, 0.85),
         ]
-        let tile: CGFloat = 1600
+        // Real EV Nova star sprite (spïn #700 "Stars"): a 4×4 grid of 5×5px
+        // frames. When it's resolvable, real frames replace the synthetic dot;
+        // otherwise we fall back to the plain colored square.
+        let starFrames = galaxy?.game.starfieldSprite().map { SpriteTextures.rotationFrames(from: $0, rotationCount: 16) }
+        let tile = requiredStarTile
         for spec in specs {
             let layer = StarLayer(parallax: spec.parallax, tile: tile)
             layer.container.zPosition = -100
             for _ in 0..<spec.count {
                 let base = CGPoint(x: .random(in: -tile/2...tile/2), y: .random(in: -tile/2...tile/2))
-                let star = SKSpriteNode(color: SKColor(white: spec.brightness, alpha: 1),
+                let star: SKSpriteNode
+                if let frames = starFrames, !frames.isEmpty {
+                    star = SKSpriteNode(texture: frames.randomElement())
+                    star.texture?.filteringMode = .nearest
+                    star.alpha = spec.brightness
+                    star.setScale(spec.size / 3.0)
+                } else {
+                    star = SKSpriteNode(color: SKColor(white: spec.brightness, alpha: 1),
                                         size: CGSize(width: spec.size, height: spec.size))
+                }
                 star.position = base
                 layer.container.addChild(star)
                 layer.stars.append(star)
@@ -301,6 +332,17 @@ final class GameScene: SKScene {
             addChild(layer.container)
             starLayers.append(layer)
         }
+    }
+
+    /// Rebuild the starfield if the window/view grew enough that the current
+    /// tile no longer covers the visible area (e.g. a resized macOS window or
+    /// an iOS rotation) — otherwise stars would only fill the old, smaller area.
+    override func didChangeSize(_ oldSize: CGSize) {
+        super.didChangeSize(oldSize)
+        guard !starLayers.isEmpty, requiredStarTile > starLayers[0].tile else { return }
+        for layer in starLayers { layer.container.removeFromParent() }
+        starLayers.removeAll()
+        buildStarfield()
     }
 
     private func buildShip() {
@@ -489,6 +531,7 @@ final class GameScene: SKScene {
         updateBeamLoopPositions(listener: scenePos)
         syncProjectiles()
         syncNPCs()
+        syncAsteroids()
         updateSelectionBrackets()
         shipNode.position = scenePos
 
@@ -736,6 +779,43 @@ final class GameScene: SKScene {
     /// Reconcile the scene's NPC nodes with the world's live NPC roster: spawn
     /// nodes for arrivals, update transforms/plume/damage for the living, and
     /// remove nodes for ships that died or jumped out.
+    /// Diff `world.asteroids` against the live node pool: build a node for any
+    /// new rock (initial scatter or a fragmentation child), update its rotation
+    /// frame from `spriteFrame`, and drop nodes for rocks that died this tick.
+    /// Asteroids are stationary (see `Asteroid`'s doc comment), so unlike
+    /// `syncNPCs` this never repositions an existing node.
+    private func syncAsteroids() {
+        var seen = Set<Int>()
+        for rock in world.asteroids where rock.isAlive {
+            seen.insert(rock.id)
+            let node = asteroidNodes[rock.id] ?? makeAsteroidNode(for: rock)
+            if let sprite = node.sprite, !node.textures.isEmpty {
+                sprite.texture = node.textures[min(rock.spriteFrame, node.textures.count - 1)]
+            }
+        }
+        for (id, node) in asteroidNodes where !seen.contains(id) {
+            node.container.removeFromParent()
+            asteroidNodes[id] = nil
+        }
+    }
+
+    private func makeAsteroidNode(for rock: Asteroid) -> AsteroidNode {
+        let n = AsteroidNode()
+        n.container.position = CGPoint(x: rock.position.x, y: rock.position.y)
+        n.container.zPosition = 6
+        let textures = asteroidTextures(for: rock.roidTypeID)
+        n.textures = textures
+        if let first = textures.first {
+            let sprite = SKSpriteNode(texture: first)
+            sprite.texture?.filteringMode = .nearest
+            n.container.addChild(sprite)
+            n.sprite = sprite
+        }
+        addChild(n.container)
+        asteroidNodes[rock.id] = n
+        return n
+    }
+
     private func syncNPCs() {
         var seen = Set<Int>()
         for npc in world.npcs {
@@ -992,6 +1072,18 @@ final class GameScene: SKScene {
         fill.fillColor = SKColor(red: CGFloat(1 - frac) * 0.9 + 0.1,
                                  green: CGFloat(frac) * 0.9,
                                  blue: 0.25, alpha: 1)
+    }
+
+    /// The rotation textures for a `röid` type, decoded once and cached (a
+    /// system typically reuses only a handful of the 16 real asteroid types).
+    private func asteroidTextures(for roidTypeID: Int) -> [SKTexture] {
+        if let cached = asteroidTextureCache[roidTypeID] { return cached }
+        var textures: [SKTexture] = []
+        if let sheet = galaxy?.game.asteroidSprite(roidTypeID) {
+            textures = SpriteTextures.rotationFrames(from: sheet)
+        }
+        asteroidTextureCache[roidTypeID] = textures
+        return textures
     }
 
     /// The rotation textures for a hull id, decoded from the player's data once

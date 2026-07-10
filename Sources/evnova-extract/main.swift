@@ -50,6 +50,109 @@ func loadCollection(_ path: String) -> (ResourceCollection, ContainerFormat) {
     }
 }
 
+// MARK: - Classic Mac dialog resource decoders (DITL / DLOG)
+
+private func be16(_ d: Data, _ off: Int) -> Int {
+    let b = d.startIndex + off
+    return (Int(d[b]) << 8) | Int(d[b + 1])
+}
+private func s16(_ d: Data, _ off: Int) -> Int {
+    let v = be16(d, off)
+    return v >= 0x8000 ? v - 0x10000 : v
+}
+private func be32(_ d: Data, _ off: Int) -> Int {
+    let b = d.startIndex + off
+    return (Int(d[b]) << 24) | (Int(d[b+1]) << 16) | (Int(d[b+2]) << 8) | Int(d[b+3])
+}
+
+private func ditlTypeName(_ raw: Int) -> String {
+    switch raw & 0x7F {
+    case 0: return "userItem"
+    case 4: return "button"
+    case 5: return "checkbox"
+    case 6: return "radioButton"
+    case 7: return "resControl"
+    case 8: return "statText"
+    case 16: return "editText"
+    case 32: return "icon"
+    case 64: return "picture"
+    default: return "type\(raw & 0x7F)"
+    }
+}
+
+/// Decode a DITL resource body and print each item's rect (top,left,bottom,right),
+/// type, enabled flag, and payload (text, or a 2-byte resource ID for icon/pic/ctl).
+private func printDITL(_ res: Resource) {
+    let d = res.data
+    print("DITL #\(res.id) \"\(res.name)\"  \(d.count) bytes")
+    guard d.count >= 2 else { return }
+    let count = s16(d, 0) + 1
+    var off = 2
+    for i in 0..<count {
+        guard off + 4 + 8 + 2 <= d.count else {
+            print("  [item \(i)] truncated at offset \(off)"); break
+        }
+        off += 4 // placeholder handle
+        let top = s16(d, off), left = s16(d, off + 2), bottom = s16(d, off + 4), right = s16(d, off + 6)
+        off += 8
+        let rawType = Int(d[d.startIndex + off]); off += 1
+        let enabled = (rawType & 0x80) == 0
+        let len = Int(d[d.startIndex + off]); off += 1
+        guard off + len <= d.count else {
+            print("  [item \(i)] item data truncated"); break
+        }
+        let payload = d.subdata(in: (d.startIndex + off)..<(d.startIndex + off + len))
+        off += len
+        if len % 2 == 1 { off += 1 } // pad to even
+
+        let kind = ditlTypeName(rawType)
+        var extra = ""
+        switch rawType & 0x7F {
+        case 8, 16: // statText / editText: raw ASCII/MacRoman text
+            extra = "  \"\(String(data: payload, encoding: .macOSRoman) ?? "?")\""
+        case 4, 5, 6: // button/checkbox/radio: label text
+            extra = "  \"\(String(data: payload, encoding: .macOSRoman) ?? "?")\""
+        case 32, 64, 7: // icon/picture/resControl: 2-byte resource id
+            if payload.count >= 2 { extra = "  resID=\(be16(payload, 0))" }
+        default:
+            if !payload.isEmpty { extra = "  bytes=\(payload.count)" }
+        }
+        let w = right - left, h = bottom - top
+        let kindPadded = kind.padding(toLength: max(kind.count, 12), withPad: " ", startingAt: 0)
+        let prefix = String(format: "  [%2d] (%4d,%4d)-(%4d,%4d) %dx%d  ", i, left, top, right, bottom, w, h)
+        print(prefix + kindPadded + (enabled ? "" : " [disabled]") + extra)
+    }
+}
+
+/// Byte offset / size table for a DLOG resource, ending in the itemsID field.
+private func dlogItemsID(_ res: Resource) -> Int? {
+    let d = res.data
+    guard d.count >= 20 else { return nil }
+    return s16(d, 18) // rect(8)+procID(2)+visible(2)+goAway(2)+refCon(4) = 18
+}
+
+private func printDLOG(_ res: Resource) {
+    let d = res.data
+    print("DLOG #\(res.id) \"\(res.name)\"  \(d.count) bytes")
+    guard d.count >= 20 else { return }
+    let top = s16(d, 0), left = s16(d, 2), bottom = s16(d, 4), right = s16(d, 6)
+    let procID = s16(d, 8)
+    let visible = s16(d, 10) != 0
+    let goAway = s16(d, 12) != 0
+    let refCon = be32(d, 14)
+    let itemsID = s16(d, 18)
+    var title = ""
+    var off = 20
+    if off < d.count {
+        let tlen = Int(d[d.startIndex + off]); off += 1
+        if off + tlen <= d.count {
+            title = String(data: d.subdata(in: (d.startIndex + off)..<(d.startIndex + off + tlen)), encoding: .macOSRoman) ?? ""
+        }
+    }
+    print("  bounds=(\(left),\(top))-(\(right),\(bottom)) \(right-left)x\(bottom-top)  procID=\(procID)  visible=\(visible)  goAway=\(goAway)  refCon=\(refCon)")
+    print("  title=\"\(title)\"  itemsID(DITL)=\(itemsID)")
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first else { usage() }
 
@@ -392,31 +495,71 @@ case "raw":
 
 case "tmpl":
     // Dev tool: parse a ResForge/EVN TMPL resource (label PString + 4-char type
-    // code pairs) and print each field with its running byte offset. Authoritative
-    // field layout for the on-disk resource bodies.
+    // code pairs) and print each field with its correct running byte offset.
+    // Authoritative field layout for the on-disk resource bodies — mirrors the
+    // real ResForge TemplateParser's offset semantics (see
+    // third_party/ResForge/Plugins/Sources/TemplateEditor/TemplateParser.swift
+    // and Elements/*.swift), specifically:
+    //   - "Rnnn" (single letter + 3 hex digits) repeats the *next* field nnn
+    //     times (hex, not decimal — e.g. R010 = 16, not 10).
+    //   - "Cnnn"/"Pnnn"/lowercase-n+hex (NCB strings) are fixed-size string
+    //     fields whose *total byte width* is the hex value (Pnnn: value+1).
+    //   - A run of consecutive bit-field elements (BBnn/WBnn/LBnn/QBnn, e.g.
+    //     the six BB04 commodity-price nibbles in spöb) shares ONE underlying
+    //     read of size matching its letter (BB=1, WB=2, LB=4, QB=8 bytes) —
+    //     only the first element in the run advances the offset; siblings
+    //     that don't fully consume the underlying width leave the reader mid
+    //     group until enough sibling bits fill it.
+    //   - "PACK"/"DVDR"/"CASE"/"CASR"/"RREF" are structural/cosmetic and cost
+    //     zero bytes; they may be printed *before* the concrete field(s) they
+    //     describe (ResForge allows a PACK label to preview fields that are
+    //     physically declared later in the stream — trust declaration order,
+    //     not proximity to the PACK line).
+    // NOT handled (rare in the resource types this repo cares about — none of
+    // crön/flët/gövt/jünk/öops/oütf/përs/ränk/spöb/sÿst/wëap need them at the
+    // top level except oütf's mod-type union and wëap's included Projectile
+    // templates): nested "TMPL <name>" includes, and KEYB/KEYE keyed
+    // (union-style) sections where only the section matching the preceding
+    // key field's value is actually present on disk. Fields after an
+    // unhandled construct are printed with "?" rather than a wrong number.
     //   evnova-extract tmpl <Templates.rsrc> <id>
     guard args.count == 3, let id = Int(args[2]) else { usage() }
     let (tcol, _) = loadCollection(args[1])
     guard let tr = tcol.resource(FourCharCode("TMPL")!, id) else {
         FileHandle.standardError.write(Data("error: no TMPL #\(id)\n".utf8)); exit(1)
     }
-    // Byte size of a template field type code (variable ones return nil).
+    // Byte size of a template field type code (variable/unhandled ones return nil).
     func tmplSize(_ code: String) -> Int? {
         switch code {
-        case "DBYT", "UBYT", "HBYT", "CHAR", "BFLG", "FBYT": return 1
-        case "DWRD", "UWRD", "HWRD", "BOOL", "WFLG", "FWRD", "RSID", "AWRD": return 2
-        case "DLNG", "ULNG", "HLNG", "LFLG", "FLNG", "PNT ", "TNAM", "KEYB": return 4
-        case "RECT": return 8
+        case "DBYT", "UBYT", "HBYT", "CHAR", "BFLG", "FBYT", "BOOL", "BORV": return 1
+        case "DWRD", "UWRD", "HWRD", "WFLG", "FWRD", "RSID", "AWRD", "WORV", "WCOL": return 2
+        case "DLNG", "ULNG", "HLNG", "LFLG", "FLNG", "PNT ", "TNAM", "LORV", "LCOL", "DATE", "LRID": return 4
+        case "RECT": return 8 // 4×DWRD
+        case "COLR": return 6 // QuickDraw color
+        case "QB64", "QORV": return 8
         default:
             if code.first == "C", let n = Int(code.dropFirst(), radix: 16) { return n } // Cnnn fixed C string
             if code.first == "P", let n = Int(code.dropFirst(), radix: 16) { return n + 1 } // Pnnn pascal
-            return nil // PSTR/CSTR/HEXD/OCNT/LSTB/LSTE/ZCNT etc — variable/structural
+            if code.first == "n", let n = Int(code.dropFirst(), radix: 16) { return n } // NCB string (NovaTools "n")
+            if code.first == "F", let n = Int(code.dropFirst(), radix: 16) { return n } // Fnnn filler bytes
+            return nil // PSTR/CSTR/HEXD/OCNT/LSTB/LSTE/ZCNT/TMPL/KEYB/KEYE etc — variable/structural/unhandled
         }
     }
+    // Bit-field byte width by leading letter(s): BB=1(UInt8) WB=2(UInt16) LB=4(UInt32) QB=8(UInt64).
+    func bitFieldGroupWidth(_ code: String) -> Int? {
+        guard code.count == 4, let n = Int(code.suffix(2)), n >= 1, n <= 64 else { return nil }
+        switch code.prefix(2) {
+        case "BB": return 1
+        case "WB": return 2
+        case "LB": return 4
+        case "QB": return 8
+        default: return nil
+        }
+    }
+    struct TField { let label: String; let code: String }
     let tdata = tr.data
     var tp = tdata.startIndex
-    var tByteOff = 0
-    print("TMPL #\(tr.id) \"\(tr.name)\" — field layout (offset, type, label):")
+    var rawFields: [TField] = []
     while tp < tdata.endIndex {
         let len = Int(tdata[tp]); tp += 1
         guard tp + len + 4 <= tdata.endIndex else { break }
@@ -424,11 +567,46 @@ case "tmpl":
         tp += len
         let code = String(data: tdata[tp..<tp+4], encoding: .macOSRoman) ?? "????"
         tp += 4
-        let sz = tmplSize(code)
-        let offStr = sz == nil ? "  ?  " : String(format: "%5d", tByteOff)
-        print("  @\(offStr)  \(code)  \(label)")
-        if let s = sz { tByteOff += s }
+        rawFields.append(TField(label: label, code: code))
     }
+    print("TMPL #\(tr.id) \"\(tr.name)\" — field layout (offset, type, label):")
+    var fi = 0
+    var tByteOff = 0
+    var bitBitsRemaining = 0 // bits left to fill in the currently-open bit-field group
+    var sawUnhandled = false
+    while fi < rawFields.count {
+        let f = rawFields[fi]
+        // "Rnnn": repeat the *next* field nnn times (hex).
+        if f.code.first == "R", f.code.count == 4, let count = Int(f.code.dropFirst(), radix: 16) {
+            guard fi + 1 < rawFields.count else { break }
+            let target = rawFields[fi + 1]
+            print("  @\(String(format: "%5d", tByteOff))  [\(f.code) → ×\(count)]  \(f.label)")
+            let sz = tmplSize(target.code)
+            for i in 0..<count {
+                let offStr = sz == nil ? "  ?  " : String(format: "%5d", tByteOff)
+                print("  @\(offStr)  \(target.code)  \(target.label) [\(i+1)/\(count)]")
+                if let s = sz { tByteOff += s } else { sawUnhandled = true }
+            }
+            fi += 2
+            continue
+        }
+        if let groupWidth = bitFieldGroupWidth(f.code) {
+            let bits = Int(f.code.suffix(2)) ?? 0
+            if bitBitsRemaining <= 0 { bitBitsRemaining = groupWidth * 8 }
+            let offStr = bitBitsRemaining == groupWidth * 8 ? String(format: "%5d", tByteOff) : "  \"  " // mid-group: same underlying read
+            print("  @\(offStr)  \(f.code)  \(f.label)  (\(bits) bits)")
+            bitBitsRemaining -= bits
+            if bitBitsRemaining <= 0 { tByteOff += groupWidth; bitBitsRemaining = 0 }
+            fi += 1
+            continue
+        }
+        let sz = tmplSize(f.code)
+        let offStr = sz == nil ? "  ?  " : String(format: "%5d", tByteOff)
+        print("  @\(offStr)  \(f.code)  \(f.label)")
+        if let s = sz { tByteOff += s } else if !["PACK", "DVDR", "CASE", "CASR", "RREF", "FCNT"].contains(f.code) { sawUnhandled = true }
+        fi += 1
+    }
+    print("\ntotal (as computed): \(tByteOff) bytes" + (sawUnhandled ? "  (⚠️ contains TMPL-include/KEYB or another unhandled construct — treat as a lower bound, verify against `raw`)" : ""))
 
 case "strscan":
     // Dev tool: across all resources of a type, find printable ASCII runs (>=3
@@ -500,6 +678,33 @@ case "cicn":
         }
     } catch {
         FileHandle.standardError.write(Data("error decoding cicn \(id): \(error)\n".utf8)); exit(1)
+    }
+
+case "ditl":
+    // Dev tool: decode a classic Mac DITL (dialog item list) resource into its
+    // item rects, types, and text/resource-ID payloads — the authoritative pixel
+    // layout for a dialog, straight from the game's own resource fork.
+    //   evnova-extract ditl <file> <id>
+    guard args.count == 3, let ditlId = Int(args[2]) else { usage() }
+    let (ditlCol, _) = loadCollection(args[1])
+    guard let ditlRes = ditlCol.resource(FourCharCode("DITL")!, ditlId) else {
+        FileHandle.standardError.write(Data("error: no DITL #\(ditlId) in \(args[1])\n".utf8)); exit(1)
+    }
+    printDITL(ditlRes)
+
+case "dlog":
+    // Dev tool: decode a classic Mac DLOG (dialog window template) resource —
+    // bounds rect, title, and the DITL id it references.
+    //   evnova-extract dlog <file> <id>
+    guard args.count == 3, let dlogId = Int(args[2]) else { usage() }
+    let (dlogCol, _) = loadCollection(args[1])
+    guard let dlogRes = dlogCol.resource(FourCharCode("DLOG")!, dlogId) else {
+        FileHandle.standardError.write(Data("error: no DLOG #\(dlogId) in \(args[1])\n".utf8)); exit(1)
+    }
+    printDLOG(dlogRes)
+    if let itemsID = dlogItemsID(dlogRes), let ditlRes = dlogCol.resource(FourCharCode("DITL")!, itemsID) {
+        print("\n--- linked DITL #\(itemsID) ---")
+        printDITL(ditlRes)
     }
 
 case "ai":

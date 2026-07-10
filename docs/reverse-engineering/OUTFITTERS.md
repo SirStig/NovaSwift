@@ -124,6 +124,22 @@ Implemented: `Sources/EVNovaKit/NovaAIModels.swift` decodes `contribute` (`@30`)
 - `lockState(for:pilot:at:diplomacy:)` (lines 52-59) combines Availability +
   Require-if-in-scope into the final available/locked/hidden state.
 
+### 3.3a `OnPurchase`/`OnSell` — side-effect control-bit sets
+
+> "OnPurchase: Control bit set expression. Leave blank if unused." /
+> "OnSell: Evaluated when the item is sold."
+
+Distinct from `Availability` (a *test*, read-only, gates the Buy button):
+these two are NCB **set** expressions, evaluated as a side effect of the
+transaction itself (buying/selling this specific outfit can flip other
+control bits — e.g. a permit purchase marking a bit a mission later checks).
+Offsets confirmed at `@301`/`@556` respectively (§8); **not decoded anywhere
+in `OutfRes`/`PilotStore.buyOutfit`/`sellOutfit`** — no bit-set side effect
+of any outfit purchase or sale exists in this engine today. This is a real
+gap: any Bible plugin (or the stock data) that gates story progress on
+"player bought item X" rather than "player owns item X" would silently not
+work.
+
 ### 3.4 Shown-but-locked vs. fully hidden
 
 Both gates above can fail without removing the item from the list — the Bible
@@ -171,8 +187,8 @@ both" style listings) with no current code path.
 
 Field | Meaning
 ---|---
-`Cost` | Base credits charged (Int32, `@14`). Refund on sell is the **same** value — the Bible has no separate sell-price field for outfits (unlike commodities, which have buy/sell spreads via `PriceLevel`).
-`Flags 0x0200` | "This item's total price is proportional to the player's ship's mass. (ship class Mass field is multiplied by this item's Cost field)" — i.e. actual charge = `shipClass.Mass × outfit.Cost`, not the flat `Cost` shown.
+`Cost` | Base credits charged (Int32/`DLNG`, `@14`, confirmed — see §8). Refund on sell is the **same** value — the Bible has no separate sell-price field for outfits (unlike commodities, which have buy/sell spreads via `PriceLevel`).
+`Flags 0x0200` | "This item's total price is proportional to the player's ship's mass. (ship class Mass field is multiplied by this item's Cost field)" — i.e. actual charge = `shipClass.Mass × outfit.Cost`, not the flat `Cost` shown. `Flags` itself is already decoded at the correct offset (`@12`, `WORV`, confirmed — see §8); this is a decoding-*consumption* gap (the bit is never read), not an offset-hunting one.
 
 `OutfRes.cost` is decoded (`NovaAIModels.swift`) and used directly as the
 displayed/charged price in `OutfitterView.info` and `PilotStore.buyOutfit`/
@@ -196,6 +212,44 @@ ModType | Meaning | ModVal
 ---|---|---
 `1` | It's a weapon | ID of the associated `wëap` resource
 `3` | It's ammunition | ID of the associated `wëap` resource **it feeds**
+
+**The Weapon/Ammo `ModVal` is a true union at a single shared offset, `@8`
+(confirmed against real data — see §8).** ResForge's `oütf` TMPL (`Templates.rsrc`
+id 513) encodes the *primary* modifier slot as a `KWRD` selector (`ModType`,
+2 bytes) immediately followed by a `KEYB`/`KEYE`-guarded union body that is
+`RSID Weapon='wëap'` when `ModType==1` and `RSID Weapon Ammo='wëap'` when
+`ModType==3` — i.e. the editor's template genuinely declares ONE reserved
+slot for the id, reinterpreted by case, not two sequential 2-byte reservations
+(the naive `evnova-extract tmpl` dump prints these sub-cases as `@6`/`@8`
+because it sums KEYB case bodies sequentially instead of collapsing them —
+a known limitation of that dev tool, not evidence of separate storage). Real
+byte data settles it outright:
+
+- `swift run evnova-extract raw "data/EV Nova" oütf 128` → **"Light Blaster"**
+  (weapon, `ModType==1`): byte word `@6`=1, `@8`=**128** — 128 is exactly the
+  `wëap` id this outfit's own name and the existing `OutfitModType.weapon`
+  decoder agree it grants.
+- `swift run evnova-extract raw "data/EV Nova" oütf 135` → **"IR Missile"**
+  (ammo, `ModType==3`): byte word `@6`=3, `@8`=**134** — 134 is the `wëap` id
+  of outfit #134 "IR Missile Launcher" (itself a `ModType==1` weapon outfit
+  whose own `@8` is 134), i.e. launcher and ammo agree on the fed weapon id
+  at the identical absolute offset.
+- `swift run evnova-extract raw "data/EV Nova" oütf 130` (weapon, "Light
+  Blaster Turret") → `@8`=130, `@12`(Flags)=2 (`0x0002` Turret bit, matching
+  the name). `swift run evnova-extract raw "data/EV Nova" oütf 156` (ammo,
+  "Polaron Torpedo") → `@8`=148, matching outfit #155 "Polaron Torpedo Tube"'s
+  own weapon id 148.
+
+Three independent weapon/ammo pairs (128/135, 130/—, 156/155) all place the
+`wëap` RSID at absolute byte offset **8**, whether the outfit is `ModType 1`
+or `ModType 3` — there is no separate "Ammo@16"-style reservation anywhere in
+real data (that offset, `@16`, is actually the low 16 bits of `Cost`, see §8).
+This is a genuine on-disk union, not merely an editor-UI convenience, and it
+matches what `Sources/EVNovaKit/NovaAIModels.swift`'s existing `OutfRes`
+decoder already does (`modifiers` loop reads type `@6`/value `@8` for the
+first slot) — that decoder was already correct here, just previously
+unverified against the TMPL/raw method. **The doc's original draft claim of
+"Weapon@10/Ammo@16" (unverified) is wrong and is superseded by this finding.**
 
 So a launcher and its missiles are two separate `oütf` entries, both pointing
 at the *same* `wëap` id — the weapon defines the projectile/damage/reload
@@ -225,8 +279,8 @@ Field | Meaning | Implemented?
 `Flags 0x0020` | Persistent specifically across a mission's forced ship-swap (`set` operator), independent of 0x0004 | Not decoded.
 `Flags 0x0008` | "This item can't be sold" | **Not decoded or enforced** — `PilotStore.sellOutfit` (`PilotStore.swift:224-230`) allows selling back any owned outfit unconditionally.
 `Flags 0x0010` | "Remove any items of this type after purchase (useful for permits and other intangible purchases)" | Not decoded/enforced — a permit-type outfit would currently sit in inventory as a normal ownable item instead of vanishing on purchase.
-`ItemClass` | "The item's classification, used in the pêrs resource for items that are given out by non-player characters' ships." | Not decoded on `OutfRes` at all (no field).
-`ScanMask` (outfit-level) | Marks an outfit as contraband to governments whose own `ScanMask` shares a bit — distinct from the mission `ScanMask` field already decoded in `MissionModels.swift`. | Not decoded on `OutfRes`. (`MissionModels.swift` decodes a *different*, mission-level `scanMask` used for boarding/cargo-scan checks — not this one.)
+`ItemClass` | "The item's classification, used in the pêrs resource for items that are given out by non-player characters' ships." | Not decoded on `OutfRes`. **Offset confirmed: `@1004`, `DWRD`, 2 bytes** — see §8. Real data: outfits #128/#135/#130/#156 all read 0 here (unclassified), consistent with these being ordinary shop items rather than pêrs loot.
+`ScanMask` (outfit-level) | Marks an outfit as contraband to governments whose own `ScanMask` shares a bit — distinct from the mission `ScanMask` field already decoded in `MissionModels.swift`. | Not decoded on `OutfRes`. **Offset confirmed: `@1006`, `WB16`, 2 bytes** — see §8. (`MissionModels.swift` decodes a *different*, mission-level `scanMask` used for boarding/cargo-scan checks — not this one.) Real data: 0 for the four spot-checked outfits (none of them are contraband-flagged).
 
 Mutual exclusivity: the Bible doesn't describe a direct "owning A forbids
 buying B" field for outfits; the closest mechanisms are `Require`/`Contribute`
@@ -308,7 +362,83 @@ single global roll-day) or is scoped per-system/per-visit — the shipped
 which matches the simplest reading but isn't separately confirmed by any
 Bible passage beyond the field's one-sentence description.
 
-## 8. What's implemented vs. what's missing
+## 8. Confirmed on-disk field layout (union question resolved)
+
+Method: `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc` TMPL
+id 513 is `oütf`'s community-authoritative byte-layout template (dumped with
+`swift run evnova-extract tmpl "third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc" 513`).
+That dump computes a naive total of 1016 bytes and carries a "contains
+KEYB/unhandled construct — treat as lower bound" warning, because the dev
+tool sums two unhandled constructs as if they were sequential instead of
+zero/shared-width: (a) the Weapon/Ammo `ModVal` union at the primary modifier
+slot (§5), and (b) a 3-entry `FCNT`-repeated "Secondary Function" list (each
+entry itself a `KWRD` selector + a same-shaped union value, for the outfit's
+2nd–4th modifier slots) that the tool sizes as **zero bytes** instead of its
+real 12 bytes (3 × 4-byte slots). Real resource size settles the missing
+width directly: `swift run evnova-extract raw "data/EV Nova" oütf 128` and
+`... oütf 135` both report **1028 bytes**, i.e. exactly `1016 + 12` — proving
+the secondary-function list is the only remaining unsized gap, and letting
+every field from `Contribute` onward be corrected by a flat `+12`.
+
+Cross-checked against four real outfits — two weapon-type, two ammo-type, one
+pair sharing a launcher/ammo `wëap` id (see §5) and one turret-flagged weapon
+(`Flags@12 == 0x0002`, matching its "Turret" name) and one ammo outfit with a
+real, non-trivial `Availability` NCB string (`swift run evnova-extract raw
+"data/EV Nova" oütf 156` → `"(b298 & P30) & !b326..."` at `@46`, and
+`Flags@12 == 0x4000`, "hide unless Availability true" — a self-consistent
+pairing, since a real conditional Availability is exactly when an author
+would opt into hiding on failure):
+
+```
+displayWeight@0(DWRD,2B) mass@2(DWRD,2B) techLevel@4(DWRD,2B)
+modType@6(KWRD,2B: -1=None/1=Weapon/3=Ammunition)
+modVal@8(RSID,2B — UNION: wëap id granted if modType==1, wëap id fed if modType==3;
+  CONFIRMED shared/single offset, not two reservations — see §5 for the 3-pair evidence)
+maximum@10(DWRD,2B) flags@12(WORV,2B) cost@14(DLNG,4B)
+secondaryFunctions[3]@18(each: KWRD selector 2B ["None"=-1 or a ModType from
+  oütf.ModTypes/TMPL#550] + union value 2B, 4B/slot, slots at @18/@22/@26 —
+  matches Sources/EVNovaKit/NovaAIModels.swift's existing OutfRes.modifiers
+  loop exactly, which reads pos∈[6,18,22,26]) — spot-checked outfits #128/#130/
+  #135/#156 all have all three slots = (-1, 0) i.e. unused
+contribute@30(QB64,8B) require@38(QB64,8B)
+availability@46(n0FF,255B,NCB Test) — spot-check: oütf#135 = "!b424",
+  oütf#156 = "(b298 & P30) & !b326..." (real, plausible NCB expressions)
+onPurchase@301(n0FF,255B,NCB Set) onSell@556(n0FF,255B,NCB Set)
+outfitterName@811(C040,64B) — spot-check: oütf#128 byte-exact "Light Blaster"
+  at @811 (found via the raw command's ASCII view), oütf#135 "IR Missile" @811
+lowercaseName@875(C040,64B) — "light blaster"@875 / "IR missile"@875 (note:
+  #135's "lowercase" field is actually "IR missile", not fully-lowercased —
+  Bible field naming is aspirational, not literally enforced by the data)
+lowercasePlural@939(C041,65B)
+itemClass@1004(DWRD,2B) scanMask@1006(WB16,2B)
+availableRandom@1008(DWRD,2B) — matches NovaAIModels.swift's existing
+  OutfRes.buyRandom@1008 exactly; real value 100 for oütf#128 ("always
+  available", the Bible's documented ≥100-clamped default)
+requireBitsApplyTo@1010(DWRD,2B) — matches existing OutfRes.requireGovt@1010
+  exactly; real value 127 for oütf#128 (outside all of the Bible's named
+  CASR ranges [-1, 128..383, 1128..1383, 2128..2383, 3128..3383] — likely a
+  stale/never-touched authoring default rather than a meaningful scope, not
+  a decoding bug: the offset itself is confirmed correct by exact agreement
+  with the tool-computed position and the resource's exact total byte count)
+unused@1012(F010,16B)
+TOTAL: 1028 bytes (confirmed exact match against real oütf #128 "Light
+  Blaster" AND #135 "IR Missile" — both report exactly 1028 bytes)
+```
+
+**Result: `Sources/EVNovaKit/NovaAIModels.swift`'s existing `OutfRes` decoder
+(offsets `cost@14`, modifier slots at `6/18/22/26`, `contribute@30`,
+`require@38`, `availBits@46`, `buyRandom@1008`, `requireGovt@1010`) is
+byte-for-byte correct for everything it decodes.** It was previously only
+cited as "verified against novaparse" (a third-party partial TypeScript
+port); this session independently re-derives and confirms the same offsets
+straight from the community TMPL + real game bytes, with no daylight between
+the two derivations. The **new** information from this pass is: (1) proof
+the Weapon/Ammo slot is a true union rather than an unverified guess, (2)
+the previously-undecoded `itemClass@1004`/`scanMask@1006`/`outfitterName@811`/
+`lowercaseName@875`/`lowercasePlural@939`/`onPurchase@301`/`onSell@556`
+offsets, none of which existed anywhere in this codebase or doc before.
+
+## 9. What's implemented vs. what's missing
 
 Mechanic | Bible field | Status | Where
 ---|---|---|---
@@ -320,8 +450,9 @@ Show-greyed vs. fully hide | `Flags 0x0100/0x4000` | Done | `OutfRes.hidesWhenLo
 Sell-anywhere override | `Flags 0x0800` | Partial — only overrides Require/Availability, **not** the upstream tech-level filter | `OutfRes.ignoresRequirements`; gap noted in §3.5
 Max-owned cap | `Max` | Done | `PilotStore.canBuyOutfit`
 Base price + flat refund | `Cost` | Done | `OutfRes.cost`, `PilotStore.buyOutfit`/`sellOutfit`
-Mass-proportional price | `Flags 0x0200` | **Missing** — not decoded, not applied | —
-Mass-proportional install mass | `Flags 0x0400` | **Missing** — not decoded, not applied | —
+Mass-proportional price | `Flags 0x0200` | **Missing** — bit not consumed (offset `@12` already decoded as `.flags`) | —
+Mass-proportional install mass | `Flags 0x0400` | **Missing** — bit not consumed (offset `@12` already decoded as `.flags`) | —
+Purchase/sale control-bit side effects | `OnPurchase`/`OnSell` | **Missing** — offsets confirmed `@301`/`@556` (§8), not decoded at all | —
 Weapon/ammo linkage | `ModType 1`/`3` | Done | `OutfRes.grantedWeapons`/`.ammoFor`, folded in `ShipLoadout.swift:140-141`
 Ammo/other-item cap increase | `ModType 27` | Decoded but **inert** — falls to `default: break` | `ShipLoadout.swift`'s aggregation switch
 Fixed-gun/turret slot flags | `Flags 0x0001/0x0002` | **Missing** entirely — no gun/turret purchase-time slot limit enforced | —
@@ -330,8 +461,9 @@ Consumed-on-purchase (permits) | `Flags 0x0010` | **Missing** | —
 Persistent-across-ship-trade | `Flags 0x0004`/`0x0020` | **Missing** as a distinct rule — outfits currently always carry over regardless of the flag | `PilotStore.buyShip` comment
 DispWeight-tier suppression | `Flags 0x1000` | **Missing** | —
 Ranks-section outfit | `Flags 0x2000` | **Missing** | —
-Illegal-outfit `ScanMask` | `ScanMask` (outf-level) | **Missing** — not decoded (distinct from the mission-level `scanMask` that *is* decoded) | —
-`ItemClass` (for pêrs loot) | `ItemClass` | **Missing** | —
+Illegal-outfit `ScanMask` | `ScanMask` (outf-level) | **Missing** — offset confirmed `@1006` (§8), not decoded (distinct from the mission-level `scanMask` that *is* decoded) | —
+`ItemClass` (for pêrs loot) | `ItemClass` | **Missing** — offset confirmed `@1004` (§8) | —
+`Outfitter Name`/`Lowercase Name`/`Lowercase Plural` | (unnamed in Bible field list; display strings) | **Missing** — offsets confirmed `@811`/`@875`/`@939` (§8); engine currently displays only the resource-fork `name` metadata, never these in-record strings | —
 Daily restock roll | `BuyRandom` (both resources) | Done, including the documented zero-behavior asymmetry | `NovaEconomy.swift` `onOfferToday`, §7 above
 
 ### NovaJS cross-reference

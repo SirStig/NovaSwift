@@ -20,6 +20,14 @@ final class GameHUDModel: ObservableObject {
     @Published var weaponAmmo = -1      // rounds left; -1 = unlimited / n/a
     @Published var cargoUsed = 0
     @Published var cargoCapacity = 0
+    /// Cargo hold contents by commodity, display-ready (name already resolved
+    /// — e.g. via `NovaGame.commodityName` — matching how `weaponName` etc.
+    /// arrive pre-resolved rather than as raw ids). Mirrors the per-commodity
+    /// breakdown `World`'s ship `cargo: [Int: Int]` dictionary already tracks
+    /// for the Trade screen; zero-ton entries are omitted. Empty when no
+    /// per-commodity source is wired up yet — `cargoUsed`/`cargoCapacity`
+    /// above remain the source of truth for the aggregate tonnage.
+    @Published var cargoByCommodity: [(name: String, tons: Int)] = []
     /// Non-empty while a landable stellar object is in reach (shown as a prompt).
     @Published var landPrompt = ""
     /// Non-empty briefly after hailing a ship (bottom-left banner), e.g. "The
@@ -32,6 +40,17 @@ final class GameHUDModel: ObservableObject {
     @Published var targetHostile = false
     /// The target's government, e.g. "Trader" (`gövt.TargetCode`).
     @Published var targetGovtLabel = ""
+    /// `shïp.Subtitle` (Nova Bible) — a short descriptor shown under the
+    /// target's name on the target readout, e.g. a hull's class tagline.
+    /// Empty = the target's ship type defines none.
+    @Published var targetSubtitle = ""
+    /// `shïp.Flags` 0x0100 (Bible: "Show % armor on target display instead of
+    /// 'Shields Down'") — once `targetShield` hits 0, show `targetArmor`
+    /// instead of literal "Shields Down" text.
+    @Published var targetShowArmorWhenShieldsDown = false
+    /// `shïp.Flags` 0x0200 (Bible: "Don't show armor or shield state on
+    /// status display") — omit the shield/armor line entirely for this target.
+    @Published var targetHidesShieldArmorLine = false
     /// The click-selected planet/station nav destination, if any — independent
     /// of the ship target above (empty name = none selected).
     @Published var navTargetName = ""

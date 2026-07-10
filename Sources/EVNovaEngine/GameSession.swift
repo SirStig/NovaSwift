@@ -47,6 +47,7 @@ public enum GameSession {
             let spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
             world.spawner = spawner
             spawner.populate(world)
+            world.populateAsteroids(typeIDs: sys.asteroidTypeIDs, count: sys.asteroidCount)
         }
         return (world, galaxy)
     }

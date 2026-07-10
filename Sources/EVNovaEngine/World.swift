@@ -1,4 +1,5 @@
 import Foundation
+import EVNovaKit
 
 /// Abstract control input. Touch, keyboard, game controllers **and the NPC AI**
 /// all translate into this; the simulation only ever reads `ControlIntent`, never
@@ -406,8 +407,13 @@ public final class World {
     /// Populates and refreshes the NPC population.
     public var spawner: Spawner?
 
+    /// Live asteroids (real `röid` rocks, from the system's `sÿst.Asteroids`/
+    /// `AstTypes` fields). Stationary — see `Asteroid`'s doc comment.
+    public private(set) var asteroids: [Asteroid] = []
+
     public var rng = SplitMix64(seed: 0xE7_0A_5EED)
     private var nextEntityID = 1
+    private var nextAsteroidID = 1
 
     public init(player: Ship, tuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
@@ -471,6 +477,61 @@ public final class World {
         return e
     }
 
+    // MARK: Asteroids
+
+    /// Scatter `count` real asteroids of the enabled `typeIDs` (a system's
+    /// `sÿst.Asteroids`/`AstTypes`) around `systemContext.center`, in the same
+    /// interior scatter band `Spawner` uses for ship placement
+    /// (`300...(jumpRadius*0.6)`, `Spawner.swift`). Call once after
+    /// `systemContext`/`galaxy` are set. Each rock picks a uniformly-random
+    /// enabled type — the Bible's `AstTypes` only says which types are
+    /// enabled, not a weighting — and looks up its real stats/sprite geometry.
+    public func populateAsteroids(typeIDs: [Int], count: Int) {
+        guard count > 0, !typeIDs.isEmpty, let game = galaxy?.game else { return }
+        let minRadius = 300.0
+        let maxRadius = max(minRadius + 1, systemContext.jumpRadius * 0.6)
+        for _ in 0..<count {
+            let typeID = typeIDs[rng.int(in: 0...(typeIDs.count - 1))]
+            let bearing = rng.double(in: 0...(2 * Double.pi))
+            let dist = rng.double(in: minRadius...maxRadius)
+            let position = systemContext.center + Vec2.heading(bearing) * dist
+            if let a = spawnAsteroid(typeID: typeID, at: position, game: game) {
+                asteroids.append(a)
+            }
+        }
+    }
+
+    /// Build one asteroid of `typeID` at `position` with a random initial spin
+    /// phase, looking up its real `röid` stats and `spïn` sprite geometry (for
+    /// the physical radius). Returns nil if the type's data can't be resolved.
+    private func spawnAsteroid(typeID: Int, at position: Vec2, game: NovaGame) -> Asteroid? {
+        guard let roid = game.roid(typeID) else { return nil }
+        let radius = game.spin(typeID + 672).map { Double($0.tileWidth) / 2 } ?? 24
+        let angle = rng.double(in: 0...(2 * Double.pi))
+        let a = Asteroid(id: nextAsteroidID, roidTypeID: typeID, position: position, angle: angle,
+                         roid: roid, radius: radius, hpScale: combatTuning.hpScale)
+        nextAsteroidID += 1
+        return a
+    }
+
+    /// Destroy an asteroid: explosion effect, and — per its real `FragType1/2`/
+    /// `FragCount` — spawn smaller sub-asteroids at the same position (±50%
+    /// count, per the Bible). A "Huge" type naturally shrinks into whatever its
+    /// own `FragType` points at (e.g. "Big"/"Medium"); no invented scale factor.
+    private func destroyAsteroid(_ rock: Asteroid) {
+        rock.isAlive = false
+        events.append(.explosion(at: rock.position, radius: max(20, rock.radius * 1.2), soundID: nil))
+        let fragTypes = [rock.fragType1, rock.fragType2].filter { $0 >= 128 }
+        guard !fragTypes.isEmpty, rock.fragCount > 0, let game = galaxy?.game else { return }
+        let n = rng.int(in: max(0, rock.fragCount - rock.fragCount / 2)...(rock.fragCount + rock.fragCount / 2))
+        for _ in 0..<n {
+            let typeID = fragTypes[rng.int(in: 0...(fragTypes.count - 1))]
+            if let frag = spawnAsteroid(typeID: typeID, at: rock.position, game: game) {
+                asteroids.append(frag)
+            }
+        }
+    }
+
     // MARK: Step
 
     public func step(_ dt: Double) {
@@ -508,6 +569,11 @@ public final class World {
         for s in allShips {
             for w in s.weapons { w.tick(dt) }
             if !s.disabled { s.regen(dt) }
+        }
+
+        // Asteroids don't move (see `Asteroid`'s doc comment) — they only spin.
+        for rock in asteroids where rock.isAlive {
+            rock.angle += rock.angularVelocityDegPerSec * .pi / 180.0 * dt
         }
 
         runPointDefense()
@@ -635,8 +701,9 @@ public final class World {
         let origin = ship.position + dir * (ship.radius + 2)
         var endPoint = origin + dir * spec.range
         var hitShip: Ship?
+        var hitAsteroid: Asteroid?
 
-        // Nearest valid ship along the ray within range.
+        // Nearest valid ship or asteroid along the ray within range.
         var bestT = spec.range
         for other in allShips where other.entityID != ship.entityID && other.isAlive {
             if !canHit(owner: ship.entityID, ownerGovt: ship.government, victim: other) { continue }
@@ -645,19 +712,41 @@ public final class World {
             guard along > 0, along <= spec.range else { continue }
             let perp = (rel - dir * along).length
             if perp <= other.radius + 4 && along < bestT {
-                bestT = along; hitShip = other
+                bestT = along; hitShip = other; hitAsteroid = nil
+            }
+        }
+        for rock in asteroids where rock.isAlive {
+            let rel = rock.position - origin
+            let along = rel.dot(dir)
+            guard along > 0, along <= spec.range else { continue }
+            let perp = (rel - dir * along).length
+            if perp <= rock.radius + 4 && along < bestT {
+                bestT = along; hitAsteroid = rock; hitShip = nil
             }
         }
         if let h = hitShip {
             endPoint = origin + dir * bestT
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization)
+        } else if let rock = hitAsteroid {
+            endPoint = origin + dir * bestT
+            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage)
         }
         // `loopSound` weapons get their audio from the beamLoopStart/Stop
         // events above instead — carrying the one-shot id here too would
         // double up (a continuous loop plus a retriggered one-shot every tick).
         events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: origin, to: endPoint,
-                            hit: hitShip != nil, soundID: spec.loopSound ? nil : spec.fireSoundID))
+                            hit: hitShip != nil || hitAsteroid != nil, soundID: spec.loopSound ? nil : spec.fireSoundID))
+    }
+
+    /// Weapon → asteroid damage. Asteroids have no shields, so shield+armor
+    /// damage both come off `hp` (scaled the same way ship armor is via
+    /// `combatTuning`). Not modeling the wëap "x10 mass damage to asteroids"
+    /// flag — that bit isn't decoded on `WeaponSpec` anywhere in this engine
+    /// yet, so every weapon currently does its normal damage to rock.
+    private func applyAsteroidHit(_ rock: Asteroid, shield: Double, armor: Double) {
+        rock.hp -= (shield + armor) * combatTuning.damageScale
+        if rock.hp <= 0 { destroyAsteroid(rock) }
     }
 
     // MARK: Projectiles
@@ -697,8 +786,18 @@ public final class World {
                     break
                 }
             }
+            guard p.alive else { continue }
+
+            for rock in asteroids where rock.isAlive {
+                if (rock.position - p.position).length <= rock.radius {
+                    applyAsteroidHit(rock, shield: p.shieldDamage, armor: p.armorDamage)
+                    p.alive = false
+                    break
+                }
+            }
         }
         projectiles.removeAll { !$0.alive }
+        asteroids.removeAll { !$0.isAlive }
     }
 
     /// Whether a shot from `owner` (faction `ownerGovt`) may damage `victim`.

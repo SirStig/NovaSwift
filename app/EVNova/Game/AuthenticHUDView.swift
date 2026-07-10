@@ -36,8 +36,7 @@ struct AuthenticHUDView: View {
                 }
 
                 targetReadout
-                    .novaPlace(layout, origin: origin(style.intf.targetArea),
-                               size: CGSize(width: style.intf.targetArea.width, height: 40))
+                    .novaPlace(layout, origin: origin(style.intf.targetArea), size: size(style.intf.targetArea))
 
                 weaponReadout
                     .novaPlace(layout, origin: origin(style.intf.weaponArea), size: size(style.intf.weaponArea))
@@ -58,35 +57,56 @@ struct AuthenticHUDView: View {
                        w: CGFloat(r.width) * v, h: CGFloat(r.height))
     }
 
-    /// The real target-lock display: the selected ship's name, government,
-    /// and shield %, or the selected planet's name, or a dim "No Target".
+    /// The real target-lock display: the selected ship's name, `shïp.Subtitle`,
+    /// government, and shield/armor line (or the selected planet's name, or a
+    /// dim "No Target"). The shield/armor line respects the target's own
+    /// `shïp.Flags` per the Bible: 0x0200 hides it outright, 0x0100 substitutes
+    /// armor % for the literal "Shields Down" text once shields hit 0.
     @ViewBuilder
     private var targetReadout: some View {
         VStack(alignment: .leading, spacing: 1) {
             if !model.targetName.isEmpty {
                 Text(model.targetName)
-                    .novaFont(.hud, weight: .bold)
+                    .novaFont(.hud, weight: .bold, size: statusSize)
                     .foregroundStyle(model.targetHostile ? Color.red : color(style.intf.brightText))
-                if !model.targetGovtLabel.isEmpty {
-                    Text(model.targetGovtLabel).novaFont(.hud)
+                if !model.targetSubtitle.isEmpty {
+                    Text(model.targetSubtitle).novaFont(.hud, size: subtitleSize)
                         .foregroundStyle(color(style.intf.dimText))
                 }
-                Text("Shield \(Int(model.targetShield * 100))%")
-                    .novaFont(.hud).monospacedDigit()
-                    .foregroundStyle(color(style.intf.dimText))
+                if !model.targetGovtLabel.isEmpty {
+                    Text(model.targetGovtLabel).novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                }
+                if !model.targetHidesShieldArmorLine {
+                    Text(targetShieldArmorLine)
+                        .novaFont(.hud, size: subtitleSize).monospacedDigit()
+                        .foregroundStyle(color(style.intf.dimText))
+                }
             } else if !model.navTargetName.isEmpty {
                 Text(model.navTargetName)
-                    .novaFont(.hud, weight: .bold)
+                    .novaFont(.hud, weight: .bold, size: statusSize)
                     .foregroundStyle(color(style.intf.brightText))
                 Text(model.navTargetLandable ? "Landable" : "No landing clearance")
-                    .novaFont(.hud)
+                    .novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
             } else {
-                Text("No Target").novaFont(.hud)
+                Text("No Target").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "Shield N%" while shields remain; once depleted, literal "Shields Down"
+    /// unless the target's `shïp.Flags` 0x0100 asks for its armor % instead.
+    private var targetShieldArmorLine: String {
+        if model.targetShield > 0 {
+            return "Shield \(Int(model.targetShield * 100))%"
+        } else if model.targetShowArmorWhenShieldsDown {
+            return "Armor \(Int(model.targetArmor * 100))%"
+        } else {
+            return "Shields Down"
+        }
     }
 
     /// Active weapon + remaining ammo (blank when unarmed — an empty box here
@@ -94,10 +114,10 @@ struct AuthenticHUDView: View {
     private var weaponReadout: some View {
         VStack(alignment: .leading, spacing: 1) {
             if !model.weaponName.isEmpty {
-                Text(model.weaponName).novaFont(.hud, weight: .semibold)
+                Text(model.weaponName).novaFont(.hud, weight: .semibold, size: statusSize)
                     .foregroundStyle(color(style.intf.brightText))
                 if model.weaponAmmo >= 0 {
-                    Text("\(model.weaponAmmo) rounds").novaFont(.hud).monospacedDigit()
+                    Text("\(model.weaponAmmo) rounds").novaFont(.hud, size: subtitleSize).monospacedDigit()
                         .foregroundStyle(color(style.intf.dimText))
                 }
             }
@@ -112,16 +132,16 @@ struct AuthenticHUDView: View {
     /// the real interface data has no field for at all.
     private var navReadout: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(model.shipName).novaFont(.hud, weight: .semibold)
+            Text(model.shipName).novaFont(.hud, weight: .semibold, size: statusSize)
                 .foregroundStyle(color(style.intf.brightText))
             if !model.systemName.isEmpty {
-                Text(model.systemName).novaFont(.hud)
+                Text(model.systemName).novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
             }
             if !model.navCourseSystemName.isEmpty {
-                Text("Course: \(model.navCourseSystemName)").novaFont(.hud)
+                Text("Course: \(model.navCourseSystemName)").novaFont(.hud, size: subtitleSize)
                 Text("\(model.navCourseJumps) jump\(model.navCourseJumps == 1 ? "" : "s")")
-                    .novaFont(.hud).monospacedDigit()
+                    .novaFont(.hud, size: subtitleSize).monospacedDigit()
             }
         }
         .foregroundStyle(color(style.intf.dimText))
@@ -130,14 +150,38 @@ struct AuthenticHUDView: View {
 
     /// Cargo hold usage — hidden entirely for holds with no capacity (e.g. an
     /// unmodified shuttle), matching how the bar areas above stay blank too.
+    /// The real `CargoArea` rect is sized for a per-commodity list (e.g.
+    /// "Food 4t" / "Metal 2t"); `model.cargoByCommodity` supplies those lines
+    /// when the caller has wired up a per-commodity source, on top of the
+    /// aggregate total this always shows.
     @ViewBuilder
     private var cargoReadout: some View {
         if model.cargoCapacity > 0 {
-            Text("CARGO \(model.cargoUsed)/\(model.cargoCapacity)t")
-                .novaFont(.hud).monospacedDigit()
-                .foregroundStyle(color(style.intf.dimText))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("CARGO \(model.cargoUsed)/\(model.cargoCapacity)t")
+                    .novaFont(.hud, size: statusSize).monospacedDigit()
+                    .foregroundStyle(color(style.intf.dimText))
+                ForEach(model.cargoByCommodity, id: \.name) { item in
+                    Text("\(item.name) \(item.tons)t")
+                        .novaFont(.hud, size: subtitleSize).monospacedDigit()
+                        .foregroundStyle(color(style.intf.dimText))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// The `ïntf` resource's own font sizes (`StatusFontSize`/`SubtitleFontSize`)
+    /// for the HUD's primary vs. secondary/descriptor lines, in design-space
+    /// points — `.novaFont(size:)` scales them by the ambient `novaTextScale`
+    /// the same way it scales every role's built-in `baseSize`. Falls back to
+    /// the generic `.hud` role size if a given `ïntf` (e.g. an unusual
+    /// government skin) leaves the field zeroed.
+    private var statusSize: CGFloat {
+        style.intf.statusFontSize > 0 ? CGFloat(style.intf.statusFontSize) : NovaFontRole.hud.baseSize
+    }
+    private var subtitleSize: CGFloat {
+        style.intf.subtitleFontSize > 0 ? CGFloat(style.intf.subtitleFontSize) : NovaFontRole.hud.baseSize
     }
 
     private func origin(_ r: NovaRect) -> CGPoint { CGPoint(x: r.left, y: r.top) }

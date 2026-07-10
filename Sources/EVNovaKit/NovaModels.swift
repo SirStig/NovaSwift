@@ -196,6 +196,15 @@ public struct ShipRes {
     /// Government this hull "belongs" to when spawned outside a `düde`.
     public let inherentGovt: Int    // @72
     public let flags: UInt16        // @74
+    /// "Show % armor on target display instead of 'Shields Down'" (Nova Bible,
+    /// `shïp.Flags` 0x0100) — only relevant once the target's shields are fully
+    /// depleted (0%); the target readout normally shows literal "Shields Down"
+    /// text in that case, this flag substitutes the armor percentage instead.
+    public var showArmorOnTargetDisplay: Bool { flags & 0x0100 != 0 }
+    /// "Don't show armor or shield state on status display" (Nova Bible,
+    /// `shïp.Flags` 0x0200) — the target readout omits the shield/armor line
+    /// entirely for this ship type.
+    public var hidesShieldArmorOnStatusDisplay: Bool { flags & 0x0200 != 0 }
     /// "The amount (in percent) to which this ship's pilots' skill varies" —
     /// EV Nova Bible. Applied as a per-instance jitter to acceleration/turn
     /// rate (one pilot-skill roll affects both) so ships of the same class
@@ -232,6 +241,10 @@ public struct ShipRes {
     public let contribute: UInt64   // @100 bits this hull contributes toward outfits'/ships' Require
     public let availBits: String    // @108 NCB control-bit test expression gating purchase
     public let require: UInt64      // @896 bits that must be met (via owned outfits/current ship) to buy
+    /// "The subtitle to show on the target display for this ship type" (Nova
+    /// Bible). Offset verified against novaparse `ShipResource.ts` (`subtitle`)
+    /// and real bytes: shïp #128 "Shuttle" carries the text "Version A" here.
+    public let subtitle: String     // @1766, 64-byte NUL-terminated field
     public let flags3: UInt16       // @1830  0x0100 hide-if-unavailable · 0x0200 hide-if-require-unmet
     /// "The percent chance that a ship of this type will be available for
     /// purchase on a given day... A BuyRandom of 0 means this ship will never
@@ -276,6 +289,7 @@ public struct ShipRes {
         contribute = u64(d, 100)
         availBits = cstr(d, 108, 255)
         require = u64(d, 896)
+        subtitle = cstr(d, 1766, 64)
         flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))
         buyRandom = i16(d, 904)
 
@@ -327,6 +341,11 @@ public struct SystRes {
     public let averageShips: Int
     /// Controlling government (−1 = independent/contested).
     public let government: Int
+    /// How many asteroids to place in this system, 0-16 (`sÿst.Asteroids`).
+    public let asteroidCount: Int
+    /// Which `röid` type ids (128-143) are enabled for this system, per the
+    /// `AstTypes` bitmask.
+    public let asteroidTypeIDs: [Int]
 
     /// Spawn entries that reference dudes directly.
     public var dudeSpawns: [(dudeID: Int, prob: Int)] {
@@ -356,6 +375,68 @@ public struct SystRes {
         spawns = sp
         averageShips = i16(d, 100)
         government = i16(d, 102)
+        asteroidCount = max(0, min(16, i16(d, 106)))
+        // AstTypes: two bitmask bytes. @148 ("roidTypes2") bits 0-7 select röid
+        // 128-135 (metal/ice); @149 ("roidTypes1") bits 0-7 select röid 136-143
+        // (dust/crystal) — offsets and bit→id mapping verified against the real
+        // sÿst TMPL (#521) and the Bible's "AstTypes" field table.
+        let roidTypes2 = d.count > 148 ? Int(d[d.startIndex + 148]) : 0
+        let roidTypes1 = d.count > 149 ? Int(d[d.startIndex + 149]) : 0
+        var types: [Int] = []
+        for bit in 0..<8 where (roidTypes2 >> bit) & 1 == 1 { types.append(128 + bit) }
+        for bit in 0..<8 where (roidTypes1 >> bit) & 1 == 1 { types.append(136 + bit) }
+        asteroidTypeIDs = types
+    }
+}
+
+// MARK: röid — asteroid type (strength, yield, fragmentation)
+
+/// One of the 16 asteroid types (`röid` #128-143). Fields verified byte-for-byte
+/// against the real TMPL (#516, `evnova-extract tmpl … 516`) and the Nova Bible's
+/// "The röid resource" section.
+public struct RoidRes {
+    public let id: Int
+    public let name: String
+    /// Equivalent to armor for ships.
+    public let strength: Int
+    /// Frame-advance rate through the 36-frame rotation sheet; 100 = 30 fps.
+    public let spinRate: Int
+    /// 0-5 = standard cargo type, 1000+ = jünk id, -1 = none.
+    public let yieldType: Int
+    /// Average resource-box yield on destruction, ±50%.
+    public let yieldQty: Int
+    public let partCount: Int
+    public let partColor: NovaColor
+    /// Sub-asteroid types to fragment into on death (-1 = none). If both are
+    /// set, Nova randomly picks between them per fragment.
+    public let fragType1: Int
+    public let fragType2: Int
+    /// Average number of sub-asteroids on death, ±50% (0 = no fragmentation).
+    public let fragCount: Int
+    /// `bööm` id (0-63, +1000 for the spark variant), -1 = none.
+    public let explodeType: Int
+    public let mass: Int
+
+    public init(_ r: Resource) {
+        id = r.id
+        name = r.name.isEmpty ? "Asteroid \(r.id)" : r.name
+        let d = r.data
+        strength = i16(d, 0)
+        spinRate = i16(d, 2)
+        yieldType = i16(d, 4)
+        yieldQty = i16(d, 6)
+        partCount = i16(d, 8)
+        if d.count >= 14 {
+            let b = d.startIndex + 10
+            partColor = NovaColor(r: d[b + 1], g: d[b + 2], b: d[b + 3])
+        } else {
+            partColor = NovaColor(r: 0, g: 0, b: 0)
+        }
+        fragType1 = i16(d, 14)
+        fragType2 = i16(d, 16)
+        fragCount = i16(d, 18)
+        explodeType = i16(d, 20)
+        mass = i16(d, 22)
     }
 }
 
@@ -412,6 +493,8 @@ private final class NovaGameCache {
     var govts: [GovtRes]?
     var shipSprites: [Int: SpriteSheet?] = [:]
     var engineGlowSprites: [Int: SpriteSheet?] = [:]
+    var asteroidSprites: [Int: SpriteSheet?] = [:]
+    var starfieldSprite: SpriteSheet??
 }
 
 /// Typed, indexed view of a merged `ResourceCollection`. Decodes resource bodies
@@ -490,6 +573,8 @@ public struct NovaGame {
     public func persons() -> [PersRes] { resources.resources(of: NovaType.pers).map(PersRes.init) }
     public func rank(_ id: Int) -> RankRes? { resources.resource(NovaType.rank, id).map(RankRes.init) }
     public func ranks() -> [RankRes] { resources.resources(of: NovaType.rank).map(RankRes.init) }
+    public func roid(_ id: Int) -> RoidRes? { resources.resource(NovaType.roid, id).map(RoidRes.init) }
+    public func roids() -> [RoidRes] { resources.resources(of: NovaType.roid).map(RoidRes.init) }
     public func desc(_ id: Int) -> DescRes? { resources.resource(NovaType.desc, id).map(DescRes.init) }
     public func stringList(_ id: Int) -> StringListRes? { resources.resource(NovaType.strList, id).map(StringListRes.init) }
     /// Convenience: the narrative text of a `dësc` resource, or "" if absent.
@@ -561,6 +646,35 @@ public struct NovaGame {
             return try? RLED.decode(rle)
         }
         return nil
+    }
+
+    /// Resolve an asteroid type's rotating rock sprite: `röid` id → `spïn`
+    /// (fixed offset `röidID + 672`, the Bible's reserved 800-815 asteroid
+    /// spïn range) → `rlëD`. Cached like `shipSprite`/`engineGlowSprite`.
+    public func asteroidSprite(_ roidID: Int) -> SpriteSheet? {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.asteroidSprites[roidID] { return cached }
+        let spinID = roidID + 672
+        var result: SpriteSheet?
+        if let spin = spin(spinID), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
+            result = try? RLED.decode(rle)
+        }
+        cache.asteroidSprites[roidID] = .some(result)
+        return result
+    }
+
+    /// The real background star sprite (`spïn` #700 "Stars" → `rlëD`), a small
+    /// multi-frame tile Nova scatters across the parallax starfield. Cached
+    /// once — there is only ever one.
+    public func starfieldSprite() -> SpriteSheet? {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.starfieldSprite { return cached }
+        var result: SpriteSheet?
+        if let spin = spin(700), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
+            result = try? RLED.decode(rle)
+        }
+        cache.starfieldSprite = .some(result)
+        return result
     }
 
     /// A reasonable starting system when the pilot's start isn't known: the most
