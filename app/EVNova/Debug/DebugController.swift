@@ -50,6 +50,13 @@ final class DebugController: ObservableObject {
     /// of presets; this is the chosen one.
     @Published var perfTestShipCount: Int = 60
 
+    // MARK: AI debug overlay
+
+    /// Draw each NPC's live AI state, combat target, navigation goal ("path"),
+    /// and formation link over the flight scene. Read every frame by the scene;
+    /// off by default. A pure visualization — it never changes the simulation.
+    @Published var aiDebugEnabled = false
+
     /// The scene currently being measured / driven. Weak: the container owns
     /// the scene's lifetime through `GameHost`, and swaps it on every rebuild.
     weak var scene: GameScene?

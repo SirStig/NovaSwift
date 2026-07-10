@@ -49,10 +49,13 @@ public final class AIBrain {
 
     // Tunables (world units).
     public var scanRange: Double = 1500
-    /// A steady wander/travel destination for non-combat states.
-    var destination: Vec2?
-    /// The stellar object id a trader is travelling to / landing on.
-    var destSpob: Int?
+    /// A steady wander/travel destination for non-combat states. Readable
+    /// (but engine-only writable) so the in-game AI debug overlay can draw the
+    /// line each ship is steering along — its current "path".
+    public internal(set) var destination: Vec2?
+    /// The stellar object id a trader is travelling to / landing on. Exposed
+    /// read-only for the same AI debug overlay.
+    public internal(set) var destSpob: Int?
     /// Which stop on the patrol beat we're heading to next.
     var patrolIndex = 0
     var stateClock: Double = 0
