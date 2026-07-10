@@ -280,6 +280,7 @@ struct GamblingView: View {
 private struct BareNovaPanel<Content: View>: View {
     let size: CGSize
     var maxScale: CGFloat = 2.2
+    @Environment(\.novaDebugEnabled) private var novaDebug
     @ViewBuilder var content: (NovaSpace) -> Content
 
     var body: some View {
@@ -290,6 +291,7 @@ private struct BareNovaPanel<Content: View>: View {
                 RoundedRectangle(cornerRadius: 10).fill(Color.black)
                 RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15))
                 content(space).novaTextScale(1)
+                if novaDebug { NovaDebugGrid.forSpace(space) }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .scaleEffect(scale)

@@ -26,6 +26,12 @@ private let gridTileSize = CGSize(width: 83, height: 54)
 private let gridCols = 4
 private let gridRows = 5
 private let gridPageSize = gridCols * gridRows
+/// Vertical room reserved *below* the 5 tile rows for the `GridPager` chevrons.
+/// Without it the grid frame is exactly `54×5 = 270pt` — the tile rows fill it
+/// edge-to-edge and the pager gets pushed out of the frame and `.clipped()`
+/// away (which is why the scroll buttons rendered "behind" / off-screen).
+private let gridPagerHeight: CGFloat = 22
+private let gridHeight = gridTileSize.height * CGFloat(gridRows) + gridPagerHeight
 
 // MARK: - Trade Center (commodity exchange)
 
@@ -213,8 +219,7 @@ struct OutfitterView: View {
     var body: some View {
         if let frame = graphics.frame(.outfit) {
             NovaMenu(frame: frame, overlay: true) { space in
-                grid.frame(width: gridTileSize.width * CGFloat(gridCols),
-                           height: gridTileSize.height * CGFloat(gridRows))
+                grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)
                     .clipped().novaPlace(space, -373, -153)
                 detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
                 if let o = selected, let pic = graphics.outfitPicture(o) {
@@ -259,6 +264,10 @@ struct OutfitterView: View {
             Spacer(minLength: 0)
             GridPager(page: currentPage, pageCount: pageCount) { page = $0 }
         }
+        // Swipe / mouse-wheel / arrow-key / controller paging — previously written
+        // (GridPagingModifier) but never attached, so the grid only paged via the
+        // chevrons. Now the whole grid responds like the real game's does.
+        .gridPaging(currentPage: currentPage, pageCount: pageCount) { page = $0 }
     }
 
     private var detail: some View {
@@ -369,10 +378,9 @@ struct ShipyardView: View {
     var body: some View {
         if let frame = graphics.frame(.shipyard) {
             NovaMenu(frame: frame, overlay: true) { space in
-                grid.frame(width: gridTileSize.width * CGFloat(gridCols),
-                           height: gridTileSize.height * CGFloat(gridRows))
-                    .novaPlace(space, -373, -153)
-                detail.frame(width: 205, height: 150).novaPlace(space, -27, -150)
+                grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)
+                    .clipped().novaPlace(space, -373, -153)
+                detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
                         .frame(width: 190, height: 185).novaPlace(space, 178, -152)
@@ -415,6 +423,7 @@ struct ShipyardView: View {
             Spacer(minLength: 0)
             GridPager(page: currentPage, pageCount: pageCount) { page = $0 }
         }
+        .gridPaging(currentPage: currentPage, pageCount: pageCount) { page = $0 }
     }
 
     /// The shipyard's dedicated display picture for a hull, falling back to the
@@ -437,22 +446,27 @@ struct ShipyardView: View {
         game.descText(13000 + s.id - 128)
     }
 
+    // Wrapped in a ScrollView (like the Outfitter's) so the class description —
+    // which for second-hand hulls runs several lines — scrolls instead of
+    // clipping at the panel's bottom edge.
     private var detail: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let s = selected {
-                NovaText(s.displayName, size: 13, weight: .bold)
-                NovaText("Cargo: \(s.cargoSpace) tons", size: 11)
-                NovaText("Free mass: \(s.freeMass) tons", size: 11)
-                NovaText("Shield / Armor: \(s.shield) / \(s.armor)", size: 11)
-                NovaText("Guns / Turrets: \(s.maxGuns) / \(s.maxTurrets)", size: 11)
-                let blurb = classDescription(s)
-                if !blurb.isEmpty {
-                    NovaText(blurb, size: 11, width: 195, align: .leading)
-                        .padding(.top, 4)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let s = selected {
+                    NovaText(s.displayName, size: 13, weight: .bold)
+                    NovaText("Cargo: \(s.cargoSpace) tons", size: 11)
+                    NovaText("Free mass: \(s.freeMass) tons", size: 11)
+                    NovaText("Shield / Armor: \(s.shield) / \(s.armor)", size: 11)
+                    NovaText("Guns / Turrets: \(s.maxGuns) / \(s.maxTurrets)", size: 11)
+                    let blurb = classDescription(s)
+                    if !blurb.isEmpty {
+                        NovaText(blurb, size: 11, width: 195, align: .leading)
+                            .padding(.top, 4)
+                    }
                 }
             }
+            .frame(width: 200, alignment: .leading)
         }
-        .frame(width: 200, alignment: .leading)
     }
 
     private func info(_ space: NovaSpace) -> some View {

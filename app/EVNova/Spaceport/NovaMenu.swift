@@ -34,6 +34,7 @@ struct NovaMenu<Content: View>: View {
     /// OVERLAYS the landing hub instead of replacing it — as EV Nova stacks the
     /// outfitter / shipyard / bar / trade windows over the spaceport.
     var overlay: Bool = false
+    @Environment(\.novaDebugEnabled) private var novaDebug
     @ViewBuilder var content: (NovaSpace) -> Content
 
     /// The reference design space every spaceport screen shares, so a small dialog
@@ -57,6 +58,7 @@ struct NovaMenu<Content: View>: View {
                     .resizable()
                     .frame(width: nw, height: nh)
                 content(space).novaTextScale(1)
+                if novaDebug { NovaDebugGrid.forSpace(space) }
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .scaleEffect(scale)
