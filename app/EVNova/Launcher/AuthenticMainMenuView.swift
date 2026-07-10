@@ -207,23 +207,58 @@ struct AuthenticMainMenuView: View {
             let bright = assets.colr.map { color($0.menuColor1) } ?? novaAmber
             let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.6)
             let border = assets.colr.map { color($0.progOutline) } ?? Color.white.opacity(0.15)
+            // Scale the panel's own metrics (ship size, padding, gaps) by the same
+            // layout scale `.novaFont` scales its text by, so the whole readout
+            // grows/shrinks as one piece with the window instead of the text
+            // scaling while the ship stayed a fixed point size.
+            let sc = layout.scale
 
-            VStack(spacing: 3) {
-                Text("Continue as \(save.displayName)")
-                    .novaFont(.body, weight: .bold)
-                    .foregroundStyle(bright)
-                Text("\(save.snapshot.shipName) · \(save.snapshot.systemName.isEmpty ? "—" : save.snapshot.systemName) · \(save.snapshot.credits.formatted()) cr")
-                    .novaFont(.caption)
-                    .foregroundStyle(dim)
+            HStack(alignment: .center, spacing: 20 * sc) {
+                // Left: pilot identity + wealth, pushed toward the ship.
+                VStack(alignment: .trailing, spacing: 3 * sc) {
+                    Text(save.displayName).novaFont(.body, weight: .bold)
+                        .foregroundStyle(bright).lineLimit(1)
+                    Text("\(save.snapshot.credits.formatted()) cr").novaFont(.caption)
+                        .foregroundStyle(dim).monospacedDigit()
+                    if !save.snapshot.ratingTitle.isEmpty {
+                        Text(save.snapshot.ratingTitle).novaFont(.caption).foregroundStyle(dim)
+                    }
+                }
+
+                // Centre: the current ship, in the game's red target-display style.
+                pilotShip(shipType: save.player.shipType)
+                    .frame(width: 120 * sc, height: 80 * sc)
+
+                // Right: ship + location, pushed away from the ship.
+                VStack(alignment: .leading, spacing: 3 * sc) {
+                    Text(save.snapshot.shipName.isEmpty ? "—" : save.snapshot.shipName)
+                        .novaFont(.body, weight: .bold).foregroundStyle(bright).lineLimit(1)
+                    Text(save.snapshot.systemName.isEmpty ? "Deep Space" : save.snapshot.systemName)
+                        .novaFont(.caption).foregroundStyle(dim)
+                    Text("Enter Ship to continue").novaFont(.caption).foregroundStyle(dim.opacity(0.85))
+                }
             }
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .background(Color.black.opacity(0.55))
+            .padding(.horizontal, 18 * sc).padding(.vertical, 10 * sc)
+            .background(Color.black.opacity(0.5))
             .overlay(Rectangle().strokeBorder(border, lineWidth: 1))
             .fixedSize()
-            .novaPlace(layout, x: (base.width - 400) / 2, y: 604, w: 400, h: 40)
+            // Centre the readout in the lower band of the design space (this is a
+            // port addition — the game's own menu has no pilot readout — so it's
+            // positioned by eye; nudge with the ⇧⌘D debug grid).
+            .position(layout.point(base.width / 2, 632))
             .opacity(appeared ? 1 : 0)
             .animation(.easeOut(duration: 0.4).delay(0.45), value: appeared)
+        }
+    }
+
+    /// The current pilot's ship in EV Nova's red silhouette style, from the live
+    /// pilot's `shipType` and the player's own shipyard/flight art.
+    @ViewBuilder private func pilotShip(shipType id: Int) -> some View {
+        if let game = model.data.game, let graphics = model.uiGraphics, let res = game.ship(id) {
+            let dedicated = graphics.shipPicture(res)
+            if let sprite = dedicated ?? graphics.shipFallbackPicture(res) {
+                ShipSilhouetteView(sprite: sprite, pixelated: dedicated == nil)
+            }
         }
     }
 

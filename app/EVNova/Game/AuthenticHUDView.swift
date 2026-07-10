@@ -16,6 +16,10 @@ struct AuthenticHUDView: View {
     @ObservedObject var model: GameHUDModel
     let style: AuthenticHUDStyle
     var showRadar: Bool = true
+    /// Resolves a target ship's `shïp` id → its sprite, so the target readout can
+    /// draw the ship's red silhouette (see `ShipSilhouetteView`). Defaults to no
+    /// art, so the HUD still renders (text-only) without a resolver wired up.
+    var targetSprite: (Int) -> CGImage? = { _ in nil }
 
     var body: some View {
         // The status bar's design space is the backdrop PICT; anchor it to the
@@ -35,7 +39,7 @@ struct AuthenticHUDView: View {
                         .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
                 }
 
-                targetReadout
+                targetReadout(layout)
                     .novaPlace(layout, origin: origin(style.intf.targetArea), size: size(style.intf.targetArea))
 
                 weaponReadout
@@ -62,8 +66,33 @@ struct AuthenticHUDView: View {
     /// dim "No Target"). The shield/armor line respects the target's own
     /// `shïp.Flags` per the Bible: 0x0200 hides it outright, 0x0100 substitutes
     /// armor % for the literal "Shields Down" text once shields hit 0.
+    /// The target box: the ship's red silhouette (when the target is a ship the
+    /// data has art for) beside the text readout, sized to scale with the HUD.
+    private func targetReadout(_ layout: NovaLayout) -> some View {
+        let sprite = model.targetShipTypeID.flatMap { targetSprite($0) }
+        // The placed box is `targetArea` design-units × layout.scale tall, so a
+        // silhouette sized off that height scales in lockstep with the HUD.
+        let boxSide = CGFloat(style.intf.targetArea.height) * layout.scale * 0.82
+        return HStack(alignment: .center, spacing: 5) {
+            if !model.targetName.isEmpty, let sprite {
+                ShipSilhouetteView(sprite: sprite, tint: targetTint)
+                    .frame(width: boxSide, height: boxSide)
+            }
+            targetText
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// EV Nova draws the target silhouette in red; a brighter red reads a
+    /// hostile lock, a duller one a neutral/known contact.
+    private var targetTint: Color {
+        model.targetHostile ? Color(red: 0.98, green: 0.28, blue: 0.22)
+                            : Color(red: 0.85, green: 0.34, blue: 0.28)
+    }
+
     @ViewBuilder
-    private var targetReadout: some View {
+    private var targetText: some View {
         VStack(alignment: .leading, spacing: 1) {
             if !model.targetName.isEmpty {
                 Text(model.targetName)

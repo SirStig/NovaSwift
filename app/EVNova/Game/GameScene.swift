@@ -696,9 +696,11 @@ final class GameScene: SKScene {
         guard let target else {
             hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0
             hud.targetHostile = false; hud.targetGovtLabel = ""
+            hud.targetShipTypeID = nil
             return
         }
         hud.targetName = target.name
+        hud.targetShipTypeID = target.shipTypeID >= 128 ? target.shipTypeID : nil
         hud.targetShield = target.maxShield > 0 ? target.shield / target.maxShield : 0
         hud.targetArmor = target.maxArmor > 0 ? target.armor / target.maxArmor : 1
         hud.targetHostile = world.diplomacy?.isHostileToPlayer(target.government) == true

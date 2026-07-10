@@ -434,26 +434,24 @@ struct GalaxyMapView: View {
                 let known = vis == .explored || vis == .chartered
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(known ? sys.name : "Unexplored")
-                            .novaFont(.body, weight: .bold)
-                            .foregroundStyle(sys.id == cur.id ? amber : .white)
+                        NovaText(known ? sys.name : "Unexplored", size: 13,
+                                 color: sys.id == cur.id ? amber : .white, width: 104, weight: .bold)
                         if known {
-                            Text(game.govt(sys.government)?.name ?? "Independent")
-                                .novaFont(.caption)
-                                .foregroundStyle(factionColor(for: sys.government))
+                            NovaText(game.govt(sys.government)?.name ?? "Independent", size: 11,
+                                     color: factionColor(for: sys.government), width: 104)
                             Divider().overlay(.white.opacity(0.25))
                             ForEach(sys.spobs, id: \.self) { spobID in
                                 if let spob = game.spob(spobID) {
                                     VStack(alignment: .leading, spacing: 1) {
-                                        Text(spob.name).novaFont(.caption, weight: .semibold)
-                                            .foregroundStyle(.white.opacity(0.9))
-                                        Text(spobServices(spob)).novaFont(.caption)
-                                            .foregroundStyle(.secondary)
+                                        NovaText(spob.name, size: 11, color: .white.opacity(0.9),
+                                                 width: 104, weight: .semibold)
+                                        NovaText(spobServices(spob), size: 11, color: Color(white: 0.6),
+                                                 width: 104)
                                     }
                                 }
                             }
                         } else {
-                            Text("No data on file.").novaFont(.caption).foregroundStyle(.secondary)
+                            NovaText("No data on file.", size: 11, color: Color(white: 0.6), width: 104)
                         }
                     }
                     .padding(8)

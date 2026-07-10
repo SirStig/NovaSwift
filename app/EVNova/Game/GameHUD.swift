@@ -35,6 +35,10 @@ final class GameHUDModel: ObservableObject {
     @Published var hailMessage = ""
     /// The player's locked target, if any (empty name = no target locked).
     @Published var targetName = ""
+    /// The locked target's `shïp` resource id, for rendering its red target-
+    /// display silhouette (see `ShipSilhouetteView`). -1 / nil when the target
+    /// isn't a ship (e.g. a selected planet) or nothing is locked.
+    @Published var targetShipTypeID: Int?
     @Published var targetShield = 1.0   // 0…1
     @Published var targetArmor = 1.0    // 0…1
     @Published var targetHostile = false
