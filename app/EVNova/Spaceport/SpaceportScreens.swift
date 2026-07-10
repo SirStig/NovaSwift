@@ -11,8 +11,11 @@ private func creditString(_ n: Int) -> String {
     return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
 }
 
-/// Tons transacted per Buy/Sell tap. EV Nova buys one per click (and more while
-/// held); we step by a handful so trading a full hold isn't a hundred taps.
+/// Default tons transacted per Buy/Sell tap. EV Nova buys one per click (and
+/// more while held); we default to a handful so trading a full hold isn't a
+/// hundred taps — but it's just the starting value for `TradeCenterView`'s
+/// quantity control, which the player can edit to an exact tonnage (real
+/// DITL #1003 "qty", the game's own type-an-amount prompt).
 private let tradeStep = 10
 
 /// Outfitter/Shipyard item-grid metrics, verified against the vendored NovaJS
@@ -34,20 +37,45 @@ struct TradeCenterView: View {
     var onDone: () -> Void
 
     @State private var selected = 0
+    /// Tons the next Buy/Sell tap transacts — editable via `qtyControl`'s
+    /// `TradeQuantityPrompt` (real DITL #1003) instead of only the fixed
+    /// `tradeStep` default.
+    @State private var pendingQty = tradeStep
+    @State private var showQtyPrompt = false
     private var game: NovaGame { graphics.game }
     private var market: [(commodity: Commodity, level: PriceLevel, price: Int)] {
         game.commodityMarket(at: spob)
     }
 
     var body: some View {
-        if let frame = graphics.frame(.trade) {
-            NovaMenu(frame: frame, overlay: true) { space in
-                list.frame(width: 372).novaPlace(space, -186, -96)
-                controls.novaPlace(space, -150, 92)
+        Group {
+            if let frame = graphics.frame(.trade) {
+                NovaMenu(frame: frame, overlay: true) { space in
+                    list.frame(width: 372).novaPlace(space, -186, -96)
+                    controls.novaPlace(space, -150, 92)
+                }
+            } else {
+                fallback
             }
-        } else {
-            fallback
         }
+        .sheet(isPresented: $showQtyPrompt) {
+            TradeQuantityPrompt(title: qtyPromptTitle, range: 1...qtyUpperBound, initial: pendingQty,
+                                 onConfirm: { pendingQty = $0; showQtyPrompt = false },
+                                 onCancel: { showQtyPrompt = false })
+        }
+    }
+
+    private var qtyPromptTitle: String {
+        current.map { "How many tons of \(game.commodityName($0.commodity))?" } ?? "How many tons?"
+    }
+    /// Advisory max for the prompt's field — the greater of what's affordable/
+    /// holdable to buy and what's held to sell, so either action stays in
+    /// range; `buyCommodity`/`sellCommodity` clamp again for real.
+    private var qtyUpperBound: Int {
+        guard let c = current else { return max(1, pendingQty) }
+        let buyLimit = c.price > 0 ? min(pilot.cargoFree(galaxy: galaxy), pilot.state.credits / c.price) : pilot.cargoFree(galaxy: galaxy)
+        let sellLimit = pilot.held(cargo: c.commodity.cargoID)
+        return max(1, buyLimit, sellLimit)
     }
 
     private var list: some View {
@@ -80,11 +108,23 @@ struct TradeCenterView: View {
                        width: 42, enabled: canBuy) { buy() }
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
                        width: 42, enabled: canSell) { sell() }
+            qtyControl
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                        width: 42, action: onDone)
             NovaText(creditString(pilot.state.credits), size: 11,
                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 130, align: .trailing)
         }
+    }
+
+    /// Opens `TradeQuantityPrompt` to type an exact tonnage; Buy/Sell then
+    /// transact that amount instead of the fixed `tradeStep`.
+    private var qtyControl: some View {
+        Button { showQtyPrompt = true } label: {
+            NovaText("×\(pendingQty)", size: 10, color: .gray, width: 32, align: .center)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
     }
 
     private var current: (commodity: Commodity, level: PriceLevel, price: Int)? {
@@ -104,7 +144,7 @@ struct TradeCenterView: View {
             return
         }
         let free = pilot.cargoFree(galaxy: galaxy)
-        let bought = pilot.buyCommodity(c.commodity, tons: tradeStep, unitPrice: c.price, cargoFree: free)
+        let bought = pilot.buyCommodity(c.commodity, tons: pendingQty, unitPrice: c.price, cargoFree: free)
         if bought == 0 {
             Log.spaceport.notice("Trade buy no-op at spöb \(spob.id, privacy: .public): commodity=\(c.commodity.cargoID, privacy: .public) price=\(c.price, privacy: .public)cr/ton credits=\(pilot.state.credits, privacy: .public) cargoFree=\(free, privacy: .public)")
         } else {
@@ -117,7 +157,7 @@ struct TradeCenterView: View {
             return
         }
         let held = pilot.held(cargo: c.commodity.cargoID)
-        let sold = pilot.sellCommodity(c.commodity, tons: tradeStep, unitPrice: c.price)
+        let sold = pilot.sellCommodity(c.commodity, tons: pendingQty, unitPrice: c.price)
         if sold == 0 {
             Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): commodity=\(c.commodity.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
         } else {
@@ -242,7 +282,10 @@ struct OutfitterView: View {
             infoRow("Available:", "\(pilot.freeMass(galaxy: galaxy)) tons")
         }
         .frame(width: 150, alignment: .leading)
-        .novaPlace(space, 232, 54)
+        // DITL #1002 item 8 (618,214)-(753,314) against the real 765×321 Outfit
+        // frame (PICT 8502 — matches DLOG #1002's own bounds exactly): cx =
+        // 618 − 382.5 ≈ 235, cy = 214 − 160.5 ≈ 53.
+        .novaPlace(space, 235, 53)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -252,11 +295,15 @@ struct OutfitterView: View {
         }
     }
 
-    // Buy/Sell/Done are each placed independently (matching the vendored
-    // NovaJS reference `nova/src/spaceport/outfitter.ts`: buy@(-100,126),
-    // sell@(0,126), done@(100,126), width 60) rather than as one offset
-    // HStack group, which had drifted the whole row ~150px to the right of
-    // its authentic position.
+    // Buy/Sell/Done are each placed independently rather than as one offset
+    // HStack group (which had drifted the whole row ~150px to the right of
+    // its authentic position). Positions re-derived directly from DITL #1002
+    // items 6/3/0 — (288,289), (394,289), (500,289), all 99×25 — against the
+    // real 765×321 Outfit frame (PICT 8502, confirmed via `evnova-extract
+    // pict`/`dlog`): cy = 289 − 160.5 ≈ 128 for the row; cx = itemLeft − 382.5.
+    // (This lands within a couple px of the vendored NovaJS reference's
+    // buy@(-100,126)/sell@(0,126)/done@(100,126) — that fix was already close;
+    // this just anchors it to the game's own real dialog layout instead.)
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
@@ -271,7 +318,7 @@ struct OutfitterView: View {
                 Log.spaceport.notice("Outfitter buy no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) cost=\(o.cost, privacy: .public) credits=\(pilot.state.credits, privacy: .public) freeMass=\(pilot.freeMass(galaxy: galaxy), privacy: .public) — insufficient credits, mass, or max-installed reached")
             }
         }
-        .novaPlace(space, -100, 126)
+        .novaPlace(space, -94, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
                    width: 60, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
             guard let o else {
@@ -284,10 +331,10 @@ struct OutfitterView: View {
                 Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")
             }
         }
-        .novaPlace(space, 0, 126)
+        .novaPlace(space, 12, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                    width: 60, action: onDone)
-            .novaPlace(space, 100, 126)
+            .novaPlace(space, 118, 128)
     }
 
     private var fallback: some View {
@@ -402,7 +449,10 @@ struct ShipyardView: View {
             infoRow("Trade-in:", creditString(pilot.tradeInValue(game: game)))
             infoRow("You Have:", creditString(pilot.state.credits))
         }
-        .novaPlace(space, 232, 54)
+        // DITL #1004 item 8 (614,214)-(757,314) against the real 765×323
+        // Shipyard frame (PICT 8501 — matches DLOG #1004's own bounds
+        // exactly): cx = 614 − 382.5 ≈ 232, cy = 214 − 161.5 ≈ 52.
+        .novaPlace(space, 232, 52)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -412,10 +462,14 @@ struct ShipyardView: View {
         }
     }
 
-    // Buy/Done placed independently (matching the vendored NovaJS reference
-    // `nova/src/spaceport/shipyard.ts`: buy@(-20,126), done@(100,126), width 60)
-    // rather than as one offset HStack group, which had drifted the whole row
-    // ~110-150px to the right of its authentic position.
+    // Buy/Done placed independently rather than as one offset HStack group
+    // (which had drifted the whole row ~110-150px to the right of its
+    // authentic position). Positions re-derived directly from DITL #1004
+    // items 0/6 — (365,289) and (480,289), both 109×25 — against the real
+    // 765×323 Shipyard frame: cy = 289 − 161.5 ≈ 128; cx = itemLeft − 382.5.
+    // (Within a couple px of the vendored NovaJS reference's buy@(-20,126)/
+    // done@(100,126) — that fix was already close; this anchors it to the
+    // game's own real dialog layout instead.)
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
         let canBuy = s.map {
@@ -434,10 +488,10 @@ struct ShipyardView: View {
                 Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
             }
         }
-        .novaPlace(space, -20, 126)
+        .novaPlace(space, -18, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                    width: 60, action: onDone)
-            .novaPlace(space, 100, 126)
+            .novaPlace(space, 98, 128)
     }
 
     private var fallback: some View {
@@ -476,12 +530,22 @@ struct BarView: View {
                     }
                     .frame(width: 220, height: 60)
                     .novaPlace(space, -112, -14)
+                    // Re-derived from DITL #1013 items 3/5 — (54,214)-(175,239)
+                    // and (105,227)-(226,252), both ~121×25 — against the real
+                    // 263×185 Bar frame (PICT 8503, confirmed via
+                    // `evnova-extract pict`/`dlog`): cy = 214…227 − 92.5 ≈
+                    // 122…135, well below the picture's own bottom edge (185)
+                    // in the dialog's native-control strip — not cy=62, which
+                    // sat ~65px too high (inside the artwork). The two items'
+                    // raw x-spans overlap once click regions are this
+                    // generous, so cx keeps the existing non-overlapping
+                    // Gamble/Leave spacing rather than reproducing that overlap.
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.gamble, fallback: "Gamble"),
                                width: 60) { showGambling = true }
-                        .novaPlace(space, -70, 62)
+                        .novaPlace(space, -77, 128)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Leave"),
                                width: 60, action: onDone)
-                        .novaPlace(space, 20, 62)
+                        .novaPlace(space, 20, 128)
                 }
             } else {
                 VStack {

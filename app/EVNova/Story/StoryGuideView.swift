@@ -117,7 +117,7 @@ struct PilotInfoView: View {
                 }
 
                 section("Escorts") {
-                    Text("No escorts hired.").foregroundStyle(.secondary).novaFont(.body)
+                    EscortsView()
                 }
             }
             .padding(16)

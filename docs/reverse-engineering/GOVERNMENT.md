@@ -192,10 +192,62 @@ and used identically for `gövt.MaxOdds` — see
 [AI_GROUND_TRUTH.md §2](../AI_GROUND_TRUTH.md) for that field's shield-scaled
 30–100% modifier. **The "internal multiplier for adjustment" is not given a
 value anywhere in the Bible** — it's explicitly acknowledged as unspecified
-developer-internal tuning, not scenario-editable data. Treat as an open
-question (flagged again in the closing summary); a from-scratch reimplementation
-has no documented value to match and will need either disassembly of
-`EV Nova.exe` or an accepted approximation (e.g. multiplier = 1).
+developer-internal tuning, not scenario-editable data.
+
+**Resolved (partially) by disassembling `EV Nova.exe`.** The tier-selection
+algorithm itself is now fully decompiled — `fcn.00469030` in the real binary
+(x86 PE, "EV Nova Community Edition r4" per its embedded version string,
+verified byte-identical to this repo's `data/EV Nova/EV Nova.exe` against
+public patch addresses in
+[andrews05/EV-Nova-CE](https://github.com/andrews05/EV-Nova-CE)'s
+`src/*.c`/`sym.cpp`, which target this exact build). It's a straight
+11-tier comparison ladder:
+
+```
+ecx = 0
+if [0x735444] <= 0: goto tail          // ecx stays 0 ("No Ability")
+ecx = 1                                // ("Little Ability")
+tail:
+if [0x735444] < 100:  jump past the rest of the ladder (ecx unchanged)
+ecx = 2                                 // ("Fair Ability")
+if [0x735444] < 200:  skip
+ecx = 3  ...  400→ecx=4, 800→ecx=5, 1600→ecx=6, 3200→ecx=7,
+              6400→ecx=8, 12800→ecx=9
+if [0x735444] >= 25600: ecx = 10        // ("Frightening")
+// ecx (0-10) then indexes a 256-byte-stride runtime string-cache
+// buffer at 0x62c1cc for the tier's display label (STR# 138 text,
+// loaded/formatted at startup — not present as static data in the
+// .exe, so the label text itself couldn't be read this way).
+```
+
+The 11 comparison thresholds are **the literal values from Appendix I**
+(`100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600`, found as a
+suspiciously regular stride-17-byte sequence of `cmp dword [addr], imm32`
+instructions — that regularity is what made this findable via a blind
+constant search of the binary at all) — **compared directly against
+`[0x735444], with no multiplication or scaling applied at this stage.**
+So whatever "internal multiplier for adjustment" the Bible refers to is
+**not** a display-time scaling of the tier thresholds — the boundaries a
+plugin author sees in Appendix I are exactly what the game checks.
+
+**Still unresolved:** what the multiplier actually adjusts, and its value.
+`[0x735444]` is read-only in this function; two call sites were traced
+(a debug-mode-only overlay at `~0x49ad17`, gated on `g_nv_debugMode`
+matching `sym.cpp`'s `SETCGLOB(0x00596D3A, g_nv_debugMode)`; and the
+player-info dialog's stat-line renderer at `~0x487c57`, confirming this is
+the same "combat rating" the Bible says appears there) — neither writes to
+`[0x735444]` first, meaning it's a persistent global already holding the
+live tally by the time either caller runs, not a value computed fresh per
+call. Its write sites are scattered across several unrelated-looking
+functions (one does a `fist` float-truncation and writes/compares against
+`0x989680` = 10,000,000, suggesting **this exact global address may be
+reused for an unrelated purpose elsewhere in the binary** — plausible for
+a single-threaded, memory-tight 1990s codebase, but means those write
+sites can't be trusted as "the kill-tally update" without further
+disassembly to isolate which one actually fires on a kill event and
+whether it applies a multiplier before adding a destroyed ship's
+`Strength` to the tally. That's the next concrete step for anyone
+continuing this thread, not attempted further in this pass.
 
 | Kills | Rating |
 |---|---|
@@ -563,8 +615,11 @@ evaluates either.
 
 ### Open questions the Bible text doesn't resolve
 
-1. The combat-rating "internal multiplier for adjustment" (Appendix I) has
-   no documented value.
+1. The combat-rating "internal multiplier for adjustment" (Appendix I) —
+   **partially resolved by disassembly, see §3.** The tier-threshold
+   comparison itself applies no multiplier (confirmed from `fcn.00469030`
+   in `EV Nova.exe`); the multiplier, if any, must live in the still-unfound
+   code that increments the tally on a kill, not in the display path.
 2. The magnitude of the two cross-government propagation rules in §1.2
    ("improve rating with enemies," "allies... dent standing") isn't
    quantified — only that they happen.
@@ -573,5 +628,10 @@ evaluates either.
    government's own `Enemy`/`Ally` list, leaving the other side's opinion
    irrelevant to whether *it* gets attacked.
 
-Both require either `EV Nova.exe` disassembly or accepted from-scratch
+Item 1 shows disassembly is tractable for isolated, well-anchored questions
+(this one took one targeted constant search plus tracing two call sites);
+items 2-3 are diplomacy/combat-resolution logic spread across functions with
+no comparably distinctive numeric anchor to search for, and weren't
+attempted in this pass. Both still require either further `EV Nova.exe`
+disassembly or accepted from-scratch
 design decisions — flagging rather than guessing further.

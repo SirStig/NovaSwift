@@ -91,20 +91,27 @@ struct SpaceportView: View {
         }
     }
 
-    /// Fixed per-role slot offsets (relative to the frame's centre). `shipyard`,
-    /// `outfitter`, and `leave` (right column, x=160) are verified against the
-    /// vendored NovaJS reference (`third_party/NovaJS/nova/src/spaceport/spaceport.ts`).
-    /// PICT 8500 itself confirms a second, symmetric button panel on the left
-    /// (x ≈ −309…−153, mirroring the right panel at x ≈ +154…+309) — `STR# 150`
-    /// (`SpaceportGraphics.swift`) independently confirms Trade Center/Bar/
-    /// Mission BBS each have their own authentic button label, so they take
-    /// that left column at the same 42px pitch as the right column's first
-    /// two slots, each role at a fixed position regardless of what else the
-    /// spöb offers (a planet missing a Shipyard doesn't shift Outfitter up).
-    private static let rightSlotY: [String: CGFloat] = ["shipyard": 74, "outfitter": 116, "leave": 200]
+    /// Fixed per-role slot offsets (relative to the frame's centre), re-derived
+    /// from DITL #1000 against the real 618×517 Spaceport frame (PICT 8500 —
+    /// matches DLOG #1000's own bounds exactly): each side column is 4 slots
+    /// (items 10/9/6/12 left, items 8/7/3/11 right; all 145×25 at x=3/471),
+    /// not 3 — cy = itemTop − 258.5, e.g. right column 74.5/116.5/157.5/197.5.
+    /// `leave` used to occupy the right column's 4th slot; DITL item 0 —
+    /// (242,551)-(442,576), 200×25, *not* part of either column — shows it's
+    /// really a separate, large, centred control below both columns (see
+    /// `leaveCX`/`leaveCY`), so it's been moved out here and that 4th slot is
+    /// free for a real service. Each role sits at a fixed position regardless
+    /// of what else the spöb offers (a planet missing a Shipyard doesn't shift
+    /// Outfitter up).
+    private static let rightSlotY: [String: CGFloat] = ["shipyard": 74, "outfitter": 116, "recharge": 158]
     private static let leftSlotY: [String: CGFloat] = ["tradeCenter": 74, "bar": 116, "missionBBS": 158]
     private static let leftX: CGFloat = -304
     private static let rightX: CGFloat = 160
+    /// DITL #1000 item 0: cx = 242 − 309 ≈ −67, cy = 551 − 258.5 ≈ 293, width
+    /// 200 (NovaButton's `width` is the middle span, so pass 200 − 26 = 174).
+    private static let leaveCX: CGFloat = -67
+    private static let leaveCY: CGFloat = 293
+    private static let leaveWidth: CGFloat = 174
 
     private typealias ButtonItem = (key: String, title: String, action: () -> Void)
 
@@ -132,7 +139,13 @@ struct SpaceportView: View {
         if spob.hasOutfitter {
             items.append(("outfitter", graphics.buttonLabel(SpaceportLabel.outfitter, fallback: "Outfitter"), { screen = .outfit }))
         }
-        items.append(("leave", graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), onDepart))
+        // Recharge/refuel — the right column's real 4th slot (DITL item 3).
+        // No dedicated `spöb.flags` service bit exists for it (fuel is a base
+        // spaceport service, not a togglable one like the bar/shipyard/etc.),
+        // so it's gated the same way Mission BBS is: any real, inhabited port.
+        if !spob.isUninhabited {
+            items.append(("recharge", graphics.buttonLabel(SpaceportLabel.recharge, fallback: "Recharge"), { rechargeShip() }))
+        }
         return items
     }
 
@@ -145,6 +158,23 @@ struct SpaceportView: View {
             NovaButton(graphics: graphics, title: item.title, width: 120, action: item.action)
                 .novaPlace(space, Self.rightX, Self.rightSlotY[item.key] ?? 74)
         }
+        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
+                   width: Self.leaveWidth, action: onDepart)
+            .novaPlace(space, Self.leaveCX, Self.leaveCY)
+    }
+
+    /// Tops off the tank — EV Nova refuels for free at any real spaceport, and
+    /// this port already does that automatically on landing (`GameContainerView.
+    /// refuel()`), so this is mostly a no-op confirmation by the time the
+    /// player can tap it; wired for real in case that ever changes.
+    private func rechargeShip() {
+        guard let maxFuel = galaxy.loadout(shipID: pilot.state.shipType, extraOutfits: pilot.state.outfits)?.maxFuel else {
+            Log.spaceport.error("Recharge tapped at spöb \(spob.id, privacy: .public) but no loadout for ship \(pilot.state.shipType, privacy: .public) — no-op")
+            return
+        }
+        pilot.state.fuel = maxFuel
+        pilot.save()
+        Log.spaceport.debug("Recharged fuel to \(maxFuel, privacy: .public) at spöb \(spob.id, privacy: .public)")
     }
 
     // MARK: Fallback (data has no interface PICT)

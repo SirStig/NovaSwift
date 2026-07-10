@@ -59,9 +59,20 @@ struct NewPilotView: View {
 
     // MARK: Name entry
 
+    // Real layout ground truth: DITL #3102 "new New Pilot" (the single-scenario
+    // variant — item 12's "character popup" sits off-canvas at top=277 against a
+    // 213-tall window, i.e. unused here; #3101 is the multi-scenario twin with
+    // that popup on-canvas instead). #3102's live items are internally consistent
+    // with its DLOG bounds (326x213), unlike #3100 "New Pilot"'s stale DLOG rect
+    // and its resControl pointing at a CNTL 128 that doesn't exist anywhere in the
+    // data — #3100 reads as vestigial, #3102 as the real shipped dialog. Its title
+    // is content, not a window title (DLOG title=""): statText item 11,
+    // "Create a new pilot:". Item 4 "Full Name:" (84w) sits beside its editText
+    // (item 7) on the same row (both top=36) rather than stacked above it, and
+    // CNTL 500 "gender popup" (item 10, 200x20) is its own row below.
     private var nameDialog: some View {
         let scenario = scenarios[min(scenarioIndex, scenarios.count - 1)]
-        return NovaDialog(title: "New Pilot", width: 440, buttons: [
+        return NovaDialog(title: "Create a New Pilot", width: 400, buttons: [
             NovaDialogButton(title: "Cancel") {
                 if scenarios.count > 1 { step = .scenario } else { dismiss() }
             },
@@ -70,15 +81,17 @@ struct NewPilotView: View {
             },
         ]) {
             VStack(alignment: .leading, spacing: 14) {
-                NovaText("Please name your pilot:", size: 13)
-                NovaTextField(placeholder: "Captain", text: $name)
+                HStack(spacing: 10) {
+                    NovaText("Full Name:", size: 13, width: 84)
+                    NovaTextField(placeholder: "Captain", text: $name)
+                }
 
                 HStack(spacing: 12) {
-                    NovaText("Gender:", size: 13)
+                    NovaText("Gender:", size: 13, width: 84)
                     Picker("", selection: $isMale) {
                         Text("Male").tag(true); Text("Female").tag(false)
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 200)
                 }
                 // A one-line reminder of what this scenario starts you with.
                 NovaText(summary(scenario), size: 11, color: .secondary)

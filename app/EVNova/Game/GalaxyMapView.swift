@@ -314,9 +314,251 @@ struct GalaxyMapView: View {
         zoom = clamped
     }
 
-    // MARK: Chrome
+    /// Recentre the map on `system` — used by "Nearest System" and by
+    /// `SystemFinderView`'s "Named System" picker. Keeps the current zoom;
+    /// only pans, the same way dragging would.
+    private func centerOn(_ system: SystRes) {
+        guard let cur = nav.current else { return }
+        pan.width = -CGFloat(system.x - cur.x) * zoom
+        pan.height = -CGFloat(system.y - cur.y) * zoom
+    }
 
-    private var chrome: some View {
+    /// "Nearest System" (DITL #2000 idx7): the real dialog gives no more
+    /// precise a definition than its label, so this picks the closest system
+    /// (straight-line, in map units) the player currently knows about —
+    /// explored, chartered, or merely glimpsed-as-adjacent — and both plots a
+    /// course to it and pans the view there, same as tapping it directly.
+    private func findNearestSystem() {
+        guard let cur = nav.current, let game = nav.game else { return }
+        let explored = pilot.state.exploredSystems
+        let mapRevealAll = pilot.ownsMapOutfit(game: game)
+        let adjacent = nav.adjacentToExplored(explored)
+        let nearest = nav.systems()
+            .filter { s in
+                s.id != cur.id
+                    && nav.visibility(of: s.id, explored: explored, adjacent: adjacent, mapRevealAll: mapRevealAll) != .unknown
+            }
+            .min { a, b in
+                hypot(Double(a.x - cur.x), Double(a.y - cur.y)) < hypot(Double(b.x - cur.x), Double(b.y - cur.y))
+            }
+        guard let nearest else { return }
+        nav.plotCourse(to: nearest.id)
+        centerOn(nearest)
+    }
+
+    // MARK: Chrome — authentic (DITL #2000 "Map", drawn on PICT #8509)
+
+    /// PICT #8509 "Map" in `Nova Files/Nova Graphics 3.rez` — the real
+    /// backdrop/chrome art for DLOG #2000 (`evnova-extract list "data/EV Nova/
+    /// Nova Files/Nova Graphics 3.rez" PICT` confirms the id + name). Decoding
+    /// it also gives the frame's true pixel size, 601×513, which for this
+    /// dialog matches the DLOG's own printed bounds (unlike some other dialogs
+    /// where that field is stale — see the ground-truth tool notes).
+    private static let frameID = 8509
+
+    /// Verified rects from `evnova-extract ditl "data/EV Nova/Nova.rez" 2000`
+    /// (left, top, width, height), top-left anchored in the 601×513 frame.
+    /// idx6, a disabled 32×32 item at (518,537)-(550,569), falls entirely
+    /// outside the 513-tall frame — an off-screen/unused control, not part of
+    /// the visible chrome, so it has no entry here.
+    private enum Item {
+        static let canvas   = (left: 9,   top: 8,   w: 458, h: 420)  // idx2 — starmap
+        static let panel    = (left: 474, top: 8,   w: 120, h: 429)  // idx5 — system info
+        static let routeBar = (left: 8,   top: 436, w: 586, h: 42)   // idx1 — course/fuel
+        static let zoomOut  = (left: 408, top: 483, w: 25,  h: 25)   // idx3
+        static let zoomIn   = (left: 438, top: 483, w: 25,  h: 25)   // idx4
+        static let nearest  = (left: 155, top: 483, w: 120, h: 25)   // idx7 — "Nearest System"
+        static let named    = (left: 11,  top: 483, w: 130, h: 25)   // idx8 — "Named System"
+        static let clear    = (left: 288, top: 483, w: 99,  h: 25)   // idx9 — "Clear Route"
+        static let done     = (left: 483, top: 483, w: 99,  h: 25)   // idx0 — "Done"
+    }
+
+    /// DITL rect → `NovaSpace` offset (see the coordinate-convention doc comment
+    /// on `NovaSpace`): children are positioned as an offset from the frame's
+    /// own centre, top-left anchored.
+    private func cx(_ item: (left: Int, top: Int, w: Int, h: Int), _ nw: CGFloat) -> CGFloat { CGFloat(item.left) - nw / 2 }
+    private func cy(_ item: (left: Int, top: Int, w: Int, h: Int), _ nh: CGFloat) -> CGFloat { CGFloat(item.top) - nh / 2 }
+
+    private func buttonLabel(_ index1: Int, fallback: String) -> String {
+        graphics?.buttonLabel(index1, fallback: fallback) ?? fallback
+    }
+
+    private func authenticChrome(frame: CGImage) -> some View {
+        let nw = CGFloat(frame.width), nh = CGFloat(frame.height)
+        let space = NovaSpace(width: nw, height: nh)
+        return GeometryReader { geo in
+            let scale = min(min(geo.size.width / 1024, geo.size.height / 768), 2.2)
+            ZStack(alignment: .topLeading) {
+                Image(decorative: frame, scale: 1).interpolation(.high).resizable()
+                    .frame(width: nw, height: nh)
+
+                mapCanvas
+                    .frame(width: CGFloat(Item.canvas.w), height: CGFloat(Item.canvas.h))
+                    .clipped()
+                    .novaPlace(space, cx(Item.canvas, nw), cy(Item.canvas, nh))
+
+                sidePanel
+                    .frame(width: CGFloat(Item.panel.w), height: CGFloat(Item.panel.h), alignment: .top)
+                    .clipped()
+                    .novaPlace(space, cx(Item.panel, nw), cy(Item.panel, nh))
+
+                // A live tick so the fuel-dependent course readout / JUMP
+                // button reflect fuel regenerating while the map is open.
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    routeBar
+                        .frame(width: CGFloat(Item.routeBar.w), height: CGFloat(Item.routeBar.h))
+                        .novaPlace(space, cx(Item.routeBar, nw), cy(Item.routeBar, nh))
+                }
+
+                bottomButtons(space: space, nw: nw, nh: nh)
+            }
+            .frame(width: nw, height: nh, alignment: .topLeading)
+            .scaleEffect(scale)
+            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+    }
+
+    /// The system-info panel (idx5): name, controlling government, and any
+    /// stellar objects' services — for the plotted destination if there is
+    /// one, else the current system. Respects the same fog-of-war the starmap
+    /// itself draws under: an unknown/merely-adjacent system shows no detail.
+    @ViewBuilder
+    private var sidePanel: some View {
+        if let cur = nav.current, let game = nav.game {
+            let infoID = nav.destinationID ?? nav.currentSystemID
+            if let sys = nav.system(infoID) {
+                let explored = pilot.state.exploredSystems
+                let adjacent = nav.adjacentToExplored(explored)
+                let mapRevealAll = pilot.ownsMapOutfit(game: game)
+                let vis = nav.visibility(of: infoID, explored: explored, adjacent: adjacent, mapRevealAll: mapRevealAll)
+                let known = vis == .explored || vis == .chartered
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(known ? sys.name : "Unexplored")
+                            .novaFont(.body, weight: .bold)
+                            .foregroundStyle(sys.id == cur.id ? amber : .white)
+                        if known {
+                            Text(game.govt(sys.government)?.name ?? "Independent")
+                                .novaFont(.caption)
+                                .foregroundStyle(factionColor(for: sys.government))
+                            Divider().overlay(.white.opacity(0.25))
+                            ForEach(sys.spobs, id: \.self) { spobID in
+                                if let spob = game.spob(spobID) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(spob.name).novaFont(.caption, weight: .semibold)
+                                            .foregroundStyle(.white.opacity(0.9))
+                                        Text(spobServices(spob)).novaFont(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        } else {
+                            Text("No data on file.").novaFont(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+        }
+    }
+
+    /// Service tags for a stellar object, from the already-decoded `spöb`
+    /// flags (`NovaEconomy.swift`) — no new field decoding.
+    private func spobServices(_ spob: SpobRes) -> String {
+        var tags: [String] = []
+        if spob.hasBar { tags.append("Bar") }
+        if spob.hasOutfitter { tags.append("Outfitter") }
+        if spob.hasShipyard { tags.append("Shipyard") }
+        if spob.hasCommodityExchange { tags.append("Trade") }
+        return tags.isEmpty ? "—" : tags.joined(separator: " · ")
+    }
+
+    /// The full-width course/fuel bar (idx1) — same content and logic as
+    /// before this workstream, just filling the real dialog's status-bar rect
+    /// instead of a floating capsule.
+    @ViewBuilder
+    private var routeBar: some View {
+        HStack {
+            if let destID = nav.destinationID, let dest = nav.system(destID), let game = nav.game {
+                let hops = nav.nextJumpHopCount
+                let canGo = nav.canAfford(hops: hops)
+                let explored = pilot.state.exploredSystems
+                let destKnown = nav.visibility(of: destID, explored: explored,
+                                               adjacent: nav.adjacentToExplored(explored),
+                                               mapRevealAll: pilot.ownsMapOutfit(game: game))
+                    != .adjacent
+                let destName = destKnown ? dest.name : "Unexplored"
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("COURSE: \(destName) — \(nav.route.count) JUMP\(nav.route.count == 1 ? "" : "S")")
+                        .novaFont(.hud, weight: .semibold)
+                        .foregroundStyle(nav.route.count <= nav.availableJumps ? routeGreen : routeWarn)
+                    Text("FUEL: \(Int(nav.currentFuel))/\(Int(nav.shipMaxFuel))  (\(nav.availableJumps) jump\(nav.availableJumps == 1 ? "" : "s"))")
+                        .novaFont(.hud).monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onJump) {
+                    Text(canGo ? (hops > 1 ? "JUMP ×\(hops)" : "JUMP") : "NO FUEL")
+                        .novaFont(.button, weight: .bold)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background((canGo ? routeGreen : routeWarn).opacity(0.18), in: Capsule())
+                        .overlay(Capsule().strokeBorder((canGo ? routeGreen : routeWarn).opacity(0.6)))
+                        .foregroundStyle(canGo ? routeGreen : routeWarn)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canGo)
+            } else {
+                Text("Click a system to plot a course · drag to pan · pinch or +/− to zoom")
+                    .novaFont(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12)
+    }
+
+    /// The bottom button row: Named System / Nearest System / Clear Route /
+    /// zoom −+ / Done, at their DITL rects (idx8, idx7, idx9, idx3, idx4,
+    /// idx0). The three-slice art + labels come from `SpaceportGraphics`
+    /// (`STR# 150` "button labels"); "Nearest System" / "Named System" have no
+    /// matching entry in that table (the real dialog's `dïtl` items are all
+    /// custom-drawn `userItem`s with no stored text), so those two use literal
+    /// EV Nova UI text instead of a `buttonLabel` lookup.
+    @ViewBuilder
+    private func bottomButtons(space: NovaSpace, nw: CGFloat, nh: CGFloat) -> some View {
+        if let graphics {
+            NovaButton(graphics: graphics, title: buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                       width: CGFloat(Item.done.w - 26), action: onClose)
+                .novaPlace(space, cx(Item.done, nw), cy(Item.done, nh))
+            NovaButton(graphics: graphics, title: buttonLabel(49, fallback: "Clear Route"),
+                       width: CGFloat(Item.clear.w - 26)) { nav.clearCourse() }
+                .novaPlace(space, cx(Item.clear, nw), cy(Item.clear, nh))
+            NovaButton(graphics: graphics, title: "Nearest System",
+                       width: CGFloat(Item.nearest.w - 26), action: findNearestSystem)
+                .novaPlace(space, cx(Item.nearest, nw), cy(Item.nearest, nh))
+            NovaButton(graphics: graphics, title: "Named System",
+                       width: CGFloat(Item.named.w - 26)) { showingFinder = true }
+                .novaPlace(space, cx(Item.named, nw), cy(Item.named, nh))
+        }
+        zoomIconButton("minus") { setZoom(zoom / 1.4) }
+            .novaPlace(space, cx(Item.zoomOut, nw), cy(Item.zoomOut, nh))
+        zoomIconButton("plus") { setZoom(zoom * 1.4) }
+            .novaPlace(space, cx(Item.zoomIn, nw), cy(Item.zoomIn, nh))
+    }
+
+    /// idx3/idx4 are 25×25 — too small for the three-slice button art (which
+    /// has a fixed 25pt-tall, ≥26pt-wide geometry), so these stay simple icon
+    /// buttons rather than `NovaButton`, sized to their real rects.
+    private func zoomIconButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 12, weight: .bold))
+                .frame(width: 25, height: 25)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+        }.buttonStyle(.plain)
+    }
+
+    // MARK: Chrome — fallback (no Map PICT resolved)
+
+    private var legacyChrome: some View {
         VStack {
             HStack {
                 Text("GALAXY MAP").novaFont(.heading, weight: .bold)
@@ -331,50 +573,16 @@ struct GalaxyMapView: View {
                 }.buttonStyle(.plain)
             }
             Spacer()
-            // A live tick so the fuel-dependent course readout / JUMP button
-            // reflect fuel regenerating in the background while the map is open.
-            TimelineView(.periodic(from: .now, by: 0.5)) { _ in courseBar }
+            // No backdrop art in this fallback, so `routeBar` gets its own
+            // legibility background here (the authentic path already sits on
+            // the real bar art from PICT #8509).
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                routeBar
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.5), in: Capsule())
+            }
         }
         .padding(14)
-    }
-
-    @ViewBuilder
-    private var courseBar: some View {
-        if let destID = nav.destinationID, let dest = nav.system(destID), let game = nav.game {
-            let hops = nav.nextJumpHopCount
-            let canGo = nav.canAfford(hops: hops)
-            let explored = pilot.state.exploredSystems
-            let destKnown = nav.visibility(of: destID, explored: explored,
-                                           adjacent: nav.adjacentToExplored(explored),
-                                           mapRevealAll: pilot.ownsMapOutfit(game: game))
-                != .adjacent
-            let destName = destKnown ? dest.name : "Unexplored"
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("COURSE: \(destName) — \(nav.route.count) JUMP\(nav.route.count == 1 ? "" : "S")")
-                        .novaFont(.hud, weight: .semibold)
-                        .foregroundStyle(nav.route.count <= nav.availableJumps ? routeGreen : routeWarn)
-                    Text("FUEL: \(Int(nav.currentFuel))/\(Int(nav.shipMaxFuel))  (\(nav.availableJumps) jump\(nav.availableJumps == 1 ? "" : "s"))")
-                        .novaFont(.hud).monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                Button(action: onJump) {
-                    Text(canGo ? (hops > 1 ? "JUMP ×\(hops)" : "JUMP") : "NO FUEL")
-                        .novaFont(.button, weight: .bold)
-                        .padding(.horizontal, 14).padding(.vertical, 6)
-                        .background((canGo ? routeGreen : routeWarn).opacity(0.18), in: Capsule())
-                        .overlay(Capsule().strokeBorder((canGo ? routeGreen : routeWarn).opacity(0.6)))
-                        .foregroundStyle(canGo ? routeGreen : routeWarn)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canGo)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(.black.opacity(0.5), in: Capsule())
-        } else {
-            Text("Click a system to plot a course • drag to pan • pinch or +/− to zoom")
-                .novaFont(.caption).foregroundStyle(.secondary)
-        }
     }
 
     private func zoomButton(_ icon: String, _ action: @escaping () -> Void) -> some View {

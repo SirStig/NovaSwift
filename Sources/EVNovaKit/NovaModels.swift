@@ -376,12 +376,12 @@ public struct SystRes {
         averageShips = i16(d, 100)
         government = i16(d, 102)
         asteroidCount = max(0, min(16, i16(d, 106)))
-        // AstTypes: two bitmask bytes. @148 ("roidTypes2") bits 0-7 select röid
-        // 128-135 (metal/ice); @149 ("roidTypes1") bits 0-7 select röid 136-143
-        // (dust/crystal) — offsets and bit→id mapping verified against the real
-        // sÿst TMPL (#521) and the Bible's "AstTypes" field table.
-        let roidTypes2 = d.count > 148 ? Int(d[d.startIndex + 148]) : 0
-        let roidTypes1 = d.count > 149 ? Int(d[d.startIndex + 149]) : 0
+        // AstTypes: two bitmask bytes. @148 ("roidTypes1") bits 0-7 select röid
+        // 136-143 (dust/crystal); @149 ("roidTypes2") bits 0-7 select röid
+        // 128-135 (metal/ice) — offsets and bit→id mapping verified against the
+        // real sÿst TMPL (#521) and the Bible's "AstTypes" field table.
+        let roidTypes1 = d.count > 148 ? Int(d[d.startIndex + 148]) : 0
+        let roidTypes2 = d.count > 149 ? Int(d[d.startIndex + 149]) : 0
         var types: [Int] = []
         for bit in 0..<8 where (roidTypes2 >> bit) & 1 == 1 { types.append(128 + bit) }
         for bit in 0..<8 where (roidTypes1 >> bit) & 1 == 1 { types.append(136 + bit) }
