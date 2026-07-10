@@ -39,7 +39,7 @@ struct MissionBoardView: View {
                 ForEach(offered, id: \.id) { mission in
                     Button { engine?.present(mission) } label: {
                         HStack(spacing: 6) {
-                            NovaText(mission.name, size: 11, width: width - 65, align: .leading)
+                            NovaText(mission.displayName, size: 11, width: width - 65, align: .leading)
                             Spacer(minLength: 0)
                             NovaText(creditsLabel(mission.pay), size: 11,
                                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 60, align: .trailing)
@@ -194,7 +194,7 @@ private struct MissionInfoSheet: View {
             if let image = graphics.pict(Self.pictID) {
                 MissionPictFrame(image: image) { space in
                     // item 2: (13,1)-(206,13) 193x12 — selected mission's title
-                    NovaText(offer.mission.name, size: 12, width: 193, align: .leading, weight: .bold)
+                    NovaText(offer.mission.displayName, size: 12, width: 193, align: .leading, weight: .bold)
                         .novaPlace(space, -222.5, -76.5)
                     // item 6: (343,4)-(465,16) 122x12 — its reward
                     NovaText(creditsLabel(offer.mission.pay), size: 11,
@@ -228,7 +228,7 @@ private struct MissionInfoSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(offered, id: \.id) { mission in
                     Button { onSelect(mission) } label: {
-                        NovaText(mission.name, size: 10,
+                        NovaText(mission.displayName, size: 10,
                                  color: mission.id == offer.mission.id ? .white : Color(white: 0.6),
                                  width: 191, align: .leading)
                             .padding(.vertical, 1)
@@ -244,7 +244,7 @@ private struct MissionInfoSheet: View {
     /// Nova Graphics 3) — a plain fallback so the flow still works.
     private var fallback: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(offer.mission.name).novaFont(.heading)
+            Text(offer.mission.displayName).novaFont(.heading)
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
@@ -301,7 +301,7 @@ private struct MissionSingleSheet: View {
                     // item 2: (12,9)-(427,276) 415x267 — briefing pane
                     ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 6) {
-                            NovaText(offer.mission.name, size: 13, width: 415, align: .leading, weight: .bold)
+                            NovaText(offer.mission.displayName, size: 13, width: 415, align: .leading, weight: .bold)
                             NovaText(offer.briefingText, size: 11, width: 415, align: .leading)
                         }
                     }
@@ -352,7 +352,7 @@ private struct MissionSingleSheet: View {
 
     private var fallback: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(offer.mission.name).novaFont(.heading)
+            Text(offer.mission.displayName).novaFont(.heading)
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }

@@ -246,7 +246,7 @@ struct OutfitterView: View {
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
                 ForEach(Array(pageItems.enumerated()), id: \.offset) { _, o in
                     if let o {
-                        ItemTile(name: o.name, image: graphics.outfitPicture(o),
+                        ItemTile(name: o.displayName, image: graphics.outfitPicture(o),
                                  quantity: pilot.owned(outfit: o.id),
                                  selected: (selectedID ?? stock.first?.id) == o.id,
                                  locked: lockState(for: o) == .locked)
@@ -401,7 +401,7 @@ struct ShipyardView: View {
                 ForEach(Array(pageItems.enumerated()), id: \.offset) { _, s in
                     if let s {
                         let picture = shipPicture(s)
-                        ItemTile(name: s.name, image: picture?.image,
+                        ItemTile(name: s.displayName, image: picture?.image,
                                  pixelated: picture?.isDedicated == false,
                                  quantity: s.id == pilot.state.shipType ? 1 : 0,
                                  selected: (selectedID ?? stock.first?.id) == s.id,
@@ -429,14 +429,27 @@ struct ShipyardView: View {
         return nil
     }
 
+    /// Ship class descriptions live at `dësc` 13000–13767, one per hull, indexed
+    /// from the first ship id. This is where the second-hand hulls explain
+    /// themselves ("…not far from being consigned to the junk heap"), which is
+    /// why the tile only ever shows the plain class name.
+    private func classDescription(_ s: ShipRes) -> String {
+        game.descText(13000 + s.id - 128)
+    }
+
     private var detail: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let s = selected {
-                NovaText(s.name, size: 13, weight: .bold)
+                NovaText(s.displayName, size: 13, weight: .bold)
                 NovaText("Cargo: \(s.cargoSpace) tons", size: 11)
                 NovaText("Free mass: \(s.freeMass) tons", size: 11)
                 NovaText("Shield / Armor: \(s.shield) / \(s.armor)", size: 11)
                 NovaText("Guns / Turrets: \(s.maxGuns) / \(s.maxTurrets)", size: 11)
+                let blurb = classDescription(s)
+                if !blurb.isEmpty {
+                    NovaText(blurb, size: 11, width: 195, align: .leading)
+                        .padding(.top, 4)
+                }
             }
         }
         .frame(width: 200, alignment: .leading)

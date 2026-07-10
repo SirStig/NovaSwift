@@ -16,6 +16,7 @@ final class SpaceportGraphics {
     private var cache: [Int: CGImage] = [:]
     private var missed: Set<Int> = []
     private var shipFallbackCache: [Int: CGImage?] = [:]
+    private var baseHullCache: [Int: Int?] = [:]
 
     init(game: NovaGame) {
         self.game = game
@@ -93,8 +94,33 @@ final class SpaceportGraphics {
     /// dedicated piece of art distinct from the small in-flight `rlëD` sprite.
     /// Using the flight sprite here (e.g. a Shuttle's 24×24 frame) stretched to
     /// fill the shipyard panel is what made ships look blurry/pixelated.
+    ///
+    /// Only the base hulls carry this art: the data defines PICTs 5000–5054 for
+    /// ships 128–182 and nothing for the twelve second-hand variants (361–372) or
+    /// the government/escort variants that share a hull. Those all fall back to
+    /// the base hull's picture, found by display name — a used Valkyrie (#371)
+    /// borrows the Valkyrie's (#137 → PICT 5009).
     func shipPicture(_ ship: ShipRes) -> CGImage? {
-        pict(ship.id - 128 + 5000)
+        if let own = pict(ship.id - 128 + 5000) { return own }
+        guard let base = baseHull(for: ship) else { return nil }
+        return pict(base - 128 + 5000)
+    }
+
+    /// The id of the lowest-numbered ship sharing `ship`'s display name that owns
+    /// shipyard art. Nil when `ship` *is* that ship, or nothing matches.
+    private func baseHull(for ship: ShipRes) -> Int? {
+        if let cached = baseHullCache[ship.id] { return cached }
+        let target = ship.displayName
+        let base = game.ships()
+            .filter { $0.id != ship.id && $0.displayName == target }
+            .sorted { $0.id < $1.id }
+            .first { pict($0.id - 128 + 5000) != nil }?
+            .id
+        if base == nil {
+            Log.spaceport.error("No shipyard art for ship \(ship.id, privacy: .public) (\(ship.name, privacy: .public)) and no base hull named \"\(target, privacy: .public)\" has any either")
+        }
+        baseHullCache[ship.id] = .some(base)
+        return base
     }
 
     /// The small in-flight sprite's frame 0, standing in for a ship's shipyard

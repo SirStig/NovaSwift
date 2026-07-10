@@ -60,6 +60,16 @@ specifically when "ships allied with the reinforcement fleet's government are
 under attack and the combat odds against them exceed `MaxOdds`" — i.e. the
 same calculation gates a second, dynamic layer of population.
 
+> **Status update:** this reactive reinforcement-summon mechanism (both the
+> `sÿst.ReinfFleet`/`ReinfDelay`/`ReinfRegen` decode and the "ally under
+> attack and outmatched → summon" trigger) is now implemented in
+> `Spawner.swift` (`updateReinforcements`/`governmentUnderAttackAndOutmatched`).
+> See [FLEETS.md](reverse-engineering/FLEETS.md) §5 and §7 for the current,
+> byte-verified implementation status and remaining caveats (notably the
+> `ReinfRegen` "days" unit being approximated as fixed sim-seconds, since no
+> galaxy-day clock reaches this layer) — this doc's own reverse-engineering
+> content above is unchanged, only noting that the gap it describes is closed.
+
 ## 3. Disable is a deterministic armor threshold, not a coin flip
 
 > `shïp.Flags 0x0010`: "Ship is disabled at 10% armor instead of 33%."

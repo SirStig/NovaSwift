@@ -256,12 +256,7 @@ public final class StorylineAnalyzer {
         return key.isEmpty ? (nil, 0) : (key, step)
     }
 
-    private func cleanName(_ name: String) -> String {
-        if let semi = name.firstIndex(of: ";") {
-            return String(name[..<semi]).trimmingCharacters(in: .whitespaces)
-        }
-        return name
-    }
+    private func cleanName(_ name: String) -> String { name.novaDisplayName }
 
     // MARK: Human-readable field descriptions
 

@@ -43,7 +43,7 @@ final class GameHost {
             let shipID = pilot.shipType
             let res = game.ship(shipID)
             ship = galaxy.makeLoadedShip(shipID, extraOutfits: pilot.outfits)
-                ?? Ship(name: res?.name ?? "Ship",
+                ?? Ship(name: res?.displayName ?? "Ship",
                         stats: ShipStats(speed: res?.speed ?? 300, acceleration: res?.acceleration ?? 400,
                                          turnRate: res?.turnRate ?? 30, rotationFrames: 36))
             ship.cargo = pilot.cargo
@@ -52,7 +52,7 @@ final class GameHost {
             if let lo = galaxy.loadout(shipID: shipID, extraOutfits: pilot.outfits) {
                 ship.fuel = pilot.fuel.map { min($0, lo.maxFuel) } ?? lo.maxFuel
             }
-            hud.shipName = pilot.shipName.isEmpty ? (res?.name ?? "") : pilot.shipName
+            hud.shipName = pilot.shipName.isEmpty ? (res?.displayName ?? "") : pilot.shipName
             if let sheet = game.shipSprite(shipID) {
                 textures = SpriteTextures.rotationFrames(from: sheet)
             }

@@ -77,7 +77,7 @@ final class PilotStore: ObservableObject {
             Log.pilot.error("PilotStore.newGame: no starting chär scenario in game data; using hardcoded fallback ship/system/credits")
         }
         let shipID = ch?.startingShip ?? game.ships().first?.id ?? 128
-        let shipName = game.ship(shipID)?.name ?? "Ship"
+        let shipName = game.ship(shipID)?.displayName ?? "Ship"
         let system = ch?.startingSystem ?? game.startingSystem()?.id ?? 128
         state = PlayerState(pilotName: "Captain",
                             shipType: shipID,
@@ -257,7 +257,7 @@ final class PilotStore: ObservableObject {
         guard state.credits >= price, ship.id != state.shipType else { return false }
         state.credits -= price
         state.shipType = ship.id
-        state.shipName = ship.name
+        state.shipName = ship.displayName
         // Outfits carry over (EV Nova keeps persistent items); cargo stays, but is
         // dropped if it no longer fits the new, smaller hold — clamped on takeoff.
         save()

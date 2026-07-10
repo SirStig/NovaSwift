@@ -17,6 +17,13 @@ final class GameDataController: ObservableObject {
     @Published private(set) var plugins: [PluginBundle] = []
     @Published private(set) var status: String = "No game data imported yet."
 
+    /// The latest prewarm report, in order. Kept separate from `status` so the
+    /// loading screen's transient per-sprite chatter doesn't overwrite the
+    /// launcher's "Loaded N resources…" summary pill.
+    @Published private(set) var prewarmProgress: PrewarmProgress?
+    /// `prewarmProgress.fraction`, clamped to never decrease.
+    @Published private(set) var prewarmFraction: Double = 0
+
     /// The resolved game, once base data is available.
     private(set) var game: NovaGame?
     private var loaded = false
@@ -121,18 +128,31 @@ final class GameDataController: ObservableObject {
     func reloadIfNeeded() { if !loaded { reload() } }
 
     /// Eagerly decodes the catalog (ships/outfits/governments) and every hull's
-    /// sprites off the main thread, reporting progress through `status` — see
-    /// `NovaGame.prewarm`. Meant to run once on the loading screen between
-    /// picking/creating a pilot and entering the game, so the first Shipyard/
-    /// Outfitter visit and the first time a hull is seen never pay decode cost
-    /// mid-frame. No-op if data hasn't loaded. Safe to await from the main actor.
+    /// sprites off the main thread, publishing progress through
+    /// `prewarmProgress` — see `NovaGame.prewarm`. Meant to run once on the
+    /// loading screen between picking/creating a pilot and entering the game, so
+    /// the first Shipyard/Outfitter visit and the first time a hull is seen never
+    /// pay decode cost mid-frame. No-op if data hasn't loaded. Safe to await from
+    /// the main actor.
+    ///
+    /// Reports stream through an `AsyncStream` rather than one unstructured
+    /// `Task { @MainActor in … }` per callback: those tasks carry no ordering
+    /// guarantee between them, so a later "210/266" could be applied before an
+    /// earlier "200/266" and the counter would visibly jump around. The stream
+    /// preserves the order `prewarm` produced them in; `max` is a cheap belt to
+    /// the stream's braces, keeping the published fraction monotonic.
     func prewarm() async {
         guard let game else { return }
-        await Task.detached(priority: .userInitiated) { [weak self] in
-            game.prewarm { text in
-                Task { @MainActor in self?.status = text }
+        let reports = AsyncStream<PrewarmProgress> { continuation in
+            Task.detached(priority: .userInitiated) {
+                game.prewarm { continuation.yield($0) }
+                continuation.finish()
             }
-        }.value
+        }
+        for await report in reports {
+            prewarmProgress = report
+            prewarmFraction = max(prewarmFraction, report.fraction)
+        }
     }
 
     func reload() {

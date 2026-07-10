@@ -7,6 +7,44 @@ Appendix I — Combat Ratings (~3518–3543), Appendix II — Legal Status
 (~3543–3577), and the control-bit/NCB primer (~97–229). Every quoted line
 below is verbatim or a close paraphrase of that text, not a guess.
 
+## Implementation status (updated after the code changes below landed)
+
+Since this doc was first written, a follow-up pass implemented several items
+that §5 originally listed as gaps:
+
+- `Diplomacy.isCriminal` now reads each government's own `crimeTolerance`
+  (`GovtRes.crimeTolerance`) instead of a single hardcoded threshold for
+  every govt — the per-government-ratio model in §2 is now correctly
+  modeled at the hostility-check layer.
+- `Diplomacy` gained `combatRating` tracking and four new methods —
+  `recordKill`/`recordDisable`/`recordBoard`/`recordSmuggling` — that apply
+  the correct, Bible-documented penalty field (`KillPenalty`/`DisabPenalty`/
+  `BoardPenalty`/`SmugPenalty`) instead of the dead `ShootPenalty` field.
+  **These methods are correct but not yet called from anywhere** — `World`'s
+  actual combat code (`World.swift`) still docks legal record from
+  `gov.shootPenalty` on every hit, and its disable/kill transitions
+  (`.shipDisabled`/`.shipDestroyed` events) don't invoke the new methods.
+  See the "implemented but not wired" rows below.
+- `GovtRes` gained six previously-undecoded fields: `require`, `jamming`
+  (`InhJam1-4`), `mediumName`, `mapColor`, `shipColor`, `interface`,
+  `newsPic` — closing the byte-verified "six fields genuinely missing from
+  the struct" gap noted in the "Correction" entry further down. `require`
+  is decoded but still has no landing-gate consumer; the other five have no
+  reader anywhere yet either (they're cosmetic/UI fields with no matching UI
+  code yet).
+- `RankRes.contribute` and `MissionRes.require` are now decoded (both were
+  previously flagged as "offset known, not yet read into the struct").
+  Both are now also **wired**: `StoryEngine.activeContributeBits()` folds
+  rank `Contribute` into the pooled bitmask, and `StoryEngine.isEligible`
+  AND-gates `mission.require` against it — the mission-availability half of
+  the Contribute/Require chain (§4.4) is live. The purchase-gating half
+  (`app/EVNova/Spaceport/ItemLocking.swift`) checks `ship.require`/
+  `outfit.require` against ship+outfit Contribute bits, but does **not**
+  fold in active-rank Contribute the way `StoryEngine` does — a
+  rank-gated purchase (the Bible's own headline example for
+  `ränk.Contribute`) is therefore still not achievable through the
+  spaceport UI today, only through mission/cron availability.
+
 This doc does **not** re-derive:
 - `gövt.MaxOdds` combat-odds gating — see [AI_GROUND_TRUTH.md](../AI_GROUND_TRUTH.md#2-combat-odds-gating-gövtmaxodds--completely-missing-from-our-sim),
   referenced briefly below where legal status interacts with it.
@@ -358,6 +396,11 @@ use for their own restrictions.
 
 ## 5. What's implemented vs. what's missing
 
+Status legend used below: ✅ **Implemented and wired** — a real gameplay
+path calls it, a player can observe the effect. ⚠️ **Implemented but not
+wired** — the function/field exists and is correct, but nothing in the
+running engine calls it yet. ❌ **Not implemented.**
+
 Cross-referenced against `Sources/EVNovaEngine/Diplomacy.swift`,
 `Sources/EVNovaKit/NovaAIModels.swift`, `Sources/EVNovaKit/NovaModels.swift`,
 `Sources/EVNovaKit/MissionModels.swift`, `Sources/EVNovaStory/StoryEngine.swift`,
@@ -387,6 +430,34 @@ evaluates either.
 - **Legal record as a mission gate** — `StoryEngine.isEligible`
   (`StoryEngine.swift:135-138`) checks `combatRating`/`legalRecord` against a
   mission's `availRating`/`availRecord`.
+- ✅ **Implemented and wired: per-government `CrimeTol` hostility ratio.**
+  `Diplomacy.isCriminal` (`Diplomacy.swift:118-128`) now reads each
+  government's own `GovtRes.crimeTolerance` and compares it against that
+  government's accumulated evilness, instead of the single hardcoded
+  `hostileThreshold = -1` every govt used to share. A govt with
+  `CrimeTol = 500` now genuinely tolerates more than one with `CrimeTol = 5`,
+  matching §2's ratio model. (The old `hostileThreshold` constant still
+  exists as a documented fallback for the rare case where a government id is
+  missing from the table entirely.)
+- ✅ **Implemented and wired: `mïsn.Require` mission-availability gate.**
+  `MissionRes.require` (`MissionModels.swift:181/263`) is decoded, and
+  `StoryEngine.isEligible` (`StoryEngine.swift:147-149`) AND-gates it against
+  `StoryEngine.activeContributeBits()` — a mission whose `Require` bits
+  aren't satisfied by the player's current ship/outfit/rank/cron Contribute
+  bits is correctly excluded from `missionsOffered`. `crön.Require` is wired
+  the same way (`StoryEngine.swift:482`, cron activation).
+- ⚠️ **Implemented but not wired (partially): `ränk.Contribute`.**
+  `RankRes.contribute` (`MissionModels.swift:414/433`) is decoded and *is*
+  folded into `StoryEngine.activeContributeBits()`
+  (`StoryEngine.swift:407`), so an active rank correctly unlocks
+  rank-gated missions/crons. It is **not** folded into
+  `app/EVNova/Spaceport/ItemLocking.swift`'s `contributedBits(pilot:)`
+  (`ItemLocking.swift:24-29`), which only pools ship+outfit Contribute — so
+  the Bible's own headline example for this field ("prevent the player from
+  buying certain items... until achieving a certain rank") still can't
+  happen through the spaceport UI. Fix: add the same active-rank loop
+  `StoryEngine.activeContributeBits()` already has to
+  `NovaGame.contributedBits(pilot:)`.
 - **`chär.Govt1-4/Status1-4` seeding** — `PilotFactory.initialLegalRecord`
   (`PilotFactory.swift:100-115`) correctly seeds starting legal record and
   propagates the negation to the starting govt's enemies' classes (this is
@@ -396,25 +467,34 @@ evaluates either.
 
 ### Gaps and discrepancies (file:line)
 
-- **`CrimeTol` is decoded but never consulted.** `GovtRes.crimeTolerance`
-  (`NovaAIModels.swift:224`) exists, but `Diplomacy.isCriminal`
-  (`Diplomacy.swift:86-87`) compares `legalRecord[govt]` against a single
-  hardcoded `hostileThreshold = -1` (`Diplomacy.swift:20`) for *every*
-  government, regardless of that govt's own crime tolerance. A government
-  with `CrimeTol = 500` and one with `CrimeTol = 5` currently turn hostile at
-  the exact same point (−1), which the Bible's model rules out entirely.
-- **`ScanFine`/`SmugPenalty`/`DisabPenalty`/`BoardPenalty`/`KillPenalty` are
-  decoded but dead.** All five are struct fields on `GovtRes`
-  (`NovaAIModels.swift:223-228`) with no reader anywhere else in the
-  codebase. The only place legal record is ever docked
-  (`World.applyHit`, `World.swift:730-735`) uses `gov.shootPenalty` — the one
-  field the Bible explicitly says is **"currently ignored"** in the real
-  game — and applies it on *every hit*, not on kill/disable/board. So today:
-  shooting (not destroying/disabling/boarding) is the only thing that dents
-  legal record, using the one documented-dead field, while the three
-  documented-live fields (`KillPenalty`, `DisabPenalty`, `BoardPenalty`) are
-  never read. `ScanFine`/`SmugPenalty` have no illegal-cargo-detection system
-  to attach to at all (see next point).
+- **`CrimeTol` — resolved, see "Correctly modeled" above.** (Kept as a
+  removed-item marker so a reader diffing this doc against an older copy
+  can see the gap was closed, not silently dropped.)
+- ⚠️ **Implemented but not wired: `recordKill`/`recordDisable`/
+  `recordBoard`/`recordSmuggling`.** `Diplomacy` now has all four methods
+  (`Diplomacy.swift:170-209`), each applying the correct live Bible field
+  (`KillPenalty`/`DisabPenalty`/`BoardPenalty`/`SmugPenalty`) via
+  `recordCrime`, and `recordKill` also credits `Diplomacy.combatRating`
+  with the destroyed ship's `shïp.Strength`. **None of the four are called
+  from anywhere in `Sources/` or `app/`** — verified by a repo-wide grep;
+  the only call sites are the methods' own definitions and their doc
+  comments. `World.applyHit` (`World.swift:828-834`) still docks legal
+  record from `gov.shootPenalty` on *every hit* — the one field the Bible
+  explicitly says is **"currently ignored"** in the real game — and
+  `World`'s disable/kill transitions (`World.swift:846-858` for
+  `.shipDisabled`, `World.swift:863-871` for `.shipDestroyed`) emit events
+  but never call `recordDisable`/`recordKill`. So today: shooting (not
+  destroying/disabling/boarding) is still the only thing that dents legal
+  record, still using the one documented-dead field, and `combatRating`
+  still cannot increase through play (see below). Closing this gap needs
+  exactly two call sites added in `World.swift`: `recordDisable` where
+  `.shipDisabled` is emitted, `recordKill` where `.shipDestroyed` is
+  emitted (using the destroyed ship's `shïp.strength`) — and the
+  every-hit `gov.shootPenalty` call removed. `recordBoard`/
+  `recordSmuggling` remain correct-but-unreachable until boarding and
+  scan-and-fine mechanics exist at all (see next two points, unchanged).
+  `ScanFine`/`SmugPenalty` still have no illegal-cargo-detection system to
+  attach to (see next point).
 - **No illegal-cargo/ScanMask system.** `MissionRes.scanMask`
   (`MissionModels.swift:123/206`) is decoded; `GovtRes` has no `scanMask`
   field decoded at all (see below). Nothing in the engine ever checks
@@ -427,12 +507,22 @@ evaluates either.
   victim's *enemies*, despite the Bible's explicit "will improve your rating
   with its enemies" clause. The half-penalty magnitude for the ally
   propagation is also an invented constant — not specified by the Bible.
-- **`combatRating` never increments during play.**
-  `PilotFactory.swift:66` sets it once from `chär.Kills` at character
-  creation. `World.despawnDepartedAndDead` (`World.swift:764-803`) emits a
-  `.shipDestroyed` event on every kill but nothing consumes that event to
-  add `shïp.Strength` to `player.combatRating` — a pilot's combat rating is
-  frozen for the entire game at whatever their starting scenario granted.
+- ❌ **`combatRating` still never increments during play.**
+  `PilotFactory.swift:66` sets `EVNovaStory.PlayerState.combatRating` once
+  from `chär.Kills` at character creation, and nothing ever adds to it
+  afterward. `EVNovaEngine.Diplomacy` now separately tracks its own
+  `combatRating` field and a `recordKill(of:shipStrength:)` method that
+  *would* increment it correctly on a kill (see the "implemented but not
+  wired" entry above) — but that's a different module's separate tally
+  (`Diplomacy` has no dependency on `EVNovaStory` and can't write to
+  `PlayerState` directly), and it's equally unreached in practice since
+  nothing calls `recordKill` either. So both the story-layer and the
+  engine-layer combat-rating counters are frozen for the entire game today;
+  a pilot's combat rating never moves past whatever their starting scenario
+  granted. Closing this needs both the `World.swift` wiring above *and* a
+  bridge that copies `Diplomacy.combatRating` into `PlayerState.combatRating`
+  (there's no such bridge yet — the two modules "never talk to each other,"
+  as already noted below for the story-layer selectors).
 - **Combat-rating title ladder doesn't match Appendix I.**
   `CombatRating` (`PilotSave.swift:131-142`) has 9 titles at thresholds
   `[0,100,200,400,800,1600,3200,6400,12800]`. The Bible's table has 11 rows
@@ -445,11 +535,16 @@ evaluates either.
   Appendix II good/evil ladder anywhere in the codebase — the ratio-to-tier
   formula in §2 isn't implemented, so nothing can currently display "Wanted
   Criminal" / "Model Citizen" etc.
-- **`ränk.Contribute` is not decoded, but its offset is already known and
-  correctly commented** — this is a trivial fix, not an open-offset mystery.
-  `RankRes.init` (`MissionModels.swift:385`) has `// 14: Contribute (8
-  bytes)` right where the field actually sits, it's simply never assigned to
-  a struct property. Independent confirmation: the `ränk` TMPL
+- **`ränk.Contribute` — now decoded and wired for missions/crons; still
+  unwired for purchases. See "Correctly modeled" / "Implemented but not
+  wired" above.** (This entry originally documented the byte-offset
+  derivation for the not-yet-decoded field; kept below for the historical
+  offset-verification record, since that reasoning is still the correct
+  citation trail for why offset 14 is right.)
+  `RankRes.init` (`MissionModels.swift:385` in the original draft of this
+  doc) had `// 14: Contribute (8 bytes)` right where the field actually
+  sits; it is now assigned to `RankRes.contribute`
+  (`MissionModels.swift:414/433`). Independent confirmation: the `ränk` TMPL
   (`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, TMPL
   #515, via `evnova-extract tmpl ... 515`) computes `Contribute@14` as an
   8-byte `QB64` field, immediately followed by `Flags` — which matches
@@ -461,16 +556,10 @@ evaluates either.
   bytes` on the nose. That real record also proves the field is *live data*,
   not always blank: bytes 14–21 decode to a non-zero 64-bit value (word at
   offset 16 = `123`, the rest of the 8 bytes zero), i.e. rank #128 actually
-  carries a real Contribute bitmask. So: offset known (14), width known (8
-  bytes, `QB64`), boundary confirmed by the following field's own working
-  offset, and real data shows it's exercised in the shipped game — the only
-  remaining work is adding a `contribute` property to `RankRes` and reading
-  `mi64`/equivalent at offset 14; no further reverse-engineering is needed.
-  A rank's ability to gate purchases/missions (§4.4) is entirely
-  unimplemented on the rank side until that one property is added.
-- **`mïsn.Require` is likewise not decoded, and the existing `1622` comment
-  is now independently confirmed correct**, the same pattern as
-  `ränk.Contribute` above. The `mïsn` TMPL (TMPL #510, via `evnova-extract
+  carries a real Contribute bitmask.
+- **`mïsn.Require` — now decoded and wired, see "Correctly modeled" above.**
+  (Historical offset-verification record, kept for its citation trail.) The
+  `mïsn` TMPL (TMPL #510, via `evnova-extract
   tmpl ... 510` — a large, 5819-byte-of-template-data dump, but clean:
   no `KEYB`/nested-`TMPL` warning anywhere in it, only cosmetic `PACK`
   name-alias entries with `@ ?` offsets for fields that already have a
@@ -499,22 +588,37 @@ evaluates either.
   TMPL and this codebase's own pre-existing comment) agree on `1622`, the
   surrounding fields' offsets check out against real decoded data, and nothing
   in ~190 sampled real missions contradicts it — high confidence this offset
-  is correct. Mission availability today only checks `AvailBits` (NCB test),
-  never `Require`; only a `require` property + `mi64` read at offset 1622 is
-  needed to close this gap.
-- **`gövt.Require` is not decoded at all** in `GovtRes` — no `require1`/
-  `require2` field exists on the struct (`NovaAIModels.swift:216-244`), so
-  government-scoped "travel permit" gating (landing gated on Contribute
-  bits) cannot exist yet.
-- **The whole Contribute/Require chain is inert even where decoded.**
-  `shïp.contribute`/`shïp.require` (`NovaModels.swift:232-234`,
-  `NovaModels.swift:276-278`) and `oütf.contribute`/`oütf.require`
-  (`NovaAIModels.swift:146-147`, `NovaAIModels.swift:177-178`) *are* decoded,
-  but a repo-wide search finds no code anywhere that reads `.contribute` or
-  `.require` off either type — no purchase-gating function combines them.
-  So even the two Contribute/Require sources this codebase does parse are
-  presently dead data; buying an outfit/ship never checks its `Require`
-  against anything.
+  is correct. Mission availability now checks both `AvailBits` (NCB test)
+  *and* `Require` (`StoryEngine.isEligible`, `StoryEngine.swift:140,147-149`).
+- ⚠️ **Implemented but not wired: `gövt.Require`.** `GovtRes.require`
+  (`NovaAIModels.swift:275`, `@84`, `QB64`) is now decoded — closing the
+  byte-offset gap this bullet originally described (no `require1`/`require2`
+  field existed at all; now there's one 64-bit `require` field, matching the
+  TMPL-verified layout in the "Correction" entry below). It has **no
+  consumer anywhere**: a repo-wide grep for landing/`canLand` logic
+  (`Galaxy.swift`, `AIBrain.swift`, `GameScene.swift`) finds no code that
+  reads `gov.require`, so the "travel permit" gate §1.1/§4.4 describe
+  ("you won't be allowed to visit any planets or stations owned by this
+  govt") still doesn't exist — landing today is gated purely by a spöb's own
+  landable flag/pict, never by government permit bits. Closing this needs a
+  new check at the landing call site(s), analogous to
+  `ItemLocking.requireGovtApplies` but for `gövt.require` itself rather than
+  an outfit's `RequireGovt`-scoped `require`.
+- ⚠️ **Implemented but not wired for ship/outfit purchases in one direction,
+  wired in the other — see above for the precise split.** This entry
+  originally read "the whole Contribute/Require chain is inert even where
+  decoded"; that's no longer accurate. `shïp.contribute`/`shïp.require`
+  (`NovaModels.swift:232-234`, `NovaModels.swift:276-278`) and
+  `oütf.contribute`/`oütf.require` (`NovaAIModels.swift:146-147`,
+  `NovaAIModels.swift:177-178`) are decoded *and* now read by
+  `app/EVNova/Spaceport/ItemLocking.swift` (`lockState(for:pilot:at:diplomacy:)`
+  for both `OutfRes` and `ShipRes`) to grey out/hide purchases whose
+  `Require` isn't satisfied, and by `StoryEngine.activeContributeBits()`
+  (`StoryEngine.swift:399-410`) for mission/cron eligibility. What's still
+  missing: `ItemLocking.contributedBits(pilot:)` doesn't fold in active-rank
+  Contribute the way `StoryEngine.activeContributeBits()` does (see the
+  `ränk.Contribute` entry above), and `gövt.require` (previous bullet) has
+  no consumer at all.
 - **Most `ränk.Flags` bits are unmodeled.** Only `0x0001` is checked
   (`StoryEngine.activateRank`, `StoryEngine.swift:115`). `0x0002`, `0x0004`,
   `0x0008` (permanent), `0x0010`, `0x0020`, `0x0040` have no decoded property
@@ -546,8 +650,10 @@ evaluates either.
   smugglePenalty@10, disablePenalty@12, boardPenalty@14, killPenalty@16,
   shootPenalty@18, initialRecord@20, maxOdds@22, classes@24(×4),
   allies@32(×4), enemies@40(×4), shipSpeedFactor@48, scanMask@50,
-  commName@52(16B), targetCode@68(16B)`, then (not yet decoded into the
-  struct) `require@84`(8B, `QB64`), `jamming1-4@92`(8B, `RECT`),
+  commName@52(16B), targetCode@68(16B)`, then (at the time this section was
+  first written, not yet decoded into the struct — **now decoded**, see the
+  "Implementation status" note near the top of this doc) `require@84`(8B,
+  `QB64`), `jamming1-4@92`(8B, `RECT`),
   `mediumName@100`(64B, `C040` — a *second*, longer name field distinct from
   `commName`), `mapColor@164`(4B), `shipColor@168`(4B), `interface@172`(2B),
   `newsPic@174`(2B), 16 bytes of declared-`Unused` padding to 192. The real
@@ -557,12 +663,19 @@ evaluates either.
   and `commName`'s 16 bytes literally spell `"Federation"` padded with
   nulls. **So `shipSpeedFactor` is real** (it's simply not documented by
   name in the Bible's prose, only inferable from the TMPL), and `commName`/
-  `targetCode` are not shifted. The *actual* gap is narrower than the
-  original theory: `GovtRes` never decodes `Require` (to land — the same
-  land-gating mechanic as `ränk.Contribute`/`mïsn.Require`, see §1.1),
-  `InhJam1-4`, the long-form `MediumName`, `MapColor`/`ShipColor`, or
-  `Interface`/`NewsPic` — six fields genuinely missing from the struct, not
-  a misalignment. `SkillMult` remains separately confirmed
+  `targetCode` are not shifted. The *actual* gap (at the time) was narrower
+  than the original theory: `GovtRes` didn't yet decode `Require` (to land —
+  the same land-gating mechanic as `ränk.Contribute`/`mïsn.Require`, see
+  §1.1), `InhJam1-4`, the long-form `MediumName`, `MapColor`/`ShipColor`, or
+  `Interface`/`NewsPic` — six fields genuinely missing from the struct at
+  the time, not a misalignment; all six are now decoded (`require`,
+  `jamming`, `mediumName`, `mapColor`, `shipColor`, `interface`, `newsPic`
+  in `NovaAIModels.swift`), though only `require` has any documented
+  gameplay meaning to wire up (§4.4's travel-permit gate — still unwired,
+  see §5) — the other five (`jamming`, `mediumName`, `mapColor`/
+  `shipColor`, `interface`, `newsPic`) are cosmetic/UI/AI-interaction fields
+  with no reader anywhere yet either, which is expected since there's no
+  matching UI/jamming-consumer code for them yet. `SkillMult` remains separately confirmed
   missing/unguessable in [AI_GROUND_TRUTH.md §4.6](../AI_GROUND_TRUTH.md)
   (no `GovtResource.ts` in novaparse to verify against). A dedicated re-check
   of the full TMPL #507 field list above (every `DWRD`/`WORV`/`CASE`/`CASR`

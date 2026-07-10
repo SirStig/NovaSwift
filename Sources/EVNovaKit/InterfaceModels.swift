@@ -16,7 +16,7 @@ public struct NovaColor: Equatable, Hashable {
 }
 
 /// A QuickDraw rectangle (top, left, bottom, right), origin top-left.
-public struct NovaRect: Equatable {
+public struct NovaRect: Equatable, Sendable {
     public let top: Int, left: Int, bottom: Int, right: Int
     public var width: Int { right - left }
     public var height: Int { bottom - top }

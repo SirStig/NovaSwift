@@ -8,6 +8,19 @@
 > accept or progress missions. Wiring this in is roadmap **P0**. See
 > [STATUS.md](STATUS.md) and [ROADMAP.md](ROADMAP.md). "Done" below means "the
 > library works," not "the player experiences it."
+>
+> **Correction (mission half only):** this banner is now stale for bar/computer
+> missions specifically — `app/EVNova/Story/AppGameServices.swift` is a real
+> `GameServices` conformer, and `app/EVNova/Story/MissionBoardView.swift`
+> instantiates a live `StoryEngine` per mission-offer location; accepting or
+> declining a mission there genuinely mutates and saves the pilot's
+> `PlayerState`. What's still true: nothing in `app/` calls
+> `StoryEngine.advanceOneDay()`/`.advanceDays()`, so the galaxy clock never
+> advances during live play and background `crön` events (timed bit-flips,
+> news) still never fire for a real player. See
+> [reverse-engineering/EVENTS.md](reverse-engineering/EVENTS.md) §5 for the
+> detailed cron-specific status, including a fixed `CronRes` byte-layout bug
+> and new `Contribute`/`Require`/news-string handling.
 
 The story layer — bar/computer missions, the control-bit ("NCB") scripting
 language, background `crön` events, ranks, and the campaign save-state. It is a

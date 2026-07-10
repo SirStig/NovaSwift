@@ -1329,7 +1329,7 @@ final class GameScene: SKScene {
         hud.cargoUsed = p.cargoUsed
         hud.cargoCapacity = p.cargoCapacity
         if let mount = p.weapons.first {
-            hud.weaponName = mount.spec.name
+            hud.weaponName = mount.spec.name.novaDisplayName
             hud.weaponAmmo = mount.ammo   // -1 = unlimited
         } else {
             hud.weaponName = ""

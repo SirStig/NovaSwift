@@ -1,13 +1,16 @@
 import SwiftUI
 
 /// EV Nova's typography, centralized: which of the game's two original fonts
-/// (Charcoal for chrome/titles, Geneva for everything else — the classic Mac OS
-/// 8 "Charcoal" appearance pairing the game itself used) a role renders in, its
-/// base point size at the 1024×768 design reference, and its shrink-to-fit
-/// behavior. `Font.custom` falls back to a system font automatically if the
-/// named font isn't registered yet (e.g. before any data is imported — see
-/// `GameDataController.registerFonts(from:)`), so no extra guarding is needed
-/// here.
+/// (Charcoal for chrome/titles, Geneva for everything else — the classic Mac OS 8
+/// "Charcoal" appearance pairing the game itself used) a role renders in, and how
+/// big it gets on the device in front of the player.
+///
+/// **Charcoal does not ship with macOS or iOS**; Geneva does. So when the
+/// player's data hasn't been imported yet, `Font.custom("Charcoal", …)` silently
+/// resolves to the system font while body text still looks right — which is
+/// exactly why "the fonts seem off" reads as a titles-only problem.
+/// `GameDataController.registerFonts(from:)` registers both from the imported
+/// data; nothing here needs to guard for it.
 enum NovaFontRole {
     case title      // Charcoal — large screen/app titles
     case heading    // Charcoal — dialog titles, section headers
@@ -23,27 +26,42 @@ enum NovaFontRole {
         }
     }
 
-    /// Point size at 1× (the game's 1024×768 design space).
+    /// The size this role renders at on a desktop-sized window.
+    ///
+    /// These are *not* the game's 2002 point sizes. EV Nova authored its chrome
+    /// for a 1024×768 CRT where 9pt Geneva was a comfortable read; the same 9pt
+    /// on a modern display, inside a window that may be a fraction of the screen,
+    /// is not. The authentic sizes still govern the *authentic* screens, which
+    /// live inside `NovaMenu`'s frame-pixel space and scale with their PICT (see
+    /// `NovaText`). This scale governs our own native chrome — launcher,
+    /// settings, plug-in store, pilot list — which has no PICT to scale against.
     var baseSize: CGFloat {
         switch self {
-        case .title:   return 24
-        case .heading: return 18
-        case .body:    return 11
-        case .caption: return 9
-        case .button:  return 12
-        case .hud:     return 12
+        case .title:   return 28
+        case .heading: return 20
+        case .body:    return 15
+        case .caption: return 13
+        case .button:  return 15
+        case .hud:     return 14
         }
     }
 
-    /// Fixed-width chrome (titles, buttons, HUD readouts) shrinks to fit on one
-    /// line rather than clipping; paragraph text (body/caption) wraps instead —
-    /// shrinking multi-line text hurts readability more than it helps fitting.
-    var shrinksToFit: Bool {
+    /// The smallest size this role may ever render at, whatever the window size.
+    /// Below roughly 11pt, UI text stops being readable at arm's length; below
+    /// 9pt it is decorative. Nothing is allowed past that line.
+    var minimumSize: CGFloat {
         switch self {
-        case .title, .heading, .button, .hud: return true
-        case .body, .caption: return false
+        case .title:   return 20
+        case .heading: return 16
+        case .body:    return 13
+        case .caption: return 11
+        case .button:  return 13
+        case .hud:     return 11
         }
     }
+
+    /// The largest size, so a 4K display doesn't render 50pt body copy.
+    var maximumSize: CGFloat { baseSize * 1.6 }
 }
 
 private struct NovaTextScaleKey: EnvironmentKey {
@@ -66,14 +84,19 @@ extension View {
         environment(\.novaTextScale, scale)
     }
 
-    /// The reusable "how big is 1024×768 in the space we've got" formula
-    /// `NovaMenu` already uses for its whole-tree `.scaleEffect`, exposed here
-    /// for the screens that have no `NovaCanvas`/`NovaMenu` container of their
-    /// own (dialogs, HUD overlays, launcher/settings chrome) so their text can
-    /// still scale between a small phone and a large desktop window.
-    func novaResponsive(maxScale: CGFloat = 2.2) -> some View {
+    /// Scale our own native chrome for the space it has.
+    ///
+    /// This deliberately does **not** reuse `min(w/1024, h/768)` — the formula
+    /// `NovaMenu` uses to fit a 1024×768 game canvas. On an iPhone that formula
+    /// evaluates to ~0.4, which turned 9pt caption text into 4.5pt. A phone is
+    /// *smaller*, so its text must be relatively *larger*, not smaller. Native
+    /// chrome reflows instead of scaling, so it only needs a gentle nudge up on
+    /// genuinely large displays, clamped hard at both ends by the role.
+    func novaResponsive(maxScale: CGFloat = 1.6) -> some View {
         GeometryReader { geo in
-            let scale = min(min(geo.size.width / 1024, geo.size.height / 768), maxScale)
+            let reference: CGFloat = 1440   // a typical desktop window width
+            let raw = geo.size.width / reference
+            let scale = min(max(raw, 1.0), maxScale)
             self.novaTextScale(scale)
         }
     }
@@ -84,26 +107,35 @@ private struct NovaFontModifier: ViewModifier {
     let role: NovaFontRole
     let weight: Font.Weight
     let baseSize: CGFloat
+    let minimumSize: CGFloat
+    let maximumSize: CGFloat
 
     func body(content: Content) -> some View {
-        let size = (baseSize * scale).clamped(to: baseSize * 0.5...baseSize * 2.2)
-        let styled = content.font(.custom(role.family, size: size).weight(weight))
-        if role.shrinksToFit {
-            styled.lineLimit(1).minimumScaleFactor(0.55)
-        } else {
-            styled
-        }
+        let size = (baseSize * scale).clamped(to: minimumSize...maximumSize)
+        content.font(.custom(role.family, size: size).weight(weight))
     }
 }
 
 extension View {
-    /// Applies EV Nova's authentic typography for `role`, scaled for the
-    /// current device/window via the ambient `novaTextScale`. `size` overrides
-    /// the role's default base size for one-off display treatments (e.g. the
-    /// launcher's oversized hero title) while still sharing the role's font
-    /// family and shrink-to-fit behavior.
+    /// Applies EV Nova's authentic typography for `role`, sized for the current
+    /// device/window via the ambient `novaTextScale` and floored at the role's
+    /// readable minimum. `size` overrides the role's default base size for
+    /// one-off display treatments (e.g. the launcher's oversized hero title)
+    /// while still sharing the role's font family.
+    ///
+    /// Note there is deliberately no blanket `lineLimit(1).minimumScaleFactor()`
+    /// here. Applying it to every title, button, and HUD readout let each label
+    /// silently shrink to a different size to fit its own box, so nothing on a
+    /// screen shared a baseline or a cap height. Labels that genuinely must fit
+    /// one line should say so at the call site.
     func novaFont(_ role: NovaFontRole, weight: Font.Weight = .regular, size: CGFloat? = nil) -> some View {
-        modifier(NovaFontModifier(role: role, weight: weight, baseSize: size ?? role.baseSize))
+        let base = size ?? role.baseSize
+        // An explicit size override scales its own floor/ceiling with it, so a
+        // hero title doesn't get clamped down to the shared `.title` maximum.
+        let ratio = base / role.baseSize
+        return modifier(NovaFontModifier(role: role, weight: weight, baseSize: base,
+                                         minimumSize: role.minimumSize * ratio,
+                                         maximumSize: role.maximumSize * ratio))
     }
 }
 

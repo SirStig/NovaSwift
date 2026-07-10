@@ -630,8 +630,16 @@ public struct NovaGame {
     public func roids() -> [RoidRes] { resources.resources(of: NovaType.roid).map(RoidRes.init) }
     public func desc(_ id: Int) -> DescRes? { resources.resource(NovaType.desc, id).map(DescRes.init) }
     public func stringList(_ id: Int) -> StringListRes? { resources.resource(NovaType.strList, id).map(StringListRes.init) }
-    /// Convenience: the narrative text of a `dësc` resource, or "" if absent.
-    public func descText(_ id: Int) -> String { desc(id)?.text ?? "" }
+    /// The narrative text of a `dësc` resource, or "" if absent.
+    ///
+    /// `dësc` bodies are mutable: they can embed `{bXXX …}` / `{G …}` / `{P …}`
+    /// conditionals that Nova resolves as it draws them. Every caller wants the
+    /// resolved text, so resolve here rather than at each display site — passing
+    /// the player's control bits and gender through `context` when they're known.
+    public func descText(_ id: Int, context: NovaTextContext = .init()) -> String {
+        guard let raw = desc(id)?.text else { return "" }
+        return NovaDescFormatter.render(raw, context: context)
+    }
 
     /// Resolve a ship's base hull sprite: shïp id → shän (same id) → rlëD.
     ///
@@ -770,19 +778,49 @@ public struct NovaGame {
     /// or the first time a hull is seen after a jump), populating the caches
     /// above so gameplay only ever hits warm reads. Intended to run once,
     /// off the main thread, while a loading screen is shown — safe to call
-    /// from any thread. `onProgress` is called periodically (not every
-    /// iteration) with a human-readable status string.
-    public func prewarm(onProgress: (String) -> Void = { _ in }) {
+    /// from any thread. `onProgress` is called in order, periodically (not
+    /// every iteration), and always ends at `completed == total`.
+    public func prewarm(onProgress: (PrewarmProgress) -> Void = { _ in }) {
         let allShips = ships()
-        onProgress("Decoding \(allShips.count) ship type(s)…")
+        // Ship sprites dominate (two decodes per hull); outfits and governments
+        // are one bulk decode apiece. Counting all three against a single total
+        // is what lets `fraction` rise monotonically across the whole run
+        // instead of restarting per phase.
+        let total = allShips.count + 2
+        func report(_ phase: String, _ completed: Int) {
+            onProgress(PrewarmProgress(phase: phase, completed: completed, total: total))
+        }
+
+        report("Decoding ship sprites", 0)
         for (i, ship) in allShips.enumerated() {
             _ = shipSprite(ship.id)
             _ = engineGlowSprite(ship.id)
-            if i % 10 == 0 { onProgress("Decoding ship sprites… \(i)/\(allShips.count)") }
+            if i % 8 == 0 { report("Decoding ship sprites", i) }
         }
-        let allOutfits = outfits()
-        onProgress("Decoded \(allOutfits.count) outfit(s).")
-        let allGovts = govts()
-        onProgress("Decoded \(allGovts.count) government(s).")
+        report("Decoding outfits", allShips.count)
+        _ = outfits()
+        report("Decoding governments", allShips.count + 1)
+        _ = govts()
+        report("Ready", total)
+    }
+}
+
+/// One ordered progress report from `NovaGame.prewarm`. `completed`/`total`
+/// span the entire prewarm, not the current `phase`, so a progress bar driven
+/// by `fraction` never jumps backwards when the phase changes.
+public struct PrewarmProgress: Sendable, Equatable {
+    /// What's being decoded right now, e.g. "Decoding ship sprites".
+    public let phase: String
+    public let completed: Int
+    public let total: Int
+
+    public init(phase: String, completed: Int, total: Int) {
+        self.phase = phase
+        self.completed = completed
+        self.total = total
+    }
+
+    public var fraction: Double {
+        total > 0 ? Double(completed) / Double(total) : 0
     }
 }

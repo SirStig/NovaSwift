@@ -11,6 +11,43 @@ sections cover — there is no separate "escort resource"; escorting is a
 cross-cutting behavior assembled from `përs`, `düde`/`flët`, `mïsn`, `gövt`, and
 `shïp` fields.
 
+## Implementation status (updated after this doc was first written)
+
+Since this doc's original "byte-verified, nothing built" pass, two follow-up
+commits landed real Swift code against the offsets/fields §2.2 confirmed:
+
+- **`ShipRes` decoding (`Sources/EVNovaKit/NovaModels.swift`, commit
+  `5a9537e`):** `hireRandom` (`@906`), `escortCategory` (`@1842`),
+  `escortUpgradesTo` (`@1832`), `escortUpgradeCost` (`@1834`), and
+  `escortSellValue` (`@1838`) are now real, decoded struct fields — no longer
+  "confirmed offset, undecoded" as this doc previously described them.
+- **Escort economics (`app/EVNova/Game/PilotStore.swift`, same commit):**
+  `escortAvailableToday(_:at:day:)` (deterministic `HireRandom` roll, same
+  FNV-1a-hash pattern as `NovaEconomy`'s `BuyRandom` stocking),
+  `hireEscort(_:at:day:)`, `upgradeEscort(_:)`, and `escortSellValue(for:)` /
+  `sellEscort(_:)` are real, working credit-transaction logic against
+  `state.credits`, with inline doc comments citing the exact Bible fields
+  they implement.
+- **`EscortsView.swift` (`app/EVNova/Game/EscortsView.swift`, commit
+  `68c9e2b`) replaced the old one-line `Text("No escorts hired.")`
+  placeholder** in `StoryGuideView`'s "Escorts" section with a
+  geometry-accurate recreation of the real DLOG/DITL #1022 "Escorts" panel
+  (verified against `Nova.rez`/`Nova Graphics 3.rez`) — but it is still a
+  **static empty state**: every button and field is disabled, "No escorts
+  hired." is hardcoded, and it has no data binding of any kind.
+
+**What this does *not* mean:** none of the above is wired together. `swift
+build` succeeds and the `PilotStore` functions are real, tested transaction
+logic — but a repo-wide grep of `app/EVNova/` turns up zero call sites for
+`hireEscort`/`upgradeEscort`/`sellEscort`/`escortAvailableToday` outside their
+own declarations, and `EscortsView` has zero references to `PilotStore`,
+`ShipRes.hireRandom`, or any of the new escort fields. There is still no
+hire-escort/requisition-escort dialog, no persistent escort roster data
+model, and no player-visible way to ever trigger this code. The three
+economics functions are effectively library code with no caller — real,
+correct, and completely inert from the player's perspective. See the updated
+§5 table below for the field-by-field breakdown.
+
 This doc does **not** re-derive:
 - `përs`/`düde` field-offset tables — see `docs/MISSIONS.md` (`PersRes`,
   `Sources/EVNovaKit/MissionModels.swift:317-351`) for the verified byte layout.
@@ -372,10 +409,10 @@ a persistent escort roster, and does not touch `PersRes` in any way.
 | `PersRes` field decoder (LinkSyst, Govt, AIType, Aggress, Coward, ShipType, LinkMission, flags, activeOn, subtitle) | ✅ Decoded | `Sources/EVNovaKit/MissionModels.swift:317-351`; exposed via `game.pers(id)`/`game.persons()`, `Sources/EVNovaKit/NovaModels.swift:454-455` |
 | `përs` 5%-chance spawn-time creation, tied to ordinary ship spawns | ❌ Not wired | No caller of `PersRes`/`game.pers`/`game.persons()` exists anywhere outside the decoder file and its accessor (verified by repo-wide grep). `docs/MISSIONS.md`'s own "Not yet wired" section already flags this: "`përs` captains offering their linked missions in space (needs AI to place them; the decoder + `activeOn`/`linkMission` fields are ready)." |
 | `AIType 0` → `shïp.InherentAI` fallback for escorts | Partially decoded, not escort-specific | `inherentAI` decoded at `Sources/EVNovaKit/NovaModels.swift:193,265` (`@66`); `AIType(raw:)` fallback exists generically (see AI_GROUND_TRUTH.md §1) but nothing in the engine currently creates a "hired/captured escort using its hull's InherentAI" — the only consumer of `InherentAI` today is `Spawner.spawnFleet` picking a flagship/escort's *own* disposition for NPC-fleet ships (`Sources/EVNovaEngine/Spawner.swift:132-133,158-165`), not a player-owned escort |
-| `shïp.HireRandom` (bar hire availability) | ❌ Not decoded, offset now confirmed | No `hireRandom` field on `ShipRes` (`Sources/EVNovaKit/NovaModels.swift:151-311` — compare `buyRandom` at line 240, which *is* decoded per commit `ff8fc20`, at the adjacent offset `@904`). Confirmed at `@906` (`DWRD`, 2B) via TMPL #518 + a 284-ship raw-data sweep — see §2.2's table |
-| `shïp.EscortType`/`UpgradeTo`/`EscUpgrdCost`/`EscSellValue` (escort-menu categorization, upgrades, resale) | ❌ Not decoded, offsets now confirmed | Same struct; none of these four fields exist on `ShipRes`. Confirmed offsets (§2.2): `UpgradeTo`(doc's name for `EscortUpgradesTo`)`@1832`(`RSID`,2B), `EscUpgrdCost@1834`(`DLNG`,4B), `EscSellValue@1838`(`DLNG`,4B, empirically always `0` in retail data — falls through to the Bible's documented 10%-of-`Cost` default), `EscortType@1842`(`DWRD`,2B, this doc's `EscortCategory`) — all byte-verified against 12 individually-inspected ships plus a 284-ship automated sweep, not just the single Shuttle (#128) spot-check from the earlier working pass |
-| "Requisition-escort" / "hire-escort" dialogs, escort control menu | ❌ Not built | No matching view in `app/EVNova/` (only `HailDialogView.swift`'s 3-button in-flight comm dialog exists, and it's unrelated — see §3) |
-| Persistent player escort roster (hired, captured, or mission-granted) | ❌ Not built | `PilotInfoView`'s "Escorts" section is a static placeholder: `app/EVNova/Story/StoryGuideView.swift:119-120` — `section("Escorts") { Text("No escorts hired.") ... }`, no backing data model, never populated |
+| `shïp.HireRandom` (bar hire availability) | ✅ Decoded (model-layer only, not wired) | `hireRandom: Int` on `ShipRes`, `Sources/EVNovaKit/NovaModels.swift:267,327` — `i16(d, 906)`, matching the `@906` offset §2.2 confirmed. Landed in commit `5a9537e`. Consumed by `PilotStore.escortAvailableToday(_:at:day:)` (`app/EVNova/Game/PilotStore.swift:291-303`) but that function has zero callers outside `PilotStore` itself |
+| `shïp.EscortType`/`UpgradeTo`/`EscUpgrdCost`/`EscSellValue` (escort-menu categorization, upgrades, resale) | ✅ Decoded (model-layer only, not wired) | All four now exist on `ShipRes` (`Sources/EVNovaKit/NovaModels.swift:272-331`): `escortCategory` (`@1842`), `escortUpgradesTo` (`@1832`), `escortUpgradeCost` (`@1834`), `escortSellValue` (`@1838`) — same commit `5a9537e`. Consumed by `PilotStore.upgradeEscort(_:)` and `PilotStore.sellEscort(_:)`/`escortSellValue(for:)` (`PilotStore.swift:313-353`), both real, correct credit-transaction logic (upgrade charges `escortUpgradeCost`, sale credits `escortSellValue` or the Bible's 10%-of-`Cost` fallback) — but neither function has any caller in `app/EVNova/` outside their own declarations (verified by repo-wide grep) |
+| "Requisition-escort" / "hire-escort" dialogs, escort control menu | ⚠️ Implemented but not wired (empty-state shell only, no data or actions) | `app/EVNova/Game/EscortsView.swift` (commit `68c9e2b`) is a geometry-accurate recreation of the real DLOG/DITL #1022 "Escorts" panel — correct 424×259 layout, four command buttons (Aggressive/Defensive/Evasive/Hold Position), identity/status/display side panels — but every control is permanently disabled, the display panel hardcodes "No escorts hired.", and the file has zero references to `PilotStore`, `ShipRes.hireRandom`/`escortCategory`/etc., or any of §2.2's new economics functions. This is UI chrome only, not a functioning hire/requisition/command dialog; a real one needs to (a) call `hireEscort`/`upgradeEscort`/`sellEscort`, (b) bind to a roster (see next row), and (c) enable its buttons against real escort state. `HailDialogView.swift`'s unrelated 3-button in-flight comm dialog is still separate — see §3 |
+| Persistent player escort roster (hired, captured, or mission-granted) | ❌ Not built | Still no roster data model anywhere in the codebase — `PlayerState` has no `escorts`-style field (noted explicitly in `PilotStore.swift:267-279`'s own doc comment). `StoryGuideView.swift:119-121`'s "Escorts" section now renders `EscortsView()` (previous row) instead of the old inline `Text("No escorts hired.")`, but that's a swap of one static placeholder for a richer static placeholder — there is still nothing that persists a hired/captured/upgraded escort between sessions or even within one |
 | `gövt.VoiceType` (per-government escort comm voice, 8 types × ack/target/victory `snd`) | ✅ Decoded, unused for escorts | `Sources/EVNovaKit/NovaAIModels.swift:220,264` decodes `voiceType`; not consumed anywhere for playing escort ack/targeting/victory audio (no escort feature exists to consume it) |
 | Capture mechanics (`Crew`, marines `ModType 25`, `OnCapture`) | Partially decoded | `crew` decoded (`NovaModels.swift:189`); marines outfit ModVal handling and `OnCapture` control-bit-set evaluation not found in `Sources/EVNovaEngine` (no boarding/capture system exists in this engine yet per AI_GROUND_TRUTH.md's boarding caveat, §1 item 3) |
 | `mïsn.ShipGoal`/`ShipBehav`/`ShipStart` (mission special-ship goals incl. `ShipGoal=3` escort-the-NPC, `ShipBehav=1` protect-the-player) | ❌ Deferred | AI_GROUND_TRUTH.md §6 item 12: "blocked on [EVNovaStory-to-game-loop wiring], not on anything AI-specific" — same root cause as the `përs` placement gap above |
@@ -383,9 +420,17 @@ a persistent escort roster, and does not touch `PersRes` in any way.
 | `përs.ShieldMod < 0` invincibility, custom weapon add/remove, grudge flag, escape-pod flag | Field-decoded only | `flags1`/related bits exist on `PersRes` (`MissionModels.swift:328-334`, only 3 of the ~16 documented flag bits have named accessors: `deactivateAfterAccept`, `offerOnBoard`, `leavesAfterAccept`); no runtime behavior consumes any of them since `PersRes` is never instantiated (see row 2) |
 | "Assist" paid support call (recent commit `bdf82d2`) | ✅ Implemented, but **not** a Bible `përs`/escort feature | See §3 — `AIBrain.assist`, `World.deliverAssistance`, `HailDialogView`'s "Request Assistance" button, `GameContainerView`'s tier-based pricing. A legitimate, self-consistent invented mechanic, but should not be mistaken for progress on `përs` recruitment, hire/requisition dialogs, or a command-verb system — it shares no code path with any of those. |
 
-**Bottom line:** the escort *AI-formation* half of EV Nova (flët-driven NPC
-convoys) is built; the entire *player-facing* half — hiring in the bar,
-requisitioning via mission, capturing, upgrading, a persistent roster with a
-management menu, and command verbs in the hail dialog — is undocumented in
-code beyond decoding a few unused struct fields and one static UI placeholder
-string. `PersRes` decodes cleanly but has zero runtime consumers.
+**Bottom line (updated):** the escort *AI-formation* half of EV Nova
+(flët-driven NPC convoys) is built. The player-facing half has moved from
+"undocumented in code" to "real backend logic, zero player-visible surface":
+`ShipRes.hireRandom`/`escortCategory`/`escortUpgradesTo`/`escortUpgradeCost`/
+`escortSellValue` are correctly decoded, and `PilotStore`'s
+`escortAvailableToday`/`hireEscort`/`upgradeEscort`/`sellEscort` are working,
+Bible-cited credit-transaction logic that compiles and (per their doc
+comments) is intended as a deliberate model-layer-only cut. `EscortsView.swift`
+adds a geometry-accurate but fully disabled empty-state panel in place of the
+old one-line placeholder. None of it is connected: no caller invokes any of
+the four `PilotStore` escort functions, `EscortsView` reads none of the new
+`ShipRes` fields, and there is still no persistent roster, no functioning
+hire/requisition dialog, and no command verbs. `PersRes` still decodes cleanly
+with zero runtime consumers, unchanged from before.

@@ -150,7 +150,7 @@ public final class Galaxy {
         }
 
         let spec = ShipSpec(
-            id: s.id, name: s.name, stats: stats,
+            id: s.id, name: s.displayName, stats: stats,
             maxShield: Double(s.shield) * combatTuning.hpScale,
             maxArmor: Double(max(1, s.armor)) * combatTuning.hpScale,
             shieldRechargePerSec: max(2, Double(s.shieldRecharge) * 0.05),

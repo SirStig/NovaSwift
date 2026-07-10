@@ -62,4 +62,11 @@ final class AppGameServices: GameServices, ObservableObject {
     nonisolated func notify(_ event: StoryNotification) {
         Log.story.debug("notify: \(String(describing: event), privacy: .public)")
     }
+
+    // Active-cron news isn't surfaced yet: there's no news dialog, and the
+    // Bible's local-over-independent precedence is resolved at the station the
+    // player lands at, not here.
+    nonisolated func showNews(text: String, govt: Int?) {
+        Log.story.notice("showNews: not yet wired (govt \(govt.map(String.init) ?? "independent", privacy: .public)): \(text.prefix(60), privacy: .public)")
+    }
 }

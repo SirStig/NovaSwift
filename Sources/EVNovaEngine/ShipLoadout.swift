@@ -243,7 +243,7 @@ extension Galaxy {
             ? Afterburner(fuelPerSecond: Double(afterburnerFuel)) : nil
 
         return Loadout(
-            shipID: s.id, name: s.name,
+            shipID: s.id, name: s.displayName,
             speed: max(0, speedStat), acceleration: max(0, accelStat), turnRate: max(0, turnStat),
             maxShield: Double(max(0, shieldStat)) * combatTuning.hpScale,
             maxArmor: Double(max(1, armorStat)) * combatTuning.hpScale,
