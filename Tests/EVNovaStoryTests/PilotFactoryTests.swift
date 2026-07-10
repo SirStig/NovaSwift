@@ -59,6 +59,29 @@ final class PilotFactoryTests: XCTestCase {
         XCTAssertEqual(a, b, "same seed → same start system")
     }
 
+    func testDefaultSeedRollsVariedStartSystems() {
+        // Regression: with a fixed default seed, every new pilot started in the
+        // *same* candidate system (index 2 → Porto Rillia for the base .Trader),
+        // which is neither the usual start nor a well-connected one. A nil seed
+        // must roll genuinely per pilot, so across many creations we see more
+        // than one of the scenario's candidates. (P(all identical over 40 rolls
+        // of a 4-way choice) ≈ (1/4)^39 — effectively zero, so this is not flaky.)
+        let game = makeGame([
+            shipResource(id: 128, cargo: 10),
+            charResource(id: 128, name: ".Trader", cash: 0, ship: 128,
+                         systems: [128, 136, 170, 184]),
+        ])
+        let ch = game.character(128)!
+        var seen: Set<Int> = []
+        for _ in 0..<40 {
+            seen.insert(PilotFactory.make(name: "P", isMale: true, scenario: ch, game: game).currentSystem)
+        }
+        XCTAssertTrue(seen.isSubset(of: [128, 136, 170, 184]),
+                      "start system must always be one of the scenario candidates")
+        XCTAssertGreaterThan(seen.count, 1,
+                             "new pilots must not all start in the same system")
+    }
+
     func testOnStartControlBitsApply() {
         let game = makeGame([
             shipResource(id: 128, cargo: 10),

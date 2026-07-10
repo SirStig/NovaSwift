@@ -69,23 +69,18 @@ final class PilotStore: ObservableObject {
         newGame(game: game)
     }
 
-    /// Start a brand-new pilot from the scenario defaults (`chär`: starting hull,
-    /// credits and system).
+    /// Start a brand-new pilot from the scenario defaults. Delegates to
+    /// `PilotFactory.makeDefault`, which is the single authoritative `chär`
+    /// bootstrap: it rolls a *random* start system among the scenario's
+    /// candidates (as EV Nova does — not always the first one), and applies the
+    /// scenario's starting hull, credits, calendar date, combat rating, legal
+    /// standings and OnStart control-bit script. Everything is data-driven from
+    /// the `chär`; the only hardcoded values are the last-ditch fallbacks the
+    /// factory itself uses when the data set has no `chär` at all.
     func newGame(game: NovaGame) {
-        let ch = game.startingChar()
-        if ch == nil {
-            Log.pilot.error("PilotStore.newGame: no starting chär scenario in game data; using hardcoded fallback ship/system/credits")
-        }
-        let shipID = ch?.startingShip ?? game.ships().first?.id ?? 128
-        let shipName = game.ship(shipID)?.displayName ?? "Ship"
-        let system = ch?.startingSystem ?? game.startingSystem()?.id ?? 128
-        state = PlayerState(pilotName: "Captain",
-                            shipType: shipID,
-                            shipName: shipName,
-                            credits: ch?.startingCredits ?? 10_000,
-                            currentSystem: system)
+        state = PilotFactory.makeDefault(name: "Captain", isMale: true, game: game)
         started = true
-        Log.pilot.notice("PilotStore.newGame: started new live pilot, ship=\(shipID) system=\(system) credits=\(self.state.credits)")
+        Log.pilot.notice("PilotStore.newGame: started new live pilot, ship=\(self.state.shipType) system=\(self.state.currentSystem) credits=\(self.state.credits)")
         save()
     }
 

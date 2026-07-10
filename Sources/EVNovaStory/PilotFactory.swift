@@ -16,11 +16,16 @@ public enum PilotFactory {
     ///   - isMale: pilot gender (drives gendered story text / NCB `p` operand).
     ///   - scenario: the chosen `chär`.
     ///   - game: the loaded game data (for ship names, govt relations, OnStart).
-    ///   - seed: RNG seed for the random start-system pick (deterministic in tests).
+    ///   - seed: RNG seed for the random start-system pick. Pass an explicit value
+    ///     for reproducibility (tests); leave `nil` — the production default — to
+    ///     seed from the system RNG so each new pilot genuinely rolls its own start
+    ///     system among the scenario's candidates, exactly as EV Nova does. A fixed
+    ///     default would make every pilot start in the same system.
     public static func make(name: String, isMale: Bool, scenario: CharRes,
-                            game: NovaGame, seed: UInt64 = 0x9E1_5EED) -> PlayerState {
+                            game: NovaGame, seed: UInt64? = nil) -> PlayerState {
         Log.pilot.notice("PilotFactory.make: creating pilot \"\(name, privacy: .public)\" from scenario \(scenario.id) (\"\(scenario.displayName, privacy: .public)\")")
-        var rng = StoryRNG(seed: seed)
+        let resolvedSeed = seed ?? UInt64.random(in: .min ... .max)
+        var rng = StoryRNG(seed: resolvedSeed)
 
         // Random start system among the scenario's candidates; sensible fallback.
         let system: Int
@@ -69,7 +74,7 @@ public enum PilotFactory {
         // Apply the OnStart NCB via a throwaway StoryEngine so the exact same SET
         // grammar/side-effects (bits, ranks, outfits, missions, ship swap) run.
         if !scenario.onStart.isEmpty {
-            let engine = StoryEngine(game: game, player: player, seed: seed)
+            let engine = StoryEngine(game: game, player: player, seed: resolvedSeed)
             engine.apply(set: scenario.onStart)
             player = engine.player
         }
@@ -80,7 +85,7 @@ public enum PilotFactory {
     /// Convenience: the default new pilot for this data set (first selectable
     /// scenario, else the lowest-id `chär`, else engine defaults).
     public static func makeDefault(name: String, isMale: Bool, game: NovaGame,
-                                   seed: UInt64 = 0x9E1_5EED) -> PlayerState {
+                                   seed: UInt64? = nil) -> PlayerState {
         let scenario = game.selectableScenarios().first ?? game.startingChar()
         if let scenario {
             return make(name: name, isMale: isMale, scenario: scenario, game: game, seed: seed)
