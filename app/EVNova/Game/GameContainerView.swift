@@ -18,6 +18,20 @@ final class GameHost {
     let galaxy: Galaxy?
     let graphics: SpaceportGraphics?
 
+    /// Cache of ship-type id → target-display source sprite (dedicated shipyard
+    /// art if present, else the in-flight sprite). Keyed with an optional value
+    /// so a miss is cached too — the HUD asks on every target change.
+    private var targetSpriteCache: [Int: CGImage?] = [:]
+
+    /// The source sprite for a target ship's red silhouette (`ShipSilhouetteView`
+    /// applies the red tint). Nil when the data has no art for that hull.
+    func targetSilhouette(shipType id: Int) -> CGImage? {
+        if let cached = targetSpriteCache[id] { return cached }
+        let img = game?.ship(id).flatMap { graphics?.shipPicture($0) ?? graphics?.shipFallbackPicture($0) }
+        targetSpriteCache[id] = img
+        return img
+    }
+
     init(model: AppModel, systemID: Int? = nil, arrivedViaJump: Bool = false) {
         controller = GameControllerInput(input: input)
         hudStyle = GameHost.makeHUDStyle(model.data.game)
@@ -204,7 +218,8 @@ struct GameContainerView: View {
                     // height-driven `.right` scale would still balloon past the
                     // play viewport's edge on extreme portrait aspect ratios.
                     GeometryReader { geo in
-                        AuthenticHUDView(model: host.hud, style: style, showRadar: model.settings.showRadar)
+                        AuthenticHUDView(model: host.hud, style: style, showRadar: model.settings.showRadar,
+                                         targetSprite: { host.targetSilhouette(shipType: $0) })
                             .frame(width: Self.sidebarWidth(in: geo.size, style: style), height: geo.size.height,
                                    alignment: .trailing)
                             .clipped()

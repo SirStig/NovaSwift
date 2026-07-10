@@ -35,6 +35,18 @@ struct GalaxyMapView: View {
     /// the PICT/button-slice/label decode+cache this chrome needs.
     @State private var graphics: SpaceportGraphics?
     @State private var showingFinder = false
+    /// Decoded `nëbu` regions with their resolved artwork, built once per data
+    /// load. Drawn behind the systems in map-space (`x,y,w,h` share the `syst`
+    /// coordinate system), scaled by the current zoom.
+    @State private var nebulae: [MapNebula] = []
+
+    private struct MapNebula { let x, y, w, h: Int; let image: CGImage }
+
+    /// Hypergate/wormhole connections between systems (`spöb` HyperLink1-8),
+    /// built once. Drawn as distinct dashed links over the hyperspace web.
+    @State private var gateLinks: [GateLink] = []
+
+    private struct GateLink { let a, b: Int; let wormhole: Bool }
 
     static let defaultZoom: CGFloat = 2.4
     private let minZoom: CGFloat = 0.5    // whole galaxy (~945 units wide) in view
@@ -45,6 +57,8 @@ struct GalaxyMapView: View {
     private let routeWarn = Color(red: 1.0, green: 0.4, blue: 0.32)
     private let adjacentGrey = Color(white: 0.42)
     private let independentColor = Color(white: 0.62)
+    private let gateHyper = Color(red: 0.3, green: 0.85, blue: 0.95).opacity(0.85)     // hypergate link
+    private let gateWormhole = Color(red: 0.78, green: 0.45, blue: 1.0).opacity(0.85)  // wormhole link
     /// Deterministic per-faction palette: the `gövt` resource carries no color of
     /// its own, so distinct governments are assigned a distinct hue by sorted id.
     /// Kept visually apart from `amber` (current system) and the route colors.
@@ -76,7 +90,10 @@ struct GalaxyMapView: View {
         .novaResponsive()
         .onAppear {
             rebuildGovtColors()
-            if graphics == nil, let game = nav.game { graphics = SpaceportGraphics(game: game) }
+            let g = graphics ?? nav.game.map { SpaceportGraphics(game: $0) }
+            if graphics == nil { graphics = g }
+            rebuildNebulae(using: g)
+            rebuildGateLinks()
         }
         .sheet(isPresented: $showingFinder) {
             SystemFinderView(nav: nav, pilot: pilot) { system in centerOn(system) }
@@ -131,9 +148,91 @@ struct GalaxyMapView: View {
         govtColors = map
     }
 
+    /// Decode each `nëbu` and resolve its artwork (highest-res PICT of the
+    /// nebula's zoom block, falling back to the smaller levels). Built once.
+    private func rebuildNebulae(using graphics: SpaceportGraphics?) {
+        guard nebulae.isEmpty, let game = nav.game, let graphics else { return }
+        nebulae = game.nebulae().compactMap { neb in
+            let baseID = game.nebulaImageID(index: neb.id - 128)
+            guard let image = graphics.pict(baseID) ?? graphics.pict(baseID - 1) ?? graphics.pict(baseID - 2) else {
+                Log.spaceport.error("Galaxy map: no PICT for nebula \(neb.id, privacy: .public) (\(neb.name, privacy: .public)) — tried \(baseID, privacy: .public)/-1/-2")
+                return nil
+            }
+            return MapNebula(x: neb.x, y: neb.y, w: neb.width, h: neb.height, image: image)
+        }
+    }
+
+    /// Build the inter-system hypergate/wormhole links from every gate `spöb`'s
+    /// HyperLink1-8, mapping each gate to its containing system. Undirected and
+    /// deduped. Wormholes whose links are all −1 (random) contribute nothing to
+    /// draw — there's no fixed destination.
+    private func rebuildGateLinks() {
+        guard gateLinks.isEmpty, let game = nav.game else { return }
+        let systems = nav.systems()
+        var spobSystem: [Int: Int] = [:]
+        for s in systems { for sp in s.spobs { spobSystem[sp] = s.id } }
+        var seen = Set<Int>()
+        var links: [GateLink] = []
+        for s in systems {
+            for sp in s.spobs {
+                guard let gate = game.spob(sp), gate.isGate else { continue }
+                for target in gate.hyperLinks {
+                    guard let other = spobSystem[target], other != s.id else { continue }
+                    let key = min(s.id, other) * 100_000 + max(s.id, other)
+                    if seen.insert(key).inserted {
+                        links.append(GateLink(a: s.id, b: other, wormhole: gate.isWormhole))
+                    }
+                }
+            }
+        }
+        gateLinks = links
+    }
+
     private func factionColor(for government: Int) -> Color {
         guard government >= 0, let color = govtColors[government] else { return independentColor }
         return color
+    }
+
+    /// A `NovaColor` (the `gövt` map/ship colour fields) as a SwiftUI `Color`.
+    private func color(_ c: NovaColor) -> Color {
+        Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+    }
+
+    /// A government's authentic **territory** colour — its real `gövt.mapColor`
+    /// (Federation blue, Auroran red, the Pirate families' greys, …). Falls back
+    /// to the synthetic palette only when the data leaves it black (16 of the 68
+    /// base governments do). Used for the background regions, *not* the dots.
+    private func govtMapColor(_ government: Int, game: NovaGame) -> Color {
+        guard government >= 0 else { return independentColor }
+        if let mc = game.govt(government)?.mapColor, mc.r != 0 || mc.g != 0 || mc.b != 0 {
+            return color(mc)
+        }
+        return factionColor(for: government)
+    }
+
+    // Relation dot colours — the player's *standing* with a system's government,
+    // deliberately distinct from the government's own territory colour above.
+    private let relFriendly    = Color(red: 0.35, green: 0.62, blue: 1.0)   // blue
+    private let relNeutral     = Color(red: 0.95, green: 0.85, blue: 0.32)  // yellow
+    private let relEnemy       = Color(red: 0.95, green: 0.3, blue: 0.25)   // red
+    private let relPirate      = Color(white: 0.42)                         // dark grey
+    private let relUninhabited = Color(white: 0.72)                         // light grey
+
+    /// The colour of a system's star dot — by the player's **relationship** to
+    /// its controlling government (not the government's own colour, which tints
+    /// the territory behind it). Pirates/marauders (attack-on-sight governments)
+    /// read dark grey, independent/no-government light grey, a government the
+    /// player is wanted with red, good standing blue, otherwise neutral yellow.
+    /// (Green "you own property here" awaits player planet-ownership tracking,
+    /// which the save state doesn't expose yet.)
+    private func relationColor(for s: SystRes, game: NovaGame) -> Color {
+        let gov = s.government
+        guard gov >= 0, let g = game.govt(gov) else { return relUninhabited }
+        if g.alwaysAttacksPlayer || g.xenophobic { return relPirate }
+        let standing = pilot.state.legalRecord[gov] ?? g.initialRecord
+        if standing < 0 { return relEnemy }
+        if standing > 0 || g.neverAttacksPlayer { return relFriendly }
+        return relNeutral
     }
 
     // MARK: Drawing
@@ -162,6 +261,45 @@ struct GalaxyMapView: View {
         // Cull to the viewport (padded so labels/lines at the edge still draw).
         let visibleRect = CGRect(origin: .zero, size: size).insetBy(dx: -60, dy: -60)
 
+        // Faction territories: a soft radial glow in each known system's
+        // government colour, additively blended so clusters of one government
+        // merge into a contiguous coloured region — the map's "spheres of
+        // influence". Derived from `syst.government` (there is no territory
+        // resource), and gated to known systems so adjacency alone never leaks
+        // a system's allegiance (matching the dot colours below). The glow
+        // radius tracks zoom so neighbours' halos overlap at any scale.
+        do {
+            var tctx = ctx
+            tctx.blendMode = .plusLighter
+            let glowR = min(max(24 * zoom, 12), 260)
+            let glowRect = visibleRect.insetBy(dx: -glowR, dy: -glowR)
+            for s in systems {
+                let vis = visibility[s.id] ?? .unknown
+                guard vis == .explored || vis == .chartered, s.government >= 0 else { continue }
+                let p = plot(s.x, s.y)
+                guard glowRect.contains(p) else { continue }
+                let col = govtMapColor(s.government, game: game)
+                tctx.fill(Path(ellipseIn: CGRect(x: p.x - glowR, y: p.y - glowR, width: glowR * 2, height: glowR * 2)),
+                          with: .radialGradient(Gradient(colors: [col.opacity(0.22), .clear]),
+                                                center: p, startRadius: 0, endRadius: glowR))
+            }
+        }
+
+        // Nebulae: coloured background regions (`nëbu`), drawn first so systems,
+        // links and labels sit on top. Each is placed by its map-space box
+        // (top-left `x,y`, extent `w,h` — same units as systems), scaled by zoom.
+        // Dimmed so it reads as atmosphere behind the map, not chrome over it.
+        if !nebulae.isEmpty {
+            var nctx = ctx
+            nctx.opacity = 0.5
+            for neb in nebulae {
+                let tl = plot(neb.x, neb.y)
+                let rect = CGRect(x: tl.x, y: tl.y, width: CGFloat(neb.w) * zoom, height: CGFloat(neb.h) * zoom)
+                guard rect.intersects(visibleRect) else { continue }
+                nctx.draw(nctx.resolve(Image(decorative: neb.image, scale: 1)), in: rect)
+            }
+        }
+
         // Hyperspace links: thin dim lines, culled to known systems only (an
         // unknown system's links stay hidden — that's how fog of war works).
         // Links touching the current system are tinted by fuel affordability.
@@ -185,6 +323,18 @@ struct GalaxyMapView: View {
         let canJumpNow = nav.availableJumps >= 1
         ctx.stroke(currentLinks, with: .color((canJumpNow ? routeGreen : routeWarn).opacity(0.6)), lineWidth: 1.3)
 
+        // Hypergate (cyan) and wormhole (violet) connections, dashed to set them
+        // apart from the solid hyperspace web. Shown only between known systems.
+        for gl in gateLinks {
+            guard let a = byID[gl.a], let b = byID[gl.b],
+                  visibility[gl.a] != .unknown, visibility[gl.b] != .unknown else { continue }
+            let pa = plot(a.x, a.y), pb = plot(b.x, b.y)
+            guard visibleRect.contains(pa) || visibleRect.contains(pb) else { continue }
+            var path = Path(); path.move(to: pa); path.addLine(to: pb)
+            ctx.stroke(path, with: .color(gl.wormhole ? gateWormhole : gateHyper),
+                       style: StrokeStyle(lineWidth: 1.3, dash: [2.5, 3]))
+        }
+
         // The plotted course: green while your current fuel can still reach that
         // hop, warning red past it — segment by segment, drawn on top of the web.
         if !nav.route.isEmpty {
@@ -204,7 +354,10 @@ struct GalaxyMapView: View {
 
         let neighborIDs = Set(cur.links)
         let showLabels = zoom >= 1.1
-        let labelSize = NovaFontRole.hud.baseSize * min(min(size.width / 1024, size.height / 768), 2.2)
+        // Fixed design-point size: the canvas is already scaled to the device by
+        // its container (novaFrameScale), so labels must not re-apply a viewport
+        // factor here — that double-scaling was the old 1024/768 formula's bug.
+        let labelSize: CGFloat = 11
 
         for s in systems {
             let vis = visibility[s.id] ?? .unknown
@@ -219,8 +372,10 @@ struct GalaxyMapView: View {
             let hopAffordable = hopIndex.map { $0 < nav.availableJumps } ?? true
 
             // The dot: current is amber, on-route hops are green/red by
-            // affordability, otherwise faction color if known, dim grey if only
-            // seen-as-adjacent (unconfirmed allegiance).
+            // affordability, otherwise coloured by the player's *relationship* to
+            // the system's government (blue friendly / yellow neutral / red
+            // wanted / grey pirate·uninhabited), dim grey if only seen-as-adjacent
+            // (unconfirmed allegiance).
             let r: CGFloat = isCurrent || isDestination ? 3.5 : (isKnownDetail ? 2.5 : 2.0)
             let dot = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
             if isCurrent {
@@ -228,7 +383,7 @@ struct GalaxyMapView: View {
             } else if onRoute {
                 ctx.fill(dot, with: .color(hopAffordable ? routeGreen : routeWarn))
             } else if isKnownDetail {
-                ctx.fill(dot, with: .color(factionColor(for: s.government)))
+                ctx.fill(dot, with: .color(relationColor(for: s, game: game)))
             } else {
                 ctx.fill(dot, with: .color(adjacentGrey))
             }
@@ -387,7 +542,7 @@ struct GalaxyMapView: View {
         let nw = CGFloat(frame.width), nh = CGFloat(frame.height)
         let space = NovaSpace(width: nw, height: nh)
         return GeometryReader { geo in
-            let scale = min(min(geo.size.width / 1024, geo.size.height / 768), 2.2)
+            let scale = novaFrameScale(frame: CGSize(width: nw, height: nh), viewport: geo.size)
             ZStack(alignment: .topLeading) {
                 Image(decorative: frame, scale: 1).interpolation(.high).resizable()
                     .frame(width: nw, height: nh)
@@ -411,10 +566,49 @@ struct GalaxyMapView: View {
                 }
 
                 bottomButtons(space: space, nw: nw, nh: nh)
+
+                // Relation key, tucked into the star-map's lower-left corner so
+                // the dot colours are readable. (Positioned by eye — nudge with
+                // the ⇧⌘D debug grid.)
+                relationLegend
+                    .novaPlace(space, CGFloat(Item.canvas.left) + 4 - nw / 2,
+                               CGFloat(Item.canvas.top + Item.canvas.h) - 72 - nh / 2)
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .scaleEffect(scale)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+    }
+
+    /// A compact key for the relation dot colours.
+    private var relationLegend: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            legendRow(relFriendly, "Friendly")
+            legendRow(relNeutral, "Neutral")
+            legendRow(relEnemy, "Wanted")
+            legendRow(relPirate, "Pirate")
+            legendRow(relUninhabited, "Uninhabited")
+            if !gateLinks.isEmpty {
+                Divider().overlay(.white.opacity(0.2)).frame(width: 60)
+                legendLine(gateHyper, "Hypergate")
+                legendLine(gateWormhole, "Wormhole")
+            }
+        }
+        .padding(5)
+        .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func legendRow(_ c: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(c).frame(width: 6, height: 6)
+            NovaText(label, size: 9, color: .white.opacity(0.85))
+        }
+    }
+
+    private func legendLine(_ c: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Rectangle().fill(c).frame(width: 6, height: 2)
+            NovaText(label, size: 9, color: .white.opacity(0.85))
         }
     }
 
@@ -434,26 +628,24 @@ struct GalaxyMapView: View {
                 let known = vis == .explored || vis == .chartered
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(known ? sys.name : "Unexplored")
-                            .novaFont(.body, weight: .bold)
-                            .foregroundStyle(sys.id == cur.id ? amber : .white)
+                        NovaText(known ? sys.name : "Unexplored", size: 13,
+                                 color: sys.id == cur.id ? amber : .white, width: 104, weight: .bold)
                         if known {
-                            Text(game.govt(sys.government)?.name ?? "Independent")
-                                .novaFont(.caption)
-                                .foregroundStyle(factionColor(for: sys.government))
+                            NovaText(game.govt(sys.government)?.name ?? "Independent", size: 11,
+                                     color: govtMapColor(sys.government, game: game), width: 104)
                             Divider().overlay(.white.opacity(0.25))
                             ForEach(sys.spobs, id: \.self) { spobID in
                                 if let spob = game.spob(spobID) {
                                     VStack(alignment: .leading, spacing: 1) {
-                                        Text(spob.name).novaFont(.caption, weight: .semibold)
-                                            .foregroundStyle(.white.opacity(0.9))
-                                        Text(spobServices(spob)).novaFont(.caption)
-                                            .foregroundStyle(.secondary)
+                                        NovaText(spob.name, size: 11, color: .white.opacity(0.9),
+                                                 width: 104, weight: .semibold)
+                                        NovaText(spobServices(spob), size: 11, color: Color(white: 0.6),
+                                                 width: 104)
                                     }
                                 }
                             }
                         } else {
-                            Text("No data on file.").novaFont(.caption).foregroundStyle(.secondary)
+                            NovaText("No data on file.", size: 11, color: Color(white: 0.6), width: 104)
                         }
                     }
                     .padding(8)
