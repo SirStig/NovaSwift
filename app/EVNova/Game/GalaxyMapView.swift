@@ -387,7 +387,7 @@ struct GalaxyMapView: View {
         let nw = CGFloat(frame.width), nh = CGFloat(frame.height)
         let space = NovaSpace(width: nw, height: nh)
         return GeometryReader { geo in
-            let scale = min(min(geo.size.width / 1024, geo.size.height / 768), 2.2)
+            let scale = novaFrameScale(frame: CGSize(width: nw, height: nh), viewport: geo.size)
             ZStack(alignment: .topLeading) {
                 Image(decorative: frame, scale: 1).interpolation(.high).resizable()
                     .frame(width: nw, height: nh)

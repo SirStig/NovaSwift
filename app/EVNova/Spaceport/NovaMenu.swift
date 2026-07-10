@@ -23,12 +23,40 @@ extension View {
     }
 }
 
+/// The device-responsive scale for an authentic frame of `frame` native pixels
+/// shown in `viewport`, shared by every `scaleEffect`-based authentic screen
+/// (`NovaMenu`, the galaxy map, the gambling panels).
+///
+/// This replaces the old `min(viewportW/1024, viewportH/768)` formula, whose
+/// fixed 1024×768 reference made small dialogs microscopic on phones (a 263×185
+/// bar frame scaled to 0.38× on a portrait iPhone → ~4pt text) while merely
+/// capping on a 4K desktop — the same UI ranging 6× across devices. Referencing
+/// the frame's **own** size against the **actual** viewport self-corrects: a
+/// small frame gets a larger multiplier (readable everywhere), a large frame a
+/// smaller one, and everything fills a consistent fraction of the screen.
+///
+/// - `fill`: fraction of the viewport the frame should occupy (letterbox margin).
+/// - `minScale`: readability floor — never scale below this *unless* the frame
+///   is larger than the viewport, in which case it shrinks to fit rather than
+///   clipping off-screen.
+/// - `maxScale`: ceiling so a tiny frame doesn't balloon on a huge display.
+func novaFrameScale(frame: CGSize, viewport: CGSize,
+                    fill: CGFloat = 0.9, minScale: CGFloat = 1.0, maxScale: CGFloat = 2.6) -> CGFloat {
+    guard frame.width > 0, frame.height > 0, viewport.width > 0, viewport.height > 0 else { return 1 }
+    let fitScale = min(viewport.width / frame.width, viewport.height / frame.height)
+    let target = fill * fitScale
+    // If even `minScale` overflows the viewport (big frame, small window), fall
+    // back to `fitScale` so the frame fits instead of clipping.
+    let floor = min(minScale, fitScale)
+    return min(maxScale, max(floor, target))
+}
+
 /// A full-screen EV Nova menu: draws the frame PICT from the player's data,
 /// scaled to fit and centred (letterboxed on black), and lays children out in
 /// its native coordinate space. Every spaceport screen is one of these.
 struct NovaMenu<Content: View>: View {
     let frame: CGImage
-    var maxScale: CGFloat = 2.2
+    var maxScale: CGFloat = 2.6
     /// Dialog mode: render at the shared spaceport scale (so the frame appears at
     /// its true relative size, centred), with a transparent background so it
     /// OVERLAYS the landing hub instead of replacing it — as EV Nova stacks the
@@ -37,21 +65,15 @@ struct NovaMenu<Content: View>: View {
     @Environment(\.novaDebugEnabled) private var novaDebug
     @ViewBuilder var content: (NovaSpace) -> Content
 
-    /// The reference design space every spaceport screen shares, so a small dialog
-    /// frame is drawn at the same scale as the full landing interface — never
-    /// fit-scaled up to fill the whole window.
-    private static var reference: CGSize { CGSize(width: 1024, height: 768) }
-
     var body: some View {
         let nw = CGFloat(frame.width), nh = CGFloat(frame.height)
         let space = NovaSpace(width: nw, height: nh)
         GeometryReader { geo in
-            // Every spaceport screen (hub + dialogs) shares one design scale
-            // (1024×768), so the landing frame renders at its true proportions
-            // centered — not fit-scaled up to fill the window — and dialogs overlay
-            // it at a matching scale.
-            let ref = Self.reference
-            let scale = min(min(geo.size.width / ref.width, geo.size.height / ref.height), maxScale)
+            // Each frame scales to fill a consistent fraction of the actual
+            // viewport (see `novaFrameScale`) — readable on a phone, sane on a
+            // 4K desktop — rather than against a fixed 1024×768 canvas the small
+            // dialog frames never filled.
+            let scale = novaFrameScale(frame: CGSize(width: nw, height: nh), viewport: geo.size, maxScale: maxScale)
             ZStack(alignment: .topLeading) {
                 Image(decorative: frame, scale: 1)
                     .interpolation(.high)

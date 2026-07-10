@@ -279,14 +279,14 @@ struct GamblingView: View {
 /// without an `Image` layer underneath.
 private struct BareNovaPanel<Content: View>: View {
     let size: CGSize
-    var maxScale: CGFloat = 2.2
+    var maxScale: CGFloat = 2.6
     @Environment(\.novaDebugEnabled) private var novaDebug
     @ViewBuilder var content: (NovaSpace) -> Content
 
     var body: some View {
         let space = NovaSpace(width: size.width, height: size.height)
         GeometryReader { geo in
-            let scale = min(min(geo.size.width / 1024, geo.size.height / 768), maxScale)
+            let scale = novaFrameScale(frame: size, viewport: geo.size, maxScale: maxScale)
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 10).fill(Color.black)
                 RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15))

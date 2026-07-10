@@ -156,6 +156,13 @@ struct AuthenticMainMenuView: View {
                         ?? CGPoint(x: (base.width - assets.logoSize.width) / 2, y: 168)
                     Image(decorative: logo, scale: 1)
                         .resizable().interpolation(.medium)
+                        // The logo is a separate PICT keyed to alpha from its own
+                        // luminance; a screen blend composites its glow additively
+                        // into the starfield so it reads as one image with the
+                        // background instead of a distinct panel with a dark seam.
+                        // (Safe now that the black backing box is keyed to alpha 0
+                        // — the double-brighten hazard was the *opaque* box, gone.)
+                        .blendMode(.screen)
                         .novaPlace(layout,
                                    x: logoOrigin.x, y: logoOrigin.y,
                                    w: assets.logoSize.width, h: assets.logoSize.height)
