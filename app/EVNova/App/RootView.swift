@@ -39,7 +39,14 @@ struct RootView: View {
                 .transition(.opacity)
                 .zIndex(10)
             }
+
+            // UI debug (measurement) overlay controls: an on-screen badge to
+            // exit and a ⇧⌘D hotkey to toggle. The grid itself is drawn by each
+            // coordinate-space container (see NovaDebug.swift) from the ambient
+            // flag injected below.
+            debugControls
         }
+        .environment(\.novaDebugEnabled, model.settings.uiDebugOverlay)
         .animation(.easeInOut(duration: 0.25), value: model.screen)
         .animation(.easeInOut(duration: 0.3), value: model.pendingIntro != nil)
         .task(id: model.data.hasBaseData) {
@@ -70,5 +77,40 @@ struct RootView: View {
                 model.screen = .mainMenu
             }
         }
+    }
+
+    /// Always-mounted so the ⇧⌘D shortcut works everywhere; the badge only shows
+    /// while the overlay is on (a persistent reminder + one-tap exit on touch).
+    @ViewBuilder private var debugControls: some View {
+        // Hidden keyboard-shortcut catcher (macOS / hardware keyboard).
+        Button(action: toggleDebug) { Color.clear }
+            .buttonStyle(.plain)
+            .frame(width: 0, height: 0)
+            .opacity(0)
+            .accessibilityHidden(true)
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+
+        if model.settings.uiDebugOverlay {
+            VStack {
+                Button(action: toggleDebug) {
+                    Label("UI DEBUG · ⇧⌘D to exit", systemImage: "ruler")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.black.opacity(0.8), in: Capsule())
+                        .foregroundStyle(.green)
+                        .overlay(Capsule().strokeBorder(.green.opacity(0.5)))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+                Spacer()
+            }
+            .zIndex(20)
+            .transition(.opacity)
+        }
+    }
+
+    private func toggleDebug() {
+        model.settings.uiDebugOverlay.toggle()
+        model.commitSettings()
     }
 }

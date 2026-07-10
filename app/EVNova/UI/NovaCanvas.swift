@@ -64,12 +64,16 @@ struct NovaLayout: Equatable {
 struct NovaCanvas<Content: View>: View {
     let design: CGSize
     var fit: NovaLayout.Fit = .fit
+    @Environment(\.novaDebugEnabled) private var novaDebug
     @ViewBuilder var content: (NovaLayout) -> Content
 
     var body: some View {
         GeometryReader { geo in
             let layout = NovaLayout(design: design, viewSize: geo.size, fit: fit)
-            content(layout).novaTextScale(layout.scale)
+            ZStack {
+                content(layout).novaTextScale(layout.scale)
+                if novaDebug { NovaDebugGrid.forLayout(layout, viewSize: geo.size) }
+            }
         }
     }
 }

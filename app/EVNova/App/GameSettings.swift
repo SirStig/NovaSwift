@@ -118,6 +118,10 @@ struct GameSettings: Codable, Equatable {
     var showRadar: Bool = true
     /// HUD panel opacity (0.2…1).
     var hudOpacity: Double = 1.0
+    /// Developer UI debug overlay: draws the design-space measurement grid on
+    /// every authentic (`NovaMenu`/`NovaCanvas`) screen and live-reads the
+    /// `.novaPlace` coordinate under the pointer. Toggle in-app with ⇧⌘D.
+    var uiDebugOverlay: Bool = false
 
     // MARK: Accessibility
 
@@ -189,6 +193,7 @@ struct GameSettings: Codable, Equatable {
         useAuthenticMenu      = v(.useAuthenticMenu, d.useAuthenticMenu)
         showRadar             = v(.showRadar, d.showRadar)
         hudOpacity            = v(.hudOpacity, d.hudOpacity)
+        uiDebugOverlay        = v(.uiDebugOverlay, d.uiDebugOverlay)
         largerHUD             = v(.largerHUD, d.largerHUD)
         highContrastHUD       = v(.highContrastHUD, d.highContrastHUD)
         colorblindMode        = v(.colorblindMode, d.colorblindMode)

@@ -18,6 +18,7 @@ struct SettingsView: View {
             audioSection
             interfaceSection
             accessibilitySection
+            developerSection
 
             Section {
                 Button("Reset All Settings", role: .destructive) { showResetConfirm = true }
@@ -148,6 +149,16 @@ struct SettingsView: View {
                 ForEach(GameSettings.ColorblindMode.allCases) { Text($0.label).tag($0) }
             }
             sliderRow("UI scale", binding(\.uiScale), 0.8...1.4)
+        }
+    }
+
+    private var developerSection: some View {
+        Section {
+            Toggle("UI debug overlay", isOn: binding(\.uiDebugOverlay))
+            Text("Draws the design-space measurement grid on authentic screens and reads the .novaPlace coordinate under your finger. Toggle live with ⇧⌘D.")
+                .novaFont(.caption).foregroundStyle(.secondary)
+        } header: {
+            Text("Developer")
         }
     }
 
