@@ -44,6 +44,20 @@ public protocol GameServices: AnyObject {
     /// A reward/notification worth surfacing to the player (credits, outfit,
     /// rank changes). Purely informational; state has already been updated.
     func notify(_ event: StoryNotification)
+
+    /// Background news from an active `crön` (Bible §`crön`, `NewsGovt`/
+    /// `GovtNewsStr`/`IndNewsStr`): text to show in the news dialog while the
+    /// event is active. `govt` is the government id this text is tagged for
+    /// (one of the cron's up to four `NewsGovt` slots) or `nil` for the
+    /// catch-all independent-news pool. Per the Bible, "local news always
+    /// takes precedence over independent news" *at stations allied with a
+    /// tagged government* — that precedence is a per-station rendering
+    /// decision the implementer makes when the player actually looks at the
+    /// news dialog (which local `govt`-tagged texts apply there, if any,
+    /// else the independent one), not something the engine can resolve at
+    /// cron-start time since it doesn't know which station the player will
+    /// later land at.
+    func showNews(text: String, govt: Int?)
 }
 
 /// A mission the engine wants to offer, with its presentation text resolved.
@@ -113,4 +127,7 @@ open class LoggingGameServices: GameServices {
         record("leave stellar: \(message ?? "")")
     }
     open func notify(_ event: StoryNotification) { record("notify \(event)") }
+    open func showNews(text: String, govt: Int?) {
+        record("news[\(govt.map(String.init) ?? "independent")]: \(text.prefix(60))")
+    }
 }

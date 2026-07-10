@@ -215,6 +215,16 @@ final class PilotStore: ObservableObject {
         guard canBuyOutfit(o, galaxy: galaxy) else { return false }
         state.credits -= o.cost
         state.grantOutfit(o.id)
+        // Bible `Flags 0x0010`: "Remove any items of this type after purchase
+        // — useful for permits and other intangible purchases" (OUTFITTERS.md
+        // §6). The effect (e.g. an unlocked NCB bit via a mission/plugin, or
+        // just the one-time credits charge itself) has already happened above;
+        // this just keeps the item from sitting in inventory as an ownable
+        // good afterward — grant-then-immediately-remove nets the same "you
+        // paid, it's gone" observable behavior the Bible describes.
+        if o.flags & 0x0010 != 0 {
+            state.removeOutfit(o.id)
+        }
         save()
         return true
     }
@@ -223,6 +233,8 @@ final class PilotStore: ObservableObject {
     @discardableResult
     func sellOutfit(_ o: OutfRes) -> Bool {
         guard owned(outfit: o.id) > 0 else { return false }
+        // Bible `Flags 0x0008`: "This item can't be sold" (OUTFITTERS.md §6).
+        guard o.flags & 0x0008 == 0 else { return false }
         state.credits += o.cost
         state.removeOutfit(o.id)
         save()
@@ -248,6 +260,94 @@ final class PilotStore: ObservableObject {
         state.shipName = ship.name
         // Outfits carry over (EV Nova keeps persistent items); cargo stays, but is
         // dropped if it no longer fits the new, smaller hold — clamped on takeoff.
+        save()
+        return true
+    }
+
+    // MARK: Escort economics (ESCORTS.md §2.2, §5 — model-layer only)
+    //
+    // The Bible's real player-facing escort system (bar "hire" flow, upgrade,
+    // resale of a captured/hired escort) runs entirely on `shïp` fields, not
+    // `përs` — see ESCORTS.md §2. No hire-escort dialog, requisition dialog,
+    // or persistent escort roster exists in this codebase yet (`PlayerState`
+    // has no `escorts`-style field, and adding one is out of scope for this
+    // file), so these functions implement the *economics* (availability roll,
+    // hire/upgrade charge, sell refund) as pure credit transactions against
+    // `state.credits`; they don't own or validate an escort's fleet
+    // membership. Wiring an actual roster + UI (the hire-escort/
+    // requisition-escort dialogs and "escort control menu" ESCORTS.md §2.2
+    // names) is a follow-up once that data model exists.
+
+    /// Whether `ship` is offered for hire in the bar today. Bible `HireRandom`:
+    /// "The percent chance that a ship of this type will be available for hire
+    /// in the bar on a given day. A HireRandom of 0 means this ship will never
+    /// be made available for hire" (ESCORTS.md §2.2) — note the zero-behavior
+    /// matches `shïp.BuyRandom`'s "never" default, not `oütf.BuyRandom`'s
+    /// "always" default. Mirrors the deterministic FNV-1a-hash-of-(day, spöb,
+    /// item) roll `NovaEconomy`'s private `onOfferToday` uses for the sibling
+    /// `BuyRandom` stocking mechanic (`NovaEconomy.swift`) — duplicated here
+    /// rather than shared since that helper is private and outside this
+    /// file's edit scope; same stable-within-a-day, no-save-state contract.
+    func escortAvailableToday(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
+        guard ship.hireRandom > 0 else { return false }   // HireRandom 0 = never hireable
+        let percent = min(ship.hireRandom, 100)
+        var hash: UInt64 = 14_695_981_039_346_656_037            // FNV-1a offset basis
+        for value in [day, spob.id, ship.id] {
+            for byte in withUnsafeBytes(of: Int64(value).bigEndian, Array.init) {
+                hash ^= UInt64(byte)
+                hash = hash &* 1_099_511_628_211                 // FNV-1a prime
+            }
+        }
+        let roll = Int(hash % 100) + 1                           // 1...100
+        return roll <= percent
+    }
+
+    /// Hire `ship` as an escort at `spob` today. The Bible documents
+    /// `HireRandom` (availability) and the upgrade/resale fields but never a
+    /// distinct "hire price" field — `Cost` is introduced once, for outright
+    /// shipyard purchase (ESCORTS.md §2.2 "Pricing gap"). Charging `ship.cost`
+    /// here is that doc's flagged inference, not a quoted Bible rule. Returns
+    /// false if not on offer today or unaffordable; does not (can't yet, see
+    /// above) add the hired ship to any roster.
+    @discardableResult
+    func hireEscort(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
+        guard escortAvailableToday(ship, at: spob, day: day) else { return false }
+        guard state.credits >= ship.cost else { return false }
+        state.credits -= ship.cost
+        save()
+        return true
+    }
+
+    /// Upgrade an escort of hull `ship` to `ship.escortUpgradesTo`, charging
+    /// `ship.escortUpgradeCost`. Bible `UpgradeTo`/`EscUpgrdCost`: "the ID of
+    /// the ship type that it can be upgraded to" / "the cost to upgrade an
+    /// escort ship of this type to the next more advanced version"
+    /// (ESCORTS.md §2.2). `escortUpgradesTo <= 0` means "not upgradeable".
+    /// Returns the upgraded hull's `shïp` id on success (caller is
+    /// responsible for actually swapping the roster entry once one exists).
+    @discardableResult
+    func upgradeEscort(_ ship: ShipRes) -> Int? {
+        guard ship.escortUpgradesTo > 0 else { return nil }
+        guard state.credits >= ship.escortUpgradeCost else { return nil }
+        state.credits -= ship.escortUpgradeCost
+        save()
+        return ship.escortUpgradesTo
+    }
+
+    /// Credits refunded for selling off a captured/hired escort of hull
+    /// `ship`. Bible `EscSellValue`: "The amount of cash the player gets for
+    /// selling off a captured escort of this type." ≤0 defaults to 10% of the
+    /// ship's original `Cost` (ESCORTS.md §2.2) — confirmed the common case:
+    /// all 284 swept retail `shïp` records have `EscSellValue == 0`, so this
+    /// fallback is what real data actually exercises, not a rare edge case.
+    func escortSellValue(for ship: ShipRes) -> Int {
+        ship.escortSellValue > 0 ? ship.escortSellValue : Int(Double(ship.cost) * 0.1)
+    }
+
+    /// Sell off an escort of hull `ship`, crediting `escortSellValue(for:)`.
+    @discardableResult
+    func sellEscort(_ ship: ShipRes) -> Bool {
+        state.credits += escortSellValue(for: ship)
         save()
         return true
     }

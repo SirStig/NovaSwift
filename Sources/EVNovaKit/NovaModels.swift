@@ -25,6 +25,11 @@ import Foundation
     return (UInt32(d[b]) << 24) | (UInt32(d[b + 1]) << 16) | (UInt32(d[b + 2]) << 8) | UInt32(d[b + 3])
 }
 
+/// A signed 32-bit big-endian field (ResForge's `DLNG` template type).
+@inline(__always) private func i32(_ d: Data, _ off: Int) -> Int {
+    Int(Int32(bitPattern: u32(d, off)))
+}
+
 /// A single 64-bit big-endian flag field (`Contribute`/`Require` — ResForge's
 /// `QB64` template type reads them as one 8-byte value, not two Int32s).
 @inline(__always) private func u64(_ d: Data, _ off: Int) -> UInt64 {
@@ -251,6 +256,33 @@ public struct ShipRes {
     /// be made available for purchase" (Bible). @904. Unlike outfits, 0 means
     /// never here, not always.
     public let buyRandom: Int
+    /// "The percent chance that a ship of this type will be available for
+    /// hire in the bar on a given day. A HireRandom of 0 means this ship
+    /// will never be made available for hire" (Bible). @906, `DWRD`. Same
+    /// zero-means-never semantics as `buyRandom`; offset confirmed against a
+    /// 284-ship sweep in docs/reverse-engineering/ESCORTS.md §2.2. Restock
+    /// gating (day-seeded roll) is implemented for `buyRandom` in
+    /// `NovaEconomy.swift`'s `onOfferToday` — a bar-hiring equivalent that
+    /// consumes this field is not wired up here.
+    public let hireRandom: Int
+    /// "Which of the four categories of escorts to put this ship type into
+    /// when organizing the escort control menu" (Bible's `EscortType`,
+    /// unlabeled `DWRD` in the TMPL). @1842. -1 = Automatic, 0 = Fighter,
+    /// 1 = Medium Ship, 2 = Warship, 3 = Freighter.
+    public let escortCategory: Int
+    /// "ID of the ship class this ship can be upgraded to" (Bible's
+    /// `UpgradeTo`). @1832, `RSID`. -1 = not upgradable.
+    public let escortUpgradesTo: Int
+    /// Credit cost to upgrade this escort to `escortUpgradesTo` (Bible's
+    /// `EscUpgrdCost`). @1834, `DLNG`, 4 bytes.
+    public let escortUpgradeCost: Int
+    /// Credits paid out when this escort is sold/dismissed (Bible's
+    /// `EscSellValue`). @1838, `DLNG`, 4 bytes. Empirically 0 for
+    /// essentially every stock ship — per the Bible, "≤0 defaults to 10% of
+    /// the ship's original Cost," so this raw field alone doesn't capture
+    /// the effective sale value; the fallback math belongs to the
+    /// behavior-layer (PilotStore) consumer, not this decode.
+    public let escortSellValue: Int
 
     public init(_ r: Resource) {
         id = r.id
@@ -292,6 +324,11 @@ public struct ShipRes {
         subtitle = cstr(d, 1766, 64)
         flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))
         buyRandom = i16(d, 904)
+        hireRandom = i16(d, 906)
+        escortUpgradesTo = i16(d, 1832)
+        escortUpgradeCost = i32(d, 1834)
+        escortSellValue = i32(d, 1838)
+        escortCategory = i16(d, 1842)
 
         // Stock weapons: 4 primary slots (ids @18, counts @26, ammo @34) plus
         // 4 extended slots stored far down the resource (ids @1742, …).
@@ -346,6 +383,19 @@ public struct SystRes {
     /// Which `röid` type ids (128-143) are enabled for this system, per the
     /// `AstTypes` bitmask.
     public let asteroidTypeIDs: [Int]
+    /// Reactive reinforcement fleet: `flët` id to summon as backup when
+    /// allies are outmatched (Bible's `ReinfFleet`). @406, `RSID`. -1 = none.
+    /// Distinct from `spawns`/`fleetSpawns` (ambient background traffic) —
+    /// see docs/reverse-engineering/FLEETS.md §5. No reactive summon
+    /// mechanism consumes this yet; only `gövt.MaxOdds`-driven pre-fight
+    /// gating exists today (`AIBrain.favorableOdds`).
+    public let reinforcementFleet: Int
+    /// Delay, in frames, before `reinforcementFleet` arrives after being
+    /// triggered (Bible's `ReinfTime`). @408, `DWRD`.
+    public let reinforcementDelay: Int
+    /// Minimum interval, in days, between `reinforcementFleet` regenerations
+    /// (Bible's `ReinfIntrval`). @410, `DWRD`.
+    public let reinforcementRegen: Int
 
     /// Spawn entries that reference dudes directly.
     public var dudeSpawns: [(dudeID: Int, prob: Int)] {
@@ -386,6 +436,9 @@ public struct SystRes {
         for bit in 0..<8 where (roidTypes2 >> bit) & 1 == 1 { types.append(128 + bit) }
         for bit in 0..<8 where (roidTypes1 >> bit) & 1 == 1 { types.append(136 + bit) }
         asteroidTypeIDs = types
+        reinforcementFleet = i16(d, 406)
+        reinforcementDelay = i16(d, 408)
+        reinforcementRegen = i16(d, 410)
     }
 }
 

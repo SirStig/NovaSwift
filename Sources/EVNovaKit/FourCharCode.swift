@@ -83,4 +83,6 @@ public enum NovaType {
     public static let cicn        = FourCharCode("cicn")!
     public static let rle8        = FourCharCode("rlë8")!
     public static let rleD        = FourCharCode("rlëD")!
+    public static let ditl        = FourCharCode("DITL")! // dialog item list (layout)
+    public static let dlog       = FourCharCode("DLOG")! // dialog window template
 }

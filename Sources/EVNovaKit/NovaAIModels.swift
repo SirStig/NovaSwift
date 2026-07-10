@@ -40,6 +40,14 @@ import Foundation
     return v
 }
 
+/// A 4-byte `LCOL` color field (`0x00RRGGBB` — first byte padding), same
+/// on-disk shape as `IntfRes`'s color fields in `InterfaceModels.swift`.
+@inline(__always) private func acolor(_ d: Data, _ off: Int) -> NovaColor {
+    guard off >= 0, off + 4 <= d.count else { return NovaColor(r: 0, g: 0, b: 0) }
+    let b = d.startIndex + off
+    return NovaColor(r: d[b + 1], g: d[b + 2], b: d[b + 3])
+}
+
 /// Read a NUL-terminated Mac Roman C-string from a fixed-size field at `off`,
 /// reading at most `maxLen` bytes. Trailing garbage after the NUL is ignored.
 @inline(__always) private func acstr(_ d: Data, _ off: Int, _ maxLen: Int) -> String {
@@ -153,8 +161,22 @@ public struct OutfRes {
     public let requireGovt: Int
     /// "The percent chance that an item of this type will be available for
     /// purchase on a given day, from 1-100. Values less than 1 or greater
-    /// than 100 are interpreted as 100" (Bible). @1008.
+    /// than 100 are interpreted as 100" (Bible). @1008. This is the same
+    /// on-disk field the Bible calls `BuyRandom` on both `oütf` and `shïp`;
+    /// `requireBitsApplyTo` below is likewise the Bible's `RequireGovt`
+    /// already decoded here as `requireGovt` — see OUTFITTERS.md §8.
     public let buyRandom: Int
+    /// "The item's classification, used in the pêrs resource for items that
+    /// are given out by non-player characters' ships" (Bible `ItemClass`).
+    /// @1004. Confirmed via OUTFITTERS.md §8 against real `oütf` TMPL +
+    /// raw data (offset `contribute@30`..`unused@1012` all re-derived and
+    /// cross-checked there).
+    public let itemClass: Int
+    /// Outfit-level `ScanMask` (Bible): marks this outfit as contraband to
+    /// any government whose own `gövt.ScanMask` shares a set bit. @1006.
+    /// Distinct from `MissionRes.scanMask` (a different, mission-level
+    /// field used for boarding/cargo-scan checks) — see OUTFITTERS.md §6.
+    public let scanMask: UInt16
 
     public init(_ r: Resource) {
         id = r.id
@@ -179,6 +201,8 @@ public struct OutfRes {
         availBits = acstr(d, 46, 255)
         requireGovt = ai16(d, 1010)
         buyRandom = ai16(d, 1008)
+        itemClass = ai16(d, 1004)
+        scanMask = au16(d, 1006)
     }
 
     /// Full-hide opt-ins (Bible `oütf.Flags`): normally a locked item still
@@ -242,6 +266,32 @@ public struct GovtRes {
     /// "The short string to show in the player's target display when a ship of
     /// this government is targeted." Falls back to `name` when blank.
     public let targetCode: String
+    /// `Require` (Bible): AND'ed against the player's ship+outfit
+    /// `Contribute` bits; unmet ⇒ can't land on any planet/station of this
+    /// government at all ("useful for making travel permits"). @84, 8 bytes
+    /// (`QB64`, same 64-bit shape as `OutfRes.contribute`/`.require` above).
+    /// Confirmed via GOVERNMENT.md's "Correction" section against the real
+    /// `gövt` TMPL + a raw `gövt #128` dump.
+    public let require: UInt64
+    /// `InhJam1-4` (Bible): inherent jamming 0-100% per of 4 jam types.
+    /// @92, `RECT` = 4× `DWRD` (2 bytes each).
+    public let jamming: [Int]
+    /// `MediumName` (Bible): "used in 'Sensors detect *xxx* reinforcement
+    /// fleet approaching.'" A longer name than `commName`, distinct field.
+    /// @100, `C040`, 64 bytes, Mac Roman C-string.
+    public let mediumName: String
+    /// `Color` (Bible): "HTML-style theme color for UI." @164, `LCOL`, 4 bytes.
+    public let mapColor: NovaColor
+    /// `ShipColor` (Bible): "HTML-style theme color for... ship paint."
+    /// @168, `LCOL`, 4 bytes.
+    public let shipColor: NovaColor
+    /// `Interface` (Bible): `ïntf` resource id used when the player flies a
+    /// ship whose inherent govt equals this govt (values <128 clamp to 128).
+    /// @172, `RSID`, 2 bytes.
+    public let interface: Int
+    /// `NewsPic` (Bible): news-window background PICT id when landed on this
+    /// govt's turf; <128 falls back to generic (PICT 9000). @174, `RSID`, 2 bytes.
+    public let newsPic: Int
 
     // Flags 1 (behavior)
     public var xenophobic: Bool       { flags1 & 0x0001 != 0 } // attacks everyone except allies
@@ -281,6 +331,13 @@ public struct GovtRes {
         commName = rawName.isEmpty ? name : rawName
         let rawTarget = acstr(d, 68, 16).trimmingCharacters(in: .whitespaces)
         targetCode = rawTarget.isEmpty ? name : rawTarget
+        require = au64(d, 84)
+        jamming = (0..<4).map { ai16(d, 92 + $0 * 2) }
+        mediumName = acstr(d, 100, 64)
+        mapColor = acolor(d, 164)
+        shipColor = acolor(d, 168)
+        interface = ai16(d, 172)
+        newsPic = ai16(d, 174)
     }
 }
 
@@ -360,6 +417,23 @@ public struct FleetRes {
     public let govt: Int
     /// −1 = any system; 128…2175 a specific `sÿst`; 10000+g govt g's systems, etc.
     public let linkSystem: Int
+    /// `AppearOn` (Bible): "a control bit test field that will cause a given
+    /// fleet to appear only when the expression evaluates to true. If this
+    /// field is left blank it will be ignored" (blank ⇒ always eligible).
+    /// @30, 256-byte NCB test string. Offset confirmed via FLEETS.md §2/§7
+    /// against the real `flët` TMPL + a raw `flët #128` dump.
+    public let appearOn: String
+    /// `Quote` (Bible, named `Hail Quote` in the TMPL): "show a random string
+    /// from the STR# resource with this ID when the fleet enters from
+    /// hyperspace" (literal `#` chars replaced with a random digit). @286, `RSID`.
+    public let hailQuote: Int
+    /// `Flags` (Bible): only bit `0x0001` is documented — see
+    /// `freightersHaveRandomCargo` below. @288, `WORV`, 2 bytes.
+    public let flags: UInt16
+
+    /// `Flags` 0x0001: "Freighters (`InherentAI` <= 2) in this fleet will
+    /// have random cargo when boarded" (Bible).
+    public var freightersHaveRandomCargo: Bool { flags & 0x0001 != 0 }
 
     public init(_ r: Resource) {
         id = r.id
@@ -376,6 +450,9 @@ public struct FleetRes {
         escorts = e
         govt = ai16(d, 26)
         linkSystem = ai16(d, 28)
+        appearOn = acstr(d, 30, 256)
+        hailQuote = ai16(d, 286)
+        flags = au16(d, 288)
     }
 }
 

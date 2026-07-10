@@ -16,8 +16,32 @@ public final class Diplomacy {
     public private(set) var govts: [Int: GovtRes]
     /// Player's standing with each government (negative = criminal there).
     public private(set) var playerRecord: [Int: Int] = [:]
-    /// Record at or below which a government turns on the player.
+    /// Fallback record-at-or-below-which-hostile, used only when a government
+    /// is unknown/missing from the table (so `crimeTolerance` can't be read) —
+    /// see `isCriminal`. Per-government hostility now uses `gövt.CrimeTol`
+    /// (`GovtRes.crimeTolerance`, Bible: "the maximum amount of evilness the
+    /// player can accumulate before warships of this govt start to beat on
+    /// him" — Appendix II) instead of this single constant for every govt.
     public var hostileThreshold = -1
+
+    /// Player's combat rating: the sum of `shïp.strength` (per-kill) of every
+    /// ship the player has destroyed (Appendix I: "the sum of the strengths
+    /// of all the ships you have destroyed, times some internal multiplier
+    /// for adjustment"). The multiplier is never given a value by the Bible,
+    /// and disassembly of the real tier-selection routine (`fcn.00469030`)
+    /// shows no scaling applied at the comparison stage either — see
+    /// docs/reverse-engineering/GOVERNMENT.md §3. Until that's pinned down
+    /// further we use multiplier = 1 (no scaling), the documented-safe
+    /// default. This is the engine-layer tally, updated live as kills happen
+    /// (mirroring `playerRecord` above); `EVNovaStory.PlayerState` has its
+    /// own persisted `combatRating` (seeded once from `chär.Kills` at pilot
+    /// creation) that this module has no dependency on and therefore cannot
+    /// write to directly — syncing the two is a pre-existing gap (see
+    /// GOVERNMENT.md §5's "two separate modules that never talk to each
+    /// other"), not something this file can close; whatever bridges
+    /// `World`'s kill event to `Diplomacy.recordKill` should also copy this
+    /// value into `PlayerState.combatRating`.
+    public private(set) var combatRating = 0
 
     /// Government ids we've already warned about missing from the table, so a
     /// per-frame AI lookup (`favorableOdds`, `isHostile`, etc.) doesn't spam
@@ -83,8 +107,24 @@ public final class Diplomacy {
 
     // MARK: Government ↔ player
 
+    /// Is the player criminal (attackable-on-sight-once-provoked) with this
+    /// government? Per Appendix II, this is a **per-government ratio**, not a
+    /// single hardcoded point value: warships turn hostile once the player's
+    /// accumulated evilness with that govt reaches its own `CrimeTol`
+    /// (`GovtRes.crimeTolerance`) — a govt with `CrimeTol = 500` tolerates far
+    /// more than one with `CrimeTol = 5`. Falls back to the old single
+    /// `hostileThreshold` constant only if the government is missing from the
+    /// table entirely (so no `crimeTolerance` can be read).
     public func isCriminal(with govt: Int) -> Bool {
-        (playerRecord[govt] ?? 0) <= hostileThreshold
+        guard let gov = self.govt(govt) else {
+            return (playerRecord[govt] ?? 0) <= hostileThreshold
+        }
+        let evilness = -(playerRecord[govt] ?? 0)
+        guard evilness > 0 else { return false }
+        // CrimeTol <= 0 is data-invalid/unset; treat any evilness as enough
+        // to provoke rather than making the govt impossible to anger.
+        guard gov.crimeTolerance > 0 else { return true }
+        return evilness >= gov.crimeTolerance
     }
 
     /// Does government `g` want to attack the player right now?
@@ -108,6 +148,63 @@ public final class Diplomacy {
             if !Set(other.classes).isDisjoint(with: govts[govt]?.allies ?? []) {
                 playerRecord[id, default: 0] -= penalty / 2
             }
+        }
+    }
+
+    // MARK: Combat/piracy events → legal standing + combat rating
+    //
+    // The Bible's four *live* evilness sources (Appendix II §2.1) are
+    // KillPenalty/DisabPenalty/BoardPenalty/SmugPenalty — `ShootPenalty` is
+    // explicitly called out as "currently ignored" in the real game, so
+    // per-hit gunfire should never call `recordCrime` directly. These methods
+    // are the correct call sites for the events that actually happen; wire
+    // combat/story code to these instead of reading `.shootPenalty`.
+
+    /// The player destroyed a ship belonging to `govt`. Applies `KillPenalty`
+    /// evilness and credits `combatRating` with the destroyed ship's
+    /// `shïp.strength` (see `combatRating`'s doc comment above for the
+    /// "internal multiplier" caveat). `World.despawnDepartedAndDead` already
+    /// emits a `.shipDestroyed` event for this — that call site just needs to
+    /// invoke this method instead of (or in addition to) its current
+    /// `gov.shootPenalty`-on-every-hit logic.
+    public func recordKill(of govt: Int, shipStrength: Int) {
+        combatRating += shipStrength
+        if let gov = self.govt(govt) {
+            recordCrime(against: govt, penalty: gov.killPenalty)
+        }
+    }
+
+    /// The player disabled (but did not destroy) a ship belonging to `govt`.
+    /// Applies `DisabPenalty` evilness. `World.applyHit` already emits a
+    /// `.shipDisabled` event for this transition — that call site just needs
+    /// to invoke this method.
+    public func recordDisable(of govt: Int) {
+        if let gov = self.govt(govt) {
+            recordCrime(against: govt, penalty: gov.disablePenalty)
+        }
+    }
+
+    /// The player boarded/plundered a ship belonging to `govt`. Applies
+    /// `BoardPenalty` evilness. No boarding/plunder mechanic exists anywhere
+    /// in this codebase yet (no event to hook this into) — see
+    /// docs/reverse-engineering/GOVERNMENT.md §5. Provided so the method
+    /// exists and is correct the moment boarding is implemented.
+    public func recordBoard(of govt: Int) {
+        if let gov = self.govt(govt) {
+            recordCrime(against: govt, penalty: gov.boardPenalty)
+        }
+    }
+
+    /// The player was *detected* smuggling `govt`-illegal mission cargo
+    /// (matched via `mïsn.ScanMask` ∩ `gövt.ScanMask`). Applies
+    /// `SmugPenalty` evilness — the point cost of getting caught, not of
+    /// merely carrying the cargo. No ScanMask/illegal-cargo detection system
+    /// exists anywhere in this codebase yet (no event to hook this into) —
+    /// see docs/reverse-engineering/GOVERNMENT.md §5. Provided so the method
+    /// exists and is correct the moment scan-and-fine is implemented.
+    public func recordSmuggling(against govt: Int) {
+        if let gov = self.govt(govt) {
+            recordCrime(against: govt, penalty: gov.smugglePenalty)
         }
     }
 }

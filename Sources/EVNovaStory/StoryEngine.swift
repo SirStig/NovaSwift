@@ -139,6 +139,14 @@ public final class StoryEngine {
         }
         if !shipTypeMatches(mission.availShipType) { return false }
         if !evaluate(test: mission.availBits) { return false }
+        // Require (Bible §crön "Contribute/Require"): mïsn.Require is AND'ed
+        // against the pooled Contribute bits from the player's ship, owned
+        // outfits, active ranks and active crön events — a capability gate
+        // distinct from (and additional to) availBits' control-bit test. A
+        // zero Require mask means "no gate" (the common case).
+        if mission.require != 0, (activeContributeBits() & mission.require) != mission.require {
+            return false
+        }
         if mission.requiresCargoSpace, freeCargoSpace() <= 0 { return false }
         return true
     }
@@ -376,6 +384,34 @@ public final class StoryEngine {
         }
     }
 
+    // MARK: - Contribute/Require pool
+
+    /// The 64-bit `Contribute` pool EV Nova ANDs against `Require` fields on
+    /// `mïsn`/`oütf`/`crön` (and `gövt`) resources (Bible §crön
+    /// "Contribute/Require": "combined with the Contribute fields from the
+    /// player's ship and the other outfit items in the player's possession").
+    /// We additionally fold in active ränk `Contribute` (its own doc comment,
+    /// `MissionModels.swift`, cites the same Require-gating use) and active
+    /// crön `Contribute` (this doc's own cross-resource-gating section) — the
+    /// only place this pool is aggregated, since none of `Contribute`'s
+    /// producers (ship/outfit/rank/cron) know about each other individually.
+    /// Recomputed on demand rather than cached: ship/outfit/rank/cron state
+    /// all change independently and a handful of resource lookups is cheap
+    /// next to a mission-offer or cron-activation check.
+    public func activeContributeBits() -> UInt64 {
+        var bits: UInt64 = game.ship(player.shipType)?.contribute ?? 0
+        for (outfitID, qty) in player.outfits where qty > 0 {
+            bits |= game.outfit(outfitID)?.contribute ?? 0
+        }
+        for rankID in player.activeRanks {
+            bits |= game.rank(rankID)?.contribute ?? 0
+        }
+        for (cronID, rt) in player.cronRuntime where rt.isActive {
+            bits |= game.cron(cronID)?.contribute ?? 0
+        }
+        return bits
+    }
+
     // MARK: - The galaxy clock & crons
 
     /// Advance the clock one day and process background events + deadlines. Call
@@ -437,15 +473,58 @@ public final class StoryEngine {
             }
             if !dateInWindow(c) { player.cronRuntime[c.id] = rt; continue }
             if !NCBTest(c.enableOn).evaluate(player) { player.cronRuntime[c.id] = rt; continue }
+            // Require (Bible §crön "Contribute/Require"): "these two Require
+            // fields... are logically and'ed with the Contribute fields from
+            // the player's current ship and outfit items. Unless for each 1
+            // bit in the Require fields there is a matching 1 bit in one or
+            // more of the Contribute fields, the cron will not be activated."
+            // A capability gate distinct from EnableOn's control-bit test.
+            if c.require != 0, (activeContributeBits() & c.require) != c.require {
+                player.cronRuntime[c.id] = rt; continue
+            }
             if c.random > 0, !rng.chance(percent: c.random) { player.cronRuntime[c.id] = rt; continue }
 
             apply(set: c.onStart)
             Log.mission.debug("cron \(c.id) started on \(String(describing: self.player.date), privacy: .public)")
             services?.notify(.cronStarted(cronID: c.id))
+            announceNews(for: c)
             rt.startedDate = player.date
             rt.endDate = player.date.adding(days: max(0, c.duration))
             player.cronRuntime[c.id] = rt
         }
+    }
+
+    /// Background news (Bible §crön, `NewsGovt1-4`/`GovtNewsStr1-4`/
+    /// `IndNewsStr`): while `c` is active, up to four governments (and their
+    /// allies) get their own "local news" text; every other government's
+    /// territory falls back to one shared "independent news" pool.
+    /// "Local news always takes precedence over independent news, even if
+    /// there is no corresponding news string to display (the STR# ID must
+    /// still be greater than zero to not be ignored)." The engine can't
+    /// resolve *which* precedence applies here — that depends on which
+    /// station the player is looking at news from, which isn't known at
+    /// cron-start time — so it hands `GameServices` one `showNews` call per
+    /// configured local slot (tagged with that slot's govt id) plus one for
+    /// the independent fallback (untagged, `govt: nil`) when configured; the
+    /// conformer that actually renders the news dialog applies the
+    /// local-beats-independent rule per station.
+    private func announceNews(for c: CronRes) {
+        for i in 0..<4 {
+            let g = c.newsGovts[i]
+            let strID = c.govtNewsStrs[i]
+            guard g >= 0, strID > 0 else { continue }
+            services?.showNews(text: randomStringListEntry(strID) ?? "", govt: g)
+        }
+        if c.independentNewsStrID > 0 {
+            services?.showNews(text: randomStringListEntry(c.independentNewsStrID) ?? "", govt: nil)
+        }
+    }
+
+    /// Randomly select one entry from a `STR#` list (Bible: "a string will be
+    /// randomly selected from the STR# resource whose ID is given by...").
+    private func randomStringListEntry(_ strListID: Int) -> String? {
+        guard let strings = game.stringList(strListID)?.strings, !strings.isEmpty else { return nil }
+        return strings[rng.int(strings.count)]
     }
 
     private func dateInWindow(_ c: CronRes) -> Bool {

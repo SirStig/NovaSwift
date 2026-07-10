@@ -33,6 +33,15 @@ import Foundation
     return Int(Int32(bitPattern: v))
 }
 
+/// Read an 8-byte big-endian bitmask (QB64 `Contribute`/`Require` fields).
+@inline(__always) private func mu64(_ d: Data, _ off: Int) -> UInt64 {
+    guard off >= 0, off + 8 <= d.count else { return 0 }
+    let base = d.startIndex + off
+    var v: UInt64 = 0
+    for i in 0..<8 { v = (v << 8) | UInt64(d[base + i]) }
+    return v
+}
+
 /// Read a NUL-terminated Mac Roman C-string from a fixed-size field at `off`,
 /// reading at most `maxLen` bytes. Trailing garbage after the NUL is ignored.
 @inline(__always) private func cstr(_ d: Data, _ off: Int, _ maxLen: Int) -> String {
@@ -164,6 +173,13 @@ public struct MissionRes: Sendable {
     public let onAbort: String
     public let onShipDone: String
 
+    /// @1622, 8 bytes: bits that must be met (via the player's ship/outfit/rank/
+    /// cron `Contribute` fields) for this mission to be available at all — a gate
+    /// distinct from, and additional to, `availBits`'s NCB test. Verified against
+    /// the `mïsn` TMPL (#510): `Require@1622` sits between `OnAbort` (ending at
+    /// 1367+255=1622) and `DatePostIncrement@1630`. See docs/reverse-engineering/GOVERNMENT.md §4.4.
+    public let require: UInt64
+
     public let acceptButton: String
     public let refuseButton: String
     public let displayWeight: Int
@@ -244,7 +260,7 @@ public struct MissionRes: Sendable {
         onSuccess  = cstr(d, 857,  255)
         onFailure  = cstr(d, 1112, 255)
         onAbort    = cstr(d, 1367, 255)
-        // 1622: Require (8 bytes)
+        require    = mu64(d, 1622)
         datePostIncrement = mi16(d, 1630)
         onShipDone = cstr(d, 1632, 255)
         acceptButton = cstr(d, 1887, 32)
@@ -259,8 +275,16 @@ public struct MissionRes: Sendable {
 /// clock enters its active window and its `enableOn` test passes, then runs
 /// `onStart`, holds for `duration` days, and runs `onEnd`.
 ///
-/// Layout verified against the real game (125 crons): a 24-byte fixed header,
-/// then three 255-byte NCB strings at 24 / 279 / 534.
+/// Layout verified against the real game (125 crons, 822 bytes each): a
+/// 24-byte fixed header, then three NCB strings at 24 / 279 / 534 — **255 /
+/// 255 / 256 bytes**, not 255 each (the `crön` TMPL types `OnEnd` as `n100` =
+/// 0x100 = 256 bytes, one longer than `EnableOn`/`OnStart`), then an 8-byte
+/// `Contribute` + 8-byte `Require` bitmask pair and four 2-byte `NewsGovt`/
+/// `GovtNewsStr` id pairs. Confirmed byte-for-byte against `crön #128`
+/// "Wraith Change" (`swift run evnova-extract raw "data/EV Nova" crön 128`):
+/// 822 bytes total, `newsGovts[0] == 130` (a real govt id) and
+/// `govtNewsStrs[0] == 15000` (a real `STR#` id) at their predicted offsets.
+/// See docs/reverse-engineering/EVENTS.md §5.
 public struct CronRes: Sendable {
     public let id: Int
     public let name: String
@@ -278,6 +302,21 @@ public struct CronRes: Sendable {
     public let enableOn: String     // NCB test — must pass for the event to start
     public let onStart: String      // NCB set — applied when the event begins
     public let onEnd: String        // NCB set — applied when the event ends
+
+    /// @790, 8 bytes: bits this event contributes (while active) toward other
+    /// resources' `Require` gates (`oütf.Require`, `mïsn.Require`, `gövt.Require`).
+    /// See docs/reverse-engineering/GOVERNMENT.md §4.4.
+    public let contribute: UInt64
+    /// @798, 8 bytes: bits that must be met (via the player's ship/outfit/rank
+    /// `Contribute` fields) for this cron to be allowed to activate at all —
+    /// a capability gate distinct from `enableOn`'s control-bit test.
+    public let require: UInt64
+    /// @806, 4×2 bytes: `NewsGovt1-4` — up to four government ids that each get
+    /// their own "local news" feed while this event is active.
+    public let newsGovts: [Int]
+    /// @814, 4×2 bytes: `GovtNewsStr1-4` — the `STR#` id to randomly pick local
+    /// news text from, one per corresponding `newsGovts` slot.
+    public let govtNewsStrs: [Int]
 
     public var loopStartUntilFalse: Bool { flags & 0x0001 != 0 }
     public var loopEndUntilFalse: Bool   { flags & 0x0002 != 0 }
@@ -300,7 +339,11 @@ public struct CronRes: Sendable {
         flags      = mu16(d, 22)
         enableOn = cstr(d, 24,  255)
         onStart  = cstr(d, 279, 255)
-        onEnd    = cstr(d, 534, 255)
+        onEnd    = cstr(d, 534, 256)
+        contribute = mu64(d, 790)
+        require    = mu64(d, 798)
+        newsGovts     = (0..<4).map { mi16(d, 806 + $0 * 2) }
+        govtNewsStrs  = (0..<4).map { mi16(d, 814 + $0 * 2) }
     }
 }
 
@@ -364,6 +407,11 @@ public struct RankRes: Sendable {
     public let priceModifier: Int    // % of normal prices at this govt's ports
     public let salary: Int           // credits per day
     public let salaryCap: Int        // 0 = uncapped
+    /// @14, 8 bytes: bits this rank contributes (while active) toward other
+    /// resources' `Require` gates — "prevent the player from buying certain
+    /// items or doing certain missions until achieving a certain rank."
+    /// See docs/reverse-engineering/GOVERNMENT.md §4.4.
+    public let contribute: UInt64
     public let flags: Int
     public let conversationName: String
     public let shortName: String
@@ -382,7 +430,7 @@ public struct RankRes: Sendable {
         priceModifier = mi16(d, 4)
         salary        = mi32(d, 6)
         salaryCap     = mi32(d, 10)
-        // 14: Contribute (8 bytes)
+        contribute    = mu64(d, 14)
         flags         = mu16(d, 22)
         conversationName = cstr(d, 24, 64)
         shortName        = cstr(d, 88, 64)

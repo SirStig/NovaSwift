@@ -67,6 +67,22 @@ public struct Loadout {
     // Weapon mounts available on the hull.
     public var maxGuns: Int
     public var maxTurrets: Int
+    /// Gun-mount slots consumed by installed outfits flagged `oütf.Flags`
+    /// `0x0001` ("this item is a fixed gun") — see OUTFITTERS.md §2/§6.
+    public var usedGunSlots: Int
+    /// Turret-mount slots consumed by installed outfits flagged `oütf.Flags`
+    /// `0x0002` ("this item is a turret") — see OUTFITTERS.md §2/§6.
+    public var usedTurretSlots: Int
+    /// Gun mounts still free for a fixed-gun-flagged outfit purchase. Purchase-time
+    /// code (e.g. `PilotStore.canBuyOutfit`) should check this — and
+    /// `freeTurretSlots` — before allowing a `0x0001`/`0x0002`-flagged outfit to be
+    /// bought, mirroring the existing `freeMass` check. Not yet enforced anywhere
+    /// (OUTFITTERS.md §6/§9: "a player can currently buy more gun-type outfits
+    /// than the hull has gun mounts for").
+    public var freeGunSlots: Int { max(0, maxGuns - usedGunSlots) }
+    /// Turret mounts still free for a turret-flagged outfit purchase. See
+    /// `freeGunSlots`.
+    public var freeTurretSlots: Int { max(0, maxTurrets - usedTurretSlots) }
 
     // Installed content.
     public var outfits: [Int: Int]  // outfit id → count
@@ -80,7 +96,62 @@ public struct Loadout {
     public var maxJumpHops: Int
 }
 
+extension OutfRes {
+    /// `oütf.Flags 0x0001`: "This item is a fixed gun" — installs into a gun
+    /// mount and competes with other `0x0001`/`0x0002`-flagged outfits for the
+    /// hull's `ShipRes.maxGuns` count. See OUTFITTERS.md §2/§6.
+    public var isFixedGunOutfit: Bool { flags & 0x0001 != 0 }
+    /// `oütf.Flags 0x0002`: "This item is a turret" — installs into a turret
+    /// mount, competing for `ShipRes.maxTurrets`. See OUTFITTERS.md §2/§6.
+    public var isTurretOutfit: Bool { flags & 0x0002 != 0 }
+    /// `oütf.Flags 0x0200`: "This item's total price is proportional to the
+    /// player's ship's mass. (ship class Mass field is multiplied by this
+    /// item's Cost field)" — Nova Bible via OUTFITTERS.md §4.
+    public var priceIsShipMassProportional: Bool { flags & 0x0200 != 0 }
+    /// `oütf.Flags 0x0400`: "This item's total mass (at purchase) is
+    /// proportional to the player's ship's mass" — `shipClass.Mass ×
+    /// outfit.Mass / 100`, positive-mass items only. Nova Bible via
+    /// OUTFITTERS.md §2.
+    public var massIsShipMassProportional: Bool { flags & 0x0400 != 0 }
+
+    /// This outfit's effective installed mass aboard a hull of `shipMass`
+    /// tons (`ShipRes.mass`, the hull's own mass field, @62) — applies the
+    /// `0x0400` proportional-mass rule (`shipMass × mass / 100`, positive-mass
+    /// items only) when the flag is set, otherwise the flat `mass`.
+    public func effectiveMass(shipMass: Int) -> Int {
+        guard massIsShipMassProportional, mass > 0 else { return mass }
+        return shipMass * mass / 100
+    }
+
+    /// This outfit's effective purchase price aboard a hull of `shipMass` tons
+    /// — applies the `0x0200` proportional-price rule (`shipMass × cost`) when
+    /// the flag is set, otherwise the flat `cost`. Exposed for purchase-time
+    /// code (e.g. `PilotStore.buyOutfit`/`sellOutfit`) to charge/refund
+    /// correctly; not consumed anywhere in this file today since this file
+    /// aggregates *stats*, not credits.
+    public func effectiveCost(shipMass: Int) -> Int {
+        guard priceIsShipMassProportional else { return cost }
+        return shipMass * cost
+    }
+}
+
 extension Galaxy {
+    /// `outfit`'s effective installed mass if fitted to `shipID` — see
+    /// `OutfRes.effectiveMass(shipMass:)`. Falls back to the flat `mass` if
+    /// the hull can't be resolved.
+    public func effectiveMass(of outfit: OutfRes, forShip shipID: Int) -> Int {
+        guard let s = game.ship(shipID) else { return outfit.mass }
+        return outfit.effectiveMass(shipMass: s.mass)
+    }
+
+    /// `outfit`'s effective purchase price if fitted to `shipID` — see
+    /// `OutfRes.effectiveCost(shipMass:)`. Falls back to the flat `cost` if
+    /// the hull can't be resolved.
+    public func effectiveCost(of outfit: OutfRes, forShip shipID: Int) -> Int {
+        guard let s = game.ship(shipID) else { return outfit.cost }
+        return outfit.effectiveCost(shipMass: s.mass)
+    }
+
     /// Resolve a hull + its outfits (preinstalled, plus any `extraOutfits` the
     /// player bought) into an effective `Loadout`. Outfit stat modifiers are
     /// summed into the hull's base stats, then converted to sim units using the
@@ -105,6 +176,7 @@ extension Galaxy {
         var cargo = s.cargoSpace
         var maxGuns = s.maxGuns, maxTurrets = s.maxTurrets
         var usedMass = 0
+        var usedGunSlots = 0, usedTurretSlots = 0
         var afterburnerFuel = 0
         var multiJumpBonus = 0
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
@@ -119,7 +191,15 @@ extension Galaxy {
                 Log.world.error("Galaxy.loadout: outfit id \(oid) (x\(count)) not found in game data for ship \(shipID) — skipped, its effects are missing from this loadout")
                 continue
             }
-            usedMass += o.mass * count
+            // Flags 0x0400: proportional-mass outfits scale with the hull's
+            // own mass instead of contributing their flat `mass` (OUTFITTERS.md §2/§4).
+            usedMass += o.effectiveMass(shipMass: s.mass) * count
+            // Flags 0x0001/0x0002: fixed-gun/turret outfits compete for the
+            // hull's MaxGuns/MaxTurrets mount counts (OUTFITTERS.md §2/§6).
+            // Bookkeeping only here — enforcement at purchase time belongs to
+            // `PilotStore`, via `Loadout.freeGunSlots`/`.freeTurretSlots`.
+            if o.isFixedGunOutfit { usedGunSlots += count }
+            if o.isTurretOutfit { usedTurretSlots += count }
             for (type, value) in o.modifiers {
                 let v = value * count
                 switch type {
@@ -175,6 +255,7 @@ extension Galaxy {
             cargoCapacity: max(0, cargo),
             massCapacity: s.freeMass + usedMass, usedMass: usedMass,
             maxGuns: maxGuns, maxTurrets: maxTurrets,
+            usedGunSlots: usedGunSlots, usedTurretSlots: usedTurretSlots,
             outfits: outfitCounts, weapons: weapons,
             maxJumpHops: max(1, 1 + multiJumpBonus))
     }
