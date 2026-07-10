@@ -158,6 +158,48 @@ struct GalaxyMapView: View {
         return color
     }
 
+    /// A `NovaColor` (the `gövt` map/ship colour fields) as a SwiftUI `Color`.
+    private func color(_ c: NovaColor) -> Color {
+        Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
+    }
+
+    /// A government's authentic **territory** colour — its real `gövt.mapColor`
+    /// (Federation blue, Auroran red, the Pirate families' greys, …). Falls back
+    /// to the synthetic palette only when the data leaves it black (16 of the 68
+    /// base governments do). Used for the background regions, *not* the dots.
+    private func govtMapColor(_ government: Int, game: NovaGame) -> Color {
+        guard government >= 0 else { return independentColor }
+        if let mc = game.govt(government)?.mapColor, mc.r != 0 || mc.g != 0 || mc.b != 0 {
+            return color(mc)
+        }
+        return factionColor(for: government)
+    }
+
+    // Relation dot colours — the player's *standing* with a system's government,
+    // deliberately distinct from the government's own territory colour above.
+    private let relFriendly    = Color(red: 0.35, green: 0.62, blue: 1.0)   // blue
+    private let relNeutral     = Color(red: 0.95, green: 0.85, blue: 0.32)  // yellow
+    private let relEnemy       = Color(red: 0.95, green: 0.3, blue: 0.25)   // red
+    private let relPirate      = Color(white: 0.42)                         // dark grey
+    private let relUninhabited = Color(white: 0.72)                         // light grey
+
+    /// The colour of a system's star dot — by the player's **relationship** to
+    /// its controlling government (not the government's own colour, which tints
+    /// the territory behind it). Pirates/marauders (attack-on-sight governments)
+    /// read dark grey, independent/no-government light grey, a government the
+    /// player is wanted with red, good standing blue, otherwise neutral yellow.
+    /// (Green "you own property here" awaits player planet-ownership tracking,
+    /// which the save state doesn't expose yet.)
+    private func relationColor(for s: SystRes, game: NovaGame) -> Color {
+        let gov = s.government
+        guard gov >= 0, let g = game.govt(gov) else { return relUninhabited }
+        if g.alwaysAttacksPlayer || g.xenophobic { return relPirate }
+        let standing = pilot.state.legalRecord[gov] ?? g.initialRecord
+        if standing < 0 { return relEnemy }
+        if standing > 0 || g.neverAttacksPlayer { return relFriendly }
+        return relNeutral
+    }
+
     // MARK: Drawing
 
     private func drawMap(ctx: inout GraphicsContext, size: CGSize, blinkOn: Bool) {
@@ -201,9 +243,9 @@ struct GalaxyMapView: View {
                 guard vis == .explored || vis == .chartered, s.government >= 0 else { continue }
                 let p = plot(s.x, s.y)
                 guard glowRect.contains(p) else { continue }
-                let col = factionColor(for: s.government)
+                let col = govtMapColor(s.government, game: game)
                 tctx.fill(Path(ellipseIn: CGRect(x: p.x - glowR, y: p.y - glowR, width: glowR * 2, height: glowR * 2)),
-                          with: .radialGradient(Gradient(colors: [col.opacity(0.20), .clear]),
+                          with: .radialGradient(Gradient(colors: [col.opacity(0.22), .clear]),
                                                 center: p, startRadius: 0, endRadius: glowR))
             }
         }
@@ -283,8 +325,10 @@ struct GalaxyMapView: View {
             let hopAffordable = hopIndex.map { $0 < nav.availableJumps } ?? true
 
             // The dot: current is amber, on-route hops are green/red by
-            // affordability, otherwise faction color if known, dim grey if only
-            // seen-as-adjacent (unconfirmed allegiance).
+            // affordability, otherwise coloured by the player's *relationship* to
+            // the system's government (blue friendly / yellow neutral / red
+            // wanted / grey pirate·uninhabited), dim grey if only seen-as-adjacent
+            // (unconfirmed allegiance).
             let r: CGFloat = isCurrent || isDestination ? 3.5 : (isKnownDetail ? 2.5 : 2.0)
             let dot = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
             if isCurrent {
@@ -292,7 +336,7 @@ struct GalaxyMapView: View {
             } else if onRoute {
                 ctx.fill(dot, with: .color(hopAffordable ? routeGreen : routeWarn))
             } else if isKnownDetail {
-                ctx.fill(dot, with: .color(factionColor(for: s.government)))
+                ctx.fill(dot, with: .color(relationColor(for: s, game: game)))
             } else {
                 ctx.fill(dot, with: .color(adjacentGrey))
             }
@@ -475,10 +519,37 @@ struct GalaxyMapView: View {
                 }
 
                 bottomButtons(space: space, nw: nw, nh: nh)
+
+                // Relation key, tucked into the star-map's lower-left corner so
+                // the dot colours are readable. (Positioned by eye — nudge with
+                // the ⇧⌘D debug grid.)
+                relationLegend
+                    .novaPlace(space, CGFloat(Item.canvas.left) + 4 - nw / 2,
+                               CGFloat(Item.canvas.top + Item.canvas.h) - 72 - nh / 2)
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .scaleEffect(scale)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+    }
+
+    /// A compact key for the relation dot colours.
+    private var relationLegend: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            legendRow(relFriendly, "Friendly")
+            legendRow(relNeutral, "Neutral")
+            legendRow(relEnemy, "Wanted")
+            legendRow(relPirate, "Pirate")
+            legendRow(relUninhabited, "Uninhabited")
+        }
+        .padding(5)
+        .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func legendRow(_ c: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(c).frame(width: 6, height: 6)
+            NovaText(label, size: 9, color: .white.opacity(0.85))
         }
     }
 
@@ -502,7 +573,7 @@ struct GalaxyMapView: View {
                                  color: sys.id == cur.id ? amber : .white, width: 104, weight: .bold)
                         if known {
                             NovaText(game.govt(sys.government)?.name ?? "Independent", size: 11,
-                                     color: factionColor(for: sys.government), width: 104)
+                                     color: govtMapColor(sys.government, game: game), width: 104)
                             Divider().overlay(.white.opacity(0.25))
                             ForEach(sys.spobs, id: \.self) { spobID in
                                 if let spob = game.spob(spobID) {
