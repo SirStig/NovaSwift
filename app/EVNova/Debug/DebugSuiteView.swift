@@ -47,6 +47,7 @@ struct DebugSuiteView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     performanceSection
                     stressTestSection
+                    aiSection
                     overlaysSection
                 }
                 .padding(16)
@@ -164,6 +165,45 @@ struct DebugSuiteView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(green.opacity(0.85))
             }
+        }
+    }
+
+    // MARK: AI debugging
+
+    private var aiSection: some View {
+        sectionCard(title: "AI", systemImage: "brain") {
+            Toggle(isOn: $debug.aiDebugEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("State & paths overlay")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    Text("Draws each NPC's AI state, target, nav goal and formation link over the scene.")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .tint(green)
+
+            if debug.aiDebugEnabled {
+                VStack(alignment: .leading, spacing: 5) {
+                    legendRow(Color(red: 0.95, green: 0.3, blue: 0.25), "line to combat target")
+                    legendRow(Color(red: 0.35, green: 0.75, blue: 1.0), "line to nav goal (path)")
+                    legendRow(Color(red: 0.4, green: 0.9, blue: 0.45), "line to fleet leader")
+                    Text("Label above each ship: state → target id · E# = escort slot.")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private func legendRow(_ color: Color, _ text: String) -> some View {
+        HStack(spacing: 7) {
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 14, height: 3)
+            Text(text)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
     }
 

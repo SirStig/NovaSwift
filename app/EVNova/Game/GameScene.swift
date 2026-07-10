@@ -117,6 +117,16 @@ final class GameScene: SKScene {
     private var perfWorstFrame: TimeInterval = 0
     private var perfFrames = 0
 
+    // AI debug overlay (draws each NPC's state, target, nav goal, and formation
+    // link when `debug?.aiDebugEnabled`). Three combined-path line nodes — one
+    // per relationship, rebuilt each frame — plus a pooled state label per ship.
+    private let aiDebugLayer = SKNode()
+    private var aiTargetLines: SKShapeNode?
+    private var aiDestLines: SKShapeNode?
+    private var aiLeaderLines: SKShapeNode?
+    private var aiLabelNodes: [Int: SKLabelNode] = [:]
+    private var aiDebugBuilt = false
+
     // Animated targeting brackets: one reusable node for the ship target, one
     // for the planet nav-selection, positioned/recolored straight from live
     // sim data every frame (not tied to `npcNodes`/`planetNodes` render-node
@@ -236,6 +246,10 @@ final class GameScene: SKScene {
             selectionLayer.addChild(bracket)
         }
         addChild(selectionLayer)
+        // AI debug overlay sits above ships/selection but below transient
+        // effects; stays empty until the debug suite turns it on.
+        aiDebugLayer.zPosition = 14
+        addChild(aiDebugLayer)
         buildShip()
         if arrivedViaJump {
             // The player just jumped in: place the ship/camera immediately (don't
@@ -554,6 +568,7 @@ final class GameScene: SKScene {
         syncNPCs()
         syncAsteroids()
         updateSelectionBrackets()
+        updateAIDebug()
         shipNode.position = scenePos
 
         if let sprite = shipSprite, !rotationTextures.isEmpty {
@@ -1507,5 +1522,142 @@ final class GameScene: SKScene {
         let armed = allIDs.filter { (galaxy.shipSpec($0)?.mounts.isEmpty == false) }
         let chosen = armed.isEmpty ? allIDs : armed
         return Array(chosen.prefix(cap))
+    }
+
+    // MARK: - Debug suite: AI overlay
+
+    /// Draw every NPC's live AI "thoughts" over the flight scene when the debug
+    /// suite has it on: a state label above each ship, a red line to its combat
+    /// target, a cyan line to its navigation goal (the point it's steering
+    /// toward — its current path), and a green line from an escort to its
+    /// fleet leader. Pure visualization; reads brain state, never mutates it.
+    ///
+    /// Lines are three combined `CGPath`s (one node each, rebuilt per frame) so
+    /// the whole overlay is a handful of nodes regardless of ship count; only
+    /// the per-ship labels are pooled by entity id.
+    private func updateAIDebug() {
+        guard debug?.aiDebugEnabled == true else {
+            if aiDebugBuilt { clearAIDebug() }
+            return
+        }
+        ensureAIDebugNodes()
+
+        let targetPath = CGMutablePath()
+        let destPath = CGMutablePath()
+        let leaderPath = CGMutablePath()
+        var seen = Set<Int>()
+
+        for npc in world.npcs where npc.isAlive {
+            guard let brain = npc.brain else { continue }
+            seen.insert(npc.entityID)
+            let from = CGPoint(x: npc.position.x, y: npc.position.y)
+
+            if let tid = brain.targetID ?? npc.currentTargetID, let t = world.ship(id: tid) {
+                targetPath.move(to: from)
+                targetPath.addLine(to: CGPoint(x: t.position.x, y: t.position.y))
+            }
+            if let dest = brain.destination {
+                destPath.move(to: from)
+                destPath.addLine(to: CGPoint(x: dest.x, y: dest.y))
+            }
+            if let lid = brain.leaderID, let leader = world.ship(id: lid) {
+                leaderPath.move(to: from)
+                leaderPath.addLine(to: CGPoint(x: leader.position.x, y: leader.position.y))
+            }
+
+            let label = aiLabelNodes[npc.entityID] ?? makeAILabel(for: npc.entityID)
+            label.position = CGPoint(x: from.x, y: from.y + CGFloat(npc.radius) + 18)
+            label.text = aiLabelText(npc, brain)
+            label.fontColor = aiStateColor(brain.state)
+        }
+
+        aiTargetLines?.path = targetPath
+        aiDestLines?.path = destPath
+        aiLeaderLines?.path = leaderPath
+
+        for (id, node) in aiLabelNodes where !seen.contains(id) {
+            node.removeFromParent()
+            aiLabelNodes[id] = nil
+        }
+    }
+
+    /// Create the three shared line nodes once (idempotent). Labels are made
+    /// lazily per ship in `makeAILabel`.
+    private func ensureAIDebugNodes() {
+        guard !aiDebugBuilt else { return }
+        func lineNode(_ color: SKColor) -> SKShapeNode {
+            let n = SKShapeNode()
+            n.strokeColor = color
+            n.lineWidth = 1
+            n.alpha = 0.7
+            aiDebugLayer.addChild(n)
+            return n
+        }
+        aiTargetLines = lineNode(SKColor(red: 0.95, green: 0.3, blue: 0.25, alpha: 1))  // combat target
+        aiDestLines   = lineNode(SKColor(red: 0.35, green: 0.75, blue: 1.0, alpha: 1))  // nav goal / path
+        aiLeaderLines = lineNode(SKColor(red: 0.4, green: 0.9, blue: 0.45, alpha: 1))   // formation link
+        aiDebugBuilt = true
+    }
+
+    /// Tear the overlay back down when it's switched off, so it costs nothing
+    /// while disabled.
+    private func clearAIDebug() {
+        aiDebugLayer.removeAllChildren()
+        aiTargetLines = nil
+        aiDestLines = nil
+        aiLeaderLines = nil
+        aiLabelNodes.removeAll()
+        aiDebugBuilt = false
+    }
+
+    private func makeAILabel(for id: Int) -> SKLabelNode {
+        let label = SKLabelNode(fontNamed: "Menlo-Bold")
+        label.fontSize = 8
+        label.verticalAlignmentMode = .bottom
+        label.horizontalAlignmentMode = .center
+        aiDebugLayer.addChild(label)
+        aiLabelNodes[id] = label
+        return label
+    }
+
+    /// The compact readout above each ship: its state (abbreviated), the entity
+    /// it's targeting if any, and an escort's formation slot.
+    private func aiLabelText(_ npc: Ship, _ brain: AIBrain) -> String {
+        var text = aiStateAbbrev(brain.state)
+        if let tid = brain.targetID { text += "→\(tid)" }
+        if brain.leaderID != nil { text += " E\(brain.formationSlot)" }
+        return text
+    }
+
+    private func aiStateAbbrev(_ state: AIState) -> String {
+        switch state {
+        case .spawning:   return "SPAWN"
+        case .traveling:  return "TRVL"
+        case .landing:    return "LAND"
+        case .patrolling: return "PATRL"
+        case .orbiting:   return "ORBIT"
+        case .attacking:  return "ATK"
+        case .fleeing:    return "FLEE"
+        case .departing:  return "DEPRT"
+        case .escorting:  return "ESCRT"
+        case .assisting:  return "ASSIST"
+        }
+    }
+
+    /// State → label colour: red for combat, amber for flight/evade, cyan for
+    /// travel, green for escort/assist, grey for idle patrol.
+    private func aiStateColor(_ state: AIState) -> SKColor {
+        switch state {
+        case .attacking:
+            return SKColor(red: 0.95, green: 0.35, blue: 0.3, alpha: 1)
+        case .fleeing, .departing:
+            return SKColor(red: 1.0, green: 0.7, blue: 0.3, alpha: 1)
+        case .traveling, .landing:
+            return SKColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1)
+        case .escorting, .assisting:
+            return SKColor(red: 0.45, green: 0.9, blue: 0.5, alpha: 1)
+        case .patrolling, .orbiting, .spawning:
+            return SKColor(white: 0.85, alpha: 1)
+        }
     }
 }
