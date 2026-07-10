@@ -59,6 +59,41 @@ final class StorylineAnalyzerTests: XCTestCase {
         XCTAssertEqual(a.untaggedMissionCount, 1)
     }
 
+    // MARK: Story map (graph)
+
+    func testStoryMapBuildsLaneNodesAndUnlockEdge() {
+        let a = StorylineAnalyzer(game: chainGame())
+        let map = a.storyMap(for: PlayerState())
+        XCTAssertEqual(map.lanes.count, 1)
+        XCTAssertEqual(map.lanes.first?.key, "Test")
+        XCTAssertEqual(map.nodes.count, 2)
+        // Both nodes share lane 0, laid out in step order.
+        XCTAssertEqual(map.nodes.map(\.laneIndex), [0, 0])
+        XCTAssertEqual(map.nodes.map(\.rowIndex), [0, 1])
+        // Step 1 sets b800 which step 2 requires → an unlocks edge 500 → 501.
+        let edge = try! XCTUnwrap(map.edges.first { $0.from == 500 && $0.to == 501 })
+        XCTAssertEqual(edge.kind, .unlocks)
+    }
+
+    func testStoryMapStartsEdgeFromScript() {
+        // m1 directly starts m2 via an S-op; both tagged into one storyline.
+        let m1 = MissionSpec(id: 510, name: "Kickoff; Chain1", onSuccess: "S511").resource()
+        let m2 = MissionSpec(id: 511, name: "Payoff; Chain2", availBits: "b900").resource()
+        let a = StorylineAnalyzer(game: makeGame([m1, m2, spobResource(id: 128, govt: 128)]))
+        let map = a.storyMap(for: PlayerState())
+        let edge = try! XCTUnwrap(map.edges.first { $0.from == 510 && $0.to == 511 })
+        // A direct start beats an incidental bit dependency for the same pair.
+        XCTAssertEqual(edge.kind, .starts)
+    }
+
+    func testStoryMapEmptyWithoutStorylines() {
+        let generic = MissionSpec(id: 620, name: "Cargo run to nowhere").resource()
+        let a = StorylineAnalyzer(game: makeGame([generic]))
+        let map = a.storyMap(for: PlayerState())
+        XCTAssertTrue(map.isEmpty)
+        XCTAssertEqual(map.untaggedCount, 1)
+    }
+
     func testObjectiveAndRewardText() {
         let m = MissionSpec(id: 700, name: "Haul; Job1", returnStellar: 128,
                             cargoType: 1, cargoQty: 8, cargoPickup: 0, cargoDropoff: 1,

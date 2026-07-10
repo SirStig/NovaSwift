@@ -91,6 +91,81 @@ public struct Storyline: Identifiable, Codable, Sendable {
     }
 }
 
+// MARK: - Story map (graph model)
+
+/// One mission drawn on the story map, plus where it sits in the lane layout.
+/// Wraps the fully-resolved `StorylineStep` (status/objective/reward/blockers)
+/// and adds the campaign it belongs to and its grid coordinates.
+public struct StoryMapNode: Identifiable, Sendable {
+    public var id: Int { step.missionID }
+    public let step: StorylineStep
+    public let storylineKey: String
+    /// Which campaign column this node lives in (0-based).
+    public let laneIndex: Int
+    /// Vertical order within the lane (0 = first step).
+    public let rowIndex: Int
+
+    public init(step: StorylineStep, storylineKey: String, laneIndex: Int, rowIndex: Int) {
+        self.step = step; self.storylineKey = storylineKey
+        self.laneIndex = laneIndex; self.rowIndex = rowIndex
+    }
+}
+
+/// A directed dependency between two mission nodes on the map.
+public struct StoryMapEdge: Identifiable, Sendable, Hashable {
+    public enum Kind: String, Sendable, Hashable {
+        case unlocks   // `from` sets a control bit that `to` requires
+        case starts    // `from` directly starts `to` (an S-op in its script)
+    }
+    public let from: Int   // mission id
+    public let to: Int     // mission id
+    public let kind: Kind
+    public var id: String { "\(from)-\(to)-\(kind.rawValue)" }
+
+    public init(from: Int, to: Int, kind: Kind) {
+        self.from = from; self.to = to; self.kind = kind
+    }
+}
+
+/// One campaign column on the map, with headline progress.
+public struct StoryMapLane: Identifiable, Sendable {
+    public let key: String
+    public let title: String
+    public let index: Int
+    public let completedCount: Int
+    public let totalCount: Int
+    public let isComplete: Bool
+    public var id: String { key }
+
+    public init(key: String, title: String, index: Int,
+                completedCount: Int, totalCount: Int, isComplete: Bool) {
+        self.key = key; self.title = title; self.index = index
+        self.completedCount = completedCount; self.totalCount = totalCount
+        self.isComplete = isComplete
+    }
+}
+
+/// The whole reconstructed campaign graph for one pilot: every storyline as a
+/// lane of mission nodes, with the dependency edges that link "what unlocks
+/// what" (including across campaigns). Powers the full-screen Story Map.
+public struct StoryMap: Sendable {
+    public let lanes: [StoryMapLane]
+    public let nodes: [StoryMapNode]
+    public let edges: [StoryMapEdge]
+    /// One-off (untagged) jobs that aren't part of any campaign — shown as a count.
+    public let untaggedCount: Int
+
+    public init(lanes: [StoryMapLane], nodes: [StoryMapNode], edges: [StoryMapEdge],
+                untaggedCount: Int) {
+        self.lanes = lanes; self.nodes = nodes; self.edges = edges
+        self.untaggedCount = untaggedCount
+    }
+
+    public var isEmpty: Bool { nodes.isEmpty }
+    /// Tallest lane (most steps) — the map's row extent.
+    public var maxRows: Int { nodes.map(\.rowIndex).max().map { $0 + 1 } ?? 0 }
+}
+
 public final class StorylineAnalyzer {
     private let game: NovaGame
 
@@ -146,6 +221,59 @@ public final class StorylineAnalyzer {
     /// The number of missions with no storyline tag (generic bar/computer jobs).
     public var untaggedMissionCount: Int {
         game.missions().filter { storyTag($0.name).key == nil }.count
+    }
+
+    /// The whole campaign graph resolved for `player`: lanes (one per storyline),
+    /// nodes (every tagged mission with live status), and the dependency edges
+    /// between them. Edges come from two sources — a mission that **sets** a
+    /// control bit another mission **requires** (`.unlocks`), and a mission that
+    /// **directly starts** another via an S-op in its script (`.starts`). Only
+    /// links between missions that are both on the map are drawn, so the graph
+    /// stays a readable campaign map rather than the full 500-mission tangle.
+    public func storyMap(for player: PlayerState) -> StoryMap {
+        let lines = storylines(for: player)
+        var lanes: [StoryMapLane] = []
+        var nodes: [StoryMapNode] = []
+        var onMap = Set<Int>()
+
+        for (laneIndex, line) in lines.enumerated() {
+            lanes.append(StoryMapLane(key: line.key, title: line.title, index: laneIndex,
+                                      completedCount: line.completedCount,
+                                      totalCount: line.totalCount, isComplete: line.isComplete))
+            for (rowIndex, step) in line.steps.enumerated() {
+                nodes.append(StoryMapNode(step: step, storylineKey: line.key,
+                                          laneIndex: laneIndex, rowIndex: rowIndex))
+                onMap.insert(step.missionID)
+            }
+        }
+
+        // De-duplicate to one edge per ordered pair; a direct `.starts` link
+        // beats an incidental `.unlocks` bit dependency between the same two.
+        var edges: [String: StoryMapEdge] = [:]
+        func add(_ from: Int, _ to: Int, _ kind: StoryMapEdge.Kind) {
+            guard from != to, onMap.contains(from), onMap.contains(to) else { return }
+            let key = "\(from)-\(to)"
+            if edges[key]?.kind == .starts { return }
+            edges[key] = StoryMapEdge(from: from, to: to, kind: kind)
+        }
+
+        for node in nodes {
+            guard let m = game.mission(node.step.missionID) else { continue }
+            // `.unlocks`: whoever sets a bit this mission needs → this mission.
+            for ref in NCBTest(m.availBits).referencedBits where !ref.negated {
+                let sources = (setters[ref.bit] ?? []).filter { $0.kind == .mission }
+                for src in sources.prefix(3) { add(src.id, m.id, .unlocks) }
+            }
+            // `.starts`: this mission's own script directly launches another.
+            for expr in [m.onAccept, m.onSuccess, m.onShipDone] {
+                for op in NCBSet.parse(expr) {
+                    if case .startMission(let target) = op { add(m.id, target, .starts) }
+                }
+            }
+        }
+
+        return StoryMap(lanes: lanes, nodes: nodes,
+                        edges: Array(edges.values), untaggedCount: untaggedMissionCount)
     }
 
     // MARK: Step construction

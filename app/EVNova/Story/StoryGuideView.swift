@@ -11,10 +11,16 @@ import EVNovaStory
 /// It also runs standalone in Xcode Previews via `StoryGuideModel.sample`.
 struct StoryGuideView: View {
     @ObservedObject var model: StoryGuideModel
-    @State private var tab: Tab = .pilot
+    @State private var tab: Tab
     var onClose: (() -> Void)?
 
-    enum Tab: String, CaseIterable { case pilot = "Pilot", story = "Story Guide" }
+    enum Tab: String, CaseIterable { case pilot = "Pilot", story = "Story Guide", map = "Story Map" }
+
+    init(model: StoryGuideModel, initialTab: Tab = .pilot, onClose: (() -> Void)? = nil) {
+        self.model = model
+        self._tab = State(initialValue: initialTab)
+        self.onClose = onClose
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +37,7 @@ struct StoryGuideView: View {
             case .pilot: PilotInfoView(pilot: model.pilot)
             case .story: StorylineBrowserView(storylines: model.storylines,
                                               untaggedCount: model.untaggedCount)
+            case .map:   StorylineMapView(map: model.storyMap)
             }
         }
         .frame(minWidth: 460, minHeight: 560)

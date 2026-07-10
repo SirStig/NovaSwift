@@ -13,6 +13,7 @@ struct GameMenuView: View {
     var onOpenMap: () -> Void
 
     @State private var showSettings = false
+    @State private var storyModel: StoryGuideModel?
     @State private var info: String?
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
@@ -38,7 +39,16 @@ struct GameMenuView: View {
                 .frame(minWidth: 420, minHeight: 520)
                 .preferredColorScheme(.dark)
         }
-        .alert("Coming soon", isPresented: Binding(get: { info != nil },
+        .sheet(isPresented: Binding(get: { storyModel != nil },
+                                    set: { if !$0 { storyModel = nil } })) {
+            if let storyModel {
+                StoryGuideView(model: storyModel, initialTab: .map,
+                               onClose: { self.storyModel = nil })
+                    .frame(minWidth: 900, minHeight: 620)
+                    .preferredColorScheme(.dark)
+            }
+        }
+        .alert("Notice", isPresented: Binding(get: { info != nil },
                                                    set: { if !$0 { info = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(info ?? "") }
@@ -52,8 +62,8 @@ struct GameMenuView: View {
                 VStack(spacing: 2) {
                     row("Resume", "play.fill", tint: amber) { onResume() }
                     row("Galaxy Map", "map.fill") { onResume(); onOpenMap() }
-                    row("Mission Log", "list.bullet.rectangle.portrait") {
-                        info = "The mission log / storyline board is coming soon."
+                    row("Story Map", "point.3.connected.trianglepath.dotted") {
+                        openStoryMap()
                     }
                     row("Preferences", "gearshape.fill") { showSettings = true }
 
@@ -99,6 +109,17 @@ struct GameMenuView: View {
             .buttonStyle(.plain)
         }
         .padding(16)
+    }
+
+    /// Open the full-screen Story Map over the live game + current pilot. Builds
+    /// a fresh guide model (indexing the mission graph) on demand; without loaded
+    /// game data there's nothing to chart, so explain that instead.
+    private func openStoryMap() {
+        if let game = model.data.game {
+            storyModel = .over(game, player: model.pilot.state)
+        } else {
+            info = "Load your EV Nova data to chart the storyline map."
+        }
     }
 
     private var sectionGap: some View {

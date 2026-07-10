@@ -47,7 +47,10 @@ The part that's still missing is the part that makes it *feel like a
 finished game*: the mission/story campaign isn't driving play yet (there's a
 Mission BBS button and window, but it's a placeholder — the underlying
 `StoryEngine` runs only under the CLI and tests, not in the app), and there's
-no way to actually lose — no player death, no game over, no paid repairs. See
+no way to actually lose — no player death, no game over, no paid repairs.
+(The in-game menu now has a **Story Map** — a pannable/zoomable graph of every
+reconstructed campaign, resolved live against your pilot: what's available now,
+what each step unlocks, and exactly what's gating anything still locked.) See
 **[docs/STATUS.md](docs/STATUS.md)** for the full, honestly-audited
 wired-vs-built-vs-missing breakdown — that document, not this README, is the
 source of truth for what's real.
