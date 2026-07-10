@@ -35,6 +35,12 @@ struct GalaxyMapView: View {
     /// the PICT/button-slice/label decode+cache this chrome needs.
     @State private var graphics: SpaceportGraphics?
     @State private var showingFinder = false
+    /// Decoded `nëbu` regions with their resolved artwork, built once per data
+    /// load. Drawn behind the systems in map-space (`x,y,w,h` share the `syst`
+    /// coordinate system), scaled by the current zoom.
+    @State private var nebulae: [MapNebula] = []
+
+    private struct MapNebula { let x, y, w, h: Int; let image: CGImage }
 
     static let defaultZoom: CGFloat = 2.4
     private let minZoom: CGFloat = 0.5    // whole galaxy (~945 units wide) in view
@@ -76,7 +82,9 @@ struct GalaxyMapView: View {
         .novaResponsive()
         .onAppear {
             rebuildGovtColors()
-            if graphics == nil, let game = nav.game { graphics = SpaceportGraphics(game: game) }
+            let g = graphics ?? nav.game.map { SpaceportGraphics(game: $0) }
+            if graphics == nil { graphics = g }
+            rebuildNebulae(using: g)
         }
         .sheet(isPresented: $showingFinder) {
             SystemFinderView(nav: nav, pilot: pilot) { system in centerOn(system) }
@@ -131,6 +139,20 @@ struct GalaxyMapView: View {
         govtColors = map
     }
 
+    /// Decode each `nëbu` and resolve its artwork (highest-res PICT of the
+    /// nebula's zoom block, falling back to the smaller levels). Built once.
+    private func rebuildNebulae(using graphics: SpaceportGraphics?) {
+        guard nebulae.isEmpty, let game = nav.game, let graphics else { return }
+        nebulae = game.nebulae().compactMap { neb in
+            let baseID = game.nebulaImageID(index: neb.id - 128)
+            guard let image = graphics.pict(baseID) ?? graphics.pict(baseID - 1) ?? graphics.pict(baseID - 2) else {
+                Log.spaceport.error("Galaxy map: no PICT for nebula \(neb.id, privacy: .public) (\(neb.name, privacy: .public)) — tried \(baseID, privacy: .public)/-1/-2")
+                return nil
+            }
+            return MapNebula(x: neb.x, y: neb.y, w: neb.width, h: neb.height, image: image)
+        }
+    }
+
     private func factionColor(for government: Int) -> Color {
         guard government >= 0, let color = govtColors[government] else { return independentColor }
         return color
@@ -161,6 +183,45 @@ struct GalaxyMapView: View {
         }
         // Cull to the viewport (padded so labels/lines at the edge still draw).
         let visibleRect = CGRect(origin: .zero, size: size).insetBy(dx: -60, dy: -60)
+
+        // Faction territories: a soft radial glow in each known system's
+        // government colour, additively blended so clusters of one government
+        // merge into a contiguous coloured region — the map's "spheres of
+        // influence". Derived from `syst.government` (there is no territory
+        // resource), and gated to known systems so adjacency alone never leaks
+        // a system's allegiance (matching the dot colours below). The glow
+        // radius tracks zoom so neighbours' halos overlap at any scale.
+        do {
+            var tctx = ctx
+            tctx.blendMode = .plusLighter
+            let glowR = min(max(24 * zoom, 12), 260)
+            let glowRect = visibleRect.insetBy(dx: -glowR, dy: -glowR)
+            for s in systems {
+                let vis = visibility[s.id] ?? .unknown
+                guard vis == .explored || vis == .chartered, s.government >= 0 else { continue }
+                let p = plot(s.x, s.y)
+                guard glowRect.contains(p) else { continue }
+                let col = factionColor(for: s.government)
+                tctx.fill(Path(ellipseIn: CGRect(x: p.x - glowR, y: p.y - glowR, width: glowR * 2, height: glowR * 2)),
+                          with: .radialGradient(Gradient(colors: [col.opacity(0.20), .clear]),
+                                                center: p, startRadius: 0, endRadius: glowR))
+            }
+        }
+
+        // Nebulae: coloured background regions (`nëbu`), drawn first so systems,
+        // links and labels sit on top. Each is placed by its map-space box
+        // (top-left `x,y`, extent `w,h` — same units as systems), scaled by zoom.
+        // Dimmed so it reads as atmosphere behind the map, not chrome over it.
+        if !nebulae.isEmpty {
+            var nctx = ctx
+            nctx.opacity = 0.5
+            for neb in nebulae {
+                let tl = plot(neb.x, neb.y)
+                let rect = CGRect(x: tl.x, y: tl.y, width: CGFloat(neb.w) * zoom, height: CGFloat(neb.h) * zoom)
+                guard rect.intersects(visibleRect) else { continue }
+                nctx.draw(nctx.resolve(Image(decorative: neb.image, scale: 1)), in: rect)
+            }
+        }
 
         // Hyperspace links: thin dim lines, culled to known systems only (an
         // unknown system's links stay hidden — that's how fog of war works).
@@ -204,7 +265,10 @@ struct GalaxyMapView: View {
 
         let neighborIDs = Set(cur.links)
         let showLabels = zoom >= 1.1
-        let labelSize = NovaFontRole.hud.baseSize * min(min(size.width / 1024, size.height / 768), 2.2)
+        // Fixed design-point size: the canvas is already scaled to the device by
+        // its container (novaFrameScale), so labels must not re-apply a viewport
+        // factor here — that double-scaling was the old 1024/768 formula's bug.
+        let labelSize: CGFloat = 11
 
         for s in systems {
             let vis = visibility[s.id] ?? .unknown

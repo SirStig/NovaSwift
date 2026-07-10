@@ -364,6 +364,35 @@ public struct ShipRes {
 
 // MARK: sÿst — star system (map position, hyperspace links, stellar objects)
 
+/// A galaxy-map nebula (`nëbu`) — a coloured background region on the star map.
+///
+/// Layout reverse-engineered from the base data (Nova Data 5, ids 128–131):
+/// the resource is 534 bytes but only the first four big-endian `int16`s carry
+/// data — `x`, `y`, `width`, `height` — a top-left-anchored box in the **same
+/// coordinate space as `sÿst`** (verified: the Holpa Nebula box (430,45)+251×298
+/// contains the Holpa system at (486,120) and its neighbours). The graphic isn't
+/// referenced in the resource; by convention each nebula owns a 7-id `PICT`
+/// block at `9500 + 7·index` holding its zoom levels (¼/½/1×), the largest being
+/// `9502 + 7·index` — see `NovaGame.nebulaImageID`.
+public struct NebuRes {
+    public let id: Int
+    public let name: String
+    public let x: Int
+    public let y: Int
+    public let width: Int
+    public let height: Int
+
+    public init(_ r: Resource) {
+        id = r.id
+        name = r.name
+        let d = r.data
+        x = i16(d, 0)
+        y = i16(d, 2)
+        width = i16(d, 4)
+        height = i16(d, 6)
+    }
+}
+
 public struct SystRes {
     public let id: Int
     public let name: String
@@ -569,6 +598,10 @@ public struct NovaGame {
     public func shan(_ id: Int) -> ShanRes? { resources.resource(NovaType.shan, id).map(ShanRes.init) }
     public func system(_ id: Int) -> SystRes? { resources.resource(NovaType.syst, id).map(SystRes.init) }
     public func systems() -> [SystRes] { resources.resources(of: NovaType.syst).map(SystRes.init) }
+    public func nebulae() -> [NebuRes] { resources.resources(of: NovaType.nebula).map(NebuRes.init) }
+    /// Highest-resolution `PICT` id for the nebula at `index` (id − 128): the
+    /// last of its 7-id block. Callers fall back to `-1`/`-2` if it's absent.
+    public func nebulaImageID(index: Int) -> Int { 9502 + 7 * index }
     public func spob(_ id: Int) -> SpobRes? { resources.resource(NovaType.spob, id).map(SpobRes.init) }
 
     // AI-driving resources.
