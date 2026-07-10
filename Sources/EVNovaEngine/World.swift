@@ -477,6 +477,22 @@ public final class World {
         return e
     }
 
+    /// Remove every NPC from the simulation at once, cleanly: stop any beam
+    /// loops they were sounding, drop any target locks pointed at them, and
+    /// refresh the roster. Unlike the per-frame despawn path this emits no
+    /// wreck/depart effects — it's a hard reset of the population, used by the
+    /// in-game debug suite's performance stress test to clear the field before
+    /// (and after) flooding it with a controlled fleet. Live projectiles are
+    /// left to expire on their own.
+    public func removeAllNPCs() {
+        for npc in npcs {
+            stopAllBeamLoops(for: npc)
+            clearTarget(npc.entityID)
+        }
+        npcs.removeAll()
+        refreshRoster()
+    }
+
     // MARK: Asteroids
 
     /// Scatter `count` real asteroids of the enabled `typeIDs` (a system's

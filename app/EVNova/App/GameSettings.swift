@@ -118,9 +118,16 @@ struct GameSettings: Codable, Equatable {
     var showRadar: Bool = true
     /// HUD panel opacity (0.2…1).
     var hudOpacity: Double = 1.0
+    /// Master switch for the in-game **debug suite**: once on, an on-screen
+    /// debug button appears during play, opening a panel of developer tools
+    /// (the UI measurement overlay, a performance stress test, and whatever
+    /// else we add as we build). Off by default; ships nothing visible until
+    /// enabled from Settings ▸ Developer.
+    var debugModeEnabled: Bool = false
     /// Developer UI debug overlay: draws the design-space measurement grid on
     /// every authentic (`NovaMenu`/`NovaCanvas`) screen and live-reads the
-    /// `.novaPlace` coordinate under the pointer. Toggle in-app with ⇧⌘D.
+    /// `.novaPlace` coordinate under the pointer. Toggled from the debug suite
+    /// (or live with ⇧⌘D).
     var uiDebugOverlay: Bool = false
 
     // MARK: Accessibility
@@ -193,6 +200,7 @@ struct GameSettings: Codable, Equatable {
         useAuthenticMenu      = v(.useAuthenticMenu, d.useAuthenticMenu)
         showRadar             = v(.showRadar, d.showRadar)
         hudOpacity            = v(.hudOpacity, d.hudOpacity)
+        debugModeEnabled      = v(.debugModeEnabled, d.debugModeEnabled)
         uiDebugOverlay        = v(.uiDebugOverlay, d.uiDebugOverlay)
         largerHUD             = v(.largerHUD, d.largerHUD)
         highContrastHUD       = v(.highContrastHUD, d.highContrastHUD)
