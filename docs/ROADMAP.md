@@ -37,20 +37,24 @@ exist for the player.* So we prioritize **wiring what's already built** and
 These are the systems that make it *EV Nova the game*. Most of the code exists;
 the work is **connecting it to the live loop**.
 
-### P0 — Wire the mission/story runtime 🟡→✅ *(biggest single gap, unchanged)*
-The `EVNovaStory` runtime (`StoryEngine`, `NCBSet`, mission lifecycle, `crön`
-events, ranks/salary) is fully built and tested but the app never runs it — only
-a read-only guide does. A Mission BBS button and window now exist in the
-spaceport hub, but they render a hardcoded placeholder with no real missions
-behind them. To wire it:
-- Implement an **app-side `GameServices` conformer** (the missing plug) that lets
-  the engine offer missions, show `dësc` text, spawn special ships, play sound,
-  swap hulls. Today only the CLI's `LoggingGameServices` conforms.
-- Instantiate `StoryEngine` in the live session (`AppModel`/`GameScene`) and
-  advance it on the galaxy clock and on game events (jumps, landings, kills).
-- Replace the Mission BBS placeholder with real live missions, and build a real
-  in-game **Mission Log** (replace the "coming soon" alert in `GameMenuView`).
-- Persist mission/NCB state through the pilot save (see P2).
+### P0 — Wire the mission/story runtime 🟡→✅ *(narrower now — mission offer/accept/decline is done)*
+**Update:** `app/EVNova/Story/AppGameServices.swift` (a real `GameServices`
+conformer) and a real `StoryEngine` instance (instantiated per-landing in
+`MissionBoardView.swift`, embedded in both the Mission BBS and Bar screens)
+now make mission offer/accept/decline genuinely live, persisting to the pilot
+save. What's left:
+- **Wire the galaxy-day clock**: nothing in `app/` calls
+  `StoryEngine.advanceOneDay()`/`.advanceDays()`/`.evaluateCrons()`, so the
+  day never advances during play and `crön` events (news, dated story beats)
+  never fire regardless of how many missions get taken. Call these from the
+  live session on jumps/landings/time-passing events, same as the CLI already
+  does.
+- **Flesh out `AppGameServices`'s remaining stub methods** — `spawnMissionShips`,
+  `changePlayerShip`, `movePlayer`, `setStellarDestroyed`, and `leaveStellar`
+  currently only log and no-op; `showNews` logs instead of surfacing a news
+  dialog. `presentMissionOffer`/`showStoryText`/`playSound` are already wired.
+- Build a real in-game **Mission Log** (replace the "coming soon" alert in
+  `GameMenuView`).
 
 ### P1 — Close the remaining stakes gaps ❌ *(narrower now — fuel and targeting are done)*
 - **Player death / game-over**: nothing checks the player's armor reaching
@@ -75,7 +79,43 @@ behind them. To wire it:
 - Decide save format: keep native JSON `PlayerState` or move to the built-but-
   unwired `PilotSave`/`CombatRating` classic-style encode path.
 
-### P3 — Authentic UI fidelity pass
+### P3 — Finish wiring this pass's new decoder/behavior code 🟡→✅ *(new)*
+A same-day implementation pass added real, tested Swift for several
+`docs/reverse-engineering/*.md`-documented gaps (new `GovtRes`/`FleetRes`/
+`OutfRes`/`SystRes`/`ShipRes`/`CronRes`/`RankRes`/`MissionRes` fields, new
+`JunkRes`/`OopsRes` models), but per those docs' own "Implementation status"
+notes, most of it has no live caller yet. Concrete, scoped wiring tasks:
+- **Call `Diplomacy.recordKill`/`.recordDisable`/`.recordBoard`/
+  `.recordSmuggling`** from `World.swift`'s combat-resolution code (its
+  `.shipDisabled`/`.shipDestroyed` transitions and per-hit path), replacing
+  the current dead-field `gov.shootPenalty` docking. (GOVERNMENT.md)
+- **Fold `RankRes.contribute` into `ItemLocking.contributedBits`**
+  (`app/EVNova/Spaceport/ItemLocking.swift`) the same way
+  `StoryEngine.activeContributeBits()` already does, so a rank-gated
+  *purchase* — the Bible's own headline example for `Contribute`/`Require` —
+  works in the spaceport UI, not just mission/cron availability. (GOVERNMENT.md)
+- **Wire `PilotStore`'s escort hire/upgrade/sell functions
+  (`hireEscort`/`upgradeEscort`/`sellEscort`/`escortAvailableToday`) to a new
+  UI** — bind them into `EscortsView.swift`, which is currently a fully
+  authentic but fully static/disabled panel with zero data binding.
+  (ESCORTS.md)
+- **Have `PilotStore.buyOutfit`/`sellOutfit` call `OutfRes.effectiveCost`**
+  instead of the flat `Cost`, so `Flags 0x0200` (mass-proportional price)
+  outfits charge/refund correctly. (OUTFITTERS.md)
+- **Consult `Loadout`'s `freeGunSlots`/`freeTurretSlots` in
+  `PilotStore.canBuyOutfit`**, so the shop stops allowing more gun/turret
+  outfits than the hull has mounts for. (OUTFITTERS.md)
+- **Call `junk()`/`junks()`/`oops()`/`oopses()` from somewhere** — a junk-trade
+  UI (a `jünk`-driven sibling of the Trade Center) and an `öops` price-disaster
+  daily roll are both fully undesigned today, not just unwired; scope a
+  feature before wiring one. (ECONOMY.md)
+- **Read `FleetRes.appearOn`/`.hailQuote`/`.freightersHaveRandomCargo`
+  somewhere** — gate ambient fleet spawns on `appearOn`'s NCB test (mirroring
+  how `Spawner.isFleetEligible` already reads `LinkSyst`), surface
+  `hailQuote` as arrival flavor text, and hook `freightersHaveRandomCargo`
+  into a boarding mechanic once one exists. (FLEETS.md)
+
+### P4 — Authentic UI fidelity pass
 - Full rebindable **keybindings** matching EV Nova; mouse used as the original
   does; controller + touch parity. → `docs/CONTROLS.md` *(to be written)*.
 - **Ionization HUD indicator** — the physics is live (`Ship.ionCharge`/

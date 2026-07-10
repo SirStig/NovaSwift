@@ -27,37 +27,104 @@ Not covered here (already owned elsewhere): AI dispositions/combat behavior
 
 ## Standout findings
 
-A few things surfaced during this pass that are worth flagging up front
-because they change what the team should build next, not just what it
-should document:
+> **Update:** a follow-up implementation pass landed real Swift for a large
+> batch of the gaps this section originally flagged (new decoder fields on
+> `GovtRes`/`FleetRes`/`OutfRes`/`SystRes`/`ShipRes`/`CronRes`/`RankRes`/
+> `MissionRes`, new `JunkRes`/`OopsRes` models, and behavior wiring in
+> `Diplomacy.swift`/`Spawner.swift`/`ShipLoadout.swift`/`PilotStore.swift`/
+> `StoryEngine.swift`/`GameServices.swift`). The bullets below are updated to
+> match. The single theme all six docs converged on independently: most of
+> this new code is **correct and tested but has no live caller** — see each
+> doc's own "Implementation status" section (near its top) for the full
+> detail this list only summarizes.
 
-- **Escort recruitment doesn't live where anyone assumed.** There's no
-  hire/requisition logic in `përs` — it's entirely in `shïp` fields
-  (`HireRandom`, `EscortType`, `UpgradeTo`, `EscUpgrdCost`, `EscSellValue`)
-  plus `dësc`'s reserved requisition-dialog IDs, none of which are decoded
-  yet. The recent "assistance mechanics" commit is an unrelated one-shot
-  paid tow-truck hail service, not escort recruitment. See ESCORTS.md §2.2–2.3.
-- **`crön` resources are silently truncated.** Real crons are 822 bytes;
-  `CronRes` only decodes 789, dropping the `NewsGovt`/`GovtNewsStr` news
-  fields — confirmed against real game data, not just source reading. See
-  EVENTS.md's gap table.
-- **Government legal status is mostly dead code.** `CrimeTol` is decoded but
-  never consulted; the live penalty path (`ShootPenalty`) is the one field
-  the Bible itself says is "currently ignored," while the fields that should
-  matter (`KillPenalty`/`DisabPenalty`/`BoardPenalty`/`SmugPenalty`/
-  `ScanFine`) aren't read anywhere. Combat rating never increments during
-  play. See GOVERNMENT.md §5.
+- **Escort recruitment now has real backend code — and it's a textbook
+  "implemented but completely unwired" case.** `ShipRes` decodes
+  `hireRandom`/`escortCategory`/`escortUpgradesTo`/`escortUpgradeCost`/
+  `escortSellValue`, and `PilotStore` (`app/EVNova/Game/PilotStore.swift`) has
+  real, working credit-transaction logic — `hireEscort`/`upgradeEscort`/
+  `sellEscort`/`escortAvailableToday`. `EscortsView.swift` was separately
+  rebuilt as a geometry-accurate recreation of the real DLOG/DITL #1022
+  "Escorts" panel — but it's a **static empty state**: every control is
+  disabled, "No escorts hired." is hardcoded, and it has zero data binding.
+  A repo-wide grep of `app/EVNova/` finds zero call sites for the `PilotStore`
+  escort functions outside their own declarations. See ESCORTS.md's
+  Implementation status note.
+- **`crön`'s byte-truncation bug is fixed, and the fix is confirmed against
+  live data, not just source reading.** `OnEnd` now decodes as the correct
+  256 bytes (was 255), and `CronRes` gained `contribute`/`require`/
+  `newsGovts`/`govtNewsStrs`. Re-running `evnova-extract raw` against cron
+  #128 "Wraith Change" gives exactly the predicted 822-byte size, with
+  `newsGovts[0] == 130` and `govtNewsStrs[0] == 15000` landing at the
+  predicted offsets. `StoryEngine.evaluateCrons()`/`announceNews(for:)` also
+  now implement the full activate→hold→start→end lifecycle and local/
+  independent news resolution described in the Bible. See EVENTS.md.
+- **The mission/story runtime is more wired into the live app than
+  `STATUS.md` previously tracked — discovered while verifying this pass, not
+  a product of it.** `app/EVNova/Story/AppGameServices.swift` is a real
+  `GameServices` conformer, and `MissionBoardView.swift` — embedded in both
+  the real Mission BBS (`SpaceportView.swift`) and Bar (`SpaceportScreens.swift`)
+  screens — instantiates a real `StoryEngine` per landing; mission offer,
+  accept, and decline are genuinely live and persist to the pilot save today.
+  However `AppGameServices.showNews` is only a logging stub (no news UI), and
+  — the decisive gap — nothing in `app/` ever calls
+  `advanceOneDay()`/`advanceDays()`/`evaluateCrons()`, so the galaxy-clock day
+  never advances during live play and cron background events (including all
+  news) still never fire for a real player. See EVENTS.md's Implementation
+  status note; `docs/STATUS.md` has been corrected to match.
+- **Government legal status gained real combat-rating plumbing, but combat
+  still doesn't call it.** `Diplomacy.isCriminal` now reads each government's
+  own `crimeTolerance` instead of one hardcoded threshold, and `Diplomacy`
+  gained `recordKill`/`recordDisable`/`recordBoard`/`recordSmuggling`, which
+  apply the correct Bible penalty fields (`KillPenalty`/`DisabPenalty`/
+  `BoardPenalty`/`SmugPenalty`) instead of the dead `ShootPenalty`. These
+  methods are correct but **`World.swift`'s actual combat code still docks
+  legal record from `gov.shootPenalty` on every hit** and never calls them —
+  combat rating still never increments during real play. Separately,
+  `RankRes.contribute`/`MissionRes.require` are now decoded and wired into
+  `StoryEngine`'s mission-availability check, but the spaceport purchase-gate
+  (`ItemLocking.swift`) still doesn't fold in active-rank `Contribute`, so a
+  rank-gated *purchase* — the Bible's own headline example — still isn't
+  achievable through the UI. See GOVERNMENT.md.
+- **`flët.LinkSyst` and `sÿst`'s reinforcement fields are now decoded *and*
+  wired — and because `Spawner.swift` is already in the live NPC-spawning
+  path (`GameSession.makeWorld`), these two are the rare case in this batch
+  that's actually player-visible today**, not just correct-but-inert.
+  `Spawner.isFleetEligible` evaluates `LinkSyst`'s five bands and filters
+  spawn-table fleets by it; `SystRes.reinforcementFleet`/`reinforcementDelay`/
+  `reinforcementRegen` are decoded, and `Spawner.updateReinforcements`
+  implements the reactive "summon reinforcements when a government's ships
+  are under fire and outmatched" mechanic the Bible and `AI_GROUND_TRUTH.md`
+  §2 describe. `flët.AppearOn`/`Quote`/`Flags` (freighter random cargo on
+  boarding) are also now decoded, but still have zero readers anywhere. See
+  FLEETS.md.
+- **`jünk`/`öops` now have real decoder models; commodity base-price
+  overrides are wired into the live trade UI, though inert for stock data.**
+  `JunkModels.swift`/`OopsModels.swift` add `JunkRes`/`OopsRes`, decoding
+  correctly against the byte layouts ECONOMY.md documents — but nothing
+  outside `EVNovaKit` calls `junk()`/`junks()`/`oops()`/`oopses()` yet, so
+  junk trading and price-disaster events remain decoded-but-inert. Separately,
+  `NovaEconomy` now reads base commodity prices from `STR ` 9300-9305 (with
+  fallback to the hardcoded table) through the same `commodityMarket(at:)`
+  path the trade UI already calls — genuinely live, though the stock game
+  never actually supplies an override, so it's currently a no-op in practice.
+  Tribute remains unimplemented. See ECONOMY.md.
+- **Outfit mass/sell-flag enforcement is real and live in the spaceport;
+  pricing and slot limits are computed but not enforced.** `Flags 0x0400`
+  (mass-proportional mass) is fully wired into `Galaxy.loadout`'s mass
+  aggregation, and `Flags 0x0008`/`0x0010` (can't-sell / consumed-on-purchase)
+  are fully enforced in the live `PilotStore.sellOutfit`/`buyOutfit`. But
+  `Flags 0x0200` (mass-proportional price) has correct math
+  (`OutfRes.effectiveCost`) that `PilotStore.buyOutfit`/`sellOutfit` never
+  call — every such outfit in real data is still charged/refunded at flat
+  `Cost` — and `Loadout.usedGunSlots`/`freeGunSlots`/`freeTurretSlots` are
+  computed but `PilotStore.canBuyOutfit` never reads them, so a player can
+  still buy more gun/turret outfits than the hull has mounts for. See
+  OUTFITTERS.md.
 - **`BuyRandom` is real, not invented** — verified against the Bible for
   both `shïp` and `oütf`, including a one-field asymmetry (`<=0` vs. `==0`
   for "always available") that the current implementation gets right. See
-  OUTFITTERS.md's closing section.
-- **`FleetRes.linkSystem` is decoded but has zero call sites** — dead data;
-  and `sÿst.ReinfFleet`/`ReinfTime`/`ReinfIntrval` aren't decoded on `SystRes`
-  at all, so reinforcement fleets can be gated (`gövt.MaxOdds`) but never
-  actually summoned. See FLEETS.md §5, §7.
-- **`jünk`, `öops`, and Tribute are entirely unimplemented** — four-char
-  codes may be registered, but there are no resource models or call sites.
-  See ECONOMY.md §5.
+  OUTFITTERS.md's closing section. (Unchanged by this pass.)
 
 ## Open questions needing binary disassembly
 
@@ -71,7 +138,13 @@ that would need `EV Nova.exe` disassembly (a candidate noted in
   one-directional per declarer (GOVERNMENT.md §1.2).
 - The exact Low/Medium/High commodity price arithmetic — the Bible gives
   tiers, not a formula from a single base price (ECONOMY.md §1).
-- The 33-byte undecoded tail of `crön` and whether its iterative flags loop
-  within one day-tick or across days (EVENTS.md, closing section).
+- Whether `crön`'s iterative flags (`0x0001`/`0x0002`, "keep evaluating
+  OnStart/OnEnd until EnableOn is no longer true") loop within one day-tick or
+  across days (EVENTS.md, closing section) — **note:** the 33-byte undecoded
+  tail this item used to also reference is resolved; `OnEnd`'s correct
+  256-byte length plus `NewsGovt`/`GovtNewsStr` are now decoded and confirmed
+  against live data (see "Standout findings" above), closing the byte gap.
+  The iterative-flags execution-model question itself is unaffected by that
+  fix and remains open.
 - Escort hire-price field and roster capacity — not named anywhere in the
   Bible prose (ESCORTS.md §4).
