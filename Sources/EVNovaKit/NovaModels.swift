@@ -539,6 +539,21 @@ public struct SpobRes {
     /// Station (#299, government #129 "Auroran Empire") carries id 10033,
     /// "Auroran station.SFIL" — a real, thematically-correct pairing.
     public let ambientSoundID: Int?
+    /// `Flags2` (`spöb` second flag longword, @30 — verified empirically against
+    /// the base data: all 23 named "Wormhole" spöbs carry `0x2000`, all 35 "HG-*"
+    /// hypergates carry `0x1000`). Bits: `0x1000` hypergate, `0x2000` wormhole,
+    /// `0x0100` deadly, `0x0400` buys any outfit, `0x0020` always dominated, …
+    public let flags2: UInt32
+    /// `HyperLink1-8` (@38, eight `int16`s): the `spöb` ids of the other
+    /// hypergates/wormholes this gate connects to (−1/0 = unused; a wormhole
+    /// with all −1 connects randomly). Empty for a non-gate stellar.
+    public let hyperLinks: [Int]
+
+    /// This stellar is a hypergate (lands → pick a connected hypergate).
+    public var isHypergate: Bool { flags2 & 0x1000 != 0 }
+    /// This stellar is a wormhole (lands → transported to a linked wormhole).
+    public var isWormhole: Bool { flags2 & 0x2000 != 0 }
+    public var isGate: Bool { isHypergate || isWormhole }
 
     public init(_ r: Resource) {
         id = r.id
@@ -556,6 +571,8 @@ public struct SpobRes {
         landingPictID = u16(d, 24)
         let rawAmbient = i16(d, 26)
         ambientSoundID = rawAmbient == -1 ? nil : rawAmbient
+        flags2 = u32(d, 30)
+        hyperLinks = (0..<8).map { i16(d, 38 + $0 * 2) }.filter { $0 >= 128 }
     }
 }
 

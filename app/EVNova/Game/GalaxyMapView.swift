@@ -42,6 +42,12 @@ struct GalaxyMapView: View {
 
     private struct MapNebula { let x, y, w, h: Int; let image: CGImage }
 
+    /// Hypergate/wormhole connections between systems (`spöb` HyperLink1-8),
+    /// built once. Drawn as distinct dashed links over the hyperspace web.
+    @State private var gateLinks: [GateLink] = []
+
+    private struct GateLink { let a, b: Int; let wormhole: Bool }
+
     static let defaultZoom: CGFloat = 2.4
     private let minZoom: CGFloat = 0.5    // whole galaxy (~945 units wide) in view
     private let maxZoom: CGFloat = 16     // a linked neighbor fills most of the screen
@@ -51,6 +57,8 @@ struct GalaxyMapView: View {
     private let routeWarn = Color(red: 1.0, green: 0.4, blue: 0.32)
     private let adjacentGrey = Color(white: 0.42)
     private let independentColor = Color(white: 0.62)
+    private let gateHyper = Color(red: 0.3, green: 0.85, blue: 0.95).opacity(0.85)     // hypergate link
+    private let gateWormhole = Color(red: 0.78, green: 0.45, blue: 1.0).opacity(0.85)  // wormhole link
     /// Deterministic per-faction palette: the `gövt` resource carries no color of
     /// its own, so distinct governments are assigned a distinct hue by sorted id.
     /// Kept visually apart from `amber` (current system) and the route colors.
@@ -85,6 +93,7 @@ struct GalaxyMapView: View {
             let g = graphics ?? nav.game.map { SpaceportGraphics(game: $0) }
             if graphics == nil { graphics = g }
             rebuildNebulae(using: g)
+            rebuildGateLinks()
         }
         .sheet(isPresented: $showingFinder) {
             SystemFinderView(nav: nav, pilot: pilot) { system in centerOn(system) }
@@ -151,6 +160,32 @@ struct GalaxyMapView: View {
             }
             return MapNebula(x: neb.x, y: neb.y, w: neb.width, h: neb.height, image: image)
         }
+    }
+
+    /// Build the inter-system hypergate/wormhole links from every gate `spöb`'s
+    /// HyperLink1-8, mapping each gate to its containing system. Undirected and
+    /// deduped. Wormholes whose links are all −1 (random) contribute nothing to
+    /// draw — there's no fixed destination.
+    private func rebuildGateLinks() {
+        guard gateLinks.isEmpty, let game = nav.game else { return }
+        let systems = nav.systems()
+        var spobSystem: [Int: Int] = [:]
+        for s in systems { for sp in s.spobs { spobSystem[sp] = s.id } }
+        var seen = Set<Int>()
+        var links: [GateLink] = []
+        for s in systems {
+            for sp in s.spobs {
+                guard let gate = game.spob(sp), gate.isGate else { continue }
+                for target in gate.hyperLinks {
+                    guard let other = spobSystem[target], other != s.id else { continue }
+                    let key = min(s.id, other) * 100_000 + max(s.id, other)
+                    if seen.insert(key).inserted {
+                        links.append(GateLink(a: s.id, b: other, wormhole: gate.isWormhole))
+                    }
+                }
+            }
+        }
+        gateLinks = links
     }
 
     private func factionColor(for government: Int) -> Color {
@@ -287,6 +322,18 @@ struct GalaxyMapView: View {
         ctx.stroke(links, with: .color(.white.opacity(0.16)), lineWidth: 1)
         let canJumpNow = nav.availableJumps >= 1
         ctx.stroke(currentLinks, with: .color((canJumpNow ? routeGreen : routeWarn).opacity(0.6)), lineWidth: 1.3)
+
+        // Hypergate (cyan) and wormhole (violet) connections, dashed to set them
+        // apart from the solid hyperspace web. Shown only between known systems.
+        for gl in gateLinks {
+            guard let a = byID[gl.a], let b = byID[gl.b],
+                  visibility[gl.a] != .unknown, visibility[gl.b] != .unknown else { continue }
+            let pa = plot(a.x, a.y), pb = plot(b.x, b.y)
+            guard visibleRect.contains(pa) || visibleRect.contains(pb) else { continue }
+            var path = Path(); path.move(to: pa); path.addLine(to: pb)
+            ctx.stroke(path, with: .color(gl.wormhole ? gateWormhole : gateHyper),
+                       style: StrokeStyle(lineWidth: 1.3, dash: [2.5, 3]))
+        }
 
         // The plotted course: green while your current fuel can still reach that
         // hop, warning red past it — segment by segment, drawn on top of the web.
@@ -541,6 +588,11 @@ struct GalaxyMapView: View {
             legendRow(relEnemy, "Wanted")
             legendRow(relPirate, "Pirate")
             legendRow(relUninhabited, "Uninhabited")
+            if !gateLinks.isEmpty {
+                Divider().overlay(.white.opacity(0.2)).frame(width: 60)
+                legendLine(gateHyper, "Hypergate")
+                legendLine(gateWormhole, "Wormhole")
+            }
         }
         .padding(5)
         .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
@@ -549,6 +601,13 @@ struct GalaxyMapView: View {
     private func legendRow(_ c: Color, _ label: String) -> some View {
         HStack(spacing: 5) {
             Circle().fill(c).frame(width: 6, height: 6)
+            NovaText(label, size: 9, color: .white.opacity(0.85))
+        }
+    }
+
+    private func legendLine(_ c: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Rectangle().fill(c).frame(width: 6, height: 2)
             NovaText(label, size: 9, color: .white.opacity(0.85))
         }
     }
