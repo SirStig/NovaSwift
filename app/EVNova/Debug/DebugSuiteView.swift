@@ -1,4 +1,5 @@
 import SwiftUI
+import EVNovaEngine
 
 /// The in-game **debug suite** panel: a slide-in developer console, opened from
 /// the on-screen debug button (or the pause menu) once debug mode is enabled.
@@ -15,6 +16,8 @@ struct DebugSuiteView: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var debug: DebugController
     var onClose: () -> Void
+
+    @State private var showGameState = false
 
     /// Fleet sizes the stress test offers.
     private let shipCountPresets = [20, 40, 60, 100, 150, 200]
@@ -37,6 +40,73 @@ struct DebugSuiteView: View {
         }
         .novaResponsive()
         .foregroundStyle(.white)
+        .sheet(isPresented: $showGameState) {
+            DebugGameStateView(debug: debug)
+                .environmentObject(model)
+                .environmentObject(model.pilot)
+        }
+    }
+
+    // MARK: Game state
+
+    private var gameStateSection: some View {
+        sectionCard(title: "GAME STATE", systemImage: "slider.horizontal.3") {
+            Text("Edit the live pilot and world — credits, fuel, ship health, date, relations, mission bits, current hull, outfits, and enemy spawns.")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                model.audio.play(.uiSelect)
+                showGameState = true
+            } label: {
+                HStack {
+                    Image(systemName: "pencil.and.list.clipboard")
+                    Text("Open Game State Editor")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 10))
+                }
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .padding(.vertical, 11).padding(.horizontal, 12)
+                .frame(maxWidth: .infinity)
+                .background(RoundedRectangle(cornerRadius: 9).fill(green.opacity(0.18)))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(green.opacity(0.6)))
+                .foregroundStyle(green)
+            }
+            .buttonStyle(.plain)
+
+            // At-a-glance quick actions for the most common tweaks.
+            HStack(spacing: 8) {
+                quickChip("Full Heal") {
+                    if let s = debug.scene?.playerShip { s.shield = s.maxShield; s.armor = s.maxArmor }
+                }
+                quickChip("Refuel") {
+                    if let s = debug.scene?.playerShip {
+                        s.fuel = s.maxFuel
+                        model.pilot.state.fuel = s.maxFuel; model.pilot.save()
+                    }
+                }
+                quickChip("+100k") {
+                    model.pilot.state.credits += 100_000; model.pilot.save()
+                }
+            }
+        }
+    }
+
+    private func quickChip(_ title: String, _ action: @escaping () -> Void) -> some View {
+        Button {
+            model.audio.play(.uiSelect)
+            action()
+        } label: {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity)
+                .background(RoundedRectangle(cornerRadius: 7).fill(.white.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.12)))
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
     }
 
     private var panel: some View {
@@ -46,6 +116,7 @@ struct DebugSuiteView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     performanceSection
+                    gameStateSection
                     stressTestSection
                     aiSection
                     overlaysSection

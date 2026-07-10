@@ -1524,6 +1524,53 @@ final class GameScene: SKScene {
         return Array(chosen.prefix(cap))
     }
 
+    // MARK: - Debug suite: live game-state actions
+
+    /// Spawn `count` armed ships right on top of the player, each provoked and
+    /// locked onto the player so they attack immediately — the debug suite's
+    /// "spawn enemies" button. Unlike the stress test this keeps the ambient
+    /// spawner running and adds to the existing population rather than wiping
+    /// it. Returns how many actually spawned.
+    @discardableResult
+    func debugSpawnHostiles(count: Int) -> Int {
+        guard let galaxy, world != nil else {
+            Log.scene.error("debugSpawnHostiles: no galaxy/world (game data not loaded)")
+            return 0
+        }
+        let hulls = pickCombatHulls(galaxy: galaxy)
+        guard !hulls.isEmpty else { return 0 }
+        let player = world.player
+        var spawned = 0
+        for i in 0..<max(0, count) {
+            let hull = hulls[i % hulls.count]
+            // Ring the player at close-but-not-touching range so they arrive in
+            // combat instantly without overlapping the hull.
+            let bearing = world.rng.double(in: 0...(2 * .pi))
+            let dist = world.rng.double(in: 400...900)
+            let pos = player.position + Vec2(sin(bearing), cos(bearing)) * dist
+            // Face the player.
+            let ang = (player.position - pos).angle
+            guard let ship = galaxy.makeLoadedShip(hull, at: pos, angle: ang,
+                                                   skillRoll: world.rng.double(in: -1...1)) else { continue }
+            let brain = AIBrain(aiType: .interceptor, govt: ship.government)
+            brain.provokedByPlayer = true          // hostile to the player regardless of diplomacy
+            brain.targetID = player.entityID
+            ship.brain = brain
+            world.addNPC(ship, arrival: .hyperspace)
+            spawned += 1
+        }
+        Log.scene.debug("debugSpawnHostiles: spawned \(spawned) attackers on the player")
+        return spawned
+    }
+
+    /// Directly set the player's live standing with a government so the change
+    /// takes effect in this session immediately (ships turn hostile/neutral on
+    /// the spot). The persisted `legalRecord` is updated separately by the
+    /// caller so the change also survives a save.
+    func debugSetLiveRelation(govt: Int, record: Int) {
+        world.diplomacy?.setPlayerRecord(govt, to: record)
+    }
+
     // MARK: - Debug suite: AI overlay
 
     /// Draw every NPC's live AI "thoughts" over the flight scene when the debug

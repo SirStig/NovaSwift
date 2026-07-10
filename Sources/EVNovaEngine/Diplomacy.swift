@@ -140,6 +140,15 @@ public final class Diplomacy {
         return isCriminal(with: g)
     }
 
+    /// Force the player's standing with a government to an exact value. Unlike
+    /// `recordCrime`/`recordKill`, this doesn't propagate to allies or apply any
+    /// penalty scaling — it's a direct override, used by the in-game debug suite
+    /// to make a government instantly friendly or hostile so combat/hailing
+    /// behaviour can be exercised on demand.
+    public func setPlayerRecord(_ govt: Int, to value: Int) {
+        playerRecord[govt] = value
+    }
+
     /// Apply a legal-record change to a government (e.g. the player fired on one
     /// of its ships). Also propagates a smaller hit to explicit allies.
     public func recordCrime(against govt: Int, penalty: Int) {
