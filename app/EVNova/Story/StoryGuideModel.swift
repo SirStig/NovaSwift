@@ -27,6 +27,7 @@ struct PilotSummary {
 @MainActor
 final class StoryGuideModel: ObservableObject {
     @Published private(set) var storylines: [Storyline] = []
+    @Published private(set) var storyMap: StoryMap = StoryMap(lanes: [], nodes: [], edges: [], untaggedCount: 0)
     @Published private(set) var pilot: PilotSummary
     @Published private(set) var untaggedCount: Int = 0
 
@@ -53,6 +54,8 @@ final class StoryGuideModel: ObservableObject {
         self.pilot = StoryGuideModel.samplePilot
         self.storylines = StoryGuideModel.sampleStorylines
         self.untaggedCount = 537
+        self.storyMap = StoryGuideModel.synthesizeMap(from: StoryGuideModel.sampleStorylines,
+                                                      untagged: 537)
     }
 
     static var sample: StoryGuideModel { StoryGuideModel(sample: true) }
@@ -64,6 +67,7 @@ final class StoryGuideModel: ObservableObject {
     private func refresh() {
         guard let game, let analyzer else { return }
         storylines = analyzer.storylines(for: player)
+        storyMap = analyzer.storyMap(for: player)
         untaggedCount = analyzer.untaggedMissionCount
 
         let ranks = player.activeRanks.compactMap { game.rank($0)?.conversationName }
@@ -127,6 +131,29 @@ final class StoryGuideModel: ObservableObject {
                     step(429, "Patrol the Frontier", 2, .locked,
                          obj: "Destroy 3 ships", reward: "30,000 cr")],
                   completedCount: 0, totalCount: 2, currentStepID: 428)]
+
+    /// Build a StoryMap from resolved storylines without a live analyzer — used
+    /// for previews and the `.sample` model. Lays each storyline out as a lane
+    /// and links consecutive steps with `.unlocks` edges (the campaign backbone).
+    static func synthesizeMap(from lines: [Storyline], untagged: Int) -> StoryMap {
+        var lanes: [StoryMapLane] = []
+        var nodes: [StoryMapNode] = []
+        var edges: [StoryMapEdge] = []
+        for (laneIndex, line) in lines.enumerated() {
+            lanes.append(StoryMapLane(key: line.key, title: line.title, index: laneIndex,
+                                      completedCount: line.completedCount,
+                                      totalCount: line.totalCount, isComplete: line.isComplete))
+            for (rowIndex, s) in line.steps.enumerated() {
+                nodes.append(StoryMapNode(step: s, storylineKey: line.key,
+                                          laneIndex: laneIndex, rowIndex: rowIndex))
+                if rowIndex > 0 {
+                    edges.append(StoryMapEdge(from: line.steps[rowIndex - 1].missionID,
+                                              to: s.missionID, kind: .unlocks))
+                }
+            }
+        }
+        return StoryMap(lanes: lanes, nodes: nodes, edges: edges, untaggedCount: untagged)
+    }
 
     private static func step(_ id: Int, _ name: String, _ n: Int, _ status: MissionStatus,
                              obj: String, reward: String, blockers: [BlockingBit] = []) -> StorylineStep {
