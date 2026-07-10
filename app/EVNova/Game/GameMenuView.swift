@@ -11,6 +11,10 @@ struct GameMenuView: View {
     @ObservedObject var hud: GameHUDModel
     var onResume: () -> Void
     var onOpenMap: () -> Void
+    /// Whether to show the Debug Suite row (debug mode enabled).
+    var showDebug: Bool = false
+    /// Open the in-game debug suite.
+    var onOpenDebug: () -> Void = {}
 
     @State private var showSettings = false
     @State private var info: String?
@@ -56,6 +60,10 @@ struct GameMenuView: View {
                         info = "The mission log / storyline board is coming soon."
                     }
                     row("Preferences", "gearshape.fill") { showSettings = true }
+                    if showDebug {
+                        row("Debug Suite", "ladybug.fill",
+                            tint: Color(red: 0.35, green: 0.95, blue: 0.5)) { onOpenDebug() }
+                    }
 
                     sectionGap
                     row("Save Pilot", "square.and.arrow.down") {

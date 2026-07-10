@@ -102,6 +102,21 @@ final class GameScene: SKScene {
     private let npcLayer = SKNode()
     private let effectsLayer = SKNode()
 
+    // Debug suite hooks. `debug` is the live controller the performance readout
+    // feeds and the stress test drives; `systemID` is retained so the stress
+    // test can rebuild the ambient spawner it tears down. Both are inert unless
+    // debug mode is on.
+    weak var debug: DebugController?
+    private var systemID = 0
+    // Frame-timing accumulators for the performance readout, flushed to `debug`
+    // on `perfReportClock`. `perfRawAccum`/`perfFrames` build the windowed
+    // average; `perfWorstFrame` tracks the window's worst single frame (the one
+    // that actually reads as a stutter).
+    private var perfReportClock: TimeInterval = 0
+    private var perfRawAccum: TimeInterval = 0
+    private var perfWorstFrame: TimeInterval = 0
+    private var perfFrames = 0
+
     // Animated targeting brackets: one reusable node for the ship target, one
     // for the planet nav-selection, positioned/recolored straight from live
     // sim data every frame (not tied to `npcNodes`/`planetNodes` render-node
@@ -186,6 +201,7 @@ final class GameScene: SKScene {
         } else {
             self.world = World(player: ship)
         }
+        self.systemID = systemID
         self.rotationTextures = textures
         self.engineGlowTextures = engineTextures
         self.settings = settings
@@ -415,8 +431,13 @@ final class GameScene: SKScene {
 
     override func update(_ currentTime: TimeInterval) {
         guard world != nil else { return }
+        // Raw, un-clamped frame delta — the true measure of render/sim cost per
+        // frame, before `dt` is capped below for physics stability. Feeds the
+        // debug performance readout only.
+        let rawFrame = lastUpdate == 0 ? 0 : currentTime - lastUpdate
         let dt = lastUpdate == 0 ? 1.0 / 60.0 : min(currentTime - lastUpdate, 1.0 / 20.0)
         lastUpdate = currentTime
+        if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
 
         controllerInput?.poll()
         let intent = input?.intent ?? .init()
@@ -1360,5 +1381,133 @@ final class GameScene: SKScene {
             guard dx * dx + dy * dy <= 1 else { return nil }
             return RadarContact(x: dx, y: dy, relationship: relationship(for: npc))
         }
+    }
+
+    // MARK: - Debug suite: performance instrumentation
+
+    /// Accumulate this frame's timing and, roughly twice a second, flush a
+    /// windowed sample (fps, average and worst frame ms, live entity/node
+    /// counts) up to the `DebugController`. Deliberately throttled: pushing
+    /// `@Published` metrics at the full frame rate would have SwiftUI re-lay-out
+    /// the debug overlay 60×/sec, itself a measurable cost that would pollute
+    /// the very numbers we're trying to read.
+    private func samplePerformance(rawFrame: TimeInterval, dt: TimeInterval) {
+        if rawFrame > 0 {
+            perfRawAccum += rawFrame
+            perfWorstFrame = max(perfWorstFrame, rawFrame)
+            perfFrames += 1
+        }
+        perfReportClock += dt
+        guard perfReportClock >= 0.5, perfFrames > 0 else { return }
+
+        let avg = perfRawAccum / Double(perfFrames)
+        let fps = avg > 0 ? 1.0 / avg : 0
+        let nodes = totalNodeCount()
+        debug?.report(fps: fps, frameMsAvg: avg * 1000, frameMsMax: perfWorstFrame * 1000,
+                      ships: world.npcs.count, projectiles: world.projectiles.count,
+                      asteroids: world.asteroids.count, nodes: nodes)
+
+        perfReportClock = 0
+        perfRawAccum = 0
+        perfWorstFrame = 0
+        perfFrames = 0
+    }
+
+    /// Total live SpriteKit node count in the scene graph (recursive) — the
+    /// render-side population that grows with ships, projectiles, and effects.
+    /// Walked only on the throttled report tick, so the O(n) traversal is a
+    /// twice-a-second cost, not a per-frame one.
+    private func totalNodeCount() -> Int {
+        func count(_ node: SKNode) -> Int {
+            node.children.reduce(1) { $0 + count($1) }
+        }
+        return count(self)
+    }
+
+    // MARK: - Debug suite: performance stress test
+
+    /// Flood the current system with `shipCount` mutually-hostile combatants
+    /// and let them fight — the port's built-in worst case for measuring and
+    /// fixing frame-rate problems. Clears any existing traffic and suspends the
+    /// ambient spawner first so the population is exactly what we asked for, then
+    /// scatters two enemy teams into one overlapping cloud around the system
+    /// centre so combat erupts immediately (everyone starts inside AI scan
+    /// range of an enemy).
+    func startPerformanceTest(shipCount: Int) {
+        guard let galaxy, world != nil else {
+            Log.scene.error("startPerformanceTest: no galaxy/world (game data not loaded) — nothing to spawn")
+            return
+        }
+        // Exactly the requested population: stop ambient arrivals and wipe the
+        // field, then build the fleet ourselves.
+        world.spawner = nil
+        world.removeAllNPCs()
+
+        let (govtA, govtB) = pickBattleGovernments()
+        let hulls = pickCombatHulls(galaxy: galaxy)
+        guard !hulls.isEmpty else {
+            Log.scene.error("startPerformanceTest: no ship hulls resolvable in the data — cannot spawn a fleet")
+            return
+        }
+
+        let center = world.systemContext.center
+        // A cloud wide enough to hold the fleet without everyone stacking on one
+        // point, but tight enough that both teams are within scan range on
+        // frame one. Scales gently with the requested count.
+        let cloudRadius = max(700.0, 90.0 * Double(shipCount).squareRoot())
+        for i in 0..<max(0, shipCount) {
+            let team = i % 2 == 0 ? govtA : govtB
+            let hull = hulls[i % hulls.count]
+            let bearing = world.rng.double(in: 0...(2 * .pi))
+            let dist = world.rng.double(in: 0...cloudRadius)
+            let pos = center + Vec2(sin(bearing), cos(bearing)) * dist
+            let ang = world.rng.double(in: 0...(2 * .pi))
+            guard let ship = galaxy.makeLoadedShip(hull, government: team, at: pos, angle: ang,
+                                                   skillRoll: world.rng.double(in: -1...1)) else { continue }
+            ship.brain = AIBrain(aiType: .warship, govt: team)
+            world.addNPC(ship, arrival: .populate)
+        }
+        Log.scene.debug("startPerformanceTest: spawned \(shipCount) combatants (govts \(govtA) vs \(govtB), \(hulls.count) hull types)")
+    }
+
+    /// Tear down the stress-test fleet and restore the system's normal ambient
+    /// traffic (rebuild the spawner and let it re-populate).
+    func stopPerformanceTest() {
+        guard let galaxy, world != nil else { return }
+        world.removeAllNPCs()
+        if let sys = galaxy.game.system(systemID) {
+            let spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
+            world.spawner = spawner
+            spawner.populate(world)
+        }
+        Log.scene.debug("stopPerformanceTest: fleet cleared, ambient spawner restored")
+    }
+
+    /// Two mutually-hostile governments to pit against each other. Prefers a
+    /// real enemy pair from the loaded diplomacy table (so the AI genuinely
+    /// wants to fight); falls back to any two distinct governments, and finally
+    /// to independents (which won't auto-engage, but still exercises the
+    /// render/physics path under load).
+    private func pickBattleGovernments() -> (Int, Int) {
+        guard let dip = world.diplomacy else { return (independentGovt, independentGovt) }
+        let ids = Array(dip.govts.keys)
+        for a in ids {
+            for b in ids where b != a && dip.areEnemies(a, b) {
+                return (a, b)
+            }
+        }
+        if ids.count >= 2 { return (ids[0], ids[1]) }
+        return (ids.first ?? independentGovt, independentGovt)
+    }
+
+    /// A varied set of *armed* hulls to spawn (up to a cap, so the test exercises
+    /// several sprite sheets without unbounded texture memory). Falls back to
+    /// every hull if none report weapon mounts.
+    private func pickCombatHulls(galaxy: Galaxy) -> [Int] {
+        let cap = 16
+        let allIDs = galaxy.game.ships().map { $0.id }
+        let armed = allIDs.filter { (galaxy.shipSpec($0)?.mounts.isEmpty == false) }
+        let chosen = armed.isEmpty ? allIDs : armed
+        return Array(chosen.prefix(cap))
     }
 }

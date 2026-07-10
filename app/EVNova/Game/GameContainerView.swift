@@ -186,6 +186,11 @@ struct GameContainerView: View {
     /// rebuild idempotent regardless of that delivery-order race.
     @State private var hostSystemID: Int?
     @State private var showMenu = false
+    /// The in-game debug suite panel (developer tools), gated by debug mode.
+    @State private var showDebugSuite = false
+    /// Live debug/performance state for this play session, handed to each
+    /// `GameScene` the container (re)builds. Persists across host rebuilds.
+    @StateObject private var debug = DebugController()
     /// The spöb the player is currently landed on (nil = flying).
     @State private var landedSpobID: Int?
     /// Keyboard focus for the flight scene. `.focusable()` alone never actually
@@ -264,7 +269,21 @@ struct GameContainerView: View {
                 if showMenu {
                     GameMenuView(hud: host.hud,
                                  onResume: { showMenu = false },
-                                 onOpenMap: { nav.showingMap = true })
+                                 onOpenMap: { nav.showingMap = true },
+                                 showDebug: model.settings.debugModeEnabled,
+                                 onOpenDebug: { showMenu = false; showDebugSuite = true })
+                }
+
+                // Debug suite: an on-screen entry point + live metrics chip while
+                // debug mode is on, and the full developer panel when opened. The
+                // simulation keeps running underneath so the readout stays live.
+                if model.settings.debugModeEnabled {
+                    debugControls
+                    if showDebugSuite {
+                        DebugSuiteView(debug: debug) { showDebugSuite = false }
+                            .zIndex(30)
+                            .transition(.opacity)
+                    }
                 }
 
                 // The landed spaceport, drawn from the player's own EV Nova data.
@@ -291,6 +310,7 @@ struct GameContainerView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMenu)
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showDebugSuite)
         .animation(.easeInOut(duration: 0.2), value: landedSpobID)
         .onChange(of: isSceneFocused) { _, focused in
             Log.input.debug("isSceneFocused -> \(focused, privacy: .public)")
@@ -343,6 +363,7 @@ struct GameContainerView: View {
                 nav.configure(game: model.data.game, startSystemID: startSystem)
                 host = GameHost(model: model, systemID: nav.currentSystemID)
                 hostSystemID = nav.currentSystemID
+                debug.attach(host?.scene)                              // point the debug suite at the live scene
                 setScenePaused(false, reason: "initial host build")   // never start frozen (nothing should set this true yet, but be sure)
                 syncNav(host)
                 navReady = true
@@ -379,6 +400,7 @@ struct GameContainerView: View {
                 model.pilot.save()
                 model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump
                 host = GameHost(model: model, systemID: newID, arrivedViaJump: true) // rebuild on jump
+                debug.attach(host?.scene)                     // re-point the debug suite (a jump ends any stress test)
                 setScenePaused(false, reason: "jump rebuild")
                 syncNav(host)
                 // A second deferred tick, same reason as the `.task` case above:
@@ -449,6 +471,7 @@ struct GameContainerView: View {
             model.autosave(reason: .manual)   // catch any shopping done during this landing
             host = GameHost(model: model, systemID: nav.currentSystemID)
             hostSystemID = nav.currentSystemID
+            debug.attach(host?.scene)         // re-point the debug suite at the rebuilt scene
             setScenePaused(false, reason: "depart")
             syncNav(host)
             grabSceneFocus(reason: "depart")
@@ -642,6 +665,35 @@ struct GameContainerView: View {
     private func hailPortrait(_ state: HailDialogState) -> CGImage? {
         guard case let .ship(_, shipTypeID) = state.kind, let res = host?.game?.ship(shipTypeID) else { return nil }
         return host?.graphics?.shipPicture(res)
+    }
+
+    /// The developer entry point shown while debug mode is on: a debug button
+    /// and a live fps/ship chip, tucked under the menu button (clear of the
+    /// right-edge status bar). Both open the full debug suite.
+    private var debugControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button { showDebugSuite = true } label: {
+                        Image(systemName: "ladybug.fill")
+                            .font(.body.weight(.semibold))
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(Color(red: 0.35, green: 0.95, blue: 0.5).opacity(0.5)))
+                            .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                    DebugMetricsChip(debug: debug) { showDebugSuite = true }
+                }
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(.leading, 14)
+        .padding(.top, 68)   // below the hamburger menu button
+        .opacity(showDebugSuite || showMenu ? 0 : 1)
+        .allowsHitTesting(!showDebugSuite && !showMenu)
+        .zIndex(15)
     }
 
     // The single in-game entry point: one unobtrusive button in the top-left

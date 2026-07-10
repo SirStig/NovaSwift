@@ -154,8 +154,8 @@ struct SettingsView: View {
 
     private var developerSection: some View {
         Section {
-            Toggle("UI debug overlay", isOn: binding(\.uiDebugOverlay))
-            Text("Draws the design-space measurement grid on authentic screens and reads the .novaPlace coordinate under your finger. Toggle live with ⇧⌘D.")
+            Toggle("Debug mode", isOn: binding(\.debugModeEnabled))
+            Text("Shows an in-game debug button that opens the debug suite: the UI measurement overlay, a performance stress test, and more developer tools as we build them.")
                 .novaFont(.caption).foregroundStyle(.secondary)
         } header: {
             Text("Developer")
