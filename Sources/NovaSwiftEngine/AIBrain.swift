@@ -128,6 +128,9 @@ public final class AIBrain {
         guard world.canDetect(other, by: me) else { return false }
         if other.isPlayer {
             if provokedByPlayer { return true }
+            // A named person the player has wronged holds a grudge and attacks
+            // wherever they meet (pêrs.Flags 0x0001).
+            if let pid = me.personID, world.playerPersGrudges.contains(pid) { return true }
             return world.diplomacy?.isHostileToPlayer(me.government) ?? false
         }
         // NPC vs NPC.

@@ -137,6 +137,22 @@ final class GameHost {
                 }
                 pilotStore.save()
             }
+
+            // pêrs (named characters): seed grudges, gate appearances on their
+            // ActiveOn NCB + not-yet-defeated, and persist grudge/defeat outcomes.
+            scene.persGrudges = model.pilot.state.persGrudges ?? []
+            scene.persSpawnEligible = { [weak pilotStore] id in
+                guard let store = pilotStore else { return true }
+                if store.state.isPersDefeated(id) { return false }
+                guard let pers = scanGame.pers(id), !pers.activeOn.isEmpty else { return true }
+                return StoryEngine(game: scanGame, player: store.state).evaluate(test: pers.activeOn)
+            }
+            scene.onPersGrudge = { [weak pilotStore] pid in
+                pilotStore?.state.recordPersGrudge(pid); pilotStore?.save()
+            }
+            scene.onPersDefeated = { [weak pilotStore] pid in
+                pilotStore?.state.recordPersDefeated(pid); pilotStore?.save()
+            }
         }
     }
 
@@ -969,10 +985,29 @@ struct GameContainerView: View {
         switch result {
         case let .ship(entityID, name, shipTypeID, govt, hostile):
             model.audio.playHailVoice(govt: govt, hostile: hostile)
+            var displayName = name
+            var response = hostile ? "They aren't interested in talking." : "This is \(name). Go ahead."
+            // Named person (pêrs): replace the generic response with their comm
+            // quote and note any mission they offer.
+            if let pid = host?.scene.personID(forEntity: entityID),
+               let game = host?.game, let pers = game.pers(pid) {
+                let engine = StoryEngine(game: game, player: model.pilot.state)
+                let disabled = host?.scene.isEntityDisabled(entityID) ?? false
+                let enc = PersEncounter.hail(pers, player: model.pilot.state, game: game,
+                                             engine: engine, disabled: disabled)
+                displayName = enc.name
+                if let quote = enc.commQuote ?? enc.hailQuote { response = quote }
+                if enc.offerMissionID != nil {
+                    host?.hud.post("\(enc.name) has a job for you — find them at a mission computer or bar.")
+                }
+                if pers.quoteOnce {
+                    model.pilot.state.markPersQuoteShown(pid); model.pilot.save()
+                }
+            }
             hailDialogState = HailDialogState(
                 kind: .ship(entityID: entityID, shipTypeID: shipTypeID),
-                name: name, govtLabel: govt.targetCode, hostile: hostile,
-                responseText: hostile ? "They aren't interested in talking." : "This is \(name). Go ahead.")
+                name: displayName, govtLabel: govt.targetCode, hostile: hostile,
+                responseText: response)
         case let .planet(spobID, name, govt, landable):
             // Hostile when the player is deeply wanted by the stellar's govt
             // (a wanted rating turns its defenders on you) — read straight from

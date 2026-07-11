@@ -113,6 +113,17 @@ public struct PlayerState: Codable, Sendable {
     public var armor: Double?
     public var shield: Double?
 
+    // pêrs (named characters) the player has interacted with. Optional for
+    // save-compat (like `fuel`).
+    /// `pêrs` ids the player has wronged (attacked/disabled) — they now hold a
+    /// grudge and are hostile wherever they appear (`pêrs.Flags 0x0001`).
+    public var persGrudges: Set<Int>?
+    /// `pêrs` ids the player has destroyed — they cease to appear again (Bible:
+    /// "as AI-people are killed off, they cease to appear in the game").
+    public var defeatedPers: Set<Int>?
+    /// `pêrs` ids whose one-time quote has already been shown (`Flags 0x0080`).
+    public var shownPersQuotes: Set<Int>?
+
     // Reputation
     public var combatRating: Int
     public var legalRecord: [Int: Int]    // govt id → standing (+ good, − wanted)
@@ -196,6 +207,14 @@ public struct PlayerState: Codable, Sendable {
     public mutating func clearLegalRecord(govt: Int) {
         if govt == -1 { legalRecord.removeAll() } else { legalRecord[govt] = nil }
     }
+
+    // MARK: pêrs interaction helpers
+    public func persHoldsGrudge(_ id: Int) -> Bool { persGrudges?.contains(id) ?? false }
+    public func isPersDefeated(_ id: Int) -> Bool { defeatedPers?.contains(id) ?? false }
+    public mutating func recordPersGrudge(_ id: Int) { persGrudges = (persGrudges ?? []).union([id]) }
+    public mutating func recordPersDefeated(_ id: Int) { defeatedPers = (defeatedPers ?? []).union([id]) }
+    public mutating func markPersQuoteShown(_ id: Int) { shownPersQuotes = (shownPersQuotes ?? []).union([id]) }
+    public func wasPersQuoteShown(_ id: Int) -> Bool { shownPersQuotes?.contains(id) ?? false }
 }
 
 // MARK: NCBTestContext conformance — lets any NCB test evaluate against a pilot.

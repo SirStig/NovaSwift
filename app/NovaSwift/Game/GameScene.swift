@@ -24,7 +24,22 @@ struct PlanetVisual {
 /// is loaded, a vector placeholder otherwise) with an engine exhaust plume, a
 /// follow camera, and a HUD driven via `GameHUDModel`.
 final class GameScene: SKScene {
-    private var world: World!
+    private var world: World! {
+        didSet {
+            // Re-apply pêrs state to every freshly-built world (system rebuilds,
+            // takeoff) so grudges/spawn-eligibility survive jumps.
+            world?.playerPersGrudges = persGrudges
+            if let e = persSpawnEligible { world?.persSpawnEligible = e }
+        }
+    }
+    /// pêrs ids the player has wronged (grudge) — host-supplied from pilot state.
+    var persGrudges: Set<Int> = []
+    /// Host gate: whether a pêrs may spawn now (ActiveOn NCB + not defeated).
+    var persSpawnEligible: ((Int) -> Bool)?
+    /// Fired when the player earns a grudge / defeats a named person; the host
+    /// persists these to the pilot.
+    var onPersGrudge: ((Int) -> Void)?
+    var onPersDefeated: ((Int) -> Void)?
     private var input: InputController!
     private var controllerInput: GameControllerInput?
 
@@ -688,6 +703,11 @@ final class GameScene: SKScene {
                 let name = world.ship(id: entityID)?.name ?? "Ally"
                 hud?.post("\(name) transfers fuel and makes repairs.")
                 audio?.play(.docking)
+            case let .personGrudge(pid):
+                persGrudges.insert(pid)
+                onPersGrudge?(pid)
+            case let .personDefeated(pid):
+                onPersDefeated?(pid)
             default:
                 break
             }
@@ -954,6 +974,14 @@ final class GameScene: SKScene {
     /// The (possibly updated) manifest for a boarded ship, for refreshing the
     /// plunder dialog after taking loot.
     func boardManifest(_ id: Int) -> World.BoardingManifest? { world?.boardingManifest(for: id) }
+
+    /// The `pêrs` id of an entity, if it's a named character (for hail quotes).
+    func personID(forEntity id: Int) -> Int? { world?.ship(id: id)?.personID }
+    /// Whether the entity's ship is currently a disabled hulk.
+    func isEntityDisabled(_ id: Int) -> Bool { world?.ship(id: id)?.disabled ?? false }
+    /// Record a fresh grudge on the live world so a wronged person turns hostile
+    /// immediately, without waiting for the next system rebuild.
+    func addLiveGrudge(_ personID: Int) { world?.playerPersGrudges.insert(personID) }
 
     /// Take the credits aboard a boarded hulk; returns the amount.
     func plunderCredits(_ id: Int) -> Int { world?.takePlunderCredits(from: id) ?? 0 }

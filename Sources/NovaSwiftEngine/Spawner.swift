@@ -348,9 +348,28 @@ public final class Spawner {
         let candidates = galaxy.game.perses().filter {
             $0.shipType == shipID && ($0.govt == govt || $0.govt == -1)
                 && !world.npcs.contains { npc in npc.personID == $0.id }
+                && world.persSpawnEligible($0.id)   // ActiveOn NCB + not-yet-defeated
         }
         guard !candidates.isEmpty else { return }
-        ship.personID = candidates[world.rng.int(in: 0...candidates.count - 1)].id
+        let pers = candidates[world.rng.int(in: 0...candidates.count - 1)]
+        ship.personID = pers.id
+        applyPersonCustomization(pers, to: ship, world: world)
+    }
+
+    /// Apply a `pêrs`'s ship customization: a shield-strength multiplier
+    /// (`ShieldMod`, <0 = invincible) and the credits it carries for plunder.
+    private func applyPersonCustomization(_ pers: PersRes, to ship: Ship, world: World) {
+        if pers.shieldMod < 0 {
+            ship.maxShield = 1_000_000; ship.shield = ship.maxShield   // "invincible"
+        } else if pers.shieldMod > 0, pers.shieldMod != 100 {
+            let scale = Double(pers.shieldMod) / 100.0
+            ship.maxShield *= scale; ship.shield = ship.maxShield
+        }
+        if pers.credits > 0 {
+            // Credits carried, ±25% (deterministic jitter from the RNG).
+            let jitter = 0.75 + world.rng.double(in: 0...0.5)
+            ship.plunderCredits = max(0, Int(Double(pers.credits) * jitter))
+        }
     }
 
     /// Spawn a fleet: a lead ship plus its escorts, formed up on the leader. The

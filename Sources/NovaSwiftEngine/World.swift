@@ -1371,6 +1371,11 @@ public final class World {
             if ownerID == 0, let dip = diplomacy {
                 dip.recordDisable(of: ship.government)
             }
+            // A named person the player just crippled holds a grudge from now on.
+            if ownerID == 0, let pid = ship.personID {
+                playerPersGrudges.insert(pid)
+                events.append(.personGrudge(personID: pid))
+            }
         } else if ownerID == 0 && !ship.isPlayer && !ship.isAlive {
             // Zeroed an already-disabled hulk's sliver of armor — a real kill,
             // finalized by `despawnDepartedAndDead` once per frame. Remember
@@ -1387,6 +1392,10 @@ public final class World {
             if !npc.isAlive {
                 if npc.killedByPlayer, let dip = diplomacy {
                     dip.recordKill(of: npc.government, shipStrength: Int(npc.combatStrength))
+                }
+                // A named person the player destroyed won't appear again.
+                if npc.killedByPlayer, let pid = npc.personID {
+                    events.append(.personDefeated(personID: pid))
                 }
                 events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
                                          soundID: npc.explosionSoundID))
@@ -1490,6 +1499,15 @@ public final class World {
     }
 
     // MARK: Cloaking & sensors (oütf ModType 17/24/30; sÿst Interference)
+
+    /// `pêrs` ids the player has wronged — those characters attack on sight
+    /// wherever they appear (`pêrs.Flags 0x0001` grudge). Synced from the pilot
+    /// by the host; read by the AI's hostility test.
+    public var playerPersGrudges: Set<Int> = []
+    /// Host gate for whether a `pêrs` may appear now — evaluates its `ActiveOn`
+    /// NCB test and "not already defeated" against live pilot state (the engine
+    /// can't evaluate NCB itself). Default: always eligible.
+    public var persSpawnEligible: (Int) -> Bool = { _ in true }
 
     /// The current system's sensor static (`sÿst.Interference`, 0-100). Set when
     /// the world is built for a system; degrades effective sensor range.
