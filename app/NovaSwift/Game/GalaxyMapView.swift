@@ -263,11 +263,11 @@ struct GalaxyMapView: View {
 
         // Fog of war: what the player currently knows about each system.
         let explored = pilot.state.exploredSystems
-        let mapRevealAll = pilot.ownsMapOutfit(game: game)
+        let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToExplored(explored)
         var visibility: [Int: SystemVisibility] = [:]
         for s in systems {
-            visibility[s.id] = nav.visibility(of: s.id, explored: explored, adjacent: adjacent, mapRevealAll: mapRevealAll)
+            visibility[s.id] = nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted)
         }
 
         let center = CGPoint(x: size.width / 2 + pan.width,
@@ -494,16 +494,16 @@ struct GalaxyMapView: View {
     // MARK: Interaction
 
     private func handleTap(at location: CGPoint, viewSize: CGSize) {
-        guard let cur = nav.current, let game = nav.game else { return }
+        guard let cur = nav.current else { return }
         let explored = pilot.state.exploredSystems
-        let mapRevealAll = pilot.ownsMapOutfit(game: game)
+        let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToExplored(explored)
         let center = CGPoint(x: viewSize.width / 2 + pan.width,
                              y: viewSize.height / 2 + pan.height)
         var best: (id: Int, dist: CGFloat)?
         for s in nav.systems() {
             // Fog of war: only known systems are selectable.
-            guard nav.visibility(of: s.id, explored: explored, adjacent: adjacent, mapRevealAll: mapRevealAll) != .unknown else { continue }
+            guard nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted) != .unknown else { continue }
             let p = CGPoint(x: center.x + CGFloat(s.x - cur.x) * zoom,
                             y: center.y + CGFloat(s.y - cur.y) * zoom)
             let d = hypot(p.x - location.x, p.y - location.y)
@@ -541,14 +541,14 @@ struct GalaxyMapView: View {
     /// explored, chartered, or merely glimpsed-as-adjacent — and both plots a
     /// course to it and pans the view there, same as tapping it directly.
     private func findNearestSystem() {
-        guard let cur = nav.current, let game = nav.game else { return }
+        guard let cur = nav.current else { return }
         let explored = pilot.state.exploredSystems
-        let mapRevealAll = pilot.ownsMapOutfit(game: game)
+        let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToExplored(explored)
         let nearest = nav.systems()
             .filter { s in
                 s.id != cur.id
-                    && nav.visibility(of: s.id, explored: explored, adjacent: adjacent, mapRevealAll: mapRevealAll) != .unknown
+                    && nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted) != .unknown
             }
             .min { a, b in
                 hypot(Double(a.x - cur.x), Double(a.y - cur.y)) < hypot(Double(b.x - cur.x), Double(b.y - cur.y))
@@ -684,8 +684,8 @@ struct GalaxyMapView: View {
             if let sys = nav.system(infoID) {
                 let explored = pilot.state.exploredSystems
                 let adjacent = nav.adjacentToExplored(explored)
-                let mapRevealAll = pilot.ownsMapOutfit(game: game)
-                let vis = nav.visibility(of: infoID, explored: explored, adjacent: adjacent, mapRevealAll: mapRevealAll)
+                let charted = pilot.chartedSystems
+                let vis = nav.visibility(of: infoID, explored: explored, adjacent: adjacent, charted: charted)
                 let known = vis == .explored || vis == .chartered
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -732,13 +732,13 @@ struct GalaxyMapView: View {
     @ViewBuilder
     private var routeBar: some View {
         HStack {
-            if let destID = nav.destinationID, let dest = nav.system(destID), let game = nav.game {
+            if let destID = nav.destinationID, let dest = nav.system(destID) {
                 let hops = nav.nextJumpHopCount
                 let canGo = nav.canAfford(hops: hops)
                 let explored = pilot.state.exploredSystems
                 let destKnown = nav.visibility(of: destID, explored: explored,
                                                adjacent: nav.adjacentToExplored(explored),
-                                               mapRevealAll: pilot.ownsMapOutfit(game: game))
+                                               charted: pilot.chartedSystems)
                     != .adjacent
                 let destName = destKnown ? dest.name : "Unexplored"
                 // Frame-pixel Geneva (like all in-frame text), not `.novaFont`

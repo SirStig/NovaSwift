@@ -123,11 +123,12 @@ final class NavigationModel: ObservableObject {
 
     /// What the player currently knows about system `id`, for map fog-of-war.
     /// `explored` is the player's visited-systems set; `adjacent` is its
-    /// precomputed `adjacentToExplored(_:)`; `mapRevealAll` is true if they own a
-    /// map/chart outfit (reveals the whole galaxy, unvisited).
-    func visibility(of id: Int, explored: Set<Int>, adjacent: Set<Int>, mapRevealAll: Bool) -> SystemVisibility {
+    /// precomputed `adjacentToExplored(_:)`; `charted` is the set of systems a
+    /// purchased/granted map outfit has revealed (`oütf` ModType 16 — a scoped
+    /// reveal recorded at acquisition, NOT the whole galaxy).
+    func visibility(of id: Int, explored: Set<Int>, adjacent: Set<Int>, charted: Set<Int>) -> SystemVisibility {
         if explored.contains(id) { return .explored }
-        if mapRevealAll { return .chartered }
+        if charted.contains(id) { return .chartered }
         if adjacent.contains(id) { return .adjacent }
         return .unknown
     }

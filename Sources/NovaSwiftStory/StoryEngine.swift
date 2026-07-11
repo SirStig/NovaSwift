@@ -77,6 +77,12 @@ public final class StoryEngine {
 
         case .grantOutfit(let id):
             player.grantOutfit(id)
+            // A granted map/chart or amnesty (ModType 16/21) reveals its systems
+            // / clears its legal record the same as a bought one — the effect is
+            // inherent to acquiring the item, not to paying for it.
+            if let o = game.outfit(id) {
+                player.applyOutfitAcquisition(o, game: game, fromSystem: player.currentSystem)
+            }
             services?.notify(.outfitGranted(outfitID: id))
         case .removeOutfit(let id):
             player.removeOutfit(id)

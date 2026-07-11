@@ -231,6 +231,11 @@ extension Galaxy {
                 case .hyperspaceSpeed: hyperspaceSpeed += v        // faster jump entry/exit sequence
                 case .weapon:          grantedWeapons[value, default: 0] += count
                 case .ammunition:      ammoAdds[value, default: 0] += count
+                // ModType 27 (increaseMax) is not a ship-stat modifier: its only
+                // effect is raising another outfit's purchase cap, enforced at buy
+                // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
+                // to fold into the flown ship here. Other unhandled ModTypes
+                // (interference/murk/hyperspaceDist/…) likewise have no stat effect.
                 default: break
                 }
             }

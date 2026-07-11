@@ -181,10 +181,12 @@ final class PilotStore: ObservableObject {
         return min(4.0, max(1.0, 1.0 + Double(bonus) / 100.0))
     }
 
-    /// True if any installed outfit is a map/chart (reveals the whole galaxy).
-    func ownsMapOutfit(game: NovaGame) -> Bool {
-        state.outfits.keys.contains { game.outfit($0)?.has(.map) ?? false }
-    }
+    /// Systems revealed by map/chart outfits the player has acquired (`oütf`
+    /// ModType 16). Unlike the old "owns a map ⇒ see the whole galaxy" flag,
+    /// this is the concrete scoped set recorded at purchase/grant time (N jumps
+    /// from where they bought it, or all-independent, or a govt class — see
+    /// `NovaGame.mapRevealedSystems`). Empty on a fresh/legacy save.
+    var chartedSystems: Set<Int> { state.chartedSystems ?? [] }
 
     // MARK: Transactions (return the number actually transacted)
 
@@ -212,26 +214,61 @@ final class PilotStore: ObservableObject {
         return n
     }
 
-    /// Can the player buy `outfit` here (affordable, fits, under its own max)?
+    /// The price actually charged/refunded for `o` on the player's current hull.
+    /// Applies Bible `Flags 0x0200` (mass-proportional price = shipMass × Cost)
+    /// via `Galaxy.effectiveCost`; a flat-priced outfit returns its plain `cost`.
+    func effectiveCost(_ o: OutfRes, galaxy: Galaxy) -> Int {
+        galaxy.effectiveCost(of: o, forShip: state.shipType)
+    }
+
+    /// The effective per-player cap on `o`, folding in any owned `ModType 27`
+    /// ("increase maximum") expanders that point at it. 0 = unlimited.
+    func maxInstallable(_ o: OutfRes, galaxy: Galaxy) -> Int {
+        galaxy.game.effectiveMaxInstallable(of: o.id, ownedOutfits: state.outfits)
+    }
+
+    /// Can the player buy `outfit` here — affordable at its effective price, fits
+    /// in free mass, under its (expander-adjusted) max, and with a free gun/turret
+    /// mount if it's a fixed-gun/turret item (Bible `Flags 0x0001/0x0002`)?
     func canBuyOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
-        guard state.credits >= o.cost else { return false }
-        if o.mass > 0, freeMass(galaxy: galaxy) < o.mass { return false }
-        if o.maxInstallable > 0, owned(outfit: o.id) >= o.maxInstallable { return false }
+        guard state.credits >= effectiveCost(o, galaxy: galaxy) else { return false }
+        // Free-mass check uses the outfit's *effective* mass (Flags 0x0400
+        // scales mass with the hull), matching how `freeMass` accounts for
+        // already-installed outfits.
+        let addedMass = galaxy.effectiveMass(of: o, forShip: state.shipType)
+        if addedMass > 0, freeMass(galaxy: galaxy) < addedMass { return false }
+        let cap = maxInstallable(o, galaxy: galaxy)
+        if cap > 0, owned(outfit: o.id) >= cap { return false }
+        // Bible `Flags 0x0001/0x0002`: a fixed gun / turret consumes one of the
+        // hull's `MaxGuns`/`MaxTurrets` mounts. Block the purchase when none are
+        // free (OUTFITTERS.md §6 — previously computed but not enforced).
+        if o.isFixedGunOutfit || o.isTurretOutfit,
+           let lo = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits) {
+            if o.isFixedGunOutfit, lo.freeGunSlots < 1 { return false }
+            if o.isTurretOutfit, lo.freeTurretSlots < 1 { return false }
+        }
         return true
     }
 
     @discardableResult
     func buyOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
         guard canBuyOutfit(o, galaxy: galaxy) else { return false }
-        state.credits -= o.cost
+        state.credits -= effectiveCost(o, galaxy: galaxy)
         state.grantOutfit(o.id)
-        // Bible `Flags 0x0010`: "Remove any items of this type after purchase
-        // — useful for permits and other intangible purchases" (OUTFITTERS.md
-        // §6). The effect (e.g. an unlocked NCB bit via a mission/plugin, or
-        // just the one-time credits charge itself) has already happened above;
-        // this just keeps the item from sitting in inventory as an ownable
-        // good afterward — grant-then-immediately-remove nets the same "you
-        // paid, it's gone" observable behavior the Bible describes.
+        // Acquisition-time modifier effects that mutate campaign state: a map
+        // (ModType 16) charts its scoped systems from *here*; an amnesty
+        // (ModType 21) clears the legal record. Shared with the mission-grant
+        // path (`StoryEngine.grantOutfit`).
+        state.applyOutfitAcquisition(o, game: galaxy.game, fromSystem: state.currentSystem)
+        // Bible `OnPurchase`: an NCB *set* expression run as a side effect of
+        // buying (e.g. a permit that flips a story bit). Distinct from a mission
+        // grant, which does not "buy" and so does not fire this.
+        runOutfitScript(o.onPurchase, game: galaxy.game)
+        // Bible `Flags 0x0010`: "Remove any items of this type after purchase —
+        // useful for permits and other intangible purchases" (OUTFITTERS.md §6).
+        // The effects above (charted systems, cleared record, set bits) have
+        // already landed; this just keeps the intangible item from sitting in
+        // inventory — grant-then-immediately-remove nets "you paid, it's gone".
         if o.flags & 0x0010 != 0 {
             state.removeOutfit(o.id)
         }
@@ -239,16 +276,30 @@ final class PilotStore: ObservableObject {
         return true
     }
 
-    /// EV Nova refunds outfits at full purchase price.
+    /// EV Nova refunds outfits at full purchase price (the same effective,
+    /// mass-proportional price they were bought at on this hull).
     @discardableResult
-    func sellOutfit(_ o: OutfRes) -> Bool {
+    func sellOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
         guard owned(outfit: o.id) > 0 else { return false }
         // Bible `Flags 0x0008`: "This item can't be sold" (OUTFITTERS.md §6).
         guard o.flags & 0x0008 == 0 else { return false }
-        state.credits += o.cost
+        state.credits += effectiveCost(o, galaxy: galaxy)
         state.removeOutfit(o.id)
+        // Bible `OnSell`: the sibling NCB set expression, run when the item is sold.
+        runOutfitScript(o.onSell, game: galaxy.game)
         save()
         return true
+    }
+
+    /// Run an outfit's `OnPurchase`/`OnSell` NCB set expression against the live
+    /// pilot, reusing the story engine's full set-op executor (bit set/clear,
+    /// and any richer op a plugin encodes) so the effect matches how mission
+    /// scripts run. No-op for the (overwhelmingly common) empty expression.
+    private func runOutfitScript(_ expr: String, game: NovaGame) {
+        guard !expr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let engine = StoryEngine(game: game, player: state)
+        engine.apply(set: expr)
+        state = engine.player
     }
 
     /// Trade-in value of the current hull *and* its installed outfits, toward
@@ -257,9 +308,14 @@ final class PilotStore: ObservableObject {
     /// ship and upgrades" — the credit covers everything currently installed,
     /// not just the bare hull.
     func tradeInValue(game: NovaGame) -> Int {
+        let shipMass = game.ship(state.shipType)?.mass ?? 0
         let hullCost = game.ship(state.shipType)?.cost ?? 0
+        // Value each installed outfit at what it actually cost on this hull —
+        // mass-proportional-price outfits (Flags 0x0200) were charged
+        // shipMass × Cost, so they trade in on the same basis, not flat `Cost`.
         let outfitsCost = state.outfits.reduce(0) { sum, owned in
-            sum + (game.outfit(owned.key)?.cost ?? 0) * owned.value
+            guard let o = game.outfit(owned.key) else { return sum }
+            return sum + o.effectiveCost(shipMass: shipMass) * owned.value
         }
         return Int(Double(hullCost + outfitsCost) * 0.25)
     }
