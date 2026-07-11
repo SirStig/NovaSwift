@@ -122,38 +122,68 @@ struct DialogChrome<Content: View>: View {
     var onClose: () -> Void = {}
     @ViewBuilder var content: () -> Content
 
+    /// Comfortable design size the content is laid out at, then uniformly scaled
+    /// to fit the viewport. Laying out at a fixed roomy size (rather than the raw
+    /// screen) is what lets a phone show the *whole* Form/List — every row, the
+    /// tab picker, the Done button — just shrunk to fit, instead of native-size
+    /// rows where only two or three are visible.
+    private let designW: CGFloat = 660
+    private let designH: CGFloat = 620
+
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.55).ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Color.black.opacity(0.55).ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                HStack {
-                    Text(title).novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
-                    Spacer()
-                }
-                .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 10)
+                // Deterministic downscale: compare the design size to the usable
+                // viewport (capped to the real screen, less a margin). No content
+                // measurement — so it can't silently fail to shrink the way the
+                // old preference-based fit did, which is why these dialogs used
+                // to overflow on iPhone.
+                let boundW = min(geo.size.width, Self.screenSize.width)
+                let boundH = min(geo.size.height, Self.screenSize.height)
+                let availW = max(1, boundW - 28)
+                let availH = max(1, boundH - 28)
+                let scale = min(1, min(availW / designW, availH / designH))
 
-                content()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-
-                HStack {
-                    Spacer()
-                    doneButton
-                }
-                .padding(.horizontal, 16)
-                .frame(height: 44)
+                card
+                    .frame(width: designW, height: designH)
+                    .background(NovaPanelBackground(graphics: model.uiGraphics))
+                    .scaleEffect(scale)
+                    .frame(width: geo.size.width, height: geo.size.height)
             }
-            // An adaptive centred card: it caps at the designed 660×620 on a
-            // roomy Mac/iPad window, but on a small iPhone it shrinks to the
-            // usable area — the scrollable Form/List inside just scrolls — so it
-            // never overflows the screen and the Done button stays reachable.
-            // Text keeps its native point size (no blurry downscaling), and the
-            // 12pt padding holds it clear of the notch / home indicator.
-            .frame(maxWidth: 660, maxHeight: 620)
-            .background(NovaPanelBackground(graphics: model.uiGraphics))
-            .padding(12)
         }
+    }
+
+    /// The dialog's fixed-size body — header, scrollable content, Done strip.
+    private var card: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title).novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
+                Spacer()
+            }
+            .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 10)
+
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+
+            HStack {
+                Spacer()
+                doneButton
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+        }
+    }
+
+    /// Hard ceiling on the usable space, whatever a parent claims to offer.
+    private static var screenSize: CGSize {
+        #if os(iOS)
+        return UIScreen.main.bounds.size
+        #else
+        return CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        #endif
     }
 
     /// The game's real three-slice Done button when data is loaded (matching

@@ -29,7 +29,10 @@ struct SettingsView: View {
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
         }
-        .novaResponsive()
+        // No `.novaResponsive()` — it scales ambient text by window width, which
+        // at the dialog's design size blows every Form row up ~1.6×. The grouped
+        // Form controls want their native point sizes; `DialogChrome` then scales
+        // the whole card uniformly to fit the screen. (Same reasoning as PluginsView.)
         .onAppear {
             // Populate the sound library so the sound test works (and enables menu music).
             if model.data.hasBaseData || model.data.game != nil { model.prepareAudioAndData() }

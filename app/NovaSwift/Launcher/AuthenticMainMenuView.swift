@@ -270,9 +270,13 @@ struct AuthenticMainMenuView: View {
     /// label/value colours coming from the cölr resource's Menu1/Menu2 pair.
     private func infoField(_ label: String, _ value: String,
                            _ bright: Color, _ dim: Color, _ sc: CGFloat) -> some View {
+        // Font sizes scale with `sc` like the surrounding frames/spacing, so the
+        // whole readout shrinks as one piece with the backdrop. Hard-coding the
+        // point sizes (as before) left the text full-size while its columns
+        // shrank on a small screen, overflowing the red band on mobile.
         VStack(alignment: .leading, spacing: 1 * sc) {
-            Text(label).novaFont(.caption, size: 9).foregroundStyle(dim).lineLimit(1)
-            Text(value).novaFont(.body, weight: .bold, size: 11).foregroundStyle(bright).lineLimit(1)
+            Text(label).novaFont(.caption, size: 9 * sc).foregroundStyle(dim).lineLimit(1)
+            Text(value).novaFont(.body, weight: .bold, size: 11 * sc).foregroundStyle(bright).lineLimit(1)
         }
     }
 
