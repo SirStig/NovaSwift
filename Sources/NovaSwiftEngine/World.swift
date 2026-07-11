@@ -221,6 +221,16 @@ public final class Ship {
     /// once the player has taken them, so re-boarding can't duplicate the haul.
     public var plunderCredits: Int = -1
 
+    /// `shïp.Crew` — the crew complement, used on both sides of the EV Nova
+    /// capture-odds math (attacker's crew vs. defender's crew × 10). See
+    /// `World.captureChance`.
+    public var crew: Int = 0
+    /// Extra effective crew from marines outfits (positive `oütf` ModType 25).
+    public var marineCrew: Int = 0
+    /// Percentage points added to capture odds from negative-ModVal marines
+    /// outfits (Bible: "-1 to -100 Increase the player's capture odds").
+    public var captureOddsBonus: Int = 0
+
     /// Whether the ship has enough fuel for one hyperspace jump.
     public var canJump: Bool { fuel >= ShipFuel.perJump }
     /// Spend one jump's fuel; returns false and spends nothing if too low.
@@ -1431,11 +1441,46 @@ public final class World {
         let cargo = s.cargo.filter { $0.value > 0 }
             .map { (commodity: $0.key, tons: $0.value) }
             .sorted { $0.commodity < $1.commodity }
-        // Tougher hulls are harder to take; the largest are uncapturable.
-        let toughness = s.maxArmor + s.maxShield
-        let chance: Int? = toughness > 2200 ? nil : max(5, min(85, 78 - Int(toughness / 40)))
         return BoardingManifest(shipID: shipID, name: s.name,
-                                credits: rolledPlunderCredits(s), cargo: cargo, captureChance: chance)
+                                credits: rolledPlunderCredits(s), cargo: cargo,
+                                captureChance: captureChance(of: s))
+    }
+
+    /// Total effective crew the player brings to a boarding action — the sum EV
+    /// Nova's capture math puts on the attacker's side: the player ship's own
+    /// `Crew`, its marines outfits' bonus crew, and the `Crew` of every escort
+    /// under the player's command.
+    public var playerBoardingCrew: Int {
+        player.crew + player.marineCrew + playerEscorts.reduce(0) { $0 + $1.crew }
+    }
+
+    /// Capture odds (percent) for the player taking disabled hulk `target`, or
+    /// nil if it can't be captured. EV Nova's documented formula:
+    ///   odds = (attackerCrew / (targetCrew × 10)) × 100
+    ///        + the player's marines odds bonus (negative-ModVal ModType-25)
+    ///        + 10 if the player's Strength exceeds 5× the target's Strength
+    /// clamped to 1…75%. The defender's ×10 crew advantage is why capture is hard
+    /// without marines or escorts. The ±5% random jitter is applied at the moment
+    /// of the attempt (`attemptCapture`), not here, so a *displayed* chance is
+    /// stable while the roll still varies.
+    public func captureChance(of target: Ship) -> Int? {
+        guard target.crew > 0 else { return nil }   // nothing to overpower
+        let ratio = Double(playerBoardingCrew) / Double(target.crew * 10) * 100
+        var odds = Int(ratio.rounded()) + player.captureOddsBonus
+        if player.combatStrength > target.combatStrength * 5 { odds += 10 }
+        return min(75, max(1, odds))
+    }
+
+    /// Board disabled hulk `shipID`: emit `.shipBoarded` and return its plunder
+    /// manifest (credits/cargo/capture odds). The canonical "player docks with
+    /// the hulk" entry point — the host then calls `takePlunderCredits` /
+    /// `takePlunderCargo` / `attemptCapture` off the returned manifest. Returns
+    /// nil (emitting nothing) if the ship isn't a boardable hulk.
+    @discardableResult
+    public func board(shipID: Int) -> BoardingManifest? {
+        guard let manifest = boardingManifest(for: shipID), let s = ship(id: shipID) else { return nil }
+        events.append(.shipBoarded(entityID: s.entityID, at: s.position))
+        return manifest
     }
 
     /// Credits aboard a hulk, rolled once (deterministically from its identity +
@@ -1477,13 +1522,16 @@ public final class World {
     }
 
     /// Attempt to capture a hulk given a 0–99 `roll` (supplied by the caller so
-    /// the engine stays deterministic). On success the ship joins the player's
-    /// escort wing. Returns whether it succeeded.
+    /// the outcome is reproducible for a given roll). The base chance is jittered
+    /// by ±5% (world RNG, per the Bible) before the roll is compared. On success
+    /// the ship joins the player's escort wing and a `.shipCaptured` event fires.
     public func attemptCapture(shipID: Int, roll: Int) -> Bool {
-        guard let manifest = boardingManifest(for: shipID), let chance = manifest.captureChance,
-              let s = ship(id: shipID) else { return false }
-        guard roll < chance else { return false }
+        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
+              let chance = captureChance(of: s) else { return false }
+        let effective = min(75, max(1, chance + rng.int(in: -5...5)))
+        guard roll < effective else { return false }
         recruitEscort(s)
+        events.append(.shipCaptured(entityID: s.entityID, shipTypeID: s.shipTypeID, at: s.position))
         return true
     }
 

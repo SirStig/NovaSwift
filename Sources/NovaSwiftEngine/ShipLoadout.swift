@@ -102,6 +102,19 @@ public struct Loadout {
     /// jump's entry/exit sequence. Interpreted by the app as a percentage speed-up
     /// of the jump animation (0 = stock timing). See `PilotStore.jumpSpeedFactor`.
     public var hyperspaceSpeedBonus: Int = 0
+
+    /// The hull's `shïp.Crew` complement — the number the boarding/capture-odds
+    /// math uses on both sides (attacker's own crew, defender's crew). See
+    /// `World.captureChance`.
+    public var crew: Int = 0
+    /// Extra "effective crew" from installed marines outfits (`oütf` ModType 25
+    /// with a **positive** ModVal): "Adds the value in ModVal to your ship's
+    /// effective crew complement when calculating capture odds" (Bible).
+    public var marineCrew: Int = 0
+    /// Flat percentage points added to capture odds from marines outfits with a
+    /// **negative** ModVal (Bible: "-1 to -100 Increase the player's capture
+    /// odds by this amount"). Stored as a positive number of percentage points.
+    public var captureOddsBonus: Int = 0
 }
 
 extension OutfRes {
@@ -189,6 +202,8 @@ extension Galaxy {
         var multiJumpBonus = 0
         var fastJump = false
         var hyperspaceSpeed = 0
+        var marineCrew = 0
+        var captureOddsBonus = 0
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
@@ -231,6 +246,11 @@ extension Galaxy {
                 case .hyperspaceSpeed: hyperspaceSpeed += v        // faster jump entry/exit sequence
                 case .weapon:          grantedWeapons[value, default: 0] += count
                 case .ammunition:      ammoAdds[value, default: 0] += count
+                case .marines:
+                    // ModType 25 (marines) feeds capture-odds, not ship stats.
+                    // Positive ModVal → +effective crew; negative (-1..-100) →
+                    // +that many percentage points of capture odds (Bible).
+                    if value >= 0 { marineCrew += v } else { captureOddsBonus += (-value) * count }
                 // ModType 27 (increaseMax) is not a ship-stat modifier: its only
                 // effect is raising another outfit's purchase cap, enforced at buy
                 // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
@@ -276,7 +296,8 @@ extension Galaxy {
             outfits: outfitCounts, weapons: weapons,
             maxJumpHops: max(1, 1 + multiJumpBonus),
             instantJump: fastJump,
-            hyperspaceSpeedBonus: hyperspaceSpeed)
+            hyperspaceSpeedBonus: hyperspaceSpeed,
+            crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus)
     }
 
     /// Build a live ship with its **full loadout** applied: outfit-modified flight
@@ -324,6 +345,9 @@ extension Galaxy {
         ship.fuelRegenPerSec = lo.fuelRegenPerSec
         ship.afterburner = lo.afterburner
         ship.cargoCapacity = lo.cargoCapacity
+        ship.crew = lo.crew
+        ship.marineCrew = lo.marineCrew
+        ship.captureOddsBonus = lo.captureOddsBonus
 
         var mounts: [WeaponMount] = []
         for w in lo.weapons {
