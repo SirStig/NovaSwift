@@ -157,7 +157,7 @@ public enum GameLibrary {
         for plugin in plugins where plugin.isEnabled {
             for url in plugin.fileURLs {
                 do {
-                    collection.overlay(try ResourceFile.read(contentsOf: url))
+                    collection.overlay(try ResourceFile.read(contentsOf: url), tag: plugin.id)
                 } catch {
                     Log.data.error("merge: failed to load plug-in \(plugin.name, privacy: .public) file \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
                     throw error

@@ -17,9 +17,9 @@ extension StoryGuideModel {
     /// Build a guide over the real loaded game with a fresh starter pilot. Useful
     /// until the running game owns a live `PlayerState` (mission/landing flow).
     /// Pass the pilot's actual save once it exists.
-    static func over(_ game: NovaGame, player: PlayerState? = nil) -> StoryGuideModel {
+    static func over(_ game: NovaGame, player: PlayerState? = nil, plugins: [PluginBundle] = []) -> StoryGuideModel {
         let pilot = player ?? StoryGuideModel.starterPilot(for: game)
-        return StoryGuideModel(game: game, player: pilot)
+        return StoryGuideModel(game: game, player: pilot, plugins: plugins)
     }
 
     /// A reasonable "new pilot" so the guide has something to show over real data:

@@ -1,19 +1,25 @@
 import SwiftUI
 import NovaSwiftStory
 
-/// The **Story Map**: a full-screen, pannable/zoomable graph of the entire
-/// campaign — every storyline is a column of mission nodes, colour-coded by the
-/// pilot's live status (completed / in progress / available now / locked), with
-/// edges linking *what unlocks what* (including across campaigns). Tapping a
-/// node opens an inspector showing its objective, reward, where it's offered,
-/// and — for a locked node — exactly what to do to unlock it.
+/// The **Story Map**: pick a storyline from the sidebar and see its full
+/// branching tree — every outcome (accept/refuse/success/failure/abort/ship
+/// objective) that can start a follow-up mission, colour-coded by the
+/// pilot's live status and, per storyline, by its owning government's real
+/// map colour. Storylines are grouped and filterable by which plug-in
+/// contributed them. Tapping a node opens an inspector with its objective,
+/// reward, and — for a locked node — exactly what to do to unlock it.
 ///
-/// This is the "see every single thing at once" view the list-style Story Guide
-/// can't give: the shape of the whole game, and where the pilot sits in it.
+/// Showing one storyline at a time (rather than every campaign as parallel
+/// lanes on one giant canvas) is what makes room to draw the *branches*: a
+/// mission whose success/failure/refusal genuinely lead to different
+/// follow-ups, or a `R(...)` 50/50 chance between two, instead of collapsing
+/// everything to a single "next step" arrow.
 struct StorylineMapView: View {
-    let map: StoryMap
+    @ObservedObject var model: StoryGuideModel
     var onClose: (() -> Void)?
 
+    @State private var selectedKey: String?
+    @State private var pluginFilter: String?
     @State private var selectedID: Int?
     @State private var zoom: CGFloat = 0.85
     @State private var zoomBase: CGFloat = 0.85
@@ -23,71 +29,94 @@ struct StorylineMapView: View {
     /// via `GeometryReader`/`PreferenceKey` since `onScrollGeometryChange`
     /// needs iOS 18/macOS 15, newer than this app's deployment target.
     ///
-    /// Drives virtualized rendering: with hundreds of missions on the map,
-    /// building/shadowing a `NodeCard` for every one of them regardless of
-    /// scroll position is what was driving the memory/frame-rate problems
-    /// (and outright crashes on iPhone). We now only build cards and stroke
-    /// edges that are actually (near) visible.
+    /// Drives virtualized rendering: a campaign with heavy random-branch
+    /// fan-out can still have plenty of nodes, so we only build cards and
+    /// stroke edges that are actually (near) visible — the fix for a real
+    /// memory/frame-rate crash on iPhone when this view drew everything.
     @State private var scrollContentFrame: CGRect = .zero
     @State private var scrollContainerSize: CGSize = .zero
 
     private enum Layout {
-        static let laneWidth: CGFloat = 226
-        static let laneGap: CGFloat = 44
-        static let rowPitch: CGFloat = 150
+        static let columnWidth: CGFloat = 226
+        static let columnGap: CGFloat = 44
+        static let rowPitch: CGFloat = 164
         static let nodeWidth: CGFloat = 198
-        static let nodeHeight: CGFloat = 106
-        static let topInset: CGFloat = 92     // room for the lane headers
+        static let nodeHeight: CGFloat = 118
+        static let topInset: CGFloat = 32
         static let sideInset: CGFloat = 40
         static let bottomInset: CGFloat = 56
-        static var lanePitch: CGFloat { laneWidth + laneGap }
+        static var columnPitch: CGFloat { columnWidth + columnGap }
         /// Extra invisible padding around every node's tap target, and how far
-        /// zoomed-out the map may go — both exist to keep nodes comfortably
+        /// zoomed-out the tree may go — both exist to keep nodes comfortably
         /// tappable on iPhone (Apple's 44pt minimum) instead of shrinking under
         /// a pinch until they're nearly impossible to hit accurately.
         static let nodeHitSlop: CGFloat = 10
         static let minZoom: CGFloat = 0.55
         static let maxZoom: CGFloat = 1.75
         /// Above this many simultaneously-visible nodes, switch from real
-        /// `NodeCard` views to a cheap `Canvas`-drawn overview (see
-        /// `lowDetailNodeCanvas`) — the actual fix for the iPhone crash when
-        /// zoomed far enough out to see most of a large campaign at once.
+        /// `NodeCard` views to a cheap `Canvas`-drawn overview — a single
+        /// storyline is usually far smaller than the old all-campaigns map,
+        /// but a heavily-modded one could still hit this.
         static let maxDetailedNodes = 120
         /// How far outside the visible viewport to still build node/edge views,
         /// so scrolling doesn't visibly pop cards in at the edge.
         static let virtualizationMargin: CGFloat = rowPitch
-        /// Symmetric padding wrapping the scaled map content inside the scroll
-        /// view (see `mapArea`) — needed to translate the ScrollView's reported
-        /// visible rect back into unscaled map coordinates.
+        /// Symmetric padding wrapping the scaled tree inside the scroll view —
+        /// needed to translate the ScrollView's reported visible rect back
+        /// into unscaled map coordinates.
         static let contentPadding: CGFloat = 28
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        HStack(spacing: 0) {
+            StorylineSidebar(lanes: model.storyMap.lanes, untaggedCount: model.storyMap.untaggedCount,
+                             selectedKey: $selectedKey, pluginFilter: $pluginFilter,
+                             pluginLabel: model.pluginLabel, governmentColor: model.governmentColor)
             Divider().overlay(.white.opacity(0.12))
-            if map.isEmpty {
-                emptyState
-            } else {
-                mapArea
+            VStack(spacing: 0) {
+                detailHeader
+                Divider().overlay(.white.opacity(0.12))
+                if model.storyMap.isEmpty {
+                    emptyState
+                } else if selectedLane == nil {
+                    noSelectionState
+                } else {
+                    detailCanvas
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(EVTheme.panel)
         .foregroundStyle(EVTheme.text)
         .novaResponsive()
+        .onAppear { if selectedKey == nil { selectedKey = model.storyMap.lanes.first?.key } }
+        .onChange(of: model.storyMap.lanes.map(\.key)) { _, keys in
+            guard !keys.isEmpty else { selectedKey = nil; return }
+            if let k = selectedKey, !keys.contains(k) { selectedKey = keys.first }
+            else if selectedKey == nil { selectedKey = keys.first }
+        }
     }
 
     // MARK: Header
 
-    private var header: some View {
+    private var selectedLane: StoryMapLane? {
+        model.storyMap.lanes.first { $0.key == selectedKey }
+    }
+
+    private var detailHeader: some View {
         HStack(spacing: 12) {
-            Image(systemName: "map.circle.fill").foregroundStyle(EVTheme.accent).font(.title2)
-            VStack(alignment: .leading, spacing: 1) {
+            if let lane = selectedLane {
+                Circle().fill(model.governmentColor(lane.governmentID)).frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(lane.title).novaFont(.heading, weight: .bold)
+                    Text(detailSubtitle(lane)).novaFont(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Image(systemName: "map.circle.fill").foregroundStyle(EVTheme.accent).font(.title2)
                 Text("Story Map").novaFont(.heading, weight: .bold)
-                Text(subtitle).novaFont(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            legend
+            if selectedLane != nil { legend }
             if let onClose {
                 Button(action: onClose) { Image(systemName: "xmark.circle.fill").font(.title2) }
                     .buttonStyle(.plain)
@@ -98,21 +127,22 @@ struct StorylineMapView: View {
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
 
-    private var subtitle: String {
-        guard !map.isEmpty else { return "No campaigns found in this data" }
-        let campaigns = map.lanes.count
-        let steps = map.nodes.count
-        var s = "\(campaigns) campaign\(campaigns == 1 ? "" : "s") · \(steps) missions"
-        if map.untaggedCount > 0 { s += " · +\(map.untaggedCount) one-off jobs" }
-        return s
+    private func detailSubtitle(_ lane: StoryMapLane) -> String {
+        var parts = ["\(lane.completedCount)/\(lane.totalCount) steps", model.pluginLabel(lane.pluginID)]
+        if let name = model.governmentName(lane.governmentID) { parts.append(name) }
+        return parts.joined(separator: " · ")
     }
 
     private var legend: some View {
-        HStack(spacing: 12) {
-            legendDot(.green, "Done")
-            legendDot(.cyan, "Active")
-            legendDot(.yellow, "Available")
-            legendDot(.gray, "Locked")
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 10) {
+                legendDot(.green, "Done"); legendDot(.cyan, "Active")
+                legendDot(.yellow, "Available"); legendDot(.gray, "Locked")
+            }
+            HStack(spacing: 10) {
+                legendDash(EVTheme.accent, "On success"); legendDash(.red, "Fail/abort")
+                legendDash(.orange, "On refuse"); Text("? = random").novaFont(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.05)))
@@ -125,14 +155,66 @@ struct StorylineMapView: View {
         }
     }
 
-    // MARK: Map canvas
+    private func legendDash(_ color: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 14, height: 2)
+            Text(label).novaFont(.caption).foregroundStyle(.secondary)
+        }
+    }
 
-    private var mapArea: some View {
+    // MARK: Tree layout for the selected storyline
+
+    private var selectedStorylineNodes: [StoryMapNode] {
+        guard let key = selectedKey else { return [] }
+        return model.storyMap.nodes.filter { $0.storylineKey == key }
+    }
+
+    private var placedNodes: [PlacedNode] {
+        let nodes = selectedStorylineNodes
+        guard !nodes.isEmpty else { return [] }
+        let laidOut = layoutTree(steps: nodes.map(\.step), edges: model.storyMap.edges)
+        let placement = Dictionary(uniqueKeysWithValues: laidOut.map { ($0.id, ($0.column, $0.row)) })
+        return nodes.compactMap { n in
+            guard let p = placement[n.id] else { return nil }
+            return PlacedNode(node: n, column: p.0, row: p.1)
+        }
+    }
+
+    /// Edges wholly inside the selected storyline — what the tree draws as
+    /// curves. A link to/from a *different* storyline (the analyzer allows
+    /// these) becomes a tappable chip on the node instead (see `crossLinksByNode`).
+    private var internalEdges: [StoryMapEdge] {
+        let ids = Set(selectedStorylineNodes.map(\.id))
+        guard !ids.isEmpty else { return [] }
+        return model.storyMap.edges.filter { ids.contains($0.from) && ids.contains($0.to) }
+    }
+
+    private var nodeByID: [Int: StoryMapNode] {
+        Dictionary(uniqueKeysWithValues: model.storyMap.nodes.map { ($0.id, $0) })
+    }
+
+    private var crossLinksByNode: [Int: [CrossLink]] {
+        guard let key = selectedKey else { return [:] }
+        var out: [Int: [CrossLink]] = [:]
+        let byID = nodeByID
+        for edge in model.storyMap.edges {
+            guard let from = byID[edge.from], let to = byID[edge.to] else { continue }
+            if from.storylineKey == key, to.storylineKey != key {
+                out[from.id, default: []].append(CrossLink(key: to.storylineKey, outgoing: true))
+            } else if to.storylineKey == key, from.storylineKey != key {
+                out[to.id, default: []].append(CrossLink(key: from.storylineKey, outgoing: false))
+            }
+        }
+        return out
+    }
+
+    // MARK: Detail canvas
+
+    private var detailCanvas: some View {
         GeometryReader { outerGeo in
             ScrollView([.horizontal, .vertical]) {
                 ZStack(alignment: .topLeading) {
                     edgeLayer
-                    laneHeaders
                     nodeLayer
                 }
                 .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
@@ -147,11 +229,12 @@ struct StorylineMapView: View {
                     }
                 )
                 // Simultaneous (not exclusive) so pinch-zoom doesn't fight the
-                // ScrollView's own native pan recognizer for the gesture — on
-                // iOS that competition was part of why panning/tapping felt
-                // unreliable while zoomed in.
+                // ScrollView's own native pan recognizer for the gesture.
                 .simultaneousGesture(magnify)
             }
+            // A fresh identity per storyline resets scroll position cleanly
+            // when switching — otherwise a shorter tree can open mid-scroll.
+            .id(selectedKey)
             .coordinateSpace(name: scrollSpace)
             .onPreferenceChange(ScrollContentFramePreferenceKey.self) { scrollContentFrame = $0 }
             .onAppear { scrollContainerSize = outerGeo.size }
@@ -171,69 +254,62 @@ struct StorylineMapView: View {
     }
 
     private var edgeLayer: some View {
-        // One dictionary build (not two), and every edge is culled against the
-        // visible viewport before we bother stroking a curve for it — with a
-        // large campaign graph this is the difference between drawing dozens
-        // of curves and drawing hundreds.
-        let nodeByID = Dictionary(uniqueKeysWithValues: map.nodes.map { ($0.id, $0) })
+        let centers = Dictionary(uniqueKeysWithValues: placedNodes.map { ($0.id, center($0)) })
+        let unlockedByID = Dictionary(uniqueKeysWithValues: placedNodes.map { ($0.id, $0.node.step.status == .completed) })
+        let edges = internalEdges
         let rect = logicalVisibleRect
         return Canvas { ctx, _ in
-            for edge in map.edges {
-                guard let fromNode = nodeByID[edge.from], let toNode = nodeByID[edge.to] else { continue }
-                let a = center(fromNode)
-                let b = center(toNode)
+            for edge in edges {
+                guard let a = centers[edge.from], let b = centers[edge.to] else { continue }
                 let span = CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
-                                   width: abs(a.x - b.x) + 1, height: abs(a.y - b.y) + 1)
+                                  width: abs(a.x - b.x) + 1, height: abs(a.y - b.y) + 1)
                 guard rect.intersects(span) else { continue }
-                let unlocked = fromNode.step.status == .completed
+                let unlocked = unlockedByID[edge.from] ?? false
                 var path = Path()
                 path.move(to: a)
                 let midY = (a.y + b.y) / 2
-                path.addCurve(to: b,
-                              control1: CGPoint(x: a.x, y: midY),
-                              control2: CGPoint(x: b.x, y: midY))
-                let color = unlocked ? Color.green.opacity(0.5)
-                                     : (edge.kind == .starts ? EVTheme.accent.opacity(0.28)
-                                                             : Color.white.opacity(0.14))
-                let dash: [CGFloat] = unlocked ? [] : (edge.kind == .starts ? [] : [5, 5])
-                ctx.stroke(path, with: .color(color),
-                           style: StrokeStyle(lineWidth: unlocked ? 2 : 1.3, dash: dash))
+                path.addCurve(to: b, control1: CGPoint(x: a.x, y: midY), control2: CGPoint(x: b.x, y: midY))
+                let style = edgeStyle(edge, unlocked: unlocked)
+                ctx.stroke(path, with: .color(style.color), style: StrokeStyle(lineWidth: style.width, dash: style.dash))
+                if edge.isRandom {
+                    let mid = CGPoint(x: (a.x + b.x) / 2, y: midY)
+                    ctx.draw(Text("?").font(.caption2.bold()).foregroundColor(style.color), at: mid)
+                }
             }
         }
         .frame(width: contentSize.width, height: contentSize.height)
         .allowsHitTesting(false)
     }
 
-    private var laneHeaders: some View {
-        ForEach(map.lanes) { lane in
-            LaneHeader(lane: lane)
-                .frame(width: Layout.laneWidth - 8)
-                .position(x: laneCenterX(lane.index), y: 40)
+    private func edgeStyle(_ edge: StoryMapEdge, unlocked: Bool) -> (color: Color, dash: [CGFloat], width: CGFloat) {
+        if unlocked { return (Color.green.opacity(0.5), [], 2) }
+        switch edge.outcome {
+        case .failure, .abort: return (Color.red.opacity(0.55), [6, 3], 1.3)
+        case .refuse: return (Color.orange.opacity(0.55), [6, 3], 1.3)
+        case .accept, .success, .shipDone: return (EVTheme.accent.opacity(0.32), [], 1.3)
+        case nil: return (Color.white.opacity(0.14), edge.kind == .unlocks ? [5, 5] : [], 1.3)
         }
     }
 
     /// Past this many simultaneously-visible missions, stop building a real
-    /// `NodeCard` (2 SF Symbols, 3 wrapped `Text` views, a shadow) per node —
-    /// zooming out on a large campaign was throwing hundreds of those live at
-    /// once, which is what was actually crashing the map on iPhone. Viewport
-    /// virtualization alone doesn't save us here: zooming *out* is exactly
-    /// when *more* of the map becomes visible at once, so the node count it
-    /// has to build only goes up as you zoom out, right up to the crash.
-    private var isLowDetail: Bool { visibleNodes.count > Layout.maxDetailedNodes }
+    /// `NodeCard` (SF Symbols, wrapped `Text`, a shadow) per node in favour of
+    /// a cheap `Canvas`-drawn overview — the fix for an iPhone crash when a
+    /// large enough tree is zoomed far enough out to see most of it at once.
+    private var isLowDetail: Bool { visiblePlacedNodes.count > Layout.maxDetailedNodes }
 
     private var nodeLayer: some View {
         Group {
-            if isLowDetail {
-                lowDetailNodeCanvas
-            } else {
-                detailedNodeLayer
-            }
+            if isLowDetail { lowDetailNodeCanvas } else { detailedNodeLayer }
         }
     }
 
     private var detailedNodeLayer: some View {
-        ForEach(visibleNodes) { node in
-            NodeCard(node: node, isSelected: node.id == selectedID)
+        let links = crossLinksByNode
+        return ForEach(visiblePlacedNodes) { p in
+            NodeCard(node: p.node, isSelected: p.node.id == selectedID,
+                    govtColor: model.governmentColor(p.node.step.governmentID),
+                    crossLinks: links[p.node.id] ?? [],
+                    onCrossLink: { key in selectedKey = key; selectedID = nil })
                 .frame(width: Layout.nodeWidth, height: Layout.nodeHeight)
                 .contentShape(Rectangle())
                 // Grow the tappable area beyond the visual card (symmetric,
@@ -241,28 +317,21 @@ struct StorylineMapView: View {
                 // iPhone even when the map is pinched down toward `minZoom`.
                 .padding(Layout.nodeHitSlop)
                 .contentShape(Rectangle())
-                .position(center(node))
-                .onTapGesture { selectedID = (selectedID == node.id) ? nil : node.id }
+                .position(center(p))
+                .onTapGesture { selectedID = (selectedID == p.id) ? nil : p.id }
         }
     }
 
-    /// A single `Canvas` pass drawing a plain colour-coded dot per node
-    /// instead of a real view hierarchy — a `Canvas` can draw hundreds of
-    /// simple shapes for a fraction of the cost of hundreds of view trees,
-    /// which is what keeps a fully-zoomed-out, hundreds-of-missions map from
-    /// crashing. Individual mission titles wouldn't be legible at this zoom
-    /// level anyway. One `SpatialTapGesture` replaces the per-node tap
-    /// gesture recognizers to still let you select a mission.
     private var lowDetailNodeCanvas: some View {
-        let nodes = visibleNodes
+        let nodes = visiblePlacedNodes
         let selected = selectedID
         return Canvas { ctx, _ in
-            for node in nodes {
-                let rect = nodeFrame(node)
-                let tint = node.step.status.tint
+            for p in nodes {
+                let rect = nodeFrame(p)
+                let tint = p.node.step.status.tint
                 let path = Path(roundedRect: rect, cornerRadius: 6)
-                ctx.fill(path, with: .color(tint.opacity(node.step.status == .locked ? 0.3 : 0.55)))
-                let isSelected = node.id == selected
+                ctx.fill(path, with: .color(tint.opacity(p.node.step.status == .locked ? 0.3 : 0.55)))
+                let isSelected = p.id == selected
                 ctx.stroke(path, with: .color(isSelected ? .white : tint.opacity(0.8)),
                            lineWidth: isSelected ? 2 : 1)
             }
@@ -283,15 +352,12 @@ struct StorylineMapView: View {
     /// The visible viewport translated back into unscaled map coordinates
     /// (undoing the scroll offset, the content padding, and the pinch-zoom
     /// scale), outset by a margin so nodes are already built just before
-    /// they'd scroll into view. Falls back to the whole map before the first
+    /// they'd scroll into view. Falls back to the whole tree before the first
     /// layout pass reports real geometry.
     private var logicalVisibleRect: CGRect {
         guard scrollContainerSize != .zero else {
             return CGRect(origin: .zero, size: contentSize)
         }
-        // `scrollContentFrame.origin` is how far the (padded, scaled) content
-        // has been scrolled — negative as the user scrolls down/right — so the
-        // visible window in that content's own coordinate space starts here.
         let visibleInContent = CGRect(x: -scrollContentFrame.minX, y: -scrollContentFrame.minY,
                                        width: scrollContainerSize.width, height: scrollContainerSize.height)
         let pad = Layout.contentPadding
@@ -302,13 +368,13 @@ struct StorylineMapView: View {
         return unscaled.insetBy(dx: -Layout.virtualizationMargin, dy: -Layout.virtualizationMargin)
     }
 
-    private var visibleNodes: [StoryMapNode] {
+    private var visiblePlacedNodes: [PlacedNode] {
         let rect = logicalVisibleRect
-        return map.nodes.filter { rect.intersects(nodeFrame($0)) }
+        return placedNodes.filter { rect.intersects(nodeFrame($0)) }
     }
 
-    private func nodeFrame(_ node: StoryMapNode) -> CGRect {
-        let c = center(node)
+    private func nodeFrame(_ p: PlacedNode) -> CGRect {
+        let c = center(p)
         return CGRect(x: c.x - Layout.nodeWidth / 2, y: c.y - Layout.nodeHeight / 2,
                       width: Layout.nodeWidth, height: Layout.nodeHeight)
     }
@@ -316,8 +382,11 @@ struct StorylineMapView: View {
     // MARK: Inspector
 
     @ViewBuilder private var inspector: some View {
-        if let id = selectedID, let node = map.nodes.first(where: { $0.id == id }) {
-            NodeInspector(node: node, onClose: { selectedID = nil })
+        if let id = selectedID, let node = model.storyMap.nodes.first(where: { $0.id == id }) {
+            NodeInspector(node: node, govtName: model.governmentName(node.step.governmentID),
+                         crossLinks: crossLinksByNode[id] ?? [],
+                         onJump: { key in selectedKey = key; selectedID = nil },
+                         onClose: { selectedID = nil })
                 .padding(16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
@@ -364,26 +433,27 @@ struct StorylineMapView: View {
 
     // MARK: Geometry
 
-    private func laneCenterX(_ i: Int) -> CGFloat {
-        Layout.sideInset + Layout.laneWidth / 2 + CGFloat(i) * Layout.lanePitch
+    private func columnCenterX(_ i: Int) -> CGFloat {
+        Layout.sideInset + Layout.columnWidth / 2 + CGFloat(i) * Layout.columnPitch
     }
     private func rowCenterY(_ r: Int) -> CGFloat {
         Layout.topInset + Layout.nodeHeight / 2 + CGFloat(r) * Layout.rowPitch
     }
-    private func center(_ node: StoryMapNode) -> CGPoint {
-        CGPoint(x: laneCenterX(node.laneIndex), y: rowCenterY(node.rowIndex))
+    private func center(_ p: PlacedNode) -> CGPoint {
+        CGPoint(x: columnCenterX(p.column), y: rowCenterY(p.row))
     }
 
     private var contentSize: CGSize {
-        let lanes = max(map.lanes.count, 1)
-        let w = Layout.sideInset * 2 + CGFloat(lanes) * Layout.laneWidth
-              + CGFloat(max(lanes - 1, 0)) * Layout.laneGap
-        let rows = max(map.maxRows, 1)
+        let nodes = placedNodes
+        let cols = max((nodes.map(\.column).max() ?? -1) + 1, 1)
+        let rows = max((nodes.map(\.row).max() ?? -1) + 1, 1)
+        let w = Layout.sideInset * 2 + CGFloat(cols) * Layout.columnWidth
+              + CGFloat(max(cols - 1, 0)) * Layout.columnGap
         let h = Layout.topInset + CGFloat(rows) * Layout.rowPitch + Layout.bottomInset
         return CGSize(width: w, height: h)
     }
 
-    // MARK: Empty state
+    // MARK: Empty / no-selection states
 
     private var emptyState: some View {
         VStack(spacing: 10) {
@@ -397,6 +467,36 @@ struct StorylineMapView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private var noSelectionState: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "list.bullet.rectangle").font(.system(size: 40)).foregroundStyle(.secondary)
+            Text(pluginFilter == nil ? "Pick a storyline" : "No storylines match this filter")
+                .novaFont(.heading).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A mission positioned in the selected storyline's tree (`StoryTreeLayout`'s
+/// column/row) paired back with its full `StoryMapNode` (status, blockers,
+/// dead ends) for rendering.
+private struct PlacedNode: Identifiable {
+    let node: StoryMapNode
+    let column: Int
+    let row: Int
+    var id: Int { node.id }
+}
+
+/// A `.starts`/`.unlocks` edge that crosses out of the selected storyline —
+/// rendered as a tappable chip on the node instead of an off-canvas curve,
+/// since only one storyline's tree is on screen at a time.
+struct CrossLink: Identifiable, Hashable {
+    let key: String        // the other storyline's key
+    let outgoing: Bool      // true = this node leads into `key`; false = started from it
+    var id: String { "\(key)-\(outgoing)" }
 }
 
 // MARK: - Scroll geometry tracking
@@ -406,29 +506,122 @@ private struct ScrollContentFramePreferenceKey: PreferenceKey {
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
-// MARK: - Lane header
+// MARK: - Sidebar
 
-private struct LaneHeader: View {
-    let lane: StoryMapLane
+/// The storyline picker: one row per campaign, grouped under a section per
+/// contributing plug-in ("Base Game" first), with a leading government-color
+/// swatch and a source filter once more than one plug-in is in play.
+private struct StorylineSidebar: View {
+    let lanes: [StoryMapLane]
+    let untaggedCount: Int
+    @Binding var selectedKey: String?
+    @Binding var pluginFilter: String?
+    let pluginLabel: (String) -> String
+    let governmentColor: (Int?) -> Color
+
+    private var pluginIDs: [String] {
+        Array(Set(lanes.map(\.pluginID))).sorted { a, b in
+            if a.isEmpty != b.isEmpty { return a.isEmpty }   // Base Game always first
+            return pluginLabel(a) < pluginLabel(b)
+        }
+    }
+
+    private var groups: [(id: String, lanes: [StoryMapLane])] {
+        let ids = pluginFilter.map { [$0] } ?? pluginIDs
+        return ids.compactMap { id in
+            let ls = lanes.filter { $0.pluginID == id }
+            return ls.isEmpty ? nil : (id, ls)
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(lane.title).novaFont(.body, weight: .bold).lineLimit(1)
-                Spacer(minLength: 0)
-                if lane.isComplete {
-                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).font(.caption)
+        VStack(spacing: 0) {
+            if pluginIDs.count > 1 { filterControl }
+            if groups.isEmpty {
+                Spacer()
+                Text("No storylines match this filter.")
+                    .novaFont(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(20)
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(groups, id: \.id) { group in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(pluginLabel(group.id).uppercased())
+                                    .novaFont(.caption, weight: .bold)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 4)
+                                ForEach(group.lanes) { lane in row(lane) }
+                            }
+                        }
+                        if untaggedCount > 0, pluginFilter == nil {
+                            Text("+ \(untaggedCount) one-off jobs")
+                                .novaFont(.caption).foregroundStyle(.secondary)
+                                .padding(.horizontal, 4).padding(.top, 2)
+                        }
+                    }
+                    .padding(8)
                 }
             }
-            ProgressView(value: lane.totalCount == 0 ? 0
-                         : Double(lane.completedCount) / Double(lane.totalCount))
-                .tint(EVTheme.accent)
-            Text("\(lane.completedCount)/\(lane.totalCount) steps")
-                .novaFont(.caption).foregroundStyle(.secondary)
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.08)))
+        .frame(width: 240)
+        .background(Color.white.opacity(0.03))
+    }
+
+    @ViewBuilder private var filterControl: some View {
+        if pluginIDs.count <= 4 {
+            Picker("", selection: $pluginFilter) {
+                Text("All").tag(String?.none)
+                ForEach(pluginIDs, id: \.self) { id in Text(pluginLabel(id)).tag(String?.some(id)) }
+            }
+            .pickerStyle(.segmented)
+            .padding(10)
+        } else {
+            Menu {
+                Button("All sources") { pluginFilter = nil }
+                ForEach(pluginIDs, id: \.self) { id in
+                    Button(pluginLabel(id)) { pluginFilter = id }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(pluginFilter.map(pluginLabel) ?? "All sources")
+                        .novaFont(.caption, weight: .bold).lineLimit(1)
+                    Image(systemName: "chevron.down").font(.caption2)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
+            .padding(10)
+        }
+    }
+
+    private func row(_ lane: StoryMapLane) -> some View {
+        Button { selectedKey = lane.key } label: {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 2).fill(governmentColor(lane.governmentID)).frame(width: 4)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(lane.title).novaFont(.body, weight: .bold).lineLimit(1)
+                        Spacer()
+                        if lane.isComplete {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).font(.caption)
+                        }
+                    }
+                    ProgressView(value: lane.totalCount == 0 ? 0
+                                 : Double(lane.completedCount) / Double(lane.totalCount))
+                        .tint(EVTheme.accent)
+                    Text("\(lane.completedCount)/\(lane.totalCount) steps")
+                        .novaFont(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8)
+                .fill(lane.key == selectedKey ? EVTheme.accent.opacity(0.18) : Color.clear))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -437,33 +630,40 @@ private struct LaneHeader: View {
 private struct NodeCard: View {
     let node: StoryMapNode
     let isSelected: Bool
+    let govtColor: Color
+    let crossLinks: [CrossLink]
+    var onCrossLink: (String) -> Void = { _ in }
 
     private var step: StorylineStep { node.step }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: step.status.symbolName)
-                    .foregroundStyle(step.status.tint)
-                Text("Step \(step.stepNumber)").novaFont(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            Rectangle().fill(govtColor).frame(width: 3)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Image(systemName: step.status.symbolName)
+                        .foregroundStyle(step.status.tint)
+                    Text("Step \(step.stepNumber)").novaFont(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Text(step.status.label.uppercased())
+                        .novaFont(.caption, weight: .bold)
+                        .foregroundStyle(step.status.tint)
+                }
+                Text(step.displayName)
+                    .novaFont(.body, weight: .bold)
+                    .foregroundStyle(EVTheme.text)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(shortObjective)
+                    .novaFont(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
-                Text(step.status.label.uppercased())
-                    .novaFont(.caption, weight: .bold)
-                    .foregroundStyle(step.status.tint)
+                if !crossLinks.isEmpty || !node.deadEndOutcomes.isEmpty { footer }
             }
-            Text(step.displayName)
-                .novaFont(.body, weight: .bold)
-                .foregroundStyle(EVTheme.text)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 0)
-            Text(shortObjective)
-                .novaFont(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
         }
-        .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 12).fill(bgColor))
         .overlay(
@@ -471,12 +671,34 @@ private struct NodeCard: View {
                 .strokeBorder(step.status.tint.opacity(isSelected ? 1 : 0.55),
                               lineWidth: isSelected ? 2.5 : 1.5)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         // A drop shadow forces an offscreen render pass per view; with
-        // potentially hundreds of cards on screen at once that compositing
-        // cost was a real contributor to the map's lag/crashes on iPhone, so
-        // only the selected card pays for one.
+        // potentially many cards on screen at once that compositing cost is a
+        // real contributor to lag on iPhone, so only the selected card pays.
         .shadow(color: isSelected ? .black.opacity(0.35) : .clear, radius: isSelected ? 8 : 0, y: 2)
         .opacity(step.status == .locked && !isSelected ? 0.82 : 1)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            if let link = crossLinks.first {
+                Button { onCrossLink(link.key) } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: link.outgoing ? "arrowshape.turn.up.right" : "arrowshape.turn.up.left")
+                        Text(link.key)
+                    }
+                }
+                .buttonStyle(.plain)
+                .novaFont(.caption, weight: .bold)
+                .foregroundStyle(EVTheme.accent)
+                .lineLimit(1)
+            }
+            if !node.deadEndOutcomes.isEmpty {
+                Label("Dead end", systemImage: "xmark.octagon")
+                    .novaFont(.caption).foregroundStyle(.red.opacity(0.85)).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     private var bgColor: Color {
@@ -496,6 +718,9 @@ private struct NodeCard: View {
 
 private struct NodeInspector: View {
     let node: StoryMapNode
+    let govtName: String?
+    let crossLinks: [CrossLink]
+    var onJump: (String) -> Void = { _ in }
     var onClose: () -> Void
 
     private var step: StorylineStep { node.step }
@@ -518,19 +743,12 @@ private struct NodeInspector: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    if step.status == .available {
-                        field("Get it at", step.offeredAt)
-                        field("Objective", step.objective)
-                        field("Reward", step.reward)
-                    } else if step.status == .active {
-                        field("Objective", step.objective)
-                        field("Reward", step.reward)
-                    } else if step.status == .completed {
-                        field("Objective", step.objective)
-                        field("Reward", step.reward)
-                    } else { // locked
-                        field("Objective", step.objective)
-                        field("Reward", step.reward)
+                    field("Objective", step.objective)
+                    field("Reward", step.reward)
+                    if step.status == .available { field("Get it at", step.offeredAt) }
+                    if let govtName { field("Government", govtName) }
+
+                    if step.status == .locked {
                         Text("How to unlock").novaFont(.caption, weight: .bold)
                             .foregroundStyle(EVTheme.accent).padding(.top, 2)
                         if step.blockers.isEmpty {
@@ -539,6 +757,23 @@ private struct NodeInspector: View {
                             ForEach(step.blockers, id: \.bit) { b in unlockHint(b) }
                         }
                     }
+
+                    if !node.deadEndOutcomes.isEmpty {
+                        Text("Can end the story here").novaFont(.caption, weight: .bold)
+                            .foregroundStyle(.red.opacity(0.85)).padding(.top, 2)
+                        Text("On \(node.deadEndOutcomes.map(\.rawValue).joined(separator: " or ")), this line may end rather than continue.")
+                            .novaFont(.caption).foregroundStyle(.secondary)
+                    }
+
+                    ForEach(crossLinks) { link in
+                        Button { onJump(link.key) } label: {
+                            Text(link.outgoing ? "→ Leads into the \(link.key) campaign"
+                                               : "← Started from the \(link.key) campaign")
+                                .novaFont(.caption, weight: .bold)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(EVTheme.accent).padding(.top, 2)
+                    }
+
                     if !step.synopsis.isEmpty {
                         Divider().opacity(0.2).padding(.vertical, 2)
                         Text(step.synopsis).novaFont(.caption).foregroundStyle(.secondary)
@@ -578,6 +813,6 @@ private struct NodeInspector: View {
 }
 
 #Preview("Story Map") {
-    StorylineMapView(map: StoryGuideModel.sample.storyMap)
+    StorylineMapView(model: .sample)
         .frame(width: 900, height: 620)
 }

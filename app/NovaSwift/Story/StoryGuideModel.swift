@@ -35,16 +35,26 @@ final class StoryGuideModel: ObservableObject {
     @Published private(set) var storyMap: StoryMap = StoryMap(lanes: [], nodes: [], edges: [], untaggedCount: 0)
     @Published private(set) var pilot: PilotSummary
     @Published private(set) var untaggedCount: Int = 0
+    /// The loaded game's government colors, built once (colors don't depend
+    /// on pilot state, so this isn't rebuilt every `refresh()`). Shared logic
+    /// with the galaxy map — see `GovernmentPalette`.
+    @Published private(set) var governmentPalette: GovernmentPalette?
 
     private let game: NovaGame?
     private var player: PlayerState
     private let analyzer: StorylineAnalyzer?
+    /// Enabled + installed plug-ins, for `pluginLabel(_:)` display-name lookup
+    /// only — `Storyline`/`StoryMapLane.pluginID` (a plain `Resource.pluginID`
+    /// tag) is resolved without this.
+    private let plugins: [PluginBundle]
 
     /// Build from a live game + pilot.
-    init(game: NovaGame, player: PlayerState) {
+    init(game: NovaGame, player: PlayerState, plugins: [PluginBundle] = []) {
         self.game = game
         self.player = player
+        self.plugins = plugins
         self.analyzer = StorylineAnalyzer(game: game)
+        self.governmentPalette = GovernmentPalette(game: game)
         self.pilot = PilotSummary(name: player.pilotName, credits: player.credits,
                                   combatRating: player.combatRating, shipName: "", currentSystem: "",
                                   date: player.date.description, ranks: [], relations: [], activeMissions: [])
@@ -56,11 +66,33 @@ final class StoryGuideModel: ObservableObject {
         self.game = nil
         self.player = PlayerState()
         self.analyzer = nil
+        self.plugins = []
+        self.governmentPalette = nil
         self.pilot = StoryGuideModel.samplePilot
         self.storylines = StoryGuideModel.sampleStorylines
         self.untaggedCount = 537
         self.storyMap = StoryGuideModel.synthesizeMap(from: StoryGuideModel.sampleStorylines,
                                                       untagged: 537)
+    }
+
+    /// Display name for a `Storyline`/`StoryMapLane.pluginID` — `""` (base
+    /// game) reads as "Base Game"; an unrecognized/uninstalled id falls back
+    /// to the raw id itself (still meaningful — it's the plug-in's folder name).
+    func pluginLabel(_ id: String) -> String {
+        id.isEmpty ? "Base Game" : (plugins.first { $0.id == id }?.name ?? id)
+    }
+
+    /// A storyline/lane's government color, or the shared neutral gray when
+    /// it has no resolved government.
+    func governmentColor(_ governmentID: Int?) -> Color {
+        guard let governmentID else { return GovernmentPalette.independent }
+        return governmentPalette?.color(for: governmentID) ?? GovernmentPalette.independent
+    }
+
+    /// A storyline/lane's government display name, when it has one.
+    func governmentName(_ governmentID: Int?) -> String? {
+        guard let governmentID else { return nil }
+        return game?.govt(governmentID)?.name
     }
 
     static var sample: StoryGuideModel { StoryGuideModel(sample: true) }
@@ -119,24 +151,26 @@ final class StoryGuideModel: ObservableObject {
         Storyline(key: "Vellos", title: "Vellos",
                   steps: [
                     step(128, "Delivery to Earth", 1, .completed,
-                         obj: "Deliver 5t of cargo to Earth", reward: "15,000 cr"),
+                         obj: "Deliver 5t of cargo to Earth", reward: "15,000 cr", govt: 128),
                     step(129, "Visit Vell-os Homeworld", 2, .active,
-                         obj: "Travel to Kania", reward: "8,000 cr"),
+                         obj: "Travel to Kania", reward: "8,000 cr", govt: 128),
                     step(130, "Return to Earth for Training", 3, .locked,
                          obj: "Report to Earth", reward: "—",
                          blockers: [BlockingBit(bit: 351, needsSet: true, unlockedBy: [
                             UnlockSource(kind: .mission, id: 129, name: "Visit Vell-os Homeworld",
-                                         hint: "Complete “Visit Vell-os Homeworld”")])]),
+                                         hint: "Complete “Visit Vell-os Homeworld”")])], govt: 128),
                     step(131, "Infiltrate the Rebels", 4, .locked,
-                         obj: "Travel to Rebel space", reward: "20,000 cr")],
-                  completedCount: 1, totalCount: 4, currentStepID: 129),
+                         obj: "Travel to Rebel space", reward: "20,000 cr", govt: 128)],
+                  completedCount: 1, totalCount: 4, currentStepID: 129,
+                  governmentID: 128, pluginID: ""),
         Storyline(key: "Federation", title: "Federation",
                   steps: [
                     step(428, "Federation Resupply", 1, .available,
-                         obj: "Deliver 20t of cargo to Levo", reward: "12,000 cr · +standing with Federation"),
+                         obj: "Deliver 20t of cargo to Levo", reward: "12,000 cr · +standing with Federation", govt: 128),
                     step(429, "Patrol the Frontier", 2, .locked,
-                         obj: "Destroy 3 ships", reward: "30,000 cr")],
-                  completedCount: 0, totalCount: 2, currentStepID: 428)]
+                         obj: "Destroy 3 ships", reward: "30,000 cr", govt: 128)],
+                  completedCount: 0, totalCount: 2, currentStepID: 428,
+                  governmentID: 128, pluginID: "SamplePlugin")]
 
     /// Build a StoryMap from resolved storylines without a live analyzer — used
     /// for previews and the `.sample` model. Lays each storyline out as a lane
@@ -148,7 +182,8 @@ final class StoryGuideModel: ObservableObject {
         for (laneIndex, line) in lines.enumerated() {
             lanes.append(StoryMapLane(key: line.key, title: line.title, index: laneIndex,
                                       completedCount: line.completedCount,
-                                      totalCount: line.totalCount, isComplete: line.isComplete))
+                                      totalCount: line.totalCount, isComplete: line.isComplete,
+                                      governmentID: line.governmentID, pluginID: line.pluginID))
             for (rowIndex, s) in line.steps.enumerated() {
                 nodes.append(StoryMapNode(step: s, storylineKey: line.key,
                                           laneIndex: laneIndex, rowIndex: rowIndex))
@@ -162,10 +197,11 @@ final class StoryGuideModel: ObservableObject {
     }
 
     private static func step(_ id: Int, _ name: String, _ n: Int, _ status: MissionStatus,
-                             obj: String, reward: String, blockers: [BlockingBit] = []) -> StorylineStep {
+                             obj: String, reward: String, blockers: [BlockingBit] = [],
+                             govt: Int? = nil) -> StorylineStep {
         StorylineStep(missionID: id, displayName: name, stepNumber: n, status: status,
                       offeredAt: "Mission Computer", objective: obj, reward: reward,
-                      blockers: blockers, synopsis: "")
+                      blockers: blockers, synopsis: "", governmentID: govt)
     }
 }
 

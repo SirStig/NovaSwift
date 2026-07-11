@@ -94,6 +94,88 @@ final class StorylineAnalyzerTests: XCTestCase {
         XCTAssertEqual(map.untaggedCount, 1)
     }
 
+    // MARK: Branching (outcome-tagged edges, random choices, dead ends)
+
+    func testStoryMapBranchesBySuccessAndFailureOutcome() {
+        // Same mission's onSuccess and onFailure each start a *different*
+        // follow-up — two distinct `.starts` edges, not collapsed into one.
+        let m1 = MissionSpec(id: 510, name: "Kickoff; Branch1",
+                             onSuccess: "S511", onFailure: "S512").resource()
+        let m2 = MissionSpec(id: 511, name: "Success path; Branch2").resource()
+        let m3 = MissionSpec(id: 512, name: "Failure path; Branch3").resource()
+        let a = StorylineAnalyzer(game: makeGame([m1, m2, m3, spobResource(id: 128, govt: 128)]))
+        let map = a.storyMap(for: PlayerState())
+        let successEdge = try! XCTUnwrap(map.edges.first { $0.from == 510 && $0.to == 511 })
+        let failureEdge = try! XCTUnwrap(map.edges.first { $0.from == 510 && $0.to == 512 })
+        XCTAssertEqual(successEdge.kind, .starts)
+        XCTAssertEqual(successEdge.outcome, .success)
+        XCTAssertEqual(failureEdge.outcome, .failure)
+        XCTAssertNotEqual(successEdge.id, failureEdge.id)
+    }
+
+    func testStoryMapRandomStartIsFlagged() {
+        // R(...) 50/50 choice: both arms are real edges, both flagged random.
+        let m1 = MissionSpec(id: 520, name: "Coinflip; Rand1",
+                             onSuccess: "R(S521 S522)").resource()
+        let m2 = MissionSpec(id: 521, name: "Heads; Rand2").resource()
+        let m3 = MissionSpec(id: 522, name: "Tails; Rand3").resource()
+        let a = StorylineAnalyzer(game: makeGame([m1, m2, m3, spobResource(id: 128, govt: 128)]))
+        let map = a.storyMap(for: PlayerState())
+        let toHeads = try! XCTUnwrap(map.edges.first { $0.from == 520 && $0.to == 521 })
+        let toTails = try! XCTUnwrap(map.edges.first { $0.from == 520 && $0.to == 522 })
+        XCTAssertTrue(toHeads.isRandom)
+        XCTAssertTrue(toTails.isRandom)
+    }
+
+    func testStoryMapRandomDeadEndIsRecorded() {
+        // R(continue, abort): the continuing arm is a real edge; the abort
+        // arm should still surface as a dead end for that outcome instead of
+        // silently vanishing.
+        let m1 = MissionSpec(id: 530, name: "Risky; Dead1",
+                             onSuccess: "R(S531 A999)").resource()
+        let m2 = MissionSpec(id: 531, name: "Continues; Dead2").resource()
+        let a = StorylineAnalyzer(game: makeGame([m1, m2, spobResource(id: 128, govt: 128)]))
+        let map = a.storyMap(for: PlayerState())
+        XCTAssertTrue(map.edges.contains { $0.from == 530 && $0.to == 531 && $0.outcome == .success })
+        let node = try! XCTUnwrap(map.nodes.first { $0.id == 530 })
+        XCTAssertTrue(node.deadEndOutcomes.contains(.success))
+    }
+
+    func testStoryMapPlainAbortWithNoStartIsDeadEnd() {
+        let m1 = MissionSpec(id: 540, name: "Grim; Dead1", onFailure: "A128").resource()
+        let m2 = MissionSpec(id: 541, name: "Only other step; Dead2").resource()
+        let a = StorylineAnalyzer(game: makeGame([m1, m2, spobResource(id: 128, govt: 128)]))
+        let map = a.storyMap(for: PlayerState())
+        let node = try! XCTUnwrap(map.nodes.first { $0.id == 540 })
+        XCTAssertEqual(node.deadEndOutcomes, [.failure])
+    }
+
+    // MARK: Government / plug-in provenance
+
+    func testStorylineGovernmentIDIsModeAcrossSteps() {
+        let m1 = MissionSpec(id: 550, name: "First; Govt1", compRewardGovt: 128).resource()
+        let m2 = MissionSpec(id: 551, name: "Second; Govt2", compRewardGovt: 128).resource()
+        let m3 = MissionSpec(id: 552, name: "Third; Govt3", compRewardGovt: 129).resource()
+        let a = StorylineAnalyzer(game: makeGame([m1, m2, m3, spobResource(id: 128, govt: 128)]))
+        let line = try! XCTUnwrap(a.storylines(for: PlayerState()).first)
+        XCTAssertEqual(line.governmentID, 128)   // 128 appears twice, 129 once
+    }
+
+    func testStorylinePluginIDFromResourceProvenance() {
+        var base = ResourceCollection()
+        base.add(spobResource(id: 128, govt: 128))
+        var pluginCol = ResourceCollection()
+        pluginCol.add(MissionSpec(id: 560, name: "Add-on step 1; Addon1").resource())
+        pluginCol.add(MissionSpec(id: 561, name: "Add-on step 2; Addon2").resource())
+        base.overlay(pluginCol, tag: "MyPlugin")
+
+        let game = NovaGame(base)
+        XCTAssertEqual(game.mission(560)?.sourcePlugin, "MyPlugin")
+        let a = StorylineAnalyzer(game: game)
+        let line = try! XCTUnwrap(a.storylines(for: PlayerState()).first { $0.key == "Addon" })
+        XCTAssertEqual(line.pluginID, "MyPlugin")
+    }
+
     func testObjectiveAndRewardText() {
         let m = MissionSpec(id: 700, name: "Haul; Job1", returnStellar: 128,
                             cargoType: 1, cargoQty: 8, cargoPickup: 0, cargoDropoff: 1,

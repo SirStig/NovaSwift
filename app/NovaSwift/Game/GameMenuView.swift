@@ -183,7 +183,7 @@ struct GameMenuView: View {
             return
         }
         storyTab = tab
-        storyModel = .over(game, player: model.pilot.state)
+        storyModel = .over(game, player: model.pilot.state, plugins: model.data.plugins)
     }
 
     /// Abort an active mission from the pilot panel and reflect it immediately:

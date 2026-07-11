@@ -57,6 +57,7 @@ struct MissionSpec {
     var onSuccess = ""
     var onFailure = ""
     var onAbort = ""
+    var onShipDone = ""
 
     func resource() -> Resource {
         var b = [UInt8](repeating: 0, count: 1970)
@@ -90,6 +91,7 @@ struct MissionSpec {
         Bytes.cstr(&b, 1112, onFailure)
         Bytes.cstr(&b, 1367, onAbort)
         Bytes.i16(&b, 1630, datePostIncrement)
+        Bytes.cstr(&b, 1632, onShipDone)
         return Resource(type: NovaType.mission, id: id, name: name, data: Data(b))
     }
 }
@@ -141,6 +143,17 @@ func spobResource(id: Int, govt: Int) -> Resource {
     Bytes.i16(&b, 20, govt)
     Bytes.i16(&b, 24, 1000)   // landingPictID > 0 → "inhabited"
     return Resource(type: NovaType.spob, id: id, name: "Spob \(id)", data: Data(b))
+}
+
+/// A government with a real `mapColor` (LCOL, `0x00RRGGBB` @164) so palette /
+/// territory-color logic can be tested without a black (unset) fallback.
+func govtResource(id: Int, name: String = "Test Govt", mapColor: (r: UInt8, g: UInt8, b: UInt8) = (0, 0, 0)) -> Resource {
+    var b = [UInt8](repeating: 0, count: 176)
+    b[164] = 0
+    b[165] = mapColor.r
+    b[166] = mapColor.g
+    b[167] = mapColor.b
+    return Resource(type: NovaType.govt, id: id, name: name, data: Data(b))
 }
 
 /// Build a NovaGame from a set of resources.

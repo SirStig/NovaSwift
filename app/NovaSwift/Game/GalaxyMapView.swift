@@ -28,9 +28,9 @@ struct GalaxyMapView: View {
     @State private var pan: CGSize = .zero
     @State private var dragLast: CGSize = .zero
     @State private var pinchStartZoom: CGFloat?
-    /// Faction map colors, keyed by `gövt` id — built once per data load, since
-    /// the resource format carries no color field of its own (see `rebuildGovtColors`).
-    @State private var govtColors: [Int: Color] = [:]
+    /// Government territory/faction colors — built once per data load (see
+    /// `rebuildGovtColors`), shared with the Story Map via `GovernmentPalette`.
+    @State private var govtPalette: GovernmentPalette?
     /// Built locally (not threaded in from `GameContainerView`, which this
     /// workstream doesn't touch) — cheap, and `SpaceportGraphics` already owns
     /// the PICT/button-slice/label decode+cache this chrome needs.
@@ -64,22 +64,8 @@ struct GalaxyMapView: View {
     private let routeGreen = Color(red: 0.3, green: 0.95, blue: 0.4)
     private let routeWarn = Color(red: 1.0, green: 0.4, blue: 0.32)
     private let adjacentGrey = Color(white: 0.42)
-    private let independentColor = Color(white: 0.62)
     private let gateHyper = Color(red: 0.3, green: 0.85, blue: 0.95).opacity(0.85)     // hypergate link
     private let gateWormhole = Color(red: 0.78, green: 0.45, blue: 1.0).opacity(0.85)  // wormhole link
-    /// Deterministic per-faction palette: the `gövt` resource carries no color of
-    /// its own, so distinct governments are assigned a distinct hue by sorted id.
-    /// Kept visually apart from `amber` (current system) and the route colors.
-    private static let factionPalette: [Color] = [
-        Color(red: 0.35, green: 0.62, blue: 1.0),   // blue
-        Color(red: 1.0, green: 0.4, blue: 0.4),     // red
-        Color(red: 0.72, green: 0.48, blue: 1.0),   // purple
-        Color(red: 0.3, green: 0.82, blue: 0.85),   // cyan
-        Color(red: 1.0, green: 0.52, blue: 0.76),   // pink
-        Color(red: 0.93, green: 0.84, blue: 0.35),  // gold
-        Color(red: 0.28, green: 0.72, blue: 0.62),  // teal
-        Color(red: 0.62, green: 0.6, blue: 0.95),   // lavender
-    ]
 
     var body: some View {
         ZStack {
@@ -145,16 +131,10 @@ struct GalaxyMapView: View {
         }
     }
 
-    /// Sort known governments by id and assign each a distinct palette color.
-    /// Independent/unresolved (`-1` or no matching `gövt`) always renders grey.
+    /// Build the shared government color palette for the loaded game.
     private func rebuildGovtColors() {
         guard let game = nav.game else { return }
-        let ids = game.govts().map(\.id).sorted()
-        var map: [Int: Color] = [:]
-        for (i, id) in ids.enumerated() {
-            map[id] = Self.factionPalette[i % Self.factionPalette.count]
-        }
-        govtColors = map
+        govtPalette = GovernmentPalette(game: game)
     }
 
     /// Decode each `nëbu` and resolve its artwork (highest-res PICT of the
@@ -206,26 +186,13 @@ struct GalaxyMapView: View {
         missionDestinations = engine.missionDestinationSystemIDs()
     }
 
-    private func factionColor(for government: Int) -> Color {
-        guard government >= 0, let color = govtColors[government] else { return independentColor }
-        return color
-    }
-
-    /// A `NovaColor` (the `gövt` map/ship colour fields) as a SwiftUI `Color`.
-    private func color(_ c: NovaColor) -> Color {
-        Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
-    }
-
     /// A government's authentic **territory** colour — its real `gövt.mapColor`
-    /// (Federation blue, Auroran red, the Pirate families' greys, …). Falls back
-    /// to the synthetic palette only when the data leaves it black (16 of the 68
-    /// base governments do). Used for the background regions, *not* the dots.
+    /// (Federation blue, Auroran red, the Pirate families' greys, …), falling
+    /// back to a deterministic per-faction hue when the data leaves it black.
+    /// Used for the background regions, *not* the relationship dots. See
+    /// `GovernmentPalette`.
     private func govtMapColor(_ government: Int, game: NovaGame) -> Color {
-        guard government >= 0 else { return independentColor }
-        if let mc = game.govt(government)?.mapColor, mc.r != 0 || mc.g != 0 || mc.b != 0 {
-            return color(mc)
-        }
-        return factionColor(for: government)
+        govtPalette?.color(for: government) ?? GovernmentPalette.independent
     }
 
     // Relation dot colours — the player's *standing* with a system's government,

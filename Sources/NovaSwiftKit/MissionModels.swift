@@ -112,6 +112,9 @@ public enum MissionOfferLocation: Int, Sendable {
 public struct MissionRes: Sendable {
     public let id: Int
     public let name: String
+    /// Which plug-in contributed this mission's currently-active definition
+    /// (`""` = base game). See `Resource.pluginID`.
+    public let sourcePlugin: String
 
     // Availability
     public let availStellar: Int      // spob/special code where offered (-1 = any inhabited)
@@ -205,6 +208,7 @@ public struct MissionRes: Sendable {
     public init(_ r: Resource) {
         id = r.id
         name = r.name
+        sourcePlugin = r.pluginID
         let d = r.data
 
         availStellar   = mi16(d, 0)

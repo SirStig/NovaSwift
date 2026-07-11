@@ -7,6 +7,10 @@ public struct Resource: Hashable {
     public let name: String
     public let attributes: Int
     public let data: Data
+    /// Which layer contributed this resource in the merged collection: ""
+    /// for the base game, else the owning `PluginBundle.id` — stamped by
+    /// `ResourceCollection.overlay(_:tag:)` during `GameLibrary.merge`.
+    public var pluginID: String = ""
 
     public init(type: FourCharCode, id: Int, name: String = "", attributes: Int = 0, data: Data) {
         self.type = type
@@ -32,10 +36,15 @@ public struct ResourceCollection {
     }
 
     /// Merge another collection on top of this one (its resources win on collision).
-    public mutating func overlay(_ other: ResourceCollection) {
+    /// `tag`, when non-empty, stamps every incoming resource's `pluginID` —
+    /// used by `GameLibrary.merge` to record which plug-in (if any) last
+    /// contributed each `(type, id)`.
+    public mutating func overlay(_ other: ResourceCollection, tag: String = "") {
         for (_, resources) in other.byType {
             for (_, resource) in resources {
-                add(resource)
+                var r = resource
+                if !tag.isEmpty { r.pluginID = tag }
+                add(r)
             }
         }
     }

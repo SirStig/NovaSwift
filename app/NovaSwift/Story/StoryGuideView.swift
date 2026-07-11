@@ -44,7 +44,7 @@ struct StoryGuideView: View {
             switch tab {
             case .story: StorylineBrowserView(storylines: model.storylines,
                                               untaggedCount: model.untaggedCount)
-            case .map:   StorylineMapView(map: model.storyMap)
+            case .map:   StorylineMapView(model: model)
             }
         }
         // Fill whatever container presents us (a sheet on iOS, the sized sheet

@@ -57,13 +57,19 @@ public struct StorylineStep: Identifiable, Codable, Sendable {
     public let reward: String           // "15,000 cr · +Federation standing"
     public let blockers: [BlockingBit]  // populated when status == .locked
     public let synopsis: String         // the offer/briefing text (may be empty)
+    /// The government whose standing this step's completion rewards (its
+    /// `compRewardGovt`), when it has one — used to color the storyline it
+    /// belongs to by that government's real map color. `nil` when the step
+    /// carries no reward-government field.
+    public let governmentID: Int?
 
     public init(missionID: Int, displayName: String, stepNumber: Int, status: MissionStatus,
                 offeredAt: String, objective: String, reward: String,
-                blockers: [BlockingBit], synopsis: String) {
+                blockers: [BlockingBit], synopsis: String, governmentID: Int? = nil) {
         self.missionID = missionID; self.displayName = displayName; self.stepNumber = stepNumber
         self.status = status; self.offeredAt = offeredAt; self.objective = objective
         self.reward = reward; self.blockers = blockers; self.synopsis = synopsis
+        self.governmentID = governmentID
     }
 }
 
@@ -77,12 +83,25 @@ public struct Storyline: Identifiable, Codable, Sendable {
     public var totalCount: Int
     /// The first step that isn't completed — "where you are now".
     public var currentStepID: Int?
+    /// This storyline's owning government — the mode of its steps'
+    /// `governmentID` (nils excluded from the vote, ties broken by first
+    /// appearance). `nil` when no step carries a reward government at all.
+    /// A heuristic: a storyline split evenly across two governments, or one
+    /// where a plug-in extension outweighs the original steps, picks
+    /// whichever is most common, not necessarily "the intended owner".
+    public var governmentID: Int?
+    /// Which plug-in contributed this storyline (`""` = base game) — the
+    /// mode of its steps' underlying mission `sourcePlugin`, same heuristic
+    /// as `governmentID`.
+    public var pluginID: String
 
     public init(key: String, title: String, steps: [StorylineStep],
-                completedCount: Int, totalCount: Int, currentStepID: Int?) {
+                completedCount: Int, totalCount: Int, currentStepID: Int?,
+                governmentID: Int? = nil, pluginID: String = "") {
         self.key = key; self.title = title; self.steps = steps
         self.completedCount = completedCount; self.totalCount = totalCount
         self.currentStepID = currentStepID
+        self.governmentID = governmentID; self.pluginID = pluginID
     }
 
     public var isComplete: Bool { completedCount >= totalCount && totalCount > 0 }
@@ -104,10 +123,19 @@ public struct StoryMapNode: Identifiable, Sendable {
     public let laneIndex: Int
     /// Vertical order within the lane (0 = first step).
     public let rowIndex: Int
+    /// Outcomes whose script explicitly ends the story here (an
+    /// `.abortMission`/`.failMission` op, with or without a sibling
+    /// `.startMission` elsewhere in the same script — see
+    /// `StorylineAnalyzer.hasDeadEnd`) rather than continuing to another
+    /// mission. Surfaced so a random/outcome branch that terminates doesn't
+    /// just silently vanish from the map.
+    public let deadEndOutcomes: [StoryMapEdge.Outcome]
 
-    public init(step: StorylineStep, storylineKey: String, laneIndex: Int, rowIndex: Int) {
+    public init(step: StorylineStep, storylineKey: String, laneIndex: Int, rowIndex: Int,
+                deadEndOutcomes: [StoryMapEdge.Outcome] = []) {
         self.step = step; self.storylineKey = storylineKey
         self.laneIndex = laneIndex; self.rowIndex = rowIndex
+        self.deadEndOutcomes = deadEndOutcomes
     }
 }
 
@@ -117,13 +145,26 @@ public struct StoryMapEdge: Identifiable, Sendable, Hashable {
         case unlocks   // `from` sets a control bit that `to` requires
         case starts    // `from` directly starts `to` (an S-op in its script)
     }
+    /// Which of a mission's six outcome scripts produced a `.starts` edge —
+    /// always `nil` for `.unlocks` edges, which aren't tied to one outcome.
+    public enum Outcome: String, Sendable, Hashable {
+        case accept, success, failure, refuse, abort, shipDone
+    }
     public let from: Int   // mission id
     public let to: Int     // mission id
     public let kind: Kind
-    public var id: String { "\(from)-\(to)-\(kind.rawValue)" }
+    public let outcome: Outcome?
+    /// True when this `.starts` edge came from inside an `R(...)` 50/50
+    /// choice — the branch is one of two+ random possibilities, not certain.
+    public let isRandom: Bool
+    /// Distinguishes concurrent branches between the same two missions (e.g.
+    /// `onSuccess` and `onFailure` both starting the same follow-up) — two
+    /// such edges share `from`/`to`/`kind` but differ in `outcome`.
+    public var id: String { "\(from)-\(to)-\(kind.rawValue)-\(outcome?.rawValue ?? "")-\(isRandom)" }
 
-    public init(from: Int, to: Int, kind: Kind) {
+    public init(from: Int, to: Int, kind: Kind, outcome: Outcome? = nil, isRandom: Bool = false) {
         self.from = from; self.to = to; self.kind = kind
+        self.outcome = outcome; self.isRandom = isRandom
     }
 }
 
@@ -135,13 +176,20 @@ public struct StoryMapLane: Identifiable, Sendable {
     public let completedCount: Int
     public let totalCount: Int
     public let isComplete: Bool
+    /// See `Storyline.governmentID`/`Storyline.pluginID` — carried onto the
+    /// lane so the map/sidebar can color and group by them without needing
+    /// the full resolved `Storyline` alongside the `StoryMap`.
+    public let governmentID: Int?
+    public let pluginID: String
     public var id: String { key }
 
     public init(key: String, title: String, index: Int,
-                completedCount: Int, totalCount: Int, isComplete: Bool) {
+                completedCount: Int, totalCount: Int, isComplete: Bool,
+                governmentID: Int? = nil, pluginID: String = "") {
         self.key = key; self.title = title; self.index = index
         self.completedCount = completedCount; self.totalCount = totalCount
         self.isComplete = isComplete
+        self.governmentID = governmentID; self.pluginID = pluginID
     }
 }
 
@@ -194,9 +242,12 @@ public final class StorylineAnalyzer {
             }
             let done = steps.filter { $0.status == .completed }.count
             let current = steps.first { $0.status != .completed }?.missionID
+            let govt = Self.mode(steps.compactMap(\.governmentID))
+            let plugin = Self.mode(ordered.map(\.sourcePlugin).filter { !$0.isEmpty }) ?? ""
             result.append(Storyline(key: key, title: key, steps: steps,
                                     completedCount: done, totalCount: steps.count,
-                                    currentStepID: current))
+                                    currentStepID: current,
+                                    governmentID: govt, pluginID: plugin))
         }
         // In-progress first, then not-started, then finished; alphabetical within.
         return result.sorted { a, b in
@@ -227,53 +278,129 @@ public final class StorylineAnalyzer {
     /// nodes (every tagged mission with live status), and the dependency edges
     /// between them. Edges come from two sources — a mission that **sets** a
     /// control bit another mission **requires** (`.unlocks`), and a mission that
-    /// **directly starts** another via an S-op in its script (`.starts`). Only
-    /// links between missions that are both on the map are drawn, so the graph
-    /// stays a readable campaign map rather than the full 500-mission tangle.
+    /// **directly starts** another via an S-op in one of its six outcome
+    /// scripts (`.starts`, tagged with which outcome and whether it came from
+    /// an `R(...)` random choice). Only links between missions that are both
+    /// on the map are drawn, so the graph stays a readable campaign map
+    /// rather than the full 500-mission tangle.
     public func storyMap(for player: PlayerState) -> StoryMap {
         let lines = storylines(for: player)
         var lanes: [StoryMapLane] = []
-        var nodes: [StoryMapNode] = []
         var onMap = Set<Int>()
-
         for (laneIndex, line) in lines.enumerated() {
             lanes.append(StoryMapLane(key: line.key, title: line.title, index: laneIndex,
                                       completedCount: line.completedCount,
-                                      totalCount: line.totalCount, isComplete: line.isComplete))
-            for (rowIndex, step) in line.steps.enumerated() {
-                nodes.append(StoryMapNode(step: step, storylineKey: line.key,
-                                          laneIndex: laneIndex, rowIndex: rowIndex))
-                onMap.insert(step.missionID)
+                                      totalCount: line.totalCount, isComplete: line.isComplete,
+                                      governmentID: line.governmentID, pluginID: line.pluginID))
+            for step in line.steps { onMap.insert(step.missionID) }
+        }
+
+        // `.starts`: every outcome script that directly launches another
+        // on-map mission, including nested inside an `R(...)` random choice
+        // (flagged `isRandom`). A direct script link beats an incidental
+        // `.unlocks` bit dependency between the same ordered pair, so
+        // `.unlocks` edges below skip any pair already linked here.
+        var startPairs = Set<String>()
+        var edges: [String: StoryMapEdge] = [:]
+        var deadEnds: [Int: [StoryMapEdge.Outcome]] = [:]
+        for missionID in onMap {
+            guard let m = game.mission(missionID) else { continue }
+            let scripts: [(String, StoryMapEdge.Outcome)] = [
+                (m.onAccept, .accept), (m.onRefuse, .refuse), (m.onSuccess, .success),
+                (m.onFailure, .failure), (m.onAbort, .abort), (m.onShipDone, .shipDone)]
+            for (expr, outcome) in scripts {
+                let ops = NCBSet.parse(expr)
+                for (target, isRandom) in Self.flattenStartMissions(ops)
+                        where target != m.id && onMap.contains(target) {
+                    let e = StoryMapEdge(from: m.id, to: target, kind: .starts,
+                                         outcome: outcome, isRandom: isRandom)
+                    edges[e.id] = e
+                    startPairs.insert("\(m.id)-\(target)")
+                }
+                // An abort/fail op — even one arm of a random choice whose
+                // other arm starts a follow-up — means this outcome may end
+                // the story here; worth surfacing rather than silently
+                // dropping that branch from the map.
+                if Self.hasDeadEnd(ops) { deadEnds[m.id, default: []].append(outcome) }
             }
         }
 
-        // De-duplicate to one edge per ordered pair; a direct `.starts` link
-        // beats an incidental `.unlocks` bit dependency between the same two.
-        var edges: [String: StoryMapEdge] = [:]
-        func add(_ from: Int, _ to: Int, _ kind: StoryMapEdge.Kind) {
-            guard from != to, onMap.contains(from), onMap.contains(to) else { return }
-            let key = "\(from)-\(to)"
-            if edges[key]?.kind == .starts { return }
-            edges[key] = StoryMapEdge(from: from, to: to, kind: kind)
-        }
-
-        for node in nodes {
-            guard let m = game.mission(node.step.missionID) else { continue }
-            // `.unlocks`: whoever sets a bit this mission needs → this mission.
+        // `.unlocks`: whoever sets a bit this mission needs → this mission.
+        for missionID in onMap {
+            guard let m = game.mission(missionID) else { continue }
             for ref in NCBTest(m.availBits).referencedBits where !ref.negated {
                 let sources = (setters[ref.bit] ?? []).filter { $0.kind == .mission }
-                for src in sources.prefix(3) { add(src.id, m.id, .unlocks) }
-            }
-            // `.starts`: this mission's own script directly launches another.
-            for expr in [m.onAccept, m.onSuccess, m.onShipDone] {
-                for op in NCBSet.parse(expr) {
-                    if case .startMission(let target) = op { add(m.id, target, .starts) }
+                for src in sources.prefix(3) {
+                    guard src.id != m.id, onMap.contains(src.id),
+                          !startPairs.contains("\(src.id)-\(m.id)") else { continue }
+                    let e = StoryMapEdge(from: src.id, to: m.id, kind: .unlocks)
+                    edges[e.id] = e
                 }
+            }
+        }
+
+        var nodes: [StoryMapNode] = []
+        for (laneIndex, line) in lines.enumerated() {
+            for (rowIndex, step) in line.steps.enumerated() {
+                nodes.append(StoryMapNode(step: step, storylineKey: line.key,
+                                          laneIndex: laneIndex, rowIndex: rowIndex,
+                                          deadEndOutcomes: deadEnds[step.missionID] ?? []))
             }
         }
 
         return StoryMap(lanes: lanes, nodes: nodes,
                         edges: Array(edges.values), untaggedCount: untaggedMissionCount)
+    }
+
+    // MARK: Branch parsing helpers
+
+    /// Every `.startMission` target in `ops`, recursively unwrapping
+    /// `.random` choices (each choice may itself contain a `.startMission`),
+    /// noting whether the target came from inside one of those 50/50 picks.
+    private static func flattenStartMissions(_ ops: [NCBSetOp], random: Bool = false) -> [(target: Int, isRandom: Bool)] {
+        var out: [(target: Int, isRandom: Bool)] = []
+        for op in ops {
+            switch op {
+            case .startMission(let target): out.append((target, random))
+            case .random(let inner): out.append(contentsOf: flattenStartMissions(inner, random: true))
+            default: break
+            }
+        }
+        return out
+    }
+
+    /// True if `ops` (recursively through `.random`) contains an
+    /// `.abortMission`/`.failMission` op — an explicit "the story ends here"
+    /// signal for that outcome, even when a *different* random branch of the
+    /// same script also starts a follow-up mission.
+    private static func hasDeadEnd(_ ops: [NCBSetOp]) -> Bool {
+        for op in ops {
+            switch op {
+            case .abortMission, .failMission: return true
+            case .random(let inner): if hasDeadEnd(inner) { return true }
+            default: break
+            }
+        }
+        return false
+    }
+
+    /// The most frequent value in `values` (ties broken by first
+    /// appearance), or `nil` for an empty input — used to pick a
+    /// storyline's representative government/plug-in across its steps.
+    fileprivate static func mode<T: Hashable>(_ values: [T]) -> T? {
+        guard !values.isEmpty else { return nil }
+        var counts: [T: Int] = [:]
+        var order: [T] = []
+        for v in values {
+            if counts[v] == nil { order.append(v) }
+            counts[v, default: 0] += 1
+        }
+        var best = order[0]
+        var bestCount = counts[best] ?? 0
+        for v in order.dropFirst() where (counts[v] ?? 0) > bestCount {
+            best = v; bestCount = counts[v] ?? 0
+        }
+        return best
     }
 
     // MARK: Step construction
@@ -290,7 +417,8 @@ public final class StorylineAnalyzer {
             objective: describeObjective(m),
             reward: describeReward(m),
             blockers: blockers,
-            synopsis: briefingText(for: m))
+            synopsis: briefingText(for: m),
+            governmentID: m.compRewardGovt >= 128 ? m.compRewardGovt : nil)
     }
 
     private func statusOf(_ m: MissionRes, player: PlayerState, engine: StoryEngine) -> MissionStatus {
