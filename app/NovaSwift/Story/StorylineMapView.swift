@@ -48,6 +48,11 @@ struct StorylineMapView: View {
         static let nodeHitSlop: CGFloat = 10
         static let minZoom: CGFloat = 0.55
         static let maxZoom: CGFloat = 1.75
+        /// Above this many simultaneously-visible nodes, switch from real
+        /// `NodeCard` views to a cheap `Canvas`-drawn overview (see
+        /// `lowDetailNodeCanvas`) — the actual fix for the iPhone crash when
+        /// zoomed far enough out to see most of a large campaign at once.
+        static let maxDetailedNodes = 120
         /// How far outside the visible viewport to still build node/edge views,
         /// so scrolling doesn't visibly pop cards in at the edge.
         static let virtualizationMargin: CGFloat = rowPitch
@@ -141,7 +146,11 @@ struct StorylineMapView: View {
                                                 value: innerGeo.frame(in: .named(scrollSpace)))
                     }
                 )
-                .gesture(magnify)
+                // Simultaneous (not exclusive) so pinch-zoom doesn't fight the
+                // ScrollView's own native pan recognizer for the gesture — on
+                // iOS that competition was part of why panning/tapping felt
+                // unreliable while zoomed in.
+                .simultaneousGesture(magnify)
             }
             .coordinateSpace(name: scrollSpace)
             .onPreferenceChange(ScrollContentFramePreferenceKey.self) { scrollContentFrame = $0 }
@@ -203,7 +212,26 @@ struct StorylineMapView: View {
         }
     }
 
+    /// Past this many simultaneously-visible missions, stop building a real
+    /// `NodeCard` (2 SF Symbols, 3 wrapped `Text` views, a shadow) per node —
+    /// zooming out on a large campaign was throwing hundreds of those live at
+    /// once, which is what was actually crashing the map on iPhone. Viewport
+    /// virtualization alone doesn't save us here: zooming *out* is exactly
+    /// when *more* of the map becomes visible at once, so the node count it
+    /// has to build only goes up as you zoom out, right up to the crash.
+    private var isLowDetail: Bool { visibleNodes.count > Layout.maxDetailedNodes }
+
     private var nodeLayer: some View {
+        Group {
+            if isLowDetail {
+                lowDetailNodeCanvas
+            } else {
+                detailedNodeLayer
+            }
+        }
+    }
+
+    private var detailedNodeLayer: some View {
         ForEach(visibleNodes) { node in
             NodeCard(node: node, isSelected: node.id == selectedID)
                 .frame(width: Layout.nodeWidth, height: Layout.nodeHeight)
@@ -216,6 +244,40 @@ struct StorylineMapView: View {
                 .position(center(node))
                 .onTapGesture { selectedID = (selectedID == node.id) ? nil : node.id }
         }
+    }
+
+    /// A single `Canvas` pass drawing a plain colour-coded dot per node
+    /// instead of a real view hierarchy — a `Canvas` can draw hundreds of
+    /// simple shapes for a fraction of the cost of hundreds of view trees,
+    /// which is what keeps a fully-zoomed-out, hundreds-of-missions map from
+    /// crashing. Individual mission titles wouldn't be legible at this zoom
+    /// level anyway. One `SpatialTapGesture` replaces the per-node tap
+    /// gesture recognizers to still let you select a mission.
+    private var lowDetailNodeCanvas: some View {
+        let nodes = visibleNodes
+        let selected = selectedID
+        return Canvas { ctx, _ in
+            for node in nodes {
+                let rect = nodeFrame(node)
+                let tint = node.step.status.tint
+                let path = Path(roundedRect: rect, cornerRadius: 6)
+                ctx.fill(path, with: .color(tint.opacity(node.step.status == .locked ? 0.3 : 0.55)))
+                let isSelected = node.id == selected
+                ctx.stroke(path, with: .color(isSelected ? .white : tint.opacity(0.8)),
+                           lineWidth: isSelected ? 2 : 1)
+            }
+        }
+        .frame(width: contentSize.width, height: contentSize.height)
+        .contentShape(Rectangle())
+        .gesture(
+            SpatialTapGesture(coordinateSpace: .local).onEnded { value in
+                let slop = Layout.nodeHitSlop
+                guard let hit = nodes.first(where: {
+                    nodeFrame($0).insetBy(dx: -slop, dy: -slop).contains(value.location)
+                }) else { return }
+                selectedID = (selectedID == hit.id) ? nil : hit.id
+            }
+        )
     }
 
     /// The visible viewport translated back into unscaled map coordinates

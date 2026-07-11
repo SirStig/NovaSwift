@@ -161,13 +161,27 @@ public final class StoryEngine {
         if mission.require != 0, (activeContributeBits() & mission.require) != mission.require {
             return false
         }
-        // Bible Flags2 0x0001: "Don't offer mission if the player doesn't have
-        // enough cargo space to hold the mission cargo (even if the mission
-        // cargo won't be picked up until later)" — i.e. compare against the
-        // actual tonnage, not just "any space at all" (the old `<= 0` check
-        // let a mission needing 50 tons through with 1 ton free).
-        if mission.requiresCargoSpace, freeCargoSpace() < abs(mission.cargoQty) { return false }
+        // Cargo space: the Mission BBS (.missionComputer) deliberately keeps a
+        // mission the player can't currently fit visible/browsable — it's just
+        // not acceptable yet (see `canAccept` below), so the board doesn't
+        // feel like it's randomly missing entries depending on hold space.
+        // Every other offer location (bar, main spaceport, trade center,
+        // shipyard, outfitter, pers-ship) is a single ad-hoc offer, not a
+        // browsable list — those simply never come up at all if the cargo
+        // wouldn't fit.
+        if location != .missionComputer, !canAccept(mission) { return false }
         return true
+    }
+
+    /// True if the player currently has enough free cargo space to accept
+    /// `mission` — used to disable (not hide) the Accept button, and as a
+    /// last-line guard in `accept(_:)` itself. Distinct from `isEligible`,
+    /// which governs whether the mission is offered/shown at all: a mission
+    /// requiring more cargo than is currently free still shows up on the
+    /// board, it just can't be accepted until room is made.
+    public func canAccept(_ mission: MissionRes) -> Bool {
+        guard mission.requiresCargoSpace else { return true }
+        return freeCargoSpace() >= abs(mission.cargoQty)
     }
 
     /// The missions on offer at a spot, after applying each mission's random
@@ -201,7 +215,7 @@ public final class StoryEngine {
             briefingText: brief,
             acceptButton: mission.acceptButton.isEmpty ? "Accept" : mission.acceptButton,
             refuseButton: mission.refuseButton.isEmpty ? "Decline" : mission.refuseButton,
-            canRefuse: !mission.cannotBeRefused)
+            canRefuse: !mission.cannotBeRefused, canAccept: canAccept(mission))
         services?.presentMissionOffer(offer)
     }
 
@@ -233,6 +247,10 @@ public final class StoryEngine {
         }
         guard !player.isMissionActive(missionID) else {
             Log.mission.debug("accept: mission \(missionID) (\"\(m.name, privacy: .public)\") already active; ignoring")
+            return false
+        }
+        guard canAccept(m) else {
+            Log.mission.debug("accept: mission \(missionID) (\"\(m.name, privacy: .public)\") refused — not enough free cargo space")
             return false
         }
         Log.mission.notice("accept: mission \(missionID) (\"\(m.name, privacy: .public)\") accepted")

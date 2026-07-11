@@ -10,7 +10,9 @@ final class DiplomacyTests: XCTestCase {
     // MARK: crafted gövt bytes
 
     private func govtData(classes: [Int], allies: [Int] = [], enemies: [Int] = [],
-                          flags1: UInt16 = 0, shootPenalty: Int = 1) -> Data {
+                          flags1: UInt16 = 0, shootPenalty: Int = 1,
+                          disablePenalty: Int = 0, killPenalty: Int = 0,
+                          crimeTolerance: Int = 0) -> Data {
         var d = [UInt8](repeating: 0, count: 60)
         func putW(_ off: Int, _ v: Int) {
             let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
@@ -20,15 +22,22 @@ final class DiplomacyTests: XCTestCase {
         for i in 0..<4 { putW(32 + i * 2, i < allies.count ? allies[i] : -1) }
         for i in 0..<4 { putW(40 + i * 2, i < enemies.count ? enemies[i] : -1) }
         putW(2, Int(flags1))
+        putW(8, crimeTolerance)
+        putW(12, disablePenalty)
+        putW(16, killPenalty)
         putW(18, shootPenalty)
         return Data(d)
     }
 
     private func govt(_ id: Int, classes: [Int], allies: [Int] = [], enemies: [Int] = [],
-                      flags1: UInt16 = 0, shootPenalty: Int = 1) -> GovtRes {
+                      flags1: UInt16 = 0, shootPenalty: Int = 1,
+                      disablePenalty: Int = 0, killPenalty: Int = 0,
+                      crimeTolerance: Int = 0) -> GovtRes {
         GovtRes(Resource(type: NovaType.govt, id: id, name: "G\(id)",
                          data: govtData(classes: classes, allies: allies, enemies: enemies,
-                                        flags1: flags1, shootPenalty: shootPenalty)))
+                                        flags1: flags1, shootPenalty: shootPenalty,
+                                        disablePenalty: disablePenalty, killPenalty: killPenalty,
+                                        crimeTolerance: crimeTolerance)))
     }
 
     func testDecodedRelations() {

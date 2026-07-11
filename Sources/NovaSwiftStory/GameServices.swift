@@ -71,15 +71,20 @@ public struct MissionOffer: Sendable {
     public let acceptButton: String
     public let refuseButton: String
     public let canRefuse: Bool
+    /// False if the player can't currently accept this (e.g. not enough free
+    /// cargo space) — the mission still shows and can be browsed, it's just
+    /// not acceptable right now. See `StoryEngine.canAccept(_:)`.
+    public let canAccept: Bool
 
     public init(mission: MissionRes, title: String, briefingText: String,
-                acceptButton: String, refuseButton: String, canRefuse: Bool) {
+                acceptButton: String, refuseButton: String, canRefuse: Bool, canAccept: Bool = true) {
         self.mission = mission
         self.title = title
         self.briefingText = briefingText
         self.acceptButton = acceptButton
         self.refuseButton = refuseButton
         self.canRefuse = canRefuse
+        self.canAccept = canAccept
     }
 }
 

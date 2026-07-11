@@ -218,7 +218,8 @@ private struct MissionInfoSheet: View {
                             .novaPlace(space, -178.5, 47.5)
                     }
                     // item 0: (290,125)-(389,150) 99x25 — accept
-                    NovaButton(graphics: graphics, title: offer.acceptButton, width: 73, action: onAccept)
+                    NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
+                               enabled: offer.canAccept, action: onAccept)
                         .novaPlace(space, 54.5, 47.5)
                 }
             } else {
@@ -254,6 +255,7 @@ private struct MissionInfoSheet: View {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()
                 Button(offer.acceptButton, action: onAccept).buttonStyle(.borderedProminent)
+                    .disabled(!offer.canAccept)
             }
         }
         .padding(20)
@@ -331,11 +333,13 @@ struct MissionSingleDialog: View {
                         NovaButton(graphics: graphics, title: offer.refuseButton, width: 73, action: onDecline)
                             .novaPlace(space, -103.5, 126.5)
                         // item 0: (225,285)-(324,310) — accept, paired with item 1
-                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73, action: onAccept)
+                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
+                                   enabled: offer.canAccept, action: onAccept)
                             .novaPlace(space, 4.5, 126.5)
                     } else {
                         // item 5: (173,285)-(272,310) — accept, centered (no refuse)
-                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73, action: onAccept)
+                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
+                                   enabled: offer.canAccept, action: onAccept)
                             .novaPlace(space, -47.5, 126.5)
                     }
 
@@ -376,6 +380,7 @@ struct MissionSingleDialog: View {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()
                 Button(offer.acceptButton, action: onAccept).buttonStyle(.borderedProminent)
+                    .disabled(!offer.canAccept)
             }
         }
         .padding(20)
