@@ -30,28 +30,52 @@ struct NovaDialog<Content: View>: View {
             // menu, not a replacement backdrop.
             Color.black.opacity(0.55).ignoresSafeArea()
 
-            // The authentic panel, centred, sized to its content.
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(title).novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
-                    content()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 16)
-
-                // Footer buttons live on the panel art's own grey control strip.
-                HStack(spacing: 10) {
-                    Spacer()
-                    ForEach(buttons) { b in footerButton(b) }
-                }
-                .padding(.horizontal, 16)
-                .frame(height: 40)
+            // Hug the content when it fits; fall back to a scrolling body only
+            // when the card would be taller than the screen (a long About on a
+            // short landscape iPhone, say). `ViewThatFits` picks the first
+            // variant that fits vertically — so short dialogs stay compact and
+            // tall ones stay fully on-screen and closable, with no downscaling,
+            // so the text stays crisp. Width is capped to `width` but shrinks on
+            // a narrow phone; the 12pt padding keeps it clear of the edges.
+            ViewThatFits(in: .vertical) {
+                card(scrolls: false)
+                card(scrolls: true)
             }
-            .frame(width: width)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(NovaPanelBackground(graphics: graphics))
-            .shrinkToFitViewport()
+            .frame(maxWidth: width)
+            .padding(12)
         }
+    }
+
+    /// One card variant. `scrolls` wraps the body in a `ScrollView` so an
+    /// over-tall dialog scrolls instead of overflowing; the footer strip stays
+    /// pinned below it either way.
+    private func card(scrolls: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if scrolls {
+                ScrollView { dialogBody }
+            } else {
+                dialogBody
+            }
+
+            // Footer buttons live on the panel art's own grey control strip.
+            HStack(spacing: 10) {
+                Spacer()
+                ForEach(buttons) { b in footerButton(b) }
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 40)
+        }
+        .frame(maxWidth: .infinity)
+        .background(NovaPanelBackground(graphics: graphics))
+    }
+
+    private var dialogBody: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title).novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 16)
     }
 
     /// The game's real three-slice button art when graphics are loaded; a
@@ -120,11 +144,15 @@ struct DialogChrome<Content: View>: View {
                 .padding(.horizontal, 16)
                 .frame(height: 44)
             }
-            // A bounded, centred card — never taller/wider than the window's
-            // usable area, so it reads as a dialog over the menu, not a page.
-            .frame(width: 660, height: 620)
+            // An adaptive centred card: it caps at the designed 660×620 on a
+            // roomy Mac/iPad window, but on a small iPhone it shrinks to the
+            // usable area — the scrollable Form/List inside just scrolls — so it
+            // never overflows the screen and the Done button stays reachable.
+            // Text keeps its native point size (no blurry downscaling), and the
+            // 12pt padding holds it clear of the notch / home indicator.
+            .frame(maxWidth: 660, maxHeight: 620)
             .background(NovaPanelBackground(graphics: model.uiGraphics))
-            .shrinkToFitViewport()
+            .padding(12)
         }
     }
 

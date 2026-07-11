@@ -17,8 +17,8 @@ struct GameSettings: Codable, Equatable {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .virtualCockpit: return "Virtual Cockpit"
-            case .tapToTurn: return "Tap to Turn"
+            case .virtualCockpit: return "On-screen Buttons"
+            case .tapToTurn: return "Tap / Drag to Fly"
             case .tilt: return "Tilt to Turn"
             }
         }

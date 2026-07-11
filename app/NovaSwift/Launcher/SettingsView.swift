@@ -47,7 +47,7 @@ struct SettingsView: View {
     // MARK: Sections
 
     private var gameplaySection: some View {
-        Section("Gameplay") {
+        Section {
             Picker("Difficulty", selection: binding(\.difficulty)) {
                 ForEach(GameSettings.Difficulty.allCases) { Text($0.label).tag($0) }
             }
@@ -55,45 +55,59 @@ struct SettingsView: View {
             Toggle("Confirm before landing", isOn: binding(\.confirmLanding))
             Toggle("Tutorial hints", isOn: binding(\.tutorialHints))
             Toggle("Pause when app loses focus", isOn: binding(\.pauseOnFocusLoss))
+        } header: {
+            Label("Gameplay", systemImage: "gamecontroller")
+        } footer: {
+            Text("Difficulty scales the damage you take. Auto-target locks onto the nearest hostile the moment you open fire.")
         }
     }
 
     private var controlsSection: some View {
-        Section("Controls") {
+        Section {
             NavigationLink {
                 ControlsView()
             } label: {
                 Label("Keyboard & Controller Bindings", systemImage: "keyboard")
             }
-            Picker("Touch scheme", selection: binding(\.controlScheme)) {
+            Picker("Touch flying", selection: binding(\.controlScheme)) {
                 ForEach(GameSettings.ControlScheme.allCases) { Text($0.label).tag($0) }
             }
             sliderRow("Turn sensitivity", binding(\.controlSensitivity), 0.4...2.0)
-            sliderRow("Tilt sensitivity", binding(\.tiltSensitivity), 0.4...2.0)
+            if model.settings.controlScheme == .tilt {
+                sliderRow("Tilt sensitivity", binding(\.tiltSensitivity), 0.4...2.0)
+            }
             sliderRow("Stick dead zone", binding(\.stickDeadzone), 0...0.5)
-            Toggle("Invert turn", isOn: binding(\.invertTurn))
+            Toggle("Invert turn direction", isOn: binding(\.invertTurn))
             Toggle("Haptic feedback", isOn: binding(\.hapticsEnabled))
             #if os(macOS)
-            Toggle("Mouse aiming", isOn: binding(\.mouseAiming))
+            Toggle("Aim toward mouse cursor", isOn: binding(\.mouseAiming))
             #endif
+        } header: {
+            Label("Controls", systemImage: "dpad")
+        } footer: {
+            Text("Touch flying sets how the on-screen controls steer your ship. The dead zone is how far a stick or drag must move before it registers.")
         }
     }
 
     private var graphicsSection: some View {
-        Section("Graphics") {
+        Section {
             sliderRow("Starfield density", binding(\.starfieldDensity), 0.2...2.0)
-            Picker("Frame rate", selection: binding(\.frameRateCap)) {
+            Picker("Frame rate limit", selection: binding(\.frameRateCap)) {
                 ForEach(GameSettings.FrameRateCap.allCases) { Text($0.label).tag($0) }
             }
             Toggle("Smooth sprite scaling", isOn: binding(\.smoothSprites))
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Screen shake", isOn: binding(\.screenShake))
-            Toggle("Show FPS", isOn: binding(\.showFPS))
+            Toggle("Show FPS counter", isOn: binding(\.showFPS))
+        } header: {
+            Label("Graphics", systemImage: "sparkles")
+        } footer: {
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. A lower frame-rate limit saves battery on mobile.")
         }
     }
 
     private var audioSection: some View {
-        Section("Audio") {
+        Section {
             Toggle("Mute all", isOn: binding(\.muteAll))
             sliderRow("Master", binding(\.masterVolume), 0...1, disabled: model.settings.muteAll)
             sliderRow("Music", binding(\.musicVolume), 0...1, disabled: model.settings.muteAll)
@@ -102,6 +116,10 @@ struct SettingsView: View {
             Toggle("Background music", isOn: binding(\.musicEnabled))
 
             soundTest
+        } header: {
+            Label("Audio", systemImage: "speaker.wave.2")
+        } footer: {
+            Text("Master scales everything; the individual sliders balance music, weapon/engine effects and interface clicks beneath it.")
         }
     }
 
@@ -135,32 +153,40 @@ struct SettingsView: View {
     }
 
     private var interfaceSection: some View {
-        Section("Interface") {
+        Section {
             Toggle("Use authentic EV Nova menu", isOn: binding(\.useAuthenticMenu))
             Toggle("Show radar", isOn: binding(\.showRadar))
             sliderRow("HUD opacity", binding(\.hudOpacity), 0.2...1.0)
+        } header: {
+            Label("Interface", systemImage: "rectangle.on.rectangle")
+        } footer: {
+            Text("The authentic menu renders the original title screen from your imported data instead of the modern launcher.")
         }
     }
 
     private var accessibilitySection: some View {
-        Section("Accessibility") {
+        Section {
             Toggle("Larger HUD", isOn: binding(\.largerHUD))
             Toggle("High-contrast HUD", isOn: binding(\.highContrastHUD))
             Toggle("Reduce flashing & motion", isOn: binding(\.reduceFlashing))
             Picker("Colorblind mode", selection: binding(\.colorblindMode)) {
                 ForEach(GameSettings.ColorblindMode.allCases) { Text($0.label).tag($0) }
             }
-            sliderRow("UI scale", binding(\.uiScale), 0.8...1.4)
+            sliderRow("Overall UI scale", binding(\.uiScale), 0.8...1.4)
+        } header: {
+            Label("Accessibility", systemImage: "accessibility")
+        } footer: {
+            Text("Reduce flashing calms the exhaust flicker, screen shake and jump flash. UI scale resizes menus and dialogs everywhere.")
         }
     }
 
     private var developerSection: some View {
         Section {
             Toggle("Debug mode", isOn: binding(\.debugModeEnabled))
-            Text("Shows an in-game debug button that opens the debug suite: the UI measurement overlay, a performance stress test, and more developer tools as we build them.")
-                .novaFont(.caption).foregroundStyle(.secondary)
         } header: {
-            Text("Developer")
+            Label("Developer", systemImage: "hammer")
+        } footer: {
+            Text("Shows an in-game debug button that opens the debug suite: the UI measurement overlay, a performance stress test, and more developer tools as we build them.")
         }
     }
 
