@@ -450,9 +450,12 @@ struct ShipyardView: View {
             ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, s in
                 if let s {
                     let picture = shipPicture(s)
+                    // No quantity badge for ships — unlike outfits, you can't
+                    // own more than one of a hull, so a numeric "1" badge on
+                    // your current ship's tile is meaningless noise (the real
+                    // Shipyard grid doesn't show one at all).
                     ItemTile(name: s.displayName, image: picture?.image,
                              pixelated: picture?.isDedicated == false,
-                             quantity: s.id == pilot.state.shipType ? 1 : 0,
                              selected: (selectedID ?? stock.first?.id) == s.id,
                              locked: lockState(for: s) == .locked)
                         .onTapGesture { selectedID = s.id }

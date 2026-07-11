@@ -71,20 +71,37 @@ struct GameMenuView: View {
                 .frame(minWidth: 640, minHeight: 580)
                 .preferredColorScheme(.dark)
         }
-        .sheet(isPresented: Binding(get: { storyModel != nil },
-                                    set: { if !$0 { storyModel = nil } })) {
-            if let storyModel {
-                StoryGuideView(model: storyModel, initialTab: storyTab,
-                               onClose: { self.storyModel = nil },
-                               onAbort: { abortMission($0) })
-                    .frame(minWidth: 900, minHeight: 620)
-                    .preferredColorScheme(.dark)
-            }
+        // The Story Map / Pilot Log wants the whole screen to breathe. On iPhone
+        // a `.sheet` is only a partial card (and the 900pt macOS width floor
+        // overflows it), so present it as a true full-screen cover there; on Mac
+        // keep the comfortable centred sheet.
+        #if os(iOS)
+        .fullScreenCover(isPresented: storyGuidePresented) { storyGuideContent }
+        #else
+        .sheet(isPresented: storyGuidePresented) {
+            storyGuideContent.frame(minWidth: 900, minHeight: 620)
         }
+        #endif
         .alert("Notice", isPresented: Binding(get: { info != nil },
                                                    set: { if !$0 { info = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(info ?? "") }
+    }
+
+    /// Whether the Story Map / Pilot Log is open (drives its presentation).
+    private var storyGuidePresented: Binding<Bool> {
+        Binding(get: { storyModel != nil }, set: { if !$0 { storyModel = nil } })
+    }
+
+    /// The Pilot Log itself — fills whatever presents it (full-screen on iOS,
+    /// the sized sheet on macOS).
+    @ViewBuilder private var storyGuideContent: some View {
+        if let storyModel {
+            StoryGuideView(model: storyModel, initialTab: storyTab,
+                           onClose: { self.storyModel = nil },
+                           onAbort: { abortMission($0) })
+                .preferredColorScheme(.dark)
+        }
     }
 
     private var panel: some View {

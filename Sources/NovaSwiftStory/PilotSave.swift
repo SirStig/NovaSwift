@@ -126,14 +126,16 @@ public struct PilotSave: Codable, Sendable, Identifiable {
     }
 }
 
-/// EV Nova's combat-rating titles, keyed off the pilot's kill/rating points.
-/// (The thresholds mirror the classic ladder; used only for display.)
+/// EV Nova's combat-rating titles (Bible Appendix I), keyed off the pilot's
+/// combat rating (sum of destroyed ships' `shïp.Strength`). All 11 documented
+/// tiers, verbatim thresholds — see `docs/reverse-engineering/GOVERNMENT.md` §3.
 public enum CombatRating {
     public static let titles = [
-        "Harmless", "Mostly Harmless", "Poor", "Fair", "Good",
-        "Competent", "Dangerous", "Deadly", "Ultimate",
+        "No Ability", "Little Ability", "Fair Ability", "Average Ability",
+        "Good Ability", "Competent", "Very Competent", "Worthy of Note",
+        "Dangerous", "Deadly", "Frightening",
     ]
-    private static let thresholds = [0, 100, 200, 400, 800, 1600, 3200, 6400, 12800]
+    private static let thresholds = [0, 1, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600]
 
     public static func title(forRating rating: Int) -> String {
         var title = titles[0]

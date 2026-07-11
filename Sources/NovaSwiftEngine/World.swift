@@ -283,6 +283,12 @@ public final class Ship {
     /// Seconds a hulk has been drifting; the world eventually clears cold wrecks.
     public var disabledClock: Double = 0
 
+    /// True if the player dealt the hit that dropped this ship to 0 armor —
+    /// read once by `despawnDepartedAndDead` to attribute `Diplomacy.recordKill`
+    /// to the player specifically (an NPC-vs-NPC kill shouldn't touch the
+    /// player's legal record).
+    public var killedByPlayer = false
+
     // Diagnostics: last known-good motion state (NaN/Infinity guard) and
     // one-shot flags so we log state *transitions*, never every frame.
     private var lastFinitePosition = Vec2()
@@ -1253,12 +1259,13 @@ public final class World {
         }
         events.append(hadShield ? .shieldHit(at: ship.position) : .armorHit(at: ship.position))
 
-        // Player fire provokes the victim and dents the player's record.
+        // Player fire provokes the victim into fighting back. Per the Bible
+        // (Appendix II §2.1), `ShootPenalty` is "currently ignored" in the
+        // real game — shooting alone never dents legal record; only the
+        // disable/kill/board/smuggling outcomes below do (`recordDisable`/
+        // `recordKill`, `Diplomacy.swift`).
         if ownerID == 0 && !ship.isPlayer {
             ship.brain?.provokedByPlayer = true
-            if let dip = diplomacy, let gov = dip.govt(ship.government) {
-                dip.recordCrime(against: ship.government, penalty: max(1, gov.shootPenalty))
-            }
         }
         // NPC fire on player: let the player's would-be attacker be remembered.
         if !ship.isPlayer, ship.brain?.targetID == nil, ownerID != 0 {
@@ -1283,6 +1290,14 @@ public final class World {
             stopAllBeamLoops(for: ship)               // a hulk doesn't fire — stop its beam loop
             events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
             Log.combat.debug("\(ship.name) [\(ship.entityID)] disabled (armor at/below \(Int(ship.disableArmorFraction * 100))% threshold) — now a drifting hulk")
+            if ownerID == 0, let dip = diplomacy {
+                dip.recordDisable(of: ship.government)
+            }
+        } else if ownerID == 0 && !ship.isPlayer && !ship.isAlive {
+            // Zeroed an already-disabled hulk's sliver of armor — a real kill,
+            // finalized by `despawnDepartedAndDead` once per frame. Remember
+            // it was the player's doing so that pass can credit `recordKill`.
+            ship.killedByPlayer = true
         }
     }
 
@@ -1292,6 +1307,9 @@ public final class World {
         var survivors: [Ship] = []
         for npc in npcs {
             if !npc.isAlive {
+                if npc.killedByPlayer, let dip = diplomacy {
+                    dip.recordKill(of: npc.government, shipStrength: Int(npc.combatStrength))
+                }
                 events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
                                          soundID: npc.explosionSoundID))
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,

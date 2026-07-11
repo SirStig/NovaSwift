@@ -58,6 +58,13 @@ final class GameHost {
             let galaxy = Galaxy(game: game)
             aiGame = game
             aiGalaxy = galaxy
+            // A fresh Galaxy means a fresh Diplomacy (`makeDiplomacy()` caches
+            // per-Galaxy, and every jump rebuilds `GameHost` from scratch) — seed
+            // it from the persisted pilot so standing survives across jumps.
+            // Combat rating isn't seeded here; it's a per-session delta folded
+            // into `PlayerState.combatRating` at sync points instead (see
+            // `GameContainerView.syncCombatStanding()`).
+            galaxy.makeDiplomacy().seed(legalRecord: pilot.legalRecord)
             // Player ship + sprite textures from the current pilot loadout (see
             // `buildPlayerShip`) — the exact same construction the in-place
             // takeoff reload (`GameScene.reloadForDeparture`) uses, so a newly
@@ -401,7 +408,10 @@ struct GameContainerView: View {
             // won't have already caught — e.g. shopping at a spaceport and then
             // leaving the app without departing again. Durable-save whatever the
             // live pilot has right now so it isn't lost.
-            if phase != .active { model.autosave(reason: .timer) }
+            if phase != .active {
+                syncCombatStanding()
+                model.autosave(reason: .timer)
+            }
         }
         .onChange(of: landedSpobID) { _, id in
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
@@ -413,6 +423,7 @@ struct GameContainerView: View {
                     // NOT topped off here — refuelling is the paid "Recharge"
                     // service, per the Bible (free only via govt/rank flags).
                     repairOnLanding(spobID: id)
+                    syncCombatStanding()
                     model.autosave(reason: .land)               // EV Nova saves on every landing
                 }
                 model.audio.startAmbient(soundID: host?.game?.spob(id)?.ambientSoundID)
@@ -468,6 +479,7 @@ struct GameContainerView: View {
                 model.pilot.state.fuel = host?.scene.playerShip?.fuel
                 model.pilot.state.currentSystem = newID       // follow the pilot to the new system
                 model.pilot.state.exploredSystems.insert(newID)
+                syncCombatStanding()   // the about-to-be-discarded Diplomacy is the source of truth
                 model.pilot.save()
                 model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump
                 host = GameHost(model: model, systemID: newID, arrivedViaJump: true) // rebuild on jump
@@ -624,6 +636,24 @@ struct GameContainerView: View {
         }
         model.pilot.state.armor = ship.armor
         model.pilot.state.shield = ship.shield
+    }
+
+    /// Persists whatever combat/legal-standing consequences played out this
+    /// session into the pilot: legal record (attacking a government's ships
+    /// dents standing with it — see `Diplomacy.recordDisable`/`recordKill`)
+    /// and combat rating (Appendix I — sum of destroyed ships' `Strength`).
+    /// Call at every point the live `World`/`Diplomacy` might otherwise be
+    /// discarded (landing, jump-out) or the app might be backgrounded —
+    /// mirrors `repairOnLanding`'s "sync live scene state into the persisted
+    /// pilot" pattern for the same reason (a jump rebuilds `GameHost`, and
+    /// with it a brand-new, unseeded-until-`GameHost.init` `Diplomacy`).
+    private func syncCombatStanding() {
+        guard let scene = host?.scene else { return }
+        for (govt, value) in scene.liveLegalRecord {
+            model.pilot.state.legalRecord[govt] = value
+        }
+        let delta = scene.consumeCombatRatingDelta()
+        if delta != 0 { model.pilot.state.combatRating += delta }
     }
 
     /// The single path a hyperjump commits through, whether triggered from the

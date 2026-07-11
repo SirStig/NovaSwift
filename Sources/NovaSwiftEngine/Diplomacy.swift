@@ -156,13 +156,47 @@ public final class Diplomacy {
         playerRecord[govt] = value
     }
 
-    /// Apply a legal-record change to a government (e.g. the player fired on one
-    /// of its ships). Also propagates a smaller hit to explicit allies.
+    /// Bulk-seed `playerRecord` from a persisted snapshot (e.g.
+    /// `PlayerState.legalRecord`). A fresh `Diplomacy` is built from scratch on
+    /// every jump/session rebuild (`GameHost.init` → `Galaxy(game:)` →
+    /// `makeDiplomacy()`), so without this the player's standing would silently
+    /// reset to neutral every time they jumped. Call once, right after
+    /// construction, before any combat can mutate it.
+    public func seed(legalRecord: [Int: Int]) {
+        for (govt, value) in legalRecord { playerRecord[govt] = value }
+    }
+
+    /// Returns the combat rating earned since the last call and resets the live
+    /// tally to 0. `combatRating` here only ever tracks kills made during the
+    /// current `Diplomacy` instance's lifetime (one jump/session, per the
+    /// `seed(legalRecord:)` doc comment) — folding this delta into
+    /// `PlayerState.combatRating` at natural save points (landing, jump-out)
+    /// is what makes it persist, without needing to seed it back in (a fresh
+    /// instance starting at 0 and being drained on every sync is already
+    /// double-count-safe regardless of how often this is called).
+    public func consumeCombatRatingDelta() -> Int {
+        defer { combatRating = 0 }
+        return combatRating
+    }
+
+    /// Apply a legal-record change to a government (e.g. the player disabled/
+    /// killed one of its ships). Per the Bible (§1.2): "Doing evil deeds to one
+    /// government will improve your rating with its enemies, and vice versa.
+    /// Allied governments also communicate your actions, so attacking one
+    /// government will make its allies hate you too." Neither propagation's
+    /// magnitude is quantified by the Bible; both use the same invented-but-
+    /// consistent half-penalty, mirrored in sign (allies suffer, enemies
+    /// benefit).
     public func recordCrime(against govt: Int, penalty: Int) {
         playerRecord[govt, default: 0] -= penalty
+        let victimAllies = govts[govt]?.allies ?? []
+        let victimEnemies = govts[govt]?.enemies ?? []
         for (id, other) in govts where id != govt {
-            if !Set(other.classes).isDisjoint(with: govts[govt]?.allies ?? []) {
+            if !Set(other.classes).isDisjoint(with: victimAllies) {
                 playerRecord[id, default: 0] -= penalty / 2
+            }
+            if !Set(other.classes).isDisjoint(with: victimEnemies) {
+                playerRecord[id, default: 0] += penalty / 2
             }
         }
     }

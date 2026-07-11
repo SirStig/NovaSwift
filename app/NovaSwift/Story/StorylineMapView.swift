@@ -17,6 +17,19 @@ struct StorylineMapView: View {
     @State private var selectedID: Int?
     @State private var zoom: CGFloat = 0.85
     @State private var zoomBase: CGFloat = 0.85
+    /// The scroll content's frame relative to the scroll view's own bounds
+    /// (i.e. how far it's been scrolled) and the scroll view's own on-screen
+    /// size — together these give us the visible viewport. Tracked manually
+    /// via `GeometryReader`/`PreferenceKey` since `onScrollGeometryChange`
+    /// needs iOS 18/macOS 15, newer than this app's deployment target.
+    ///
+    /// Drives virtualized rendering: with hundreds of missions on the map,
+    /// building/shadowing a `NodeCard` for every one of them regardless of
+    /// scroll position is what was driving the memory/frame-rate problems
+    /// (and outright crashes on iPhone). We now only build cards and stroke
+    /// edges that are actually (near) visible.
+    @State private var scrollContentFrame: CGRect = .zero
+    @State private var scrollContainerSize: CGSize = .zero
 
     private enum Layout {
         static let laneWidth: CGFloat = 226
@@ -28,6 +41,20 @@ struct StorylineMapView: View {
         static let sideInset: CGFloat = 40
         static let bottomInset: CGFloat = 56
         static var lanePitch: CGFloat { laneWidth + laneGap }
+        /// Extra invisible padding around every node's tap target, and how far
+        /// zoomed-out the map may go — both exist to keep nodes comfortably
+        /// tappable on iPhone (Apple's 44pt minimum) instead of shrinking under
+        /// a pinch until they're nearly impossible to hit accurately.
+        static let nodeHitSlop: CGFloat = 10
+        static let minZoom: CGFloat = 0.55
+        static let maxZoom: CGFloat = 1.75
+        /// How far outside the visible viewport to still build node/edge views,
+        /// so scrolling doesn't visibly pop cards in at the edge.
+        static let virtualizationMargin: CGFloat = rowPitch
+        /// Symmetric padding wrapping the scaled map content inside the scroll
+        /// view (see `mapArea`) — needed to translate the ScrollView's reported
+        /// visible rect back into unscaled map coordinates.
+        static let contentPadding: CGFloat = 28
     }
 
     var body: some View {
@@ -96,18 +123,30 @@ struct StorylineMapView: View {
     // MARK: Map canvas
 
     private var mapArea: some View {
-        ScrollView([.horizontal, .vertical]) {
-            ZStack(alignment: .topLeading) {
-                edgeLayer
-                laneHeaders
-                nodeLayer
+        GeometryReader { outerGeo in
+            ScrollView([.horizontal, .vertical]) {
+                ZStack(alignment: .topLeading) {
+                    edgeLayer
+                    laneHeaders
+                    nodeLayer
+                }
+                .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
+                .scaleEffect(zoom, anchor: .topLeading)
+                .frame(width: contentSize.width * zoom, height: contentSize.height * zoom,
+                       alignment: .topLeading)
+                .padding(Layout.contentPadding)
+                .background(
+                    GeometryReader { innerGeo in
+                        Color.clear.preference(key: ScrollContentFramePreferenceKey.self,
+                                                value: innerGeo.frame(in: .named(scrollSpace)))
+                    }
+                )
+                .gesture(magnify)
             }
-            .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
-            .scaleEffect(zoom, anchor: .topLeading)
-            .frame(width: contentSize.width * zoom, height: contentSize.height * zoom,
-                   alignment: .topLeading)
-            .padding(28)
-            .gesture(magnify)
+            .coordinateSpace(name: scrollSpace)
+            .onPreferenceChange(ScrollContentFramePreferenceKey.self) { scrollContentFrame = $0 }
+            .onAppear { scrollContainerSize = outerGeo.size }
+            .onChange(of: outerGeo.size) { _, newSize in scrollContainerSize = newSize }
         }
         .background(mapBackground)
         .overlay(alignment: .bottomTrailing) { zoomControls }
@@ -115,16 +154,29 @@ struct StorylineMapView: View {
         .animation(.easeInOut(duration: 0.18), value: selectedID)
     }
 
+    private let scrollSpace = "storyMapScroll"
+
     private var mapBackground: some View {
         LinearGradient(colors: [Color(white: 0.05), Color(white: 0.08)],
                        startPoint: .top, endPoint: .bottom)
     }
 
     private var edgeLayer: some View {
-        Canvas { ctx, _ in
+        // One dictionary build (not two), and every edge is culled against the
+        // visible viewport before we bother stroking a curve for it — with a
+        // large campaign graph this is the difference between drawing dozens
+        // of curves and drawing hundreds.
+        let nodeByID = Dictionary(uniqueKeysWithValues: map.nodes.map { ($0.id, $0) })
+        let rect = logicalVisibleRect
+        return Canvas { ctx, _ in
             for edge in map.edges {
-                guard let a = centers[edge.from], let b = centers[edge.to] else { continue }
-                let unlocked = statusByID[edge.from] == .completed
+                guard let fromNode = nodeByID[edge.from], let toNode = nodeByID[edge.to] else { continue }
+                let a = center(fromNode)
+                let b = center(toNode)
+                let span = CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                                   width: abs(a.x - b.x) + 1, height: abs(a.y - b.y) + 1)
+                guard rect.intersects(span) else { continue }
+                let unlocked = fromNode.step.status == .completed
                 var path = Path()
                 path.move(to: a)
                 let midY = (a.y + b.y) / 2
@@ -152,12 +204,51 @@ struct StorylineMapView: View {
     }
 
     private var nodeLayer: some View {
-        ForEach(map.nodes) { node in
+        ForEach(visibleNodes) { node in
             NodeCard(node: node, isSelected: node.id == selectedID)
                 .frame(width: Layout.nodeWidth, height: Layout.nodeHeight)
+                .contentShape(Rectangle())
+                // Grow the tappable area beyond the visual card (symmetric,
+                // transparent padding) so nodes stay comfortably tappable on
+                // iPhone even when the map is pinched down toward `minZoom`.
+                .padding(Layout.nodeHitSlop)
+                .contentShape(Rectangle())
                 .position(center(node))
                 .onTapGesture { selectedID = (selectedID == node.id) ? nil : node.id }
         }
+    }
+
+    /// The visible viewport translated back into unscaled map coordinates
+    /// (undoing the scroll offset, the content padding, and the pinch-zoom
+    /// scale), outset by a margin so nodes are already built just before
+    /// they'd scroll into view. Falls back to the whole map before the first
+    /// layout pass reports real geometry.
+    private var logicalVisibleRect: CGRect {
+        guard scrollContainerSize != .zero else {
+            return CGRect(origin: .zero, size: contentSize)
+        }
+        // `scrollContentFrame.origin` is how far the (padded, scaled) content
+        // has been scrolled — negative as the user scrolls down/right — so the
+        // visible window in that content's own coordinate space starts here.
+        let visibleInContent = CGRect(x: -scrollContentFrame.minX, y: -scrollContentFrame.minY,
+                                       width: scrollContainerSize.width, height: scrollContainerSize.height)
+        let pad = Layout.contentPadding
+        let unscaled = CGRect(x: (visibleInContent.minX - pad) / zoom,
+                               y: (visibleInContent.minY - pad) / zoom,
+                               width: visibleInContent.width / zoom,
+                               height: visibleInContent.height / zoom)
+        return unscaled.insetBy(dx: -Layout.virtualizationMargin, dy: -Layout.virtualizationMargin)
+    }
+
+    private var visibleNodes: [StoryMapNode] {
+        let rect = logicalVisibleRect
+        return map.nodes.filter { rect.intersects(nodeFrame($0)) }
+    }
+
+    private func nodeFrame(_ node: StoryMapNode) -> CGRect {
+        let c = center(node)
+        return CGRect(x: c.x - Layout.nodeWidth / 2, y: c.y - Layout.nodeHeight / 2,
+                      width: Layout.nodeWidth, height: Layout.nodeHeight)
     }
 
     // MARK: Inspector
@@ -207,7 +298,7 @@ struct StorylineMapView: View {
         withAnimation(.easeOut(duration: 0.15)) { zoom = clampZoom(z) }
         zoomBase = zoom
     }
-    private func clampZoom(_ z: CGFloat) -> CGFloat { min(max(z, 0.4), 1.75) }
+    private func clampZoom(_ z: CGFloat) -> CGFloat { min(max(z, Layout.minZoom), Layout.maxZoom) }
 
     // MARK: Geometry
 
@@ -230,13 +321,6 @@ struct StorylineMapView: View {
         return CGSize(width: w, height: h)
     }
 
-    private var centers: [Int: CGPoint] {
-        Dictionary(uniqueKeysWithValues: map.nodes.map { ($0.id, center($0)) })
-    }
-    private var statusByID: [Int: MissionStatus] {
-        Dictionary(uniqueKeysWithValues: map.nodes.map { ($0.id, $0.step.status) })
-    }
-
     // MARK: Empty state
 
     private var emptyState: some View {
@@ -251,6 +335,13 @@ struct StorylineMapView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
+
+// MARK: - Scroll geometry tracking
+
+private struct ScrollContentFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 // MARK: - Lane header
@@ -318,7 +409,11 @@ private struct NodeCard: View {
                 .strokeBorder(step.status.tint.opacity(isSelected ? 1 : 0.55),
                               lineWidth: isSelected ? 2.5 : 1.5)
         )
-        .shadow(color: .black.opacity(0.35), radius: isSelected ? 8 : 3, y: 2)
+        // A drop shadow forces an offscreen render pass per view; with
+        // potentially hundreds of cards on screen at once that compositing
+        // cost was a real contributor to the map's lag/crashes on iPhone, so
+        // only the selected card pays for one.
+        .shadow(color: isSelected ? .black.opacity(0.35) : .clear, radius: isSelected ? 8 : 0, y: 2)
         .opacity(step.status == .locked && !isSelected ? 0.82 : 1)
     }
 

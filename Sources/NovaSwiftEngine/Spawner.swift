@@ -386,8 +386,13 @@ public final class Spawner {
         let ctx = world.systemContext
         switch origin {
         case .planet:
+            // `canLand` already means landable AND inhabited (see `StellarBody`'s
+            // doc comment) — a system with no such body has nowhere to launch a
+            // ship from, so fall through to an edge/hyperspace arrival instead
+            // of lifting off an uninhabited rock.
             let pads = ctx.bodies.filter { $0.canLand }
-            if let pad = pads.isEmpty ? ctx.bodies.first : pads[world.rng.int(in: 0...(pads.count - 1))] {
+            if !pads.isEmpty {
+                let pad = pads[world.rng.int(in: 0...(pads.count - 1))]
                 let outward = (pad.position - ctx.center)
                 let ang = (outward.length < 1 ? Vec2(0, 1) : outward).angle
                 return (pad.position, ang, .launch)

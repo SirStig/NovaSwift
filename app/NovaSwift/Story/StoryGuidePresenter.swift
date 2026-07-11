@@ -33,10 +33,19 @@ extension StoryGuideModel {
 }
 
 extension View {
-    /// Present the Pilot / Story Guide window as a sheet.
+    /// Present the Pilot / Story Guide window: a true full-screen cover on iPhone
+    /// (the Story Map wants the whole screen), a centred sheet on macOS.
     func storyGuideSheet(isPresented: Binding<Bool>, model: StoryGuideModel) -> some View {
-        sheet(isPresented: isPresented) {
+        #if os(iOS)
+        return fullScreenCover(isPresented: isPresented) {
             StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false })
+                .preferredColorScheme(.dark)
         }
+        #else
+        return sheet(isPresented: isPresented) {
+            StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false })
+                .frame(minWidth: 900, minHeight: 620)
+        }
+        #endif
     }
 }

@@ -57,11 +57,11 @@ struct StoryGuideView: View {
         .novaResponsive()
     }
 
+    // No title bar here — the tabs below (and the Story Map's own header)
+    // already say what this window is; a bare "Pilot Log" label just ate
+    // vertical space, especially on iPhone. Keep only the close control.
     private var header: some View {
         HStack {
-            Image(systemName: "person.crop.circle.badge.questionmark")
-                .foregroundStyle(EVTheme.accent)
-            Text("Pilot Log").novaFont(.heading)
             Spacer()
             if let onClose {
                 Button(action: onClose) { Image(systemName: "xmark.circle.fill") }
@@ -69,7 +69,7 @@ struct StoryGuideView: View {
                     .foregroundStyle(EVTheme.text.opacity(0.6))
             }
         }
-        .padding(.horizontal, 14).padding(.top, 12)
+        .padding(.horizontal, 14).padding(.top, 8)
     }
 }
 

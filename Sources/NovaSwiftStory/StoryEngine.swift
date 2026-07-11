@@ -161,7 +161,12 @@ public final class StoryEngine {
         if mission.require != 0, (activeContributeBits() & mission.require) != mission.require {
             return false
         }
-        if mission.requiresCargoSpace, freeCargoSpace() <= 0 { return false }
+        // Bible Flags2 0x0001: "Don't offer mission if the player doesn't have
+        // enough cargo space to hold the mission cargo (even if the mission
+        // cargo won't be picked up until later)" — i.e. compare against the
+        // actual tonnage, not just "any space at all" (the old `<= 0` check
+        // let a mission needing 50 tons through with 1 ton free).
+        if mission.requiresCargoSpace, freeCargoSpace() < abs(mission.cargoQty) { return false }
         return true
     }
 
@@ -735,7 +740,16 @@ public final class StoryEngine {
     /// offer, and the accepted mission — not a different world each render.
     /// Returns nil for "-1 no destination" or when nothing matches.
     public func concreteStellar(_ code: Int, salt: UInt64) -> Int? {
-        if code >= 128 { return code }
+        // Only 128...2175 is a literal spob id (`StellarMatching.swift`'s
+        // documented ranges) — govt/class/independent selector codes (9999,
+        // 10000+g, 15000+g, 20000+g, 25000+g, 30000+g, 31000+g) are also
+        // >= 128 but are NOT literal ids; they must fall through to the
+        // StellarMatch-based candidate search below. Treating every code
+        // >= 128 as literal (the old check) made a random-destination mission
+        // resolve to a bogus "spob #10000"-style lookup, which silently
+        // rendered as the "your destination"/"an unknown system" placeholder
+        // in mission text instead of the real, randomly-chosen world.
+        if (128...2175).contains(code) { return code }
         if code == -1 { return nil }
         let candidates = game.spobs()
             .filter { $0.id != (initialSpob ?? -1) }   // not where the mission is offered

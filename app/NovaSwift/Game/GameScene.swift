@@ -1573,7 +1573,8 @@ final class GameScene: SKScene {
         let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy)
 
         // Lift off from the departed body: sit just clear of its surface, nose
-        // pointed away from the system centre, drifting gently outward.
+        // pointed away from the system centre, at rest — EV Nova doesn't give
+        // you outbound momentum on takeoff, you fly away under your own thrust.
         let ctx = w.systemContext
         if let body = ctx.bodies.first(where: { $0.id == spobID }) {
             var outward = body.position - ctx.center
@@ -1581,7 +1582,7 @@ final class GameScene: SKScene {
             let dir = outward.normalized
             player.position = body.position + dir * (body.radius + 60)
             player.angle = dir.angle
-            player.velocity = dir * (player.stats.maxSpeed * 0.25)
+            player.velocity = Vec2()
         } else {
             // Departed body isn't a navigable stellar (shouldn't happen from the
             // landing screen) — fall back to the generic mid-system start point.
@@ -2277,6 +2278,21 @@ final class GameScene: SKScene {
     /// caller so the change also survives a save.
     func debugSetLiveRelation(govt: Int, record: Int) {
         world.diplomacy?.setPlayerRecord(govt, to: record)
+    }
+
+    /// The live world's per-government legal record right now — read at
+    /// natural save points (landing, jump-out) to persist into
+    /// `PlayerState.legalRecord`, since a fresh `Diplomacy` (and thus a fresh
+    /// in-memory record) is built on every jump. See `GameHost.init`'s seeding
+    /// call for the inbound half of this bridge.
+    var liveLegalRecord: [Int: Int] { world.diplomacy?.playerRecord ?? [:] }
+
+    /// Combat rating earned since the last call, draining the live tally back
+    /// to 0 — fold the result into `PlayerState.combatRating`. Safe to call
+    /// from multiple sync points; each call only returns what's accrued since
+    /// the previous one.
+    func consumeCombatRatingDelta() -> Int {
+        world.diplomacy?.consumeCombatRatingDelta() ?? 0
     }
 
     // MARK: - Debug suite: AI overlay

@@ -745,12 +745,15 @@ public final class AIBrain {
 
     // MARK: Waypoint helpers
 
-    /// A landable stellar object for a trader to head for (nil if none).
+    /// A landable, inhabited stellar object for a trader to head for — nil if
+    /// the system has none, in which case `travel()` departs instead of
+    /// picking an uninhabited rock/deep-space stellar to "land" on (AI should
+    /// only ever land on inhabited planets/stations; `canLand` already encodes
+    /// both — see `StellarBody`'s doc comment).
     private func pickPlanetBody(_ world: World) -> StellarBody? {
         let landable = world.systemContext.bodies.filter { $0.canLand }
-        let pool = landable.isEmpty ? world.systemContext.bodies : landable
-        guard !pool.isEmpty else { return nil }
-        return pool[world.rng.int(in: 0...(pool.count - 1))]
+        guard !landable.isEmpty else { return nil }
+        return landable[world.rng.int(in: 0...(landable.count - 1))]
     }
 
     /// The next stop on a patrol beat: the following stellar object in the

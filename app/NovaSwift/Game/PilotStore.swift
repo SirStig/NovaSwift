@@ -251,12 +251,20 @@ final class PilotStore: ObservableObject {
         return true
     }
 
-    /// Trade-in value of the current hull toward a new one (25% of hull cost).
+    /// Trade-in value of the current hull *and* its installed outfits, toward
+    /// a new ship. Per the Bible: "The cost of buying a ship is always the
+    /// cost of the new ship minus 25% of the original cost of your current
+    /// ship and upgrades" — the credit covers everything currently installed,
+    /// not just the bare hull.
     func tradeInValue(game: NovaGame) -> Int {
-        Int(Double(game.ship(state.shipType)?.cost ?? 0) * 0.25)
+        let hullCost = game.ship(state.shipType)?.cost ?? 0
+        let outfitsCost = state.outfits.reduce(0) { sum, owned in
+            sum + (game.outfit(owned.key)?.cost ?? 0) * owned.value
+        }
+        return Int(Double(hullCost + outfitsCost) * 0.25)
     }
 
-    /// Net price to switch to `ship` (its cost minus the current hull's trade-in).
+    /// Net price to switch to `ship` (its cost minus the current hull+outfits trade-in).
     func netPrice(of ship: ShipRes, game: NovaGame) -> Int {
         max(0, ship.cost - tradeInValue(game: game))
     }
@@ -268,8 +276,15 @@ final class PilotStore: ObservableObject {
         state.credits -= price
         state.shipType = ship.id
         state.shipName = ship.displayName
-        // Outfits carry over (EV Nova keeps persistent items); cargo stays, but is
-        // dropped if it no longer fits the new, smaller hold — clamped on takeoff.
+        // The old hull and everything installed on it are traded in together
+        // (credited via `tradeInValue` above) — real EV Nova does NOT carry
+        // outfits over to a new ship by default. The one exception is
+        // `oütf.Flags 0x0004`, "this item stays with you when you trade
+        // ships" (licenses/permits, star charts, and whatever else scenario
+        // data flags this way) — everything else is gone with the old ship.
+        state.outfits = state.outfits.filter { id, _ in
+            (game.outfit(id)?.flags ?? 0) & 0x0004 != 0
+        }
         save()
         return true
     }

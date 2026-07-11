@@ -2,7 +2,11 @@ import Foundation
 import NovaSwiftKit
 
 /// A stellar object the AI can navigate to (planet / station). `canLand` gates
-/// whether traders will treat it as a destination.
+/// whether traders will treat it as a destination — true only for bodies that
+/// are both landable (`spöb.isLandable`) AND inhabited (`!spöb.isUninhabited`,
+/// flag 0x20): the AI should only ever land on inhabited planets/stations, per
+/// the Bible's own "uninhabited" services flag, never bare rocks or deep-space
+/// stellars that happen to carry a landing pict.
 public struct StellarBody {
     public let id: Int
     public let position: Vec2
@@ -247,7 +251,8 @@ public final class Galaxy {
             // PlanetVisual), so landing/collision geometry agrees with what's on screen
             // instead of every body sharing one hardcoded radius.
             let radius = Double(game.spobSprite(spobID)?.frameWidth ?? 48) / 2
-            bodies.append(StellarBody(id: spobID, position: pos, radius: radius, canLand: s.isLandable))
+            bodies.append(StellarBody(id: spobID, position: pos, radius: radius,
+                                      canLand: s.isLandable && !s.isUninhabited))
         }
         // The system's actual centre of mass — not the world origin, which a
         // system's stellar objects don't necessarily cluster around. Everything
