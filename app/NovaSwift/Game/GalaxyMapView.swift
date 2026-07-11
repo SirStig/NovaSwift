@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// The galaxy map, in the spirit of EV Nova's: systems plotted at their real
 /// coordinates centered on the current system, hyperspace links as thin lines,
@@ -10,7 +10,7 @@ import EVNovaStory
 /// aren't linked to one you have, or haven't charted with a map outfit) aren't
 /// drawn at all — real fog of war. Drag to pan; pinch, +/- to zoom.
 ///
-/// Chrome is rebuilt from the real "Map" dialog, DITL #2000 (`evnova-extract
+/// Chrome is rebuilt from the real "Map" dialog, DITL #2000 (`novaswift-extract
 /// ditl "data/EV Nova/Nova.rez" 2000`), drawn on its actual backdrop, PICT
 /// #8509 "Map" (`Nova Files/Nova Graphics 3.rez`) — see `Item` below for the
 /// verified rects. The starmap canvas, drag/pinch/tap interaction and route
@@ -561,14 +561,14 @@ struct GalaxyMapView: View {
     // MARK: Chrome — authentic (DITL #2000 "Map", drawn on PICT #8509)
 
     /// PICT #8509 "Map" in `Nova Files/Nova Graphics 3.rez` — the real
-    /// backdrop/chrome art for DLOG #2000 (`evnova-extract list "data/EV Nova/
+    /// backdrop/chrome art for DLOG #2000 (`novaswift-extract list "data/EV Nova/
     /// Nova Files/Nova Graphics 3.rez" PICT` confirms the id + name). Decoding
     /// it also gives the frame's true pixel size, 601×513, which for this
     /// dialog matches the DLOG's own printed bounds (unlike some other dialogs
     /// where that field is stale — see the ground-truth tool notes).
     private static let frameID = 8509
 
-    /// Verified rects from `evnova-extract ditl "data/EV Nova/Nova.rez" 2000`
+    /// Verified rects from `novaswift-extract ditl "data/EV Nova/Nova.rez" 2000`
     /// (left, top, width, height), top-left anchored in the 601×513 frame.
     /// idx6, a disabled 32×32 item at (518,537)-(550,569), falls entirely
     /// outside the 513-tall frame — an off-screen/unused control, not part of

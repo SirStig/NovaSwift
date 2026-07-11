@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Resolves EV Nova's "special" stellar/system selector codes against a concrete
 /// object. Mission fields like `returnStellar`, `availStellar` and

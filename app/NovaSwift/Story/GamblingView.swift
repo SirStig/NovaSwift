@@ -1,6 +1,6 @@
 import SwiftUI
 import AVKit
-import EVNovaKit
+import NovaSwiftKit
 
 /// The Bar's Gambling screen — the real "Galaxy Racing Network" holovid betting
 /// game, not an invented mini-game. Confirmed authentic from the base data
@@ -16,7 +16,7 @@ import EVNovaKit
 /// odds/multiplier are recorded — so a 3× return on a correct pick (net +2×
 /// the stake) is this port's own reasonable choice, not a ported value.
 ///
-/// Layout re-derived from the real dialog resources (`evnova-extract dlog`/
+/// Layout re-derived from the real dialog resources (`novaswift-extract dlog`/
 /// `ditl`, re-verified against the base install, not transcribed):
 ///  - DITL #1023 "Race" (DLOG bounds 470×230) drives `choosingView`: 4 color
 ///    boxes, 100×100, at left=13/128/243/357, top=88; 2 buttons, 99×25, at
@@ -279,7 +279,7 @@ struct GamblingView: View {
 /// A frame-less, real-geometry panel for dialogs with no matching-size
 /// backdrop PICT (DITL #1015 "Gamble" — see `GamblingView`'s header comment):
 /// the same `NovaSpace`/`.novaPlace` coordinate contract and reference-scale
-/// behavior as `NovaMenu` (`app/EVNova/Spaceport/NovaMenu.swift`), just
+/// behavior as `NovaMenu` (`app/NovaSwift/Spaceport/NovaMenu.swift`), just
 /// without an `Image` layer underneath.
 private struct BareNovaPanel<Content: View>: View {
     let size: CGSize

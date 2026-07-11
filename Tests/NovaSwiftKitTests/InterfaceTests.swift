@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 final class InterfaceTests: XCTestCase {
 

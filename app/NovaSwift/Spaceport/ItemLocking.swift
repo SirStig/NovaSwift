@@ -1,6 +1,6 @@
-import EVNovaKit
-import EVNovaEngine
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 /// Whether a mission/story-gated outfit or ship can be shown/bought at the
 /// current spaceport, per the Nova Bible's `Availability`/`Require`/

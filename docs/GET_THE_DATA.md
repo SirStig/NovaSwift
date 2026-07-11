@@ -37,7 +37,7 @@ Both folders are git-ignored — nothing here is ever committed.
 
 Modern macOS can't use the old resource-fork APIs directly, but you have options:
 
-- **This project's tool:** `evnova-extract` reads resource-fork and `.ndat`
+- **This project's tool:** `novaswift-extract` reads resource-fork and `.ndat`
   directly (see `tools/extractor/`).
 - Read a file's resource fork by appending `/..namedfork/rsrc` to its path.
 - **ResForge** (<https://github.com/andrews05/ResForge>) — modern Swift editor

@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// A saved pilot on disk: a versioned envelope around the `PlayerState` payload,
 /// plus metadata for the pilot roster (name, timestamps, playtime) and a small

@@ -38,7 +38,7 @@ that §5 originally listed as gaps:
   rank `Contribute` into the pooled bitmask, and `StoryEngine.isEligible`
   AND-gates `mission.require` against it — the mission-availability half of
   the Contribute/Require chain (§4.4) is live. The purchase-gating half
-  (`app/EVNova/Spaceport/ItemLocking.swift`) checks `ship.require`/
+  (`app/NovaSwift/Spaceport/ItemLocking.swift`) checks `ship.require`/
   `outfit.require` against ship+outfit Contribute bits, but does **not**
   fold in active-rank Contribute the way `StoryEngine` does — a
   rank-gated purchase (the Bible's own headline example for
@@ -401,12 +401,12 @@ path calls it, a player can observe the effect. ⚠️ **Implemented but not
 wired** — the function/field exists and is correct, but nothing in the
 running engine calls it yet. ❌ **Not implemented.**
 
-Cross-referenced against `Sources/EVNovaEngine/Diplomacy.swift`,
-`Sources/EVNovaKit/NovaAIModels.swift`, `Sources/EVNovaKit/NovaModels.swift`,
-`Sources/EVNovaKit/MissionModels.swift`, `Sources/EVNovaStory/StoryEngine.swift`,
-`Sources/EVNovaStory/PlayerState.swift`, `Sources/EVNovaStory/PilotFactory.swift`,
-`Sources/EVNovaStory/PilotSave.swift`, `Sources/EVNovaStory/StellarMatching.swift`,
-`Sources/EVNovaEngine/World.swift`. `third_party/NovaJS` has no government/legal
+Cross-referenced against `Sources/NovaSwiftEngine/Diplomacy.swift`,
+`Sources/NovaSwiftKit/NovaAIModels.swift`, `Sources/NovaSwiftKit/NovaModels.swift`,
+`Sources/NovaSwiftKit/MissionModels.swift`, `Sources/NovaSwiftStory/StoryEngine.swift`,
+`Sources/NovaSwiftStory/PlayerState.swift`, `Sources/NovaSwiftStory/PilotFactory.swift`,
+`Sources/NovaSwiftStory/PilotSave.swift`, `Sources/NovaSwiftStory/StellarMatching.swift`,
+`Sources/NovaSwiftEngine/World.swift`. `third_party/NovaJS` has no government/legal
 logic beyond decoding `shïp.inherentGovt` (`ShipResource.ts:140`) and labeling
 outfit ModType 21 `"clean legal record"` (`OutfResource.ts:103`) — it never
 evaluates either.
@@ -415,7 +415,7 @@ evaluates either.
 
 - **Class/Ally/Enemy relation resolution** —
   `Diplomacy.considersHostile`/`areEnemies`/`areAllied`
-  (`Sources/EVNovaEngine/Diplomacy.swift:54-82`) correctly implements "A is
+  (`Sources/NovaSwiftEngine/Diplomacy.swift:54-82`) correctly implements "A is
   hostile to B iff A's Enemy-classes intersect B's Class-tags," with
   xenophobic (`0x0001`) override, and symmetrizes ally/enemy declarations by
   OR — a reasonable, Bible-silent engineering choice (§1.2).
@@ -451,7 +451,7 @@ evaluates either.
   folded into `StoryEngine.activeContributeBits()`
   (`StoryEngine.swift:407`), so an active rank correctly unlocks
   rank-gated missions/crons. It is **not** folded into
-  `app/EVNova/Spaceport/ItemLocking.swift`'s `contributedBits(pilot:)`
+  `app/NovaSwift/Spaceport/ItemLocking.swift`'s `contributedBits(pilot:)`
   (`ItemLocking.swift:24-29`), which only pools ship+outfit Contribute — so
   the Bible's own headline example for this field ("prevent the player from
   buying certain items... until achieving a certain rank") still can't
@@ -508,13 +508,13 @@ evaluates either.
   with its enemies" clause. The half-penalty magnitude for the ally
   propagation is also an invented constant — not specified by the Bible.
 - ❌ **`combatRating` still never increments during play.**
-  `PilotFactory.swift:66` sets `EVNovaStory.PlayerState.combatRating` once
+  `PilotFactory.swift:66` sets `NovaSwiftStory.PlayerState.combatRating` once
   from `chär.Kills` at character creation, and nothing ever adds to it
-  afterward. `EVNovaEngine.Diplomacy` now separately tracks its own
+  afterward. `NovaSwiftEngine.Diplomacy` now separately tracks its own
   `combatRating` field and a `recordKill(of:shipStrength:)` method that
   *would* increment it correctly on a kill (see the "implemented but not
   wired" entry above) — but that's a different module's separate tally
-  (`Diplomacy` has no dependency on `EVNovaStory` and can't write to
+  (`Diplomacy` has no dependency on `NovaSwiftStory` and can't write to
   `PlayerState` directly), and it's equally unreached in practice since
   nothing calls `recordKill` either. So both the story-layer and the
   engine-layer combat-rating counters are frozen for the entire game today;
@@ -546,12 +546,12 @@ evaluates either.
   sits; it is now assigned to `RankRes.contribute`
   (`MissionModels.swift:414/433`). Independent confirmation: the `ränk` TMPL
   (`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, TMPL
-  #515, via `evnova-extract tmpl ... 515`) computes `Contribute@14` as an
+  #515, via `novaswift-extract tmpl ... 515`) computes `Contribute@14` as an
   8-byte `QB64` field, immediately followed by `Flags` — which matches
   `RankRes.init` reading `flags = mu16(d, 22)` (14 + 8 = 22) exactly. The
   TMPL's own computed total for the whole resource is 152 bytes, matching
   both `MISSIONS.md`'s verified [ränk = 152 bytes](../MISSIONS.md#ränk--152-bytes)
-  figure and a real dump: `swift run evnova-extract raw "data/EV Nova" ränk
+  figure and a real dump: `swift run novaswift-extract raw "data/EV Nova" ränk
   128` returns `ränk #128 "Federation Naval Rank of Commander;Fed 1"  152
   bytes` on the nose. That real record also proves the field is *live data*,
   not always blank: bytes 14–21 decode to a non-zero 64-bit value (word at
@@ -559,7 +559,7 @@ evaluates either.
   carries a real Contribute bitmask.
 - **`mïsn.Require` — now decoded and wired, see "Correctly modeled" above.**
   (Historical offset-verification record, kept for its citation trail.) The
-  `mïsn` TMPL (TMPL #510, via `evnova-extract
+  `mïsn` TMPL (TMPL #510, via `novaswift-extract
   tmpl ... 510` — a large, 5819-byte-of-template-data dump, but clean:
   no `KEYB`/nested-`TMPL` warning anywhere in it, only cosmetic `PACK`
   name-alias entries with `@ ?` offsets for fields that already have a
@@ -573,9 +573,9 @@ evaluates either.
   own `datePostIncrement = mi16(d, 1630)` exactly, and `onShipDone@1632`
   matches `MissionModels.swift:249`'s `cstr(d, 1632, 255)`. The template's
   computed grand total (1970 bytes) also matches real data exactly: `swift
-  run evnova-extract list ".../Nova Data 1.rez" mïsn` shows all sampled
+  run novaswift-extract list ".../Nova Data 1.rez" mïsn` shows all sampled
   missions (e.g. #128–#133) at precisely `1970 bytes`. A raw spot-check
-  across ~190 real missions (`swift run evnova-extract raw "data/EV Nova"
+  across ~190 real missions (`swift run novaswift-extract raw "data/EV Nova"
   mïsn <id>` for ids 128–133, 140–220 in steps of 10, and a further sweep of
   128–315) found `Require` itself zero in every sampled record — consistent
   with the Bible's own framing of it as a niche gate ("prevent the player
@@ -611,7 +611,7 @@ evaluates either.
   (`NovaModels.swift:232-234`, `NovaModels.swift:276-278`) and
   `oütf.contribute`/`oütf.require` (`NovaAIModels.swift:146-147`,
   `NovaAIModels.swift:177-178`) are decoded *and* now read by
-  `app/EVNova/Spaceport/ItemLocking.swift` (`lockState(for:pilot:at:diplomacy:)`
+  `app/NovaSwift/Spaceport/ItemLocking.swift` (`lockState(for:pilot:at:diplomacy:)`
   for both `OutfRes` and `ShipRes`) to grey out/hide purchases whose
   `Require` isn't satisfied, and by `StoryEngine.activeContributeBits()`
   (`StoryEngine.swift:399-410`) for mission/cron eligibility. What's still
@@ -638,13 +638,13 @@ evaluates either.
   `Enemy4` and `CommName`. That theory undercounted: the `gövt` TMPL in
   `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc` (TMPL
   #507 — the actual community-maintained field-layout authority, decoded via
-  `evnova-extract tmpl`) shows a **second** `Flags` word (`Flags 2`,
+  `novaswift-extract tmpl`) shows a **second** `Flags` word (`Flags 2`,
   8 more behavior bits — `Can't Request Assist/Mercy`, `Doesn't use
   hypergates`, `Prefers wormholes`, etc.) immediately after `Flags 1`, which
   the Bible's prose glosses over but the template makes explicit. Re-deriving
   every offset from the TMPL's field sizes and cross-checking against a raw
   hex dump of the real `gövt #128` "Federation" record
-  (`swift run evnova-extract raw "data/EV Nova" gövt 128`, 192 bytes total)
+  (`swift run novaswift-extract raw "data/EV Nova" gövt 128`, 192 bytes total)
   confirms the *entire* struct byte-for-byte:
   `voiceType@0, flags1@2, flags2@4, scanFine@6, crimeTolerance@8,
   smugglePenalty@10, disablePenalty@12, boardPenalty@14, killPenalty@16,
@@ -700,8 +700,8 @@ evaluates either.
 - **Story-layer govt-scoped selectors don't call `Diplomacy` at all.**
   `StellarMatch.spob`'s ally/enemy/class selector ranges (15000/25000/30000/
   31000, `StellarMatching.swift:35-40`) fall back to a plain govt-id match
-  instead of resolving real ally/enemy relations — `EVNovaEngine.Diplomacy`
-  (which gets this right, see above) and `EVNovaStory` are two separate
+  instead of resolving real ally/enemy relations — `NovaSwiftEngine.Diplomacy`
+  (which gets this right, see above) and `NovaSwiftStory` are two separate
   modules that never talk to each other. Already flagged from the story side
   in [MISSIONS.md's "Not yet wired" section](../MISSIONS.md#not-yet-wired-needs-the-other-systems).
 - **`flët` (fleet) resource is decoded but never spawns anything.**

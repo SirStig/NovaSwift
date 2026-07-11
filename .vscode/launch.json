@@ -4,21 +4,21 @@
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:EV-NOVA}",
-            "name": "Debug evnova-extract",
-            "target": "evnova-extract",
+            "cwd": "${workspaceFolder:NovaSwift}",
+            "name": "Debug novaswift-extract",
+            "target": "novaswift-extract",
             "configuration": "debug",
-            "preLaunchTask": "swift: Build Debug evnova-extract"
+            "preLaunchTask": "swift: Build Debug novaswift-extract"
         },
         {
             "type": "swift",
             "request": "launch",
             "args": [],
-            "cwd": "${workspaceFolder:EV-NOVA}",
-            "name": "Release evnova-extract",
-            "target": "evnova-extract",
+            "cwd": "${workspaceFolder:NovaSwift}",
+            "name": "Release novaswift-extract",
+            "target": "novaswift-extract",
             "configuration": "release",
-            "preLaunchTask": "swift: Build Release evnova-extract"
+            "preLaunchTask": "swift: Build Release novaswift-extract"
         }
     ]
 }

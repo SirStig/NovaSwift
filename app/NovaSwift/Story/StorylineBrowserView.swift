@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaStory
+import NovaSwiftStory
 
 /// The aftermarket **Story Guide**: a master/detail browser over every
 /// reconstructed campaign. The left column lists storylines with progress; the

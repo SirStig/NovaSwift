@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// A stellar object the AI can navigate to (planet / station). `canLand` gates
 /// whether traders will treat it as a destination.

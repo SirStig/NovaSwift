@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaStory
+import NovaSwiftStory
 
 /// The in-game info window: the pilot's dossier (credits, ship, ranks, standings,
 /// active missions) plus an aftermarket **Story Guide** — an EV-Bible-style

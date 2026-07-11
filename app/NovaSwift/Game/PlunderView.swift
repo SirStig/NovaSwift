@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// A single line of loot in the manifest readout (`PlunderView`'s cargo
 /// panel) — one row of cargo, or the credits/ammo/energy summary lines.
@@ -10,7 +10,7 @@ struct PlunderLine: Identifiable {
 }
 
 /// The in-flight "Plunder Dialog" — `DLOG`/`DITL` #1011 in `Nova.rez`,
-/// verified with `evnova-extract dlog/ditl "data/EV Nova/Nova.rez" 1011`:
+/// verified with `novaswift-extract dlog/ditl "data/EV Nova/Nova.rez" 1011`:
 ///
 ///     DLOG #1011  bounds=(40,40)-(349,238)  309x198
 ///     DITL #1011 "Plunder Dialog"
@@ -34,7 +34,7 @@ struct PlunderLine: Identifiable {
 /// exactly six adjacent `STR# 150` entries that thematically fits a
 /// plunder/boarding action list is indices 40-45: "Cargo", "Credits",
 /// "Ammo", "Energy", "Capture Ship", "Demand Tribute" (confirmed via
-/// `evnova-extract raw "data/EV Nova" 'STR#' 150`) — six labels for six
+/// `novaswift-extract raw "data/EV Nova" 'STR#' 150`) — six labels for six
 /// buttons. The two long labels ("Capture Ship", "Demand Tribute") land on
 /// this dialog's two widest slots (126px, 146px); the four short resource
 /// names fill the four 89px slots. Which of the four short names sits in

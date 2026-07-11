@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// Authentic EV Nova dialog chrome for the screens the game itself presents as
 /// dialogs over the title backdrop (new-pilot name entry, scenario select) and

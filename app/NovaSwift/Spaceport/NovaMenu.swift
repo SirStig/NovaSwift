@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// EV Nova's menu coordinate space: the origin is the **centre** of the frame
 /// PICT, matching the game's layout (children are positioned as offsets from the

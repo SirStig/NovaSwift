@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// One-call assembly of a fully-wired, populated `World` for a system: the player
 /// ship, the diplomacy table, the system's stellar geometry, and a spawner that

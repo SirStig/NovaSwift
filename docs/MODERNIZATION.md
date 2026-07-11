@@ -65,7 +65,7 @@ case.
 
 ## 2. Enhanced AI  (highest ROI, zero assets, zero legal drag → do first)
 
-**Seam:** `EVNovaEngine/AIBrain.swift`. Keep today's state machine as the **Classic**
+**Seam:** `NovaSwiftEngine/AIBrain.swift`. Keep today's state machine as the **Classic**
 strategy (unchanged, still the default). Add an `AITuning` config and an **Enhanced**
 strategy that is a superset.
 
@@ -101,7 +101,7 @@ Enhanced behaviors, each a discrete, testable increment:
   director scales spawn skill/size to the player's current ship.
 
 **Determinism & tests.** All randomness through `world.rng`. New headless scenario
-in `evnova-extract ai` (Classic vs Enhanced), plus `AIBehaviorTests`: same seed →
+in `novaswift-extract ai` (Classic vs Enhanced), plus `AIBehaviorTests`: same seed →
 same outcome; Enhanced wins 1v1 vs Classic at ≥ target rate; afterburner/evade
 actually fire. Gameplay-affecting → record active AI mode in the pilot save so a
 purist run is distinguishable.

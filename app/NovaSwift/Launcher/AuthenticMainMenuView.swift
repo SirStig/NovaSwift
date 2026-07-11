@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// The authentic EV Nova main menu, rendered from the player's own assets: the
 /// full-screen background picture (PICT 8000), the game logo (rlëD 8010) and the

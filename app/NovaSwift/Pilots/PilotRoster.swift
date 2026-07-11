@@ -1,10 +1,10 @@
 import Foundation
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// The app-facing library of saved pilots: the launcher's pilot list and the
-/// create / select / delete / duplicate actions, backed by `EVNovaStory`'s
+/// create / select / delete / duplicate actions, backed by `NovaSwiftStory`'s
 /// `PilotArchive` (many `.evpilot` files + rotating auto-backups). This is the
 /// *durable* multi-pilot store; the live in-session pilot is `AppModel.pilot`
 /// (a `PilotStore`), which this loads into when the player starts or resumes.

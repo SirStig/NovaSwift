@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 final class SoundResourceTests: XCTestCase {
 

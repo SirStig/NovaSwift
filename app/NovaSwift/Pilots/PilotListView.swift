@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// The saved-pilot roster, presented as an authentic EV Nova dialog (the real
 /// game used the OS file dialog to open a `.plt`, so a multi-save browser is a

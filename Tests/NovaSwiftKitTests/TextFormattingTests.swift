@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 /// Every case here is either quoted verbatim from the Nova Bible's `dësc`
 /// section or taken from a real resource in the shipped data.

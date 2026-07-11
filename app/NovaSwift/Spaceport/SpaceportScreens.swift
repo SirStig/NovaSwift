@@ -1,7 +1,7 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaEngine
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 // The spaceport sub-screens, each drawn on its own EV Nova frame PICT: the Trade
 // Center (8510), Outfitter (8502), Shipyard (8501) and Bar (8503). Item lists,
@@ -335,7 +335,7 @@ struct OutfitterView: View {
     // HStack group (which had drifted the whole row ~150px to the right of
     // its authentic position). Positions re-derived directly from DITL #1002
     // items 6/3/0 — (288,289), (394,289), (500,289), all 99×25 — against the
-    // real 765×321 Outfit frame (PICT 8502, confirmed via `evnova-extract
+    // real 765×321 Outfit frame (PICT 8502, confirmed via `novaswift-extract
     // pict`/`dlog`): cy = 289 − 160.5 ≈ 128 for the row; cx = itemLeft − 382.5.
     // (This lands within a couple px of the vendored NovaJS reference's
     // buy@(-100,126)/sell@(0,126)/done@(100,126) — that fix was already close;

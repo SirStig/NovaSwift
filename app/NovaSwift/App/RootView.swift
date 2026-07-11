@@ -65,7 +65,7 @@ struct RootView: View {
             // and their data ships a track). Music carries through into the game.
             model.prepareAudioAndData()
             #if DEBUG
-            if ProcessInfo.processInfo.environment["EVNOVA_AUTOPLAY"] != nil,
+            if ProcessInfo.processInfo.environment["NOVASWIFT_AUTOPLAY"] != nil,
                model.data.hasBaseData {
                 // Dev-only: jump straight into the game scene, skipping the main
                 // menu. Never available in Release builds — a leftover exported

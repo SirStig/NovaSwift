@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaEngine
+import NovaSwiftEngine
 
 /// Shared input sink. Each input source (keyboard, touch, game controller, mouse)
 /// keeps its own intent; the combined `intent` the scene reads is their OR-merge,

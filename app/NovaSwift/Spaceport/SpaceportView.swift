@@ -1,7 +1,7 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaEngine
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 /// The landed spaceport, rendered entirely from the player's own EV Nova data:
 /// the `Spaceport` frame PICT (8500), the planet's landscape PICT, its spaceport

@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaPluginStore
+import NovaSwiftKit
+import NovaSwiftPluginStore
 
 /// Full detail page for one catalog entry: description, screenshots (if any),
 /// a link out to a trailer (if any — thumbnail + open externally, never an

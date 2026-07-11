@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaEngine
+@testable import NovaSwiftEngine
 
 final class FlightTests: XCTestCase {
 

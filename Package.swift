@@ -2,66 +2,66 @@
 import PackageDescription
 
 let package = Package(
-    name: "EVNova",
+    name: "NovaSwift",
     platforms: [
         .macOS(.v13),
         .iOS(.v16),
     ],
     products: [
         // Data layer: containers, resource model, typed decoders, graphics.
-        .library(name: "EVNovaKit", targets: ["EVNovaKit"]),
+        .library(name: "NovaSwiftKit", targets: ["NovaSwiftKit"]),
         // Simulation core: flight physics, input intents, world state.
-        .library(name: "EVNovaEngine", targets: ["EVNovaEngine"]),
+        .library(name: "NovaSwiftEngine", targets: ["NovaSwiftEngine"]),
         // Story/mission runtime: control bits, missions, crons, player state.
-        .library(name: "EVNovaStory", targets: ["EVNovaStory"]),
+        .library(name: "NovaSwiftStory", targets: ["NovaSwiftStory"]),
         // Plug-in store: catalog metadata + download/install pipeline.
-        .library(name: "EVNovaPluginStore", targets: ["EVNovaPluginStore"]),
+        .library(name: "NovaSwiftPluginStore", targets: ["NovaSwiftPluginStore"]),
         // Command-line extractor / inspector.
-        .executable(name: "evnova-extract", targets: ["evnova-extract"]),
+        .executable(name: "novaswift-extract", targets: ["novaswift-extract"]),
     ],
     dependencies: [
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.0"),
     ],
     targets: [
-        .target(name: "EVNovaKit", path: "Sources/EVNovaKit"),
-        .target(name: "EVNovaEngine", dependencies: ["EVNovaKit"], path: "Sources/EVNovaEngine"),
-        .target(name: "EVNovaStory", dependencies: ["EVNovaKit"], path: "Sources/EVNovaStory"),
+        .target(name: "NovaSwiftKit", path: "Sources/NovaSwiftKit"),
+        .target(name: "NovaSwiftEngine", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftEngine"),
+        .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftStory"),
         .target(
-            name: "EVNovaPluginStore",
+            name: "NovaSwiftPluginStore",
             dependencies: [
-                "EVNovaKit",
+                "NovaSwiftKit",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ],
-            path: "Sources/EVNovaPluginStore",
+            path: "Sources/NovaSwiftPluginStore",
             resources: [
                 .copy("Resources/PluginCatalog.json"),
                 .copy("Resources/Screenshots"),
             ]
         ),
         .executableTarget(
-            name: "evnova-extract",
-            dependencies: ["EVNovaKit", "EVNovaEngine", "EVNovaStory"],
-            path: "Sources/evnova-extract"
+            name: "novaswift-extract",
+            dependencies: ["NovaSwiftKit", "NovaSwiftEngine", "NovaSwiftStory"],
+            path: "Sources/novaswift-extract"
         ),
         .testTarget(
-            name: "EVNovaKitTests",
-            dependencies: ["EVNovaKit"],
-            path: "Tests/EVNovaKitTests"
+            name: "NovaSwiftKitTests",
+            dependencies: ["NovaSwiftKit"],
+            path: "Tests/NovaSwiftKitTests"
         ),
         .testTarget(
-            name: "EVNovaEngineTests",
-            dependencies: ["EVNovaEngine"],
-            path: "Tests/EVNovaEngineTests"
+            name: "NovaSwiftEngineTests",
+            dependencies: ["NovaSwiftEngine"],
+            path: "Tests/NovaSwiftEngineTests"
         ),
         .testTarget(
-            name: "EVNovaStoryTests",
-            dependencies: ["EVNovaStory"],
-            path: "Tests/EVNovaStoryTests"
+            name: "NovaSwiftStoryTests",
+            dependencies: ["NovaSwiftStory"],
+            path: "Tests/NovaSwiftStoryTests"
         ),
         .testTarget(
-            name: "EVNovaPluginStoreTests",
-            dependencies: ["EVNovaPluginStore"],
-            path: "Tests/EVNovaPluginStoreTests"
+            name: "NovaSwiftPluginStoreTests",
+            dependencies: ["NovaSwiftPluginStore"],
+            path: "Tests/NovaSwiftPluginStoreTests"
         ),
     ]
 )

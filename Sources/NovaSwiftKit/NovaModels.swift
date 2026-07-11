@@ -486,7 +486,7 @@ public struct SystRes {
 // MARK: röid — asteroid type (strength, yield, fragmentation)
 
 /// One of the 16 asteroid types (`röid` #128-143). Fields verified byte-for-byte
-/// against the real TMPL (#516, `evnova-extract tmpl … 516`) and the Nova Bible's
+/// against the real TMPL (#516, `novaswift-extract tmpl … 516`) and the Nova Bible's
 /// "The röid resource" section.
 public struct RoidRes {
     public let id: Int

@@ -1,7 +1,7 @@
 import XCTest
 import Foundation
-import EVNovaKit
-@testable import EVNovaStory
+import NovaSwiftKit
+@testable import NovaSwiftStory
 
 final class PilotFactoryTests: XCTestCase {
 

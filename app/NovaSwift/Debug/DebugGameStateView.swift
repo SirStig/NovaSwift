@@ -1,7 +1,7 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaEngine
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 /// The debug suite's **game-state editor**: a form for poking the live pilot and
 /// world directly — credits, fuel, ship health, the galaxy date, government

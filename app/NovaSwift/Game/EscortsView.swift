@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The pilot dossier's "Escorts" panel — an authentic-geometry recreation of
 /// DLOG/DITL #1022 "Escorts", the game's real in-flight escort management
-/// window (re-verified this pass: `evnova-extract dlog "data/EV Nova/Nova.rez" 1022`
-/// → bounds 424×259; `evnova-extract ditl ... 1022` → 12 items, all
+/// window (re-verified this pass: `novaswift-extract dlog "data/EV Nova/Nova.rez" 1022`
+/// → bounds 424×259; `novaswift-extract ditl ... 1022` → 12 items, all
 /// `userItem`/`statText`, no native controls, so the item rects ARE the exact
 /// pixel layout). Its frame art is PICT #8513 "Escort communications" in
 /// `Nova Graphics 3.rez` — confirmed (not assumed) by decoding it and reading
@@ -23,7 +23,7 @@ import SwiftUI
 /// they're deliberately not rendered rather than guessed at.
 ///
 /// No escort hire/dismiss/roster data model exists anywhere in the codebase
-/// (checked `Sources/EVNovaEngine`, `EVNovaKit`, `EVNovaStory`: `AIBrain` has
+/// (checked `Sources/NovaSwiftEngine`, `NovaSwiftKit`, `NovaSwiftStory`: `AIBrain` has
 /// only the *AI-side* "escort a fleet leader" formation-flying state, and
 /// `Fleet`/`Spawner` only spawn NPC escort fleets — nothing tracks escorts the
 /// *player* has hired). So this is deliberately the EMPTY STATE only: correct

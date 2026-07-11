@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Where a catalog entry's installable file is actually hosted. Purely
 /// informational (shown to the user before they download); the store never
@@ -20,7 +20,7 @@ public enum PluginSourceHost: String, Codable, Sendable {
 
 /// One entry in the browsable plug-in store: metadata about a plug-in or total
 /// conversion, independent of whether it's installed. Reuses `PluginKind` from
-/// `EVNovaKit` so a catalog entry and its installed `PluginBundle` agree on kind.
+/// `NovaSwiftKit` so a catalog entry and its installed `PluginBundle` agree on kind.
 public struct PluginCatalogEntry: Codable, Identifiable, Hashable, Sendable {
     /// Stable identity. Also the folder name the installer extracts this entry
     /// into under the plug-ins directory, so an installed `PluginBundle.id`

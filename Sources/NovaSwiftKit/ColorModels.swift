@@ -10,14 +10,14 @@ import Foundation
 // "only the first cölr resource is loaded."
 //
 // Byte layout reverse-engineered and verified against the real 244-byte
-// resource (`evnova-extract raw "data/EV Nova" "cölr" 128`), field order taken
+// resource (`novaswift-extract raw "data/EV Nova" "cölr" 128`), field order taken
 // from the Nova Bible ("* The cölr resource"). Every field below was pinned to
 // an exact byte offset by walking the Bible's field order end-to-end against
 // the raw hex dump — the fields consume the full 244 bytes with no gap or
 // overlap, which is strong corroborating evidence the offsets are right.
 // Button1x/y..Button6x/y (offsets 114–137) are additionally cross-checked
 // against the hardcoded MainMenuAssets.positions array in
-// app/EVNova/Launcher/AuthenticMainMenuView.swift, where they match exactly.
+// app/NovaSwift/Launcher/AuthenticMainMenuView.swift, where they match exactly.
 //
 // Colors are 4 bytes 0x00RRGGBB (byte 0 padding), same convention as IntfRes.
 // Font names are NUL-padded Mac Roman strings in fixed 64-byte fields (same

@@ -15,12 +15,12 @@ exist for the player.* So we prioritize **wiring what's already built** and
 
 ## Foundation — wired ✅
 
-- ✅ **Data layer** (`EVNovaKit`): classic fork / `.ndat` / `BRGR .rez`; plug-in
+- ✅ **Data layer** (`NovaSwiftKit`): classic fork / `.ndat` / `BRGR .rez`; plug-in
   override chain; typed decoders (shïp/oütf/wëap/sÿst/spöb/spïn/shän/…); `rlëD`
   + `PICT` decode. Reads the full real game.
 - ✅ **Plug-in library + store**: discover/classify/enable-disable; bundled
-  catalog + import; in-app `EVNovaPluginStore` browse/download/install UI.
-- ✅ **Engine** (`EVNovaEngine`): Newtonian flight, combat, projectiles/beams,
+  catalog + import; in-app `NovaSwiftPluginStore` browse/download/install UI.
+- ✅ **Engine** (`NovaSwiftEngine`): Newtonian flight, combat, projectiles/beams,
   shield/armor damage, ionization (charge/dissipate/disable-firing/disable-
   movement), odds-based AI decisions, NPC spawning from real `düde`/`flët`,
   government standings & diplomacy — all driven live via `GameSession.makeWorld`.
@@ -38,7 +38,7 @@ These are the systems that make it *EV Nova the game*. Most of the code exists;
 the work is **connecting it to the live loop**.
 
 ### P0 — Wire the mission/story runtime 🟡→✅ *(narrower now — mission offer/accept/decline is done)*
-**Update:** `app/EVNova/Story/AppGameServices.swift` (a real `GameServices`
+**Update:** `app/NovaSwift/Story/AppGameServices.swift` (a real `GameServices`
 conformer) and a real `StoryEngine` instance (instantiated per-landing in
 `MissionBoardView.swift`, embedded in both the Mission BBS and Bar screens)
 now make mission offer/accept/decline genuinely live, persisting to the pilot
@@ -90,7 +90,7 @@ notes, most of it has no live caller yet. Concrete, scoped wiring tasks:
   `.shipDisabled`/`.shipDestroyed` transitions and per-hit path), replacing
   the current dead-field `gov.shootPenalty` docking. (GOVERNMENT.md)
 - **Fold `RankRes.contribute` into `ItemLocking.contributedBits`**
-  (`app/EVNova/Spaceport/ItemLocking.swift`) the same way
+  (`app/NovaSwift/Spaceport/ItemLocking.swift`) the same way
   `StoryEngine.activeContributeBits()` already does, so a rank-gated
   *purchase* — the Bible's own headline example for `Contribute`/`Require` —
   works in the spaceport UI, not just mission/cron availability. (GOVERNMENT.md)
@@ -137,7 +137,7 @@ notes, most of it has no live caller yet. Concrete, scoped wiring tasks:
   accessibility layered on (opt-in, per charter).
 - **Plug-in tooling**: load-order/override UI polish; in-app resource editor
   (Mission Computer / ResForge-class) + pilot editing — requires a new **write
-  path** in `EVNovaKit` (serializers + per-type encoders). Scoped in
+  path** in `NovaSwiftKit` (serializers + per-type encoders). Scoped in
   `docs/EDITOR_AND_PLUGINS_SCOPE.md`.
 
 ---

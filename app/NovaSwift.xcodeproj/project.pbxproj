@@ -7,18 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA000000000000000000F3 /* EVNovaKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F1 /* EVNovaKit */; };
-		AA000000000000000000F4 /* EVNovaEngine in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F2 /* EVNovaEngine */; };
-		AA000000000000000000F6 /* EVNovaStory in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F5 /* EVNovaStory */; };
-		AA000000000000000000F8 /* EVNovaPluginStore in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F7 /* EVNovaPluginStore */; };
+		AA000000000000000000F3 /* NovaSwiftKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F1 /* NovaSwiftKit */; };
+		AA000000000000000000F4 /* NovaSwiftEngine in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F2 /* NovaSwiftEngine */; };
+		AA000000000000000000F6 /* NovaSwiftStory in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F5 /* NovaSwiftStory */; };
+		AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F7 /* NovaSwiftPluginStore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		AA000000000000000000E5 /* EVNova.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EVNova.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA000000000000000000E5 /* NovaSwift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NovaSwift.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		AA000000000000000000E6 /* EVNova */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = EVNova; sourceTree = "<group>"; };
+		AA000000000000000000E6 /* NovaSwift */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = NovaSwift; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -26,10 +26,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA000000000000000000F3 /* EVNovaKit in Frameworks */,
-				AA000000000000000000F4 /* EVNovaEngine in Frameworks */,
-				AA000000000000000000F6 /* EVNovaStory in Frameworks */,
-				AA000000000000000000F8 /* EVNovaPluginStore in Frameworks */,
+				AA000000000000000000F3 /* NovaSwiftKit in Frameworks */,
+				AA000000000000000000F4 /* NovaSwiftEngine in Frameworks */,
+				AA000000000000000000F6 /* NovaSwiftStory in Frameworks */,
+				AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -39,7 +39,7 @@
 		AA000000000000000000E2 = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000E6 /* EVNova */,
+				AA000000000000000000E6 /* NovaSwift */,
 				AA000000000000000000E3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -47,7 +47,7 @@
 		AA000000000000000000E3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AA000000000000000000E5 /* EVNova.app */,
+				AA000000000000000000E5 /* NovaSwift.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -55,9 +55,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AA000000000000000000E4 /* EVNova */ = {
+		AA000000000000000000E4 /* NovaSwift */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA000000000000000000EB /* Build configuration list for PBXNativeTarget "EVNova" */;
+			buildConfigurationList = AA000000000000000000EB /* Build configuration list for PBXNativeTarget "NovaSwift" */;
 			buildPhases = (
 				AA000000000000000000E7 /* Sources */,
 				AA000000000000000000E8 /* Frameworks */,
@@ -68,17 +68,17 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				AA000000000000000000E6 /* EVNova */,
+				AA000000000000000000E6 /* NovaSwift */,
 			);
-			name = EVNova;
+			name = NovaSwift;
 			packageProductDependencies = (
-				AA000000000000000000F1 /* EVNovaKit */,
-				AA000000000000000000F2 /* EVNovaEngine */,
-				AA000000000000000000F5 /* EVNovaStory */,
-				AA000000000000000000F7 /* EVNovaPluginStore */,
+				AA000000000000000000F1 /* NovaSwiftKit */,
+				AA000000000000000000F2 /* NovaSwiftEngine */,
+				AA000000000000000000F5 /* NovaSwiftStory */,
+				AA000000000000000000F7 /* NovaSwiftPluginStore */,
 			);
-			productName = EVNova;
-			productReference = AA000000000000000000E5 /* EVNova.app */;
+			productName = NovaSwift;
+			productReference = AA000000000000000000E5 /* NovaSwift.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -96,7 +96,7 @@
 					};
 				};
 			};
-			buildConfigurationList = AA000000000000000000EA /* Build configuration list for PBXProject "EVNova" */;
+			buildConfigurationList = AA000000000000000000EA /* Build configuration list for PBXProject "NovaSwift" */;
 			compatibilityVersion = "Xcode 15.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -113,7 +113,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				AA000000000000000000E4 /* EVNova */,
+				AA000000000000000000E4 /* NovaSwift */,
 			);
 		};
 /* End PBXProject section */
@@ -258,7 +258,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.houseofkac.evnova;
+				PRODUCT_BUNDLE_IDENTIFIER = com.houseofkac.novaswift;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -292,7 +292,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.houseofkac.evnova;
+				PRODUCT_BUNDLE_IDENTIFIER = com.houseofkac.novaswift;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -305,7 +305,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA000000000000000000EA /* Build configuration list for PBXProject "EVNova" */ = {
+		AA000000000000000000EA /* Build configuration list for PBXProject "NovaSwift" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA000000000000000000EC /* Debug */,
@@ -314,7 +314,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		AA000000000000000000EB /* Build configuration list for PBXNativeTarget "EVNova" */ = {
+		AA000000000000000000EB /* Build configuration list for PBXNativeTarget "NovaSwift" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA000000000000000000EE /* Debug */,
@@ -333,21 +333,21 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AA000000000000000000F1 /* EVNovaKit */ = {
+		AA000000000000000000F1 /* NovaSwiftKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = EVNovaKit;
+			productName = NovaSwiftKit;
 		};
-		AA000000000000000000F2 /* EVNovaEngine */ = {
+		AA000000000000000000F2 /* NovaSwiftEngine */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = EVNovaEngine;
+			productName = NovaSwiftEngine;
 		};
-		AA000000000000000000F5 /* EVNovaStory */ = {
+		AA000000000000000000F5 /* NovaSwiftStory */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = EVNovaStory;
+			productName = NovaSwiftStory;
 		};
-		AA000000000000000000F7 /* EVNovaPluginStore */ = {
+		AA000000000000000000F7 /* NovaSwiftPluginStore */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = EVNovaPluginStore;
+			productName = NovaSwiftPluginStore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

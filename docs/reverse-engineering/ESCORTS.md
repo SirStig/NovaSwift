@@ -16,19 +16,19 @@ cross-cutting behavior assembled from `përs`, `düde`/`flët`, `mïsn`, `gövt`
 Since this doc's original "byte-verified, nothing built" pass, two follow-up
 commits landed real Swift code against the offsets/fields §2.2 confirmed:
 
-- **`ShipRes` decoding (`Sources/EVNovaKit/NovaModels.swift`, commit
+- **`ShipRes` decoding (`Sources/NovaSwiftKit/NovaModels.swift`, commit
   `5a9537e`):** `hireRandom` (`@906`), `escortCategory` (`@1842`),
   `escortUpgradesTo` (`@1832`), `escortUpgradeCost` (`@1834`), and
   `escortSellValue` (`@1838`) are now real, decoded struct fields — no longer
   "confirmed offset, undecoded" as this doc previously described them.
-- **Escort economics (`app/EVNova/Game/PilotStore.swift`, same commit):**
+- **Escort economics (`app/NovaSwift/Game/PilotStore.swift`, same commit):**
   `escortAvailableToday(_:at:day:)` (deterministic `HireRandom` roll, same
   FNV-1a-hash pattern as `NovaEconomy`'s `BuyRandom` stocking),
   `hireEscort(_:at:day:)`, `upgradeEscort(_:)`, and `escortSellValue(for:)` /
   `sellEscort(_:)` are real, working credit-transaction logic against
   `state.credits`, with inline doc comments citing the exact Bible fields
   they implement.
-- **`EscortsView.swift` (`app/EVNova/Game/EscortsView.swift`, commit
+- **`EscortsView.swift` (`app/NovaSwift/Game/EscortsView.swift`, commit
   `68c9e2b`) replaced the old one-line `Text("No escorts hired.")`
   placeholder** in `StoryGuideView`'s "Escorts" section with a
   geometry-accurate recreation of the real DLOG/DITL #1022 "Escorts" panel
@@ -38,7 +38,7 @@ commits landed real Swift code against the offsets/fields §2.2 confirmed:
 
 **What this does *not* mean:** none of the above is wired together. `swift
 build` succeeds and the `PilotStore` functions are real, tested transaction
-logic — but a repo-wide grep of `app/EVNova/` turns up zero call sites for
+logic — but a repo-wide grep of `app/NovaSwift/` turns up zero call sites for
 `hireEscort`/`upgradeEscort`/`sellEscort`/`escortAvailableToday` outside their
 own declarations, and `EscortsView` has zero references to `PilotStore`,
 `ShipRes.hireRandom`, or any of the new escort fields. There is still no
@@ -50,7 +50,7 @@ correct, and completely inert from the player's perspective. See the updated
 
 This doc does **not** re-derive:
 - `përs`/`düde` field-offset tables — see `docs/MISSIONS.md` (`PersRes`,
-  `Sources/EVNovaKit/MissionModels.swift:317-351`) for the verified byte layout.
+  `Sources/NovaSwiftKit/MissionModels.swift:317-351`) for the verified byte layout.
 - The 4 base `AIType` dispositions or combat-AI variance sources (odds gating,
   cloak flags, jamming, etc.) — see `docs/AI_GROUND_TRUTH.md`, whose §1 already
   quotes `AIType = 0` = "use the ship's own inherent AI, only meaningful for
@@ -160,10 +160,10 @@ The Bible documents a full escort acquisition economy, entirely on ordinary
 
 **Byte offsets now confirmed** (superseding the "unknown layout" framing this
 section previously had). Method: `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`
-TMPL #518 (`shïp`), decoded field-by-field via `swift run evnova-extract tmpl
+TMPL #518 (`shïp`), decoded field-by-field via `swift run novaswift-extract tmpl
 "third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc" 518`, gives a
 1860-byte total record. Cross-checked against real `shïp` records with
-`swift run evnova-extract raw "data/EV Nova" shïp <id>` for **12 ships**
+`swift run novaswift-extract raw "data/EV Nova" shïp <id>` for **12 ships**
 spanning fighters, medium ships, warships, carriers, and freighters (#128
 Shuttle, #129 Heavy Shuttle, #130 Cargo Drone, #135 Lightning, #137 Valkyrie,
 #141 Fed Destroyer, #142 Fed Patrol Boat, #143 Fed Carrier, #144 Fed Viper,
@@ -175,10 +175,10 @@ check for outliers — every one of the 284 is exactly 1860 bytes:
 |---|---|---|---|
 | `HireRandom` | `@906` | `DWRD`, 2B | Sane 0–100 percentages across all 284 swept ships (208 are 0 = never hireable, e.g. Cargo Drone #130, Wraith variants #168-170 — matches non-combat/plot-only hulls; nonzero values cluster on fighters/mediums/warships, e.g. Viper #167 = 95, Valkyrie #137 = 50, Fed Viper #144 = 35) |
 | `EscortType` (doc's name; field is unlabeled `DWRD` in the TMPL — naming it `EscortCategory` here to match this doc's evidence-based convention) | `@1842` | `DWRD`, 2B | Distribution across the 284-ship sweep: 0=Fighter ×25, 1=Medium Ship ×105, 2=Warship ×106, 3=Freighter ×48 — and the assignments are sane per-hull: Viper #167/Manta #161/Fed Viper #144 → 0 (Fighter); Valkyrie #137/Fed Patrol Boat #142 → 1 (Medium); Shuttle #128/Heavy Shuttle #129/Cargo Drone #130 → 3 (Freighter). No ship in the sweep used -1 (Automatic) |
-| `UpgradeTo` | `@1832` | `RSID`, 2B | Every non-`(-1)` value in the sweep resolves to a **real `shïp` id with the same class name and equal-or-better stats** — e.g. Shuttle #128→#188 "Shuttle" (shield 30→35, armor 30→40), Fed Viper #144→#223 "Fed Viper" (shield 60→80), Valkyrie #137→#280 "Valkyrie" (armor 120→130), Fed Patrol Boat #142→#217 "Fed Patrol Boat" (shield 350→400), Viper #167→#335 "Viper" (shield 45→50), Manta #161→#315 "Manta" (shield 100→180) — confirmed with `swift run evnova-extract ship "data/EV Nova" <id>` on both ends of each chain. 133/284 swept ships are `-1` (not upgradeable), e.g. Cargo Drone #130, all three Wraith age-variants #168-170 |
+| `UpgradeTo` | `@1832` | `RSID`, 2B | Every non-`(-1)` value in the sweep resolves to a **real `shïp` id with the same class name and equal-or-better stats** — e.g. Shuttle #128→#188 "Shuttle" (shield 30→35, armor 30→40), Fed Viper #144→#223 "Fed Viper" (shield 60→80), Valkyrie #137→#280 "Valkyrie" (armor 120→130), Fed Patrol Boat #142→#217 "Fed Patrol Boat" (shield 350→400), Viper #167→#335 "Viper" (shield 45→50), Manta #161→#315 "Manta" (shield 100→180) — confirmed with `swift run novaswift-extract ship "data/EV Nova" <id>` on both ends of each chain. 133/284 swept ships are `-1` (not upgradeable), e.g. Cargo Drone #130, all three Wraith age-variants #168-170 |
 | `EscUpgrdCost` | `@1834` | `DLNG`, 4B | Sane, tier-scaled credit values across the sweep: Shuttle #128 = 5,000cr, Fed Viper #144 = 50,000cr, Fed Patrol Boat #142 = 70,000cr, up to Leviathan #131 = 1,000,000cr (a superfreighter — plausible top-end price). Zero negative/overflow values anywhere in the 284-ship sweep |
 | `EscSellValue` | `@1838` | `DLNG`, 4B | **Confirmed 0 on literally all 284 swept ships, with no exceptions.** Per the Bible's own text ("≤0 defaults to 10% of the ship's original `Cost`"), this means the retail game never overrides this field — every escort sale falls through to the automatic 10%-of-`Cost` default. (An earlier working note from this session misread ship #128's field at this offset as "3" — that was actually reading 4 bytes too far forward, into `EscortCategory@1842`'s value for that ship, which is legitimately 3 = Freighter. Re-verified byte-by-byte against the raw dump: `@1838`'s two 16-bit words are `0,0` for Shuttle, and `0,0` for every other ship checked.) |
-| `Crew` | already decoded | — | `crew` at `Sources/EVNovaKit/NovaModels.swift:189` (`@68`, per the TMPL field list) — unrelated to this session's new offsets, listed here for completeness since the Bible groups it with the hire/capture fields |
+| `Crew` | already decoded | — | `crew` at `Sources/NovaSwiftKit/NovaModels.swift:189` (`@68`, per the TMPL field list) — unrelated to this session's new offsets, listed here for completeness since the Bible groups it with the hire/capture fields |
 | `OnCapture` | `@976` | `n0FF`, 255B (NCB Set) | Not spot-checked against real data this session (would require parsing/decoding an NCB control-bit-set expression, out of scope here) — offset is TMPL-derived only |
 | `OnRetire` | `@1231` | `n0FF`, 255B (NCB Set) | Same caveat as `OnCapture` |
 
@@ -302,7 +302,7 @@ Related `mïsn` fields (full section starts ~line 1417):
 "defend me" for mission special ships — this, not anything on `përs` itself,
 is the field that makes a special ship behave like a bodyguard. AI_GROUND_TRUTH.md
 §4.8 already flags `ShipBehav` as a deferred item (needs mission-driven ship
-spawning wired through `EVNovaStory` — not done).
+spawning wired through `NovaSwiftStory` — not done).
 
 ### 2.4 `flët` (fleet) escorts — a third, unrelated meaning of "escort"
 
@@ -333,15 +333,15 @@ the "assistance mechanics" commit (`bdf82d2`, "Implement assistance
 mechanics for NPCs and enhance communication features") added a **one-shot,
 paid "tow truck" hail service**, not escort recruitment or command:
 
-- `AIBrain.assist` (`Sources/EVNovaEngine/AIBrain.swift:481-502`) — a hailed
+- `AIBrain.assist` (`Sources/NovaSwiftEngine/AIBrain.swift:481-502`) — a hailed
   NPC flies to the player, docks within 90 units, and calls
   `World.deliverAssistance` exactly once (`assistDelivered` latch), which
   refuels the player to full and floors armor at 40% max
-  (`Sources/EVNovaEngine/World.swift:892-897`). After delivery, if the player
+  (`Sources/NovaSwiftEngine/World.swift:892-897`). After delivery, if the player
   currently has a hostile ship targeted and the assisting NPC is armed, it
   will pitch in against that one target (reusing `attack()` wholesale) before
   departing on a 4-second timer (`AIBrain.swift:492-501`).
-- `HailDialogView.swift` (`app/EVNova/Game/HailDialogView.swift:17-115`) — the
+- `HailDialogView.swift` (`app/NovaSwift/Game/HailDialogView.swift:17-115`) — the
   comm dialog exposes exactly **three** buttons: `Greetings`, `Request
   Assistance`, `Close Channel` (lines 84-88). No per-escort order verbs exist
   because there is no persistent escort object to command — assistance is
@@ -350,7 +350,7 @@ paid "tow truck" hail service**, not escort recruitment or command:
 - Pricing is by diplomatic tier, not `përs`/hire economics: `assistanceTier`
   (`GameScene`) maps to free (ally), 300cr (neutral), or 900cr with only a 50%
   acceptance chance (wary/dislikes-you-but-not-hostile) —
-  `app/EVNova/Game/GameContainerView.swift:190-193, 580-615`. This pricing
+  `app/NovaSwift/Game/GameContainerView.swift:190-193, 580-615`. This pricing
   model is an invented scope cut with no Bible citation (the Bible's own
   hire/capture pricing is `Cost`/`EscUpgrdCost`/`EscSellValue`, none of which
   this code path reads).
@@ -406,17 +406,17 @@ a persistent escort roster, and does not touch `PersRes` in any way.
 
 | Bible concept | Status | Where |
 |---|---|---|
-| `PersRes` field decoder (LinkSyst, Govt, AIType, Aggress, Coward, ShipType, LinkMission, flags, activeOn, subtitle) | ✅ Decoded | `Sources/EVNovaKit/MissionModels.swift:317-351`; exposed via `game.pers(id)`/`game.persons()`, `Sources/EVNovaKit/NovaModels.swift:454-455` |
+| `PersRes` field decoder (LinkSyst, Govt, AIType, Aggress, Coward, ShipType, LinkMission, flags, activeOn, subtitle) | ✅ Decoded | `Sources/NovaSwiftKit/MissionModels.swift:317-351`; exposed via `game.pers(id)`/`game.persons()`, `Sources/NovaSwiftKit/NovaModels.swift:454-455` |
 | `përs` 5%-chance spawn-time creation, tied to ordinary ship spawns | ❌ Not wired | No caller of `PersRes`/`game.pers`/`game.persons()` exists anywhere outside the decoder file and its accessor (verified by repo-wide grep). `docs/MISSIONS.md`'s own "Not yet wired" section already flags this: "`përs` captains offering their linked missions in space (needs AI to place them; the decoder + `activeOn`/`linkMission` fields are ready)." |
-| `AIType 0` → `shïp.InherentAI` fallback for escorts | Partially decoded, not escort-specific | `inherentAI` decoded at `Sources/EVNovaKit/NovaModels.swift:193,265` (`@66`); `AIType(raw:)` fallback exists generically (see AI_GROUND_TRUTH.md §1) but nothing in the engine currently creates a "hired/captured escort using its hull's InherentAI" — the only consumer of `InherentAI` today is `Spawner.spawnFleet` picking a flagship/escort's *own* disposition for NPC-fleet ships (`Sources/EVNovaEngine/Spawner.swift:132-133,158-165`), not a player-owned escort |
-| `shïp.HireRandom` (bar hire availability) | ✅ Decoded (model-layer only, not wired) | `hireRandom: Int` on `ShipRes`, `Sources/EVNovaKit/NovaModels.swift:267,327` — `i16(d, 906)`, matching the `@906` offset §2.2 confirmed. Landed in commit `5a9537e`. Consumed by `PilotStore.escortAvailableToday(_:at:day:)` (`app/EVNova/Game/PilotStore.swift:291-303`) but that function has zero callers outside `PilotStore` itself |
-| `shïp.EscortType`/`UpgradeTo`/`EscUpgrdCost`/`EscSellValue` (escort-menu categorization, upgrades, resale) | ✅ Decoded (model-layer only, not wired) | All four now exist on `ShipRes` (`Sources/EVNovaKit/NovaModels.swift:272-331`): `escortCategory` (`@1842`), `escortUpgradesTo` (`@1832`), `escortUpgradeCost` (`@1834`), `escortSellValue` (`@1838`) — same commit `5a9537e`. Consumed by `PilotStore.upgradeEscort(_:)` and `PilotStore.sellEscort(_:)`/`escortSellValue(for:)` (`PilotStore.swift:313-353`), both real, correct credit-transaction logic (upgrade charges `escortUpgradeCost`, sale credits `escortSellValue` or the Bible's 10%-of-`Cost` fallback) — but neither function has any caller in `app/EVNova/` outside their own declarations (verified by repo-wide grep) |
-| "Requisition-escort" / "hire-escort" dialogs, escort control menu | ⚠️ Implemented but not wired (empty-state shell only, no data or actions) | `app/EVNova/Game/EscortsView.swift` (commit `68c9e2b`) is a geometry-accurate recreation of the real DLOG/DITL #1022 "Escorts" panel — correct 424×259 layout, four command buttons (Aggressive/Defensive/Evasive/Hold Position), identity/status/display side panels — but every control is permanently disabled, the display panel hardcodes "No escorts hired.", and the file has zero references to `PilotStore`, `ShipRes.hireRandom`/`escortCategory`/etc., or any of §2.2's new economics functions. This is UI chrome only, not a functioning hire/requisition/command dialog; a real one needs to (a) call `hireEscort`/`upgradeEscort`/`sellEscort`, (b) bind to a roster (see next row), and (c) enable its buttons against real escort state. `HailDialogView.swift`'s unrelated 3-button in-flight comm dialog is still separate — see §3 |
+| `AIType 0` → `shïp.InherentAI` fallback for escorts | Partially decoded, not escort-specific | `inherentAI` decoded at `Sources/NovaSwiftKit/NovaModels.swift:193,265` (`@66`); `AIType(raw:)` fallback exists generically (see AI_GROUND_TRUTH.md §1) but nothing in the engine currently creates a "hired/captured escort using its hull's InherentAI" — the only consumer of `InherentAI` today is `Spawner.spawnFleet` picking a flagship/escort's *own* disposition for NPC-fleet ships (`Sources/NovaSwiftEngine/Spawner.swift:132-133,158-165`), not a player-owned escort |
+| `shïp.HireRandom` (bar hire availability) | ✅ Decoded (model-layer only, not wired) | `hireRandom: Int` on `ShipRes`, `Sources/NovaSwiftKit/NovaModels.swift:267,327` — `i16(d, 906)`, matching the `@906` offset §2.2 confirmed. Landed in commit `5a9537e`. Consumed by `PilotStore.escortAvailableToday(_:at:day:)` (`app/NovaSwift/Game/PilotStore.swift:291-303`) but that function has zero callers outside `PilotStore` itself |
+| `shïp.EscortType`/`UpgradeTo`/`EscUpgrdCost`/`EscSellValue` (escort-menu categorization, upgrades, resale) | ✅ Decoded (model-layer only, not wired) | All four now exist on `ShipRes` (`Sources/NovaSwiftKit/NovaModels.swift:272-331`): `escortCategory` (`@1842`), `escortUpgradesTo` (`@1832`), `escortUpgradeCost` (`@1834`), `escortSellValue` (`@1838`) — same commit `5a9537e`. Consumed by `PilotStore.upgradeEscort(_:)` and `PilotStore.sellEscort(_:)`/`escortSellValue(for:)` (`PilotStore.swift:313-353`), both real, correct credit-transaction logic (upgrade charges `escortUpgradeCost`, sale credits `escortSellValue` or the Bible's 10%-of-`Cost` fallback) — but neither function has any caller in `app/NovaSwift/` outside their own declarations (verified by repo-wide grep) |
+| "Requisition-escort" / "hire-escort" dialogs, escort control menu | ⚠️ Implemented but not wired (empty-state shell only, no data or actions) | `app/NovaSwift/Game/EscortsView.swift` (commit `68c9e2b`) is a geometry-accurate recreation of the real DLOG/DITL #1022 "Escorts" panel — correct 424×259 layout, four command buttons (Aggressive/Defensive/Evasive/Hold Position), identity/status/display side panels — but every control is permanently disabled, the display panel hardcodes "No escorts hired.", and the file has zero references to `PilotStore`, `ShipRes.hireRandom`/`escortCategory`/etc., or any of §2.2's new economics functions. This is UI chrome only, not a functioning hire/requisition/command dialog; a real one needs to (a) call `hireEscort`/`upgradeEscort`/`sellEscort`, (b) bind to a roster (see next row), and (c) enable its buttons against real escort state. `HailDialogView.swift`'s unrelated 3-button in-flight comm dialog is still separate — see §3 |
 | Persistent player escort roster (hired, captured, or mission-granted) | ❌ Not built | Still no roster data model anywhere in the codebase — `PlayerState` has no `escorts`-style field (noted explicitly in `PilotStore.swift:267-279`'s own doc comment). `StoryGuideView.swift:119-121`'s "Escorts" section now renders `EscortsView()` (previous row) instead of the old inline `Text("No escorts hired.")`, but that's a swap of one static placeholder for a richer static placeholder — there is still nothing that persists a hired/captured/upgraded escort between sessions or even within one |
-| `gövt.VoiceType` (per-government escort comm voice, 8 types × ack/target/victory `snd`) | ✅ Decoded, unused for escorts | `Sources/EVNovaKit/NovaAIModels.swift:220,264` decodes `voiceType`; not consumed anywhere for playing escort ack/targeting/victory audio (no escort feature exists to consume it) |
-| Capture mechanics (`Crew`, marines `ModType 25`, `OnCapture`) | Partially decoded | `crew` decoded (`NovaModels.swift:189`); marines outfit ModVal handling and `OnCapture` control-bit-set evaluation not found in `Sources/EVNovaEngine` (no boarding/capture system exists in this engine yet per AI_GROUND_TRUTH.md's boarding caveat, §1 item 3) |
-| `mïsn.ShipGoal`/`ShipBehav`/`ShipStart` (mission special-ship goals incl. `ShipGoal=3` escort-the-NPC, `ShipBehav=1` protect-the-player) | ❌ Deferred | AI_GROUND_TRUTH.md §6 item 12: "blocked on [EVNovaStory-to-game-loop wiring], not on anything AI-specific" — same root cause as the `përs` placement gap above |
-| `flët.EscortType`/`Min`/`Max` — NPC fleet escort formations | ✅ Implemented | `Sources/EVNovaEngine/Spawner.swift:126-163` (`spawnFleet`) builds a flagship + numbered escort slots; `Sources/EVNovaEngine/AIBrain.swift:17,42-45,240-252,450-473` (`AIState.escorting`, `leaderID`, `formationSlot`, `escort()` V-wing station-keeping) drives their flight. This is the one escort concept fully built — but it's the *NPC convoy screen* meaning of "escort," not the player's own roster. |
+| `gövt.VoiceType` (per-government escort comm voice, 8 types × ack/target/victory `snd`) | ✅ Decoded, unused for escorts | `Sources/NovaSwiftKit/NovaAIModels.swift:220,264` decodes `voiceType`; not consumed anywhere for playing escort ack/targeting/victory audio (no escort feature exists to consume it) |
+| Capture mechanics (`Crew`, marines `ModType 25`, `OnCapture`) | Partially decoded | `crew` decoded (`NovaModels.swift:189`); marines outfit ModVal handling and `OnCapture` control-bit-set evaluation not found in `Sources/NovaSwiftEngine` (no boarding/capture system exists in this engine yet per AI_GROUND_TRUTH.md's boarding caveat, §1 item 3) |
+| `mïsn.ShipGoal`/`ShipBehav`/`ShipStart` (mission special-ship goals incl. `ShipGoal=3` escort-the-NPC, `ShipBehav=1` protect-the-player) | ❌ Deferred | AI_GROUND_TRUTH.md §6 item 12: "blocked on [NovaSwiftStory-to-game-loop wiring], not on anything AI-specific" — same root cause as the `përs` placement gap above |
+| `flët.EscortType`/`Min`/`Max` — NPC fleet escort formations | ✅ Implemented | `Sources/NovaSwiftEngine/Spawner.swift:126-163` (`spawnFleet`) builds a flagship + numbered escort slots; `Sources/NovaSwiftEngine/AIBrain.swift:17,42-45,240-252,450-473` (`AIState.escorting`, `leaderID`, `formationSlot`, `escort()` V-wing station-keeping) drives their flight. This is the one escort concept fully built — but it's the *NPC convoy screen* meaning of "escort," not the player's own roster. |
 | `përs.ShieldMod < 0` invincibility, custom weapon add/remove, grudge flag, escape-pod flag | Field-decoded only | `flags1`/related bits exist on `PersRes` (`MissionModels.swift:328-334`, only 3 of the ~16 documented flag bits have named accessors: `deactivateAfterAccept`, `offerOnBoard`, `leavesAfterAccept`); no runtime behavior consumes any of them since `PersRes` is never instantiated (see row 2) |
 | "Assist" paid support call (recent commit `bdf82d2`) | ✅ Implemented, but **not** a Bible `përs`/escort feature | See §3 — `AIBrain.assist`, `World.deliverAssistance`, `HailDialogView`'s "Request Assistance" button, `GameContainerView`'s tier-based pricing. A legitimate, self-consistent invented mechanic, but should not be mistaken for progress on `përs` recruitment, hire/requisition dialogs, or a command-verb system — it shares no code path with any of those. |
 

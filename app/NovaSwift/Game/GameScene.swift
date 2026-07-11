@@ -1,6 +1,6 @@
 import SpriteKit
-import EVNovaKit
-import EVNovaEngine
+import NovaSwiftKit
+import NovaSwiftEngine
 #if os(macOS)
 import AppKit
 #else
@@ -19,7 +19,7 @@ struct PlanetVisual {
     let isUninhabited: Bool
 }
 
-/// The live game scene. Runs the `EVNovaEngine` simulation and draws it: an
+/// The live game scene. Runs the `NovaSwiftEngine` simulation and draws it: an
 /// infinite parallax starfield, the player ship (real EV Nova sprite when data
 /// is loaded, a vector placeholder otherwise) with an engine exhaust plume, a
 /// follow camera, and a HUD driven via `GameHUDModel`.

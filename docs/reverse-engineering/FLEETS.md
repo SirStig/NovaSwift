@@ -79,11 +79,11 @@ Critically, the Bible's `sÿst.DudeTypes` field text (below) only ever
 describes it as holding a `düde` ID (128–639). It does **not** state, anywhere
 in the prose, how a system's spawn table refers to a `flët` instead of a
 `düde`. The existing decoder (`SystRes.spawns`,
-`Sources/EVNovaKit/NovaModels.swift:323-338`) resolves this by convention: a
+`Sources/NovaSwiftKit/NovaModels.swift:323-338`) resolves this by convention: a
 **negative** value in a `DudeTypes` slot is read as `-value` = a `flët` id
 (`fleetSpawns`), while a positive value ≥128 is a `düde` id (`dudeSpawns`).
 This is a reasonable, and empirically-confirmed, inference — running
-`evnova-extract ai "data/EV Nova" <sysID> 1` against the real Nova.rez data
+`novaswift-extract ai "data/EV Nova" <sysID> 1` against the real Nova.rez data
 shows most Federation-space systems reporting `8 dude(s), 0 fleet(s)`, but
 Alphara (#131) and Nesre Secundus (#133) report `7 dude(s), 1 fleet(s)` out of
 the same 8 total slots — i.e. real stock data does mix negative (fleet) and
@@ -95,7 +95,7 @@ turns up a different rule (e.g. a separate flag bit rather than sign).
 ## 1. `sÿst` fields governing traffic/density (lines 3002–3132)
 
 Full field list, in Bible order, with what's decoded in `SystRes`
-(`Sources/EVNovaKit/NovaModels.swift:316-360`) noted per row:
+(`Sources/NovaSwiftKit/NovaModels.swift:316-360`) noted per row:
 
 | Field | Bible meaning | Decoded in `SystRes`? |
 |---|---|---|
@@ -133,7 +133,7 @@ controls, and neither is decoded yet.
 
 `Spawner.swift` reflects the two real knobs closely:
 `targetPopulation = min(maxPopulation, avg + 2)` derives a live cap from
-`averageShips` (`Sources/EVNovaEngine/Spawner.swift:44-45`), and
+`averageShips` (`Sources/NovaSwiftEngine/Spawner.swift:44-45`), and
 `spawnOne` draws from the combined `dudes`+`fleets` weighted table
 (`Spawner.swift:76-95`) — matching `%Prob`'s weighted-pick semantics
 (`weightedPick`, `Spawner.swift:97-105`, same algorithm as `DudeRes.pickShip`
@@ -158,16 +158,16 @@ re-rolled — see §7.
 | `Quote` | "Show a random string from the STR# resource with this ID when the fleet enters from hyperspace. Any occurrences of the character '#'… will be replaced with a random digit (0-9)" | ✅ decoded as `hailQuote` @286 (`RSID`, 2 bytes) — **still never read anywhere**, no arrival-text event exists, see §7 (updated) |
 | `Flags` | `0x0001`: "Freighters (`InherentAI <= 2`) in this fleet will have random cargo when boarded" | ✅ decoded as `flags` @288 (`WORV`, 2 bytes) with a computed `freightersHaveRandomCargo` property — **still never read anywhere**; boarding isn't modeled, see §7 (updated) |
 
-`FleetRes.init` (`Sources/EVNovaKit/NovaAIModels.swift:440-455`) now reads
+`FleetRes.init` (`Sources/NovaSwiftKit/NovaAIModels.swift:440-455`) now reads
 through byte 288 (`appearOn`, `hailQuote`, `flags`), not just bytes 0–29 as
 when this doc was first written. Decoding `flët`'s real TMPL (TMPL #506 in
 `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, via the
-now-fixed `evnova-extract tmpl`) gave `AppearOn@30`(`n100`= a 256-byte NCB
+now-fixed `novaswift-extract tmpl`) gave `AppearOn@30`(`n100`= a 256-byte NCB
 test string, not a short field — much bigger than the 2-byte slot one might
 guess), `HailQuote@286`(`RSID`, 2B — this is the Bible's `Quote` field, named
 `Hail Quote` in the template), `Flags@288`(`WORV`, 2B), then 16 bytes of
 declared-`Unused` padding to a total of **306 bytes**. Confirmed against
-`swift run evnova-extract raw "data/EV Nova" flët 128` ("Small Federation
+`swift run novaswift-extract raw "data/EV Nova" flët 128` ("Small Federation
 Fleet"): real size is exactly 306 bytes, `LinkSyst@28=10000` (="any system of
 this fleet's own government" per §3's offset convention, `10000 + govtIndex`,
 consistent with `AffilGovt@26=128`= Federation, index 0), and `AppearOn`/
@@ -182,7 +182,7 @@ outstanding** — see §4 and §7 (updated).
 independently rolled uniformly in `[Min, Max]` or something else (e.g.
 Gaussian, or all four types rolled together against a shared budget); the
 engine's own choice (`Spawner.spawnFleet`,
-`Sources/EVNovaEngine/Spawner.swift:148-149`) is a plain independent uniform
+`Sources/NovaSwiftEngine/Spawner.swift:148-149`) is a plain independent uniform
 roll per escort type, `world.rng.int(in: min...max(min,max))`, which is the
 natural reading of "the minimum/maximum number of each type" but not something
 the Bible spells out mechanically.
@@ -212,9 +212,9 @@ with `Govt = Pirates` but `LinkSyst = 25000 + Federation id`, meaning "spawn in
 systems hostile to the Federation," which could be a third faction's space).
 The ally/enemy tests are exactly the class-membership relations already
 decoded on `gövt` (`GovtRes.allies`/`.enemies`,
-`Sources/EVNovaKit/NovaAIModels.swift:234-237`) and already evaluated by
+`Sources/NovaSwiftKit/NovaAIModels.swift:234-237`) and already evaluated by
 `Diplomacy.areAllied`/`Diplomacy.considersHostile`
-(`Sources/EVNovaEngine/Diplomacy.swift:70-84`) — no new relational logic would
+(`Sources/NovaSwiftEngine/Diplomacy.swift:70-84`) — no new relational logic would
 be needed to implement `LinkSyst`, only a lookup that walks all known systems'
 `government` field through those same two functions.
 
@@ -238,11 +238,11 @@ resolves this today — `linkSystem` is decoded and then never read (§7).
 - **`AppearOn`** is the same "control bit test expression" family as `spöb`'s
   `Visibility` field (lines 3072-3079, same section) and as the `mïsn`/`crön`
   TEST-expression grammar already implemented for the story layer
-  (`NCBTest`, `Sources/EVNovaStory/NCBExpression.swift:17-40` — bit refs
+  (`NCBTest`, `Sources/NovaSwiftStory/NCBExpression.swift:17-40` — bit refs
   `bNNN`, `&`/`|`/`!`/parens, evaluated against an `NCBTestContext`). It's
   blank-means-always-eligible ("If this field is left blank it will be
   ignored"), not blank-means-never. The parser/evaluator for this grammar
-  already exists in `EVNovaStory`, and the **decode half is now done**
+  already exists in `NovaSwiftStory`, and the **decode half is now done**
   (`FleetRes.appearOn`, §2) — but the **plumbing half is still outstanding**:
   nothing calls `NCBTest` on it or gates `Spawner.isFleetEligible`/spawn
   selection with the result, so a fleet with a non-blank `AppearOn` would
@@ -251,7 +251,7 @@ resolves this today — `linkSystem` is decoded and then never read (§7).
   moment the fleet "enters from hyperspace" — i.e. only for edge/jump-in
   arrivals, not for `.interior` (initial system fill) or `.planet` (launch)
   spawns in `Spawner`'s own vocabulary (`Spawner.SpawnOrigin`,
-  `Sources/EVNovaEngine/Spawner.swift:93`). It's a `STR#`-id reference, and
+  `Sources/NovaSwiftEngine/Spawner.swift:93`). It's a `STR#`-id reference, and
   the Bible calls out one piece of text substitution: literal `#` characters
   in the chosen string get replaced with a random digit 0-9 (e.g. for a
   squadron call-sign like "Patrol Wing #-#"). Contrast this with
@@ -283,8 +283,8 @@ followed them has been updated to reflect the current implementation.
 
 **Byte offsets now confirmed against real data.** Decoding `sÿst`'s real TMPL
 (`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc` TMPL #521,
-via the now-fixed `evnova-extract tmpl`) and cross-checking against
-`swift run evnova-extract raw "data/EV Nova" sÿst 128` ("Kania", 428 bytes,
+via the now-fixed `novaswift-extract tmpl`) and cross-checking against
+`swift run novaswift-extract raw "data/EV Nova" sÿst 128` ("Kania", 428 bytes,
 matching the TMPL's computed total exactly): `ReinfFleet@406`(RSID, 2B),
 `ReinfDelay@408`("frames", 2B — the Bible's `ReinfTime`), `ReinfRegen@410`
 ("days", 2B — the Bible's `ReinfIntrval`), then 16 bytes of declared-`Unused`
@@ -293,7 +293,7 @@ padding to 428. Kania's real record has `ReinfFleet=129` (a real, non-`-1`
 `ReinfDelay=900`(frames, = 30s at the Bible's "30 = one second" convention
 from the `AIBrain`/jamming docs), `ReinfRegen=2`(days). So today:
 
-- `AIBrain.favorableOdds` (`Sources/EVNovaEngine/AIBrain.swift:163-182`)
+- `AIBrain.favorableOdds` (`Sources/NovaSwiftEngine/AIBrain.swift:163-182`)
   correctly gates whether an *already-present* warship/interceptor picks a
   fight — the "before you charge in, weigh the odds" half. Unchanged by this
   update.
@@ -312,7 +312,7 @@ from the `AIBrain`/jamming docs), `ReinfRegen=2`(days). So today:
   `ReinfRegen`'s "days" unit is approximated as a fixed number of sim-seconds
   (`secondsPerReinforcementDay = 60`, `Spawner.swift:82`) since no galaxy-day
   calendar clock is threaded into combat simulation at this layer (that
-  lives one layer up, in `EVNovaStory.GameDate`) — a documented engine
+  lives one layer up, in `NovaSwiftStory.GameDate`) — a documented engine
   approximation, not a byte-verified constant, worth flagging alongside the
   other engine inventions in §7's table.
   `Spawner` still only draws ambient/fleet arrivals from the static
@@ -368,10 +368,10 @@ than a `flët` reference.
 1. ~~Exact byte offsets for `AppearOn`/`Quote`/`Flags`~~ — **resolved**, see
    §2 and §7. `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`
    turned out to have the authoritative `flët`/`sÿst` field layouts (TMPL
-   #506/#521) all along; `evnova-extract tmpl` just computed their offsets
+   #506/#521) all along; `novaswift-extract tmpl` just computed their offsets
    wrong (didn't multiply `Rnnn` repeat groups, didn't size several field
    types) until fixed in this pass. Confirmed against real `flët #128` and
-   `sÿst #128` records via `evnova-extract raw`.
+   `sÿst #128` records via `novaswift-extract raw`.
 2. **`LinkSyst` vs. per-system spawn-table wiring** (§3): does `LinkSyst`
    gate/validate what a system's own `DudeTypes` table already pins, or does
    it independently drive spawn eligibility for fleets that *aren't*
@@ -395,6 +395,6 @@ than a `flët` reference.
    engine choice) vs. some other original-game distribution — Bible doesn't
    say.
 4. **The negative-id-means-fleet convention itself** (§0) — empirically
-   confirmed against real stock data via `evnova-extract ai`, but not stated
+   confirmed against real stock data via `novaswift-extract ai`, but not stated
    anywhere in the Bible's own `DudeTypes` field description; worth treating
    as "very likely correct, unverified from prose" rather than a quoted spec.

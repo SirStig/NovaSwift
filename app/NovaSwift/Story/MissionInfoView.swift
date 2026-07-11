@@ -1,13 +1,13 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// EV Nova's **Mission Info** dialog — the in-flight list of every mission the
 /// player is currently on, with the selected mission's briefing and where to go
 /// on the right, an "Abort Mission" button (disabled when the mission forbids
 /// it), and Done. Rebuilt from the real dialog: backdrop PICT #8517 "Mission
 /// Info" (471×155, `Nova Files/Nova Graphics 3.rez`), item rects from DITL
-/// #1012 (`evnova-extract ditl "data/EV Nova/Nova.rez" 1012`) — see `Item`.
+/// #1012 (`novaswift-extract ditl "data/EV Nova/Nova.rez" 1012`) — see `Item`.
 ///
 /// The list, description and destination all come from `StoryEngine`'s
 /// `activeMissionSummaries()`, so the destination shown here is the exact same

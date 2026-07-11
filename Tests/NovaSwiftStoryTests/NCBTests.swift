@@ -1,6 +1,6 @@
 import XCTest
-import EVNovaKit
-@testable import EVNovaStory
+import NovaSwiftKit
+@testable import NovaSwiftStory
 
 /// A trivial context for testing TEST-expression evaluation in isolation.
 private struct Ctx: NCBTestContext {

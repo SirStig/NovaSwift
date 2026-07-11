@@ -1,6 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import EVNovaKit
+import NovaSwiftKit
 
 /// Explains the bring-your-own-data model and imports the user's owned EV Nova
 /// base data into the app container. Plug-ins ship prebundled; the copyrighted

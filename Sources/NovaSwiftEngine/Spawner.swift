@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Which dudes and fleets populate a system, and how densely. Built by the app
 /// from a decoded `SystRes` (its `dudeSpawns`/`fleetSpawns`/`averageShips`).
@@ -84,7 +84,7 @@ public final class Spawner {
     private var reinforcementCooldownUntil: Double = 0
     /// EV Nova's `ReinfIntrval` is in calendar days, but nothing at this
     /// layer (`Spawner`/`World`) tracks a galaxy day clock — that lives in
-    /// `EVNovaStory.GameDate`, a layer up, and isn't threaded through combat
+    /// `NovaSwiftStory.GameDate`, a layer up, and isn't threaded through combat
     /// simulation. Treat a "day" as this many sim-seconds so the regen gate
     /// still does its job (suppressing back-to-back re-triggers) without
     /// pretending to calendar accuracy — an engine invention in the same

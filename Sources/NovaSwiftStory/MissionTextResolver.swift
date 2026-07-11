@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Expands EV Nova's mission "wildcard" tags in `dësc` text — the `<PN>`,
 /// `<CQ>`, `<DSY>`… symbols the game substitutes at display time so a briefing
@@ -7,7 +7,7 @@ import EVNovaKit
 /// this particular offer (Nova Bible, "Whenever Nova displays a desc resource
 /// related to a mission… it replaces a few special wildcard symbols").
 ///
-/// This is distinct from `NovaDescFormatter` (`EVNovaKit/TextFormatting.swift`),
+/// This is distinct from `NovaDescFormatter` (`NovaSwiftKit/TextFormatting.swift`),
 /// which resolves the `{bXXX …}` / `{G …}` / `{P …}` *conditionals* every desc
 /// carries. The pipeline is: raw bytes → `NovaDescFormatter.render` (conditionals
 /// + newline normalization) → `MissionText.resolve` (these `<…>` wildcards).

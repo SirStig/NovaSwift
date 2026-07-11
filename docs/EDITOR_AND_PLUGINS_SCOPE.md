@@ -11,7 +11,7 @@ built), `docs/DATA_FORMAT.md` (container + resource formats), `docs/ROADMAP.md` 
 
 ## 0. The load-bearing fact: today the data layer is read-only
 
-Everything currently in `EVNovaKit` **parses**. Nothing **writes**.
+Everything currently in `NovaSwiftKit` **parses**. Nothing **writes**.
 
 - `Resource` is an immutable value type (`let type/id/name/data`).
 - `ClassicResourceFork.parse` and `RezContainer.parse` decode bytes → `ResourceCollection`.
@@ -69,10 +69,10 @@ control-bit/`crön` system; importing non-EV formats.
 
 ## 3. Architecture
 
-### 3.1 New in `EVNovaKit` — the write path (Milestone A)
+### 3.1 New in `NovaSwiftKit` — the write path (Milestone A)
 
 ```
-EVNovaKit/
+NovaSwiftKit/
   Resource.swift              (exists) — add a mutable editing model alongside
   Editing/
     EditableResource.swift    class: mutable type/id/name/attributes/data + dirty flag
@@ -94,7 +94,7 @@ Key decisions:
 
 - **Round-trip tests are the spec.** For every container and every resource type: parse a real
   resource → re-serialize → assert byte-identical (or field-identical where padding is free).
-  Wire these into `Tests/EVNovaKitTests` as golden tests against the user's own data (never
+  Wire these into `Tests/NovaSwiftKitTests` as golden tests against the user's own data (never
   commit the bytes). This is how we know encoders are correct.
 - **Schema-driven, not one-off.** Rather than hand-write an encoder per type, describe each
   resource type once as an ordered list of fields (offset, width, signedness, enum, string
@@ -111,7 +111,7 @@ Key decisions:
 ### 3.2 New in the app — the editor UI (Milestones C–D)
 
 ```
-app/EVNova/Editor/
+app/NovaSwift/Editor/
   EditorRootView.swift        three-pane: type list · resource list · detail/inspector
   ResourceListView.swift      per-type list w/ id, name, search, add/dupe/delete
   Inspectors/
@@ -148,18 +148,18 @@ The multi-pilot save system is implemented and shipping ahead of the editor, usi
 `.plt`. It is deliberately editor-ready: the future pilot editor mutates these same Codable
 types with an automatic pre-edit backup.
 
-- `EVNovaKit/CharacterModels.swift` — `CharRes`, the full `chär` starting-scenario decoder
+- `NovaSwiftKit/CharacterModels.swift` — `CharRes`, the full `chär` starting-scenario decoder
   (verified byte-exact vs real base #128 ".Trader"). `NovaGame.characters()/selectableScenarios()`.
-- `EVNovaStory/PilotSave.swift` — versioned envelope (metadata + list snapshot + `PlayerState`),
-  resilient decoding. `EVNovaStory/PilotArchive.swift` — many `<uuid>.evpilot` files, rotating
+- `NovaSwiftStory/PilotSave.swift` — versioned envelope (metadata + list snapshot + `PlayerState`),
+  resilient decoding. `NovaSwiftStory/PilotArchive.swift` — many `<uuid>.evpilot` files, rotating
   auto-backups (keep newest N + first), atomic writes, pluggable **iCloud-ready** storage root.
-  `EVNovaStory/PilotFactory.swift` — scenario → `PlayerState` (random start system, cash/ship/
+  `NovaSwiftStory/PilotFactory.swift` — scenario → `PlayerState` (random start system, cash/ship/
   standings/date + OnStart NCB through the real SET executor).
 - App: `Pilots/PilotRoster.swift` (roster/create/select/delete/duplicate) + `NewPilotView`,
   `PilotListView`, `IntroSequenceView` (scenario picker + gender/name + story intro slideshow),
   wired into the authentic main menu (New / Open / Enter Ship). Autosave on hyperjump, save +
   rotating backup on **every landing** and manual save; `AppModel.autosave(reason:)`.
-- CLI `evnova-extract char <baseDir> [id]`; tests: `CharacterModelTests`, `PilotFactoryTests`,
+- CLI `novaswift-extract char <baseDir> [id]`; tests: `CharacterModelTests`, `PilotFactoryTests`,
   `PilotStoreTests`.
 
 **Still pending here:** real `.plt`/`NpïL` binary import/export (§4 research spike), the full
@@ -175,7 +175,7 @@ Before committing UI:
    deobfuscation (byte cipher / key). Validate by round-tripping the user's own pilot: decrypt
    → re-encrypt → byte-identical, and by making one known edit (e.g. cash) and loading it in a
    desktop EV Nova. Sources to check: existing open-source Nova pilot editors, the EVN Bible,
-   evnova-utils. **Flag every field-layout assumption as unverified until a real pilot confirms.**
+   novaswift-utils. **Flag every field-layout assumption as unverified until a real pilot confirms.**
 2. Only then build `PilotFile` + `PilotModel` + `PilotEditorView`.
 
 Edit surface (v1): cash, current ship, installed outfits, cargo, legal standing per govt,

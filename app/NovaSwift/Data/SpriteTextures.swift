@@ -1,6 +1,6 @@
 import Foundation
 import SpriteKit
-import EVNovaKit
+import NovaSwiftKit
 
 /// Bridges decoded EV Nova sprite sheets into SpriteKit textures.
 enum SpriteTextures {

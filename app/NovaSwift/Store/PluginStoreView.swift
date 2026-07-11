@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaPluginStore
+import NovaSwiftKit
+import NovaSwiftPluginStore
 
 /// Browsable catalog of downloadable plug-ins/total conversions. Fully usable
 /// offline (all metadata + screenshots are bundled); only tapping Install

@@ -78,7 +78,7 @@ import Foundation
 /// What an outfit *does* to the ship it's installed on. These are EV Nova's
 /// "ModType" function codes (the number stored in each of an outfit's four
 /// modifier slots), from novaparse `OutfResource.ts`. Most carry a signed value;
-/// the boolean-style ones ignore it. `EVNovaEngine` aggregates these into a
+/// the boolean-style ones ignore it. `NovaSwiftEngine` aggregates these into a
 /// ship's effective stats.
 public enum OutfitModType: Int, Sendable {
     case none = 0
@@ -236,7 +236,7 @@ public struct OutfRes {
 /// A government: its diplomatic stance (class membership, ally/enemy classes),
 /// crime penalties, and behavior flags. Two governments are hostile when one's
 /// `enemies` classes intersect the other's `classes`, or a xenophobe/attack flag
-/// applies. See `Diplomacy` in EVNovaEngine.
+/// applies. See `Diplomacy` in NovaSwiftEngine.
 public struct GovtRes {
     public let id: Int
     public let name: String

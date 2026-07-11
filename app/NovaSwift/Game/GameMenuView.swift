@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// The in-game menu — a single, clean, animated panel that slides in from the
 /// left and hosts every non-flight action: resume, galaxy map, mission log,

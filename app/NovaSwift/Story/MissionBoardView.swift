@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// A list of real `mïsn` offers at one `MissionOfferLocation`, shared by the
 /// Mission BBS and Bar screens (`AvailLoc` 0 and 1 respectively — the two
@@ -17,7 +17,7 @@ import EVNovaStory
 /// implies for a ~144pt-tall box. Tapping a row opens the real accept/refuse
 /// popup — DITL #1012 "Mission Info" for the mission computer, DITL #1016
 /// "Single Mission" for the bar (a lone patron's offer, no browsing list) —
-/// both verified against `evnova-extract dlog/ditl` and their frame PICTs.
+/// both verified against `novaswift-extract dlog/ditl` and their frame PICTs.
 struct MissionBoardView: View {
     let game: NovaGame
     @ObservedObject var pilot: PilotStore
@@ -132,7 +132,7 @@ private struct MissionPictFrame<Content: View>: View {
 
 /// The three-slice resizable frame DITL #1016 "Single Mission" draws itself
 /// on — PICTs 8521/8522/8523 ("Mission offer (upper/middle/lower)"), each
-/// 441px wide (verified via `evnova-extract pict`: 441×9, 441×365, 441×40).
+/// 441px wide (verified via `novaswift-extract pict`: 441×9, 441×365, 441×40).
 /// The middle slice stretches to fill whatever height the briefing text
 /// needs, the same way `NovaButtonStyle` stretches a button's middle cap
 /// horizontally.
@@ -169,7 +169,7 @@ private struct MissionThreeSliceFrame<Content: View>: View {
 
 /// The mission-computer accept/refuse popup — DITL #1012 "Mission Info",
 /// bounds `(40,40)-(511,195)` = 471×155, confirmed exact against PICT #8517
-/// "Mission Info" (`evnova-extract pict` → 471×155, no stale-bounds
+/// "Mission Info" (`novaswift-extract pict` → 471×155, no stale-bounds
 /// correction needed here). Item #5 (`(177,222)-(232,259)`) falls outside
 /// that 155pt-tall frame in every reading of the DITL and is left unrendered
 /// — likely a vestigial/unused item, not a real control.
@@ -263,7 +263,7 @@ private struct MissionInfoSheet: View {
 
 /// The bar's accept/decline popup — DITL #1016 "Single Mission", drawn on
 /// the three-slice PICTs 8521-8523 (an existing code comment flagged these
-/// as the right frame; confirmed by name via `evnova-extract list ... PICT`
+/// as the right frame; confirmed by name via `novaswift-extract list ... PICT`
 /// and by their 441px-wide decode matching the DITL's item extents). The
 /// bar offers one mission at a time (no browsing list, unlike the mission
 /// computer) so the frame is just the briefing pane plus accept/decline.

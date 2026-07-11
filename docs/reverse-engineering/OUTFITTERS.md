@@ -22,18 +22,18 @@ several of the greps while researching this doc.
 Since this doc was first written, a follow-up implementation pass landed real
 Swift for several of the gaps identified below:
 
-- **`OutfRes` decoding** (`Sources/EVNovaKit/NovaAIModels.swift`): `itemClass`
+- **`OutfRes` decoding** (`Sources/NovaSwiftKit/NovaAIModels.swift`): `itemClass`
   (`@1004`) and `scanMask` (`@1006`) are now decoded fields on `OutfRes` (they
   were previously confirmed-by-offset-only, not present in code). Neither is
   consumed by any behavior yet — see §6.
 - **Mass-proportional mass** (`Flags 0x0400`): now fully implemented and
   wired — `OutfRes.massIsShipMassProportional`/`.effectiveMass(shipMass:)`
-  (`Sources/EVNovaEngine/ShipLoadout.swift`) are consumed inside
+  (`Sources/NovaSwiftEngine/ShipLoadout.swift`) are consumed inside
   `Galaxy.loadout`'s `usedMass` aggregation. ✅
 - **Mass-proportional price** (`Flags 0x0200`): the *decoding and math* landed
   the same way (`OutfRes.priceIsShipMassProportional`/`.effectiveCost(shipMass:)`),
   but it is **not wired into the shop** — `PilotStore.buyOutfit`/`sellOutfit`
-  (`app/EVNova/Game/PilotStore.swift`) still charge/refund the flat `o.cost`
+  (`app/NovaSwift/Game/PilotStore.swift`) still charge/refund the flat `o.cost`
   and never call `effectiveCost`. Verified directly against the current file
   contents for this update. ⚠️ computed, not charged.
 - **Gun/turret slot tracking**: `Loadout.usedGunSlots`/`usedTurretSlots`/
@@ -80,7 +80,7 @@ any `oütf` flagged 0x0001/0x0002 competes for those slots. Everything else
 slot. `ModType 45`/`46` ("modify max guns"/"modify max turrets") let an outfit
 itself add or remove gun/turret capacity (e.g. a gun-mount-adding pod).
 
-Cross-reference: `Sources/EVNovaEngine/ShipLoadout.swift` sums `.maxGuns`/
+Cross-reference: `Sources/NovaSwiftEngine/ShipLoadout.swift` sums `.maxGuns`/
 `.maxTurrets` modifiers into the hull's counts (lines 106, 136-137) — that's
 the *aggregation* math and is already covered by `docs/SHIP_SYSTEM.md`.
 
@@ -99,7 +99,7 @@ hidden outright.
 
 I.e. `outfit.techLevel <= spob.techLevel` OR `spob.techLevel` is overridden by
 one of the stellar's specific `SpecialTech` grants. Implemented:
-`NovaEconomy.sells(techLevel:at:)` (`Sources/EVNovaKit/NovaEconomy.swift:165-166`):
+`NovaEconomy.sells(techLevel:at:)` (`Sources/NovaSwiftKit/NovaEconomy.swift:165-166`):
 `techLevel <= spob.techLevel || spobSpecialTech(spob.id).contains(techLevel)`.
 Tech-level failure **fully removes** the item from the list — it's the only
 gate the Bible doesn't soften with a "still shown, greyed out" fallback.
@@ -151,9 +151,9 @@ RequireGovt value | Scope
 Outside its scope, the `Require` gate simply doesn't apply (item is available
 there regardless of what the player owns).
 
-Implemented: `Sources/EVNovaKit/NovaAIModels.swift` decodes `contribute` (`@30`),
+Implemented: `Sources/NovaSwiftKit/NovaAIModels.swift` decodes `contribute` (`@30`),
 `require` (`@38`), `requireGovt` (`@1010`) on `OutfRes`. Logic in
-`app/EVNova/Spaceport/ItemLocking.swift`:
+`app/NovaSwift/Spaceport/ItemLocking.swift`:
 - `contributedBits(pilot:)` (lines 24-30) ORs the current ship's `contribute`
   with every owned outfit's `contribute`.
 - `requireGovtApplies` (lines 37-49) implements the four range cases above.
@@ -192,7 +192,7 @@ items opting into 0x0100 (hide-on-failed-Require) or 0x4000
 owning ≥1 already forces it visible. Implemented: `OutfRes.hidesWhenLocked`
 (`flags & 0x0100 != 0 || flags & 0x4000 != 0`), consumed by `LockState` in
 `ItemLocking.swift` (`.available` / `.locked` / `.hidden`) and filtered in
-`OutfitterView.stock` (`app/EVNova/Spaceport/SpaceportScreens.swift:163`).
+`OutfitterView.stock` (`app/NovaSwift/Spaceport/SpaceportScreens.swift:163`).
 
 ### 3.5 The "ignore everything" escape hatch
 
@@ -228,12 +228,12 @@ Field | Meaning
 
 `OutfRes.cost` is decoded (`NovaAIModels.swift`) and used directly as the
 displayed/charged price in `OutfitterView.info` and `PilotStore.buyOutfit`/
-`sellOutfit` (`app/EVNova/Game/PilotStore.swift:214-242`) — full refund on
+`sellOutfit` (`app/NovaSwift/Game/PilotStore.swift:214-242`) — full refund on
 sell, matching the Bible's flat-refund model. **Gap (partially closed)**:
 `Flags 0x0200` (mass-proportional pricing) is now decoded
 (`OutfRes.priceIsShipMassProportional`) and the correct math exists
 (`OutfRes.effectiveCost(shipMass:)` / `Galaxy.effectiveCost(of:forShip:)` in
-`Sources/EVNovaEngine/ShipLoadout.swift`) — but `PilotStore.buyOutfit`/
+`Sources/NovaSwiftEngine/ShipLoadout.swift`) — but `PilotStore.buyOutfit`/
 `sellOutfit` still charge/refund the flat `o.cost` and never call
 `effectiveCost`. So every mass-scaled-price outfit in real data is still
 mis-priced by the running engine today (charged/refunded at flat `Cost`
@@ -261,23 +261,23 @@ id 513) encodes the *primary* modifier slot as a `KWRD` selector (`ModType`,
 `RSID Weapon='wëap'` when `ModType==1` and `RSID Weapon Ammo='wëap'` when
 `ModType==3` — i.e. the editor's template genuinely declares ONE reserved
 slot for the id, reinterpreted by case, not two sequential 2-byte reservations
-(the naive `evnova-extract tmpl` dump prints these sub-cases as `@6`/`@8`
+(the naive `novaswift-extract tmpl` dump prints these sub-cases as `@6`/`@8`
 because it sums KEYB case bodies sequentially instead of collapsing them —
 a known limitation of that dev tool, not evidence of separate storage). Real
 byte data settles it outright:
 
-- `swift run evnova-extract raw "data/EV Nova" oütf 128` → **"Light Blaster"**
+- `swift run novaswift-extract raw "data/EV Nova" oütf 128` → **"Light Blaster"**
   (weapon, `ModType==1`): byte word `@6`=1, `@8`=**128** — 128 is exactly the
   `wëap` id this outfit's own name and the existing `OutfitModType.weapon`
   decoder agree it grants.
-- `swift run evnova-extract raw "data/EV Nova" oütf 135` → **"IR Missile"**
+- `swift run novaswift-extract raw "data/EV Nova" oütf 135` → **"IR Missile"**
   (ammo, `ModType==3`): byte word `@6`=3, `@8`=**134** — 134 is the `wëap` id
   of outfit #134 "IR Missile Launcher" (itself a `ModType==1` weapon outfit
   whose own `@8` is 134), i.e. launcher and ammo agree on the fed weapon id
   at the identical absolute offset.
-- `swift run evnova-extract raw "data/EV Nova" oütf 130` (weapon, "Light
+- `swift run novaswift-extract raw "data/EV Nova" oütf 130` (weapon, "Light
   Blaster Turret") → `@8`=130, `@12`(Flags)=2 (`0x0002` Turret bit, matching
-  the name). `swift run evnova-extract raw "data/EV Nova" oütf 156` (ammo,
+  the name). `swift run novaswift-extract raw "data/EV Nova" oütf 156` (ammo,
   "Polaron Torpedo") → `@8`=148, matching outfit #155 "Polaron Torpedo Tube"'s
   own weapon id 148.
 
@@ -286,7 +286,7 @@ Three independent weapon/ammo pairs (128/135, 130/—, 156/155) all place the
 or `ModType 3` — there is no separate "Ammo@16"-style reservation anywhere in
 real data (that offset, `@16`, is actually the low 16 bits of `Cost`, see §8).
 This is a genuine on-disk union, not merely an editor-UI convenience, and it
-matches what `Sources/EVNovaKit/NovaAIModels.swift`'s existing `OutfRes`
+matches what `Sources/NovaSwiftKit/NovaAIModels.swift`'s existing `OutfRes`
 decoder already does (`modifiers` loop reads type `@6`/value `@8` for the
 first slot) — that decoder was already correct here, just previously
 unverified against the TMPL/raw method. **The doc's original draft claim of
@@ -314,8 +314,8 @@ to raise another outfit's `Max` currently does nothing.
 
 Field | Meaning | Implemented?
 ---|---|---
-`Max` | "How many you can have (not counting weapon limitations)" — a hard per-player cap, 0 = unlimited | Yes — `OutfRes.maxInstallable` (`@10`), enforced in `PilotStore.canBuyOutfit` (`app/EVNova/Game/PilotStore.swift:206-211`): `owned(outfit:) >= maxInstallable` blocks Buy.
-`Flags 0x0001`/`0x0002` (fixed gun / turret) | Ties the purchase to consuming a hull's `MaxGuns`/`MaxTurrets` slot | **Decoded and tracked, not enforced at purchase.** `OutfRes.isFixedGunOutfit`/`.isTurretOutfit` (`Sources/EVNovaEngine/ShipLoadout.swift`) are now decoded, and `Galaxy.loadout` computes `Loadout.usedGunSlots`/`usedTurretSlots`/`freeGunSlots`/`freeTurretSlots` from them. But `PilotStore.canBuyOutfit` (`PilotStore.swift:206-211`) still only checks credits, free mass, and `maxInstallable` — it never reads `freeGunSlots`/`freeTurretSlots`. A player can still buy more gun-type outfits than the hull has gun mounts for; the loadout math will silently fold them all in as if every one fit.
+`Max` | "How many you can have (not counting weapon limitations)" — a hard per-player cap, 0 = unlimited | Yes — `OutfRes.maxInstallable` (`@10`), enforced in `PilotStore.canBuyOutfit` (`app/NovaSwift/Game/PilotStore.swift:206-211`): `owned(outfit:) >= maxInstallable` blocks Buy.
+`Flags 0x0001`/`0x0002` (fixed gun / turret) | Ties the purchase to consuming a hull's `MaxGuns`/`MaxTurrets` slot | **Decoded and tracked, not enforced at purchase.** `OutfRes.isFixedGunOutfit`/`.isTurretOutfit` (`Sources/NovaSwiftEngine/ShipLoadout.swift`) are now decoded, and `Galaxy.loadout` computes `Loadout.usedGunSlots`/`usedTurretSlots`/`freeGunSlots`/`freeTurretSlots` from them. But `PilotStore.canBuyOutfit` (`PilotStore.swift:206-211`) still only checks credits, free mass, and `maxInstallable` — it never reads `freeGunSlots`/`freeTurretSlots`. A player can still buy more gun-type outfits than the hull has gun mounts for; the loadout math will silently fold them all in as if every one fit.
 `Flags 0x0004` | "This item stays with you when you trade ships (persistent)" | Not decoded/enforced — `buyShip` in `PilotStore.swift` has a comment "Outfits carry over (EV Nova keeps persistent items)" but that's applied unconditionally to *all* outfits, not gated on this flag.
 `Flags 0x0020` | Persistent specifically across a mission's forced ship-swap (`set` operator), independent of 0x0004 | Not decoded.
 `Flags 0x0008` | "This item can't be sold" | **Implemented and enforced** — `PilotStore.sellOutfit` (`PilotStore.swift:234-242`) now guards `o.flags & 0x0008 == 0` and rejects the sale (returns `false`) when the flag is set.
@@ -364,7 +364,7 @@ mechanics with BuyRandom feature")
 - `OutfRes.buyRandom` (`@1008`) and `ShipRes.buyRandom` (`@904`) decoded
   verbatim from the Bible fields above.
 - `NovaGame.outfitsSold(at:day:)` / `shipsSold(at:day:)`
-  (`Sources/EVNovaKit/NovaEconomy.swift`) take an optional `day` (an absolute
+  (`Sources/NovaSwiftKit/NovaEconomy.swift`) take an optional `day` (an absolute
   day count, e.g. `GameDate.julianDay`) and, when supplied, filter through a
   private `onOfferToday(buyRandom:neverIfZero:spobID:itemID:day:)` helper.
   `neverIfZero` is `false` for outfits, `true` for ships — implementing the
@@ -377,7 +377,7 @@ mechanics with BuyRandom feature")
   given day" phrasing implies); (c) advancing the day naturally changes the
   hash and re-rolls every item independently.
 - Wired into the UI: `OutfitterView.stock` / `ShipyardView.stock`
-  (`app/EVNova/Spaceport/SpaceportScreens.swift`) now pass
+  (`app/NovaSwift/Spaceport/SpaceportScreens.swift`) now pass
   `pilot.state.date.julianDay` through, so the visible grid genuinely changes
   day to day.
 
@@ -407,7 +407,7 @@ Bible passage beyond the field's one-sentence description.
 
 Method: `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc` TMPL
 id 513 is `oütf`'s community-authoritative byte-layout template (dumped with
-`swift run evnova-extract tmpl "third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc" 513`).
+`swift run novaswift-extract tmpl "third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc" 513`).
 That dump computes a naive total of 1016 bytes and carries a "contains
 KEYB/unhandled construct — treat as lower bound" warning, because the dev
 tool sums two unhandled constructs as if they were sequential instead of
@@ -416,7 +416,7 @@ slot (§5), and (b) a 3-entry `FCNT`-repeated "Secondary Function" list (each
 entry itself a `KWRD` selector + a same-shaped union value, for the outfit's
 2nd–4th modifier slots) that the tool sizes as **zero bytes** instead of its
 real 12 bytes (3 × 4-byte slots). Real resource size settles the missing
-width directly: `swift run evnova-extract raw "data/EV Nova" oütf 128` and
+width directly: `swift run novaswift-extract raw "data/EV Nova" oütf 128` and
 `... oütf 135` both report **1028 bytes**, i.e. exactly `1016 + 12` — proving
 the secondary-function list is the only remaining unsized gap, and letting
 every field from `Contribute` onward be corrected by a flat `+12`.
@@ -424,7 +424,7 @@ every field from `Contribute` onward be corrected by a flat `+12`.
 Cross-checked against four real outfits — two weapon-type, two ammo-type, one
 pair sharing a launcher/ammo `wëap` id (see §5) and one turret-flagged weapon
 (`Flags@12 == 0x0002`, matching its "Turret" name) and one ammo outfit with a
-real, non-trivial `Availability` NCB string (`swift run evnova-extract raw
+real, non-trivial `Availability` NCB string (`swift run novaswift-extract raw
 "data/EV Nova" oütf 156` → `"(b298 & P30) & !b326..."` at `@46`, and
 `Flags@12 == 0x4000`, "hide unless Availability true" — a self-consistent
 pairing, since a real conditional Availability is exactly when an author
@@ -438,7 +438,7 @@ modVal@8(RSID,2B — UNION: wëap id granted if modType==1, wëap id fed if modT
 maximum@10(DWRD,2B) flags@12(WORV,2B) cost@14(DLNG,4B)
 secondaryFunctions[3]@18(each: KWRD selector 2B ["None"=-1 or a ModType from
   oütf.ModTypes/TMPL#550] + union value 2B, 4B/slot, slots at @18/@22/@26 —
-  matches Sources/EVNovaKit/NovaAIModels.swift's existing OutfRes.modifiers
+  matches Sources/NovaSwiftKit/NovaAIModels.swift's existing OutfRes.modifiers
   loop exactly, which reads pos∈[6,18,22,26]) — spot-checked outfits #128/#130/
   #135/#156 all have all three slots = (-1, 0) i.e. unused
 contribute@30(QB64,8B) require@38(QB64,8B)
@@ -466,7 +466,7 @@ TOTAL: 1028 bytes (confirmed exact match against real oütf #128 "Light
   Blaster" AND #135 "IR Missile" — both report exactly 1028 bytes)
 ```
 
-**Result: `Sources/EVNovaKit/NovaAIModels.swift`'s existing `OutfRes` decoder
+**Result: `Sources/NovaSwiftKit/NovaAIModels.swift`'s existing `OutfRes` decoder
 (offsets `cost@14`, modifier slots at `6/18/22/26`, `contribute@30`,
 `require@38`, `availBits@46`, `buyRandom@1008`, `requireGovt@1010`) is
 byte-for-byte correct for everything it decodes.** It was previously only

@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// The "New Pilot" flow, presented as an authentic EV Nova dialog over the title
 /// backdrop. Like the real game: when the data defines a single scenario it goes

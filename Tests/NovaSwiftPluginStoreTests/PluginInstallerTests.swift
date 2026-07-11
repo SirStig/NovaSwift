@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaPluginStore
+@testable import NovaSwiftPluginStore
 
 final class PluginInstallerTests: XCTestCase {
     private func makeFixtureZip() throws -> URL {

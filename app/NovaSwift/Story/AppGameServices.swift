@@ -1,6 +1,6 @@
 import Foundation
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// The app's `GameServices` conformer — the seam the story/mission engine
 /// (`StoryEngine`) reaches out through for anything beyond its own control-bit

@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// Decodes and caches the EV Nova interface graphics the spaceport screens draw
 /// themselves from — **all from the player's own data**, never our own artwork:
@@ -181,7 +181,7 @@ final class SpaceportGraphics {
 }
 
 /// Standard EV Nova button-label indices in `STR# 150`, verified directly
-/// against the real resource (`evnova-extract raw data/base 'STR#' 150`):
+/// against the real resource (`novaswift-extract raw data/base 'STR#' 150`):
 /// Leave, Buy, Sell, Buy Ship, Done, Recharge, Trade Center, Outfitter,
 /// Shipyard, Bar, Gamble, Holovid, Hire Escort, Bet 1000, Bet 5000, Mission
 /// BBS, … `missionBBS` was previously mis-set to 11 (actually "Gamble") —

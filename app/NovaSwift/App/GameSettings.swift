@@ -144,7 +144,7 @@ struct GameSettings: Codable, Equatable {
 
     // Kept at v1: the resilient decoder above fills any field a v1 blob lacks, so
     // existing players keep their saved volumes/controls when new options land.
-    static let storageKey = "com.evnova.settings.v1"
+    static let storageKey = "com.novaswift.settings.v1"
 
     static func load() -> GameSettings {
         guard let data = UserDefaults.standard.data(forKey: storageKey),

@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaStory
+import NovaSwiftStory
 
 /// The **Story Map**: a full-screen, pannable/zoomable graph of the entire
 /// campaign — every storyline is a column of mission nodes, colour-coded by the

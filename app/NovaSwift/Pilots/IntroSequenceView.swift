@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// The story intro shown when a new pilot is created: the scenario's `chär`
 /// intro PICTs as a timed slideshow (tap or click to advance early), followed by

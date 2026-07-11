@@ -1,7 +1,7 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
-/// "Named System" search — DITL #2000 idx8 (`evnova-extract ditl "data/EV Nova/Nova.rez" 2000`,
+/// "Named System" search — DITL #2000 idx8 (`novaswift-extract ditl "data/EV Nova/Nova.rez" 2000`,
 /// item 8, 130×25, bottom-left of the Map dialog's button row). The real dialog has no room to
 /// spell out every system name, so it opens this as a searchable picker; selecting a result plots
 /// a course the same way tapping the system on the starmap does (`nav.plotCourse(to:)`).

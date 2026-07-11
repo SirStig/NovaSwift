@@ -41,7 +41,7 @@ struct KeyBindings: Codable, Equatable {
 
     // MARK: Persistence
 
-    static let storageKey = "com.evnova.keybindings.v1"
+    static let storageKey = "com.novaswift.keybindings.v1"
 
     static func load() -> KeyBindings {
         guard let data = UserDefaults.standard.data(forKey: storageKey),

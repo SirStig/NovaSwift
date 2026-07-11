@@ -1,9 +1,9 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// Plug-in hub: an "Installed" manager (enable/disable/delete what's on
 /// device) and a "Store" tab (browse/search/install the bundled catalog —
-/// see `app/EVNova/Store/PluginStoreView.swift`). This is the mobile answer to
+/// see `app/NovaSwift/Store/PluginStoreView.swift`). This is the mobile answer to
 /// drop-in plug-in folders (see docs/MOBILE_AND_PLUGINS.md §3).
 struct PluginsView: View {
     @EnvironmentObject private var model: AppModel

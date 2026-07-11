@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 /// Decodes a synthetic `chär` laid out exactly like the real base-game #128
 /// ".Trader" (362 bytes), so the test proves the field offsets without shipping

@@ -9,7 +9,7 @@ import Foundation
 // All multi-byte fields are big-endian (classic Mac / QuickDraw). The bit
 // expression strings (AvailBits, OnAccept, …) are NUL-terminated Mac Roman
 // C-strings living in fixed-size (255-byte) fields; their grammar is handled
-// by the NCB engine in the EVNovaStory module.
+// by the NCB engine in the NovaSwiftStory module.
 
 // MARK: Byte helpers (big-endian, bounds-safe)
 
@@ -103,7 +103,7 @@ public enum MissionOfferLocation: Int, Sendable {
 /// A decoded `mïsn` resource — one mission definition.
 ///
 /// This is the *static* definition. Runtime progress (accepted? objective met?)
-/// lives in `EVNovaStory.ActiveMission`, keyed by this mission's `id`.
+/// lives in `NovaSwiftStory.ActiveMission`, keyed by this mission's `id`.
 ///
 /// Field layout verified against the real game's 791 missions (each 1970 bytes):
 /// a fixed 92-byte header, then seven 255-byte NCB strings, an 8-byte Require
@@ -281,7 +281,7 @@ public struct MissionRes: Sendable {
 /// 0x100 = 256 bytes, one longer than `EnableOn`/`OnStart`), then an 8-byte
 /// `Contribute` + 8-byte `Require` bitmask pair and four 2-byte `NewsGovt`/
 /// `GovtNewsStr` id pairs. Confirmed byte-for-byte against `crön #128`
-/// "Wraith Change" (`swift run evnova-extract raw "data/EV Nova" crön 128`):
+/// "Wraith Change" (`swift run novaswift-extract raw "data/EV Nova" crön 128`):
 /// 822 bytes total, `newsGovts[0] == 130` (a real govt id) and
 /// `govtNewsStrs[0] == 15000` (a real `STR#` id) at their predicted offsets.
 /// See docs/reverse-engineering/EVENTS.md §5.

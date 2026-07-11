@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaEngine
+import NovaSwiftEngine
 
 /// The in-game **debug suite** panel: a slide-in developer console, opened from
 /// the on-screen debug button (or the pause menu) once debug mode is enabled.

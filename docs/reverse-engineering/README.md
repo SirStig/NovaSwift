@@ -7,8 +7,8 @@ guessing. Same standard as `../AI_GROUND_TRUTH.md` (the original of this
 series, kept in `docs/` proper): every claim is a verbatim quote or close
 paraphrase of `data/EV Nova/Documentation/Nova Bible.txt` — the official
 Ambrosia/Matt Burch developer "Resource Bible" — not a guess, plus a
-file:line comparison against what `Sources/EVNovaKit`/`EVNovaEngine`/
-`EVNovaStory` actually do today. Where the Bible doesn't give a formula or
+file:line comparison against what `Sources/NovaSwiftKit`/`NovaSwiftEngine`/
+`NovaSwiftStory` actually do today. Where the Bible doesn't give a formula or
 number, that's stated explicitly as an open question rather than invented.
 
 | Doc | Resource(s) | Covers |
@@ -41,19 +41,19 @@ Not covered here (already owned elsewhere): AI dispositions/combat behavior
 - **Escort recruitment now has real backend code — and it's a textbook
   "implemented but completely unwired" case.** `ShipRes` decodes
   `hireRandom`/`escortCategory`/`escortUpgradesTo`/`escortUpgradeCost`/
-  `escortSellValue`, and `PilotStore` (`app/EVNova/Game/PilotStore.swift`) has
+  `escortSellValue`, and `PilotStore` (`app/NovaSwift/Game/PilotStore.swift`) has
   real, working credit-transaction logic — `hireEscort`/`upgradeEscort`/
   `sellEscort`/`escortAvailableToday`. `EscortsView.swift` was separately
   rebuilt as a geometry-accurate recreation of the real DLOG/DITL #1022
   "Escorts" panel — but it's a **static empty state**: every control is
   disabled, "No escorts hired." is hardcoded, and it has zero data binding.
-  A repo-wide grep of `app/EVNova/` finds zero call sites for the `PilotStore`
+  A repo-wide grep of `app/NovaSwift/` finds zero call sites for the `PilotStore`
   escort functions outside their own declarations. See ESCORTS.md's
   Implementation status note.
 - **`crön`'s byte-truncation bug is fixed, and the fix is confirmed against
   live data, not just source reading.** `OnEnd` now decodes as the correct
   256 bytes (was 255), and `CronRes` gained `contribute`/`require`/
-  `newsGovts`/`govtNewsStrs`. Re-running `evnova-extract raw` against cron
+  `newsGovts`/`govtNewsStrs`. Re-running `novaswift-extract raw` against cron
   #128 "Wraith Change" gives exactly the predicted 822-byte size, with
   `newsGovts[0] == 130` and `govtNewsStrs[0] == 15000` landing at the
   predicted offsets. `StoryEngine.evaluateCrons()`/`announceNews(for:)` also
@@ -61,7 +61,7 @@ Not covered here (already owned elsewhere): AI dispositions/combat behavior
   independent news resolution described in the Bible. See EVENTS.md.
 - **The mission/story runtime is more wired into the live app than
   `STATUS.md` previously tracked — discovered while verifying this pass, not
-  a product of it.** `app/EVNova/Story/AppGameServices.swift` is a real
+  a product of it.** `app/NovaSwift/Story/AppGameServices.swift` is a real
   `GameServices` conformer, and `MissionBoardView.swift` — embedded in both
   the real Mission BBS (`SpaceportView.swift`) and Bar (`SpaceportScreens.swift`)
   screens — instantiates a real `StoryEngine` per landing; mission offer,
@@ -102,7 +102,7 @@ Not covered here (already owned elsewhere): AI dispositions/combat behavior
   overrides are wired into the live trade UI, though inert for stock data.**
   `JunkModels.swift`/`OopsModels.swift` add `JunkRes`/`OopsRes`, decoding
   correctly against the byte layouts ECONOMY.md documents — but nothing
-  outside `EVNovaKit` calls `junk()`/`junks()`/`oops()`/`oopses()` yet, so
+  outside `NovaSwiftKit` calls `junk()`/`junks()`/`oops()`/`oopses()` yet, so
   junk trading and price-disaster events remain decoded-but-inert. Separately,
   `NovaEconomy` now reads base commodity prices from `STR ` 9300-9305 (with
   fallback to the hardcoded table) through the same `commodityMarket(at:)`

@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Abstract control input. Touch, keyboard, game controllers **and the NPC AI**
 /// all translate into this; the simulation only ever reads `ControlIntent`, never

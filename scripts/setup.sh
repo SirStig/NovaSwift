@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Vendor the open-source reference implementations we study (as executable specs)
-# into third_party/. None are linked at runtime; EVNovaKit reimplements in Swift.
+# into third_party/. None are linked at runtime; NovaSwiftKit reimplements in Swift.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TP="third_party"

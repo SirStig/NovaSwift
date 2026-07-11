@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 /// Byte-level decode tests for the outfit (`oütf`) and the expanded ship (`shïp`)
 /// resources — the data half of the ship system. Offsets are asserted against the

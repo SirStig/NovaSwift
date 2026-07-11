@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaEngine
+import NovaSwiftKit
+import NovaSwiftEngine
 
 /// How much the player currently knows about a system, for map fog-of-war.
 enum SystemVisibility {

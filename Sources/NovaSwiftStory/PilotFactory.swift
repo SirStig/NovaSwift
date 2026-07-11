@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Turns a `chär` starting scenario into a fresh `PlayerState` — the authentic
 /// EV Nova "new pilot" bootstrap: pick a random start system, seed cash / ship /

@@ -1,11 +1,11 @@
 import XCTest
 import Foundation
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 /// Pins the `DITL`/`DLOG`/`STR#` decoders to the byte layouts documented in
 /// Inside Macintosh, using synthetic resources plus the exact numbers observed
 /// in the shipped `Nova.rez` (see the fixtures below, transcribed from
-/// `evnova-extract ditl/dlog`). If someone "fixes" a rect field order, these
+/// `novaswift-extract ditl/dlog`). If someone "fixes" a rect field order, these
 /// fail loudly.
 final class DialogModelsTests: XCTestCase {
 

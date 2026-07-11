@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// The game's audio facade. Owns the engine + sound library, applies user volume
 /// settings, maps named game events to `snd ` resources, plays positional SFX,

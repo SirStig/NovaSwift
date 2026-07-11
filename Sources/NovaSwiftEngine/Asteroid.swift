@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// A rock in a system — EV Nova's `röid`. Real per-type stats (`Strength`,
 /// `Mass`, fragmentation) come straight from the decoded `RoidRes`. The Bible

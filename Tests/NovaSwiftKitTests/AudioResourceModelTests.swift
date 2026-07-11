@@ -1,11 +1,11 @@
 import XCTest
 import Foundation
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 /// Decode tests for the audio-related fields added to `wëap`/`bööm`/`shïp`/
 /// `gövt`/`spöb`: weapon fire/explosion sounds, government hail text, and
 /// stellar ambient sound. Offsets verified empirically against the real base
-/// data (`evnova-extract raw`/`sounds`) — see docs/DATA_FORMAT.md.
+/// data (`novaswift-extract raw`/`sounds`) — see docs/DATA_FORMAT.md.
 final class AudioResourceModelTests: XCTestCase {
 
     private func payload(_ size: Int, _ set: [(Int, Int)] = [], strings: [(Int, String)] = []) -> Data {

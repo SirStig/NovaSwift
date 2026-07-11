@@ -52,12 +52,12 @@ public final class PilotArchive {
 
     // MARK: Default roots
 
-    /// `…/Application Support/EVNova/Pilots` — the local, always-available store.
+    /// `…/Application Support/NovaSwift/Pilots` — the local, always-available store.
     public static func defaultLocalRoot() -> URL {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
                                                  in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("EVNova/Pilots", isDirectory: true)
+        return base.appendingPathComponent("NovaSwift/Pilots", isDirectory: true)
     }
 
     /// The iCloud ubiquity `Documents/Pilots` folder, if the app is entitled and

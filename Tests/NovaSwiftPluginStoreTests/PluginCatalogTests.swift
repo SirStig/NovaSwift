@@ -1,6 +1,6 @@
 import XCTest
-import EVNovaKit
-@testable import EVNovaPluginStore
+import NovaSwiftKit
+@testable import NovaSwiftPluginStore
 
 final class PluginCatalogTests: XCTestCase {
     func testCatalogDecodes() {

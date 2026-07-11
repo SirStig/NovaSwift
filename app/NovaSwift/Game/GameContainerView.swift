@@ -1,8 +1,8 @@
 import SwiftUI
 import SpriteKit
-import EVNovaKit
-import EVNovaEngine
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 /// Builds and owns the game scene, input, controller, and HUD for a play session.
 @MainActor
@@ -464,7 +464,7 @@ struct GameContainerView: View {
     /// race if the focusable scene view hasn't finished entering the view
     /// hierarchy on that tick — this is the fix for "ship won't move" reports
     /// where keyboard input silently never reaches `KeyboardControls.onKeyPress`.
-    /// Logs every attempt/outcome (subsystem com.evnova.app, category Input) so
+    /// Logs every attempt/outcome (subsystem com.novaswift.app, category Input) so
     /// the failure mode is visible in Console without attaching a debugger.
     private func grabSceneFocus(reason: String, attempt: Int = 0) {
         DispatchQueue.main.async {

@@ -1,11 +1,11 @@
 import Foundation
 import SwiftUI
-import EVNovaKit
-import EVNovaEngine
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 /// The persistent player pilot: the single source of truth for credits, cargo,
-/// installed outfits, current hull and location. It wraps `EVNovaStory`'s
+/// installed outfits, current hull and location. It wraps `NovaSwiftStory`'s
 /// `PlayerState` (which the story engine also reads/mutates) in an observable,
 /// disk-backed store so the spaceport UI can shop against it and the game can
 /// save/resume.
@@ -29,7 +29,7 @@ final class PilotStore: ObservableObject {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
                                                  in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent("EVNova", isDirectory: true)
+        let dir = base.appendingPathComponent("NovaSwift", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("pilot.json")
     }

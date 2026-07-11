@@ -2,9 +2,9 @@ import os
 
 /// Categorized `os.Logger`s for the simulation core (flight physics, combat,
 /// AI, world lifecycle). View in Console.app/`log stream` filtered by
-/// `subsystem:com.evnova.engine`, or per-category with `category:<name>`.
+/// `subsystem:com.novaswift.engine`, or per-category with `category:<name>`.
 public enum Log {
-    static let subsystem = "com.evnova.engine"
+    static let subsystem = "com.novaswift.engine"
 
     public static let physics = Logger(subsystem: subsystem, category: "Physics")
     public static let combat = Logger(subsystem: subsystem, category: "Combat")

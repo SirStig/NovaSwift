@@ -1,5 +1,5 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// The authentic EV Nova status bar, rendered from the player's own data via the
 /// shared `NovaCanvas` layout: the `ïntf` backdrop PICT anchored to the right

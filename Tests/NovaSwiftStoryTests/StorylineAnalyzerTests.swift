@@ -1,6 +1,6 @@
 import XCTest
-import EVNovaKit
-@testable import EVNovaStory
+import NovaSwiftKit
+@testable import NovaSwiftStory
 
 final class StorylineAnalyzerTests: XCTestCase {
 

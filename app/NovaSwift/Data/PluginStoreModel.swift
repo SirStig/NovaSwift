@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
-import EVNovaKit
-import EVNovaPluginStore
+import NovaSwiftKit
+import NovaSwiftPluginStore
 
 /// Tracks install/download state for the plug-in store catalog and drives the
 /// install/delete pipeline. Installed files land under

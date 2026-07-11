@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 // Reconstructs EV Nova's storylines from the mission control-bit graph and
 // reports, for a given pilot, exactly where they are in each campaign and what

@@ -40,7 +40,7 @@ The player supplies the game. **We ship code; the player ships EV Nova.**
   they choose to install.
 - **Nothing is hardcoded or mocked in the shipping game.** If a value, name,
   price, sprite, or behavior appears in play, it came from the player's data via
-  `EVNovaKit`. Placeholder/sample data is allowed only in dev tools and tests,
+  `NovaSwiftKit`. Placeholder/sample data is allowed only in dev tools and tests,
   never in the play loop. (See "Anti-goals" — this one is currently violated in
   places; STATUS.md tracks where.)
 

@@ -1,6 +1,6 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 // One-line integration for the in-game Pilot / Story Guide window. Whichever
 // view owns the interactive in-game menu bar adds a button that flips a

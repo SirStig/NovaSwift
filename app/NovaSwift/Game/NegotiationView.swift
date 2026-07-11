@@ -1,8 +1,8 @@
 import SwiftUI
-import EVNovaKit
+import NovaSwiftKit
 
 /// The in-flight "Negotiation" dialog — `DLOG`/`DITL` #1008 in `Nova.rez`,
-/// verified with `evnova-extract dlog/ditl "data/EV Nova/Nova.rez" 1008`:
+/// verified with `novaswift-extract dlog/ditl "data/EV Nova/Nova.rez" 1008`:
 ///
 ///     DLOG #1008  bounds=(40,40)-(302,147)  262x107
 ///     DITL #1008 "Negotiation"

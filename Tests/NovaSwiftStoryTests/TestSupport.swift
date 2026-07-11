@@ -1,6 +1,6 @@
 import Foundation
-import EVNovaKit
-@testable import EVNovaStory
+import NovaSwiftKit
+@testable import NovaSwiftStory
 
 // Builders that synthesise real-layout mïsn / crön / shïp / dësc resource bytes,
 // so the engine can be exercised without shipping any copyrighted game data. The

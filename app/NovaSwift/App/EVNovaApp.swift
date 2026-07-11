@@ -3,7 +3,7 @@ import SwiftUI
 /// Application entry point. One multiplatform SwiftUI app for iOS, iPadOS and
 /// macOS. The launcher is the root; the game scene is presented from it.
 @main
-struct EVNovaApp: App {
+struct NovaSwiftApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {

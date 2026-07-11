@@ -1,7 +1,7 @@
 import XCTest
 import Foundation
-import EVNovaKit
-@testable import EVNovaStory
+import NovaSwiftKit
+@testable import NovaSwiftStory
 
 final class PilotStoreTests: XCTestCase {
 
@@ -9,7 +9,7 @@ final class PilotStoreTests: XCTestCase {
 
     override func setUpWithError() throws {
         tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("evnova-pilottests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("novaswift-pilottests-\(UUID().uuidString)", isDirectory: true)
     }
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: tempRoot)

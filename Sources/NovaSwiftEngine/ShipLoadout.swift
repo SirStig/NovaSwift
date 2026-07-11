@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 // The "ship system" aggregation layer: it takes a decoded hull (`shïp`) plus its
 // installed outfits (`oütf`) and resolves them into the *effective* ship — the

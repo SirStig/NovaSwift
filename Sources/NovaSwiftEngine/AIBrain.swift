@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// What an NPC is currently doing. Transitions are driven by `AIBrain.think`
 /// from perception (nearest hostile), health, and disposition (`AIType`).

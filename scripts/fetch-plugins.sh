@@ -71,4 +71,4 @@ fetch_url "$EV_DL/ARPIA2.zip" "ARPIA2.zip" "ARPIA2"
 
 echo
 echo "Downloaded plug-ins into $DEST/ (git-ignored)."
-echo "Inspect one:  .build/debug/evnova-extract types \"$DEST/The Frozen Heart/Nova Files/E3 Data.rez\""
+echo "Inspect one:  .build/debug/novaswift-extract types \"$DEST/The Frozen Heart/Nova Files/E3 Data.rez\""

@@ -1,6 +1,6 @@
 import Foundation
 import GameController
-import EVNovaEngine
+import NovaSwiftEngine
 
 /// Reads a connected MFi / Xbox / PlayStation controller and feeds the shared
 /// `InputController`. Twin-stick style: left stick = turn + thrust, right stick

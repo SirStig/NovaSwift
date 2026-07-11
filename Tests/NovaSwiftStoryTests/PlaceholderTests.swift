@@ -1,7 +1,7 @@
 import XCTest
-@testable import EVNovaStory
+@testable import NovaSwiftStory
 
-/// Placeholder so the `EVNovaStoryTests` target (declared in Package.swift) has a
+/// Placeholder so the `NovaSwiftStoryTests` target (declared in Package.swift) has a
 /// source file and the package resolves. Replace with real story-layer tests.
 final class PlaceholderTests: XCTestCase {
     func testStoryModuleLinks() {

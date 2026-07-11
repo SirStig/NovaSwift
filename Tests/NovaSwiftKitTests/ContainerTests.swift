@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 final class ContainerTests: XCTestCase {
 
@@ -82,12 +82,12 @@ final class ContainerTests: XCTestCase {
 
     // MARK: Optional test against a real downloaded fixture
 
-    /// If EVNOVA_FIXTURE points to a real .rez/.ndat file (e.g. a downloaded
+    /// If NOVASWIFT_FIXTURE points to a real .rez/.ndat file (e.g. a downloaded
     /// community plug-in), parse it and assert it produced resources. Skipped
     /// when the env var is unset so the suite stays hermetic.
     func testRealFixtureIfProvided() throws {
-        guard let path = ProcessInfo.processInfo.environment["EVNOVA_FIXTURE"] else {
-            throw XCTSkip("Set EVNOVA_FIXTURE to a real .rez/.ndat file to run this test")
+        guard let path = ProcessInfo.processInfo.environment["NOVASWIFT_FIXTURE"] else {
+            throw XCTSkip("Set NOVASWIFT_FIXTURE to a real .rez/.ndat file to run this test")
         }
         let collection = try ResourceFile.read(contentsOf: URL(fileURLWithPath: path))
         XCTAssertGreaterThan(collection.totalCount, 0)

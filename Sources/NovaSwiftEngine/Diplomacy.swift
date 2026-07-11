@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// The special "government" id used for the player and for truly independent
 /// ships (EV Nova uses −1 for independent). Independent ships are hostile to no
@@ -40,7 +40,7 @@ public final class Diplomacy {
     /// docs/reverse-engineering/GOVERNMENT.md §3. Until that's pinned down
     /// further we use multiplier = 1 (no scaling), the documented-safe
     /// default. This is the engine-layer tally, updated live as kills happen
-    /// (mirroring `playerRecord` above); `EVNovaStory.PlayerState` has its
+    /// (mirroring `playerRecord` above); `NovaSwiftStory.PlayerState` has its
     /// own persisted `combatRating` (seeded once from `chär.Kills` at pilot
     /// creation) that this module has no dependency on and therefore cannot
     /// write to directly — syncing the two is a pre-existing gap (see

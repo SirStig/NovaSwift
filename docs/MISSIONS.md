@@ -1,8 +1,8 @@
-# Missions & Story (`EVNovaStory`)
+# Missions & Story (`NovaSwiftStory`)
 
 > ⚠️ **Status: BUILT, NOT WIRED.** This module is fully implemented and tested,
 > but the running app does **not** drive it — the only live consumer is the
-> `evnova-extract` CLI and unit tests, plus a **read-only** `StorylineAnalyzer`
+> `novaswift-extract` CLI and unit tests, plus a **read-only** `StorylineAnalyzer`
 > that computes a static guide. **No app type conforms to `GameServices`**, and
 > the app never instantiates `StoryEngine` for play, so the player cannot yet
 > accept or progress missions. Wiring this in is roadmap **P0**. See
@@ -10,8 +10,8 @@
 > library works," not "the player experiences it."
 >
 > **Correction (mission half only):** this banner is now stale for bar/computer
-> missions specifically — `app/EVNova/Story/AppGameServices.swift` is a real
-> `GameServices` conformer, and `app/EVNova/Story/MissionBoardView.swift`
+> missions specifically — `app/NovaSwift/Story/AppGameServices.swift` is a real
+> `GameServices` conformer, and `app/NovaSwift/Story/MissionBoardView.swift`
 > instantiates a live `StoryEngine` per mission-offer location; accepting or
 > declining a mission there genuinely mutates and saves the pilot's
 > `PlayerState`. What's still true: nothing in `app/` calls
@@ -24,8 +24,8 @@
 
 The story layer — bar/computer missions, the control-bit ("NCB") scripting
 language, background `crön` events, ranks, and the campaign save-state. It is a
-**self-contained module** (`Sources/EVNovaStory`) that depends only on
-`EVNovaKit`, so it plugs into the game as combat, AI, audio, and the authentic
+**self-contained module** (`Sources/NovaSwiftStory`) that depends only on
+`NovaSwiftKit`, so it plugs into the game as combat, AI, audio, and the authentic
 UI come online. Everything it can't do itself goes through one protocol,
 `GameServices`, which starts as a logging stub.
 
@@ -33,7 +33,7 @@ This is roadmap item **5 (Missions & story)**.
 
 ## What's done
 
-- **Typed decoders** (in `EVNovaKit/MissionModels.swift`) for `mïsn`, `crön`,
+- **Typed decoders** (in `NovaSwiftKit/MissionModels.swift`) for `mïsn`, `crön`,
   `përs`, `ränk`, `dësc`, `STR#`. Field offsets were **verified empirically
   against the real game** (791 missions, 125 crons, 31 ranks) — see below.
 - **NCB engine** (`NCBExpression.swift`): a hand-rolled parser + evaluator for
@@ -48,13 +48,13 @@ This is roadmap item **5 (Missions & story)**.
   against the galaxy clock; rank salaries; the full SET-op executor.
 - **Galaxy clock** (`GameDate.swift`): day/month/year with Julian-day arithmetic
   for deadlines and cron windows.
-- **Tests** (`Tests/EVNovaStoryTests`) + a real-data playthrough:
-  `evnova-extract story <baseDir> 128` drives the actual Vell-os storyline
+- **Tests** (`Tests/NovaSwiftStoryTests`) + a real-data playthrough:
+  `novaswift-extract story <baseDir> 128` drives the actual Vell-os storyline
   through the engine.
 
 ## Verified binary layouts
 
-Confirmed by dumping real resources (`evnova-extract raw/strscan/tmpl`) and
+Confirmed by dumping real resources (`novaswift-extract raw/strscan/tmpl`) and
 cross-checking the ResForge NovaTools TMPL definitions.
 
 ### `mïsn` — 1970 bytes
@@ -185,19 +185,19 @@ engine.advanceOneDay()            // crons, deadlines, salaries
 
 ## In-game Pilot window + aftermarket Story Guide
 
-A new **`StorylineAnalyzer`** (`EVNovaStory`) reconstructs the campaigns straight
+A new **`StorylineAnalyzer`** (`NovaSwiftStory`) reconstructs the campaigns straight
 from the mission bit-graph — no hand-authored guide. It links "who sets bit N"
 (a mission's `OnSuccess`/`OnShipDone`/`OnAccept`, or a cron's `OnStart`/`OnEnd`)
 to "who needs bit N" (`AvailBits`), groups missions by EV Nova's `"Name; TagN"`
 convention, and for any pilot reports each step's status plus — for the current
 locked step — **exactly what to do to unlock it**.
 
-Proven on the real game: `evnova-extract storylines <baseDir> [b350,b6666,…]`
+Proven on the real game: `novaswift-extract storylines <baseDir> [b350,b6666,…]`
 reconstructs all 23 campaigns (Fed 37, Polaris 36, Auroran 28, Vell-os 29, …) and
 prints next-step guidance like *"needs b208 set — via Complete 'Find and Return
 with Bazara'"*.
 
-The SwiftUI UI lives in `app/EVNova/Story/`:
+The SwiftUI UI lives in `app/NovaSwift/Story/`:
 - **`PilotInfoView`** — the Pilot window: credits, ship, combat rating, ranks,
   government standings, active missions, escorts (original-game info window).
 - **`StorylineBrowserView`** — the *aftermarket* EV-Bible-style browser: every

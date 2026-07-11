@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// The story/mission runtime. Owns the pilot's `PlayerState`, evaluates NCB
 /// expressions, offers and tracks missions, applies rewards, and processes

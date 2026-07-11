@@ -73,7 +73,7 @@ Standard **Mac resource types** are also used (plain ASCII codes, no umlauts):
 | `vers` | Version resource (plug-in metadata) |
 
 Tooling for inspecting/authoring these: **MissionComputer**, **ResEdit/Resorcerer** (classic
-Mac), **EVNEW** (Windows), **RezEditor**, and the CLI **vasi/evnova-utils**.
+Mac), **EVNEW** (Windows), **RezEditor**, and the CLI **vasi/novaswift-utils**.
 
 ---
 
@@ -284,7 +284,7 @@ from RLE. For sprite objects that use PICT, a companion mask PICT supplies trans
 
 Reference tooling / clones worth studying for a parser:
 - NovaJS (TypeScript parser + engine): https://github.com/mattsoulanille/NovaJS
-- vasi/evnova-utils (Perl inspection tools): https://github.com/vasi/evnova-utils
+- vasi/novaswift-utils (Perl inspection tools): https://github.com/vasi/novaswift-utils
 - OpenNova project blog: https://opennovablog.wordpress.com/
 - andrews05 EV stuff (Bible + tools): https://andrews05.github.io/evstuff/
 

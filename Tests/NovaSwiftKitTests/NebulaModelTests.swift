@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 /// Byte-level decode test for the nebula (`nëbu`) resource. The layout was
 /// reverse-engineered from the base data (Nova Data 5, ids 128–131): four

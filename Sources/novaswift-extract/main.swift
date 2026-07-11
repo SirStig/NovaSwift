@@ -1,16 +1,16 @@
 import Foundation
-import EVNovaKit
-import EVNovaStory
-import EVNovaEngine
+import NovaSwiftKit
+import NovaSwiftStory
+import NovaSwiftEngine
 
-// evnova-extract — inspect EV Nova resource containers (classic fork / .ndat / BRGR .rez).
+// novaswift-extract — inspect EV Nova resource containers (classic fork / .ndat / BRGR .rez).
 //
-//   evnova-extract types <file>            Summary: each resource type and count
-//   evnova-extract list  <file> <TYPE>     List resources of a type (id, name, size)
-//   evnova-extract info  <file>            Format + totals
+//   novaswift-extract types <file>            Summary: each resource type and count
+//   novaswift-extract list  <file> <TYPE>     List resources of a type (id, name, size)
+//   novaswift-extract info  <file>            Format + totals
 
 func usage() -> Never {
-    let name = "evnova-extract"
+    let name = "novaswift-extract"
     FileHandle.standardError.write(Data("""
     \(name) — inspect EV Nova resource containers
 
@@ -493,7 +493,7 @@ case "sound":
 case "raw":
     // Dev tool: dump a resource body as signed 16-bit big-endian words, to
     // reverse-check field offsets against the EV Nova Bible.
-    //   evnova-extract raw <baseDir> <TYPE> <id>
+    //   novaswift-extract raw <baseDir> <TYPE> <id>
     guard args.count == 4, let type = FourCharCode(args[2]), let id = Int(args[3]) else { usage() }
     let rawBaseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let rawCol: ResourceCollection
@@ -558,7 +558,7 @@ case "tmpl":
     // (union-style) sections where only the section matching the preceding
     // key field's value is actually present on disk. Fields after an
     // unhandled construct are printed with "?" rather than a wrong number.
-    //   evnova-extract tmpl <Templates.rsrc> <id>
+    //   novaswift-extract tmpl <Templates.rsrc> <id>
     guard args.count == 3, let id = Int(args[2]) else { usage() }
     let (tcol, _) = loadCollection(args[1])
     guard let tr = tcol.resource(FourCharCode("TMPL")!, id) else {
@@ -647,7 +647,7 @@ case "tmpl":
 case "strscan":
     // Dev tool: across all resources of a type, find printable ASCII runs (>=3
     // chars) and tally their START offsets — reveals fixed string-field offsets.
-    //   evnova-extract strscan <baseDir> <TYPE>
+    //   novaswift-extract strscan <baseDir> <TYPE>
     guard args.count == 3, let type = FourCharCode(args[2]) else { usage() }
     let ssBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let ssCol: ResourceCollection
@@ -720,7 +720,7 @@ case "ditl":
     // Dev tool: decode a classic Mac DITL (dialog item list) resource into its
     // item rects, types, and text/resource-ID payloads — the authoritative pixel
     // layout for a dialog, straight from the game's own resource fork.
-    //   evnova-extract ditl <file> <id>
+    //   novaswift-extract ditl <file> <id>
     guard args.count == 3, let ditlId = Int(args[2]) else { usage() }
     let (ditlCol, _) = loadCollection(args[1])
     guard let ditlRes = ditlCol.resource(FourCharCode("DITL")!, ditlId) else {
@@ -731,7 +731,7 @@ case "ditl":
 case "dlog":
     // Dev tool: decode a classic Mac DLOG (dialog window template) resource —
     // bounds rect, title, and the DITL id it references.
-    //   evnova-extract dlog <file> <id>
+    //   novaswift-extract dlog <file> <id>
     guard args.count == 3, let dlogId = Int(args[2]) else { usage() }
     let (dlogCol, _) = loadCollection(args[1])
     guard let dlogRes = dlogCol.resource(FourCharCode("DLOG")!, dlogId) else {
@@ -747,7 +747,7 @@ case "ai":
     // Headless AI simulation: load a real system, populate it with NPCs from its
     // düde/flët spawn table, run the full engine (diplomacy + behaviors + combat)
     // for N seconds, and report what happened. Proves the AI works on real data.
-    //   evnova-extract ai <baseDir> [systemID] [seconds]
+    //   novaswift-extract ai <baseDir> [systemID] [seconds]
     guard args.count >= 2 else { usage() }
     let aiBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let aiGame: NovaGame
@@ -838,7 +838,7 @@ case "ai":
 case "mission":
     // Decode a single mission and print its resolved fields + text. Validates
     // the mïsn decoder against real data.
-    //   evnova-extract mission <baseDir> <id>
+    //   novaswift-extract mission <baseDir> <id>
     guard args.count == 3, let id = Int(args[2]) else { usage() }
     let mBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let mGame: NovaGame
@@ -874,7 +874,7 @@ case "mission":
 case "missions":
     // Parse ALL missions and report aggregate stats — a bulk validation that the
     // decoder handles every real mission without producing garbage.
-    //   evnova-extract missions <baseDir>
+    //   novaswift-extract missions <baseDir>
     guard args.count == 2 else { usage() }
     let msBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let msGame: NovaGame
@@ -913,7 +913,7 @@ case "story":
     // End-to-end story-engine playthrough on REAL data: drive the actual first
     // Vell-os storyline missions through the engine and show the control-bit
     // chain advancing. Proves the mission runtime works on shipping game data.
-    //   evnova-extract story <baseDir> [firstMissionID]
+    //   novaswift-extract story <baseDir> [firstMissionID]
     guard args.count >= 2 else { usage() }
     let stBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let stGame: NovaGame
@@ -977,7 +977,7 @@ case "story":
 case "storylines":
     // Reconstruct every campaign from the mission bit-graph and show a pilot's
     // progress + next-step guidance (the data behind the in-game story guide).
-    //   evnova-extract storylines <baseDir> [setBits: b350,b6666,...]
+    //   novaswift-extract storylines <baseDir> [setBits: b350,b6666,...]
     guard args.count >= 2 else { usage() }
     let slBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let slGame: NovaGame

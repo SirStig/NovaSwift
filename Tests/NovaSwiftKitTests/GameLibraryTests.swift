@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 final class GameLibraryTests: XCTestCase {
 
@@ -8,7 +8,7 @@ final class GameLibraryTests: XCTestCase {
 
     override func setUpWithError() throws {
         tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("evnova-lib-\(UUID().uuidString)")
+            .appendingPathComponent("novaswift-lib-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     }
 

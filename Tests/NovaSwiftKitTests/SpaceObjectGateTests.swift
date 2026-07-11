@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaKit
+@testable import NovaSwiftKit
 
 /// Byte-level decode tests for the `spöb` hypergate/wormhole fields, reverse-
 /// engineered and verified against the base data: Flags2 (@30) carries `0x1000`

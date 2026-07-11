@@ -188,7 +188,7 @@ sources on top of the base 4-type model:
 
 All items below are now either ✅ done, or explicitly deferred with a reason
 (not silently skipped). Done in this pass (2026-07-08 - 2026-07-09), all with
-tests and a real-data headless sanity sweep (`evnova-extract ai`) across many
+tests and a real-data headless sanity sweep (`novaswift-extract ai`) across many
 systems showing combat/disable/kills/orbiting all still occur:
 
 1. ✅ **Combat-odds gating.** `AIBrain.favorableOdds` sums nearby
@@ -272,8 +272,8 @@ systems showing combat/disable/kills/orbiting all still occur:
     `testIonizedShipCannotThrustOrTurn`, `testIonizationDissipatesOverTime`,
     `testCantFireWhileIonizedWeaponIsBlocked`.
 12. **Deferred — mission ShipBehav overrides.** Needs mission-driven ship
-    spawning wired through `EVNovaStory` into `AIBrain`/`Spawner`, and per
-    [[evnova-wiring-status]] the story runtime isn't wired to the game loop
+    spawning wired through `NovaSwiftStory` into `AIBrain`/`Spawner`, and per
+    [[novaswift-wiring-status]] the story runtime isn't wired to the game loop
     at all yet (no `GameServices` conformer) — this is blocked on that larger,
     separately-tracked wiring gap, not on anything AI-specific. Revisit once
     missions can actually spawn special ships into a running `World`.

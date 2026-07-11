@@ -1,7 +1,7 @@
 import SwiftUI
-import EVNovaKit
-import EVNovaEngine
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 /// EV Nova's player-info dialog — the four-tab panel the game opens on 'I':
 /// **General / Cargo / Extras / Honors** tab buttons across the top, a text

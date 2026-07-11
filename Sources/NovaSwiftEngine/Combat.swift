@@ -1,5 +1,5 @@
 import Foundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Scales that map EV Nova's integer combat stats into simulation units. EV Nova
 /// runs its projectile logic at 30 fps and stores speeds in the same "unit" space

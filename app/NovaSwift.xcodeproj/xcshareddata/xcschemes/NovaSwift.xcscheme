@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "AA000000000000000000E4"
-               BuildableName = "EVNova.app"
-               BlueprintName = "EVNova"
-               ReferencedContainer = "container:EVNova.xcodeproj">
+               BuildableName = "NovaSwift.app"
+               BlueprintName = "NovaSwift"
+               ReferencedContainer = "container:NovaSwift.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -44,9 +44,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AA000000000000000000E4"
-            BuildableName = "EVNova.app"
-            BlueprintName = "EVNova"
-            ReferencedContainer = "container:EVNova.xcodeproj">
+            BuildableName = "NovaSwift.app"
+            BlueprintName = "NovaSwift"
+            ReferencedContainer = "container:NovaSwift.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>

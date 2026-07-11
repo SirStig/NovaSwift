@@ -1,6 +1,6 @@
 import XCTest
-@testable import EVNovaKit
-@testable import EVNovaEngine
+@testable import NovaSwiftKit
+@testable import NovaSwiftEngine
 
 /// End-to-end tests for the ship system: outfit aggregation into an effective
 /// loadout, and the live fuel / afterburner / cargo runtime on a `Ship`.

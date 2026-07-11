@@ -1,14 +1,14 @@
 import Foundation
 import SwiftUI
 import CoreText
-import EVNovaKit
+import NovaSwiftKit
 
 /// Locates game data and the plug-in catalog, tracks which plug-ins are enabled,
 /// and produces a merged `NovaGame` for the engine.
 ///
 /// Data sources, in priority order:
 ///  1. User-imported base data in Application Support (the mobile BYO-data path).
-///  2. A dev override via the `EVNOVA_DATA` environment variable (points at a
+///  2. A dev override via the `NOVASWIFT_DATA` environment variable (points at a
 ///     `Nova Files` folder) — used when running from the repo.
 ///  3. A bundled plug-in catalog (prebundled, toggleable) — see docs/MOBILE_AND_PLUGINS.md §3.
 @MainActor
@@ -40,7 +40,7 @@ final class GameDataController: ObservableObject {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
                                                  in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("EVNova", isDirectory: true)
+        return base.appendingPathComponent("NovaSwift", isDirectory: true)
     }
 
     /// Where imported base data lives on device.
@@ -130,7 +130,7 @@ final class GameDataController: ObservableObject {
            !GameLibrary.discoverResourceFiles(in: importedBaseDir).isEmpty {
             return importedBaseDir
         }
-        if let dev = ProcessInfo.processInfo.environment["EVNOVA_DATA"],
+        if let dev = ProcessInfo.processInfo.environment["NOVASWIFT_DATA"],
            !dev.isEmpty, fm.fileExists(atPath: dev) {
             return URL(fileURLWithPath: dev)
         }
@@ -143,8 +143,8 @@ final class GameDataController: ObservableObject {
         if FileManager.default.fileExists(atPath: importedPluginsDir.path) {
             dirs.append(importedPluginsDir)
         }
-        // Dev convenience: repo plug-ins next to EVNOVA_DATA/../..
-        if let dev = ProcessInfo.processInfo.environment["EVNOVA_PLUGINS"], !dev.isEmpty {
+        // Dev convenience: repo plug-ins next to NOVASWIFT_DATA/../..
+        if let dev = ProcessInfo.processInfo.environment["NOVASWIFT_PLUGINS"], !dev.isEmpty {
             dirs.append(URL(fileURLWithPath: dev))
         }
         return dirs
@@ -201,7 +201,7 @@ final class GameDataController: ObservableObject {
             hasBaseData = false
             game = nil
             status = "No EV Nova data found. Import your game data to play. \(plugins.count) plug-in(s) ready."
-            Log.data.notice("reload: no base game data found (checked \(self.importedBaseDir.path, privacy: .public) and EVNOVA_DATA) — \(self.plugins.count, privacy: .public) plug-in(s) ready but nothing to play")
+            Log.data.notice("reload: no base game data found (checked \(self.importedBaseDir.path, privacy: .public) and NOVASWIFT_DATA) — \(self.plugins.count, privacy: .public) plug-in(s) ready but nothing to play")
             return
         }
         Log.data.info("reload: using base data at \(baseDir.path, privacy: .public)")

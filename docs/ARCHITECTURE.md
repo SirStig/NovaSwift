@@ -35,12 +35,12 @@ dormant-codebase-revival tax.
 │    iOS/iPadOS  ·  macOS      → host a SpriteKit scene,          │
 │                                per-platform input adapters      │
 ├──────────────────────────────────────────────────────────────┤
-│  EVNovaEngine   (Swift)                                         │
+│  NovaSwiftEngine   (Swift)                                         │
 │    deterministic simulation: Newtonian flight, AI, weapons,     │
 │    missions, economy, galaxy/jump, save games                   │
 │    rendering via SpriteKit (sprites, HUD, starfield) over Metal │
 ├──────────────────────────────────────────────────────────────┤
-│  EVNovaKit      (Swift package — the reusable core)            │
+│  NovaSwiftKit      (Swift package — the reusable core)            │
 │    ResourceFork  parse resource-fork / .ndat container          │
 │    NovaTypes     decode shïp wëap oütf mïsn spöb sÿst gövt …     │
 │    Graphics      rlëD / rlë8 / PICT  → CGImage / texture         │
@@ -51,21 +51,21 @@ dormant-codebase-revival tax.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-`tools/extractor/` (`evnova-extract` CLI) is a thin front-end over `EVNovaKit`
+`tools/extractor/` (`novaswift-extract` CLI) is a thin front-end over `NovaSwiftKit`
 that converts a data set into an open **asset pack** (JSON + PNG + audio) for
 build-time bake or offline inspection. The app can also import on-device using
-the same `EVNovaKit` code.
+the same `NovaSwiftKit` code.
 
 ## Data flow
 
 ```
 data/base/*.ndat  ─┐
-data/plugins/*   ─┼─► EVNovaKit.PluginChain ─► resolved resource table
+data/plugins/*   ─┼─► NovaSwiftKit.PluginChain ─► resolved resource table
                    │        (base first, plug-ins override by type+id)
                    └─► Graphics/Audio decoders ─► textures / audio
                                     │
                                     ▼
-                         EVNovaEngine runtime model ─► SpriteKit scene
+                         NovaSwiftEngine runtime model ─► SpriteKit scene
 ```
 
 ## Reference implementations (studied, MIT — vendored under `third_party/`)
@@ -73,7 +73,7 @@ data/plugins/*   ─┼─► EVNovaKit.PluginChain ─► resolved resource tab
 - **ResForge** (Swift) — resource-fork / Rez / PICT / `snd` decoding to model in Swift.
 - **Graphite** (C++17) — reference for the `rlëD` RLE decoder and QuickDraw types.
 - **novaparse** in **NovaJS** (TS) — reference for every Nova resource-type field layout.
-- **evnova-utils** (Perl) — cross-check for field semantics.
+- **novaswift-utils** (Perl) — cross-check for field semantics.
 
 We do not link these at runtime; we reimplement in Swift and use them as
 executable specifications.

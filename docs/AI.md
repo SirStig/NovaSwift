@@ -5,8 +5,8 @@ and going, patrols on station, pirates hunting, defense fleets scrambling — th
 way EV Nova does. It is a faithful reconstruction driven **entirely by the
 player's own game data** (`gövt`, `düde`, `flët`, `shïp`, `wëap`, `sÿst`).
 
-The whole thing lives in `EVNovaEngine` and is exercised headlessly by
-`evnova-extract ai <baseDir> [systemID] [seconds]`.
+The whole thing lives in `NovaSwiftEngine` and is exercised headlessly by
+`novaswift-extract ai <baseDir> [systemID] [seconds]`.
 
 ## The core idea: NPCs are ships with a brain
 
@@ -24,7 +24,7 @@ perceive world ─▶ AIBrain.think() ─▶ ControlIntent ─▶ Ship.step() �
 
 ## Data it reads (all verified against the real game)
 
-Decoders in `EVNovaKit` (`NovaAIModels.swift`, `NovaModels.swift`), with byte
+Decoders in `NovaSwiftKit` (`NovaAIModels.swift`, `NovaModels.swift`), with byte
 offsets taken from the EV Nova / ResForge `TMPL` templates and cross-checked
 against real resources:
 
@@ -213,7 +213,7 @@ identically. Coverage:
   interceptors resolves.
 - `ShipSystemTests` — SkillVar jitters accel/turn by a supplied roll (and
   leaves them alone with none).
-- Integration: `evnova-extract ai "…/Nova Files"` runs the whole thing on the
+- Integration: `novaswift-extract ai "…/Nova Files"` runs the whole thing on the
   real game — e.g. Sol's traders come and go peacefully, Kania and Auroran
   space break into real dogfights, and interceptors visibly orbit/patrol
   across dozens of real systems.

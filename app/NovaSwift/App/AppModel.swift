@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 /// Top-level app state: current screen, settings, and the game data library
 /// (base data + plug-in catalog with enabled state).

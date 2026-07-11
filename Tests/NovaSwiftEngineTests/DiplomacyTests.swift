@@ -1,6 +1,6 @@
 import XCTest
-@testable import EVNovaEngine
-import EVNovaKit
+@testable import NovaSwiftEngine
+import NovaSwiftKit
 
 /// Verifies EV Nova's class-based government relations resolve correctly, using
 /// hand-built `gövt` bodies laid out at the real byte offsets (Flags1@2,

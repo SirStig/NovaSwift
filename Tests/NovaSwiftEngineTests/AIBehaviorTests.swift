@@ -1,6 +1,6 @@
 import XCTest
-@testable import EVNovaEngine
-import EVNovaKit
+@testable import NovaSwiftEngine
+import NovaSwiftKit
 
 /// Exercises the NPC brain end-to-end: perception → state transitions → steering
 /// → firing, and a full deterministic duel driven only by governments + AI.

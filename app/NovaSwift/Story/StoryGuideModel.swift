@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
-import EVNovaKit
-import EVNovaStory
+import NovaSwiftKit
+import NovaSwiftStory
 
 // View-model backing the in-game Pilot window + aftermarket Story Guide. It turns
 // the story engine's state into display-ready values, and offers a `.sample`

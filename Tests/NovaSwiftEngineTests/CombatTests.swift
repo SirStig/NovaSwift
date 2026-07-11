@@ -1,5 +1,5 @@
 import XCTest
-@testable import EVNovaEngine
+@testable import NovaSwiftEngine
 
 /// Weapons, projectiles, damage bleed-through, beams, and death — the substance
 /// behind an NPC's "attack".

@@ -1,6 +1,6 @@
 import Foundation
 import AVFoundation
-import EVNovaKit
+import NovaSwiftKit
 
 /// Decodes `snd ` resources from the loaded game data into ready-to-play
 /// `AVAudioPCMBuffer`s, resampled to the engine's canonical format and cached by
