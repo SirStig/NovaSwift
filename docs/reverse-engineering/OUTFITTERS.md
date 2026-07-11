@@ -17,6 +17,42 @@ UTF-8 — plain `grep` silently finds nothing in it unless you decode first
 (`python3 -c "open(...).read().decode('mac_roman')"` or equivalent); this bit
 several of the greps while researching this doc.
 
+## Implementation status (updated after the outfitter wiring audit)
+
+**Outfitter wiring audit (this pass).** A follow-up pass closed the remaining
+"decoded/computed but not wired" gaps the earlier passes had catalogued below,
+plus fixed a real behavior bug in the map outfit. All are grounded in the Bible
+ModType/Flags text (cross-checked against the andrews05 EV Nova Bible mirror) —
+no invented logic:
+
+- **Map outfit (ModType 16) — behavior fix.** Previously *any* map outfit
+  revealed the **entire galaxy** (`PilotStore.ownsMapOutfit` → a
+  `mapRevealAll` boolean). That is wrong: the Bible's ModVal is "1 and up = how
+  many jumps away from present system to explore; -1 = all inhabited independent
+  systems; -1000 & down = all systems of that govt class." Now a one-shot reveal
+  is computed at acquisition (`NovaGame.mapRevealedSystems(modVal:from:)`) and
+  recorded in a new `PlayerState.chartedSystems` set — kept distinct from
+  `exploredSystems` so a bought chart never satisfies an NCB `Exxx`
+  "have-you-been-there" gate. Wired at both acquisition points (shop
+  `PilotStore.buyOutfit` and mission grant `StoryEngine.grantOutfit`).
+- **Clean legal record (ModType 21)** now applied on acquisition
+  (`PlayerState.applyOutfitAcquisition`): clears standing with the ModVal govt,
+  or all govts when ModVal is -1. ✅
+- **Mass-proportional price (Flags 0x0200)** now charged/refunded via
+  `Galaxy.effectiveCost` in `PilotStore.buyOutfit`/`sellOutfit`/`canBuyOutfit`/
+  `tradeInValue` (was computed but never charged). ✅
+- **Fixed-gun/turret slots (Flags 0x0001/0x0002)** now enforced at purchase —
+  `PilotStore.canBuyOutfit` rejects a buy when `freeGunSlots`/`freeTurretSlots`
+  is 0 (was computed but not enforced). ✅
+- **Increase-maximum (ModType 27)** now consumed at purchase via
+  `NovaGame.effectiveMaxInstallable` (base Max × owned expanders pointing at the
+  item); `canBuyOutfit` checks that effective cap (was decoded but inert). ✅
+- **Sell-anywhere (Flags 0x0800)** now bypasses the upstream tech-level filter in
+  `NovaEconomy.outfitsSold`, not just the Require/Availability check (§3.5). ✅
+- **OnPurchase/OnSell (@301/@556)** now decoded on `OutfRes` and executed via
+  `StoryEngine.apply(set:)` on buy/sell — permits/licenses that flip story bits
+  now work (§3.3a). ✅
+
 ## Implementation status (updated after the mass-cost/slot-tracking/sell-flag pass)
 
 Since this doc was first written, a follow-up implementation pass landed real
@@ -169,12 +205,13 @@ Distinct from `Availability` (a *test*, read-only, gates the Buy button):
 these two are NCB **set** expressions, evaluated as a side effect of the
 transaction itself (buying/selling this specific outfit can flip other
 control bits — e.g. a permit purchase marking a bit a mission later checks).
-Offsets confirmed at `@301`/`@556` respectively (§8); **not decoded anywhere
-in `OutfRes`/`PilotStore.buyOutfit`/`sellOutfit`** — no bit-set side effect
-of any outfit purchase or sale exists in this engine today. This is a real
-gap: any Bible plugin (or the stock data) that gates story progress on
-"player bought item X" rather than "player owns item X" would silently not
-work.
+Offsets confirmed at `@301`/`@556` respectively (§8). **Fixed in the outfitter
+wiring audit**: both are now decoded as `OutfRes.onPurchase`/`.onSell` and run
+through the story engine's set-op executor (`PilotStore.runOutfitScript` →
+`StoryEngine.apply(set:)`) as a side effect of buying/selling — so a permit
+that gates story progress on "player *bought* item X" now flips its bit.
+(A mission-*granted* outfit deliberately does not fire OnPurchase — it wasn't
+"bought"; its map/record modifier effects still apply.)
 
 ### 3.4 Shown-but-locked vs. fully hidden
 
@@ -202,11 +239,12 @@ owning ≥1 already forces it visible. Implemented: `OutfRes.hidesWhenLocked`
 Implemented as `OutfRes.ignoresRequirements`, checked first in
 `lockState(for:pilot:at:spob:diplomacy:)` — but note it's only wired into the
 `Require`/`Availability` check, not into the **tech-level** filter upstream in
-`NovaGame.outfitsSold` (`NovaEconomy.swift:186-193`), which unconditionally
-calls `sells(techLevel:at:)` before this flag is ever consulted. **This is a
-gap**: per the Bible's literal wording ("regardless of tech level..."), an
-0x0800 item should show up even at a spaceport whose tech level is too low for
-it, and today it won't.
+`NovaGame.outfitsSold` (`NovaEconomy.swift`). **Fixed in the outfitter wiring
+audit**: `outfitsSold` now passes an item through when
+`sells(techLevel:at:)` **or** `ignoresRequirements` (0x0800) is true, so an
+0x0800 item shows up even where the tech level is too low — matching the
+Bible's "regardless of tech level..." wording. (The `hasOutfitter` guard still
+applies: a spaceport with no outfitter at all shows nothing.)
 
 ### 3.6 The "suppress a rival item" flag
 
@@ -233,12 +271,11 @@ sell, matching the Bible's flat-refund model. **Gap (partially closed)**:
 `Flags 0x0200` (mass-proportional pricing) is now decoded
 (`OutfRes.priceIsShipMassProportional`) and the correct math exists
 (`OutfRes.effectiveCost(shipMass:)` / `Galaxy.effectiveCost(of:forShip:)` in
-`Sources/NovaSwiftEngine/ShipLoadout.swift`) — but `PilotStore.buyOutfit`/
-`sellOutfit` still charge/refund the flat `o.cost` and never call
-`effectiveCost`. So every mass-scaled-price outfit in real data is still
-mis-priced by the running engine today (charged/refunded at flat `Cost`
-instead of `shipMass × Cost`), even though the decode-and-compute half of the
-work is done. This is a wiring gap, not a missing-offset gap.
+`Sources/NovaSwiftEngine/ShipLoadout.swift`). **Fixed in the outfitter wiring
+audit**: `PilotStore.effectiveCost` now calls `Galaxy.effectiveCost` and is
+used for the affordability check, the charge, the sell refund, and the ship
+trade-in valuation — so a mass-scaled-price outfit is charged/refunded at
+`shipMass × Cost` on the player's current hull, not flat `Cost`.
 
 Commodities (the separate Trade Center, not outfits) do have a genuine
 buy/sell spread via `PriceLevel` (`NovaEconomy.swift`) — that's a different
@@ -304,11 +341,14 @@ Implemented: `OutfRes.grantedWeapons` (`ModType == .weapon`) and `.ammoFor`
 (`ModType == .ammunition`) in `NovaAIModels.swift`; folded into a `Loadout`'s
 resolved weapon list by `Galaxy.loadout` (`ShipLoadout.swift:140-141,
 147-158`): weapon-outfit counts become mount counts, ammo-outfit counts become
-extra ammo units on the matching weapon id. **Gap**: `ModType 27`
-("increase maximum", used for ammo-cap-raising permits/pods) is decoded as an
-enum case (`.increaseMax`) but never consumed in `ShipLoadout.swift`'s
-aggregation switch (falls into `default: break`) — an outfit that's supposed
-to raise another outfit's `Max` currently does nothing.
+extra ammo units on the matching weapon id. **`ModType 27` ("increase
+maximum") fixed in the outfitter wiring audit**: `NovaGame.effectiveMaxInstallable`
+(`OutfitConstraints.swift`) computes base `Max` × the number of owned
+ModType-27 items pointing at the target (the Bible's exact multiplier rule),
+and `PilotStore.canBuyOutfit` enforces that effective cap. It is *not* a
+ship-stat modifier, so `ShipLoadout.swift`'s stat-aggregation switch correctly
+leaves it in `default: break` — its only job is raising a purchase cap, which
+lives in the shop layer.
 
 ## 6. Purchase constraints
 
@@ -493,22 +533,24 @@ NCB Availability test | `Availability` | ✅ Done | `OutfRes.availBits` + `ItemL
 Contribute/Require prerequisite | `Contribute`/`Require` | ✅ Done | `ItemLocking.swift:24-30, 52-59`
 RequireGovt scoping | `RequireGovt` | ✅ Done | `ItemLocking.swift:37-49`
 Show-greyed vs. fully hide | `Flags 0x0100/0x4000` | ✅ Done | `OutfRes.hidesWhenLocked`
-Sell-anywhere override | `Flags 0x0800` | ⚠️ Partial — only overrides Require/Availability, **not** the upstream tech-level filter | `OutfRes.ignoresRequirements`; gap noted in §3.5
+Sell-anywhere override | `Flags 0x0800` | ✅ Done — overrides Require/Availability **and** the upstream tech-level filter | `OutfRes.ignoresRequirements` + `NovaEconomy.outfitsSold`
 Max-owned cap | `Max` | ✅ Done | `PilotStore.canBuyOutfit`
 Base price + flat refund | `Cost` | ✅ Done | `OutfRes.cost`, `PilotStore.buyOutfit`/`sellOutfit`
-Mass-proportional price | `Flags 0x0200` | ⚠️ Implemented but not wired — `OutfRes.priceIsShipMassProportional` + `effectiveCost(shipMass:)` computed in `ShipLoadout.swift`, but `PilotStore.buyOutfit`/`sellOutfit` still charge/refund flat `o.cost` and never call `effectiveCost` | `ShipLoadout.swift:107-110, 126-135`; gap in `PilotStore.swift:214-242`
+Mass-proportional price | `Flags 0x0200` | ✅ Done — `PilotStore.effectiveCost` calls `Galaxy.effectiveCost`, used by `buyOutfit`/`sellOutfit`/`canBuyOutfit`/`tradeInValue` | `ShipLoadout.swift:107-110, 126-135` + `PilotStore.swift`
 Mass-proportional install mass | `Flags 0x0400` | ✅ Implemented and wired — `OutfRes.massIsShipMassProportional` + `effectiveMass(shipMass:)` consumed in `Galaxy.loadout`'s `usedMass` sum | `ShipLoadout.swift:111-124, 196`
-Purchase/sale control-bit side effects | `OnPurchase`/`OnSell` | ❌ Missing — offsets confirmed `@301`/`@556` (§8), not decoded at all | —
+Purchase/sale control-bit side effects | `OnPurchase`/`OnSell` | ✅ Done — decoded on `OutfRes` (`@301`/`@556`) and run via `StoryEngine.apply(set:)` on buy/sell | `NovaAIModels.swift` + `PilotStore.runOutfitScript`
 Weapon/ammo linkage | `ModType 1`/`3` | ✅ Done | `OutfRes.grantedWeapons`/`.ammoFor`, folded in `ShipLoadout.swift:140-141`
-Ammo/other-item cap increase | `ModType 27` | ❌ Decoded but **inert** — falls to `default: break` | `ShipLoadout.swift`'s aggregation switch
-Fixed-gun/turret slot flags | `Flags 0x0001/0x0002` | ⚠️ Implemented but not wired — `OutfRes.isFixedGunOutfit`/`.isTurretOutfit` decoded, `Loadout.usedGunSlots`/`usedTurretSlots`/`freeGunSlots`/`freeTurretSlots` computed in `Galaxy.loadout`, but `PilotStore.canBuyOutfit` never checks them — no purchase-time slot cap yet | `ShipLoadout.swift:68-85, 100-106, 179, 201-202`; gap in `PilotStore.swift:206-211`
+Map reveal | `ModType 16` | ✅ Done — scoped one-shot reveal at acquisition (N jumps / all-independent / govt class), recorded in `PlayerState.chartedSystems`; **was** a whole-galaxy reveal bug | `NovaGame.mapRevealedSystems` + `PlayerState.applyOutfitAcquisition`
+Clean legal record | `ModType 21` | ✅ Done — clears standing with the ModVal govt (or all if -1) on acquisition | `PlayerState.applyOutfitAcquisition` / `clearLegalRecord`
+Ammo/other-item cap increase | `ModType 27` | ✅ Done — `NovaGame.effectiveMaxInstallable` (base Max × owned expanders) enforced in `PilotStore.canBuyOutfit`; not a ship-stat modifier, so `ShipLoadout` intentionally skips it | `OutfitConstraints.swift` + `PilotStore.swift`
+Fixed-gun/turret slot flags | `Flags 0x0001/0x0002` | ✅ Done — `PilotStore.canBuyOutfit` rejects a fixed-gun/turret buy when `Loadout.freeGunSlots`/`freeTurretSlots` is 0 | `ShipLoadout.swift:68-85, 100-106` + `PilotStore.swift`
 Can't-sell flag | `Flags 0x0008` | ✅ Implemented and wired — `sellOutfit` rejects the sale when set | `PilotStore.swift:234-242`
 Consumed-on-purchase (permits) | `Flags 0x0010` | ✅ Implemented and wired — `buyOutfit` grants then immediately `removeOutfit`s | `PilotStore.swift:213-230`
 Persistent-across-ship-trade | `Flags 0x0004`/`0x0020` | ❌ Missing as a distinct rule — outfits currently always carry over regardless of the flag | `PilotStore.buyShip` comment
 DispWeight-tier suppression | `Flags 0x1000` | ❌ Missing | —
 Ranks-section outfit | `Flags 0x2000` | ❌ Missing | —
-Illegal-outfit `ScanMask` | `ScanMask` (outf-level) | ⚠️ Decoded, not consumed — `OutfRes.scanMask` (`@1006`) is now a real field but nothing evaluates it against a government's `ScanMask` (distinct from the mission-level `scanMask` that *is* both decoded and used) | `NovaAIModels.swift`
-`ItemClass` (for pêrs loot) | `ItemClass` | ⚠️ Decoded, not consumed — `OutfRes.itemClass` (`@1004`) is now a real field but no `pêrs`-loot logic reads it | `NovaAIModels.swift`
+Illegal-outfit `ScanMask` | `ScanMask` (outf-level) | ✅ Done — `gövt.ScanMask@50` decoded + `Contraband`/`ContrabandScan` fine the player for scanned contraband (outfit/junk/mission) | `Contraband.swift`, `ContrabandScan.swift`; see docs/reverse-engineering/GOVERNMENT.md
+`ItemClass` (for pêrs loot) | `ItemClass` | ✅ Done — `pêrs` decoded (`PersModels.swift`); `NovaGame.personBoardingGrant` hands over `GrantCount/2…GrantCount` random outfits of `GrantClass` when the player boards a named person's hulk; spawner tags 5% of ships as a `pêrs` | `PersModels.swift`, `World.takePlunderOutfits`, `Spawner.assignPersonIfLucky`
 `Outfitter Name`/`Lowercase Name`/`Lowercase Plural` | (unnamed in Bible field list; display strings) | ❌ Missing — offsets confirmed `@811`/`@875`/`@939` (§8); engine currently displays only the resource-fork `name` metadata, never these in-record strings | —
 Daily restock roll | `BuyRandom` (both resources) | ✅ Done, including the documented zero-behavior asymmetry | `NovaEconomy.swift` `onOfferToday`, §7 above
 

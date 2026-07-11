@@ -102,6 +102,65 @@ public struct Loadout {
     /// jump's entry/exit sequence. Interpreted by the app as a percentage speed-up
     /// of the jump animation (0 = stock timing). See `PilotStore.jumpSpeedFactor`.
     public var hyperspaceSpeedBonus: Int = 0
+
+    /// Fighter bays fitted (`wëap` Guidance 99). Each launches carried fighters
+    /// rather than firing. See `FighterBaySpec` and `Ship.fighterBays`.
+    public var fighterBays: [FighterBaySpec] = []
+
+    /// Combined cloaking-device flag bits (`oütf` ModType 17, OR'd across fitted
+    /// cloaks). 0 = the ship has no cloak. Bit meanings (Bible): 0x0002 visible
+    /// on radar, 0x0004 drops shields on activation, 0x0008 decloaks when hit,
+    /// 0x0010/20/40/80 use 1/2/4/8 fuel per sec, 0x0100/200/400/800 use
+    /// 1/2/4/8 shield per sec, 0x1000 area cloak. See `Ship` cloak state.
+    public var cloakFlags: Int = 0
+    /// Combined cloak-scanner flag bits (`oütf` ModType 30). Bible: 0x0001 reveal
+    /// cloaked ships on radar, 0x0002 on screen, 0x0004 target untargetable
+    /// ships, 0x0008 target cloaked ships.
+    public var cloakScannerFlags: Int = 0
+    /// Anti-interference: total `oütf` ModType 24, subtracted from the system's
+    /// `Interference` when computing effective sensor range.
+    public var interferenceReduction: Int = 0
+    /// Net `oütf` ModType 28 murk change applied to the current system's murk.
+    public var murkModifier: Int = 0
+    /// Whether the ship carries an escape pod (`shïp.EscapePod` count or an
+    /// `oütf` ModType 11 escape-pod item) — the pilot survives destruction.
+    public var hasEscapePod: Bool = false
+    /// `oütf` ModType 20 (auto-eject): automatically ejects the pilot on death
+    /// (requires an escape pod to work, per the Bible).
+    public var hasAutoEject: Bool = false
+
+    /// The hull's `shïp.Crew` complement — the number the boarding/capture-odds
+    /// math uses on both sides (attacker's own crew, defender's crew). See
+    /// `World.captureChance`.
+    public var crew: Int = 0
+    /// Extra "effective crew" from installed marines outfits (`oütf` ModType 25
+    /// with a **positive** ModVal): "Adds the value in ModVal to your ship's
+    /// effective crew complement when calculating capture odds" (Bible).
+    public var marineCrew: Int = 0
+    /// Flat percentage points added to capture odds from marines outfits with a
+    /// **negative** ModVal (Bible: "-1 to -100 Increase the player's capture
+    /// odds by this amount"). Stored as a positive number of percentage points.
+    public var captureOddsBonus: Int = 0
+}
+
+/// A fighter bay fitted to a ship (`wëap` Guidance 99). Immutable spec resolved
+/// from the bay weapon; the live docked/deployed counts live on `Ship.FighterBay`.
+public struct FighterBaySpec: Equatable, Sendable {
+    /// The `wëap` id of the bay itself.
+    public var bayWeaponID: Int
+    /// The `shïp` class id of the fighter this bay launches (`wëap.AmmoType`).
+    public var fighterShipID: Int
+    /// How many fighters the bay holds when full (`wëap.MaxAmmo` × bays fitted).
+    public var capacity: Int
+    /// Minimum frames between launches (`wëap.Reload`, at 30 fps).
+    public var launchIntervalFrames: Int
+
+    public init(bayWeaponID: Int, fighterShipID: Int, capacity: Int, launchIntervalFrames: Int) {
+        self.bayWeaponID = bayWeaponID
+        self.fighterShipID = fighterShipID
+        self.capacity = capacity
+        self.launchIntervalFrames = launchIntervalFrames
+    }
 }
 
 extension OutfRes {
@@ -189,6 +248,11 @@ extension Galaxy {
         var multiJumpBonus = 0
         var fastJump = false
         var hyperspaceSpeed = 0
+        var marineCrew = 0
+        var captureOddsBonus = 0
+        var cloakFlags = 0, cloakScannerFlags = 0
+        var interferenceReduction = 0, murkModifier = 0
+        var hasEscapePod = s.podCount > 0, hasAutoEject = false
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
@@ -231,6 +295,22 @@ extension Galaxy {
                 case .hyperspaceSpeed: hyperspaceSpeed += v        // faster jump entry/exit sequence
                 case .weapon:          grantedWeapons[value, default: 0] += count
                 case .ammunition:      ammoAdds[value, default: 0] += count
+                case .marines:
+                    // ModType 25 (marines) feeds capture-odds, not ship stats.
+                    // Positive ModVal → +effective crew; negative (-1..-100) →
+                    // +that many percentage points of capture odds (Bible).
+                    if value >= 0 { marineCrew += v } else { captureOddsBonus += (-value) * count }
+                case .cloak:           cloakFlags |= value          // ModVal = cloak flag bits
+                case .cloakScanner:    cloakScannerFlags |= value   // ModVal = scanner flag bits
+                case .interference:    interferenceReduction += v    // subtracts from system Interference
+                case .murk:            murkModifier += v             // adjusts system Murk
+                case .escapePod:       hasEscapePod = true           // ModType 11
+                case .autoEject:       hasAutoEject = true           // ModType 20 (needs a pod)
+                // ModType 27 (increaseMax) is not a ship-stat modifier: its only
+                // effect is raising another outfit's purchase cap, enforced at buy
+                // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
+                // to fold into the flown ship here. Other unhandled ModTypes
+                // (interference/murk/hyperspaceDist/…) likewise have no stat effect.
                 default: break
                 }
             }
@@ -247,6 +327,17 @@ extension Galaxy {
         }
         for (wid, a) in ammoAdds {
             let e = byID[wid] ?? (0, 0); byID[wid] = (e.count, e.ammo + a)
+        }
+        // Fighter bays (`wëap` Guidance 99) don't fire projectiles — they launch
+        // carried fighters. Pull them out of the firing-weapon list into a
+        // dedicated bay list (capacity × number of bays fitted).
+        var fighterBays: [FighterBaySpec] = []
+        for (wid, entry) in byID where game.weapon(wid)?.isFighterBay == true {
+            guard let w = game.weapon(wid) else { continue }
+            fighterBays.append(FighterBaySpec(bayWeaponID: wid, fighterShipID: w.fighterShipID,
+                                              capacity: w.fighterCapacity * max(1, entry.count),
+                                              launchIntervalFrames: max(1, w.reload)))
+            byID[wid] = nil
         }
         let weapons = byID.map { (id: $0.key, count: $0.value.count, ammo: $0.value.ammo) }
             .sorted { $0.id < $1.id }
@@ -271,7 +362,12 @@ extension Galaxy {
             outfits: outfitCounts, weapons: weapons,
             maxJumpHops: max(1, 1 + multiJumpBonus),
             instantJump: fastJump,
-            hyperspaceSpeedBonus: hyperspaceSpeed)
+            hyperspaceSpeedBonus: hyperspaceSpeed,
+            fighterBays: fighterBays,
+            cloakFlags: cloakFlags, cloakScannerFlags: cloakScannerFlags,
+            interferenceReduction: interferenceReduction, murkModifier: murkModifier,
+            hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject,
+            crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus)
     }
 
     /// Build a live ship with its **full loadout** applied: outfit-modified flight
@@ -319,6 +415,13 @@ extension Galaxy {
         ship.fuelRegenPerSec = lo.fuelRegenPerSec
         ship.afterburner = lo.afterburner
         ship.cargoCapacity = lo.cargoCapacity
+        ship.crew = lo.crew
+        ship.marineCrew = lo.marineCrew
+        ship.captureOddsBonus = lo.captureOddsBonus
+        ship.fighterBays = lo.fighterBays.map { Ship.FighterBay(spec: $0) }
+        ship.cloakFlags = lo.cloakFlags
+        ship.cloakScannerFlags = lo.cloakScannerFlags
+        ship.interferenceReduction = lo.interferenceReduction
 
         var mounts: [WeaponMount] = []
         for w in lo.weapons {

@@ -361,7 +361,7 @@ struct OutfitterView: View {
                 Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            if pilot.sellOutfit(o) {
+            if pilot.sellOutfit(o, galaxy: galaxy) {
                 Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
             } else {
                 Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")

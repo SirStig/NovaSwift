@@ -221,6 +221,77 @@ public final class Ship {
     /// once the player has taken them, so re-boarding can't duplicate the haul.
     public var plunderCredits: Int = -1
 
+    /// `shïp.Crew` — the crew complement, used on both sides of the EV Nova
+    /// capture-odds math (attacker's crew vs. defender's crew × 10). See
+    /// `World.captureChance`.
+    public var crew: Int = 0
+    /// Extra effective crew from marines outfits (positive `oütf` ModType 25).
+    public var marineCrew: Int = 0
+    /// Percentage points added to capture odds from negative-ModVal marines
+    /// outfits (Bible: "-1 to -100 Increase the player's capture odds").
+    public var captureOddsBonus: Int = 0
+
+    /// A live fighter bay aboard a carrier: its immutable spec plus the running
+    /// docked count, launch cooldown, and the set of currently-deployed fighter
+    /// entity ids. `docked` starts full and is spent on launch, restored when a
+    /// live fighter re-docks. See `World`'s fighter-bay handling.
+    public final class FighterBay {
+        public let spec: FighterBaySpec
+        public var docked: Int
+        public var launchCooldown: Double = 0
+        public var deployed: Set<Int> = []
+        public init(spec: FighterBaySpec) { self.spec = spec; self.docked = max(0, spec.capacity) }
+    }
+    /// Fighter bays fitted to this ship (empty for non-carriers).
+    public var fighterBays: [FighterBay] = []
+
+    // Cloaking (oütf ModType 17). `cloakFlags` are the OR'd device flags; the
+    // rest is live state driven by `World`'s cloak step.
+    public var cloakFlags: Int = 0
+    public var cloakScannerFlags: Int = 0
+    public var hasCloak: Bool { cloakFlags != 0 }
+    /// Player/AI intent to be cloaked. Toggled by input (player) or the brain.
+    public var cloakEngaged = false
+    /// 0 = fully visible, 1 = fully cloaked; fades between when (dis)engaging.
+    public var cloakLevel: Double = 0
+    /// Substantially hidden — excluded from targeting/AI acquisition (unless the
+    /// observer has a cloak scanner). Uses a high threshold so a ship mid-fade
+    /// is still detectable.
+    public var isCloaked: Bool { cloakLevel >= 0.99 }
+    /// Fuel drained per second while cloaked (Bible bits 0x0010/20/40/80 = 1/2/4/8).
+    public var cloakFuelPerSec: Double {
+        Double((cloakFlags & 0x0010 != 0 ? 1 : 0) + (cloakFlags & 0x0020 != 0 ? 2 : 0)
+             + (cloakFlags & 0x0040 != 0 ? 4 : 0) + (cloakFlags & 0x0080 != 0 ? 8 : 0))
+    }
+    /// Shield drained per second while cloaked (Bible bits 0x0100/200/400/800 = 1/2/4/8).
+    public var cloakShieldPerSec: Double {
+        Double((cloakFlags & 0x0100 != 0 ? 1 : 0) + (cloakFlags & 0x0200 != 0 ? 2 : 0)
+             + (cloakFlags & 0x0400 != 0 ? 4 : 0) + (cloakFlags & 0x0800 != 0 ? 8 : 0))
+    }
+    /// 0x0002: a cloaked ship of this type still shows on radar.
+    public var cloakVisibleOnRadar: Bool { cloakFlags & 0x0002 != 0 }
+    /// 0x0004: engaging the cloak immediately drops shields to zero.
+    public var cloakDropsShields: Bool { cloakFlags & 0x0004 != 0 }
+    /// 0x0008: taking damage forces the cloak off.
+    public var cloakDropsOnDamage: Bool { cloakFlags & 0x0008 != 0 }
+    /// 0x1000: area cloak — ships in formation with this one are cloaked too.
+    public var cloakIsArea: Bool { cloakFlags & 0x1000 != 0 }
+    /// Anti-interference (oütf ModType 24): subtracted from the system's sensor
+    /// static when computing this ship's effective sensor range.
+    public var interferenceReduction: Int = 0
+    /// Set on a launched fighter: the entity id of the carrier it flew from, so
+    /// it can dock back and be freed if the carrier dies. nil = not a fighter.
+    public var carrierID: Int?
+    /// `përs` id when this ship is a named character (5% spawn chance). Drives the
+    /// target-display name and the ItemClass boarding-loot grant. nil = ordinary.
+    public var personID: Int?
+    /// Outfit ids this hulk still owes the player as `përs` boarding loot; nil =
+    /// not yet rolled, empty = already taken. See `World.takePlunderOutfits`.
+    public var plunderOutfits: [Int]?
+    /// True once this fighter has been told to return to its carrier (low on
+    /// ammo/health, or the carrier left combat) — it heads home to dock.
+    public var recallToCarrier = false
+
     /// Whether the ship has enough fuel for one hyperspace jump.
     public var canJump: Bool { fuel >= ShipFuel.perJump }
     /// Spend one jump's fuel; returns false and spends nothing if too low.
@@ -703,6 +774,11 @@ public final class World {
             for w in s.weapons { w.tick(dt) }
             if !s.disabled { s.regen(dt) }
         }
+
+        // Fighter bays: carriers deploy fighters in combat; fighters dock back.
+        updateFighterBays(dt)
+        // Cloaking devices: fade in/out and drain fuel/shield.
+        stepCloak(dt)
 
         // Asteroids don't move (see `Asteroid`'s doc comment) — they only spin.
         for rock in asteroids where rock.isAlive {
@@ -1254,6 +1330,8 @@ public final class World {
         // need one too — this was real, uncapped log volume that scaled
         // directly with how many ships were fighting.
         _ = ship.applyDamage(shield: shield, armor: armor)
+        // Cloak flag 0x0008: taking damage forces the cloak off.
+        if ship.cloakEngaged, ship.cloakDropsOnDamage { ship.cloakEngaged = false }
         if ionization > 0, ship.ionizeMax > 0 {
             ship.ionCharge = min(ship.ionizeMax, ship.ionCharge + ionization)
         }
@@ -1293,6 +1371,11 @@ public final class World {
             if ownerID == 0, let dip = diplomacy {
                 dip.recordDisable(of: ship.government)
             }
+            // A named person the player just crippled holds a grudge from now on.
+            if ownerID == 0, let pid = ship.personID {
+                playerPersGrudges.insert(pid)
+                events.append(.personGrudge(personID: pid))
+            }
         } else if ownerID == 0 && !ship.isPlayer && !ship.isAlive {
             // Zeroed an already-disabled hulk's sliver of armor — a real kill,
             // finalized by `despawnDepartedAndDead` once per frame. Remember
@@ -1309,6 +1392,10 @@ public final class World {
             if !npc.isAlive {
                 if npc.killedByPlayer, let dip = diplomacy {
                     dip.recordKill(of: npc.government, shipStrength: Int(npc.combatStrength))
+                }
+                // A named person the player destroyed won't appear again.
+                if npc.killedByPlayer, let pid = npc.personID {
+                    events.append(.personDefeated(personID: pid))
                 }
                 events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
                                          soundID: npc.explosionSoundID))
@@ -1372,7 +1459,7 @@ public final class World {
     @discardableResult
     public func selectNearestTarget(hostileOnly: Bool) -> Ship? {
         let candidates = npcs.filter { npc in
-            npc.isAlive && !npc.disabled
+            npc.isAlive && !npc.disabled && canDetect(npc, by: player)
                 && (!hostileOnly || diplomacy?.isHostileToPlayer(npc.government) == true)
         }
         guard let nearest = candidates.min(by: {
@@ -1411,6 +1498,152 @@ public final class World {
         return orders.allSatisfy { $0 == first } ? first : nil
     }
 
+    // MARK: Cloaking & sensors (oütf ModType 17/24/30; sÿst Interference)
+
+    /// `pêrs` ids the player has wronged — those characters attack on sight
+    /// wherever they appear (`pêrs.Flags 0x0001` grudge). Synced from the pilot
+    /// by the host; read by the AI's hostility test.
+    public var playerPersGrudges: Set<Int> = []
+    /// Host gate for whether a `pêrs` may appear now — evaluates its `ActiveOn`
+    /// NCB test and "not already defeated" against live pilot state (the engine
+    /// can't evaluate NCB itself). Default: always eligible.
+    public var persSpawnEligible: (Int) -> Bool = { _ in true }
+
+    /// The current system's sensor static (`sÿst.Interference`, 0-100). Set when
+    /// the world is built for a system; degrades effective sensor range.
+    public var systemInterference: Int = 0
+    /// The current system's visual murk (`sÿst.Murk`, 0-100; <0 also hides the
+    /// starfield). A renderer hook — the app draws a fog whose depth tracks this
+    /// (net of the player's ModType-28 murk outfits). No gameplay effect.
+    public var systemMurk: Int = 0
+
+    /// `base` sensor range reduced by the effective interference `observer`
+    /// experiences: `base × (1 − netInterference/100)`, where net interference
+    /// is the system's static minus the observer's anti-interference outfits.
+    /// At 100 net interference the range is zero (complete sensor blackout, per
+    /// the Bible's 0-100 endpoints; the linear curve between them is this
+    /// engine's reading of "how thick the static is").
+    public func effectiveSensorRange(_ base: Double, for observer: Ship) -> Double {
+        let net = max(0, min(100, systemInterference - observer.interferenceReduction))
+        return base * (1 - Double(net) / 100)
+    }
+
+    /// Whether `observer` can detect (and therefore target) `target`, accounting
+    /// for cloaking. A cloaked target is hidden unless the observer carries a
+    /// cloak scanner able to target cloaked ships (ModType 30 bit 0x0008).
+    /// Non-cloaked targets pass here; range/interference gating is separate.
+    public func canDetect(_ target: Ship, by observer: Ship) -> Bool {
+        guard target.isCloaked else { return true }
+        return observer.cloakScannerFlags & 0x0008 != 0
+    }
+
+    /// Fade cloaks in/out and drain their fuel/shield upkeep. A cloak forced off
+    /// (out of fuel/shields) simply disengages and fades back to visible.
+    private func stepCloak(_ dt: Double) {
+        let baseFade = 1.0 / 1.2                    // full fade in ~1.2s
+        for s in allShips where s.hasCloak {
+            let rate = baseFade * (s.cloakFlags & 0x0001 != 0 ? 2 : 1)   // 0x0001 = faster fading
+            if s.cloakEngaged {
+                if s.cloakLevel == 0, s.cloakDropsShields { s.shield = 0 }   // 0x0004
+                s.cloakLevel = min(1, s.cloakLevel + rate * dt)
+                if s.cloakFuelPerSec > 0 { s.fuel = max(0, s.fuel - s.cloakFuelPerSec * dt) }
+                if s.cloakShieldPerSec > 0 { s.shield = max(0, s.shield - s.cloakShieldPerSec * dt) }
+                if (s.cloakFuelPerSec > 0 && s.fuel <= 0) || (s.cloakShieldPerSec > 0 && s.shield <= 0) {
+                    s.cloakEngaged = false                                   // can't power it — drop cloak
+                }
+            } else if s.cloakLevel > 0 {
+                s.cloakLevel = max(0, s.cloakLevel - rate * dt)
+            }
+        }
+    }
+
+    /// Toggle the player's cloaking device (no-op if the player has no cloak).
+    public func togglePlayerCloak() {
+        guard player.hasCloak else { return }
+        player.cloakEngaged.toggle()
+    }
+
+    // MARK: Fighter bays (wëap Guidance 99)
+
+    /// Whether `carrier` is currently engaged (has a live hostile target) — the
+    /// condition under which EV Nova carriers auto-deploy their fighters.
+    private func carrierInCombat(_ carrier: Ship) -> Bool {
+        guard let tid = carrier.currentTargetID, let t = ship(id: tid) else { return false }
+        return t.isAlive && !t.disabled
+    }
+
+    /// Per-frame fighter-bay processing: carriers in combat launch fighters up to
+    /// each bay's capacity (throttled by the bay's launch interval); deployed
+    /// fighters that run out of ammo, get badly hurt, or whose carrier has left
+    /// combat return and dock (restoring the bay); a carrier's death orphans its
+    /// still-flying fighters (they become independent ships of the same govt).
+    private func updateFighterBays(_ dt: Double) {
+        guard galaxy != nil else { return }   // fighters are spawned via the galaxy
+
+        // Launch pass over a snapshot (launching appends to `npcs`).
+        for carrier in allShips where !carrier.fighterBays.isEmpty && carrier.isAlive && !carrier.disabled {
+            let inCombat = carrierInCombat(carrier)
+            for bay in carrier.fighterBays {
+                bay.launchCooldown = max(0, bay.launchCooldown - dt)
+                // Drop dead/orphaned fighters from the roster.
+                bay.deployed = bay.deployed.filter { ship(id: $0)?.carrierID == carrier.entityID }
+                if inCombat, bay.docked > 0, bay.launchCooldown <= 0,
+                   let fighter = launchFighter(from: carrier, bay: bay) {
+                    bay.docked -= 1
+                    bay.deployed.insert(fighter.entityID)
+                    bay.launchCooldown = Double(bay.spec.launchIntervalFrames) / 30.0
+                }
+            }
+        }
+
+        // Recall & dock pass — collect removals, apply after iterating.
+        var docked: Set<Int> = []
+        for f in npcs where f.carrierID != nil && f.isAlive {
+            guard let carrier = ship(id: f.carrierID!), carrier.isAlive, !carrier.disabled else {
+                // Carrier gone: the fighter is orphaned — it keeps fighting for
+                // its government but has no bay to return to.
+                f.carrierID = nil; f.recallToCarrier = false; f.brain?.leaderID = nil
+                continue
+            }
+            if !f.recallToCarrier {
+                let outOfAmmo = !f.weapons.isEmpty && f.weapons.allSatisfy { $0.ammo == 0 }
+                if outOfAmmo || f.healthFraction < 0.3 || !carrierInCombat(carrier) {
+                    f.recallToCarrier = true
+                }
+            }
+            if f.recallToCarrier,
+               (f.position - carrier.position).length <= carrier.radius + f.radius + 30 {
+                if let bay = carrier.fighterBays.first(where: { $0.deployed.contains(f.entityID) }) {
+                    bay.deployed.remove(f.entityID)
+                    bay.docked = min(bay.spec.capacity, bay.docked + 1)
+                }
+                docked.insert(f.entityID)
+            }
+        }
+        if !docked.isEmpty {
+            for id in docked { clearTarget(id) }
+            npcs.removeAll { docked.contains($0.entityID) }
+        }
+    }
+
+    /// Launch one fighter from `carrier`'s `bay`: a real sub-ship of the bay's
+    /// fighter class, allied to the carrier and ordered to hunt its enemies.
+    private func launchFighter(from carrier: Ship, bay: Ship.FighterBay) -> Ship? {
+        guard let galaxy else { return nil }
+        let pos = carrier.position + Vec2.heading(carrier.angle) * (carrier.radius + 20)
+        guard let fighter = galaxy.makeLoadedShip(bay.spec.fighterShipID, government: carrier.government,
+                                                  at: pos, angle: carrier.angle) else { return nil }
+        let brain = fighter.brain ?? AIBrain(aiType: .interceptor, govt: carrier.government)
+        fighter.brain = brain
+        brain.leaderID = carrier.entityID
+        brain.escortOrder = .aggressive
+        brain.provokedByPlayer = carrier.isPlayer ? false : (carrier.brain?.provokedByPlayer ?? false)
+        fighter.carrierID = carrier.entityID
+        fighter.velocity = carrier.velocity
+        _ = addNPC(fighter, arrival: .launch)
+        return fighter
+    }
+
     // MARK: Boarding / plunder
 
     /// What a disabled ship yields when boarded — its name, credits aboard, the
@@ -1421,6 +1654,9 @@ public final class World {
         public let credits: Int
         public let cargo: [(commodity: Int, tons: Int)]
         public let captureChance: Int?   // percent, nil = can't be captured
+        /// Outfit ids this hulk grants as `përs` ItemClass loot (empty for an
+        /// ordinary ship, or a person whose grant roll came up empty).
+        public var grantedOutfits: [Int] = []
     }
 
     /// The plunder a disabled ship offers, or nil if `shipID` isn't a boardable
@@ -1431,11 +1667,73 @@ public final class World {
         let cargo = s.cargo.filter { $0.value > 0 }
             .map { (commodity: $0.key, tons: $0.value) }
             .sorted { $0.commodity < $1.commodity }
-        // Tougher hulls are harder to take; the largest are uncapturable.
-        let toughness = s.maxArmor + s.maxShield
-        let chance: Int? = toughness > 2200 ? nil : max(5, min(85, 78 - Int(toughness / 40)))
-        return BoardingManifest(shipID: shipID, name: s.name,
-                                credits: rolledPlunderCredits(s), cargo: cargo, captureChance: chance)
+        return BoardingManifest(shipID: shipID, name: personName(s) ?? s.name,
+                                credits: rolledPlunderCredits(s), cargo: cargo,
+                                captureChance: captureChance(of: s),
+                                grantedOutfits: rolledPlunderOutfits(s))
+    }
+
+    /// The `përs` character name for a ship, if it's a named person.
+    private func personName(_ s: Ship) -> String? {
+        guard let pid = s.personID else { return nil }
+        return galaxy?.game.pers(pid)?.name
+    }
+
+    /// The `përs` ItemClass boarding loot for `s`, rolled once (deterministically
+    /// from its identity) and cached. Empty for an ordinary ship.
+    private func rolledPlunderOutfits(_ s: Ship) -> [Int] {
+        if s.plunderOutfits == nil {
+            guard let pid = s.personID, let pers = galaxy?.game.pers(pid) else { s.plunderOutfits = []; return [] }
+            let seed = UInt64(bitPattern: Int64(s.entityID &* 2_654_435_761)) ^ UInt64(bitPattern: Int64(pid &+ 1))
+            s.plunderOutfits = galaxy?.game.personBoardingGrant(pers, seed: seed == 0 ? 1 : seed) ?? []
+        }
+        return s.plunderOutfits ?? []
+    }
+
+    /// Take the `përs` outfit loot from a boarded hulk (clearing it so it can't be
+    /// taken twice). The host adds these outfit ids to the pilot.
+    public func takePlunderOutfits(from shipID: Int) -> [Int] {
+        guard let s = ship(id: shipID) else { return [] }
+        let loot = rolledPlunderOutfits(s)
+        s.plunderOutfits = []
+        return loot
+    }
+
+    /// Total effective crew the player brings to a boarding action — the sum EV
+    /// Nova's capture math puts on the attacker's side: the player ship's own
+    /// `Crew`, its marines outfits' bonus crew, and the `Crew` of every escort
+    /// under the player's command.
+    public var playerBoardingCrew: Int {
+        player.crew + player.marineCrew + playerEscorts.reduce(0) { $0 + $1.crew }
+    }
+
+    /// Capture odds (percent) for the player taking disabled hulk `target`, or
+    /// nil if it can't be captured. EV Nova's documented formula:
+    ///   odds = (attackerCrew / (targetCrew × 10)) × 100
+    ///        + the player's marines odds bonus (negative-ModVal ModType-25)
+    ///        + 10 if the player's Strength exceeds 5× the target's Strength
+    /// clamped to 1…75%. The defender's ×10 crew advantage is why capture is hard
+    /// without marines or escorts. The ±5% random jitter is applied at the moment
+    /// of the attempt (`attemptCapture`), not here, so a *displayed* chance is
+    /// stable while the roll still varies.
+    public func captureChance(of target: Ship) -> Int? {
+        guard target.crew > 0 else { return nil }   // nothing to overpower
+        let ratio = Double(playerBoardingCrew) / Double(target.crew * 10) * 100
+        var odds = Int(ratio.rounded()) + player.captureOddsBonus
+        if player.combatStrength > target.combatStrength * 5 { odds += 10 }
+        return min(75, max(1, odds))
+    }
+
+    /// Board disabled hulk `shipID`: emit `.shipBoarded` and return its plunder
+    /// manifest (credits/cargo/capture odds). The canonical "player docks with
+    /// the hulk" entry point — the host then calls `takePlunderCredits` /
+    /// `takePlunderCargo` / `attemptCapture` off the returned manifest. Returns
+    /// nil (emitting nothing) if the ship isn't a boardable hulk.
+    @discardableResult
+    public func board(shipID: Int) -> BoardingManifest? {
+        guard let manifest = boardingManifest(for: shipID), let s = ship(id: shipID) else { return nil }
+        events.append(.shipBoarded(entityID: s.entityID, at: s.position))
+        return manifest
     }
 
     /// Credits aboard a hulk, rolled once (deterministically from its identity +
@@ -1477,13 +1775,16 @@ public final class World {
     }
 
     /// Attempt to capture a hulk given a 0–99 `roll` (supplied by the caller so
-    /// the engine stays deterministic). On success the ship joins the player's
-    /// escort wing. Returns whether it succeeded.
+    /// the outcome is reproducible for a given roll). The base chance is jittered
+    /// by ±5% (world RNG, per the Bible) before the roll is compared. On success
+    /// the ship joins the player's escort wing and a `.shipCaptured` event fires.
     public func attemptCapture(shipID: Int, roll: Int) -> Bool {
-        guard let manifest = boardingManifest(for: shipID), let chance = manifest.captureChance,
-              let s = ship(id: shipID) else { return false }
-        guard roll < chance else { return false }
+        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
+              let chance = captureChance(of: s) else { return false }
+        let effective = min(75, max(1, chance + rng.int(in: -5...5)))
+        guard roll < effective else { return false }
         recruitEscort(s)
+        events.append(.shipCaptured(entityID: s.entityID, shipTypeID: s.shipTypeID, at: s.position))
         return true
     }
 

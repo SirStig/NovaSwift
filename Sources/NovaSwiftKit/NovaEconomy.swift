@@ -247,7 +247,12 @@ extension NovaGame {
     public func outfitsSold(at spob: SpobRes, day: Int? = nil) -> [OutfRes] {
         guard spob.hasOutfitter else { return [] }
         return outfits()
-            .filter { sells(techLevel: $0.techLevel, at: spob) }
+            // Bible `Flags 0x0800`: "This item can be sold anywhere, regardless
+            // of tech level, requirements, or mission bits" — so a 0x0800 outfit
+            // bypasses the tech-level gate entirely (OUTFITTERS.md §3.5). The
+            // Require/Availability half of "regardless" is handled downstream in
+            // `ItemLocking`; this closes the upstream tech-level half.
+            .filter { sells(techLevel: $0.techLevel, at: spob) || $0.ignoresRequirements }
             .filter { outfit in
                 guard let day else { return true }
                 return onOfferToday(buyRandom: outfit.buyRandom, neverIfZero: false,

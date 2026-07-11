@@ -24,7 +24,22 @@ struct PlanetVisual {
 /// is loaded, a vector placeholder otherwise) with an engine exhaust plume, a
 /// follow camera, and a HUD driven via `GameHUDModel`.
 final class GameScene: SKScene {
-    private var world: World!
+    private var world: World! {
+        didSet {
+            // Re-apply pêrs state to every freshly-built world (system rebuilds,
+            // takeoff) so grudges/spawn-eligibility survive jumps.
+            world?.playerPersGrudges = persGrudges
+            if let e = persSpawnEligible { world?.persSpawnEligible = e }
+        }
+    }
+    /// pêrs ids the player has wronged (grudge) — host-supplied from pilot state.
+    var persGrudges: Set<Int> = []
+    /// Host gate: whether a pêrs may spawn now (ActiveOn NCB + not defeated).
+    var persSpawnEligible: ((Int) -> Bool)?
+    /// Fired when the player earns a grudge / defeats a named person; the host
+    /// persists these to the pilot.
+    var onPersGrudge: ((Int) -> Void)?
+    var onPersDefeated: ((Int) -> Void)?
     private var input: InputController!
     private var controllerInput: GameControllerInput?
 
@@ -125,6 +140,12 @@ final class GameScene: SKScene {
     /// fuel, advance the route, follow the pilot, save). Supplied by the container.
     private var jumpCommit: (() -> Void)?
     private var jumpCommitted = false
+
+    /// Invoked when a government ship completes a scan of the player, with that
+    /// ship's government id. The host wires this to the contraband scan-and-fine
+    /// (`ContrabandScan.enforce`), which needs live pilot state the scene doesn't
+    /// hold. nil = no consequence (e.g. the no-data demo path).
+    var onPlayerScanned: ((Int) -> Void)?
     /// True while a jump wants manual input suppressed (the whole sequence).
     var isJumping: Bool { jumpPhase != .none }
     /// Full-viewport white flash + radial star streaks, parented to the camera.
@@ -664,11 +685,17 @@ final class GameScene: SKScene {
                 if entityID == 0 { audio?.play(.docking) }
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
-            case let .shipScanned(_, targetID, at):
+            case let .shipScanned(scannerID, targetID, at):
                 if targetID == 0 {
                     // The player doesn't need a visual sweep over their own ship —
                     // just the bottom-left message log, like other ambient messages.
                     hud?.post("You are being scanned.")
+                    // The scanning government checks the player's holds/equipment
+                    // for contraband and fines it (host wires the consequence,
+                    // which needs pilot state). -1 govt = independent (no scan law).
+                    if let govt = world.ship(id: scannerID)?.government, govt >= 0 {
+                        onPlayerScanned?(govt)
+                    }
                 } else {
                     spawnScanSweep(at: CGPoint(x: at.x, y: at.y))
                 }
@@ -676,6 +703,11 @@ final class GameScene: SKScene {
                 let name = world.ship(id: entityID)?.name ?? "Ally"
                 hud?.post("\(name) transfers fuel and makes repairs.")
                 audio?.play(.docking)
+            case let .personGrudge(pid):
+                persGrudges.insert(pid)
+                onPersGrudge?(pid)
+            case let .personDefeated(pid):
+                onPersDefeated?(pid)
             default:
                 break
             }
@@ -829,6 +861,14 @@ final class GameScene: SKScene {
         selectedPlanetID = nil
     }
 
+    /// Toggle the player's cloaking device (oütf ModType 17). No-op if unfitted.
+    func togglePlayerCloak() {
+        world.togglePlayerCloak()
+        if world.player.hasCloak {
+            hud?.post(world.player.cloakEngaged ? "Cloaking device engaged." : "Cloaking device disengaged.")
+        }
+    }
+
     /// One entry in the combined Tab-cycle order: every in-range ship plus
     /// every planet in the system, ordered by distance from the player, so
     /// Tab reaches planets too — not just ships found by clicking.
@@ -935,11 +975,30 @@ final class GameScene: SKScene {
     /// plunder dialog after taking loot.
     func boardManifest(_ id: Int) -> World.BoardingManifest? { world?.boardingManifest(for: id) }
 
+    /// The `pêrs` id of an entity, if it's a named character (for hail quotes).
+    func personID(forEntity id: Int) -> Int? { world?.ship(id: id)?.personID }
+    /// Whether the entity's ship is currently a disabled hulk.
+    func isEntityDisabled(_ id: Int) -> Bool { world?.ship(id: id)?.disabled ?? false }
+    /// Record a fresh grudge on the live world so a wronged person turns hostile
+    /// immediately, without waiting for the next system rebuild.
+    func addLiveGrudge(_ personID: Int) { world?.playerPersGrudges.insert(personID) }
+
+    /// Push the current pêrs grudge set + spawn-eligibility gate onto the live
+    /// world. Called by the host after it sets those (post-`configure`), so the
+    /// starting system reflects a pilot's existing grudges immediately.
+    func syncPersStateToWorld() {
+        world?.playerPersGrudges = persGrudges
+        if let e = persSpawnEligible { world?.persSpawnEligible = e }
+    }
+
     /// Take the credits aboard a boarded hulk; returns the amount.
     func plunderCredits(_ id: Int) -> Int { world?.takePlunderCredits(from: id) ?? 0 }
 
     /// Move a boarded hulk's cargo into the hold; returns what was taken.
     func plunderCargo(_ id: Int) -> [(commodity: Int, tons: Int)] { world?.takePlunderCargo(from: id) ?? [] }
+
+    /// Take a boarded përs hulk's ItemClass outfit loot (outfit ids); once only.
+    func plunderOutfits(_ id: Int) -> [Int] { world?.takePlunderOutfits(from: id) ?? [] }
 
     /// Roll to capture a boarded hulk into the escort wing; returns success.
     func attemptCapture(_ id: Int) -> Bool {

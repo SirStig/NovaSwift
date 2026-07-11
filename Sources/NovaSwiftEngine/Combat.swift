@@ -534,4 +534,13 @@ public enum WorldEvent {
     /// A paid "Request Assistance" ally docked with the player and delivered
     /// fuel/repairs — `entityID` is the ally, for the renderer's banner text.
     case assistanceDelivered(entityID: Int)
+    /// The player boarded a disabled hulk (to plunder/attempt capture).
+    case shipBoarded(entityID: Int, at: Vec2)
+    /// The player captured a disabled hulk; it joins the escort wing.
+    case shipCaptured(entityID: Int, shipTypeID: Int, at: Vec2)
+    /// The player attacked a named person (`pêrs`) who now holds a grudge — they
+    /// will attack the player wherever they meet. The host persists this.
+    case personGrudge(personID: Int)
+    /// The player destroyed a named person; they cease to appear again. Persisted.
+    case personDefeated(personID: Int)
 }

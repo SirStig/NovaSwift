@@ -7,7 +7,7 @@ import NovaSwiftKit
 /// a course the same way tapping the system on the starmap does (`nav.plotCourse(to:)`).
 ///
 /// Only systems the player actually knows about are listed — the same fog-of-war rule the map
-/// canvas itself draws under (`NavigationModel.visibility(of:explored:adjacent:mapRevealAll:)`):
+/// canvas itself draws under (`NavigationModel.visibility(of:explored:adjacent:charted:)`):
 /// merely-adjacent (glimpsed-but-unvisited) systems are left off since their real name hasn't
 /// been learned in-fiction, same as the map hides their label.
 struct SystemFinderView: View {
@@ -22,11 +22,11 @@ struct SystemFinderView: View {
     private var known: [SystRes] {
         guard let game = nav.game else { return [] }
         let explored = pilot.state.exploredSystems
-        let mapRevealAll = pilot.ownsMapOutfit(game: game)
+        let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToExplored(explored)
         return nav.systems()
             .filter {
-                let vis = nav.visibility(of: $0.id, explored: explored, adjacent: adjacent, mapRevealAll: mapRevealAll)
+                let vis = nav.visibility(of: $0.id, explored: explored, adjacent: adjacent, charted: charted)
                 return vis == .explored || vis == .chartered
             }
             .sorted { $0.name < $1.name }

@@ -177,6 +177,15 @@ public struct OutfRes {
     /// Distinct from `MissionRes.scanMask` (a different, mission-level
     /// field used for boarding/cargo-scan checks) — see OUTFITTERS.md §6.
     public let scanMask: UInt16
+    /// `OnPurchase` (Bible): "Control bit set expression... evaluated when the
+    /// item is bought." An NCB *set* expression (same grammar as a mission's
+    /// OnAccept), run as a side effect of a shop purchase — e.g. a permit that
+    /// flips a story bit. @301, `n0FF` (255-byte NCB string). Empty = no effect.
+    /// See OUTFITTERS.md §3.3a / §8.
+    public let onPurchase: String
+    /// `OnSell` (Bible): the sibling NCB set expression "evaluated when the item
+    /// is sold." @556, `n0FF`. Empty = no effect.
+    public let onSell: String
 
     public init(_ r: Resource) {
         id = r.id
@@ -203,6 +212,8 @@ public struct OutfRes {
         buyRandom = ai16(d, 1008)
         itemClass = ai16(d, 1004)
         scanMask = au16(d, 1006)
+        onPurchase = acstr(d, 301, 255)
+        onSell = acstr(d, 556, 255)
     }
 
     /// Full-hide opt-ins (Bible `oütf.Flags`): normally a locked item still
@@ -228,6 +239,26 @@ public struct OutfRes {
     /// (weapon id) this outfit supplies ammo for (ModType 3), if any.
     public var ammoFor: [Int] {
         modifiers.filter { $0.type == .ammunition }.map(\.value)
+    }
+    /// The ModVals of this outfit's map modifiers (`ModType 16`), if any. A map
+    /// outfit reveals systems when acquired — see `NovaGame.mapRevealedSystems`
+    /// for what each value means (positive = N jumps out; -1 = inhabited
+    /// independent; <= -1000 = a govt class). Usually one entry.
+    public var mapModVals: [Int] {
+        modifiers.filter { $0.type == .map }.map(\.value)
+    }
+    /// The government ids this outfit clears the player's legal record with when
+    /// acquired (`ModType 21`, "clean legal record"): the Bible's "ID of govt to
+    /// clear legal record with, or -1 for all". Empty if this isn't a
+    /// record-clearing outfit.
+    public var cleanRecordGovts: [Int] {
+        modifiers.filter { $0.type == .cleanRecord }.map(\.value)
+    }
+    /// The outfit ids whose maximum this outfit raises (`ModType 27`, "increase
+    /// maximum"): "The ID number of another outfit item... whose maximum value
+    /// is to be increased." See `NovaGame.effectiveMaxInstallable`.
+    public var increasesMaxOf: [Int] {
+        modifiers.filter { $0.type == .increaseMax }.map(\.value)
     }
 }
 
@@ -260,6 +291,14 @@ public struct GovtRes {
     /// Classes this government is hostile to.
     public let enemies: [Int]
     public let shipSpeedFactor: Int
+    /// `gövt.ScanMask` (Bible): 16-bit contraband jurisdiction mask. "If any of
+    /// the 1 bits in a government's ScanMask field match any of the 1 bits in a
+    /// mission's [or jünk type's, or outfit's] ScanMask field, that government
+    /// will consider that cargo illegal." `0` = this govt polices nothing. @50,
+    /// `WB16`, confirmed against real data: Federation `0x8000`, its sub-factions
+    /// (Bureau `0x8008`, Civvies `0x8010`) inherit the `0x8000` bit — the same
+    /// bit-space `mïsn.ScanMask@24` uses. See docs/reverse-engineering/GOVERNMENT.md.
+    public let scanMask: UInt16
     /// "The short string to show for ships of this government when they are
     /// hailed by the player" (EV Nova Bible). Falls back to `name` when blank.
     public let commName: String
@@ -327,6 +366,7 @@ public struct GovtRes {
         allies  = (0..<4).map { ai16(d, 32 + $0 * 2) }.filter { $0 != -1 }
         enemies = (0..<4).map { ai16(d, 40 + $0 * 2) }.filter { $0 != -1 }
         shipSpeedFactor = ai16(d, 48)
+        scanMask = au16(d, 50)
         let rawName = acstr(d, 52, 16)
         commName = rawName.isEmpty ? name : rawName
         let rawTarget = acstr(d, 68, 16).trimmingCharacters(in: .whitespaces)
@@ -554,6 +594,16 @@ public struct WeapRes {
     public let flags2Raw: UInt16
 
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
+    /// `Guidance 99` — "Carried ship (AmmoType is the ID of the ship class)"
+    /// (Bible). A fighter bay: firing it launches a real sub-ship rather than a
+    /// projectile.
+    public var isFighterBay: Bool { guidance == .bay }
+    /// For a fighter bay (`guidance 99`), the `shïp` class id of the fighter it
+    /// launches — stored in `AmmoType` (Bible). Meaningless for other weapons.
+    public var fighterShipID: Int { ammoType }
+    /// For a fighter bay, how many fighters the bay holds (`MaxAmmo`) — e.g. a
+    /// Viper Bay carries 4, a Thunderhead Bay 3 (confirmed against real data).
+    public var fighterCapacity: Int { max(0, maxAmmo) }
     /// `Flags` 0x0002: this weapon fires on the *secondary* trigger (typically
     /// missiles/torpedoes), not the primary.
     public var firedBySecondTrigger: Bool { flagsRaw & 0x0002 != 0 }

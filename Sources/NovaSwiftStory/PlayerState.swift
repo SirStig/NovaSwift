@@ -89,6 +89,16 @@ public struct PlayerState: Codable, Sendable {
     // Position & exploration
     public var currentSystem: Int
     public var exploredSystems: Set<Int>
+    /// Systems revealed by a purchased/granted map or chart outfit (`oütf`
+    /// ModType 16) but not physically visited — shown named on the galaxy map
+    /// yet distinct from `exploredSystems`. A map is a one-shot reveal recorded
+    /// here at acquisition time (see `applyOutfitAcquisition`), so it survives
+    /// the (usually intangible) map item being consumed. Kept SEPARATE from
+    /// `exploredSystems` on purpose: `exploredSystems` drives the NCB `Exxx`
+    /// "has the player *been* to system X" test, and buying a chart must not
+    /// satisfy a story gate that requires actually travelling there. Optional so
+    /// older saves without the field still decode (like `fuel`/`armor`).
+    public var chartedSystems: Set<Int>?
     /// Current hyperspace fuel, in the engine's units (100 = one jump). `nil`
     /// means "uninitialized" — treated as a full tank until the first jump/save.
     /// Optional (rather than defaulted) so older saves without this field decode
@@ -102,6 +112,17 @@ public struct PlayerState: Codable, Sendable {
     /// where no repair was available.
     public var armor: Double?
     public var shield: Double?
+
+    // pêrs (named characters) the player has interacted with. Optional for
+    // save-compat (like `fuel`).
+    /// `pêrs` ids the player has wronged (attacked/disabled) — they now hold a
+    /// grudge and are hostile wherever they appear (`pêrs.Flags 0x0001`).
+    public var persGrudges: Set<Int>?
+    /// `pêrs` ids the player has destroyed — they cease to appear again (Bible:
+    /// "as AI-people are killed off, they cease to appear in the game").
+    public var defeatedPers: Set<Int>?
+    /// `pêrs` ids whose one-time quote has already been shown (`Flags 0x0080`).
+    public var shownPersQuotes: Set<Int>?
 
     // Reputation
     public var combatRating: Int
@@ -133,6 +154,7 @@ public struct PlayerState: Codable, Sendable {
         self.cargo = [:]
         self.currentSystem = currentSystem
         self.exploredSystems = [currentSystem]
+        self.chartedSystems = []
         self.combatRating = 0
         self.legalRecord = [:]
         self.activeRanks = []
@@ -169,6 +191,30 @@ public struct PlayerState: Codable, Sendable {
         let remaining = (outfits[id] ?? 0) - count
         if remaining > 0 { outfits[id] = remaining } else { outfits[id] = nil }
     }
+
+    /// Whether system `id` has been revealed by a map/chart outfit (but not
+    /// necessarily visited). See `chartedSystems`.
+    public func isSystemCharted(_ id: Int) -> Bool { chartedSystems?.contains(id) ?? false }
+
+    /// Record `ids` as revealed by a map/chart outfit. Idempotent (union).
+    public mutating func chartSystems<S: Sequence>(_ ids: S) where S.Element == Int {
+        chartedSystems = (chartedSystems ?? []).union(ids)
+    }
+
+    /// Clear the player's legal record with government `govt` (set standing back
+    /// to neutral), or with *every* government when `govt == -1` — the effect of
+    /// an acquired `oütf` ModType 21 ("clean legal record") item.
+    public mutating func clearLegalRecord(govt: Int) {
+        if govt == -1 { legalRecord.removeAll() } else { legalRecord[govt] = nil }
+    }
+
+    // MARK: pêrs interaction helpers
+    public func persHoldsGrudge(_ id: Int) -> Bool { persGrudges?.contains(id) ?? false }
+    public func isPersDefeated(_ id: Int) -> Bool { defeatedPers?.contains(id) ?? false }
+    public mutating func recordPersGrudge(_ id: Int) { persGrudges = (persGrudges ?? []).union([id]) }
+    public mutating func recordPersDefeated(_ id: Int) { defeatedPers = (defeatedPers ?? []).union([id]) }
+    public mutating func markPersQuoteShown(_ id: Int) { shownPersQuotes = (shownPersQuotes ?? []).union([id]) }
+    public func wasPersQuoteShown(_ id: Int) -> Bool { shownPersQuotes?.contains(id) ?? false }
 }
 
 // MARK: NCBTestContext conformance — lets any NCB test evaluate against a pilot.
