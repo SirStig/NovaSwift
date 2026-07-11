@@ -1,10 +1,23 @@
 import SwiftUI
 
+/// The app's real mark: the commissioned ship + "NOVA" wordmark illustration
+/// also used as the App Icon (`Assets.xcassets/AppLogo.imageset`, same source
+/// image as `AppIcon.appiconset`). Used everywhere the app shows its own
+/// branding (launcher, loading screen, About, in-game pause menu header).
+struct AppLogo: View {
+    var body: some View {
+        Image("AppLogo")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
 /// The app's original vector mark — a stylized interceptor banking across a
 /// ringed planet against a starfield. Drawn from scratch (no EV Nova artwork
-/// is used), so it is safe to ship. The same geometry is rasterised for the
-/// app icon by `scripts/make-icon.swift`, keeping the icon and in-app logo
-/// identical.
+/// is used). Superseded in-app by `AppLogo` (the commissioned icon
+/// illustration); kept because `scripts/make-icon.swift` still rasterises
+/// this geometry as a reference/history of the mark's earlier form.
 struct AppMark: View {
     var body: some View {
         GeometryReader { geo in
@@ -162,7 +175,7 @@ struct AboutView: View {
         ]) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 12) {
-                    AppMark().frame(width: 48, height: 48)
+                    AppLogo().frame(width: 48, height: 48)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("NovaSwift").novaFont(.heading, weight: .bold)
                         Text("an unofficial port").novaFont(.body).foregroundStyle(.secondary)

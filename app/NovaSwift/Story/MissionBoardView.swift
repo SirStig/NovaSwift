@@ -127,6 +127,8 @@ private struct MissionPictFrame<Content: View>: View {
             content(space)
         }
         .frame(width: space.width, height: space.height)
+        // Native pixel size would overflow a compact iPhone sheet; cap it.
+        .shrinkToFitViewport()
     }
 }
 
@@ -157,6 +159,7 @@ private struct MissionThreeSliceFrame<Content: View>: View {
             content(space)
         }
         .frame(width: width, height: height)
+        .shrinkToFitViewport()
     }
 
     private func slice(_ image: CGImage, _ h: CGFloat) -> some View {

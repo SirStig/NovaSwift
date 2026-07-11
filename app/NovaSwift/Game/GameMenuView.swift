@@ -136,9 +136,9 @@ struct GameMenuView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            AppMark().frame(width: 44, height: 44)
+            AppLogo().frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 2) {
-                Text(hud.shipName.isEmpty ? "EV NOVA" : hud.shipName)
+                Text(hud.shipName.isEmpty ? "NOVA SWIFT" : hud.shipName)
                     .novaFont(.heading).foregroundStyle(amber)
                 if !hud.systemName.isEmpty {
                     Text(hud.systemName).novaFont(.caption).foregroundStyle(.secondary)

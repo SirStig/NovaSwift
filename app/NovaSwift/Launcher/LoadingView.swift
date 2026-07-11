@@ -60,8 +60,8 @@ struct LoadingView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                AppMark()
-                    .frame(width: 104, height: 104)
+                AppLogo()
+                    .frame(width: 88, height: 88)
                     .shadow(color: novaAmber.opacity(0.28), radius: 28)
 
                 Text("NOVA SWIFT")
