@@ -1106,28 +1106,56 @@ private struct GameLoadingView: View {
     }
 }
 
-/// The land prompt ("Press L to land on …") as **plain centred text at the
-/// bottom of the screen** — no capsule, no border, just legible white text with
-/// a soft shadow, the way EV Nova shows its on-screen prompts. Reads the live
-/// HUD model so it appears/updates as the player approaches.
+/// The land prompt at the bottom-centre of the screen. On macOS it's the plain
+/// EV Nova on-screen text hint ("Press L to land on …"). On iOS the desktop
+/// keyboard hint is meaningless, so when you're cleared to set down it becomes a
+/// **tappable amber "Land" pill** — the actual control, not a description of one
+/// — falling back to a plain "Slow down…" hint when you're too fast.
 private struct LandPromptView: View {
     @ObservedObject var hud: GameHUDModel
+    var onLand: () -> Void = {}
+
     var body: some View {
         VStack {
             Spacer()
-            if !hud.landPrompt.isEmpty {
-                Text(hud.landPrompt)
-                    .novaFont(.hud, weight: .semibold)
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
-                    .padding(.bottom, 30)
-                    .transition(.opacity)
-            }
+            content
+                .padding(.bottom, 30)
         }
         .frame(maxWidth: .infinity)
         .novaResponsive()
         .animation(.easeInOut(duration: 0.15), value: hud.landPrompt)
-        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder private var content: some View {
+        #if os(iOS)
+        if hud.landReady, !hud.landName.isEmpty {
+            Button(action: onLand) {
+                HStack(spacing: 7) {
+                    Image(systemName: "arrow.down.to.line")
+                    Text("Land on \(hud.landName)").lineLimit(1)
+                }
+                .font(.custom(NovaFontRole.hud.family, size: NovaFontRole.hud.baseSize).weight(.semibold))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Capsule().fill(novaAmber))
+                .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
+            }
+            .buttonStyle(.plain)
+            .transition(.opacity)
+        } else if !hud.landName.isEmpty {
+            hint("Slow down to land on \(hud.landName)").allowsHitTesting(false)
+        }
+        #else
+        if !hud.landPrompt.isEmpty { hint(hud.landPrompt).allowsHitTesting(false) }
+        #endif
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .novaFont(.hud, weight: .semibold)
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+            .transition(.opacity)
     }
 }
 

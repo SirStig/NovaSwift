@@ -728,8 +728,12 @@ final class GameScene: SKScene {
                 .flatMap { _ in planetVisuals.first { $0.id == id }?.name } ?? "the spaceport"
             hud?.landPrompt = canLandNow ? "Press L to land on \(name)"
                                          : "Slow down to land on \(name)"
+            hud?.landName = name
+            hud?.landReady = canLandNow
         } else {
             hud?.landPrompt = ""
+            hud?.landName = ""
+            hud?.landReady = false
         }
     }
 

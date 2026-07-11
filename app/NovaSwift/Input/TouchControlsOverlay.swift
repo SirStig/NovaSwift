@@ -156,25 +156,31 @@ struct TouchControlsOverlay: View {
     }
 
     private var actionGrid: some View {
-        let cols = Array(repeating: GridItem(.fixed(m.tile), spacing: 10 * m.s), count: 3)
-        return LazyVGrid(columns: cols, spacing: 10 * m.s) {
-            tile("scope", "Target", { onDiscrete(.targetNearest) })
-            tile("exclamationmark.triangle.fill", "Hostile", { onDiscrete(.nearestHostile) })
-            tile("arrow.triangle.2.circlepath", "Next", { onDiscrete(.targetNext) })
-            tile("antenna.radiowaves.left.and.right", "Hail", { onDiscrete(.hailTarget) })
-            tile("shippingbox.fill", "Board", { onDiscrete(.board) })
-            tile("xmark.circle", "Untarget", { onDiscrete(.clearTarget) })
-            tile("map.fill", "Map", { onDiscrete(.galaxyMap) })
-            tile("bolt.horizontal.circle.fill", "Jump", { onDiscrete(.hyperjump) })
-            tile("arrow.down.to.line", "Land", { onDiscrete(.land) }, enabled: hud.landPrompt != nil)
-            tile("list.bullet.clipboard", "Missions", { onOpenPanel(.missions) })
-            tile("person.2.fill", "Escorts", { onOpenPanel(.escorts) })
-            tile("person.crop.circle", "Pilot", { onOpenPanel(.pilotInfo) })
-            tile("line.3.horizontal", "Menu", { onDiscrete(.openMenu) })
+        let cols = Array(repeating: GridItem(.fixed(m.tile), spacing: 9 * m.s), count: 4)
+        // Cap the grid height so it can never run off the bottom of a short
+        // (landscape) screen; it scrolls if it somehow would.
+        let maxH = max(m.tile * 2, viewportSize.height - m.toggle - m.edge * 2 - 40 * m.s)
+        return ScrollView(.vertical, showsIndicators: false) {
+            LazyVGrid(columns: cols, spacing: 9 * m.s) {
+                tile("scope", "Target", { onDiscrete(.targetNearest) })
+                tile("exclamationmark.triangle.fill", "Hostile", { onDiscrete(.nearestHostile) })
+                tile("arrow.triangle.2.circlepath", "Next", { onDiscrete(.targetNext) })
+                tile("xmark.circle", "Untarget", { onDiscrete(.clearTarget) })
+                tile("antenna.radiowaves.left.and.right", "Hail", { onDiscrete(.hailTarget) })
+                tile("shippingbox.fill", "Board", { onDiscrete(.board) })
+                tile("map.fill", "Map", { onDiscrete(.galaxyMap) })
+                tile("bolt.horizontal.circle.fill", "Jump", { onDiscrete(.hyperjump) })
+                tile("arrow.down.to.line", "Land", { onDiscrete(.land) }, enabled: hud.landReady)
+                tile("list.bullet.clipboard", "Missions", { onOpenPanel(.missions) })
+                tile("person.2.fill", "Escorts", { onOpenPanel(.escorts) })
+                tile("person.crop.circle", "Pilot", { onOpenPanel(.pilotInfo) })
+                tile("line.3.horizontal", "Menu", { onDiscrete(.openMenu) })
+            }
         }
+        .frame(width: m.tile * 4 + 9 * m.s * 3, height: nil)
+        .frame(maxHeight: maxH)
         .padding(11 * m.s)
         .novaControlPanel(corner: 14 * m.s)
-        .frame(maxWidth: m.tile * 3 + 10 * m.s * 2 + 22 * m.s)
     }
 
     private func tile(_ system: String, _ label: String, _ action: @escaping () -> Void,
