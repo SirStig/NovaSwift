@@ -70,6 +70,28 @@ public struct ShipSpec {
     /// `snd ` id for this hull's death explosion (final explosion, falling back
     /// to the breakup explosion), or nil if neither resolves to a sound.
     public let explosionSoundID: Int?
+    /// Real weapon exit points from this hull's `shän`, or nil if it has none.
+    public let exitPoints: ShipExitPoints?
+}
+
+extension Galaxy {
+    /// Convert a hull's `shän` weapon exit points into the engine's maths
+    /// convention (origin centre, +x = ship's right, +y = nose). `shän` already
+    /// stores y nose-positive (verified against real hulls: guns sit at positive
+    /// y, toward the front), which matches this engine's +y-up world — so unlike
+    /// NovaJS (a y-down renderer that negates) no sign flip is needed. Returns
+    /// nil when the hull has no `shän`, so firing falls back to a nose muzzle.
+    public func exitPoints(forShip shipID: Int) -> ShipExitPoints? {
+        guard let shan = game.shan(shipID) else { return nil }
+        func conv(_ pts: [ShanExitPoint]) -> [Vec2] {
+            pts.map { Vec2(Double($0.x), Double($0.y)) }
+        }
+        return ShipExitPoints(
+            gun: conv(shan.gunPoints), turret: conv(shan.turretPoints),
+            guided: conv(shan.guidedPoints), beam: conv(shan.beamPoints),
+            upCompress: (x: Double(shan.upCompress.x), y: Double(shan.upCompress.y)),
+            downCompress: (x: Double(shan.downCompress.x), y: Double(shan.downCompress.y)))
+    }
 }
 
 /// EV Nova's `shïp.SkillVar`: "the amount (in percent) to which this ship's
@@ -166,7 +188,8 @@ public final class Galaxy {
             disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, skillVar: s.skillVar,
             fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo,
             ionizeMax: Double(max(0, s.ionizeMax)), deionizePerSec: Double(max(0, s.deionize)) * 0.3,
-            mounts: mounts, explosionSoundID: game.deathExplosionSoundID(s))
+            mounts: mounts, explosionSoundID: game.deathExplosionSoundID(s),
+            exitPoints: exitPoints(forShip: id))
         shipCache[id] = spec
         return spec
     }
@@ -186,6 +209,7 @@ public final class Galaxy {
         ship.explosionSoundID = spec.explosionSoundID
         ship.government = govt ?? spec.government
         ship.radius = spec.radius
+        ship.exitPoints = spec.exitPoints
         ship.maxShield = spec.maxShield; ship.shield = spec.maxShield
         ship.maxArmor = spec.maxArmor; ship.armor = spec.maxArmor
         ship.shieldRechargePerSec = spec.shieldRechargePerSec

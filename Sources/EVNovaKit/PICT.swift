@@ -129,19 +129,23 @@ public enum PICT {
             writeRow(row, y: y, width: min(width, frameW), packType: packType,
                      cmpCount: cmpCount, pixelSize: pixelSize, frameW: frameW, into: &rgba)
         }
+        // Only 32-bit argb pixmaps carry an alpha byte; revert the common
+        // unused-pad (all-zero) case to opaque so opaque art doesn't vanish.
+        if packType == 1 { normalizeArgbAlpha(&rgba) }
     }
 
     private static func writeRow(_ row: [UInt8], y: Int, width: Int, packType: Int,
                                  cmpCount: Int, pixelSize: Int, frameW: Int, into rgba: inout [UInt8]) {
         for x in 0..<width {
-            var rc = 0, gc = 0, bc = 0
+            var rc = 0, gc = 0, bc = 0, ac = 255
             switch packType {
             case 0, 2: // rgb
                 guard 3*x + 2 < row.count else { continue }
                 rc = Int(row[3*x]); gc = Int(row[3*x+1]); bc = Int(row[3*x+2])
-            case 1: // argb (skip alpha)
+            case 1: // argb — honor the alpha byte (post-pass reverts it to opaque
+                    // when the whole channel is the classic unused/zero pad byte)
                 guard 4*x + 3 < row.count else { continue }
-                rc = Int(row[4*x+1]); gc = Int(row[4*x+2]); bc = Int(row[4*x+3])
+                ac = Int(row[4*x]); rc = Int(row[4*x+1]); gc = Int(row[4*x+2]); bc = Int(row[4*x+3])
             case 3: // 16-bit 1-5-5-5 words
                 guard 2*x + 1 < row.count else { continue }
                 let p = (UInt16(row[2*x]) << 8) | UInt16(row[2*x+1])
@@ -155,8 +159,23 @@ public enum PICT {
             }
             let idx = (y * frameW + x) * 4
             guard idx + 3 < rgba.count else { continue }
-            rgba[idx] = UInt8(rc); rgba[idx+1] = UInt8(gc); rgba[idx+2] = UInt8(bc); rgba[idx+3] = 255
+            rgba[idx] = UInt8(rc); rgba[idx+1] = UInt8(gc); rgba[idx+2] = UInt8(bc); rgba[idx+3] = UInt8(ac)
         }
+    }
+
+    /// Classic 32-bit QuickDraw pixmaps store an "unused" high byte that is
+    /// almost always 0 — reading it as alpha would render the whole image
+    /// invisible. So after decoding a 32-bit (argb) pixmap, if *every* pixel's
+    /// alpha came out 0, the channel was that unused pad, not a real mask:
+    /// force the image fully opaque. A genuine alpha mask (any pixel > 0) is
+    /// left intact, giving those PICTs their real transparency.
+    private static func normalizeArgbAlpha(_ rgba: inout [UInt8]) {
+        var maxAlpha: UInt8 = 0
+        var i = 3
+        while i < rgba.count { maxAlpha = max(maxAlpha, rgba[i]); i += 4 }
+        guard maxAlpha == 0 else { return }
+        i = 3
+        while i < rgba.count { rgba[i] = 255; i += 4 }
     }
 
     // MARK: Helpers

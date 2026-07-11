@@ -14,9 +14,12 @@ struct ShipSilhouetteView: View {
     let sprite: CGImage
     /// EV Nova's target-display red by default.
     var tint: Color = Color(red: 0.92, green: 0.22, blue: 0.18)
-    /// Small in-flight sprites are pixel art and stay crisp; dedicated shipyard
-    /// art (much larger) scales smoothly.
-    var pixelated: Bool = true
+    /// The silhouette source is the small in-flight sprite (it carries a clean
+    /// alpha mask, unlike the opaque shipyard art). Scaled up to the readout box
+    /// it must be **smoothed**, not nearest-neighbor — nearest-neighbor turned a
+    /// 32-48px sprite into big hard blocks. `.high` interpolation keeps it a soft
+    /// but recognizable ship rather than a pixel grid.
+    var pixelated: Bool = false
     /// Overlay the target scope's faint horizontal scan lines. On by default —
     /// the game's target readout has them; turn off for a plain silhouette.
     var scanLines: Bool = true

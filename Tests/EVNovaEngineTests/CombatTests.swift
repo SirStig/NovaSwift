@@ -167,6 +167,65 @@ final class CombatTests: XCTestCase {
         XCTAssertTrue(world.events.contains { if case .beam(_, _, _, _, let hit, _) = $0 { return hit } else { return false } })
     }
 
+    // MARK: exit points & beam tracking
+
+    private func exitGun(exitType: WeaponExitType = .gun, beam: Bool = false,
+                         loop: Bool = false) -> WeaponSpec {
+        WeaponSpec(id: 200, name: "EP", shieldDamage: 1, armorDamage: 1, reloadSeconds: 1,
+                   projectileSpeed: 100, range: 200, accuracyRadians: 0, isBeam: beam,
+                   isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0,
+                   exitType: exitType, loopSound: loop)
+    }
+
+    func testMuzzleUsesRotatedExitPoint() {
+        let s = makeShip("A", govt: 1, at: Vec2())
+        // One gun hardpoint 10px to the right, 20px toward the nose (math coords).
+        s.exitPoints = ShipExitPoints(gun: [Vec2(10, 20)], turret: [], guided: [], beam: [])
+        s.weapons = [WeaponMount(spec: exitGun())]
+
+        s.angle = 0                                     // facing north (+y)
+        var m = s.muzzle(for: s.weapons[0])
+        XCTAssertEqual(m.x, 10, accuracy: 1e-6)
+        XCTAssertEqual(m.y, 20, accuracy: 1e-6)
+
+        s.angle = .pi / 2                               // turned 90° clockwise → facing +x
+        m = s.muzzle(for: s.weapons[0])
+        XCTAssertEqual(m.x, 20, accuracy: 1e-6)         // "ahead" is now +x
+        XCTAssertEqual(m.y, -10, accuracy: 1e-6)        // "right" is now -y
+    }
+
+    func testMountsSpreadAcrossExitPoints() {
+        let s = makeShip("A", govt: 1, at: Vec2())
+        s.exitPoints = ShipExitPoints(gun: [Vec2(-10, 0), Vec2(10, 0)], turret: [], guided: [], beam: [])
+        s.weapons = [WeaponMount(spec: exitGun()), WeaponMount(spec: exitGun())]
+        XCTAssertEqual(s.weapons[0].exitIndex, 0)
+        XCTAssertEqual(s.weapons[1].exitIndex, 1)
+        XCTAssertEqual(s.muzzle(for: s.weapons[0]).x, -10, accuracy: 1e-6)
+        XCTAssertEqual(s.muzzle(for: s.weapons[1]).x, 10, accuracy: 1e-6)
+    }
+
+    func testContinuousBeamStaysWeldedToMovingShip() {
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        attacker.exitPoints = ShipExitPoints(gun: [], turret: [], guided: [], beam: [Vec2(0, 10)])
+        attacker.weapons = [WeaponMount(spec: exitGun(beam: true, loop: true))]
+        world.intent.firePrimary = true
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.activeBeams.count, 1, "a held continuous beam yields one live beam")
+        XCTAssertEqual(world.activeBeams[0].from.x, 0, accuracy: 1e-6)
+
+        // Teleport the shooter: the beam origin must follow it, not stay put.
+        attacker.position = Vec2(500, 0)
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.activeBeams[0].from.x, 500, accuracy: 5, "beam origin tracks the ship")
+
+        // Releasing the trigger tears the beam down.
+        world.intent.firePrimary = false
+        world.step(1.0 / 30.0)
+        XCTAssertTrue(world.activeBeams.isEmpty, "beam ends when the trigger releases")
+    }
+
     // MARK: ionization
 
     func testWeaponHitAddsIonizationCharge() {

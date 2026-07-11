@@ -713,8 +713,11 @@ public final class AIBrain {
         let reach = min(scanRange, ctx.jumpRadius * 0.7)
         let player = world.player
         let toPlayer = (player.position - me.position).length
-        // Prefer the player when reasonably close and not already hostile.
-        if player.isAlive, toPlayer < reach,
+        // Prefer the player when reasonably close and not already hostile — but
+        // not if some other authority ship scanned them recently (`World.playerScanCooldown`),
+        // so a busy system doesn't chain-scan the player the moment each ship's
+        // own cooldown expires.
+        if player.isAlive, toPlayer < reach, world.playerScanCooldown <= 0,
            world.diplomacy?.isHostileToPlayer(me.government) != true, !provokedByPlayer {
             return player
         }

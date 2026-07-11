@@ -34,6 +34,7 @@ public enum GameSession {
             player.shieldRechargePerSec = spec.shieldRechargePerSec
             player.armorRechargePerSec = spec.armorRechargePerSec
             player.radius = spec.radius
+            player.exitPoints = spec.exitPoints
             player.weapons = spec.mounts.map { WeaponMount(spec: $0.spec, ammo: $0.ammo) }
             if player.government == independentGovt { player.government = spec.government }
         }

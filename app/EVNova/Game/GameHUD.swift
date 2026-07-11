@@ -30,9 +30,24 @@ final class GameHUDModel: ObservableObject {
     @Published var cargoByCommodity: [(name: String, tons: Int)] = []
     /// Non-empty while a landable stellar object is in reach (shown as a prompt).
     @Published var landPrompt = ""
-    /// Non-empty briefly after hailing a ship (bottom-left banner), e.g. "The
-    /// Federation hails you." Cleared on a fade timer by whoever sets it.
-    @Published var hailMessage = ""
+    /// The rolling bottom-left message log — the calendar date on each jump/land,
+    /// hail replies, mission notices, etc. Each entry fades out on its own timer,
+    /// exactly like EV Nova's on-screen message strip.
+    @Published var messages: [HUDMessage] = []
+
+    /// Post a transient message to the bottom-left log. It appears immediately
+    /// and fades away after a few seconds; the log keeps only the most recent
+    /// few so it never grows without bound.
+    func post(_ text: String) {
+        guard !text.isEmpty else { return }
+        let msg = HUDMessage(text: text)
+        withAnimation(.easeOut(duration: 0.2)) { messages.append(msg) }
+        if messages.count > 6 { messages.removeFirst(messages.count - 6) }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            withAnimation(.easeIn(duration: 0.6)) { self?.messages.removeAll { $0.id == msg.id } }
+        }
+    }
     /// The player's locked target, if any (empty name = no target locked).
     @Published var targetName = ""
     /// The locked target's `shïp` resource id, for rendering its red target-
@@ -68,6 +83,12 @@ final class GameHUDModel: ObservableObject {
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
     @Published var planetBlips: [RadarContact] = []
+}
+
+/// One transient entry in the bottom-left message log.
+struct HUDMessage: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
 }
 
 /// How a radar contact relates to the player, driving its dot color: red for a

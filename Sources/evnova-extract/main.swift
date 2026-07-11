@@ -303,6 +303,14 @@ case "ship":
     }
     if let shan = game.shan(s.id) {
         print("  shän #\(shan.id): baseSprite spïn \(shan.baseSpriteID)  frames \(shan.baseSetCount)  \(shan.baseWidth)x\(shan.baseHeight)")
+        func fmt(_ pts: [ShanExitPoint]) -> String {
+            pts.map { "(\($0.x),\($0.y))" }.joined(separator: " ")
+        }
+        print("    exit gun:    \(fmt(shan.gunPoints))")
+        print("    exit turret: \(fmt(shan.turretPoints))")
+        print("    exit guided: \(fmt(shan.guidedPoints))")
+        print("    exit beam:   \(fmt(shan.beamPoints))")
+        print("    compress up \(shan.upCompress) down \(shan.downCompress)")
     }
     if let (spin, rle) = game.shipSpriteData(s.id), let sheet = try? RLED.decode(rle) {
         let outDir = "data/converted/ships"

@@ -118,6 +118,14 @@ public struct ShanRes {
     public let turretPoints: [ShanExitPoint]
     public let guidedPoints: [ShanExitPoint]
     public let beamPoints: [ShanExitPoint]
+    /// Perspective foreshortening applied to exit points, as (x%, y%). EV Nova
+    /// squishes a ¾-view hull's exit offsets by these factors — `upCompress`
+    /// when the hull faces the upper half of the screen, `downCompress` when it
+    /// faces the lower half. 100 = no compression (the common case). Fields
+    /// @136–142; a stored 0 means "unset" and defaults to 100 (matches
+    /// novaparse `ShanResource.ts`).
+    public let upCompress: (x: Int, y: Int)
+    public let downCompress: (x: Int, y: Int)
 
     public init(_ r: Resource) {
         id = r.id
@@ -141,6 +149,10 @@ public struct ShanRes {
         turretPoints = points(xBase: 88, yBase: 96, zBase: 152)
         guidedPoints = points(xBase: 104, yBase: 112, zBase: 160)
         beamPoints = points(xBase: 120, yBase: 128, zBase: 168)
+        // 0 on disk means "unset" → 100% (no compression).
+        func comp(_ off: Int) -> Int { let v = i16(d, off); return v == 0 ? 100 : v }
+        upCompress = (x: comp(136), y: comp(138))
+        downCompress = (x: comp(140), y: comp(142))
     }
 }
 

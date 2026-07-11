@@ -502,6 +502,16 @@ public struct WeapRes {
     public let proxRadius: Int
     public let blastRadius: Int
     public let beamLength: Int
+    /// Beam thickness in pixels (`wëap` @50). Only meaningful for beam weapons.
+    public let beamWidth: Int
+    /// Core beam colour (`wëap` @54, a 4-byte `0x00RRGGBB` field). Drives the
+    /// on-screen beam tint so e.g. a Polaris beam renders in its authentic hue
+    /// instead of a generic white line. Only meaningful for beam weapons.
+    public let beamColor: NovaColor
+    /// Which set of `shän` weapon exit points a shot leaves from (`wëap` @88):
+    /// -1 = ship centre, 0 = gun, 1 = turret, 2 = guided, 3 = beam. Offset
+    /// verified against novaparse `WeapResource.ts` (`exitTypeN`).
+    public let exitType: Int
     public let turnRate: Int        // for guided munitions
     public let maxAmmo: Int
     public let count: Int           // rounds consumed / fired per shot
@@ -562,6 +572,9 @@ public struct WeapRes {
         proxRadius = ai16(d, 24)
         blastRadius = ai16(d, 26)
         beamLength = ai16(d, 48)
+        beamWidth = ai16(d, 50)
+        beamColor = acolor(d, 54)
+        exitType = ai16(d, 88)
         turnRate = ai16(d, 106)
         maxAmmo = ai16(d, 108)
         count = ai16(d, 118)

@@ -58,7 +58,17 @@ final class GameScene: SKScene {
     private var planetVisuals: [PlanetVisual] = []
     private var planetNodes: [SKNode] = []
     private let projectileLayer = SKNode()
-    private var projectileNodes: [SKShapeNode] = []
+    /// Pooled projectile sprites. SKSpriteNodes sharing one texture batch into a
+    /// single draw call, unlike the per-node SKShapeNodes they replaced — the
+    /// difference is what keeps a busy firefight from dropping frames.
+    private var projectileNodes: [SKSpriteNode] = []
+    /// Pooled beam sprites, mirrored from `world.activeBeams` every frame so a
+    /// beam stays welded to its (moving, turning) shooter. A stretched shared
+    /// texture, so beams batch and never re-tessellate a path.
+    private var beamNodes: [SKSpriteNode] = []
+    /// Shared textures for the pools above (built once, lazily).
+    private lazy var projectileTexture: SKTexture = GameScene.makeDotTexture()
+    private lazy var beamTexture: SKTexture = GameScene.makeBeamTexture()
     private var systemName = ""
     /// True when this scene was just built because the player jumped in from
     /// hyperspace (not a fresh game start, a landing depart, or a load) — the
@@ -172,9 +182,6 @@ final class GameScene: SKScene {
     /// beam loop pans/attenuates as it (or the player) moves, and stopped when
     /// the world emits `.beamLoopStop` or the shooter no longer resolves.
     private var activeBeamLoops: [String: (shooterID: Int, soundID: Int)] = [:]
-    /// One persistent line node per active beam loop (same keys as
-    /// `activeBeamLoops`), repositioned every tick instead of respawned.
-    private var beamLoopNodes: [String: SKShapeNode] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
     private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
     // An arrival effect to play when a node is first built for a ship that just
@@ -535,38 +542,25 @@ final class GameScene: SKScene {
                 if let soundID {
                     audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 }
-            case let .beam(shooterID, mountIndex, from, to, hit, soundID):
-                let loopKey = "\(shooterID):\(mountIndex)"
-                if let line = beamLoopNodes[loopKey] {
-                    // Continuous-fire beam: reposition the one persistent line
-                    // instead of spawning a fresh flash node every reload tick
-                    // (up to 10×/sec per beam mount) — that per-tick spawn was
-                    // real allocation + scene-graph + SKAction churn that
-                    // scaled directly with how many ships were fighting.
-                    updatePersistentBeam(line, from: CGPoint(x: from.x, y: from.y),
-                                         to: CGPoint(x: to.x, y: to.y), hit: hit)
-                } else {
-                    spawnBeam(from: CGPoint(x: from.x, y: from.y),
-                              to: CGPoint(x: to.x, y: to.y), hit: hit)
-                    // Beams re-fire every reload tick while held; only retrigger the
-                    // player's own beam sound on the rising edge (fresh key-down) so
-                    // a held trigger doesn't stutter. NPC beams aren't gated by the
-                    // player's `wasFiring`, so they still sound each time they fire.
-                    if let soundID, !wasFiring {
-                        audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
-                    }
+            case let .beam(_, _, from, _, _, soundID):
+                // Geometry is drawn from `world.activeBeams` in `syncBeams()`;
+                // this event only carries the pulse-beam fire sound. Retrigger
+                // the player's own beam only on the rising edge so a held
+                // trigger doesn't stutter; NPC beams aren't gated by `wasFiring`.
+                if let soundID, !wasFiring {
+                    audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
                 }
             case let .beamLoopStart(shooterID, mountIndex, soundID):
+                // Beam geometry is now drawn from `world.activeBeams` in
+                // `syncBeams()`; this event only drives the continuous audio loop.
                 let key = "\(shooterID):\(mountIndex)"
                 if let soundID {
                     activeBeamLoops[key] = (shooterID, soundID)
                 }
-                beamLoopNodes[key] = makePersistentBeamNode()
             case let .beamLoopStop(shooterID, mountIndex):
                 let key = "\(shooterID):\(mountIndex)"
                 activeBeamLoops.removeValue(forKey: key)
                 audio?.stopLoop(key: key)
-                beamLoopNodes.removeValue(forKey: key)?.removeFromParent()
             case let .explosion(at, radius, soundID):
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
                 audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
@@ -587,22 +581,17 @@ final class GameScene: SKScene {
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
             case let .shipScanned(_, targetID, at):
-                spawnScanSweep(at: CGPoint(x: at.x, y: at.y))
                 if targetID == 0 {
-                    let msg = "You are being scanned."
-                    hud?.hailMessage = msg
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak hud] in
-                        if hud?.hailMessage == msg { hud?.hailMessage = "" }
-                    }
+                    // The player doesn't need a visual sweep over their own ship —
+                    // just the bottom-left message log, like other ambient messages.
+                    hud?.post("You are being scanned.")
+                } else {
+                    spawnScanSweep(at: CGPoint(x: at.x, y: at.y))
                 }
             case let .assistanceDelivered(entityID):
                 let name = world.ship(id: entityID)?.name ?? "Ally"
-                let msg = "\(name) transfers fuel and makes repairs."
-                hud?.hailMessage = msg
+                hud?.post("\(name) transfers fuel and makes repairs.")
                 audio?.play(.docking)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak hud] in
-                    if hud?.hailMessage == msg { hud?.hailMessage = "" }
-                }
             default:
                 break
             }
@@ -610,6 +599,7 @@ final class GameScene: SKScene {
         wasFiring = intent.firePrimary
         updateBeamLoopPositions(listener: scenePos)
         syncProjectiles()
+        syncBeams()
         syncNPCs()
         syncAsteroids()
         updateSelectionBrackets()
@@ -839,9 +829,10 @@ final class GameScene: SKScene {
     private func syncProjectiles() {
         let shots = world.projectiles
         while projectileNodes.count < shots.count {
-            let dot = SKShapeNode(circleOfRadius: 2.2)
-            dot.fillColor = SKColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1)
-            dot.strokeColor = .clear
+            let dot = SKSpriteNode(texture: projectileTexture)
+            dot.size = CGSize(width: 9, height: 9)
+            dot.color = SKColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1)
+            dot.colorBlendFactor = 1
             dot.blendMode = .add
             projectileLayer.addChild(dot)
             projectileNodes.append(dot)
@@ -855,6 +846,88 @@ final class GameScene: SKScene {
                 node.isHidden = true
             }
         }
+    }
+
+    /// Mirror `world.activeBeams` into a pool of stretched beam sprites. The
+    /// world welds continuous beams to their shooters each step, so simply
+    /// following its geometry keeps a beam locked to the moving ship and its
+    /// endpoint clipped to whatever it's hitting. Pooled + batched, so many
+    /// simultaneous beams cost almost nothing.
+    private func syncBeams() {
+        let beams = world.activeBeams
+        while beamNodes.count < beams.count {
+            let node = SKSpriteNode(texture: beamTexture)
+            node.anchorPoint = CGPoint(x: 0, y: 0.5)   // pivot at the muzzle end
+            node.colorBlendFactor = 1
+            node.blendMode = .add
+            node.zPosition = 12
+            effectsLayer.addChild(node)
+            beamNodes.append(node)
+        }
+        for (i, node) in beamNodes.enumerated() {
+            guard i < beams.count else { node.isHidden = true; continue }
+            let b = beams[i]
+            let from = CGPoint(x: b.from.x, y: b.from.y)
+            let dx = b.to.x - b.from.x, dy = b.to.y - b.from.y
+            let length = max(1, CGFloat((dx * dx + dy * dy).squareRoot()))
+            let width = CGFloat(b.width > 0 ? b.width : 3)
+            node.position = from
+            node.zRotation = atan2(CGFloat(dy), CGFloat(dx))
+            node.size = CGSize(width: length, height: max(2, width))
+            if let c = b.color {
+                node.color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)
+            } else {
+                node.color = b.hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 1)
+                                   : SKColor(white: 0.85, alpha: 1)
+            }
+            node.isHidden = false
+        }
+    }
+
+    /// A soft round dot used for every projectile (radial white→transparent).
+    private static func makeDotTexture(diameter: Int = 16) -> SKTexture {
+        let d = max(4, diameter)
+        return imageTexture(width: d, height: d) { ctx in
+            let cs = CGColorSpaceCreateDeviceRGB()
+            let colors = [SKColor.white.cgColor,
+                          SKColor(white: 1, alpha: 0).cgColor] as CFArray
+            guard let grad = CGGradient(colorsSpace: cs, colors: colors,
+                                        locations: [0, 1]) else { return }
+            let c = CGPoint(x: Double(d) / 2, y: Double(d) / 2)
+            ctx.drawRadialGradient(grad, startCenter: c, startRadius: 0,
+                                   endCenter: c, endRadius: Double(d) / 2,
+                                   options: [])
+        }
+    }
+
+    /// A 1×N vertical-falloff strip: opaque core fading to transparent edges.
+    /// Stretched along its length (x) and thickness (y) per beam.
+    private static func makeBeamTexture(thickness: Int = 32) -> SKTexture {
+        let h = max(4, thickness)
+        return imageTexture(width: 4, height: h) { ctx in
+            let cs = CGColorSpaceCreateDeviceRGB()
+            let colors = [SKColor(white: 1, alpha: 0).cgColor,
+                          SKColor.white.cgColor,
+                          SKColor(white: 1, alpha: 0).cgColor] as CFArray
+            guard let grad = CGGradient(colorsSpace: cs, colors: colors,
+                                        locations: [0, 0.5, 1]) else { return }
+            ctx.drawLinearGradient(grad, start: CGPoint(x: 0, y: 0),
+                                   end: CGPoint(x: 0, y: Double(h)), options: [])
+        }
+    }
+
+    /// Draw into an RGBA bitmap and wrap the result in an `SKTexture`.
+    private static func imageTexture(width: Int, height: Int, _ draw: (CGContext) -> Void) -> SKTexture {
+        var px = [UInt8](repeating: 0, count: width * height * 4)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: &px, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: width * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            return SKTexture()
+        }
+        draw(ctx)
+        guard let img = ctx.makeImage() else { return SKTexture() }
+        return SKTexture(cgImage: img)
     }
 
     // MARK: NPC ships
@@ -1307,10 +1380,12 @@ final class GameScene: SKScene {
         projectileNodes.removeAll()
         for (_, n) in asteroidNodes { n.container.removeFromParent() }
         asteroidNodes.removeAll()
-        for (key, n) in beamLoopNodes { audio?.stopLoop(key: key); n.removeFromParent() }
-        beamLoopNodes.removeAll()
+        for (key, _) in activeBeamLoops { audio?.stopLoop(key: key) }
         activeBeamLoops.removeAll()
+        // Beam sprites live on effectsLayer, cleared just below; drop our
+        // handles so the pool rebuilds for the new system.
         effectsLayer.removeAllChildren()
+        beamNodes.removeAll()
         for (_, n) in aiLabelNodes { n.removeFromParent() }
         aiLabelNodes.removeAll()
         pendingEntrance.removeAll()
@@ -1639,44 +1714,6 @@ final class GameScene: SKScene {
                                      at: CGPoint(x: shooter.position.x, y: shooter.position.y),
                                      listener: listener)
         }
-    }
-
-    /// A brief bright line for an instant-hit beam.
-    private func spawnBeam(from: CGPoint, to: CGPoint, hit: Bool) {
-        let path = CGMutablePath()
-        path.move(to: from)
-        path.addLine(to: to)
-        let line = SKShapeNode(path: path)
-        line.strokeColor = hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 0.9)
-                                : SKColor(white: 0.8, alpha: 0.6)
-        line.lineWidth = hit ? 2.5 : 1.5
-        line.blendMode = .add
-        line.zPosition = 12
-        effectsLayer.addChild(line)
-        line.run(.sequence([.fadeOut(withDuration: 0.12), .removeFromParent()]))
-    }
-
-    /// A bare, un-animated line node for a continuous `loopSound` beam — added
-    /// once per loop and repositioned every tick by `updatePersistentBeam`
-    /// instead of respawning a flash node on every reload tick.
-    private func makePersistentBeamNode() -> SKShapeNode {
-        let line = SKShapeNode()
-        line.lineWidth = 2.5
-        line.blendMode = .add
-        line.zPosition = 12
-        line.alpha = 0.9
-        effectsLayer.addChild(line)
-        return line
-    }
-
-    /// Reposition a persistent continuous-beam line for this tick's shot.
-    private func updatePersistentBeam(_ line: SKShapeNode, from: CGPoint, to: CGPoint, hit: Bool) {
-        let path = CGMutablePath()
-        path.move(to: from)
-        path.addLine(to: to)
-        line.path = path
-        line.strokeColor = hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 0.9)
-                                : SKColor(white: 0.8, alpha: 0.6)
     }
 
     /// An expanding, fading flash for an explosion.

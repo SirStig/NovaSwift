@@ -114,6 +114,9 @@ public final class Ship {
     public var government: Int = independentGovt
     /// Collision radius (px). Set from the sprite size where known.
     public var radius: Double = 16
+    /// This hull's real weapon exit points (from its `shän`), or nil when the
+    /// data has none — firing then falls back to a point just ahead of centre.
+    public var exitPoints: ShipExitPoints?
 
     // Combat state.
     public var maxShield: Double = 100
@@ -122,7 +125,33 @@ public final class Ship {
     public var armor: Double = 100
     public var shieldRechargePerSec: Double = 8
     public var armorRechargePerSec: Double = 0
-    public var weapons: [WeaponMount] = []
+    public var weapons: [WeaponMount] = [] {
+        didSet { assignExitIndices() }
+    }
+    /// Spread each weapon's mounts across the hull's exit points of its type:
+    /// the Nth mount of a given `exitType` takes hardpoint N (wrapped), so
+    /// simultaneous barrels leave distinct points instead of stacking on one.
+    private func assignExitIndices() {
+        var next: [WeaponExitType: Int] = [:]
+        for mount in weapons {
+            let t = mount.spec.exitType
+            let i = next[t, default: 0]
+            mount.exitIndex = i
+            next[t] = i + 1
+        }
+    }
+
+    /// World-space muzzle for `mount` given the ship's live position and heading —
+    /// the real hardpoint the shot leaves from.
+    public func muzzle(for mount: WeaponMount) -> Vec2 {
+        let nose = radius + 4
+        guard let ep = exitPoints, mount.spec.exitType != .center else {
+            return position + Vec2.heading(angle) * nose
+        }
+        return position + ep.muzzleOffset(type: mount.spec.exitType, index: mount.exitIndex,
+                                          angle: angle, nose: nose)
+    }
+
     /// EV Nova's `shïp.Strength` — relative combat power, used for the
     /// combat-odds check (`gövt.MaxOdds`) before an AI picks a fight.
     public var combatStrength: Double = 1
@@ -409,6 +438,10 @@ public final class World {
     /// Live NPC ships (does not include the player).
     public private(set) var npcs: [Ship] = []
     public private(set) var projectiles: [Projectile] = []
+    /// Live beam segments the renderer mirrors each frame. Continuous beams are
+    /// welded to their shooter (geometry recomputed every step); pulse beams are
+    /// brief flashes. See `refreshActiveBeams`.
+    public private(set) var activeBeams: [ActiveBeam] = []
     /// Transient render/audio events produced this step; drain after `step`.
     public private(set) var events: [WorldEvent] = []
 
@@ -429,6 +462,13 @@ public final class World {
     public var rng = SplitMix64(seed: 0xE7_0A_5EED)
     private var nextEntityID = 1
     private var nextAsteroidID = 1
+
+    /// Time before any authority ship will pick the player as a scan mark
+    /// again. Each `AIBrain`'s own `scanCooldown` only throttles that one
+    /// ship, so a busy system with several patrols could otherwise chain-scan
+    /// the player back-to-back as each ship's individual cooldown expired.
+    /// Set on every player scan; checked by `AIBrain.pickScanTarget`.
+    public var playerScanCooldown: Double = 0
 
     public init(player: Ship, tuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
@@ -503,6 +543,7 @@ public final class World {
     /// turns it into a visible scan sweep. Purely cosmetic in this engine —
     /// there's no contraband/ScanMask system yet to key consequences off.
     public func reportScan(scannerID: Int, targetID: Int, at: Vec2) {
+        if targetID == 0 { playerScanCooldown = 60 }
         events.append(.shipScanned(scannerID: scannerID, targetID: targetID, at: at))
     }
 
@@ -587,6 +628,7 @@ public final class World {
 
     public func step(_ dt: Double) {
         events.removeAll(keepingCapacity: true)
+        playerScanCooldown = max(0, playerScanCooldown - dt)
 
         spawner?.update(dt, world: self)
         refreshRoster()
@@ -630,6 +672,9 @@ public final class World {
         runPointDefense()
         stepProjectiles(dt)
         despawnDepartedAndDead()
+        // Ships have moved this step; weld continuous beams to their new
+        // positions/headings and expire pulse-beam flashes.
+        refreshActiveBeams(dt)
     }
 
     /// Guidance 9/10 mounts (`WeapRes.isPointDefense`): "fires automatically at
@@ -694,10 +739,10 @@ public final class World {
             }
 
             if spec.isBeam {
-                fireBeam(from: ship, mountIndex: mountIndex, spec: spec, aim: aim, target: target)
+                fireBeam(from: ship, mount: mount, mountIndex: mountIndex, spec: spec, aim: aim, target: target)
             } else {
                 let dir = Vec2.heading(aim)
-                let muzzle = ship.position + dir * (ship.radius + 4)
+                let muzzle = ship.muzzle(for: mount)
                 let vel = dir * spec.projectileSpeed + ship.velocity * 0.5
                 let life = spec.range / max(1, spec.projectileSpeed)
                 let p = Projectile(position: muzzle, velocity: vel, life: life,
@@ -717,7 +762,9 @@ public final class World {
     /// Start/stop a real audio loop for each `loopSound` beam mount as its
     /// ship's trigger is held/released — independent of the reload tick, so a
     /// continuous-fire beam sounds like one sustained loop rather than a
-    /// one-shot sample retriggered up to 10×/sec while held.
+    /// one-shot sample retriggered up to 10×/sec while held. Also creates/removes
+    /// the persistent `ActiveBeam` whose geometry `refreshActiveBeams` welds to
+    /// the ship every frame.
     private func updateBeamLoops(for ship: Ship, held: Bool) {
         for (idx, mount) in ship.weapons.enumerated() where mount.spec.isBeam && mount.spec.loopSound {
             let looping = ship.activeBeamLoopMounts.contains(idx)
@@ -726,10 +773,12 @@ public final class World {
                     ship.activeBeamLoopMounts.insert(idx)
                     events.append(.beamLoopStart(shooterID: ship.entityID, mountIndex: idx,
                                                  soundID: mount.spec.fireSoundID))
+                    spawnActiveBeam(for: ship, mount: mount, mountIndex: idx, continuous: true)
                 }
             } else if looping {
                 ship.activeBeamLoopMounts.remove(idx)
                 events.append(.beamLoopStop(shooterID: ship.entityID, mountIndex: idx))
+                removeActiveBeam(shooterID: ship.entityID, mountIndex: idx)
             }
         }
     }
@@ -741,26 +790,59 @@ public final class World {
         guard !ship.activeBeamLoopMounts.isEmpty else { return }
         for idx in ship.activeBeamLoopMounts {
             events.append(.beamLoopStop(shooterID: ship.entityID, mountIndex: idx))
+            removeActiveBeam(shooterID: ship.entityID, mountIndex: idx)
         }
         ship.activeBeamLoopMounts.removeAll()
     }
 
-    /// Instant-hit beam: damage the aimed target if it's within range and roughly
-    /// in the beam's path.
-    private func fireBeam(from ship: Ship, mountIndex: Int, spec: WeaponSpec, aim: Double, target: Ship?) {
+    /// Instant-hit beam fired this reload tick: apply damage along the ray from
+    /// the mount's real exit point. Continuous beams keep their persistent
+    /// `ActiveBeam` (refreshed each frame); pulse beams get a brief flash beam
+    /// and their own fire sound.
+    private func fireBeam(from ship: Ship, mount: WeaponMount, mountIndex: Int,
+                          spec: WeaponSpec, aim: Double, target: Ship?) {
+        let origin = ship.muzzle(for: mount)
         let dir = Vec2.heading(aim)
-        let origin = ship.position + dir * (ship.radius + 2)
-        var endPoint = origin + dir * spec.range
+        let cast = beamCast(from: origin, dir: dir, range: spec.range, owner: ship)
+        if let h = cast.hitShip {
+            applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
+                     ionization: spec.ionization)
+        } else if let rock = cast.hitAsteroid {
+            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage)
+        }
+        let hit = cast.hitShip != nil || cast.hitAsteroid != nil
+        if !spec.loopSound {
+            // Pulse beam: a short-lived flash welded to the exit point. Continuous
+            // beams instead keep the persistent ActiveBeam from updateBeamLoops.
+            if let existing = activeBeams.first(where: { $0.shooterID == ship.entityID && $0.mountIndex == mountIndex && !$0.continuous }) {
+                existing.from = origin; existing.to = cast.end; existing.hit = hit
+                existing.life = 0.08
+            } else {
+                activeBeams.append(ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
+                                              from: origin, to: cast.end, hit: hit,
+                                              continuous: false, life: 0.08,
+                                              width: spec.beamWidth, color: spec.beamColor))
+            }
+        }
+        // Telemetry/audio event (renderer draws geometry from `activeBeams`, not
+        // this). `loopSound` beams get their audio from beamLoopStart/Stop, so
+        // they carry no one-shot id here.
+        events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: origin, to: cast.end,
+                            hit: hit, soundID: spec.loopSound ? nil : spec.fireSoundID))
+    }
+
+    /// Raycast a beam of `range` px from `origin` along unit `dir`: the nearest
+    /// hittable ship or asteroid, and the clipped endpoint.
+    private func beamCast(from origin: Vec2, dir: Vec2, range: Double, owner: Ship)
+        -> (end: Vec2, hitShip: Ship?, hitAsteroid: Asteroid?) {
+        var bestT = range
         var hitShip: Ship?
         var hitAsteroid: Asteroid?
-
-        // Nearest valid ship or asteroid along the ray within range.
-        var bestT = spec.range
-        for other in allShips where other.entityID != ship.entityID && other.isAlive {
-            if !canHit(owner: ship.entityID, ownerGovt: ship.government, victim: other) { continue }
+        for other in allShips where other.entityID != owner.entityID && other.isAlive {
+            if !canHit(owner: owner.entityID, ownerGovt: owner.government, victim: other) { continue }
             let rel = other.position - origin
             let along = rel.dot(dir)
-            guard along > 0, along <= spec.range else { continue }
+            guard along > 0, along <= range else { continue }
             let perp = (rel - dir * along).length
             if perp <= other.radius + 4 && along < bestT {
                 bestT = along; hitShip = other; hitAsteroid = nil
@@ -769,25 +851,68 @@ public final class World {
         for rock in asteroids where rock.isAlive {
             let rel = rock.position - origin
             let along = rel.dot(dir)
-            guard along > 0, along <= spec.range else { continue }
+            guard along > 0, along <= range else { continue }
             let perp = (rel - dir * along).length
             if perp <= rock.radius + 4 && along < bestT {
                 bestT = along; hitAsteroid = rock; hitShip = nil
             }
         }
-        if let h = hitShip {
-            endPoint = origin + dir * bestT
-            applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
-                     ionization: spec.ionization)
-        } else if let rock = hitAsteroid {
-            endPoint = origin + dir * bestT
-            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage)
+        let end = (hitShip != nil || hitAsteroid != nil) ? origin + dir * bestT : origin + dir * range
+        return (end, hitShip, hitAsteroid)
+    }
+
+    /// Create the persistent beam segment for a continuous mount (geometry is
+    /// filled in immediately and refreshed every frame by `refreshActiveBeams`).
+    private func spawnActiveBeam(for ship: Ship, mount: WeaponMount, mountIndex: Int, continuous: Bool) {
+        guard !activeBeams.contains(where: { $0.shooterID == ship.entityID && $0.mountIndex == mountIndex }) else { return }
+        let beam = ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
+                              from: ship.position, to: ship.position, hit: false,
+                              continuous: continuous, life: .infinity,
+                              width: mount.spec.beamWidth, color: mount.spec.beamColor)
+        activeBeams.append(beam)
+        refreshBeam(beam)
+    }
+
+    private func removeActiveBeam(shooterID: Int, mountIndex: Int) {
+        activeBeams.removeAll { $0.shooterID == shooterID && $0.mountIndex == mountIndex }
+    }
+
+    /// Recompute a continuous beam's geometry from its live shooter, so the beam
+    /// stays welded to the moving, turning ship and re-clips to whatever it's
+    /// now pointing at.
+    private func refreshBeam(_ beam: ActiveBeam) {
+        guard let ship = ship(id: beam.shooterID), ship.isAlive,
+              beam.mountIndex < ship.weapons.count else { return }
+        let mount = ship.weapons[beam.mountIndex]
+        let spec = mount.spec
+        let origin = ship.muzzle(for: mount)
+        // Beams track the current target; otherwise they fire straight ahead.
+        var aim = ship.angle
+        if let tID = ship.currentTargetID, let t = self.ship(id: tID), t.isAlive {
+            aim = (t.position - origin).angle
         }
-        // `loopSound` weapons get their audio from the beamLoopStart/Stop
-        // events above instead — carrying the one-shot id here too would
-        // double up (a continuous loop plus a retriggered one-shot every tick).
-        events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: origin, to: endPoint,
-                            hit: hitShip != nil || hitAsteroid != nil, soundID: spec.loopSound ? nil : spec.fireSoundID))
+        let cast = beamCast(from: origin, dir: Vec2.heading(aim), range: spec.range, owner: ship)
+        beam.from = origin
+        beam.to = cast.end
+        beam.hit = cast.hitShip != nil || cast.hitAsteroid != nil
+    }
+
+    /// Advance all live beams once per step: weld continuous beams to their
+    /// shooters (dropping any whose loop ended or shooter vanished) and count
+    /// pulse beams down.
+    private func refreshActiveBeams(_ dt: Double) {
+        guard !activeBeams.isEmpty else { return }
+        activeBeams.removeAll { beam in
+            if beam.continuous {
+                guard let ship = ship(id: beam.shooterID), ship.isAlive,
+                      ship.activeBeamLoopMounts.contains(beam.mountIndex) else { return true }
+                refreshBeam(beam)
+                return false
+            } else {
+                beam.life -= dt
+                return beam.life <= 0
+            }
+        }
     }
 
     /// Weapon → asteroid damage. Asteroids have no shields, so shield+armor

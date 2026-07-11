@@ -2,6 +2,7 @@ import SwiftUI
 import SpriteKit
 import EVNovaKit
 import EVNovaEngine
+import EVNovaStory
 
 /// Builds and owns the game scene, input, controller, and HUD for a play session.
 @MainActor
@@ -276,7 +277,7 @@ struct GameContainerView: View {
                 }
 
                 LandPromptView(hud: host.hud)
-                HailBannerView(hud: host.hud)
+                MessageLogView(hud: host.hud)
 
                 if let state = hailDialogState {
                     HailDialogView(
@@ -370,6 +371,7 @@ struct GameContainerView: View {
         .onChange(of: landedSpobID) { _, id in
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
             if let id {
+                advanceGameDay()                                // landing→depart is one calendar day
                 DispatchQueue.main.async {
                     // Inhabited ports restore hull + shields to full for free
                     // (shields regen while docked; hull is patched up). Fuel is
@@ -548,6 +550,25 @@ struct GameContainerView: View {
         }
     }
 
+    /// Advance the galaxy calendar by one day and announce the new date in the
+    /// message log. EV Nova ticks a day on every hyperjump and every landing;
+    /// `StoryEngine.advanceOneDay` also runs the day's crön/deadline processing,
+    /// so time-gated story events and mission time limits progress with it.
+    private func advanceGameDay() {
+        guard let game = model.data.game else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state)
+        engine.advanceOneDay()
+        model.pilot.state = engine.player
+        host?.hud.post(Self.logDate(model.pilot.state.date))
+    }
+
+    /// Short calendar date for the message log, e.g. "23 Jun 1177".
+    private static func logDate(_ d: GameDate) -> String {
+        let m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        let mon = (1...12).contains(d.month) ? m[d.month - 1] : "\(d.month)"
+        return "\(d.day) \(mon) \(d.year)"
+    }
+
     /// Free hull + shield restore on landing — but **only at an inhabited port**
     /// (a planet/station people actually live on). Uninhabited rocks give
     /// nothing free: no repair, no shield restore (and no Recharge either). Fuel
@@ -594,6 +615,7 @@ struct GameContainerView: View {
             model.pilot.state.fuel = host.scene.playerShip?.fuel
             model.pilot.state.currentSystem = destID
             model.pilot.state.exploredSystems.insert(destID)
+            advanceGameDay()                                   // each hyperjump is one calendar day
             model.pilot.save()
             model.autosave(reason: .jump)                      // EV Nova saves on every hyperjump
             syncNav(host)                                      // refresh course/HUD (ship instance persists the swap)
@@ -834,9 +856,10 @@ struct GameContainerView: View {
     }
 }
 
-/// A small centred prompt shown while a landable stellar object is in reach
-/// ("Press L to land on …"). Reads the live HUD model so it appears/updates as
-/// the player approaches.
+/// The land prompt ("Press L to land on …") as **plain centred text at the
+/// bottom of the screen** — no capsule, no border, just legible white text with
+/// a soft shadow, the way EV Nova shows its on-screen prompts. Reads the live
+/// HUD model so it appears/updates as the player approaches.
 private struct LandPromptView: View {
     @ObservedObject var hud: GameHUDModel
     var body: some View {
@@ -846,10 +869,8 @@ private struct LandPromptView: View {
                 Text(hud.landPrompt)
                     .novaFont(.hud, weight: .semibold)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
-                    .padding(.bottom, 90)
+                    .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                    .padding(.bottom, 30)
                     .transition(.opacity)
             }
         }
@@ -859,32 +880,30 @@ private struct LandPromptView: View {
     }
 }
 
-/// A brief bottom-left banner for ambient, non-interactive system messages —
-/// currently just "`<ally>` transfers fuel and makes repairs." after a paid
-/// assist delivers (`GameScene`'s `.assistanceDelivered` handler sets and
-/// self-clears `hud.hailMessage`). Interactive hailing opens `HailDialogState`
-/// instead, not this banner.
-private struct HailBannerView: View {
+/// The rolling bottom-left message log: the calendar date on each jump/land,
+/// hail replies, mission notices and any other transient game message, as plain
+/// stacked text that fades out on its own timer (`GameHUDModel.post`). No panel
+/// or border — just the log, like the original.
+private struct MessageLogView: View {
     @ObservedObject var hud: GameHUDModel
     var body: some View {
         VStack {
             Spacer()
             HStack {
-                if !hud.hailMessage.isEmpty {
-                    Text(hud.hailMessage)
-                        .novaFont(.hud, weight: .semibold)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
-                        .transition(.opacity)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(hud.messages) { m in
+                        Text(m.text)
+                            .novaFont(.hud, weight: .semibold)
+                            .foregroundStyle(.white)
+                            .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                            .transition(.opacity)
+                    }
                 }
                 Spacer()
             }
             .padding(.leading, 16).padding(.bottom, 24)
         }
         .novaResponsive()
-        .animation(.easeInOut(duration: 0.2), value: hud.hailMessage)
         .allowsHitTesting(false)
     }
 }

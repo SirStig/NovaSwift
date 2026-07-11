@@ -22,6 +22,25 @@ public struct CombatTuning {
     public static let `default` = CombatTuning()
 }
 
+/// Which set of a hull's `shän` weapon exit points a weapon fires from — the
+/// real per-hull hardpoints, so a shot leaves the gun barrel / turret / launch
+/// bay it belongs to instead of the ship's centre. Derived from `wëap`'s
+/// `exitType` field.
+public enum WeaponExitType: Equatable {
+    case center, gun, turret, guided, beam
+
+    /// Map `WeapRes.exitType` (-1 centre / 0 gun / 1 turret / 2 guided / 3 beam).
+    public init(raw: Int) {
+        switch raw {
+        case 0: self = .gun
+        case 1: self = .turret
+        case 2: self = .guided
+        case 3: self = .beam
+        default: self = .center
+        }
+    }
+}
+
 /// A simulation-ready weapon: damage, reach, fire rate, projectile behaviour.
 /// Built from a decoded `WeapRes` via `CombatTuning`.
 public struct WeaponSpec {
@@ -35,6 +54,12 @@ public struct WeaponSpec {
     public let accuracyRadians: Double
     public let isBeam: Bool
     public let isGuided: Bool
+    /// Which hull hardpoint set this weapon's shots leave from.
+    public let exitType: WeaponExitType
+    /// Rendered beam thickness in px (beams only; 0 → engine default).
+    public let beamWidth: Double
+    /// Rendered beam colour as 0–1 RGB (beams only). Nil → engine default tint.
+    public let beamColor: (r: Double, g: Double, b: Double)?
     public let turnRate: Double          // rad/sec, guided munitions
     public let blastRadius: Double       // px, 0 = direct hit only
     public let ammoPerShot: Int          // 0/1 typically; drains mount ammo
@@ -63,6 +88,8 @@ public struct WeaponSpec {
                 reloadSeconds: Double, projectileSpeed: Double, range: Double,
                 accuracyRadians: Double, isBeam: Bool, isGuided: Bool,
                 turnRate: Double, blastRadius: Double, ammoPerShot: Int,
+                exitType: WeaponExitType = .center,
+                beamWidth: Double = 0, beamColor: (r: Double, g: Double, b: Double)? = nil,
                 fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false,
                 isPointDefense: Bool = false, vulnerableToPD: Bool = true,
                 ionization: Double = 0, cantFireWhileIonized: Bool = false) {
@@ -71,6 +98,7 @@ public struct WeaponSpec {
         self.reloadSeconds = reloadSeconds; self.projectileSpeed = projectileSpeed
         self.range = range; self.accuracyRadians = accuracyRadians
         self.isBeam = isBeam; self.isGuided = isGuided; self.turnRate = turnRate
+        self.exitType = exitType; self.beamWidth = beamWidth; self.beamColor = beamColor
         self.blastRadius = blastRadius; self.ammoPerShot = ammoPerShot
         self.fireSoundID = fireSoundID; self.explosionBoomID = explosionBoomID
         self.loopSound = loopSound
@@ -91,6 +119,21 @@ public struct WeaponSpec {
         accuracyRadians = Double(w.accuracy) * .pi / 180.0
         isBeam = w.isBeam
         isGuided = w.isGuided
+        // Honour the weapon's declared exit type; fall back to a sensible hardpoint
+        // set by guidance when the data leaves it at "centre" (-1) so a gun still
+        // leaves the gun ports rather than the hull's dead centre.
+        var et = WeaponExitType(raw: w.exitType)
+        if et == .center {
+            if w.isBeam { et = .beam }
+            else if w.isGuided { et = .guided }
+            else if w.isTurret { et = .turret }
+            else { et = .gun }
+        }
+        exitType = et
+        beamWidth = Double(max(0, w.beamWidth))
+        beamColor = w.isBeam ? (Double(w.beamColor.r) / 255.0,
+                                Double(w.beamColor.g) / 255.0,
+                                Double(w.beamColor.b) / 255.0) : nil
         turnRate = Double(w.turnRate) * 3.0 * .pi / 180.0
         blastRadius = Double(w.blastRadius)
         ammoPerShot = w.maxAmmo > 0 ? 1 : 0
@@ -109,6 +152,12 @@ public final class WeaponMount {
     public let spec: WeaponSpec
     public var cooldown: Double = 0      // seconds until it can fire again
     public var ammo: Int                 // -1 = unlimited
+    /// Which of the hull's exit points (of this weapon's `spec.exitType`) this
+    /// mount fires from. Assigned by `Ship` when its weapon list is installed:
+    /// the Nth mount of a given exit type takes the Nth hardpoint, so a
+    /// four-gun hull's guns leave four distinct barrels at once. Indexed
+    /// modulo the available point count.
+    public var exitIndex: Int = 0
 
     /// Which blocked-fire reason we last logged, so a held-down fire button
     /// while reloading/dry doesn't spam the log every frame — only the frame
@@ -177,6 +226,87 @@ public final class Projectile {
         self.targetID = targetID
         self.ionization = ionization
         self.vulnerableToPD = vulnerableToPD
+    }
+}
+
+/// A hull's real weapon exit points (from its `shän`), in the engine's maths
+/// convention: origin at the hull centre, **+y toward the nose**, +x to the
+/// ship's right, in unrotated sprite pixels. (`shän` already stores y
+/// nose-positive, matching this y-up world — see `Galaxy.exitPoints`.)
+/// `muzzleOffset` rotates one of these into world space for the current heading.
+public struct ShipExitPoints {
+    public var gun: [Vec2]
+    public var turret: [Vec2]
+    public var guided: [Vec2]
+    public var beam: [Vec2]
+    /// Perspective foreshortening (x%, y%) for hulls facing screen-up / screen-down.
+    public var upCompress: (x: Double, y: Double)
+    public var downCompress: (x: Double, y: Double)
+
+    public init(gun: [Vec2], turret: [Vec2], guided: [Vec2], beam: [Vec2],
+                upCompress: (x: Double, y: Double) = (100, 100),
+                downCompress: (x: Double, y: Double) = (100, 100)) {
+        self.gun = gun; self.turret = turret; self.guided = guided; self.beam = beam
+        self.upCompress = upCompress; self.downCompress = downCompress
+    }
+
+    public func points(for type: WeaponExitType) -> [Vec2] {
+        switch type {
+        case .gun: return gun
+        case .turret: return turret
+        case .guided: return guided
+        case .beam: return beam
+        case .center: return []
+        }
+    }
+
+    /// World-space offset (relative to the hull centre) of exit point `index` of
+    /// `type`, for a hull pointing along `angle`. Falls back to a point `nose`
+    /// pixels ahead of centre when the hull declares no points of that type.
+    public func muzzleOffset(type: WeaponExitType, index: Int, angle: Double, nose: Double) -> Vec2 {
+        let pts = points(for: type)
+        let forward = Vec2.heading(angle)          // (sinθ, cosθ), +y = nose at θ=0
+        guard !pts.isEmpty else { return forward * nose }
+        let local = pts[((index % pts.count) + pts.count) % pts.count]
+        // A hull that never authored this hardpoint leaves it at the origin;
+        // firing from dead centre looks wrong, so fall back to a nose muzzle.
+        if local.x == 0 && local.y == 0 { return forward * nose }
+        let right = Vec2(forward.y, -forward.x)    // ship's right in world space
+        var world = right * local.x + forward * local.y
+        // Screen-space perspective squish (identity at 100/100).
+        let up = forward.y >= 0                      // nose in the upper screen half
+        let cx = (up ? upCompress.x : downCompress.x) / 100.0
+        let cy = (up ? upCompress.y : downCompress.y) / 100.0
+        world = Vec2(world.x * cx, world.y * cy)
+        return world
+    }
+}
+
+/// A live beam segment the renderer draws this frame. Continuous (`loopSound`)
+/// beams persist while their trigger is held and have their geometry recomputed
+/// off the live shooter every step, so the beam stays welded to the moving,
+/// turning ship; pulse beams live a fraction of a second. The world owns these
+/// (see `World.activeBeams`); the renderer mirrors them like it does projectiles.
+public final class ActiveBeam {
+    public let shooterID: Int
+    public let mountIndex: Int
+    public var from: Vec2
+    public var to: Vec2
+    public var hit: Bool
+    /// Continuous vs. one-shot pulse. Continuous beams are refreshed each step
+    /// and removed on trigger release; pulse beams count `life` down.
+    public let continuous: Bool
+    public var life: Double
+    public let width: Double
+    public let color: (r: Double, g: Double, b: Double)?
+
+    public init(shooterID: Int, mountIndex: Int, from: Vec2, to: Vec2, hit: Bool,
+                continuous: Bool, life: Double, width: Double,
+                color: (r: Double, g: Double, b: Double)?) {
+        self.shooterID = shooterID; self.mountIndex = mountIndex
+        self.from = from; self.to = to; self.hit = hit
+        self.continuous = continuous; self.life = life
+        self.width = width; self.color = color
     }
 }
 

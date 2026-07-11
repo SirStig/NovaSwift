@@ -56,9 +56,20 @@ enum StellarMatch {
         }
     }
 
+    /// Decode a government from a special stellar code. The Bible's govt ranges
+    /// ("9999-10255 Specific govt's stellar", 15000/20000/25000/30000/31000 +…)
+    /// encode the government as a **0-based index off `base`**, which maps onto
+    /// EV Nova's 128-based government resource IDs — so `10000` → govt 128
+    /// (Federation), `10001` → 129, and so on.
+    ///
+    /// The previous `base + 128 … base + 255` window (returning `code - base`)
+    /// was doubly wrong: it excluded `base … base+127` — i.e. the entire common
+    /// case, including `10000` = Federation — and shifted the id by 128. That
+    /// silently rejected the ~90 generic "Ferry Passengers"/"Delivery to <DST>"
+    /// BBS missions (all `availStellar` 10000), leaving mission boards empty.
     private static func govtOf(_ code: Int, base: Int) -> Int? {
-        guard code >= base + 128, code <= base + 255 else { return nil }
-        return code - base
+        guard code >= base, code <= base + 255 else { return nil }
+        return code - base + 128
     }
 
     /// A stellar is "inhabited" if it offers services (has a valid landing pict /

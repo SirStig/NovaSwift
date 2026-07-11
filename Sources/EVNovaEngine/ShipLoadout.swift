@@ -305,6 +305,7 @@ extension Galaxy {
         ship.explosionSoundID = shipRes.flatMap { game.deathExplosionSoundID($0) }
         ship.government = govt ?? shipRes?.inherentGovt ?? independentGovt
         ship.radius = radius
+        ship.exitPoints = exitPoints(forShip: shipID)
         ship.combatStrength = Double(max(1, shipRes?.strength ?? 1))
         ship.disableArmorFraction = (shipRes.map { $0.flags & 0x0010 != 0 } ?? false) ? 0.10 : 0.33
         ship.fleeWhenOutOfAmmo = shipRes?.fleeWhenOutOfAmmo ?? false

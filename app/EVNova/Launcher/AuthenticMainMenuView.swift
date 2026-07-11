@@ -1,5 +1,6 @@
 import SwiftUI
 import EVNovaKit
+import EVNovaStory
 
 /// The authentic EV Nova main menu, rendered from the player's own assets: the
 /// full-screen background picture (PICT 8000), the game logo (rlëD 8010) and the
@@ -78,8 +79,15 @@ struct MainMenuAssets {
                 let h = tileH > 0 ? min(tileH, full.height) : full.height
                 let lastFrame = max(0, spin.tilesDown - 1)
                 let y = min(lastFrame * h, max(0, full.height - h))
-                let cropped = full.cropping(to: CGRect(x: 0, y: y, width: w, height: h)) ?? full
-                logo = keyOutBlack(cropped)
+                // Keep the RAW opaque frame — the logo sheet bakes its own
+                // starfield + nebula glow around the letters, all on black. It's
+                // composited with a `.screen` blend (see the view), where the
+                // near-black background adds nothing and only the glow/letters
+                // lift over the menu's own backdrop. Keying black out instead
+                // left the logo's baked stars to *replace* the backdrop in a
+                // 654×209 rectangle — the mismatched-brightness box that read as
+                // "the logo is a different brightness than the rest of the UI".
+                logo = full.cropping(to: CGRect(x: 0, y: y, width: w, height: h)) ?? full
                 logoSize = CGSize(width: logo?.width ?? w, height: logo?.height ?? h)
             }
         }
@@ -87,39 +95,6 @@ struct MainMenuAssets {
         return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons, colr: colr)
     }
 
-    /// PICT-sourced logo art is opaque with a black backing box (PICT has no
-    /// alpha channel). Derive alpha from luminance and un-premultiply the
-    /// color so the glow composites naturally over the starfield behind it —
-    /// a `.screen` blend on the raw opaque art double-brightens every pixel
-    /// where the glow overlaps a bright star instead of just masking the box.
-    private static func keyOutBlack(_ image: CGImage) -> CGImage? {
-        let width = image.width, height = image.height
-        guard width > 0, height > 0 else { return nil }
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: &pixels, width: width, height: height,
-                                   bitsPerComponent: 8, bytesPerRow: width * 4,
-                                   space: colorSpace,
-                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        for i in stride(from: 0, to: pixels.count, by: 4) {
-            let r = pixels[i], g = pixels[i + 1], b = pixels[i + 2]
-            let alpha = max(r, max(g, b))
-            if alpha == 0 {
-                pixels[i + 3] = 0
-            } else {
-                pixels[i] = UInt8(min(255, Int(r) * 255 / Int(alpha)))
-                pixels[i + 1] = UInt8(min(255, Int(g) * 255 / Int(alpha)))
-                pixels[i + 2] = UInt8(min(255, Int(b) * 255 / Int(alpha)))
-                pixels[i + 3] = alpha
-            }
-        }
-        guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                       bytesPerRow: width * 4, space: colorSpace,
-                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
-    }
 }
 
 struct AuthenticMainMenuView: View {
@@ -149,25 +124,28 @@ struct AuthenticMainMenuView: View {
                 }
 
                 if let logo = assets.logo, assets.logoSize.height > 0 {
-                    // LogoX/LogoY (cölr #128 offsets 224–227); fall back to a centered
-                    // placement matching the base game's real values (191,162) if the
-                    // resource couldn't be decoded.
+                    // The logo frame is not just the letters — it bakes in the
+                    // surrounding title-screen region (the cockpit-frame edges,
+                    // the starfield, the planet glow below) exactly as it sits in
+                    // backdrop PICT 8000. It is therefore drawn **opaque at its
+                    // authored LogoX/LogoY** (cölr #128 offsets 224–227), so its
+                    // baked surroundings land pixel-on-pixel over 8000's matching
+                    // art and only the logo itself reads as "added". Keying the
+                    // black (leaves its own stars → a brighter box) or a `.screen`
+                    // blend (double-exposes the shared chrome/planet) both broke
+                    // that alignment; the fallback origin matches the base game's
+                    // real LogoX/LogoY for when the cölr can't be decoded.
                     let logoOrigin = assets.colr?.logo
-                        ?? CGPoint(x: (base.width - assets.logoSize.width) / 2, y: 168)
+                        ?? CGPoint(x: (base.width - assets.logoSize.width) / 2, y: 162)
                     Image(decorative: logo, scale: 1)
                         .resizable().interpolation(.medium)
-                        // The logo is a separate PICT keyed to alpha from its own
-                        // luminance (the black backing box → alpha 0). A plain
-                        // over-composite keeps its colours at their true tone; a
-                        // `.screen` blend (used before) additively brightened
-                        // every logo pixel against the starfield, making the logo
-                        // read lighter/hotter than the rest of the chrome.
                         .novaPlace(layout,
                                    x: logoOrigin.x, y: logoOrigin.y,
                                    w: assets.logoSize.width, h: assets.logoSize.height)
+                        // Only a fade — no scaleEffect, which would break the
+                        // pixel-exact overlay and reveal a doubled seam.
                         .opacity(appeared ? 1 : 0)
-                        .scaleEffect(appeared ? 1 : 0.94)
-                        .animation(.spring(response: 0.6, dampingFraction: 0.85), value: appeared)
+                        .animation(.easeOut(duration: 0.6), value: appeared)
                 }
 
                 buttons(layout: layout)
@@ -221,53 +199,80 @@ struct AuthenticMainMenuView: View {
     @ViewBuilder private func pilotStatus(layout: NovaLayout) -> some View {
         if let save = model.roster.mostRecent {
             let bright = assets.colr.map { color($0.menuColor1) } ?? novaAmber
-            let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.6)
-            // Scale the panel's own metrics (ship size, padding, gaps) by the same
-            // layout scale `.novaFont` scales its text by, so the whole readout
-            // grows/shrinks as one piece with the window instead of the text
-            // scaling while the ship stayed a fixed point size.
+            let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.55)
+            // Everything scales with the backdrop via `layout.scale`, so the
+            // readout grows/shrinks as one piece with the window.
             let sc = layout.scale
+            let game = model.data.game
 
-            // Both text columns get the SAME fixed width so the ship stays the
-            // HStack's true midpoint — otherwise the wider right column shoved
-            // the ship left of centre (the "not centred correctly" the readout
-            // showed before). Centring the symmetric HStack now centres the ship
-            // under the menu knob.
-            let columnWidth = 190 * sc
-            HStack(alignment: .center, spacing: 16 * sc) {
-                // Left: pilot identity + wealth, pushed toward the ship.
-                VStack(alignment: .trailing, spacing: 3 * sc) {
-                    Text(save.displayName).novaFont(.body, weight: .bold)
-                        .foregroundStyle(bright).lineLimit(1)
-                    Text("\(save.snapshot.credits.formatted()) cr").novaFont(.caption)
-                        .foregroundStyle(dim).monospacedDigit()
-                    if !save.snapshot.ratingTitle.isEmpty {
-                        Text(save.snapshot.ratingTitle).novaFont(.caption).foregroundStyle(dim)
-                    }
+            // The two field columns flank the red ship icon exactly as the
+            // original main menu lays them out: Pilot Name / Ship Name / Ship
+            // Class on the left, Legal Status / Combat Rating / Current Date on
+            // the right — each a dim label above a bright value.
+            HStack(alignment: .top, spacing: 14 * sc) {
+                VStack(alignment: .leading, spacing: 7 * sc) {
+                    infoField("Pilot Name", save.displayName, bright, dim, sc)
+                    infoField("Ship Name", save.snapshot.shipName.isEmpty ? "—" : save.snapshot.shipName, bright, dim, sc)
+                    infoField("Ship Class", game?.ship(save.player.shipType)?.displayName ?? "—", bright, dim, sc)
                 }
-                .frame(width: columnWidth, alignment: .trailing)
+                .frame(width: 150 * sc, alignment: .leading)
 
-                // Centre: the current ship, in the game's red target-display style.
                 pilotShip(shipType: save.player.shipType)
-                    .frame(width: 100 * sc, height: 62 * sc)
+                    .frame(width: 88 * sc, height: 54 * sc)
+                    .padding(.top, 12 * sc)
 
-                // Right: ship + location, pushed away from the ship.
-                VStack(alignment: .leading, spacing: 3 * sc) {
-                    Text(save.snapshot.shipName.isEmpty ? "—" : save.snapshot.shipName)
-                        .novaFont(.body, weight: .bold).foregroundStyle(bright).lineLimit(1)
-                    Text(save.snapshot.systemName.isEmpty ? "Deep Space" : save.snapshot.systemName)
-                        .novaFont(.caption).foregroundStyle(dim)
-                    Text("Enter Ship to continue").novaFont(.caption).foregroundStyle(dim.opacity(0.85))
+                VStack(alignment: .leading, spacing: 7 * sc) {
+                    infoField("Legal Status", legalStatusText(save), bright, dim, sc)
+                    infoField("Combat Rating", save.snapshot.ratingTitle.isEmpty ? "Harmless" : save.snapshot.ratingTitle, bright, dim, sc)
+                    infoField("Current Date", Self.menuDate(save.player.date), bright, dim, sc)
                 }
-                .frame(width: columnWidth, alignment: .leading)
+                .frame(width: 150 * sc, alignment: .leading)
             }
             .fixedSize()
-            // Centred in the backdrop's dark bottom band, below the knob and
-            // button columns (positioned by eye; nudge with the ⇧⌘D debug grid).
-            .position(layout.point(base.width / 2, 722))
+            // In the backdrop's dark red bottom band, below the button knob.
+            .position(layout.point(base.width / 2, 706))
             .opacity(appeared ? 1 : 0)
             .animation(.easeOut(duration: 0.4).delay(0.45), value: appeared)
         }
+    }
+
+    /// One pilot-info cell: a small dim label above its bright value, the
+    /// label/value colours coming from the cölr resource's Menu1/Menu2 pair.
+    private func infoField(_ label: String, _ value: String,
+                           _ bright: Color, _ dim: Color, _ sc: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 1 * sc) {
+            Text(label).novaFont(.caption, size: 9).foregroundStyle(dim).lineLimit(1)
+            Text(value).novaFont(.body, weight: .bold, size: 11).foregroundStyle(bright).lineLimit(1)
+        }
+    }
+
+    /// The player's standing with the government of the system they're docked
+    /// in, as the menu's short status label.
+    private func legalStatusText(_ save: PilotSave) -> String {
+        guard let game = model.data.game,
+              let govt = game.system(save.player.currentSystem)?.government,
+              let record = save.player.legalRecord[govt], record != 0
+        else { return "No Record" }
+        switch record {
+        case ..<(-200): return "Enemy"
+        case ..<0:      return "Criminal"
+        case 1..<200:   return "Clean"
+        default:        return "Trusted"
+        }
+    }
+
+    /// EV Nova's long-form calendar date, e.g. "June 23rd, 1177 NC".
+    private static func menuDate(_ d: GameDate) -> String {
+        let months = ["January","February","March","April","May","June","July",
+                      "August","September","October","November","December"]
+        let month = (1...12).contains(d.month) ? months[d.month - 1] : "\(d.month)"
+        let s: String
+        switch d.day % 100 {
+        case 11, 12, 13: s = "th"
+        default:
+            switch d.day % 10 { case 1: s = "st"; case 2: s = "nd"; case 3: s = "rd"; default: s = "th" }
+        }
+        return "\(month) \(d.day)\(s), \(d.year) NC"
     }
 
     /// The current pilot's ship in EV Nova's red silhouette style. Uses the
@@ -277,7 +282,7 @@ struct AuthenticMainMenuView: View {
     @ViewBuilder private func pilotShip(shipType id: Int) -> some View {
         if let game = model.data.game, let graphics = model.uiGraphics, let res = game.ship(id),
            let sprite = graphics.shipFallbackPicture(res) {
-            ShipSilhouetteView(sprite: sprite, pixelated: true)
+            ShipSilhouetteView(sprite: sprite)
         }
     }
 
