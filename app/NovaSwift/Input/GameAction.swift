@@ -6,7 +6,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     // Flight
     case accelerate, decelerate, turnLeft, turnRight, afterburner
     // Combat
-    case firePrimary, fireSecondary, selectSecondaryPrev, selectSecondaryNext
+    case firePrimary, fireSecondary, selectSecondaryPrev, selectSecondaryNext, toggleCloak
     // Targeting
     case targetNearest, targetNext, nearestHostile, clearTarget
     // Navigation
@@ -35,7 +35,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     var category: Category {
         switch self {
         case .accelerate, .decelerate, .turnLeft, .turnRight, .afterburner: return .flight
-        case .firePrimary, .fireSecondary, .selectSecondaryPrev, .selectSecondaryNext: return .combat
+        case .firePrimary, .fireSecondary, .selectSecondaryPrev, .selectSecondaryNext, .toggleCloak: return .combat
         case .targetNearest, .targetNext, .nearestHostile, .clearTarget: return .targeting
         case .land, .hyperjump, .galaxyMap, .autopilot, .hailTarget, .board: return .navigation
         case .pauseGame, .openMenu: return .interface
@@ -53,6 +53,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .fireSecondary: return "Fire Secondary Weapon"
         case .selectSecondaryPrev: return "Previous Secondary"
         case .selectSecondaryNext: return "Next Secondary"
+        case .toggleCloak: return "Toggle Cloak"
         case .targetNearest: return "Target Nearest Ship"
         case .targetNext: return "Cycle Target"
         case .nearestHostile: return "Target Nearest Hostile"

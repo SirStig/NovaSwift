@@ -935,6 +935,8 @@ struct GameContainerView: View {
             host?.scene.cycleSecondaryWeapon(forward: true)
         case .selectSecondaryPrev:
             host?.scene.cycleSecondaryWeapon(forward: false)
+        case .toggleCloak:
+            host?.scene.togglePlayerCloak()
         case .board:
             // Board the targeted hulk if it's disabled and in reach.
             if let m = host?.scene.attemptBoard() { boardManifest = m }

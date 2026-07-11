@@ -45,6 +45,8 @@ public enum GameSession {
         world.diplomacy = galaxy.makeDiplomacy()
         world.systemContext = galaxy.systemContext(for: systemID)
         if let sys = game.system(systemID) {
+            world.systemInterference = sys.interference   // sensor static (sÿst.Interference)
+            world.systemMurk = sys.murk                    // visual fog (sÿst.Murk)
             let spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
             world.spawner = spawner
             spawner.populate(world)

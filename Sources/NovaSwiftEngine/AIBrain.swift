@@ -123,6 +123,9 @@ public final class AIBrain {
     /// no longer count as threats or targets.
     func isHostile(_ me: Ship, _ other: Ship, _ world: World) -> Bool {
         guard other.isAlive, !other.disabled, other.entityID != me.entityID else { return false }
+        // A cloaked ship this brain can't detect is off the table entirely — it
+        // can't be acquired as a target, and a target that cloaks is dropped.
+        guard world.canDetect(other, by: me) else { return false }
         if other.isPlayer {
             if provokedByPlayer { return true }
             return world.diplomacy?.isHostileToPlayer(me.government) ?? false
@@ -134,7 +137,9 @@ public final class AIBrain {
     /// Nearest hostile within scan range, if any.
     func nearestHostile(_ me: Ship, _ world: World) -> Ship? {
         var best: Ship?
-        var bestDist = scanRange
+        // Sensor reach shrinks with system interference (sÿst.Interference),
+        // net of this ship's anti-interference outfits.
+        var bestDist = world.effectiveSensorRange(scanRange, for: me)
         for other in world.allShips where isHostile(me, other, world) {
             let d = (other.position - me.position).length
             if d < bestDist { bestDist = d; best = other }
@@ -353,6 +358,11 @@ public final class AIBrain {
         }
 
         me.currentTargetID = (state == .attacking) ? targetID : nil
+
+        // Cloak-capable ships raise the cloak to slip away when fleeing, and drop
+        // it otherwise (it bleeds fuel/shields). The `World` cloak step handles
+        // the fade and forced-off-when-empty.
+        if me.hasCloak { me.cloakEngaged = (state == .fleeing) }
 
         switch state {
         case .attacking:  return attack(me, world)

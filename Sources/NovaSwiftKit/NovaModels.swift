@@ -421,6 +421,18 @@ public struct SystRes {
     public let government: Int
     /// How many asteroids to place in this system, 0-16 (`sÿst.Asteroids`).
     public let asteroidCount: Int
+    /// `sÿst.Interference` (Bible): "How thick the static in the system should
+    /// be. 0 is no static, 100 is complete sensor blackout." Degrades radar /
+    /// sensor range (see `World` detection). @108, confirmed against real data
+    /// (0-100, sits right after Asteroids@106).
+    public let interference: Int
+    /// `sÿst.Murk` (Bible): "The murkiness of the system (0-100). Zero will
+    /// cause everything to appear normally — 100 will cause the player to
+    /// question their current glasses prescription. A value less than zero is
+    /// equivalent to zero murk but also hides the starfield." A visual fog
+    /// depth for the renderer. @146, confirmed against real data (sits right
+    /// before AstTypes@148).
+    public let murk: Int
     /// Which `röid` type ids (128-143) are enabled for this system, per the
     /// `AstTypes` bitmask.
     public let asteroidTypeIDs: [Int]
@@ -467,6 +479,8 @@ public struct SystRes {
         averageShips = i16(d, 100)
         government = i16(d, 102)
         asteroidCount = max(0, min(16, i16(d, 106)))
+        interference = i16(d, 108)
+        murk = i16(d, 146)
         // AstTypes: two bitmask bytes. @148 ("roidTypes1") bits 0-7 select röid
         // 136-143 (dust/crystal); @149 ("roidTypes2") bits 0-7 select röid
         // 128-135 (metal/ice) — offsets and bit→id mapping verified against the

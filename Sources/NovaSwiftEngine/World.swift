@@ -244,6 +244,41 @@ public final class Ship {
     }
     /// Fighter bays fitted to this ship (empty for non-carriers).
     public var fighterBays: [FighterBay] = []
+
+    // Cloaking (oütf ModType 17). `cloakFlags` are the OR'd device flags; the
+    // rest is live state driven by `World`'s cloak step.
+    public var cloakFlags: Int = 0
+    public var cloakScannerFlags: Int = 0
+    public var hasCloak: Bool { cloakFlags != 0 }
+    /// Player/AI intent to be cloaked. Toggled by input (player) or the brain.
+    public var cloakEngaged = false
+    /// 0 = fully visible, 1 = fully cloaked; fades between when (dis)engaging.
+    public var cloakLevel: Double = 0
+    /// Substantially hidden — excluded from targeting/AI acquisition (unless the
+    /// observer has a cloak scanner). Uses a high threshold so a ship mid-fade
+    /// is still detectable.
+    public var isCloaked: Bool { cloakLevel >= 0.99 }
+    /// Fuel drained per second while cloaked (Bible bits 0x0010/20/40/80 = 1/2/4/8).
+    public var cloakFuelPerSec: Double {
+        Double((cloakFlags & 0x0010 != 0 ? 1 : 0) + (cloakFlags & 0x0020 != 0 ? 2 : 0)
+             + (cloakFlags & 0x0040 != 0 ? 4 : 0) + (cloakFlags & 0x0080 != 0 ? 8 : 0))
+    }
+    /// Shield drained per second while cloaked (Bible bits 0x0100/200/400/800 = 1/2/4/8).
+    public var cloakShieldPerSec: Double {
+        Double((cloakFlags & 0x0100 != 0 ? 1 : 0) + (cloakFlags & 0x0200 != 0 ? 2 : 0)
+             + (cloakFlags & 0x0400 != 0 ? 4 : 0) + (cloakFlags & 0x0800 != 0 ? 8 : 0))
+    }
+    /// 0x0002: a cloaked ship of this type still shows on radar.
+    public var cloakVisibleOnRadar: Bool { cloakFlags & 0x0002 != 0 }
+    /// 0x0004: engaging the cloak immediately drops shields to zero.
+    public var cloakDropsShields: Bool { cloakFlags & 0x0004 != 0 }
+    /// 0x0008: taking damage forces the cloak off.
+    public var cloakDropsOnDamage: Bool { cloakFlags & 0x0008 != 0 }
+    /// 0x1000: area cloak — ships in formation with this one are cloaked too.
+    public var cloakIsArea: Bool { cloakFlags & 0x1000 != 0 }
+    /// Anti-interference (oütf ModType 24): subtracted from the system's sensor
+    /// static when computing this ship's effective sensor range.
+    public var interferenceReduction: Int = 0
     /// Set on a launched fighter: the entity id of the carrier it flew from, so
     /// it can dock back and be freed if the carrier dies. nil = not a fighter.
     public var carrierID: Int?
@@ -736,6 +771,8 @@ public final class World {
 
         // Fighter bays: carriers deploy fighters in combat; fighters dock back.
         updateFighterBays(dt)
+        // Cloaking devices: fade in/out and drain fuel/shield.
+        stepCloak(dt)
 
         // Asteroids don't move (see `Asteroid`'s doc comment) — they only spin.
         for rock in asteroids where rock.isAlive {
@@ -1287,6 +1324,8 @@ public final class World {
         // need one too — this was real, uncapped log volume that scaled
         // directly with how many ships were fighting.
         _ = ship.applyDamage(shield: shield, armor: armor)
+        // Cloak flag 0x0008: taking damage forces the cloak off.
+        if ship.cloakEngaged, ship.cloakDropsOnDamage { ship.cloakEngaged = false }
         if ionization > 0, ship.ionizeMax > 0 {
             ship.ionCharge = min(ship.ionizeMax, ship.ionCharge + ionization)
         }
@@ -1405,7 +1444,7 @@ public final class World {
     @discardableResult
     public func selectNearestTarget(hostileOnly: Bool) -> Ship? {
         let candidates = npcs.filter { npc in
-            npc.isAlive && !npc.disabled
+            npc.isAlive && !npc.disabled && canDetect(npc, by: player)
                 && (!hostileOnly || diplomacy?.isHostileToPlayer(npc.government) == true)
         }
         guard let nearest = candidates.min(by: {
@@ -1442,6 +1481,62 @@ public final class World {
         let orders = playerEscorts.compactMap { $0.brain?.escortOrder }
         guard let first = orders.first else { return nil }
         return orders.allSatisfy { $0 == first } ? first : nil
+    }
+
+    // MARK: Cloaking & sensors (oütf ModType 17/24/30; sÿst Interference)
+
+    /// The current system's sensor static (`sÿst.Interference`, 0-100). Set when
+    /// the world is built for a system; degrades effective sensor range.
+    public var systemInterference: Int = 0
+    /// The current system's visual murk (`sÿst.Murk`, 0-100; <0 also hides the
+    /// starfield). A renderer hook — the app draws a fog whose depth tracks this
+    /// (net of the player's ModType-28 murk outfits). No gameplay effect.
+    public var systemMurk: Int = 0
+
+    /// `base` sensor range reduced by the effective interference `observer`
+    /// experiences: `base × (1 − netInterference/100)`, where net interference
+    /// is the system's static minus the observer's anti-interference outfits.
+    /// At 100 net interference the range is zero (complete sensor blackout, per
+    /// the Bible's 0-100 endpoints; the linear curve between them is this
+    /// engine's reading of "how thick the static is").
+    public func effectiveSensorRange(_ base: Double, for observer: Ship) -> Double {
+        let net = max(0, min(100, systemInterference - observer.interferenceReduction))
+        return base * (1 - Double(net) / 100)
+    }
+
+    /// Whether `observer` can detect (and therefore target) `target`, accounting
+    /// for cloaking. A cloaked target is hidden unless the observer carries a
+    /// cloak scanner able to target cloaked ships (ModType 30 bit 0x0008).
+    /// Non-cloaked targets pass here; range/interference gating is separate.
+    public func canDetect(_ target: Ship, by observer: Ship) -> Bool {
+        guard target.isCloaked else { return true }
+        return observer.cloakScannerFlags & 0x0008 != 0
+    }
+
+    /// Fade cloaks in/out and drain their fuel/shield upkeep. A cloak forced off
+    /// (out of fuel/shields) simply disengages and fades back to visible.
+    private func stepCloak(_ dt: Double) {
+        let baseFade = 1.0 / 1.2                    // full fade in ~1.2s
+        for s in allShips where s.hasCloak {
+            let rate = baseFade * (s.cloakFlags & 0x0001 != 0 ? 2 : 1)   // 0x0001 = faster fading
+            if s.cloakEngaged {
+                if s.cloakLevel == 0, s.cloakDropsShields { s.shield = 0 }   // 0x0004
+                s.cloakLevel = min(1, s.cloakLevel + rate * dt)
+                if s.cloakFuelPerSec > 0 { s.fuel = max(0, s.fuel - s.cloakFuelPerSec * dt) }
+                if s.cloakShieldPerSec > 0 { s.shield = max(0, s.shield - s.cloakShieldPerSec * dt) }
+                if (s.cloakFuelPerSec > 0 && s.fuel <= 0) || (s.cloakShieldPerSec > 0 && s.shield <= 0) {
+                    s.cloakEngaged = false                                   // can't power it — drop cloak
+                }
+            } else if s.cloakLevel > 0 {
+                s.cloakLevel = max(0, s.cloakLevel - rate * dt)
+            }
+        }
+    }
+
+    /// Toggle the player's cloaking device (no-op if the player has no cloak).
+    public func togglePlayerCloak() {
+        guard player.hasCloak else { return }
+        player.cloakEngaged.toggle()
     }
 
     // MARK: Fighter bays (wëap Guidance 99)

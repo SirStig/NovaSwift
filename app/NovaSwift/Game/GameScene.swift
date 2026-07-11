@@ -841,6 +841,14 @@ final class GameScene: SKScene {
         selectedPlanetID = nil
     }
 
+    /// Toggle the player's cloaking device (oütf ModType 17). No-op if unfitted.
+    func togglePlayerCloak() {
+        world.togglePlayerCloak()
+        if world.player.hasCloak {
+            hud?.post(world.player.cloakEngaged ? "Cloaking device engaged." : "Cloaking device disengaged.")
+        }
+    }
+
     /// One entry in the combined Tab-cycle order: every in-range ship plus
     /// every planet in the system, ordered by distance from the player, so
     /// Tab reaches planets too — not just ships found by clicking.

@@ -107,6 +107,22 @@ public struct Loadout {
     /// rather than firing. See `FighterBaySpec` and `Ship.fighterBays`.
     public var fighterBays: [FighterBaySpec] = []
 
+    /// Combined cloaking-device flag bits (`oütf` ModType 17, OR'd across fitted
+    /// cloaks). 0 = the ship has no cloak. Bit meanings (Bible): 0x0002 visible
+    /// on radar, 0x0004 drops shields on activation, 0x0008 decloaks when hit,
+    /// 0x0010/20/40/80 use 1/2/4/8 fuel per sec, 0x0100/200/400/800 use
+    /// 1/2/4/8 shield per sec, 0x1000 area cloak. See `Ship` cloak state.
+    public var cloakFlags: Int = 0
+    /// Combined cloak-scanner flag bits (`oütf` ModType 30). Bible: 0x0001 reveal
+    /// cloaked ships on radar, 0x0002 on screen, 0x0004 target untargetable
+    /// ships, 0x0008 target cloaked ships.
+    public var cloakScannerFlags: Int = 0
+    /// Anti-interference: total `oütf` ModType 24, subtracted from the system's
+    /// `Interference` when computing effective sensor range.
+    public var interferenceReduction: Int = 0
+    /// Net `oütf` ModType 28 murk change applied to the current system's murk.
+    public var murkModifier: Int = 0
+
     /// The hull's `shïp.Crew` complement — the number the boarding/capture-odds
     /// math uses on both sides (attacker's own crew, defender's crew). See
     /// `World.captureChance`.
@@ -228,6 +244,8 @@ extension Galaxy {
         var hyperspaceSpeed = 0
         var marineCrew = 0
         var captureOddsBonus = 0
+        var cloakFlags = 0, cloakScannerFlags = 0
+        var interferenceReduction = 0, murkModifier = 0
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
@@ -275,6 +293,10 @@ extension Galaxy {
                     // Positive ModVal → +effective crew; negative (-1..-100) →
                     // +that many percentage points of capture odds (Bible).
                     if value >= 0 { marineCrew += v } else { captureOddsBonus += (-value) * count }
+                case .cloak:           cloakFlags |= value          // ModVal = cloak flag bits
+                case .cloakScanner:    cloakScannerFlags |= value   // ModVal = scanner flag bits
+                case .interference:    interferenceReduction += v    // subtracts from system Interference
+                case .murk:            murkModifier += v             // adjusts system Murk
                 // ModType 27 (increaseMax) is not a ship-stat modifier: its only
                 // effect is raising another outfit's purchase cap, enforced at buy
                 // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
@@ -333,6 +355,8 @@ extension Galaxy {
             instantJump: fastJump,
             hyperspaceSpeedBonus: hyperspaceSpeed,
             fighterBays: fighterBays,
+            cloakFlags: cloakFlags, cloakScannerFlags: cloakScannerFlags,
+            interferenceReduction: interferenceReduction, murkModifier: murkModifier,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus)
     }
 
@@ -385,6 +409,9 @@ extension Galaxy {
         ship.marineCrew = lo.marineCrew
         ship.captureOddsBonus = lo.captureOddsBonus
         ship.fighterBays = lo.fighterBays.map { Ship.FighterBay(spec: $0) }
+        ship.cloakFlags = lo.cloakFlags
+        ship.cloakScannerFlags = lo.cloakScannerFlags
+        ship.interferenceReduction = lo.interferenceReduction
 
         var mounts: [WeaponMount] = []
         for w in lo.weapons {
