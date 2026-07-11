@@ -114,6 +114,30 @@ final class GameHost {
                         planets: planets, systemName: systemName,
                         game: aiGame, systemID: aiSystemID, galaxy: aiGalaxy,
                         arrivedViaJump: arrivedViaJump)
+
+        // Contraband scanning: when a government ship finishes scanning the
+        // player, its government checks the player's holds/equipment against its
+        // `ScanMask` and fines (`ScanFine`) / logs smuggling (`SmugPenalty`).
+        // The consequence needs live pilot state, so it's wired from here.
+        if let scanGame = aiGame {
+            let pilotStore = model.pilot
+            scene.onPlayerScanned = { [weak pilotStore, weak hud] scannerGovt in
+                guard let pilotStore,
+                      let result = ContrabandScan.enforce(on: &pilotStore.state,
+                                                           game: scanGame, govtID: scannerGovt),
+                      result.foundContraband else { return }
+                let name = scanGame.govt(scannerGovt)?.name ?? "Patrol"
+                if result.warningOnly {
+                    hud?.post("\(name): contraband detected — you are let off with a warning.")
+                } else if result.fine > 0 {
+                    hud?.post("\(name) fined you \(result.fine)cr for carrying contraband.")
+                }
+                if result.smugglingPenalty > 0 {
+                    hud?.post("\(name) logs your smuggling; your standing worsens.")
+                }
+                pilotStore.save()
+            }
+        }
     }
 
     /// The player's live ship + its sprite textures, built from the current pilot

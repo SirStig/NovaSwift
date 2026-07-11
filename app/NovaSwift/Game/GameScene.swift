@@ -125,6 +125,12 @@ final class GameScene: SKScene {
     /// fuel, advance the route, follow the pilot, save). Supplied by the container.
     private var jumpCommit: (() -> Void)?
     private var jumpCommitted = false
+
+    /// Invoked when a government ship completes a scan of the player, with that
+    /// ship's government id. The host wires this to the contraband scan-and-fine
+    /// (`ContrabandScan.enforce`), which needs live pilot state the scene doesn't
+    /// hold. nil = no consequence (e.g. the no-data demo path).
+    var onPlayerScanned: ((Int) -> Void)?
     /// True while a jump wants manual input suppressed (the whole sequence).
     var isJumping: Bool { jumpPhase != .none }
     /// Full-viewport white flash + radial star streaks, parented to the camera.
@@ -664,11 +670,17 @@ final class GameScene: SKScene {
                 if entityID == 0 { audio?.play(.docking) }
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
-            case let .shipScanned(_, targetID, at):
+            case let .shipScanned(scannerID, targetID, at):
                 if targetID == 0 {
                     // The player doesn't need a visual sweep over their own ship —
                     // just the bottom-left message log, like other ambient messages.
                     hud?.post("You are being scanned.")
+                    // The scanning government checks the player's holds/equipment
+                    // for contraband and fines it (host wires the consequence,
+                    // which needs pilot state). -1 govt = independent (no scan law).
+                    if let govt = world.ship(id: scannerID)?.government, govt >= 0 {
+                        onPlayerScanned?(govt)
+                    }
                 } else {
                     spawnScanSweep(at: CGPoint(x: at.x, y: at.y))
                 }

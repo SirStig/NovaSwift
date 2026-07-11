@@ -538,8 +538,4 @@ public enum WorldEvent {
     case shipBoarded(entityID: Int, at: Vec2)
     /// The player captured a disabled hulk; it joins the escort wing.
     case shipCaptured(entityID: Int, shipTypeID: Int, at: Vec2)
-    /// A government ship scanned the player and found contraband: `fine` credits
-    /// were levied (0 = warning only), `smugglingPenalty` legal-record points
-    /// were applied for mission contraband. See `World.reportScan`.
-    case contrabandDetected(scannerID: Int, fine: Int, smugglingPenalty: Int, at: Vec2)
 }

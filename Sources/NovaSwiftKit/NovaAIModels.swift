@@ -291,6 +291,14 @@ public struct GovtRes {
     /// Classes this government is hostile to.
     public let enemies: [Int]
     public let shipSpeedFactor: Int
+    /// `gövt.ScanMask` (Bible): 16-bit contraband jurisdiction mask. "If any of
+    /// the 1 bits in a government's ScanMask field match any of the 1 bits in a
+    /// mission's [or jünk type's, or outfit's] ScanMask field, that government
+    /// will consider that cargo illegal." `0` = this govt polices nothing. @50,
+    /// `WB16`, confirmed against real data: Federation `0x8000`, its sub-factions
+    /// (Bureau `0x8008`, Civvies `0x8010`) inherit the `0x8000` bit — the same
+    /// bit-space `mïsn.ScanMask@24` uses. See docs/reverse-engineering/GOVERNMENT.md.
+    public let scanMask: UInt16
     /// "The short string to show for ships of this government when they are
     /// hailed by the player" (EV Nova Bible). Falls back to `name` when blank.
     public let commName: String
@@ -358,6 +366,7 @@ public struct GovtRes {
         allies  = (0..<4).map { ai16(d, 32 + $0 * 2) }.filter { $0 != -1 }
         enemies = (0..<4).map { ai16(d, 40 + $0 * 2) }.filter { $0 != -1 }
         shipSpeedFactor = ai16(d, 48)
+        scanMask = au16(d, 50)
         let rawName = acstr(d, 52, 16)
         commName = rawName.isEmpty ? name : rawName
         let rawTarget = acstr(d, 68, 16).trimmingCharacters(in: .whitespaces)
