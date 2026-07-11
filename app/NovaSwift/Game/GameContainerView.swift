@@ -234,6 +234,13 @@ struct GameContainerView: View {
     @State private var showMissionsPanel = false
     @State private var showPilotInfoPanel = false
     @State private var showEscortsPanel = false
+    /// Bumped when an escort order is issued so the command window re-renders
+    /// with the new highlighted order (engine state changes don't publish).
+    @State private var escortRefresh = 0
+    /// The disabled ship currently being boarded (nil = plunder dialog closed).
+    @State private var boardManifest: World.BoardingManifest?
+    /// Bumped after taking loot so the plunder dialog re-reads the manifest.
+    @State private var boardRefresh = 0
     /// Credit cost of "Request Assistance" by how the hailed crew feels about
     /// the player (`GameScene.AssistanceTier`) — allies help for free; a
     /// crew that dislikes the player (negative but not-yet-hostile legal
@@ -314,34 +321,13 @@ struct GameContainerView: View {
                 }
 
                 // Mobile action-menu panels (opened from the on-screen controls).
-                // These reuse the same authentic dialogs the in-game menu hosts.
-                if showMissionsPanel, let graphics = model.uiGraphics, let game = model.data.game {
-                    MissionInfoView(graphics: graphics, game: game, pilot: model.pilot,
-                                    onClose: { showMissionsPanel = false })
-                        .transition(.opacity)
-                }
-                if showPilotInfoPanel, let graphics = model.uiGraphics {
-                    Color.black.opacity(0.5).ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { showPilotInfoPanel = false }
-                    PlayerInfoView(graphics: graphics, pilot: model.pilot,
-                                   onJettison: { jettisonHold() },
-                                   onDone: { showPilotInfoPanel = false })
-                        .transition(.opacity)
-                }
-                if showEscortsPanel {
-                    Color.black.opacity(0.55).ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { showEscortsPanel = false }
-                    EscortsView()
-                        .shrinkToFitViewport()
-                        .transition(.opacity)
-                }
+                mobilePanels
 
                 if showMenu {
                     GameMenuView(hud: host.hud,
                                  onResume: { showMenu = false },
                                  onOpenMap: { nav.showingMap = true },
+                                 onOpenEscorts: { showEscortsPanel = true },
                                  showDebug: model.settings.debugModeEnabled,
                                  onOpenDebug: { showMenu = false; showDebugSuite = true })
                 }
@@ -376,8 +362,7 @@ struct GameContainerView: View {
                     .transition(.opacity)
                 }
             } else {
-                Color.black.ignoresSafeArea()
-                ProgressView().tint(.white)
+                GameLoadingView()
             }
         }
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
@@ -740,6 +725,96 @@ struct GameContainerView: View {
         host?.scene.tapToFlyEnabled = (model.settings.controlScheme == .tapToTurn)
     }
 
+    /// The mobile action-menu panels (missions / pilot info / escorts), reusing
+    /// the same authentic dialogs the in-game menu hosts. Extracted from `body`
+    /// to keep that expression inside the type-checker's budget.
+    @ViewBuilder private var mobilePanels: some View {
+        if showMissionsPanel, let graphics = model.uiGraphics, let game = model.data.game {
+            MissionInfoView(graphics: graphics, game: game, pilot: model.pilot,
+                            onClose: { showMissionsPanel = false })
+                .transition(.opacity)
+        }
+        if showPilotInfoPanel, let graphics = model.uiGraphics {
+            Color.black.opacity(0.5).ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { showPilotInfoPanel = false }
+            PlayerInfoView(graphics: graphics, pilot: model.pilot,
+                           onJettison: { jettisonHold() },
+                           onDone: { showPilotInfoPanel = false })
+                .transition(.opacity)
+        }
+        if showEscortsPanel, let scene = host?.scene {
+            Color.black.opacity(0.55).ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { showEscortsPanel = false }
+            let _ = escortRefresh   // re-read the roster after each order
+            EscortsView(escorts: scene.escortRoster(),
+                        currentOrder: scene.escortOrder,
+                        onCommand: { scene.commandEscorts($0); escortRefresh += 1 },
+                        onClose: { showEscortsPanel = false })
+                .shrinkToFitViewport()
+                .transition(.opacity)
+        }
+        if let m = boardManifest, let scene = host?.scene {
+            let _ = boardRefresh   // re-read after taking loot
+            PlunderView(
+                graphics: host?.graphics,
+                targetName: m.name,
+                cargoLines: m.cargo.map { PlunderLine(label: commodityLabel($0.commodity),
+                                                      amount: "\($0.tons)") },
+                creditsAboard: m.credits, ammoAboard: 0, energyAboard: 0,
+                captureChance: m.captureChance,
+                onTakeCargo: { plunderTakeCargo(scene, shipID: m.shipID) },
+                onTakeCredits: { plunderTakeCredits(scene, shipID: m.shipID) },
+                onTakeAmmo: {}, onTakeEnergy: {},
+                onCaptureShip: { plunderCapture(scene, shipID: m.shipID) },
+                onDemandTribute: { plunderTakeCredits(scene, shipID: m.shipID) },
+                onDismiss: { boardManifest = nil })
+                .transition(.opacity)
+        }
+    }
+
+    /// A commodity's display name for the plunder manifest (best-effort — most
+    /// hulks have empty holds, so this is rarely exercised).
+    private func commodityLabel(_ id: Int) -> String {
+        if let c = Commodity(rawValue: id) { return host?.game?.commodityName(c) ?? "Cargo" }
+        return "Cargo"
+    }
+
+    private func refreshBoard(_ scene: GameScene, shipID: Int) {
+        boardManifest = scene.boardManifest(shipID)
+        boardRefresh += 1
+    }
+
+    private func plunderTakeCredits(_ scene: GameScene, shipID: Int) {
+        let credits = scene.plunderCredits(shipID)
+        guard credits > 0 else { return }
+        model.pilot.state.credits += credits
+        model.pilot.save()
+        host?.hud.post("Took \(credits) credits.")
+        refreshBoard(scene, shipID: shipID)
+    }
+
+    private func plunderTakeCargo(_ scene: GameScene, shipID: Int) {
+        let taken = scene.plunderCargo(shipID)
+        guard !taken.isEmpty else { return }
+        for (commodity, tons) in taken { model.pilot.state.cargo[commodity, default: 0] += tons }
+        model.pilot.save()
+        let total = taken.reduce(0) { $0 + $1.tons }
+        host?.hud.post("Took \(total) tons of cargo.")
+        refreshBoard(scene, shipID: shipID)
+    }
+
+    private func plunderCapture(_ scene: GameScene, shipID: Int) {
+        if scene.attemptCapture(shipID) {
+            host?.hud.post("Ship captured — it joins your escorts.")
+            boardManifest = nil
+        } else {
+            host?.hud.post("Capture attempt failed.")
+            refreshBoard(scene, shipID: shipID)
+        }
+    }
+
     /// Open one of the mobile action-menu panels over flight.
     private func openMobilePanel(_ panel: MobilePanel) {
         switch panel {
@@ -785,6 +860,13 @@ struct GameContainerView: View {
             host?.scene.clearTarget()
         case .hailTarget:
             hail()
+        case .selectSecondaryNext:
+            host?.scene.cycleSecondaryWeapon(forward: true)
+        case .selectSecondaryPrev:
+            host?.scene.cycleSecondaryWeapon(forward: false)
+        case .board:
+            // Board the targeted hulk if it's disabled and in reach.
+            if let m = host?.scene.attemptBoard() { boardManifest = m }
         default:
             break
         }
@@ -957,6 +1039,52 @@ struct GameContainerView: View {
                 Spacer()
             }
             Spacer()
+        }
+    }
+}
+
+/// Shown while `GameHost` builds the live scene (ship + planet sprites, HUD
+/// art) for the destination system — a synchronous decode that can take a
+/// visible moment on mobile hardware. Matches `LoadingView`'s starfield/
+/// wordmark treatment so this brief gap reads as an intentional loading
+/// screen rather than a stalled black one.
+private struct GameLoadingView: View {
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            StarfieldBackground()
+
+            VStack(spacing: 18) {
+                AppLogo()
+                    .frame(width: 88, height: 88)
+                    .shadow(color: novaAmber.opacity(0.28), radius: 28)
+                    .scaleEffect(pulse ? 1.03 : 1.0)
+
+                Text("NOVA SWIFT")
+                    .novaFont(.title, weight: .heavy, size: 34)
+                    .tracking(8)
+                    .foregroundStyle(.white)
+
+                LinearGradient(colors: [.clear, novaAmber.opacity(0.55), .clear],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 260, height: 1)
+
+                ProgressView()
+                    .tint(novaAmber)
+                    .scaleEffect(1.2)
+                    .padding(.top, 8)
+
+                Text("Entering the system…")
+                    .novaFont(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
         }
     }
 }

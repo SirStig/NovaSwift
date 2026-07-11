@@ -127,6 +127,43 @@ public final class Ship {
     public var armorRechargePerSec: Double = 0
     public var weapons: [WeaponMount] = []
 
+    /// The `wëap` id of the secondary weapon the player has selected to fire on
+    /// the secondary trigger (EV Nova fires only the *chosen* secondary, not all
+    /// of them at once). nil = not yet chosen; `effectiveSecondaryID` then falls
+    /// back to the first secondary fitted. Ignored for AI ships, which fire every
+    /// group their brain triggers.
+    public var selectedSecondaryID: Int?
+
+    /// Distinct secondary weapons fitted, in mount order — the cycle the player's
+    /// weapon-switch control steps through. Point-defense mounts fire themselves,
+    /// so they aren't selectable.
+    public var secondaryWeaponIDs: [Int] {
+        weapons.filter { $0.spec.isSecondary && !$0.spec.isPointDefense }.map { $0.spec.id }
+    }
+
+    /// The secondary id actually used when the secondary trigger is held: the
+    /// player's selection, or the first secondary fitted if none chosen yet.
+    public var effectiveSecondaryID: Int? {
+        selectedSecondaryID ?? secondaryWeaponIDs.first
+    }
+
+    /// The mount for the effective secondary (drives the HUD weapon readout).
+    public var effectiveSecondaryMount: WeaponMount? {
+        guard let id = effectiveSecondaryID else { return nil }
+        return weapons.first { $0.spec.id == id && $0.spec.isSecondary }
+    }
+
+    /// Step the selected secondary to the next/previous fitted secondary,
+    /// wrapping. No-op when the ship carries fewer than two secondaries.
+    public func cycleSecondary(forward: Bool) {
+        let ids = secondaryWeaponIDs
+        guard !ids.isEmpty else { selectedSecondaryID = nil; return }
+        let current = effectiveSecondaryID ?? ids[0]
+        let idx = ids.firstIndex(of: current) ?? 0
+        let n = ids.count
+        selectedSecondaryID = ids[forward ? (idx + 1) % n : (idx - 1 + n) % n]
+    }
+
     /// World-space muzzle for exit point `index` of `exitType`, given the ship's
     /// live position/heading — the real hardpoint the shot leaves from.
     public func muzzle(exitType: WeaponExitType, index: Int) -> Vec2 {
@@ -179,6 +216,10 @@ public final class Ship {
     public var cargo: [Int: Int] = [:]
     public var cargoUsed: Int { cargo.values.reduce(0, +) }
     public var cargoFree: Int { max(0, cargoCapacity - cargoUsed) }
+
+    /// Credits aboard for plunder once disabled. -1 = not yet rolled; set to 0
+    /// once the player has taken them, so re-boarding can't duplicate the haul.
+    public var plunderCredits: Int = -1
 
     /// Whether the ship has enough fuel for one hyperspace jump.
     public var canJump: Bool { fuel >= ShipFuel.perJump }
@@ -420,6 +461,9 @@ public final class Ship {
 /// `intent` (player) and each NPC's `brain`. Rendering reads state and drains
 /// `events`; it never mutates the simulation.
 public final class World {
+    /// The player ship's fixed entity id. Escorts carry this as their `leaderID`.
+    public static let playerEntityID = 0
+
     public var player: Ship
     public var intent = ControlIntent()
     public var tuning: FlightTuning
@@ -714,8 +758,17 @@ public final class World {
             // Point-defense mounts fire themselves via `runPointDefense`.
             if spec.isPointDefense { continue }
             // Fire-group gating: guns on the primary trigger, missiles/rockets on
-            // the secondary. NPCs fire everything on whichever trigger their AI held.
-            let triggered = isAI ? anyTrigger : (spec.isSecondary ? secondary : primary)
+            // the secondary. NPCs fire everything on whichever trigger their AI
+            // held. The player fires only the *selected* secondary, not every
+            // secondary at once (EV Nova's secondary-weapon selection).
+            let triggered: Bool
+            if isAI {
+                triggered = anyTrigger
+            } else if spec.isSecondary {
+                triggered = secondary && spec.id == ship.effectiveSecondaryID
+            } else {
+                triggered = primary
+            }
             guard triggered else { continue }
             // Reload not ready / dry on ammo: the classic invisible "why didn't
             // my weapon fire" bug. Logged once per block-reason transition.
@@ -1317,6 +1370,118 @@ public final class World {
     /// Drop the player's current target lock, if any.
     public func clearPlayerTarget() {
         player.currentTargetID = nil
+    }
+
+    // MARK: Player escorts
+
+    /// Ships currently under the player's command (captured or hired), i.e. AI
+    /// ships whose fleet leader is the player.
+    public var playerEscorts: [Ship] {
+        npcs.filter { $0.isAlive && $0.brain?.leaderID == Self.playerEntityID }
+    }
+
+    /// Issue a standing order to the whole escort wing.
+    public func setPlayerEscortOrder(_ order: EscortOrder) {
+        for e in playerEscorts { e.brain?.escortOrder = order }
+    }
+
+    /// The current wing order (the most common one among escorts), or nil when
+    /// the player has none — for the command window's selected state.
+    public var playerEscortOrder: EscortOrder? {
+        let orders = playerEscorts.compactMap { $0.brain?.escortOrder }
+        guard let first = orders.first else { return nil }
+        return orders.allSatisfy { $0 == first } ? first : nil
+    }
+
+    // MARK: Boarding / plunder
+
+    /// What a disabled ship yields when boarded — its name, credits aboard, the
+    /// cargo in its hold, and the odds of capturing it (nil = uncapturable).
+    public struct BoardingManifest {
+        public let shipID: Int
+        public let name: String
+        public let credits: Int
+        public let cargo: [(commodity: Int, tons: Int)]
+        public let captureChance: Int?   // percent, nil = can't be captured
+    }
+
+    /// The plunder a disabled ship offers, or nil if `shipID` isn't a boardable
+    /// (alive + disabled) hulk. Deterministic per ship so re-opening the dialog
+    /// shows the same haul.
+    public func boardingManifest(for shipID: Int) -> BoardingManifest? {
+        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled else { return nil }
+        let cargo = s.cargo.filter { $0.value > 0 }
+            .map { (commodity: $0.key, tons: $0.value) }
+            .sorted { $0.commodity < $1.commodity }
+        // Tougher hulls are harder to take; the largest are uncapturable.
+        let toughness = s.maxArmor + s.maxShield
+        let chance: Int? = toughness > 2200 ? nil : max(5, min(85, 78 - Int(toughness / 40)))
+        return BoardingManifest(shipID: shipID, name: s.name,
+                                credits: rolledPlunderCredits(s), cargo: cargo, captureChance: chance)
+    }
+
+    /// Credits aboard a hulk, rolled once (deterministically from its identity +
+    /// toughness) and cached on the ship.
+    private func rolledPlunderCredits(_ s: Ship) -> Int {
+        if s.plunderCredits < 0 {
+            var h = UInt64(bitPattern: Int64(s.entityID &+ 1)) &* 0x9E3779B97F4A7C15
+            h ^= UInt64(bitPattern: Int64(s.shipTypeID &+ 7)) &* 0xD1B54A32D192ED03
+            let value = max(40, Int((s.maxArmor + s.maxShield) / 2))
+            s.plunderCredits = value / 2 + Int(h % UInt64(max(1, value)))
+        }
+        return s.plunderCredits
+    }
+
+    /// Take the credits aboard a hulk (zeroing them so they can't be re-taken).
+    public func takePlunderCredits(from shipID: Int) -> Int {
+        guard let s = ship(id: shipID) else { return 0 }
+        let c = rolledPlunderCredits(s)
+        s.plunderCredits = 0
+        return c
+    }
+
+    /// Move a hulk's cargo into the player's hold, limited by free space, and
+    /// return what was actually taken (commodity id → tons).
+    @discardableResult
+    public func takePlunderCargo(from shipID: Int) -> [(commodity: Int, tons: Int)] {
+        guard let s = ship(id: shipID) else { return [] }
+        var taken: [(commodity: Int, tons: Int)] = []
+        for (commodity, tons) in s.cargo.sorted(by: { $0.key < $1.key }) where tons > 0 {
+            let room = player.cargoFree
+            guard room > 0 else { break }
+            let move = min(tons, room)
+            player.cargo[commodity, default: 0] += move
+            s.cargo[commodity]! -= move
+            if s.cargo[commodity]! <= 0 { s.cargo[commodity] = nil }
+            taken.append((commodity, move))
+        }
+        return taken
+    }
+
+    /// Attempt to capture a hulk given a 0–99 `roll` (supplied by the caller so
+    /// the engine stays deterministic). On success the ship joins the player's
+    /// escort wing. Returns whether it succeeded.
+    public func attemptCapture(shipID: Int, roll: Int) -> Bool {
+        guard let manifest = boardingManifest(for: shipID), let chance = manifest.captureChance,
+              let s = ship(id: shipID) else { return false }
+        guard roll < chance else { return false }
+        recruitEscort(s)
+        return true
+    }
+
+    /// Recruit `ship` as a player escort — ally it to the player, clear any
+    /// hostility, and place it in the formation under a defensive order. Assigns
+    /// the next free formation slot and gives it a brain if it somehow lacked one.
+    public func recruitEscort(_ ship: Ship) {
+        let brain = ship.brain ?? AIBrain(aiType: .warship, govt: player.government)
+        ship.brain = brain
+        ship.government = player.government
+        brain.leaderID = Self.playerEntityID
+        brain.escortOrder = .defensive
+        brain.provokedByPlayer = false
+        brain.formationSlot = playerEscorts.filter { $0.entityID != ship.entityID }.count
+        ship.disabled = false
+        ship.currentTargetID = nil
     }
 
     /// Lock a specific ship by id (click-to-select). Unlike

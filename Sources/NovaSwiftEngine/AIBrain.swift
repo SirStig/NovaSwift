@@ -3,6 +3,24 @@ import NovaSwiftKit
 
 /// What an NPC is currently doing. Transitions are driven by `AIBrain.think`
 /// from perception (nearest hostile), health, and disposition (`AIType`).
+/// A standing order the player issues to their escorts (the EV Nova escort
+/// command window). Drives how a `leaderID == 0` ship behaves in `think`.
+public enum EscortOrder: String, Sendable, CaseIterable, Identifiable {
+    case aggressive   // hunt the player's target / any nearby hostile
+    case defensive    // fly formation, adopt the player's target, fight back
+    case evasive      // avoid combat; flee threats, otherwise keep formation
+    case hold         // stop and hold position; don't follow or engage
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .aggressive: return "Aggressive"
+        case .defensive:  return "Defensive"
+        case .evasive:    return "Evasive"
+        case .hold:       return "Hold Position"
+        }
+    }
+}
+
 public enum AIState: String, Sendable {
     case spawning      // just arrived; pick an initial goal
     case traveling     // trader heading to a planet
@@ -42,10 +60,15 @@ public final class AIBrain {
     /// Set true when the player damages this ship — it will fight back even if
     /// its government is otherwise neutral.
     public var provokedByPlayer = false
-    /// Fleet leader to escort, if any.
+    /// Fleet leader to escort, if any. A `leaderID` of `World.playerEntityID`
+    /// (0) marks a ship as one of the *player's* escorts — commanded via
+    /// `escortOrder`.
     public var leaderID: Int?
     /// This escort's slot in the leader's formation (0-based), for tidy wings.
     public var formationSlot = 0
+    /// Standing order for a player escort (`leaderID == 0`). Ignored by ordinary
+    /// NPC-fleet escorts, which always behave as `.defensive`.
+    public var escortOrder: EscortOrder = .defensive
     /// Set once this assist run has docked with the player and delivered
     /// fuel/repairs — reset every time `beginAssisting()` starts a new run.
     public var assistDelivered = false
@@ -267,13 +290,36 @@ public final class AIBrain {
         }
 
         // If an escort and its leader is alive, prefer escorting/adopting target.
+        // Player escorts (leaderID == 0) additionally obey their standing order.
         if let lid = leaderID {
             if let leader = world.ship(id: lid), leader.isAlive {
-                if state != .attacking && state != .fleeing { enter(.escorting) }
-                // Adopt the leader's target when it has one.
-                if state != .fleeing, let lt = leader.currentTargetID,
-                   let lts = world.ship(id: lt), isHostile(me, lts, world), armed {
-                    targetID = lt; enter(.attacking)
+                let isPlayerEscort = (lid == World.playerEntityID)
+                let order: EscortOrder = isPlayerEscort ? escortOrder : .defensive
+                switch order {
+                case .hold:
+                    // Hold position: don't follow or fight; coast to a stop.
+                    targetID = nil
+                    me.currentTargetID = nil
+                    return ControlIntent()
+                case .evasive:
+                    // Keep formation, but run from any real threat rather than engage.
+                    if threat != nil { enter(.fleeing) }
+                    else if state != .attacking { enter(.escorting) }
+                case .aggressive:
+                    // Adopt the leader's target, else hunt the nearest hostile.
+                    let mark = leader.currentTargetID.flatMap { world.ship(id: $0) } ?? threat
+                    if armed, let m = mark, isHostile(me, m, world) {
+                        targetID = m.entityID; enter(.attacking)
+                    } else if state != .attacking && state != .fleeing {
+                        enter(.escorting)
+                    }
+                case .defensive:
+                    if state != .attacking && state != .fleeing { enter(.escorting) }
+                    // Adopt the leader's target when it has one.
+                    if state != .fleeing, let lt = leader.currentTargetID,
+                       let lts = world.ship(id: lt), isHostile(me, lts, world), armed {
+                        targetID = lt; enter(.attacking)
+                    }
                 }
             } else {
                 leaderID = nil   // leader gone — act on our own disposition

@@ -13,6 +13,8 @@ struct GameMenuView: View {
     @ObservedObject var hud: GameHUDModel
     var onResume: () -> Void
     var onOpenMap: () -> Void
+    /// Open the escort command window (container-owned, needs the live scene).
+    var onOpenEscorts: () -> Void = {}
     /// Whether to show the Debug Suite row (debug mode enabled).
     var showDebug: Bool = false
     /// Open the in-game debug suite.
@@ -101,6 +103,7 @@ struct GameMenuView: View {
                         if model.uiGraphics != nil, model.data.game != nil { showMissions = true }
                         else { info = "Import your EV Nova data to view missions." }
                     }
+                    row("Escorts", "person.2.fill") { onResume(); onOpenEscorts() }
                     row("Story Map", "point.3.connected.trianglepath.dotted") {
                         openStoryGuide(.map)
                     }

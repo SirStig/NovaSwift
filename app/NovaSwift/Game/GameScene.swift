@@ -860,6 +860,88 @@ final class GameScene: SKScene {
         selectedPlanetID = nil
     }
 
+    /// Step the selected secondary weapon (the one the secondary trigger fires),
+    /// reflecting the change in the HUD readout immediately so the switch is
+    /// visible even between throttled HUD updates. Returns the new weapon's name
+    /// (for a transient on-screen confirmation), or nil with no secondaries.
+    @discardableResult
+    func cycleSecondaryWeapon(forward: Bool) -> String? {
+        guard let player = world?.player, !player.secondaryWeaponIDs.isEmpty else { return nil }
+        player.cycleSecondary(forward: forward)
+        if let mount = player.effectiveSecondaryMount {
+            hud?.weaponName = mount.spec.name.novaDisplayName
+            hud?.weaponAmmo = mount.ammo
+            return mount.spec.name.novaDisplayName
+        }
+        return nil
+    }
+
+    // MARK: Player escorts (command window)
+
+    /// A snapshot of one player escort for the command UI.
+    struct EscortInfo: Identifiable {
+        let id: Int
+        let name: String
+        let shipType: Int
+        let shieldFraction: Double
+        let armorFraction: Double
+    }
+
+    /// The player's current escort wing (captured / recruited ships).
+    func escortRoster() -> [EscortInfo] {
+        (world?.playerEscorts ?? []).map {
+            EscortInfo(id: $0.entityID, name: $0.name, shipType: $0.shipTypeID,
+                       shieldFraction: $0.shieldFraction, armorFraction: $0.armorFraction)
+        }
+    }
+
+    /// The wing's shared standing order (nil if mixed / no escorts).
+    var escortOrder: EscortOrder? { world?.playerEscortOrder }
+
+    /// Issue a standing order to the whole escort wing.
+    func commandEscorts(_ order: EscortOrder) { world?.setPlayerEscortOrder(order) }
+
+    // MARK: Boarding
+
+    /// How close (world units) the player must be to a disabled hulk to board it.
+    private let boardingRange: Double = 280
+
+    /// The loot from a boardable hulk in reach — the current target if it's a
+    /// disabled ship in range, otherwise the nearest disabled ship in range
+    /// (so the Board control "just works" near a wreck, since the target-cycle
+    /// hotkeys deliberately skip disabled ships). nil when nothing is boardable.
+    func attemptBoard() -> World.BoardingManifest? {
+        guard let w = world else { return nil }
+        let pos = w.player.position
+        func boardable(_ s: Ship) -> Bool {
+            s.isAlive && s.disabled && s !== w.player && (s.position - pos).length <= boardingRange
+        }
+        // Prefer the explicit target, else the nearest disabled hulk in range.
+        if let tid = w.player.currentTargetID, let s = w.ship(id: tid), boardable(s) {
+            return w.boardingManifest(for: tid)
+        }
+        let nearest = w.npcs.filter(boardable)
+            .min { ($0.position - pos).length < ($1.position - pos).length }
+        guard let hulk = nearest else { return nil }
+        world?.selectTarget(id: hulk.entityID)   // lock it so the plunder targets it
+        return w.boardingManifest(for: hulk.entityID)
+    }
+
+    /// The (possibly updated) manifest for a boarded ship, for refreshing the
+    /// plunder dialog after taking loot.
+    func boardManifest(_ id: Int) -> World.BoardingManifest? { world?.boardingManifest(for: id) }
+
+    /// Take the credits aboard a boarded hulk; returns the amount.
+    func plunderCredits(_ id: Int) -> Int { world?.takePlunderCredits(from: id) ?? 0 }
+
+    /// Move a boarded hulk's cargo into the hold; returns what was taken.
+    func plunderCargo(_ id: Int) -> [(commodity: Int, tons: Int)] { world?.takePlunderCargo(from: id) ?? [] }
+
+    /// Roll to capture a boarded hulk into the escort wing; returns success.
+    func attemptCapture(_ id: Int) -> Bool {
+        world?.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)) ?? false
+    }
+
     /// Click/tap hit-test in scene space (== world space here): nearest ship
     /// first, then nearest planet; clears the selection if nothing was hit.
     /// Called by `GameContainerView` off a tap gesture on the `SpriteView`.
@@ -1981,7 +2063,10 @@ final class GameScene: SKScene {
         updateNavTargetHUD()
         hud.cargoUsed = p.cargoUsed
         hud.cargoCapacity = p.cargoCapacity
-        if let mount = p.weapons.first {
+        // The weapon readout tracks the selected *secondary* (what the secondary
+        // trigger / weapon-switch control fires), matching EV Nova's status bar;
+        // falls back to the first weapon so a guns-only ship still shows one.
+        if let mount = p.effectiveSecondaryMount ?? p.weapons.first {
             hud.weaponName = mount.spec.name.novaDisplayName
             hud.weaponAmmo = mount.ammo   // -1 = unlimited
         } else {
