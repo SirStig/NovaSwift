@@ -230,6 +230,10 @@ struct GameContainerView: View {
     @FocusState private var isSceneFocused: Bool
     /// The open hail/communication dialog, if any (nil = closed).
     @State private var hailDialogState: HailDialogState?
+    /// Mobile action-menu panels the on-screen controls can open over flight.
+    @State private var showMissionsPanel = false
+    @State private var showPilotInfoPanel = false
+    @State private var showEscortsPanel = false
     /// Credit cost of "Request Assistance" by how the hailed crew feels about
     /// the player (`GameScene.AssistanceTier`) — allies help for free; a
     /// crew that dislikes the player (negative but not-yet-hostile legal
@@ -266,7 +270,19 @@ struct GameContainerView: View {
                 }
 
                 #if os(iOS)
-                TouchControlsOverlay(input: host.input)
+                // The play area is free of controls (so tap/drag-to-fly and
+                // target taps work), with clusters at the corners; the right-hand
+                // ones inset by the status-bar HUD width so they never overlap it.
+                if landedSpobID == nil {
+                    GeometryReader { geo in
+                        TouchControlsOverlay(
+                            input: host.input, hud: host.hud,
+                            tapToFly: model.settings.controlScheme == .tapToTurn,
+                            rightInset: Self.sidebarWidth(in: geo.size, style: host.hudStyle),
+                            onDiscrete: handleDiscrete,
+                            onOpenPanel: openMobilePanel)
+                    }
+                }
                 #endif
 
                 topLeftMenuButton
@@ -295,6 +311,31 @@ struct GameContainerView: View {
                         onRequestLanding: { requestPlanetLanding() },
                         onDemandTribute: { demandPlanetTribute() },
                         onClose: { hailDialogState = nil })
+                }
+
+                // Mobile action-menu panels (opened from the on-screen controls).
+                // These reuse the same authentic dialogs the in-game menu hosts.
+                if showMissionsPanel, let graphics = model.uiGraphics, let game = model.data.game {
+                    MissionInfoView(graphics: graphics, game: game, pilot: model.pilot,
+                                    onClose: { showMissionsPanel = false })
+                        .transition(.opacity)
+                }
+                if showPilotInfoPanel, let graphics = model.uiGraphics {
+                    Color.black.opacity(0.5).ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { showPilotInfoPanel = false }
+                    PlayerInfoView(graphics: graphics, pilot: model.pilot,
+                                   onJettison: { jettisonHold() },
+                                   onDone: { showPilotInfoPanel = false })
+                        .transition(.opacity)
+                }
+                if showEscortsPanel {
+                    Color.black.opacity(0.55).ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { showEscortsPanel = false }
+                    EscortsView()
+                        .shrinkToFitViewport()
+                        .transition(.opacity)
                 }
 
                 if showMenu {
@@ -411,8 +452,10 @@ struct GameContainerView: View {
                 // at all" on a fresh pilot: no error, the key events just never
                 // arrive because nothing ever became key.
                 grabSceneFocus(reason: "initial host build")
+                applyControlScheme()
             }
         }
+        .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
         .onChange(of: nav.currentSystemID) { _, newID in
             // `navReady` alone doesn't catch the initial `nav.configure(...)`
             // notification racing this handler (see `hostSystemID`'s doc
@@ -439,6 +482,7 @@ struct GameContainerView: View {
                 debug.attach(host?.scene)                     // re-point the debug suite (a jump ends any stress test)
                 setScenePaused(false, reason: "jump rebuild")
                 syncNav(host)
+                applyControlScheme()
                 // A second deferred tick, same reason as the `.task` case above:
                 // `host` just changed identity, so the new `sceneLayer` view
                 // needs its own transaction to enter the tree before it can
@@ -687,6 +731,28 @@ struct GameContainerView: View {
         .focusEffectDisabled()
         .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
                                    onDiscrete: handleDiscrete))
+    }
+
+    /// Push the touch steering mode (Settings ▸ Touch scheme) down to the live
+    /// scene. Called on every host build and whenever the setting changes, so a
+    /// jump-rebuilt scene keeps the player's choice.
+    private func applyControlScheme() {
+        host?.scene.tapToFlyEnabled = (model.settings.controlScheme == .tapToTurn)
+    }
+
+    /// Open one of the mobile action-menu panels over flight.
+    private func openMobilePanel(_ panel: MobilePanel) {
+        switch panel {
+        case .missions:  showMissionsPanel = true
+        case .pilotInfo: showPilotInfoPanel = true
+        case .escorts:   showEscortsPanel = true
+        }
+    }
+
+    /// Dump the hold — the mobile Pilot-info panel's "Jettison Cargo".
+    private func jettisonHold() {
+        model.pilot.state.cargo = [:]
+        model.pilot.save()
     }
 
     private func handleDiscrete(_ action: GameAction) {

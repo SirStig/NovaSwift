@@ -27,6 +27,19 @@ final class GameScene: SKScene {
     private var world: World!
     private var input: InputController!
     private var controllerInput: GameControllerInput?
+
+    /// When true (Settings ▸ Touch scheme = "Tap to Turn"), touching the space
+    /// view points the ship where you touch; a tap that doesn't drag no longer
+    /// selects a target (the on-screen action buttons do that instead). When
+    /// false (the default "Virtual Cockpit"), a tap selects a target and the
+    /// arc buttons steer. Set by the container from the live settings.
+    var tapToFlyEnabled = false
+    /// Live finger offset from the view centre while steering by touch, in view
+    /// points (x → right, y → down). Converted to a compass heading every frame
+    /// so the steer stays correct as the follow-camera tracks the ship. nil when
+    /// not actively steering — the last heading is then held (the ship coasts on
+    /// its set bearing rather than snapping straight).
+    private var steerViewOffset: CGVector?
     private var hud: GameHUDModel?
     private var settings = GameSettings()
     private var audio: GameAudio?
@@ -335,11 +348,35 @@ final class GameScene: SKScene {
     }
     #else
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let t = touches.first {
+        guard let t = touches.first else { return }
+        if tapToFlyEnabled {
+            steerViewOffset = viewOffset(of: t)
+        } else {
             let p = t.location(in: self)
             Log.input.debug("touchesBegan -> scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public))")
             selectAt(scenePoint: p)
         }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard tapToFlyEnabled, let t = touches.first else { return }
+        steerViewOffset = viewOffset(of: t)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        steerViewOffset = nil   // stop steering; the last heading is held
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        steerViewOffset = nil
+    }
+
+    /// A touch's offset from the presenting view's centre (which the follow
+    /// camera keeps pinned to the ship), in view points.
+    private func viewOffset(of t: UITouch) -> CGVector {
+        guard let v = view else { return .zero }
+        let loc = t.location(in: v)
+        return CGVector(dx: loc.x - v.bounds.midX, dy: loc.y - v.bounds.midY)
     }
     #endif
 
@@ -522,6 +559,21 @@ final class GameScene: SKScene {
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
 
         controllerInput?.poll()
+
+        // Tap/drag-to-fly steering: turn the finger's offset from the view centre
+        // (= the follow-camera-centred ship) into a compass heading the ship
+        // rotates toward. Done per-frame, not just on touch-move, so a held-still
+        // finger keeps steering. When steering stops the last heading persists
+        // (coast on bearing); when the mode is off we clear it so no stale
+        // heading fights the arc buttons.
+        if tapToFlyEnabled {
+            if let off = steerViewOffset, jumpPhase == .none {
+                input?.touch.desiredHeading = atan2(off.dx, -off.dy)
+            }
+        } else {
+            input?.touch.desiredHeading = nil
+        }
+
         // During a hyperspace jump the scene flies the ship (locking manual
         // control); otherwise the player's own intent drives it.
         let intent: ControlIntent

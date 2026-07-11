@@ -16,6 +16,7 @@ data/EV Nova/
 # --- Build artifacts ---
 build/
 DerivedData/
+scratch-dd/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 .build/
