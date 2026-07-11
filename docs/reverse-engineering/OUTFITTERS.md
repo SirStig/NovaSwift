@@ -549,8 +549,8 @@ Consumed-on-purchase (permits) | `Flags 0x0010` | ✅ Implemented and wired — 
 Persistent-across-ship-trade | `Flags 0x0004`/`0x0020` | ❌ Missing as a distinct rule — outfits currently always carry over regardless of the flag | `PilotStore.buyShip` comment
 DispWeight-tier suppression | `Flags 0x1000` | ❌ Missing | —
 Ranks-section outfit | `Flags 0x2000` | ❌ Missing | —
-Illegal-outfit `ScanMask` | `ScanMask` (outf-level) | ⚠️ Decoded, not consumed — `OutfRes.scanMask` (`@1006`) is now a real field but nothing evaluates it against a government's `ScanMask` (distinct from the mission-level `scanMask` that *is* both decoded and used) | `NovaAIModels.swift`
-`ItemClass` (for pêrs loot) | `ItemClass` | ⚠️ Decoded, not consumed — `OutfRes.itemClass` (`@1004`) is now a real field but no `pêrs`-loot logic reads it | `NovaAIModels.swift`
+Illegal-outfit `ScanMask` | `ScanMask` (outf-level) | ✅ Done — `gövt.ScanMask@50` decoded + `Contraband`/`ContrabandScan` fine the player for scanned contraband (outfit/junk/mission) | `Contraband.swift`, `ContrabandScan.swift`; see docs/reverse-engineering/GOVERNMENT.md
+`ItemClass` (for pêrs loot) | `ItemClass` | ✅ Done — `pêrs` decoded (`PersModels.swift`); `NovaGame.personBoardingGrant` hands over `GrantCount/2…GrantCount` random outfits of `GrantClass` when the player boards a named person's hulk; spawner tags 5% of ships as a `pêrs` | `PersModels.swift`, `World.takePlunderOutfits`, `Spawner.assignPersonIfLucky`
 `Outfitter Name`/`Lowercase Name`/`Lowercase Plural` | (unnamed in Bible field list; display strings) | ❌ Missing — offsets confirmed `@811`/`@875`/`@939` (§8); engine currently displays only the resource-fork `name` metadata, never these in-record strings | —
 Daily restock roll | `BuyRandom` (both resources) | ✅ Done, including the documented zero-behavior asymmetry | `NovaEconomy.swift` `onOfferToday`, §7 above
 
