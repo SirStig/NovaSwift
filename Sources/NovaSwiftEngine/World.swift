@@ -282,6 +282,12 @@ public final class Ship {
     /// Set on a launched fighter: the entity id of the carrier it flew from, so
     /// it can dock back and be freed if the carrier dies. nil = not a fighter.
     public var carrierID: Int?
+    /// `përs` id when this ship is a named character (5% spawn chance). Drives the
+    /// target-display name and the ItemClass boarding-loot grant. nil = ordinary.
+    public var personID: Int?
+    /// Outfit ids this hulk still owes the player as `përs` boarding loot; nil =
+    /// not yet rolled, empty = already taken. See `World.takePlunderOutfits`.
+    public var plunderOutfits: [Int]?
     /// True once this fighter has been told to return to its carrier (low on
     /// ammo/health, or the carrier left combat) — it heads home to dock.
     public var recallToCarrier = false
@@ -1630,6 +1636,9 @@ public final class World {
         public let credits: Int
         public let cargo: [(commodity: Int, tons: Int)]
         public let captureChance: Int?   // percent, nil = can't be captured
+        /// Outfit ids this hulk grants as `përs` ItemClass loot (empty for an
+        /// ordinary ship, or a person whose grant roll came up empty).
+        public var grantedOutfits: [Int] = []
     }
 
     /// The plunder a disabled ship offers, or nil if `shipID` isn't a boardable
@@ -1640,9 +1649,36 @@ public final class World {
         let cargo = s.cargo.filter { $0.value > 0 }
             .map { (commodity: $0.key, tons: $0.value) }
             .sorted { $0.commodity < $1.commodity }
-        return BoardingManifest(shipID: shipID, name: s.name,
+        return BoardingManifest(shipID: shipID, name: personName(s) ?? s.name,
                                 credits: rolledPlunderCredits(s), cargo: cargo,
-                                captureChance: captureChance(of: s))
+                                captureChance: captureChance(of: s),
+                                grantedOutfits: rolledPlunderOutfits(s))
+    }
+
+    /// The `përs` character name for a ship, if it's a named person.
+    private func personName(_ s: Ship) -> String? {
+        guard let pid = s.personID else { return nil }
+        return galaxy?.game.pers(pid)?.name
+    }
+
+    /// The `përs` ItemClass boarding loot for `s`, rolled once (deterministically
+    /// from its identity) and cached. Empty for an ordinary ship.
+    private func rolledPlunderOutfits(_ s: Ship) -> [Int] {
+        if s.plunderOutfits == nil {
+            guard let pid = s.personID, let pers = galaxy?.game.pers(pid) else { s.plunderOutfits = []; return [] }
+            let seed = UInt64(bitPattern: Int64(s.entityID &* 2_654_435_761)) ^ UInt64(bitPattern: Int64(pid &+ 1))
+            s.plunderOutfits = galaxy?.game.personBoardingGrant(pers, seed: seed == 0 ? 1 : seed) ?? []
+        }
+        return s.plunderOutfits ?? []
+    }
+
+    /// Take the `përs` outfit loot from a boarded hulk (clearing it so it can't be
+    /// taken twice). The host adds these outfit ids to the pilot.
+    public func takePlunderOutfits(from shipID: Int) -> [Int] {
+        guard let s = ship(id: shipID) else { return [] }
+        let loot = rolledPlunderOutfits(s)
+        s.plunderOutfits = []
+        return loot
     }
 
     /// Total effective crew the player brings to a boarding action — the sum EV

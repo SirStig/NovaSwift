@@ -876,6 +876,18 @@ struct GameContainerView: View {
         refreshBoard(scene, shipID: shipID)
     }
 
+    /// Grant a boarded përs ship's ItemClass outfit loot to the pilot (given
+    /// automatically on boarding, per the Bible's "given out ... when boarded").
+    private func grantBoardingLoot(_ m: World.BoardingManifest) {
+        guard let scene = host?.scene else { return }
+        let loot = scene.plunderOutfits(m.shipID)
+        guard !loot.isEmpty else { return }
+        for oid in loot { model.pilot.state.grantOutfit(oid) }
+        model.pilot.save()
+        let names = Set(loot.compactMap { host?.game?.outfit($0)?.name })
+        host?.hud.post("Salvaged \(loot.count) item(s)\(names.isEmpty ? "" : ": \(names.sorted().joined(separator: ", "))").")
+    }
+
     private func plunderCapture(_ scene: GameScene, shipID: Int) {
         if scene.attemptCapture(shipID) {
             host?.hud.post("Ship captured — it joins your escorts.")
@@ -939,7 +951,10 @@ struct GameContainerView: View {
             host?.scene.togglePlayerCloak()
         case .board:
             // Board the targeted hulk if it's disabled and in reach.
-            if let m = host?.scene.attemptBoard() { boardManifest = m }
+            if let m = host?.scene.attemptBoard() {
+                boardManifest = m
+                grantBoardingLoot(m)   // përs ItemClass loot is handed over on boarding
+            }
         default:
             break
         }

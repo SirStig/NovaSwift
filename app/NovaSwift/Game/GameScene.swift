@@ -961,6 +961,9 @@ final class GameScene: SKScene {
     /// Move a boarded hulk's cargo into the hold; returns what was taken.
     func plunderCargo(_ id: Int) -> [(commodity: Int, tons: Int)] { world?.takePlunderCargo(from: id) ?? [] }
 
+    /// Take a boarded përs hulk's ItemClass outfit loot (outfit ids); once only.
+    func plunderOutfits(_ id: Int) -> [Int] { world?.takePlunderOutfits(from: id) ?? [] }
+
     /// Roll to capture a boarded hulk into the escort wing; returns success.
     func attemptCapture(_ id: Int) -> Bool {
         world?.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)) ?? false

@@ -122,6 +122,12 @@ public struct Loadout {
     public var interferenceReduction: Int = 0
     /// Net `oütf` ModType 28 murk change applied to the current system's murk.
     public var murkModifier: Int = 0
+    /// Whether the ship carries an escape pod (`shïp.EscapePod` count or an
+    /// `oütf` ModType 11 escape-pod item) — the pilot survives destruction.
+    public var hasEscapePod: Bool = false
+    /// `oütf` ModType 20 (auto-eject): automatically ejects the pilot on death
+    /// (requires an escape pod to work, per the Bible).
+    public var hasAutoEject: Bool = false
 
     /// The hull's `shïp.Crew` complement — the number the boarding/capture-odds
     /// math uses on both sides (attacker's own crew, defender's crew). See
@@ -246,6 +252,7 @@ extension Galaxy {
         var captureOddsBonus = 0
         var cloakFlags = 0, cloakScannerFlags = 0
         var interferenceReduction = 0, murkModifier = 0
+        var hasEscapePod = s.podCount > 0, hasAutoEject = false
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
@@ -297,6 +304,8 @@ extension Galaxy {
                 case .cloakScanner:    cloakScannerFlags |= value   // ModVal = scanner flag bits
                 case .interference:    interferenceReduction += v    // subtracts from system Interference
                 case .murk:            murkModifier += v             // adjusts system Murk
+                case .escapePod:       hasEscapePod = true           // ModType 11
+                case .autoEject:       hasAutoEject = true           // ModType 20 (needs a pod)
                 // ModType 27 (increaseMax) is not a ship-stat modifier: its only
                 // effect is raising another outfit's purchase cap, enforced at buy
                 // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
@@ -357,6 +366,7 @@ extension Galaxy {
             fighterBays: fighterBays,
             cloakFlags: cloakFlags, cloakScannerFlags: cloakScannerFlags,
             interferenceReduction: interferenceReduction, murkModifier: murkModifier,
+            hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus)
     }
 
