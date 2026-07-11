@@ -983,6 +983,14 @@ final class GameScene: SKScene {
     /// immediately, without waiting for the next system rebuild.
     func addLiveGrudge(_ personID: Int) { world?.playerPersGrudges.insert(personID) }
 
+    /// Push the current pêrs grudge set + spawn-eligibility gate onto the live
+    /// world. Called by the host after it sets those (post-`configure`), so the
+    /// starting system reflects a pilot's existing grudges immediately.
+    func syncPersStateToWorld() {
+        world?.playerPersGrudges = persGrudges
+        if let e = persSpawnEligible { world?.persSpawnEligible = e }
+    }
+
     /// Take the credits aboard a boarded hulk; returns the amount.
     func plunderCredits(_ id: Int) -> Int { world?.takePlunderCredits(from: id) ?? 0 }
 

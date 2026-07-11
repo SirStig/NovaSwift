@@ -153,6 +153,9 @@ final class GameHost {
             scene.onPersDefeated = { [weak pilotStore] pid in
                 pilotStore?.state.recordPersDefeated(pid); pilotStore?.save()
             }
+            // The world was already built by `configure` above — push the pilot's
+            // existing grudges/eligibility onto it now.
+            scene.syncPersStateToWorld()
         }
     }
 
