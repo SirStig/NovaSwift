@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Getting your own game data working
+    url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/blob/main/docs/GET_THE_DATA.md
+    about: Questions about supplying your own legally-owned EV Nova data — read this first, it's not a bug tracker topic.
