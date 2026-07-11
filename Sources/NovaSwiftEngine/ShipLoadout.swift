@@ -103,6 +103,10 @@ public struct Loadout {
     /// of the jump animation (0 = stock timing). See `PilotStore.jumpSpeedFactor`.
     public var hyperspaceSpeedBonus: Int = 0
 
+    /// Fighter bays fitted (`wëap` Guidance 99). Each launches carried fighters
+    /// rather than firing. See `FighterBaySpec` and `Ship.fighterBays`.
+    public var fighterBays: [FighterBaySpec] = []
+
     /// The hull's `shïp.Crew` complement — the number the boarding/capture-odds
     /// math uses on both sides (attacker's own crew, defender's crew). See
     /// `World.captureChance`.
@@ -115,6 +119,26 @@ public struct Loadout {
     /// **negative** ModVal (Bible: "-1 to -100 Increase the player's capture
     /// odds by this amount"). Stored as a positive number of percentage points.
     public var captureOddsBonus: Int = 0
+}
+
+/// A fighter bay fitted to a ship (`wëap` Guidance 99). Immutable spec resolved
+/// from the bay weapon; the live docked/deployed counts live on `Ship.FighterBay`.
+public struct FighterBaySpec: Equatable, Sendable {
+    /// The `wëap` id of the bay itself.
+    public var bayWeaponID: Int
+    /// The `shïp` class id of the fighter this bay launches (`wëap.AmmoType`).
+    public var fighterShipID: Int
+    /// How many fighters the bay holds when full (`wëap.MaxAmmo` × bays fitted).
+    public var capacity: Int
+    /// Minimum frames between launches (`wëap.Reload`, at 30 fps).
+    public var launchIntervalFrames: Int
+
+    public init(bayWeaponID: Int, fighterShipID: Int, capacity: Int, launchIntervalFrames: Int) {
+        self.bayWeaponID = bayWeaponID
+        self.fighterShipID = fighterShipID
+        self.capacity = capacity
+        self.launchIntervalFrames = launchIntervalFrames
+    }
 }
 
 extension OutfRes {
@@ -273,6 +297,17 @@ extension Galaxy {
         for (wid, a) in ammoAdds {
             let e = byID[wid] ?? (0, 0); byID[wid] = (e.count, e.ammo + a)
         }
+        // Fighter bays (`wëap` Guidance 99) don't fire projectiles — they launch
+        // carried fighters. Pull them out of the firing-weapon list into a
+        // dedicated bay list (capacity × number of bays fitted).
+        var fighterBays: [FighterBaySpec] = []
+        for (wid, entry) in byID where game.weapon(wid)?.isFighterBay == true {
+            guard let w = game.weapon(wid) else { continue }
+            fighterBays.append(FighterBaySpec(bayWeaponID: wid, fighterShipID: w.fighterShipID,
+                                              capacity: w.fighterCapacity * max(1, entry.count),
+                                              launchIntervalFrames: max(1, w.reload)))
+            byID[wid] = nil
+        }
         let weapons = byID.map { (id: $0.key, count: $0.value.count, ammo: $0.value.ammo) }
             .sorted { $0.id < $1.id }
 
@@ -297,6 +332,7 @@ extension Galaxy {
             maxJumpHops: max(1, 1 + multiJumpBonus),
             instantJump: fastJump,
             hyperspaceSpeedBonus: hyperspaceSpeed,
+            fighterBays: fighterBays,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus)
     }
 
@@ -348,6 +384,7 @@ extension Galaxy {
         ship.crew = lo.crew
         ship.marineCrew = lo.marineCrew
         ship.captureOddsBonus = lo.captureOddsBonus
+        ship.fighterBays = lo.fighterBays.map { Ship.FighterBay(spec: $0) }
 
         var mounts: [WeaponMount] = []
         for w in lo.weapons {

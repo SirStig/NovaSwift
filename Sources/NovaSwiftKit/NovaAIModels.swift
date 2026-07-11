@@ -594,6 +594,16 @@ public struct WeapRes {
     public let flags2Raw: UInt16
 
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
+    /// `Guidance 99` — "Carried ship (AmmoType is the ID of the ship class)"
+    /// (Bible). A fighter bay: firing it launches a real sub-ship rather than a
+    /// projectile.
+    public var isFighterBay: Bool { guidance == .bay }
+    /// For a fighter bay (`guidance 99`), the `shïp` class id of the fighter it
+    /// launches — stored in `AmmoType` (Bible). Meaningless for other weapons.
+    public var fighterShipID: Int { ammoType }
+    /// For a fighter bay, how many fighters the bay holds (`MaxAmmo`) — e.g. a
+    /// Viper Bay carries 4, a Thunderhead Bay 3 (confirmed against real data).
+    public var fighterCapacity: Int { max(0, maxAmmo) }
     /// `Flags` 0x0002: this weapon fires on the *secondary* trigger (typically
     /// missiles/torpedoes), not the primary.
     public var firedBySecondTrigger: Bool { flagsRaw & 0x0002 != 0 }

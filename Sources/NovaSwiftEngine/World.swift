@@ -231,6 +231,26 @@ public final class Ship {
     /// outfits (Bible: "-1 to -100 Increase the player's capture odds").
     public var captureOddsBonus: Int = 0
 
+    /// A live fighter bay aboard a carrier: its immutable spec plus the running
+    /// docked count, launch cooldown, and the set of currently-deployed fighter
+    /// entity ids. `docked` starts full and is spent on launch, restored when a
+    /// live fighter re-docks. See `World`'s fighter-bay handling.
+    public final class FighterBay {
+        public let spec: FighterBaySpec
+        public var docked: Int
+        public var launchCooldown: Double = 0
+        public var deployed: Set<Int> = []
+        public init(spec: FighterBaySpec) { self.spec = spec; self.docked = max(0, spec.capacity) }
+    }
+    /// Fighter bays fitted to this ship (empty for non-carriers).
+    public var fighterBays: [FighterBay] = []
+    /// Set on a launched fighter: the entity id of the carrier it flew from, so
+    /// it can dock back and be freed if the carrier dies. nil = not a fighter.
+    public var carrierID: Int?
+    /// True once this fighter has been told to return to its carrier (low on
+    /// ammo/health, or the carrier left combat) — it heads home to dock.
+    public var recallToCarrier = false
+
     /// Whether the ship has enough fuel for one hyperspace jump.
     public var canJump: Bool { fuel >= ShipFuel.perJump }
     /// Spend one jump's fuel; returns false and spends nothing if too low.
@@ -713,6 +733,9 @@ public final class World {
             for w in s.weapons { w.tick(dt) }
             if !s.disabled { s.regen(dt) }
         }
+
+        // Fighter bays: carriers deploy fighters in combat; fighters dock back.
+        updateFighterBays(dt)
 
         // Asteroids don't move (see `Asteroid`'s doc comment) — they only spin.
         for rock in asteroids where rock.isAlive {
@@ -1419,6 +1442,87 @@ public final class World {
         let orders = playerEscorts.compactMap { $0.brain?.escortOrder }
         guard let first = orders.first else { return nil }
         return orders.allSatisfy { $0 == first } ? first : nil
+    }
+
+    // MARK: Fighter bays (wëap Guidance 99)
+
+    /// Whether `carrier` is currently engaged (has a live hostile target) — the
+    /// condition under which EV Nova carriers auto-deploy their fighters.
+    private func carrierInCombat(_ carrier: Ship) -> Bool {
+        guard let tid = carrier.currentTargetID, let t = ship(id: tid) else { return false }
+        return t.isAlive && !t.disabled
+    }
+
+    /// Per-frame fighter-bay processing: carriers in combat launch fighters up to
+    /// each bay's capacity (throttled by the bay's launch interval); deployed
+    /// fighters that run out of ammo, get badly hurt, or whose carrier has left
+    /// combat return and dock (restoring the bay); a carrier's death orphans its
+    /// still-flying fighters (they become independent ships of the same govt).
+    private func updateFighterBays(_ dt: Double) {
+        guard galaxy != nil else { return }   // fighters are spawned via the galaxy
+
+        // Launch pass over a snapshot (launching appends to `npcs`).
+        for carrier in allShips where !carrier.fighterBays.isEmpty && carrier.isAlive && !carrier.disabled {
+            let inCombat = carrierInCombat(carrier)
+            for bay in carrier.fighterBays {
+                bay.launchCooldown = max(0, bay.launchCooldown - dt)
+                // Drop dead/orphaned fighters from the roster.
+                bay.deployed = bay.deployed.filter { ship(id: $0)?.carrierID == carrier.entityID }
+                if inCombat, bay.docked > 0, bay.launchCooldown <= 0,
+                   let fighter = launchFighter(from: carrier, bay: bay) {
+                    bay.docked -= 1
+                    bay.deployed.insert(fighter.entityID)
+                    bay.launchCooldown = Double(bay.spec.launchIntervalFrames) / 30.0
+                }
+            }
+        }
+
+        // Recall & dock pass — collect removals, apply after iterating.
+        var docked: Set<Int> = []
+        for f in npcs where f.carrierID != nil && f.isAlive {
+            guard let carrier = ship(id: f.carrierID!), carrier.isAlive, !carrier.disabled else {
+                // Carrier gone: the fighter is orphaned — it keeps fighting for
+                // its government but has no bay to return to.
+                f.carrierID = nil; f.recallToCarrier = false; f.brain?.leaderID = nil
+                continue
+            }
+            if !f.recallToCarrier {
+                let outOfAmmo = !f.weapons.isEmpty && f.weapons.allSatisfy { $0.ammo == 0 }
+                if outOfAmmo || f.healthFraction < 0.3 || !carrierInCombat(carrier) {
+                    f.recallToCarrier = true
+                }
+            }
+            if f.recallToCarrier,
+               (f.position - carrier.position).length <= carrier.radius + f.radius + 30 {
+                if let bay = carrier.fighterBays.first(where: { $0.deployed.contains(f.entityID) }) {
+                    bay.deployed.remove(f.entityID)
+                    bay.docked = min(bay.spec.capacity, bay.docked + 1)
+                }
+                docked.insert(f.entityID)
+            }
+        }
+        if !docked.isEmpty {
+            for id in docked { clearTarget(id) }
+            npcs.removeAll { docked.contains($0.entityID) }
+        }
+    }
+
+    /// Launch one fighter from `carrier`'s `bay`: a real sub-ship of the bay's
+    /// fighter class, allied to the carrier and ordered to hunt its enemies.
+    private func launchFighter(from carrier: Ship, bay: Ship.FighterBay) -> Ship? {
+        guard let galaxy else { return nil }
+        let pos = carrier.position + Vec2.heading(carrier.angle) * (carrier.radius + 20)
+        guard let fighter = galaxy.makeLoadedShip(bay.spec.fighterShipID, government: carrier.government,
+                                                  at: pos, angle: carrier.angle) else { return nil }
+        let brain = fighter.brain ?? AIBrain(aiType: .interceptor, govt: carrier.government)
+        fighter.brain = brain
+        brain.leaderID = carrier.entityID
+        brain.escortOrder = .aggressive
+        brain.provokedByPlayer = carrier.isPlayer ? false : (carrier.brain?.provokedByPlayer ?? false)
+        fighter.carrierID = carrier.entityID
+        fighter.velocity = carrier.velocity
+        _ = addNPC(fighter, arrival: .launch)
+        return fighter
     }
 
     // MARK: Boarding / plunder
