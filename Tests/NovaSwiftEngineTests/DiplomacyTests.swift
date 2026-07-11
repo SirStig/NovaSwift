@@ -95,4 +95,51 @@ final class DiplomacyTests: XCTestCase {
         XCTAssertTrue(dip.isCriminal(with: 130))
         XCTAssertTrue(dip.isHostileToPlayer(130))
     }
+
+    func testRecordDisableAppliesDisabPenaltyNotShootPenalty() {
+        let a = govt(128, classes: [1], shootPenalty: 999, disablePenalty: 7)
+        let dip = Diplomacy(govts: [a])
+        dip.recordDisable(of: 128)
+        XCTAssertEqual(dip.playerRecord[128], -7)   // DisabPenalty, never the (dead) ShootPenalty
+    }
+
+    func testRecordKillAppliesKillPenaltyAndCreditsCombatRating() {
+        let a = govt(128, classes: [1], killPenalty: 12)
+        let dip = Diplomacy(govts: [a])
+        dip.recordKill(of: 128, shipStrength: 40)
+        XCTAssertEqual(dip.playerRecord[128], -12)
+        XCTAssertEqual(dip.combatRating, 40)
+    }
+
+    func testConsumeCombatRatingDeltaResetsAndIsSafeAcrossMultipleCalls() {
+        let a = govt(128, classes: [1], killPenalty: 1)
+        let dip = Diplomacy(govts: [a])
+        dip.recordKill(of: 128, shipStrength: 25)
+        XCTAssertEqual(dip.consumeCombatRatingDelta(), 25)
+        XCTAssertEqual(dip.consumeCombatRatingDelta(), 0)   // drained — no double count
+        dip.recordKill(of: 128, shipStrength: 10)
+        XCTAssertEqual(dip.consumeCombatRatingDelta(), 10)
+    }
+
+    func testRecordCrimePropagatesToAlliesAndEnemiesOfVictim() {
+        // Victim (128) declares 129 an ally and 130 an enemy.
+        let victim = govt(128, classes: [1], allies: [9], enemies: [2])
+        let ally = govt(129, classes: [9])
+        let enemy = govt(130, classes: [2])
+        let bystander = govt(131, classes: [3])
+        let dip = Diplomacy(govts: [victim, ally, enemy, bystander])
+        dip.recordCrime(against: 128, penalty: 10)
+        XCTAssertEqual(dip.playerRecord[128], -10)  // the victim itself
+        XCTAssertEqual(dip.playerRecord[129], -5)   // ally: standing worsens too
+        XCTAssertEqual(dip.playerRecord[130], 5)    // enemy: standing improves
+        XCTAssertNil(dip.playerRecord[131])         // unrelated govt untouched
+    }
+
+    func testSeedLegalRecordBulkLoadsPersistedStanding() {
+        let a = govt(128, classes: [1])
+        let dip = Diplomacy(govts: [a])
+        dip.seed(legalRecord: [128: -42])
+        XCTAssertEqual(dip.playerRecord[128], -42)
+        XCTAssertTrue(dip.isCriminal(with: 128))   // crimeTolerance 0 → any evilness counts
+    }
 }

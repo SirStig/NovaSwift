@@ -1,5 +1,6 @@
 import XCTest
 @testable import NovaSwiftEngine
+import NovaSwiftKit
 
 /// Weapons, projectiles, damage bleed-through, beams, and death — the substance
 /// behind an NPC's "attack".
@@ -385,5 +386,65 @@ final class CombatTests: XCTestCase {
         world.step(1.0 / 30.0)
 
         XCTAssertTrue(world.projectiles.isEmpty, "a Seeker-0x0020 weapon should refuse to fire while its ship is ionized")
+    }
+
+    // MARK: legal-record wiring (disable/kill dent standing, shooting alone does not)
+
+    /// A minimal `gövt` with `DisabPenalty@12`/`KillPenalty@16`/`ShootPenalty@18`
+    /// set to distinct, recognizable values so a test can tell which one fired.
+    private func govtWithPenalties(id: Int, disablePenalty: Int, killPenalty: Int, shootPenalty: Int) -> GovtRes {
+        var d = [UInt8](repeating: 0, count: 60)
+        func putW(_ off: Int, _ v: Int) {
+            let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
+            d[off] = UInt8(u >> 8); d[off + 1] = UInt8(u & 0xff)
+        }
+        putW(12, disablePenalty); putW(16, killPenalty); putW(18, shootPenalty)
+        return GovtRes(Resource(type: NovaType.govt, id: id, name: "G\(id)", data: Data(d)))
+    }
+
+    func testDisablingAShipDentsLegalRecordViaDisabPenaltyOnly() {
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        world.diplomacy = Diplomacy(govts: [govtWithPenalties(id: 2, disablePenalty: 3, killPenalty: 99, shootPenalty: 999)])
+        let target = makeShip("B", govt: 2, at: Vec2(0, 300))
+        target.government = 2
+        _ = world.addNPC(target)
+        target.armor = 40; target.maxArmor = 100; target.shield = 0   // just above the 33% disable floor
+
+        attacker.angle = 0
+        attacker.weapons = [WeaponMount(spec: gun(armor: 15, beam: true))]  // crosses the disable threshold
+        attacker.currentTargetID = target.entityID
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)
+
+        XCTAssertTrue(target.disabled)
+        XCTAssertEqual(world.diplomacy?.playerRecord[2], -3, "only DisabPenalty applied, not ShootPenalty")
+    }
+
+    func testDestroyingAShipDentsLegalRecordAndCreditsCombatRating() {
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        world.diplomacy = Diplomacy(govts: [govtWithPenalties(id: 2, disablePenalty: 1, killPenalty: 8, shootPenalty: 999)])
+        let target = makeShip("B", govt: 2, at: Vec2(0, 300))
+        target.government = 2
+        target.combatStrength = 55
+        _ = world.addNPC(target)
+        target.disabled = true                       // already a hulk
+        target.armor = 5; target.shield = 0           // one more hit finishes it
+
+        attacker.weapons = [WeaponMount(spec: gun())]
+        attacker.currentTargetID = target.entityID
+        world.intent.firePrimary = true
+
+        var destroyed = false
+        for _ in 0..<60 {
+            world.step(1.0 / 30.0)
+            if world.events.contains(where: { if case .shipDestroyed = $0 { return true } else { return false } }) {
+                destroyed = true; break
+            }
+        }
+        XCTAssertTrue(destroyed)
+        XCTAssertEqual(world.diplomacy?.playerRecord[2], -8, "KillPenalty applied on the actual kill")
+        XCTAssertEqual(world.diplomacy?.combatRating, 55, "combat rating credited with the destroyed ship's strength")
     }
 }
