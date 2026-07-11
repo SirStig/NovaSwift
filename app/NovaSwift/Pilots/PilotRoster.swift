@@ -170,4 +170,88 @@ final class PilotRoster: ObservableObject {
     static func fingerprint(for game: NovaGame) -> String {
         "ships:\(game.ships().count) syst:\(game.systems().count) char:\(game.characters().count)"
     }
+
+    // MARK: Save slots (many independent saves, one pilot identity)
+
+    /// Our own native save format supports up to 3 independent save slots per
+    /// pilot (unlike a single obfuscated `.plt`) — this is separate from a
+    /// slot's own backup history (`history(for:)`/`groupHistory(for:)`), which
+    /// keeps happening underneath each slot regardless of how many slots exist.
+    static let maxSlotsPerPilot = 3
+
+    /// A pilot identity: every save sharing a `pilotGroupID`, oldest first (so
+    /// "Slot 1/2/3" is just position — no separate stored index needed).
+    struct PilotGroup: Identifiable {
+        let id: UUID   // == pilotGroupID
+        let slots: [PilotSave]
+        var mostRecent: PilotSave { slots.max { $0.updatedAt < $1.updatedAt } ?? slots[0] }
+        var canAddSlot: Bool { slots.count < PilotRoster.maxSlotsPerPilot }
+    }
+
+    /// Every pilot, grouped by `pilotGroupID` and sorted by each group's most
+    /// recently played slot — this is what the pilot list should show one row
+    /// per, instead of `pilots` directly (which is per-save, i.e. per-slot).
+    var groups: [PilotGroup] {
+        Dictionary(grouping: pilots, by: \.pilotGroupID)
+            .map { PilotGroup(id: $0.key, slots: $0.value.sorted { $0.createdAt < $1.createdAt }) }
+            .sorted { $0.mostRecent.updatedAt > $1.mostRecent.updatedAt }
+    }
+
+    /// Add another save slot to `groupID`, cloned from `templateID` (typically
+    /// the group's `mostRecent` slot). Refuses past the 3-slot cap.
+    @discardableResult
+    func addSlot(to groupID: UUID, from templateID: UUID) -> PilotSave? {
+        guard groups.first(where: { $0.id == groupID })?.canAddSlot == true else {
+            Log.pilot.debug("PilotRoster.addSlot: group \(groupID, privacy: .public) is already at the \(PilotRoster.maxSlotsPerPilot)-slot cap")
+            return nil
+        }
+        let created = try? archive.createSlot(from: templateID)
+        if let created {
+            Log.pilot.notice("PilotRoster.addSlot: added slot \(created.id, privacy: .public) to group \(groupID, privacy: .public)")
+        } else {
+            Log.pilot.error("PilotRoster.addSlot: failed to create a slot from \(templateID, privacy: .public)")
+        }
+        refresh()
+        return created
+    }
+
+    /// Rename every slot in `groupID` — display name is the shared pilot
+    /// identity across slots, not a per-slot label.
+    func renameGroup(_ groupID: UUID, to name: String, game: NovaGame?) {
+        for slot in groups.first(where: { $0.id == groupID })?.slots ?? [] {
+            rename(slot.id, to: name, game: game)
+        }
+    }
+
+    /// Delete every slot in `groupID` — the whole pilot, all its slots, and
+    /// each slot's own backups. Use plain `delete(_:)` instead to drop a
+    /// single slot while keeping the rest of the group.
+    func deleteGroup(_ groupID: UUID) {
+        for slot in groups.first(where: { $0.id == groupID })?.slots ?? [] {
+            do {
+                try archive.delete(id: slot.id)
+            } catch {
+                Log.pilot.error("PilotRoster.deleteGroup: failed to delete slot \(slot.id, privacy: .public) of group \(groupID, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        Log.pilot.notice("PilotRoster.deleteGroup: deleted pilot group \(groupID, privacy: .public)")
+        refresh()
+    }
+
+    /// One backup, tagged with which slot it belongs to (a group can have up
+    /// to 3 slots, each with its own independent backup history).
+    struct GroupHistoryEntry: Identifiable {
+        let slotID: UUID
+        let entry: HistoryEntry
+        var id: URL { entry.url }
+    }
+
+    /// Every backup across every slot in `groupID`, newest-first — "all
+    /// backups for this pilot", merging each slot's own `history(for:)`.
+    func groupHistory(for groupID: UUID) -> [GroupHistoryEntry] {
+        let slots = groups.first(where: { $0.id == groupID })?.slots ?? []
+        return slots
+            .flatMap { slot in history(for: slot.id).map { GroupHistoryEntry(slotID: slot.id, entry: $0) } }
+            .sorted { $0.entry.save.updatedAt > $1.entry.save.updatedAt }
+    }
 }

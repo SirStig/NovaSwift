@@ -188,6 +188,64 @@ final class StoryEngineTests: XCTestCase {
         XCTAssertEqual(eng.player.credits, 600)
     }
 
+    // MARK: Mission destination resolution (`concreteStellar`)
+
+    func testConcreteStellarResolvesFixedIDPassthrough() {
+        let (eng, _) = engine([])
+        XCTAssertEqual(eng.concreteStellar(500, salt: 0), 500, "128...2175 is a literal spob id")
+    }
+
+    func testConcreteStellarResolvesGovtScopedSelectorNotAsLiteralID() {
+        // Regression: codes >= 128 that aren't literal ids (govt/class/random
+        // selectors) used to be treated as a literal spob id, so a mission's
+        // random destination resolved to a bogus lookup (silently rendering
+        // as the "your destination" placeholder) instead of a real spob.
+        // 10000+g selects "any stellar of government g" (g = code - 10000 + 128).
+        let spob = spobResource(id: 500, govt: 128)
+        let (eng, _) = engine([spob])
+        XCTAssertEqual(eng.concreteStellar(10000, salt: 0), 500,
+                       "a govt-scoped selector code must resolve via StellarMatch, not pass through as a literal id")
+    }
+
+    func testConcreteStellarReturnsNilForNoDestination() {
+        let (eng, _) = engine([])
+        XCTAssertNil(eng.concreteStellar(-1, salt: 0))
+    }
+
+    // MARK: Mission-accept cargo-space gating (show-but-disable vs. hide)
+
+    func testMissionComputerKeepsCargoShortMissionVisibleButNotAcceptable() {
+        // The Mission BBS (.missionComputer) should still show a mission the
+        // player can't currently fit — just not let them accept it.
+        let m = MissionSpec(id: 600, availLocation: 0 /* missionComputer */,
+                            cargoType: 1, cargoQty: 500, cargoPickup: 0, flags2: 0x0001).resource()
+        let (eng, _) = engine([m])
+        XCTAssertTrue(eng.isEligible(eng.game.mission(600)!, at: .missionComputer, spobID: nil),
+                      "still offered/browsable even without enough cargo space")
+        XCTAssertFalse(eng.canAccept(eng.game.mission(600)!), "but not acceptable")
+        XCTAssertFalse(eng.accept(600), "accept() itself refuses when there isn't enough room")
+        XCTAssertFalse(eng.player.isMissionActive(600))
+    }
+
+    func testOtherLocationsHideCargoShortMissionEntirely() {
+        // Bar/trade-center/shipyard/outfitter/pers-ship offers are one-at-a-time
+        // ad-hoc offers, not a browsable board — those should never come up at
+        // all if the cargo wouldn't fit.
+        let m = MissionSpec(id: 601, availLocation: 1 /* bar */,
+                            cargoType: 1, cargoQty: 500, cargoPickup: 0, flags2: 0x0001).resource()
+        let (eng, _) = engine([m])
+        XCTAssertFalse(eng.isEligible(eng.game.mission(601)!, at: .bar, spobID: nil),
+                       "a bar offer the player can't fit should never be offered")
+    }
+
+    func testCanAcceptTrueWhenNoCargoSpaceFlagOrEnoughRoom() {
+        let noFlag = MissionSpec(id: 602, cargoType: 1, cargoQty: 500, cargoPickup: 0).resource()
+        let fits = MissionSpec(id: 603, cargoType: 1, cargoQty: 1, cargoPickup: 0, flags2: 0x0001).resource()
+        let (eng, _) = engine([noFlag, fits])
+        XCTAssertTrue(eng.canAccept(eng.game.mission(602)!), "flag not set — no cargo gate at all")
+        XCTAssertTrue(eng.canAccept(eng.game.mission(603)!), "1 ton needed, plenty of room free")
+    }
+
     // MARK: Save/restore
 
     func testPlayerStateCodableRoundTrip() throws {

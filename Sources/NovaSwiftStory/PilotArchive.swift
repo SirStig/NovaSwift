@@ -278,12 +278,19 @@ public final class PilotArchive {
         Log.pilot.notice("PilotArchive.delete: deleted pilot \(id, privacy: .public)")
     }
 
-    /// Clone a pilot under a new id (and optional new name) — a "copy pilot" action.
+    /// Clone a pilot under a new id (and optional new name) — a "copy pilot"
+    /// action that forks an independent pilot identity. Deliberately assigns a
+    /// **fresh** `pilotGroupID` (not inherited from the source): this is a
+    /// separate pilot family, not another save slot of the same one, so it
+    /// must not count against the source's 3-slot cap or show up in its
+    /// backups view. See `createSlot(from:)` for "another save of this same
+    /// pilot" instead.
     @discardableResult
     public func duplicate(id: UUID, newName: String? = nil) throws -> PilotSave {
         do {
             var save = try load(id: id)
             save.id = UUID()
+            save.pilotGroupID = save.id
             if let newName { save.displayName = newName }
             else { save.displayName += " Copy" }
             save.createdAt = now()
@@ -292,6 +299,27 @@ public final class PilotArchive {
             return duplicated
         } catch {
             Log.pilot.error("PilotArchive.duplicate: failed to duplicate pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw error
+        }
+    }
+
+    /// Create another save slot for the **same** pilot: a full copy under a
+    /// new id, but keeping `displayName` and `pilotGroupID` unchanged (unlike
+    /// `duplicate`, which forks an independent pilot). The roster caps this at
+    /// 3 slots per group (`PilotRoster.PilotGroup.canAddSlot`) — this method
+    /// itself doesn't enforce the cap, matching `duplicate`'s pattern of being
+    /// a plain archive primitive.
+    @discardableResult
+    public func createSlot(from id: UUID) throws -> PilotSave {
+        do {
+            var save = try load(id: id)
+            save.id = UUID()
+            save.createdAt = now()
+            let created = try self.save(save, backup: false)
+            Log.pilot.notice("PilotArchive.createSlot: created slot \(created.id, privacy: .public) for pilot group \(created.pilotGroupID, privacy: .public) from \(id, privacy: .public)")
+            return created
+        } catch {
+            Log.pilot.error("PilotArchive.createSlot: failed to create slot from pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
             throw error
         }
     }

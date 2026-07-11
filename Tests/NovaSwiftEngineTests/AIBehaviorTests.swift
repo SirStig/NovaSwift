@@ -439,6 +439,35 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertFalse(world.npcs.contains { $0 === trader }, "a landed ship vanishes into the spaceport")
     }
 
+    func testTraderNeverLandsOnUninhabitedOrNonLandableBody() {
+        // Regression: `pickPlanetBody` used to fall back to *any* stellar body
+        // (including uninhabited/non-landable ones) when the system had no
+        // landable body at all. The AI should only ever land on inhabited
+        // planets/stations (`canLand` already folds in `!isUninhabited`) —
+        // with none available, a trader should just fly on/depart, never
+        // "land" on the uninhabited rock.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 900), radius: 90, canLand: false)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000)
+
+        let trader = warship("Trader", govt: 202, at: Vec2(), armed: false)
+        trader.brain = AIBrain(aiType: .braveTrader, govt: 202)
+        world.addNPC(trader)
+
+        for _ in 0..<600 {                                     // up to 20s
+            world.step(1.0 / 30.0)
+            XCTAssertNotEqual(trader.brain?.state, .landing, "no landable body exists in this system")
+            if world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }) {
+                XCTFail("should never land — the only stellar body isn't landable")
+            }
+        }
+        XCTAssertNil(trader.landingSpob)
+        XCTAssertFalse(trader.wantsToLand)
+    }
+
     func testDeterministicDuelResolves() {
         // Two mutually hostile warships, armed, closing head-on. Pure AI + combat.
         let a = warship("A", govt: 210, at: Vec2(0, -500), angle: 0)         // facing north (+y)

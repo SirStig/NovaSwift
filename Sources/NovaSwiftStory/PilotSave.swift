@@ -19,6 +19,11 @@ public struct PilotSave: Codable, Sendable, Identifiable {
     // MARK: Metadata
     public var formatVersion: Int
     public var id: UUID
+    /// Groups multiple independent saves as "the same pilot" — a save slot.
+    /// Defaults to `id` (a singleton group of one) unless explicitly shared
+    /// with another save via `PilotArchive.createSlot(from:)`. Purely additive:
+    /// old on-disk saves decode with no key present and become a group of one.
+    public var pilotGroupID: UUID
     public var displayName: String
     public var scenarioName: String
     public var createdAt: Date
@@ -55,6 +60,7 @@ public struct PilotSave: Codable, Sendable, Identifiable {
     // MARK: Init
 
     public init(id: UUID = UUID(),
+                pilotGroupID: UUID? = nil,
                 displayName: String,
                 scenarioName: String,
                 player: PlayerState,
@@ -66,6 +72,7 @@ public struct PilotSave: Codable, Sendable, Identifiable {
                 formatVersion: Int = PilotSave.currentFormatVersion) {
         self.formatVersion = formatVersion
         self.id = id
+        self.pilotGroupID = pilotGroupID ?? id
         self.displayName = displayName
         self.scenarioName = scenarioName
         self.player = player
@@ -79,6 +86,7 @@ public struct PilotSave: Codable, Sendable, Identifiable {
     /// Build a save from a freshly created (or updated) pilot, resolving the
     /// snapshot from the game so list rows read correctly.
     public init(id: UUID = UUID(),
+                pilotGroupID: UUID? = nil,
                 displayName: String,
                 scenarioName: String,
                 player: PlayerState,
@@ -87,7 +95,7 @@ public struct PilotSave: Codable, Sendable, Identifiable {
                 createdAt: Date = Date(),
                 updatedAt: Date = Date(),
                 playtimeSeconds: Double = 0) {
-        self.init(id: id, displayName: displayName, scenarioName: scenarioName,
+        self.init(id: id, pilotGroupID: pilotGroupID, displayName: displayName, scenarioName: scenarioName,
                   player: player, snapshot: PilotSave.snapshot(for: player, game: game),
                   dataFingerprint: dataFingerprint, createdAt: createdAt,
                   updatedAt: updatedAt, playtimeSeconds: playtimeSeconds)
@@ -114,6 +122,7 @@ public struct PilotSave: Codable, Sendable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         formatVersion   = (try? c.decodeIfPresent(Int.self, forKey: .formatVersion)) ?? nil ?? 1
         id              = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? nil ?? UUID()
+        pilotGroupID    = (try? c.decodeIfPresent(UUID.self, forKey: .pilotGroupID)) ?? nil ?? id
         displayName     = (try? c.decodeIfPresent(String.self, forKey: .displayName)) ?? nil ?? "Captain"
         scenarioName    = (try? c.decodeIfPresent(String.self, forKey: .scenarioName)) ?? nil ?? ""
         createdAt       = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? nil ?? Date()

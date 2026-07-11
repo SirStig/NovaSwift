@@ -107,5 +107,34 @@ final class PilotStoreTests: XCTestCase {
         let list = store.list()
         XCTAssertEqual(list.count, 1)
         XCTAssertEqual(list.first?.player.pilotName, "Legacy")
+        // No pilotGroupID key in the minimal JSON either — an old save on disk
+        // from before slots existed should decode as its own group of one.
+        XCTAssertEqual(list.first?.pilotGroupID, list.first?.id)
+    }
+
+    // MARK: Save slots (pilotGroupID)
+
+    func testFreshSaveDefaultsPilotGroupIDToItsOwnID() throws {
+        let save = makeSave(name: "Solo")
+        XCTAssertEqual(save.pilotGroupID, save.id)
+    }
+
+    func testDuplicateAssignsAFreshGroupIDNotTheSourcesGroup() throws {
+        let store = archive()
+        let original = try store.save(makeSave(name: "Orig"))
+        let copy = try store.duplicate(id: original.id, newName: "Clone")
+        XCTAssertNotEqual(copy.pilotGroupID, original.pilotGroupID,
+                          "a duplicate forks an independent pilot, not another slot of the same one")
+        XCTAssertEqual(copy.pilotGroupID, copy.id, "the fork is its own singleton group")
+    }
+
+    func testCreateSlotPreservesDisplayNameAndGroupIDButNotID() throws {
+        let store = archive()
+        let original = try store.save(makeSave(name: "Vet"))
+        let slot = try store.createSlot(from: original.id)
+        XCTAssertNotEqual(slot.id, original.id, "a new independent save file")
+        XCTAssertEqual(slot.pilotGroupID, original.pilotGroupID, "same pilot identity")
+        XCTAssertEqual(slot.displayName, original.displayName, "slots share the pilot's name, unlike Duplicate")
+        XCTAssertEqual(store.list().count, 2, "the original and the new slot are both independently listed")
     }
 }
