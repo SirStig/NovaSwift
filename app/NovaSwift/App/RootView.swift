@@ -59,6 +59,15 @@ struct RootView: View {
                 menuAssets = MainMenuAssets.load(model.data.game)
             }
         }
+        .onChange(of: model.data.hasBaseData) { _, has in
+            // The launcher is a pre-data setup guide only — there is no "demo"
+            // to fall through to. The moment data becomes available (import
+            // completes while the guide is on screen), advance straight into
+            // the authentic menu, mirroring the `onAppear` check below.
+            if has, model.screen == .launcher {
+                model.screen = .mainMenu
+            }
+        }
         .onAppear {
             model.data.reload()
             // Wire audio to the data and start menu music (if the player enabled it

@@ -64,7 +64,7 @@ struct LoadingView: View {
                     .frame(width: 104, height: 104)
                     .shadow(color: novaAmber.opacity(0.28), radius: 28)
 
-                Text("EV NOVA")
+                Text("NOVA SWIFT")
                     .novaFont(.title, weight: .heavy, size: 34)
                     .tracking(8)
                     .foregroundStyle(.white)

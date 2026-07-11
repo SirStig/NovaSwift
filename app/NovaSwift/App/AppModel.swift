@@ -81,11 +81,13 @@ final class AppModel: ObservableObject {
         audio.startMusicIfEnabled()
     }
 
-    /// From the port's native launcher, "Play" opens the authentic EV Nova main
-    /// menu (when game data is present); without data it drops straight into the
-    /// demo via the loading screen.
+    /// From the port's native launcher, opens the authentic EV Nova main menu.
+    /// The launcher only offers this once game data is present — there is no
+    /// data-less "demo" to fall back to — but guard it anyway since `screen`
+    /// is otherwise settable from anywhere.
     func startGame() {
-        screen = data.hasBaseData ? .mainMenu : .loading
+        guard data.hasBaseData else { return }
+        screen = .mainMenu
     }
 
     /// From the authentic main menu, New Pilot / Enter Ship begins play.
@@ -129,14 +131,13 @@ final class AppModel: ObservableObject {
     /// "Enter Ship" — continue the most recently played pilot, if any.
     func continueMostRecent() {
         if let recent = roster.mostRecent { play(recent) }
-        else { beginPlay() }   // no roster pilot yet: fall back to the demo/default start
+        else { beginPlay() }   // no roster pilot yet: fall back to the default start
     }
 
     /// Persist the live pilot into its durable roster file (+ backup on land /
     /// manual save). A session that never went through `createPilot`/`play`
-    /// (the no-data demo path, or a dev autoplay run) has no roster id yet —
-    /// adopt it into the roster now instead of leaving it un-persisted for the
-    /// whole session.
+    /// (a dev autoplay run) has no roster id yet — adopt it into the roster
+    /// now instead of leaving it un-persisted for the whole session.
     func autosave(reason: SaveReason) {
         let id = pilot.rosterID ?? roster.adopt(state: pilot.state, game: data.game).id
         if pilot.rosterID == nil { pilot.bind(rosterID: id) }

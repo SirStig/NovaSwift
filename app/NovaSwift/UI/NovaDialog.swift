@@ -50,6 +50,7 @@ struct NovaDialog<Content: View>: View {
             .frame(width: width)
             .fixedSize(horizontal: false, vertical: true)
             .background(NovaPanelBackground(graphics: graphics))
+            .shrinkToFitViewport()
         }
     }
 
@@ -123,6 +124,7 @@ struct DialogChrome<Content: View>: View {
             // usable area, so it reads as a dialog over the menu, not a page.
             .frame(width: 660, height: 620)
             .background(NovaPanelBackground(graphics: model.uiGraphics))
+            .shrinkToFitViewport()
         }
     }
 

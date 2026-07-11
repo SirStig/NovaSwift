@@ -169,6 +169,7 @@ struct GamblingView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15)))
         .novaResponsive()
+        .shrinkToFitViewport()
     }
 
     private func placeBet(_ amount: Int) {
@@ -206,6 +207,7 @@ struct GamblingView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15)))
         .novaResponsive()
+        .shrinkToFitViewport()
     }
 
     private func finishRace() {

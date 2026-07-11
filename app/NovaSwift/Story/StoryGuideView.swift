@@ -47,7 +47,11 @@ struct StoryGuideView: View {
             case .map:   StorylineMapView(map: model.storyMap)
             }
         }
-        .frame(minWidth: 460, minHeight: 560)
+        // Fill whatever container presents us (a sheet on iOS, the sized sheet
+        // on macOS) instead of forcing a 460-wide floor that overflows a compact
+        // iPhone. `idealWidth` keeps the macOS sheet comfortably wide.
+        .frame(minWidth: 300, idealWidth: 900, maxWidth: .infinity,
+               minHeight: 380, maxHeight: .infinity)
         .background(EVTheme.panel)
         .foregroundStyle(EVTheme.text)
         .novaResponsive()

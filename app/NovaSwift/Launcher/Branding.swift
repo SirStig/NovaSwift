@@ -138,26 +138,55 @@ struct AppMark: View {
     }
 }
 
+/// External links shown in the port's own (non-authentic) UI.
+enum NovaLinks {
+    static let repo = URL(string: "https://github.com/SirStig/NovaSwift")!
+}
+
 /// The About box, in the game's own dialog chrome (`NovaDialog` — mission-panel
 /// art, three-slice Done button) instead of a bare system sheet.
 struct AboutView: View {
     /// Closes this dialog (injected by the full-screen overlay presenter).
     var onClose: () -> Void = {}
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "Version \(version) (\(build))"
+    }
+
     var body: some View {
-        NovaDialog(title: "About EV Nova", width: 460, buttons: [
+        NovaDialog(title: "About NovaSwift", width: 460, buttons: [
             NovaDialogButton(title: "Done", isDefault: true) { onClose() },
         ]) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 12) {
                     AppMark().frame(width: 48, height: 48)
-                    Text("an unofficial port").novaFont(.body).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("NovaSwift").novaFont(.heading, weight: .bold)
+                        Text("an unofficial port").novaFont(.body).foregroundStyle(.secondary)
+                    }
                 }
-                Text("A non-commercial, fan-made port of EV Nova to Apple platforms. Not affiliated with or endorsed by Ambrosia Software, ATMOS, or the original authors.")
+                Text("A non-commercial, fan-made native port of EV Nova to iPhone, iPad and Mac. Not affiliated with or endorsed by Ambrosia Software, ATMOS, or the original authors.")
                     .novaFont(.body)
                 Text("Game data is not included. You supply your own legally-obtained EV Nova data via Import Data. Community plug-ins are the property of their respective authors.")
                     .novaFont(.body).foregroundStyle(.secondary)
+
+                Divider().overlay(Color.white.opacity(0.15))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Created by Joshua Kac (SirStig)").novaFont(.body, weight: .semibold)
+                    Link(destination: NovaLinks.repo) {
+                        Label("github.com/SirStig", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    .novaFont(.body)
+                }
+
                 Text("Built on the open reimplementation work of the Escape Velocity community.")
                     .novaFont(.caption).foregroundStyle(.secondary)
+                Text(appVersion)
+                    .novaFont(.caption).foregroundStyle(.tertiary)
             }
         }
     }
