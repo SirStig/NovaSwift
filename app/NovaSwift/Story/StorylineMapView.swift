@@ -23,17 +23,19 @@ struct StorylineMapView: View {
     @State private var selectedID: Int?
     @State private var zoom: CGFloat = 0.85
     @State private var zoomBase: CGFloat = 0.85
-    /// The scroll content's frame relative to the scroll view's own bounds
-    /// (i.e. how far it's been scrolled) and the scroll view's own on-screen
-    /// size — together these give us the visible viewport. Tracked manually
-    /// via `GeometryReader`/`PreferenceKey` since `onScrollGeometryChange`
-    /// needs iOS 18/macOS 15, newer than this app's deployment target.
-    ///
-    /// Drives virtualized rendering: a campaign with heavy random-branch
-    /// fan-out can still have plenty of nodes, so we only build cards and
-    /// stroke edges that are actually (near) visible — the fix for a real
-    /// memory/frame-rate crash on iPhone when this view drew everything.
-    @State private var scrollContentFrame: CGRect = .zero
+    /// Manual pan offset, dragged the same way `GalaxyMapView` does — a plain
+    /// `ScrollView` only answers to a trackpad swipe/scroll wheel on macOS,
+    /// not a mouse click-drag, so panning here is driven by our own
+    /// `DragGesture` instead of relying on `ScrollView`'s native recognizer
+    /// (which is also what keeps this consistent with touch-drag on iOS).
+    @State private var pan: CGSize = .zero
+    @State private var dragLast: CGSize = .zero
+    /// The canvas's own on-screen size, used with `pan`/`zoom` to translate
+    /// the visible viewport back into unscaled map coordinates. Drives
+    /// virtualized rendering: a campaign with heavy random-branch fan-out can
+    /// still have plenty of nodes, so we only build cards and stroke edges
+    /// that are actually (near) visible — the fix for a real memory/frame-rate
+    /// crash on iPhone when this view drew everything.
     @State private var scrollContainerSize: CGSize = .zero
 
     private enum Layout {
@@ -59,12 +61,8 @@ struct StorylineMapView: View {
         /// but a heavily-modded one could still hit this.
         static let maxDetailedNodes = 120
         /// How far outside the visible viewport to still build node/edge views,
-        /// so scrolling doesn't visibly pop cards in at the edge.
+        /// so panning doesn't visibly pop cards in at the edge.
         static let virtualizationMargin: CGFloat = rowPitch
-        /// Symmetric padding wrapping the scaled tree inside the scroll view —
-        /// needed to translate the ScrollView's reported visible rect back
-        /// into unscaled map coordinates.
-        static let contentPadding: CGFloat = 28
     }
 
     var body: some View {
@@ -94,6 +92,10 @@ struct StorylineMapView: View {
             guard !keys.isEmpty else { selectedKey = nil; return }
             if let k = selectedKey, !keys.contains(k) { selectedKey = keys.first }
             else if selectedKey == nil { selectedKey = keys.first }
+        }
+        // A shorter tree shouldn't open still panned/zoomed from the last one.
+        .onChange(of: selectedKey) { _, _ in
+            pan = .zero; dragLast = .zero; zoom = 0.85; zoomBase = 0.85
         }
     }
 
@@ -212,31 +214,30 @@ struct StorylineMapView: View {
 
     private var detailCanvas: some View {
         GeometryReader { outerGeo in
-            ScrollView([.horizontal, .vertical]) {
-                ZStack(alignment: .topLeading) {
-                    edgeLayer
-                    nodeLayer
-                }
-                .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
-                .scaleEffect(zoom, anchor: .topLeading)
-                .frame(width: contentSize.width * zoom, height: contentSize.height * zoom,
-                       alignment: .topLeading)
-                .padding(Layout.contentPadding)
-                .background(
-                    GeometryReader { innerGeo in
-                        Color.clear.preference(key: ScrollContentFramePreferenceKey.self,
-                                                value: innerGeo.frame(in: .named(scrollSpace)))
-                    }
-                )
-                // Simultaneous (not exclusive) so pinch-zoom doesn't fight the
-                // ScrollView's own native pan recognizer for the gesture.
-                .simultaneousGesture(magnify)
+            ZStack(alignment: .topLeading) {
+                edgeLayer
+                nodeLayer
             }
-            // A fresh identity per storyline resets scroll position cleanly
-            // when switching — otherwise a shorter tree can open mid-scroll.
-            .id(selectedKey)
-            .coordinateSpace(name: scrollSpace)
-            .onPreferenceChange(ScrollContentFramePreferenceKey.self) { scrollContentFrame = $0 }
+            .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
+            .scaleEffect(zoom, anchor: .topLeading)
+            .offset(pan)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .clipped()
+            // A plain `DragGesture` (not ScrollView's native pan) so this
+            // responds the same way to a mouse click-drag on macOS as it does
+            // to touch-drag on iOS — see `pan`'s declaration.
+            .gesture(
+                DragGesture()
+                    .onChanged { g in
+                        pan.width += g.translation.width - dragLast.width
+                        pan.height += g.translation.height - dragLast.height
+                        dragLast = g.translation
+                    }
+                    .onEnded { _ in dragLast = .zero }
+            )
+            // Simultaneous (not exclusive) so pinch-zoom doesn't fight the drag.
+            .simultaneousGesture(magnify)
             .onAppear { scrollContainerSize = outerGeo.size }
             .onChange(of: outerGeo.size) { _, newSize in scrollContainerSize = newSize }
         }
@@ -245,8 +246,6 @@ struct StorylineMapView: View {
         .overlay(alignment: .bottom) { inspector }
         .animation(.easeInOut(duration: 0.18), value: selectedID)
     }
-
-    private let scrollSpace = "storyMapScroll"
 
     private var mapBackground: some View {
         LinearGradient(colors: [Color(white: 0.05), Color(white: 0.08)],
@@ -350,21 +349,20 @@ struct StorylineMapView: View {
     }
 
     /// The visible viewport translated back into unscaled map coordinates
-    /// (undoing the scroll offset, the content padding, and the pinch-zoom
-    /// scale), outset by a margin so nodes are already built just before
-    /// they'd scroll into view. Falls back to the whole tree before the first
-    /// layout pass reports real geometry.
+    /// (undoing `pan` and the pinch-zoom scale), outset by a margin so nodes
+    /// are already built just before they'd pan into view. Falls back to the
+    /// whole tree before the first layout pass reports real geometry.
+    ///
+    /// The content is drawn scaled (`.scaleEffect(zoom, anchor: .topLeading)`)
+    /// then shifted (`.offset(pan)`), so a screen point maps back to content
+    /// space as `(screen - pan) / zoom`.
     private var logicalVisibleRect: CGRect {
         guard scrollContainerSize != .zero else {
             return CGRect(origin: .zero, size: contentSize)
         }
-        let visibleInContent = CGRect(x: -scrollContentFrame.minX, y: -scrollContentFrame.minY,
-                                       width: scrollContainerSize.width, height: scrollContainerSize.height)
-        let pad = Layout.contentPadding
-        let unscaled = CGRect(x: (visibleInContent.minX - pad) / zoom,
-                               y: (visibleInContent.minY - pad) / zoom,
-                               width: visibleInContent.width / zoom,
-                               height: visibleInContent.height / zoom)
+        let unscaled = CGRect(x: -pan.width / zoom, y: -pan.height / zoom,
+                               width: scrollContainerSize.width / zoom,
+                               height: scrollContainerSize.height / zoom)
         return unscaled.insetBy(dx: -Layout.virtualizationMargin, dy: -Layout.virtualizationMargin)
     }
 
@@ -497,13 +495,6 @@ struct CrossLink: Identifiable, Hashable {
     let key: String        // the other storyline's key
     let outgoing: Bool      // true = this node leads into `key`; false = started from it
     var id: String { "\(key)-\(outgoing)" }
-}
-
-// MARK: - Scroll geometry tracking
-
-private struct ScrollContentFramePreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 // MARK: - Sidebar

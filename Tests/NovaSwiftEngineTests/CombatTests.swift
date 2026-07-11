@@ -388,6 +388,103 @@ final class CombatTests: XCTestCase {
         XCTAssertTrue(world.projectiles.isEmpty, "a Seeker-0x0020 weapon should refuse to fire while its ship is ionized")
     }
 
+    // MARK: Seeker jamming/interference (0x0008/0x0010, SESSION_AUDIT_FOLLOWUPS.md §B)
+
+    /// A minimal `gövt` with `InhJam1-4` set (offset 92, 4×16-bit).
+    private func govtWithJamming(id: Int, jamming: [Int]) -> GovtRes {
+        var d = [UInt8](repeating: 0, count: 100)
+        func putW(_ off: Int, _ v: Int) {
+            let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
+            d[off] = UInt8(u >> 8); d[off + 1] = UInt8(u & 0xff)
+        }
+        for (i, v) in jamming.prefix(4).enumerated() { putW(92 + i * 2, v) }
+        return GovtRes(Resource(type: NovaType.govt, id: id, name: "G\(id)", data: Data(d)))
+    }
+
+    func testTurnsAwayIfJammedEventuallyLosesLockAgainstAHighJamGovt() {
+        let missile = WeaponSpec(id: 150, name: "Seeker", shieldDamage: 10, armorDamage: 10,
+                                 reloadSeconds: 1, projectileSpeed: 400, range: 30_000,
+                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 2,
+                                 blastRadius: 0, ammoPerShot: 0, turnsAwayIfJammed: true)
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [100, 0, 0, 0])])
+        let target = makeShip("B", govt: 2, at: Vec2(0, 2000))
+        target.government = 2
+        let tid = world.addNPC(target)
+
+        attacker.weapons = [WeaponMount(spec: missile)]
+        attacker.currentTargetID = tid
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)   // fires the missile
+        XCTAssertEqual(world.projectiles.count, 1)
+
+        var lostLock = false
+        for _ in 0..<300 {   // up to 10s — a 100%-jammed target should lose lock well before then
+            world.step(1.0 / 30.0)
+            if world.projectiles.first?.targetID == nil { lostLock = true; break }
+        }
+        XCTAssertTrue(lostLock, "a fully-jammed government's ship should eventually shake the lock")
+    }
+
+    func testTurnsAwayIfJammedNeverTriggersAgainstAnUnjammedGovt() {
+        let missile = WeaponSpec(id: 150, name: "Seeker", shieldDamage: 10, armorDamage: 10,
+                                 reloadSeconds: 1, projectileSpeed: 400, range: 30_000,
+                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 2,
+                                 blastRadius: 0, ammoPerShot: 0, turnsAwayIfJammed: true)
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [0, 0, 0, 0])])
+        let target = makeShip("B", govt: 2, at: Vec2(0, 2000))
+        target.government = 2
+        let tid = world.addNPC(target)
+
+        attacker.weapons = [WeaponMount(spec: missile)]
+        attacker.currentTargetID = tid
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.projectiles.count, 1)
+
+        for _ in 0..<120 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(world.projectiles.first?.targetID, tid, "zero jamming should never shake the lock")
+    }
+
+    func testConfusedByInterferenceSlowsSteeringButNotUnaffectedWeapons() {
+        let jammed = WeaponSpec(id: 152, name: "Confused Seeker", shieldDamage: 10, armorDamage: 10,
+                                reloadSeconds: 1, projectileSpeed: 400, range: 3000,
+                                accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 4,
+                                blastRadius: 0, ammoPerShot: 0, confusedByInterference: true)
+        let clean = WeaponSpec(id: 153, name: "Clean Seeker", shieldDamage: 10, armorDamage: 10,
+                               reloadSeconds: 1, projectileSpeed: 400, range: 3000,
+                               accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 4,
+                               blastRadius: 0, ammoPerShot: 0)
+
+        // Target well off-axis so the lead angle requires real steering, and
+        // moving so the intercept keeps demanding correction frame to frame.
+        func fireOneAndMeasureFacingDrift(_ spec: WeaponSpec, interference: Int) -> Double {
+            let attacker = makeShip("A", govt: 1, at: Vec2())
+            let world = World(player: attacker)
+            world.systemInterference = interference
+            let target = makeShip("B", govt: 2, at: Vec2(1500, 1500))
+            target.velocity = Vec2(0, 200)
+            let tid = world.addNPC(target)
+            attacker.weapons = [WeaponMount(spec: spec)]
+            attacker.currentTargetID = tid
+            world.intent.firePrimary = true
+            world.step(1.0 / 30.0)
+            guard let p = world.projectiles.first else { return 0 }
+            let startFacing = p.facing
+            for _ in 0..<10 { world.step(1.0 / 30.0) }
+            guard let p2 = world.projectiles.first else { return 0 }
+            return abs(angleDelta(from: startFacing, to: p2.facing))
+        }
+
+        let confusedDrift = fireOneAndMeasureFacingDrift(jammed, interference: 100)
+        let cleanDrift = fireOneAndMeasureFacingDrift(clean, interference: 100)
+        XCTAssertLessThan(confusedDrift, cleanDrift,
+                          "at 100% interference a confused-by-interference seeker should steer less than an unaffected one")
+    }
+
     // MARK: legal-record wiring (disable/kill dent standing, shooting alone does not)
 
     /// A minimal `gövt` with `DisabPenalty@12`/`KillPenalty@16`/`ShootPenalty@18`

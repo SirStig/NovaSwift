@@ -523,8 +523,10 @@ final class AIBehaviorTests: XCTestCase {
     }
 
     func testLocalAuthorityScansThePlayer() {
-        // An armed authority ship with the player close by and non-hostile flies
-        // a scan pass and emits a shipScanned event aimed at the player.
+        // The "piracy police" that scan traffic are *interceptors* (Bible), holding
+        // orbit and buzzing a passing ship. An armed authority interceptor with the
+        // player close by and non-hostile flies a scan pass and emits a shipScanned
+        // event aimed at the player.
         let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
                           position: Vec2(0, 180))                 // within scan-complete range
         let world = World(player: player)
@@ -534,16 +536,60 @@ final class AIBehaviorTests: XCTestCase {
             center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
 
         let patrol = warship("Patrol", govt: 500, at: Vec2())
-        patrol.brain = AIBrain(aiType: .warship, govt: 500)
+        patrol.brain = AIBrain(aiType: .interceptor, govt: 500)
         world.addNPC(patrol)
 
         world.step(1.0 / 30.0)
-        XCTAssertEqual(patrol.brain?.state, .scanning, "authority breaks off its beat to scan a passing ship")
+        XCTAssertEqual(patrol.brain?.state, .scanning, "an authority interceptor breaks off its orbit to scan a passing ship")
         let scanned = world.events.contains {
             if case let .shipScanned(_, targetID, _) = $0 { return targetID == player.entityID }
             return false
         }
         XCTAssertTrue(scanned, "the scan pass should emit a shipScanned event targeting the player")
+        XCTAssertTrue(world.playerScanned, "the player-scan latch should trip so no other ship re-scans this visit")
+    }
+
+    func testAuthorityWarshipJumpsOutAfterTourOfDuty() {
+        // A local-authority warship with no enemies to fight doesn't police the
+        // system forever: after its (randomized) tour of duty it heads for the
+        // hyperspace edge and leaves — the turnover that keeps a system's traffic
+        // coming and going instead of the same hulls looping in place.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(0, 300))
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50])])   // player not hostile
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 900), radius: 80, canLand: true)],
+            center: Vec2(), jumpRadius: 4000, spawnRadius: 3400, systemGovt: 500)
+
+        let patrol = warship("Patrol", govt: 500, at: Vec2())
+        patrol.brain = AIBrain(aiType: .warship, govt: 500)
+        world.addNPC(patrol)
+
+        // Step out past the longest possible tour (dutyRemaining ≤ 135s).
+        var departed = false
+        for _ in 0..<200 {           // 200s of sim time at dt=1s
+            world.step(1.0)
+            if patrol.wantsToDepart { departed = true; break }
+        }
+        XCTAssertTrue(departed, "an idle authority warship should eventually jump out")
+    }
+
+    func testToroidalWrapFoldsPositionAcrossTheEdge() {
+        // Fly off one edge of the finite playfield and reappear on the opposite
+        // side (EV Nova's system wrap). A ship past +wrapExtent folds to the far
+        // negative side, keeping the system a fixed finite size with no wall.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(6000, 0))                       // beyond the +x edge
+        let world = World(player: player)
+        world.systemContext = SystemContext(
+            bodies: [], center: Vec2(), jumpRadius: 3000, spawnRadius: 2500,
+            wrapExtent: 5000, systemGovt: independentGovt)
+
+        world.step(1.0 / 30.0)
+        // fold(6000) with ext 5000: ((6000+5000) mod 10000) − 5000 = −4000.
+        XCTAssertEqual(player.position.x, -4000, accuracy: 1, "x should wrap to the opposite edge")
+        XCTAssertEqual(player.position.y, 0, accuracy: 1, "the in-bounds axis is untouched")
     }
 
     // MARK: fleet spawn eligibility (the LinkSyst govt-index → resource-id fix)
@@ -591,5 +637,77 @@ final class AIBehaviorTests: XCTestCase {
         for _ in 0..<120 { world.step(1.0 / 30.0) }              // ~4s later
         XCTAssertLessThanOrEqual(arrival.velocity.length, arrival.stats.maxSpeed + 1,
                                  "the entry over-speed bleeds back down to cruise")
+    }
+
+    // MARK: pêrs Aggress/Coward tuning (SESSION_AUDIT_FOLLOWUPS.md §A)
+
+    func testPersCowardLowersRetreatThresholdBelowDefault() {
+        // Default warship-retreat threshold is a fixed 25% shields; a pêrs with
+        // Coward=60 should flee at 50% shields, where the default would not.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [govt(230, classes: [30], flags1: 0x0010)]) // warshipsRetreat
+        let npc = warship("Coward", govt: 230, at: Vec2())
+        npc.shield = 40   // 50% of maxShield 80
+        let brain = AIBrain(aiType: .warship, govt: 230)
+        brain.personCoward = 60
+        npc.brain = brain
+        world.addNPC(npc)
+
+        world.step(1.0 / 30.0)
+        // With no hostile diplomacy configured, a ship that starts fleeing
+        // immediately finds no pursuer and proceeds straight to `.departing`
+        // (heading for the jump edge) within the same tick — both states
+        // indicate the Coward-triggered retreat fired.
+        let retreated = npc.brain?.state == .fleeing || npc.brain?.state == .departing
+        XCTAssertTrue(retreated, "Coward=60 should retreat at 50% shields, got \(String(describing: npc.brain?.state))")
+    }
+
+    func testDefaultRetreatThresholdIgnoresHigherShields() {
+        // Same 50% shield fraction, but no personCoward override — the fixed
+        // 25% default shouldn't trigger a retreat.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [govt(231, classes: [31], flags1: 0x0010)]) // warshipsRetreat
+        let npc = warship("Steady", govt: 231, at: Vec2())
+        npc.shield = 40   // 50% of maxShield 80
+        npc.brain = AIBrain(aiType: .warship, govt: 231)
+        world.addNPC(npc)
+
+        world.step(1.0 / 30.0)
+        XCTAssertNotEqual(npc.brain?.state, .fleeing, "50% shields is above the default 25% retreat threshold")
+    }
+
+    func testPersAggressionTunesAttackStandoffDistance() {
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        // Directly north (angle 0, matching this engine's heading convention)
+        // so aim error stays near zero and only standoff distance is at play.
+        let target = warship("Target", govt: 999, at: Vec2(0, 2_100))
+        world.addNPC(target)
+
+        let close = warship("Close", govt: 998, at: Vec2())
+        let closeBrain = AIBrain(aiType: .warship, govt: 998)
+        closeBrain.personAggression = 1
+        closeBrain.state = .attacking
+        closeBrain.targetID = target.entityID
+        close.brain = closeBrain
+        world.addNPC(close)
+
+        let far = warship("Far", govt: 998, at: Vec2())
+        let farBrain = AIBrain(aiType: .warship, govt: 998)
+        farBrain.personAggression = 3
+        farBrain.state = .attacking
+        farBrain.targetID = target.entityID
+        far.brain = farBrain
+        world.addNPC(far)
+
+        // Target sits 2100 out (the 5000-range gun): a close-standoff brain
+        // (0.4× range = 2000) treats it as still beyond standoff and thrusts
+        // to close in; a far-standoff brain (1.0× range = 5000) treats it as
+        // already well inside standoff and eases off the throttle.
+        let closeIntent = closeBrain.think(ship: close, world: world, dt: 1.0 / 30.0)
+        let farIntent = farBrain.think(ship: far, world: world, dt: 1.0 / 30.0)
+        XCTAssertTrue(closeIntent.thrust, "Aggress=1 (close) should still be closing at 2100/5000 range")
+        XCTAssertFalse(farIntent.thrust, "Aggress=3 (far) should already consider 2100/5000 range close enough")
     }
 }

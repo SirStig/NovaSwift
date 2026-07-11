@@ -351,52 +351,6 @@ public struct CronRes: Sendable {
     }
 }
 
-// MARK: përs — named character / unique NPC captain
-
-/// A decoded `përs` resource: a named unique captain that can appear in space,
-/// optionally offering a linked mission. AI/combat behaviour is fleshed out by
-/// the (separate) AI module; the story engine only needs the mission link, the
-/// activation test, and where the person roams.
-///
-/// The full përs body carries variable-length weapon arrays near its tail; this
-/// decoder reads the fixed head plus the `activeOn` NCB test (empirically at
-/// offset 52) and the linked mission, which is what the story layer consumes.
-public struct PersRes: Sendable {
-    public let id: Int
-    public let name: String
-
-    public let linkSystem: Int
-    public let govt: Int
-    public let aiType: Int
-    public let aggression: Int
-    public let retreatShield: Int
-    public let shipType: Int
-    public let linkMission: Int      // mïsn id this person offers (-1 = none)
-    public let flags1: Int
-    public let activeOn: String      // NCB test gating whether the person exists
-    public let subtitle: String
-
-    public var deactivateAfterAccept: Bool { flags1 & 0x0100 != 0 }
-    public var offerOnBoard: Bool          { flags1 & 0x0200 != 0 }
-    public var leavesAfterAccept: Bool     { flags1 & 0x0800 != 0 }
-
-    public init(_ r: Resource) {
-        id = r.id
-        name = r.name
-        let d = r.data
-        linkSystem    = mi16(d, 0)
-        govt          = mi16(d, 2)
-        aiType        = mi16(d, 4)
-        aggression    = mi16(d, 6)
-        retreatShield = mi16(d, 8)
-        shipType      = mi16(d, 10)
-        linkMission   = mi16(d, 30)
-        flags1        = mu16(d, 32)
-        activeOn      = cstr(d, 52, 256)
-        subtitle      = cstr(d, 314, 64)
-    }
-}
-
 // MARK: ränk — player standing with a government
 
 /// A decoded `ränk` resource: a title the player can hold with a government,

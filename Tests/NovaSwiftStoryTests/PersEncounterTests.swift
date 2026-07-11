@@ -58,6 +58,19 @@ final class PersEncounterTests: XCTestCase {
                        "Come closer.")
     }
 
+    func testHailQuoteGatedByAttackingContext() {
+        // Flag 0x0010: only show HailQuote when the ship begins to attack
+        // the player (SESSION_AUDIT_FOLLOWUPS.md §A — previously decoded but
+        // never actually consulted by `hail`'s gating).
+        let g = game(persFlags: 0x0010)
+        let engine = StoryEngine(game: g, player: PlayerState(currentSystem: 128))
+        XCTAssertNil(PersEncounter.hail(g.pers(131)!, player: engine.player, game: g, engine: engine,
+                                        attacking: false).hailQuote,
+                     "not currently attacking — the attacking-only quote stays withheld")
+        XCTAssertEqual(PersEncounter.hail(g.pers(131)!, player: engine.player, game: g, engine: engine,
+                                          attacking: true).hailQuote, "Come closer.")
+    }
+
     func testMissionOnBoardNotOfferedOnHail() {
         // Flag 0x0200: LinkMission is offered on boarding, not hailing.
         let g = game(persFlags: 0x0200)

@@ -181,7 +181,7 @@ final class OutfitMechanicsTests: XCTestCase {
         put16(&s, 12, 1)       // techLevel 1
         col.add(Resource(type: NovaType.spob, id: 400, name: "Port", data: Data(s)))
         col.add(outfit(200, name: "Too Advanced", tech: 99))                 // gated out
-        col.add(outfit(201, name: "Sold Anywhere", tech: 99, flags: 0x0800)) // 0x0800 bypasses
+        col.add(outfit(201, name: "Sold Anywhere", flags: 0x0800, tech: 99)) // 0x0800 bypasses
         let game = NovaGame(col)
         let spob = game.spob(400)!
         let ids = Set(game.outfitsSold(at: spob).map(\.id))

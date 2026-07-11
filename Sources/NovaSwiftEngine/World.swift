@@ -276,9 +276,26 @@ public final class Ship {
     public var cloakDropsOnDamage: Bool { cloakFlags & 0x0008 != 0 }
     /// 0x1000: area cloak — ships in formation with this one are cloaked too.
     public var cloakIsArea: Bool { cloakFlags & 0x1000 != 0 }
+    /// Cloak level shared onto this ship by an area-cloaking formation-mate
+    /// (`cloakIsArea`), independent of any cloak device of its own. Maintained
+    /// each frame by `World.stepCloak`.
+    public var areaCloakLevel: Double = 0
+    /// The stronger of this ship's own cloak and any area-cloak shared onto it
+    /// by a formation-mate — what detection/rendering should actually use.
+    public var effectiveCloakLevel: Double { max(cloakLevel, areaCloakLevel) }
+    /// Substantially hidden by either its own cloak or a formation-mate's area
+    /// cloak — the target-selection/radar/rendering-facing check.
+    public var isEffectivelyCloaked: Bool { effectiveCloakLevel >= 0.99 }
     /// Anti-interference (oütf ModType 24): subtracted from the system's sensor
     /// static when computing this ship's effective sensor range.
     public var interferenceReduction: Int = 0
+    /// ModType 11 (`escapePod`): if the player is flying this hull when
+    /// destroyed, they eject and survive instead of a real game-over.
+    public var hasEscapePod: Bool = false
+    /// ModType 20 (`autoEject`): ignored without `hasEscapePod` — ejection
+    /// itself is currently automatic either way, so this is tracked for
+    /// completeness but doesn't change the outcome.
+    public var hasAutoEject: Bool = false
     /// Set on a launched fighter: the entity id of the carrier it flew from, so
     /// it can dock back and be freed if the carrier dies. nil = not a fighter.
     public var carrierID: Int?
@@ -545,6 +562,10 @@ public final class World {
     public var intent = ControlIntent()
     public var tuning: FlightTuning
     public var combatTuning: CombatTuning
+    /// Set once the player's death has been reported via `.playerDestroyed`,
+    /// so a `World` that keeps stepping with 0 armor (the app hasn't reacted
+    /// yet) doesn't re-report it every frame.
+    private var playerDeathReported = false
 
     /// Live NPC ships (does not include the player).
     public private(set) var npcs: [Ship] = []
@@ -580,6 +601,12 @@ public final class World {
     /// the player back-to-back as each ship's individual cooldown expired.
     /// Set on every player scan; checked by `AIBrain.pickScanTarget`.
     public var playerScanCooldown: Double = 0
+    /// Latched true the first time an authority ship scans the player this system
+    /// visit. A fresh `World` is built on each system entry, so this resets
+    /// naturally per visit — giving the original's "you get buzzed by about one
+    /// ship each time you enter," not a repeating cooldown that lets a busy system
+    /// re-scan you every minute you loiter. Checked by `AIBrain.pickScanTarget`.
+    public var playerScanned = false
 
     public init(player: Ship, tuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
@@ -654,7 +681,7 @@ public final class World {
     /// turns it into a visible scan sweep. Purely cosmetic in this engine —
     /// there's no contraband/ScanMask system yet to key consequences off.
     public func reportScan(scannerID: Int, targetID: Int, at: Vec2) {
-        if targetID == 0 { playerScanCooldown = 60 }
+        if targetID == 0 { playerScanCooldown = 60; playerScanned = true }
         events.append(.shipScanned(scannerID: scannerID, targetID: targetID, at: at))
     }
 
@@ -747,6 +774,7 @@ public final class World {
         // Player: outside intent.
         fireWeapons(from: player, intent: intent)
         player.step(dt, intent: intent, tuning: tuning)
+        wrapIntoSystem(player)
 
         // NPCs: each brain decides an intent. Disabled hulks don't think — they
         // just tumble and bleed off speed until they cool and drift away.
@@ -756,6 +784,7 @@ public final class World {
                 npc.velocity = npc.velocity * max(0, 1 - 0.35 * dt)
                 npc.angle += npc.disableSpin * dt
                 npc.position += npc.velocity * dt
+                wrapIntoSystem(npc)
                 continue
             }
             let npcIntent: ControlIntent
@@ -767,6 +796,7 @@ public final class World {
             }
             fireWeapons(from: npc, intent: npcIntent)
             npc.step(dt, intent: npcIntent, tuning: tuning)
+            wrapIntoSystem(npc)
         }
 
         // Cooldowns & regen (hulks recover nothing).
@@ -791,6 +821,41 @@ public final class World {
         // Ships have moved this step; weld continuous beams to their new
         // positions/headings and expire pulse-beam flashes.
         refreshActiveBeams(dt)
+        reportPlayerDeathIfNeeded()
+    }
+
+    /// The player's own death is otherwise invisible to `despawnDepartedAndDead`
+    /// (which only ever looks at `npcs`) — report it exactly once via
+    /// `.playerDestroyed`, alongside the same explosion effect an NPC kill
+    /// gets, so the app can run its escape-pod-or-game-over reaction.
+    private func reportPlayerDeathIfNeeded() {
+        guard !playerDeathReported, !player.isAlive else { return }
+        playerDeathReported = true
+        events.append(.explosion(at: player.position, radius: max(24, player.radius * 1.5),
+                                 soundID: player.explosionSoundID))
+        events.append(.playerDestroyed(hadEscapePod: player.hasEscapePod))
+    }
+
+    /// Toroidal wrap: EV Nova's systems are a fixed finite size — fly off one edge
+    /// and you reappear on the opposite side ("no walls, but you roll over"). Folds
+    /// a ship's position back into the `±wrapExtent` box around `systemContext.center`,
+    /// on the x and y axes independently. Idempotent for in-bounds ships (the guard
+    /// skips them entirely), so it only ever acts the frame a ship actually crosses
+    /// an edge — the player's camera then hard-cuts to the far side, exactly the
+    /// teleport-to-the-other-side the wrap should look like. NPCs heading out to jump
+    /// despawn at `jumpRadius` (< `wrapExtent`), so they never wrap.
+    private func wrapIntoSystem(_ ship: Ship) {
+        let ext = systemContext.wrapExtent
+        guard ext > 0 else { return }
+        let rel = ship.position - systemContext.center
+        guard abs(rel.x) > ext || abs(rel.y) > ext else { return }
+        let span = 2 * ext
+        func fold(_ v: Double) -> Double {
+            var r = (v + ext).truncatingRemainder(dividingBy: span)
+            if r < 0 { r += span }
+            return r - ext
+        }
+        ship.position = systemContext.center + Vec2(fold(rel.x), fold(rel.y))
     }
 
     /// Guidance 9/10 mounts (`WeapRes.isPointDefense`): "fires automatically at
@@ -982,7 +1047,9 @@ public final class World {
                            detonateOnExpire: spec.detonateOnExpire, impact: spec.impact,
                            submunition: spec.submunition, subDepth: subDepth,
                            explosionBoomID: spec.explosionBoomID,
-                           graphicSpinID: spec.graphicSpinID, spinShots: spec.spinShots)
+                           graphicSpinID: spec.graphicSpinID, spinShots: spec.spinShots,
+                           confusedByInterference: spec.confusedByInterference,
+                           turnsAwayIfJammed: spec.turnsAwayIfJammed)
         projectiles.append(p)
         return p
     }
@@ -1179,6 +1246,18 @@ public final class World {
 
             // Movement by guidance.
             if p.homing {
+                // Seeker 0x0010 "turns away if jammed": each second in flight,
+                // an at-risk shot has a chance (equal to its target's
+                // government's summed InhJam1-4, clamped 0-100%) to lose lock
+                // entirely — an engine reading of the four jam types as one
+                // combined jam strength, since the Bible doesn't specify how
+                // a weapon picks among them.
+                if p.turnsAwayIfJammed, let tid = p.targetID, let t = ship(id: tid) {
+                    let jam = max(0, min(100, diplomacy?.govt(t.government)?.jamming.reduce(0, +) ?? 0))
+                    if jam > 0, rng.double(in: 0...1) < (Double(jam) / 100) * dt {
+                        p.targetID = nil
+                    }
+                }
                 // Steer the heading toward the first-order intercept, then fly
                 // inertialessly at cruise speed along it (EV Nova guided shots
                 // don't drift — they point where they're going).
@@ -1186,7 +1265,13 @@ public final class World {
                     let lead = leadAngle(from: p.position, shooterVel: p.velocity, target: t,
                                          shotSpeed: p.speed, instantHit: false)
                     var d = angleDelta(from: p.facing, to: lead)
-                    let maxTurn = p.turnRate * dt
+                    // Seeker 0x0008 "confused by sensor interference": the
+                    // same range-degrading curve `effectiveSensorRange` uses
+                    // for AI perception, applied to steering rate instead.
+                    let turnRate = p.confusedByInterference
+                        ? p.turnRate * max(0, 1 - Double(systemInterference) / 100)
+                        : p.turnRate
+                    let maxTurn = turnRate * dt
                     d = max(-maxTurn, min(maxTurn, d))
                     p.facing += d
                 }
@@ -1533,9 +1618,14 @@ public final class World {
     /// cloak scanner able to target cloaked ships (ModType 30 bit 0x0008).
     /// Non-cloaked targets pass here; range/interference gating is separate.
     public func canDetect(_ target: Ship, by observer: Ship) -> Bool {
-        guard target.isCloaked else { return true }
+        guard target.isEffectivelyCloaked else { return true }
         return observer.cloakScannerFlags & 0x0008 != 0
     }
+
+    /// A ship's formation key: an escort's is its leader's entity id; a leader
+    /// (or any lone ship) is its own key. Two ships sharing a key fly together
+    /// — the grouping `cloakIsArea` (0x1000) shares a cloak across.
+    private func formationKey(_ s: Ship) -> Int { s.brain?.leaderID ?? s.entityID }
 
     /// Fade cloaks in/out and drain their fuel/shield upkeep. A cloak forced off
     /// (out of fuel/shields) simply disengages and fades back to visible.
@@ -1554,6 +1644,18 @@ public final class World {
             } else if s.cloakLevel > 0 {
                 s.cloakLevel = max(0, s.cloakLevel - rate * dt)
             }
+        }
+
+        // Area cloak (0x1000): ships flying with an area-cloaking ship share
+        // its cloak level for detection/rendering, without needing a cloak of
+        // their own — recomputed fresh each step from the current formations.
+        var groupCloak: [Int: Double] = [:]
+        for s in allShips where s.hasCloak && s.cloakIsArea && s.cloakLevel > 0 {
+            let key = formationKey(s)
+            groupCloak[key] = max(groupCloak[key] ?? 0, s.cloakLevel)
+        }
+        for s in allShips {
+            s.areaCloakLevel = groupCloak[formationKey(s)] ?? 0
         }
     }
 

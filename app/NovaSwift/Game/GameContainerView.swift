@@ -194,6 +194,33 @@ final class GameHost {
         return PlayerSession(ship: ship, textures: textures, engineTextures: engineTextures, shipName: name)
     }
 
+    /// The nearest inhabited `spöb` to `position` within `systemID`, or nil if
+    /// the system has none (an escape-pod rescue needs somewhere to land).
+    static func nearestInhabitedSpob(in systemID: Int, near position: Vec2, game: NovaGame) -> SpobRes? {
+        let candidates = game.stellarObjects(in: systemID).map(\.spob).filter { !$0.isUninhabited }
+        return candidates.min { a, b in
+            (Vec2(a.x, a.y) - position).length < (Vec2(b.x, b.y) - position).length
+        }
+    }
+
+    /// Apply an escape-pod rescue to a persisted pilot: the ship, its cargo,
+    /// and every installed outfit are lost (per the Bible's escape pod being
+    /// a last resort, not a lifeboat that tows your hull home); the pilot is
+    /// dropped at `spob` with a stock replacement hull and full fuel/armor/
+    /// shield. Credits, legal record, missions, and combat rating carry over.
+    static func applyEscapePodRescue(to state: inout PlayerState, droppedAt spob: SpobRes, game: NovaGame) {
+        let stockShipID = game.startingChar()?.shipID.flatMap { $0 >= 128 ? $0 : nil } ?? game.ships().first?.id
+        if let stockShipID {
+            state.shipType = stockShipID
+            state.shipName = game.ship(stockShipID)?.name ?? ""
+        }
+        state.outfits = [:]
+        state.cargo = [:]
+        state.armor = nil; state.shield = nil; state.fuel = nil
+        state.currentSystem = spob.systemID
+        state.exploredSystems.insert(spob.systemID)
+    }
+
     /// Decode the authentic status bar: the ïntf interface definition + its
     /// backdrop PICT, from the player's own data. Returns nil if unavailable
     /// (the container then falls back to `GameHUDView`, our own non-authentic HUD).
@@ -280,6 +307,14 @@ struct GameContainerView: View {
     @FocusState private var isSceneFocused: Bool
     /// The open hail/communication dialog, if any (nil = closed).
     @State private var hailDialogState: HailDialogState?
+    /// Backs the in-flight LinkMission offer a hailed/boarded `pêrs` makes —
+    /// mirrors the bar's `services.pendingOffer` pattern (`SpaceportView`) so
+    /// the same accept/decline panel works mid-flight.
+    @StateObject private var flightMissionServices = AppGameServices()
+    @State private var flightMissionEngine: StoryEngine?
+    /// The `pêrs` id behind the current flight mission offer, if any — needed
+    /// on accept to honor its deactivate/leave-after-mission flags.
+    @State private var flightMissionPersonID: Int?
     /// Mobile action-menu panels the on-screen controls can open over flight.
     @State private var showMissionsPanel = false
     @State private var showPilotInfoPanel = false
@@ -382,6 +417,18 @@ struct GameContainerView: View {
                         onClose: { hailDialogState = nil })
                 }
 
+                // A pêrs's in-flight LinkMission offer (hailed or boarded) —
+                // stacks over the hail dialog exactly as the bar stacks its
+                // offer over the spaceport hub.
+                if let offer = flightMissionServices.pendingOffer, let graphics = host.graphics {
+                    Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                    MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
+                                        onPage: { _ in },
+                                        onAccept: { acceptFlightMissionOffer(offer) },
+                                        onDecline: { declineFlightMissionOffer(offer) })
+                        .transition(.opacity)
+                }
+
                 // Mobile action-menu panels (opened from the on-screen controls).
                 mobilePanels
 
@@ -450,6 +497,10 @@ struct GameContainerView: View {
         .onChange(of: hailDialogState != nil) { _, open in
             setScenePaused(open, reason: "hailDialogState=\(open)")
             if !open { grabSceneFocus(reason: "hail dialog closed") }
+        }
+        .onChange(of: flightMissionServices.pendingOffer != nil) { _, open in
+            setScenePaused(open, reason: "flightMissionOffer=\(open)")
+            if !open { grabSceneFocus(reason: "flight mission offer closed") }
         }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding/quitting is the one moment a manual save/jump/land
@@ -912,6 +963,62 @@ struct GameContainerView: View {
         host?.hud.post("Salvaged \(loot.count) item(s)\(names.isEmpty ? "" : ": \(names.sorted().joined(separator: ", "))").")
     }
 
+    /// A boarded `pêrs` offering its LinkMission on boarding rather than
+    /// hailing (`Flags` 0x0200) — same in-flight accept/decline panel as a hail.
+    private func offerBoardedPersonMission(_ m: World.BoardingManifest) {
+        guard let pid = host?.scene.personID(forEntity: m.shipID),
+              let game = host?.game, let pers = game.pers(pid) else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+        let enc = PersEncounter.hail(pers, player: model.pilot.state, game: game,
+                                     engine: engine, boarding: true)
+        presentPersMissionOffer(pid, missionID: enc.offerMissionID, engine: engine, game: game)
+    }
+
+    /// Surface a `pêrs`'s offered LinkMission as the in-flight accept/decline
+    /// panel (mirrors the bar's `services.pendingOffer` flow).
+    private func presentPersMissionOffer(_ personID: Int, missionID: Int?, engine: StoryEngine, game: NovaGame) {
+        guard let missionID, let mission = game.mission(missionID) else { return }
+        flightMissionEngine = engine
+        flightMissionPersonID = personID
+        engine.present(mission)
+    }
+
+    /// Accept the current in-flight `pêrs` LinkMission offer, honoring the
+    /// person's deactivate/leave-after-acceptance flags.
+    private func acceptFlightMissionOffer(_ offer: MissionOffer) {
+        guard let engine = flightMissionEngine else { return }
+        _ = engine.accept(offer.mission.id)
+        model.pilot.state = engine.player
+        if let pid = flightMissionPersonID, let pers = host?.game?.pers(pid) {
+            // "Deactivate ship (don't make it show up again) after accepting
+            // its LinkMission" (0x0100) — reuses the same not-yet-defeated
+            // spawn-eligibility gate as a defeated pêrs, since the visible
+            // effect (never spawns again) is identical.
+            if pers.deactivateAfterMission {
+                model.pilot.state.recordPersDefeated(pid)
+            }
+            // "Make ship leave after accepting its LinkMission" (0x0800).
+            if pers.leaveAfterMission {
+                host?.scene.sendPersonDeparting(personID: pid)
+            }
+        }
+        model.pilot.save()
+        flightMissionServices.pendingOffer = nil
+        flightMissionEngine = nil
+        flightMissionPersonID = nil
+    }
+
+    /// Decline the current in-flight `pêrs` LinkMission offer.
+    private func declineFlightMissionOffer(_ offer: MissionOffer) {
+        guard let engine = flightMissionEngine else { return }
+        engine.decline(offer.mission.id)
+        model.pilot.state = engine.player
+        model.pilot.save()
+        flightMissionServices.pendingOffer = nil
+        flightMissionEngine = nil
+        flightMissionPersonID = nil
+    }
+
     private func plunderCapture(_ scene: GameScene, shipID: Int) {
         if scene.attemptCapture(shipID) {
             host?.hud.post("Ship captured — it joins your escorts.")
@@ -978,6 +1085,7 @@ struct GameContainerView: View {
             if let m = host?.scene.attemptBoard() {
                 boardManifest = m
                 grantBoardingLoot(m)   // përs ItemClass loot is handed over on boarding
+                offerBoardedPersonMission(m)
             }
         default:
             break
@@ -995,19 +1103,20 @@ struct GameContainerView: View {
             model.audio.playHailVoice(govt: govt, hostile: hostile)
             var displayName = name
             var response = hostile ? "They aren't interested in talking." : "This is \(name). Go ahead."
+            var customPictID: Int?
             // Named person (pêrs): replace the generic response with their comm
             // quote and note any mission they offer.
             if let pid = host?.scene.personID(forEntity: entityID),
                let game = host?.game, let pers = game.pers(pid) {
-                let engine = StoryEngine(game: game, player: model.pilot.state)
+                let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
                 let disabled = host?.scene.isEntityDisabled(entityID) ?? false
+                let attacking = host?.scene.isEntityAttackingPlayer(entityID) ?? false
                 let enc = PersEncounter.hail(pers, player: model.pilot.state, game: game,
-                                             engine: engine, disabled: disabled)
+                                             engine: engine, disabled: disabled, attacking: attacking)
                 displayName = enc.name
+                customPictID = enc.hailPictID
                 if let quote = enc.commQuote ?? enc.hailQuote { response = quote }
-                if enc.offerMissionID != nil {
-                    host?.hud.post("\(enc.name) has a job for you — find them at a mission computer or bar.")
-                }
+                presentPersMissionOffer(pid, missionID: enc.offerMissionID, engine: engine, game: game)
                 if pers.quoteOnce {
                     model.pilot.state.markPersQuoteShown(pid); model.pilot.save()
                 }
@@ -1015,7 +1124,7 @@ struct GameContainerView: View {
             hailDialogState = HailDialogState(
                 kind: .ship(entityID: entityID, shipTypeID: shipTypeID),
                 name: displayName, govtLabel: govt.targetCode, hostile: hostile,
-                responseText: response)
+                responseText: response, customPictID: customPictID)
         case let .planet(spobID, name, govt, landable):
             // Hostile when the player is deeply wanted by the stellar's govt
             // (a wanted rating turns its defenders on you) — read straight from
@@ -1107,6 +1216,11 @@ struct GameContainerView: View {
     }
 
     private func hailPortrait(_ state: HailDialogState) -> CGImage? {
+        // A pêrs's custom HailPict (Bible: shown "in the comm dialog instead
+        // of the ship's default") wins over the default ship/planet portrait.
+        if let pictID = state.customPictID, let custom = host?.graphics?.pict(pictID) {
+            return custom
+        }
         switch state.kind {
         case let .ship(_, shipTypeID):
             guard let res = host?.game?.ship(shipTypeID) else { return nil }
@@ -1359,6 +1473,9 @@ struct HailDialogState {
     var landable = true
     var responseText: String
     var assistRequested = false
+    /// A `pêrs`'s custom `HailPict`, when this hail is with a named character
+    /// that specifies one — overrides the default ship/planet portrait.
+    var customPictID: Int? = nil
 }
 
 /// Routes hardware-keyboard presses into flight intents using the user's

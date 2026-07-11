@@ -24,7 +24,7 @@ public enum PersEncounter {
     /// Whether the player currently "likes" this person: no grudge and a
     /// non-negative legal standing with the person's government.
     public static func likesPlayer(_ pers: PersRes, player: PlayerState) -> Bool {
-        guard !player.persHoldsGrudge(pers.personID) else { return false }
+        guard !player.persHoldsGrudge(pers.id) else { return false }
         guard pers.govt >= 0 else { return true }
         return (player.legalRecord[pers.govt] ?? 0) >= 0
     }
@@ -45,18 +45,20 @@ public enum PersEncounter {
 
     /// Resolve a hail (or board, when `boarding` is true) of `pers`. `disabled`
     /// is whether the person's ship is currently a disabled hulk (enables the
-    /// disabled-only HailQuote). Does not mutate — the caller applies quote-once
-    /// via `PlayerState.markPersQuoteShown` when it actually shows the quote.
+    /// disabled-only HailQuote); `attacking` is whether it's currently engaged
+    /// in combat with the player (enables the attacking-only HailQuote). Does
+    /// not mutate — the caller applies quote-once via
+    /// `PlayerState.markPersQuoteShown` when it actually shows the quote.
     public static func hail(_ pers: PersRes, player: PlayerState, game: NovaGame,
                             engine: StoryEngine, boarding: Bool = false,
-                            disabled: Bool = false) -> PersHailResult {
+                            disabled: Bool = false, attacking: Bool = false) -> PersHailResult {
         let mission = offeredMission(pers, player: player, game: game, engine: engine, boarding: boarding)
         let missionAvailable = mission != nil
-        let hasGrudge = player.persHoldsGrudge(pers.personID)
+        let hasGrudge = player.persHoldsGrudge(pers.id)
         let likes = likesPlayer(pers, player: player)
 
         // Quote-once already spent? Then no quotes.
-        let spent = pers.quoteOnce && player.wasPersQuoteShown(pers.personID)
+        let spent = pers.quoteOnce && player.wasPersQuoteShown(pers.id)
         // "Don't show quote when the LinkMission isn't available" (0x0400).
         let missionGateOK = !pers.noQuoteWithoutMission || missionAvailable
 
@@ -81,11 +83,12 @@ public enum PersEncounter {
             let ok = !conditional
                 || (pers.hailQuoteWhenGrudge && hasGrudge)
                 || (pers.hailQuoteWhenLikes && likes)
+                || (pers.hailQuoteWhenAttacking && attacking)
                 || (pers.hailQuoteWhenDisabled && disabled)
             if ok { hail = str(7101, pers.hailQuote) }
         }
 
-        return PersHailResult(personID: pers.personID, name: pers.name,
+        return PersHailResult(personID: pers.id, name: pers.name,
                               commQuote: comm, hailQuote: hail,
                               hailPictID: pers.hailPict >= 128 ? pers.hailPict : nil,
                               offerMissionID: mission)

@@ -422,6 +422,8 @@ extension Galaxy {
         ship.cloakFlags = lo.cloakFlags
         ship.cloakScannerFlags = lo.cloakScannerFlags
         ship.interferenceReduction = lo.interferenceReduction
+        ship.hasEscapePod = lo.hasEscapePod
+        ship.hasAutoEject = lo.hasAutoEject
 
         var mounts: [WeaponMount] = []
         for w in lo.weapons {

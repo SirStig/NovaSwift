@@ -94,8 +94,14 @@ public final class Spawner {
     public init(galaxy: Galaxy, table: SpawnTable) {
         self.galaxy = galaxy
         self.table = table
-        let avg = max(2, table.averageShips)
-        self.targetPopulation = min(maxPopulation, avg + 2)
+        // Track the system's real `sÿst.AvgShips` as the ambient fill target
+        // (Bible: "the average number of AI ships in the system … +/- 50%").
+        // Turnover — tour-of-duty departures + traders landing/leaving — makes the
+        // live count breathe around this target instead of sitting pinned at it,
+        // which is what reads as ships coming and going. Fleets/reinforcements are
+        // group events allowed to push a bit past it, up to `maxPopulation`.
+        let avg = max(3, table.averageShips)
+        self.targetPopulation = min(maxPopulation, avg)
     }
 
     /// Where a spawn comes from: mid-system (initial fill), the hyperspace edge
@@ -345,10 +351,10 @@ public final class Spawner {
     /// (same ship class + compatible government), avoiding one already in-system.
     private func assignPersonIfLucky(to ship: Ship, shipID: Int, govt: Int, world: World) {
         guard world.rng.int(in: 0...99) < 5 else { return }
-        let candidates = galaxy.game.perses().filter {
-            $0.shipType == shipID && ($0.govt == govt || $0.govt == -1)
-                && !world.npcs.contains { npc in npc.personID == $0.id }
-                && world.persSpawnEligible($0.id)   // ActiveOn NCB + not-yet-defeated
+        let candidates = galaxy.game.perses().filter { candidate in
+            candidate.shipType == shipID && (candidate.govt == govt || candidate.govt == -1)
+                && !world.npcs.contains { npc in npc.personID == candidate.id }
+                && world.persSpawnEligible(candidate.id)   // ActiveOn NCB + not-yet-defeated
         }
         guard !candidates.isEmpty else { return }
         let pers = candidates[world.rng.int(in: 0...candidates.count - 1)]
@@ -357,7 +363,9 @@ public final class Spawner {
     }
 
     /// Apply a `pêrs`'s ship customization: a shield-strength multiplier
-    /// (`ShieldMod`, <0 = invincible) and the credits it carries for plunder.
+    /// (`ShieldMod`, <0 = invincible), the credits it carries for plunder, and
+    /// its `WeapType`/`WeapCount`/`AmmoLoad` weapon layering on top of the
+    /// hull's stock fit.
     private func applyPersonCustomization(_ pers: PersRes, to ship: Ship, world: World) {
         if pers.shieldMod < 0 {
             ship.maxShield = 1_000_000; ship.shield = ship.maxShield   // "invincible"
@@ -369,6 +377,43 @@ public final class Spawner {
             // Credits carried, ±25% (deterministic jitter from the RNG).
             let jitter = 0.75 + world.rng.double(in: 0...0.5)
             ship.plunderCredits = max(0, Int(Double(pers.credits) * jitter))
+        }
+        ship.brain?.personAggression = pers.aggression
+        ship.brain?.personCoward = pers.coward
+        applyPersonWeapons(pers, to: ship)
+    }
+
+    /// Layer a `pêrs`'s `WeapType`/`WeapCount`/`AmmoLoad[4]` onto the spawned
+    /// hull's stock weapons. Per the Bible, a negative `WeapCount` *removes*
+    /// that many stock copies of `WeapType` instead of adding them.
+    func applyPersonWeapons(_ pers: PersRes, to ship: Ship) {
+        for i in 0..<4 {
+            let wtype = pers.weapType[i]
+            let wcount = pers.weapCount[i]
+            guard wtype > 0, wcount != 0 else { continue }
+            if wcount > 0 {
+                guard let spec = galaxy.weaponSpec(wtype) else { continue }
+                let ammoLoad = pers.ammoLoad[i]
+                if let existing = ship.weapons.first(where: { $0.spec.id == wtype }) {
+                    existing.count += wcount
+                    if ammoLoad > 0, existing.ammo >= 0 { existing.ammo += ammoLoad }
+                } else {
+                    ship.weapons.append(WeaponMount(spec: spec, ammo: ammoLoad > 0 ? ammoLoad : -1, count: wcount))
+                }
+            } else {
+                var remaining = -wcount
+                ship.weapons.removeAll { mount in
+                    guard mount.spec.id == wtype, remaining > 0 else { return false }
+                    if mount.count <= remaining {
+                        remaining -= mount.count
+                        return true
+                    } else {
+                        mount.count -= remaining
+                        remaining = 0
+                        return false
+                    }
+                }
+            }
         }
     }
 

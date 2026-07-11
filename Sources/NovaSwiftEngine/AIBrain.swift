@@ -103,6 +103,23 @@ public final class AIBrain {
     /// Time before this ship will look to scan another passing vessel — keeps
     /// patrols from chain-scanning everything in sight.
     var scanCooldown: Double = 0
+    /// Authority "tour of duty": seconds a warship/interceptor will keep policing
+    /// this system before it jumps out and is replaced by fresh traffic. Bible: a
+    /// warship "seeks out and attacks his enemies, or jumps out if there aren't
+    /// any." Without this, local-authority patrols/orbits loiter forever — which
+    /// pins the population and stops any new ships from arriving (the "9 identical
+    /// ships circling forever, nothing comes or goes" bug). Randomized per ship on
+    /// first idle so departures stagger; -1 means "not yet rolled".
+    var dutyRemaining: Double = -1
+
+    /// `pêrs.Aggress` (1 close … 3 far): how close this ship presses its attack
+    /// standoff distance. Set by `Spawner` when this brain is promoted to a
+    /// named `pêrs`; nil for ordinary NPCs (falls back to `aiType`'s default).
+    public var personAggression: Int?
+    /// `pêrs.Coward`: percent of shields at which this ship flees a fight,
+    /// overriding the fixed 25% warship-retreat threshold. Set by `Spawner`
+    /// alongside `personAggression`.
+    public var personCoward: Int?
 
     public init(aiType: AIType, govt: Int) {
         self.aiType = aiType
@@ -258,7 +275,8 @@ public final class AIBrain {
 
         // Retreat conditions by disposition.
         let govt = world.diplomacy?.govt(me.government)
-        let warshipRetreat = (govt?.warshipsRetreat ?? false) && me.shieldFraction < 0.25
+        let cowardThreshold = personCoward.map { Double($0) / 100.0 } ?? 0.25
+        let warshipRetreat = (govt?.warshipsRetreat ?? false) && me.shieldFraction < cowardThreshold
         // Bible: "AI ships of this type will run away/dock if out of ammo for
         // all ammo-using weapons" (`shïp.Flags2` 0x0080) — checked regardless
         // of disposition; dock (head to a planet) if nothing's chasing us,
@@ -348,16 +366,39 @@ public final class AIBrain {
             enter(defaultIdleState(me, world))
         }
 
-        // Local authority on its idle beat (patrolling or holding orbit) will,
-        // now and then, break off to fly over and scan a passing ship — the
-        // player first. This is what makes police "check you out" instead of
-        // ignoring you. Not while escorting a leader, and never chain-scanning.
-        if (state == .patrolling || state == .orbiting), armed, scanCooldown <= 0,
+        // Interceptors are the "piracy police": the Bible has *interceptors*
+        // (not warships) "buzz incoming ships to scan them for illegal cargo."
+        // Holding orbit, one will now and then peel off to fly over and scan a
+        // passing ship — the player first. Restricting this to interceptors, and
+        // latching the player scan to once per system visit (`World.playerScanned`,
+        // checked in `pickScanTarget`), is what stops the "half the system keeps
+        // scanning me" pile-up: in the original you get buzzed by about one ship
+        // each time you enter. Not while escorting a leader, and never chain-scanning.
+        if aiType == .interceptor, state == .orbiting, armed, scanCooldown <= 0,
            leaderID == nil, isSystemAuthority(me, world),
            let mark = pickScanTarget(me, world) {
             scanTargetID = mark.entityID
             scanReported = false
             enter(.scanning)
+        }
+
+        // Tour of duty: a local-authority warship/interceptor doesn't police one
+        // system forever. With no fight to be had, after a (randomized, staggered)
+        // stretch it jumps out — Bible: a warship "jumps out if there aren't any"
+        // enemies. Departing drops the population below target, so the spawner
+        // trickles in fresh arrivals: the coming-and-going that makes a system feel
+        // alive instead of the same handful of hulls looping in place. A fight
+        // re-rolls the clock so a ship that just defended the system doesn't bolt
+        // the instant the shooting stops.
+        if leaderID == nil, aiType == .warship || aiType == .interceptor,
+           isSystemAuthority(me, world) {
+            if threat != nil {
+                dutyRemaining = -1
+            } else if state == .patrolling || state == .orbiting {
+                if dutyRemaining < 0 { dutyRemaining = world.rng.double(in: 55...135) }
+                dutyRemaining -= dt
+                if dutyRemaining <= 0 { enter(.departing) }
+            }
         }
 
         me.currentTargetID = (state == .attacking) ? targetID : nil
@@ -425,7 +466,14 @@ public final class AIBrain {
 
         let aimError = abs(angleDelta(from: me.angle, to: desired))
         // Interceptors crowd the target; warships hold at a comfortable range.
-        let standoff = aiType == .interceptor ? range * 0.5 : range * 0.7
+        // A named pêrs's `Aggress` (1 close … 3 far) overrides that default.
+        let standoff: Double
+        if let aggress = personAggression {
+            let factor = aggress <= 1 ? 0.4 : (aggress == 2 ? 0.7 : 1.0)
+            standoff = range * factor
+        } else {
+            standoff = aiType == .interceptor ? range * 0.5 : range * 0.7
+        }
         if dist > standoff {
             // Thrust when roughly pointed the right way, so we actually close.
             if aimError < .pi / 2 {
@@ -531,11 +579,16 @@ public final class AIBrain {
     /// circles. Repaths only when it actually reaches a waypoint (or a long
     /// safety timeout), not every few seconds.
     private func patrol(_ me: Ship, _ world: World, _ dt: Double) -> ControlIntent {
-        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 240 {
+        // Repath as soon as we get near the current waypoint — no braking radius,
+        // so the ship *flies the beat* at cruise past each planet and moves on to
+        // the next, tracing a continuous circuit. The old `arrive(slowRadius:)`
+        // coasted the ship to a near-stop over each body, which read as "picked a
+        // point and circles it forever" — exactly the behavior being fixed.
+        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 300 {
             destination = pickPatrolPoint(me, world)
-            repathClock = 14
+            repathClock = 22
         }
-        return arrive(me, to: destination ?? me.position, slowRadius: 180)
+        return seek(me, to: destination ?? me.position)
     }
 
     /// Interceptor idle default: hold a slow, wide orbit around the nearest
@@ -623,26 +676,32 @@ public final class AIBrain {
         let fwd = Vec2(sin(leader.angle), cos(leader.angle))
         let right = Vec2(cos(leader.angle), -sin(leader.angle))
         let station = leader.position + fwd * behind + right * lateral
+        // Feed the leader's velocity forward: the slot travels *with* the leader,
+        // so aim where the slot is going, not where it is. This is what keeps the
+        // wing pinned to the leader as it accelerates instead of sagging behind and
+        // catching up in a sawtooth (the old wobble).
+        let aheadStation = station + leader.velocity * 0.5
         let toStation = station - me.position
         let d = toStation.length
-        let leaderMoving = leader.velocity.length > leader.stats.maxSpeed * 0.12
+        let leaderMoving = leader.velocity.length > leader.stats.maxSpeed * 0.1
 
-        // On station: lock to the leader's heading so the wing points as one. If
-        // the leader is under way, keep thrusting to hold pace (a purely braking
-        // `arrive` would sag out of formation the moment the leader accelerates).
-        if d < 46 {
+        // Locked into the slot (tight band): fly exactly as the leader flies —
+        // same heading, matched throttle — so the formation reads as one rigid
+        // delta. Much tighter than the old 46-unit float, which let escorts drift
+        // around their slots.
+        if d < 30 {
             var intent = ControlIntent()
             intent.desiredHeading = leader.angle
-            if leaderMoving, abs(angleDelta(from: me.angle, to: leader.angle)) < .pi / 2,
-               me.velocity.length < leader.velocity.length { intent.thrust = true }
+            // Hold pace: thrust while the leader is under way and we're pointed
+            // with it, unless we're already a touch faster (so we settle, not surge).
+            if leaderMoving, abs(angleDelta(from: me.angle, to: leader.angle)) < .pi / 3,
+               me.velocity.length < leader.velocity.length * 1.02 { intent.thrust = true }
             return intent
         }
-        // Off station: while the leader is moving, aim a bit ahead of the slot so
-        // we close the gap and keep up rather than tail-chasing a moving point.
-        if leaderMoving {
-            return seek(me, to: station + leader.velocity * 0.4)
-        }
-        return arrive(me, to: station, slowRadius: 120)
+        // Approaching the slot: settle onto the velocity-predicted station. A modest
+        // slow radius lets a fast escort drop cleanly into place instead of blowing
+        // through it, while the feed-forward keeps it from lagging a moving leader.
+        return arrive(me, to: aheadStation, slowRadius: 110)
     }
 
     /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
@@ -779,10 +838,13 @@ public final class AIBrain {
         if !stops.isEmpty {
             patrolIndex = (patrolIndex + 1) % stops.count
             let b = stops[patrolIndex]
-            // A small fixed standoff off the body, not a big random jitter, so
-            // the waypoint is stable and the ship doesn't wander around it.
-            let off = Vec2(world.rng.double(in: -110...110), world.rng.double(in: -110...110))
-            return b.position + off
+            // A stable standoff on the *outer* face of each body (away from system
+            // centre), no random jitter: visiting each planet's outer point in turn
+            // sweeps a wide, believable circuit of the whole system rather than
+            // orbiting one spot. Deterministic, so the beat doesn't twitch.
+            let outward = b.position - ctx.center
+            let dir = outward.length < 1 ? Vec2(0, 1) : outward.normalized
+            return b.position + dir * (b.radius + 200)
         }
         // Empty system: loiter somewhere inside the jump radius.
         let r = ctx.jumpRadius * 0.5
@@ -800,10 +862,10 @@ public final class AIBrain {
         let player = world.player
         let toPlayer = (player.position - me.position).length
         // Prefer the player when reasonably close and not already hostile — but
-        // not if some other authority ship scanned them recently (`World.playerScanCooldown`),
-        // so a busy system doesn't chain-scan the player the moment each ship's
-        // own cooldown expires.
-        if player.isAlive, toPlayer < reach, world.playerScanCooldown <= 0,
+        // only once per system visit (`World.playerScanned`, latched when the
+        // scan lands). In the original you get buzzed by about one interceptor
+        // each time you enter a system, not repeatedly the whole time you loiter.
+        if player.isAlive, toPlayer < reach, !world.playerScanned,
            world.diplomacy?.isHostileToPlayer(me.government) != true, !provokedByPlayer {
             return player
         }

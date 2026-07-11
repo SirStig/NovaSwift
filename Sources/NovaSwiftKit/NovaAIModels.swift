@@ -632,6 +632,10 @@ public struct WeapRes {
     /// "Seeker" 0x0020: "Can't fire if ship is ionized" — a per-weapon flag,
     /// not automatic for all guided weapons.
     public var cantFireWhileIonized: Bool { seekerFlagsRaw & 0x0020 != 0 }
+    /// "Seeker" 0x0008: "Confused by sensor interference".
+    public var confusedByInterference: Bool { seekerFlagsRaw & 0x0008 != 0 }
+    /// "Seeker" 0x0010: "Turns away if jammed".
+    public var turnsAwayIfJammed: Bool { seekerFlagsRaw & 0x0010 != 0 }
     /// "Guidance = 9/10... fires automatically at incoming guided weapons and
     /// nearby ships" (EV Nova Bible).
     public var isPointDefense: Bool { guidance == .pointDefense || guidance == .pointDefenseBeam }

@@ -83,6 +83,66 @@ final class CloakTests: XCTestCase {
         XCTAssertTrue(world.canDetect(target, by: observer))
     }
 
+    // MARK: area cloak (0x1000) — shared onto formation-mates
+
+    func testAreaCloakSharesLevelWithEscortLackingItsOwnDevice() {
+        let world = World(player: Ship(name: "P", stats: stats()))
+        let leader = Ship(name: "Leader", stats: stats())
+        leader.cloakFlags = 0x1010          // area cloak, 1 fuel/sec
+        leader.maxFuel = 100; leader.fuel = 100
+        leader.cloakEngaged = true
+        world.addNPC(leader)
+
+        let escort = Ship(name: "Escort", stats: stats())
+        world.addNPC(escort)
+        let escortBrain = AIBrain(aiType: .warship, govt: 100)
+        escortBrain.leaderID = leader.entityID
+        escort.brain = escortBrain
+
+        for _ in 0..<60 { world.step(1.0) }   // plenty of time to fully fade in
+        XCTAssertEqual(leader.cloakLevel, 1.0, accuracy: 0.001)
+        XCTAssertEqual(escort.areaCloakLevel, 1.0, accuracy: 0.001,
+                       "an escort with no cloak of its own shares its area-cloaking leader's level")
+        XCTAssertTrue(escort.isEffectivelyCloaked, "the shared area-cloak level counts as effectively cloaked")
+        XCTAssertFalse(escort.isCloaked, "but the escort's own device-level cloak state stays untouched")
+    }
+
+    func testAreaCloakDoesNotLeakToUnrelatedShips() {
+        let world = World(player: Ship(name: "P", stats: stats()))
+        let leader = Ship(name: "Leader", stats: stats())
+        leader.cloakFlags = 0x1010
+        leader.maxFuel = 100; leader.fuel = 100
+        leader.cloakEngaged = true
+        world.addNPC(leader)
+
+        let bystander = Ship(name: "Bystander", stats: stats())
+        world.addNPC(bystander)   // no leaderID — not in the leader's formation
+
+        for _ in 0..<60 { world.step(1.0) }
+        XCTAssertEqual(bystander.areaCloakLevel, 0, "an unrelated ship shares in no one's area cloak")
+        XCTAssertFalse(bystander.isEffectivelyCloaked)
+    }
+
+    func testCanDetectHonorsAreaCloakOnAnUncloakedEscort() {
+        let world = World(player: Ship(name: "P", stats: stats()))
+        let leader = Ship(name: "Leader", stats: stats())
+        leader.cloakFlags = 0x1010
+        leader.maxFuel = 100; leader.fuel = 100
+        leader.cloakEngaged = true
+        world.addNPC(leader)
+
+        let escort = Ship(name: "Escort", stats: stats())
+        world.addNPC(escort)
+        let escortBrain = AIBrain(aiType: .warship, govt: 100)
+        escortBrain.leaderID = leader.entityID
+        escort.brain = escortBrain
+
+        for _ in 0..<60 { world.step(1.0) }
+        let observer = Ship(name: "O", stats: stats())
+        XCTAssertFalse(world.canDetect(escort, by: observer),
+                       "an area-cloaked escort is undetectable just like its cloaking leader")
+    }
+
     // MARK: interference-scaled range
 
     func testInterferenceShrinksSensorRange() {

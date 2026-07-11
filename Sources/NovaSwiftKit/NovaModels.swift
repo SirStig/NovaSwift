@@ -699,8 +699,6 @@ public struct NovaGame {
     public func missions() -> [MissionRes] { resources.resources(of: NovaType.mission).map(MissionRes.init) }
     public func cron(_ id: Int) -> CronRes? { resources.resource(NovaType.cron, id).map(CronRes.init) }
     public func crons() -> [CronRes] { resources.resources(of: NovaType.cron).map(CronRes.init) }
-    public func pers(_ id: Int) -> PersRes? { resources.resource(NovaType.pers, id).map(PersRes.init) }
-    public func persons() -> [PersRes] { resources.resources(of: NovaType.pers).map(PersRes.init) }
     public func rank(_ id: Int) -> RankRes? { resources.resource(NovaType.rank, id).map(RankRes.init) }
     public func ranks() -> [RankRes] { resources.resources(of: NovaType.rank).map(RankRes.init) }
     public func roid(_ id: Int) -> RoidRes? { resources.resource(NovaType.roid, id).map(RoidRes.init) }

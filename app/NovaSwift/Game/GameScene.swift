@@ -40,6 +40,9 @@ final class GameScene: SKScene {
     /// persists these to the pilot.
     var onPersGrudge: ((Int) -> Void)?
     var onPersDefeated: ((Int) -> Void)?
+    /// Fired once when the player's own ship is destroyed. `hadEscapePod`
+    /// picks the host's reaction: rescue-at-nearest-port vs. game over.
+    var onPlayerDestroyed: ((_ hadEscapePod: Bool) -> Void)?
     private var input: InputController!
     private var controllerInput: GameControllerInput?
 
@@ -708,6 +711,8 @@ final class GameScene: SKScene {
                 onPersGrudge?(pid)
             case let .personDefeated(pid):
                 onPersDefeated?(pid)
+            case let .playerDestroyed(hadEscapePod):
+                onPlayerDestroyed?(hadEscapePod)
             default:
                 break
             }
@@ -979,6 +984,20 @@ final class GameScene: SKScene {
     func personID(forEntity id: Int) -> Int? { world?.ship(id: id)?.personID }
     /// Whether the entity's ship is currently a disabled hulk.
     func isEntityDisabled(_ id: Int) -> Bool { world?.ship(id: id)?.disabled ?? false }
+    /// Whether the entity's ship is currently engaged in combat with the
+    /// player — feeds `pêrs.HailQuote`'s "only when the ship begins to attack
+    /// the player" flag (0x0010).
+    func isEntityAttackingPlayer(_ id: Int) -> Bool {
+        guard let brain = world?.ship(id: id)?.brain else { return false }
+        return brain.state == .attacking && brain.targetID == World.playerEntityID
+    }
+    /// Send a named `pêrs`'s live ship (looked up by its `pêrs` id, not entity
+    /// id) off toward the hyperspace edge — `pêrs.Flags` 0x0800 ("make ship
+    /// leave after accepting its LinkMission"). A no-op if that person isn't
+    /// currently spawned in this system.
+    func sendPersonDeparting(personID: Int) {
+        world?.npcs.first { $0.personID == personID }?.brain?.state = .departing
+    }
     /// Record a fresh grudge on the live world so a wronged person turns hostile
     /// immediately, without waiting for the next system rebuild.
     func addLiveGrudge(_ personID: Int) { world?.playerPersGrudges.insert(personID) }
@@ -1292,10 +1311,16 @@ final class GameScene: SKScene {
 
     private func syncNPCs() {
         var seen = Set<Int>()
+        // A cloak scanner's 0x0002 bit ("reveal cloaked ships on the screen")
+        // keeps cloaked hulls fully visible to the player despite the fade
+        // below; without it, cloaking fades a ship toward invisible as
+        // `cloakLevel` rises (harmless — always 0 on an uncloaked ship).
+        let screenRevealsCloaked = world.player.cloakScannerFlags & 0x0002 != 0
         for npc in world.npcs {
             seen.insert(npc.entityID)
             let node = npcNodes[npc.entityID] ?? makeNPCNode(for: npc)
             node.container.position = CGPoint(x: npc.position.x, y: npc.position.y)
+            node.container.alpha = screenRevealsCloaked ? 1.0 : CGFloat(1 - npc.effectiveCloakLevel)
             if let sprite = node.sprite, !node.textures.isEmpty {
                 sprite.texture = node.textures[min(npc.spriteFrame, node.textures.count - 1)]
             } else if let tri = node.placeholder {
@@ -2156,9 +2181,21 @@ final class GameScene: SKScene {
             guard dx * dx + dy * dy <= 1 else { return nil }
             return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv))
         }
+        // A cloaked ship drops off the player's radar entirely unless its own
+        // device flags it "visible on radar" regardless (oütf ModType 17
+        // 0x0002) or the player carries a cloak scanner that reveals cloaked
+        // ships on radar (ModType 30 0x0001).
+        let radarRevealsCloaked = p.cloakScannerFlags & 0x0001 != 0
+        // System sensor static (sÿst.Interference) shrinks the ship radar's
+        // effective reach exactly as it shrinks AI perception — contacts that
+        // would show at the fixed range drop off sooner as static thickens.
+        // Stellars aren't gated by this: they're visible landmarks, not active
+        // sensor contacts.
+        let shipRadarRange = max(1, world.effectiveSensorRange(Double(radarRange), for: p))
         hud.blips = world.npcs.compactMap { npc in
-            let dx = (npc.position.x - shipPos.x) / Double(radarRange)
-            let dy = -(npc.position.y - shipPos.y) / Double(radarRange)
+            if npc.isEffectivelyCloaked, !npc.cloakVisibleOnRadar, !radarRevealsCloaked { return nil }
+            let dx = (npc.position.x - shipPos.x) / shipRadarRange
+            let dy = -(npc.position.y - shipPos.y) / shipRadarRange
             guard dx * dx + dy * dy <= 1 else { return nil }
             return RadarContact(x: dx, y: dy, relationship: relationship(for: npc))
         }

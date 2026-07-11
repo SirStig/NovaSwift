@@ -105,6 +105,12 @@ public struct WeaponSpec {
     /// Seeker 0x0020: this (guided) weapon refuses to fire while its own ship
     /// is ionized.
     public let cantFireWhileIonized: Bool
+    /// Seeker 0x0008: "Confused by sensor interference" — this guided shot's
+    /// tracking degrades as the system's `sÿst.Interference` static rises.
+    public let confusedByInterference: Bool
+    /// Seeker 0x0010: "Turns away if jammed" — this guided shot can lose lock
+    /// on a target whose government's `InhJam1-4` jamming is strong enough.
+    public let turnsAwayIfJammed: Bool
     /// Proximity-fuse radius in px (unguided missiles/bombs): the shot detonates
     /// within this distance of a valid target instead of needing a direct hit.
     public let proxRadius: Double
@@ -153,6 +159,7 @@ public struct WeaponSpec {
                 fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false,
                 isPointDefense: Bool = false, vulnerableToPD: Bool = true,
                 ionization: Double = 0, cantFireWhileIonized: Bool = false,
+                confusedByInterference: Bool = false, turnsAwayIfJammed: Bool = false,
                 guidance: WeaponGuidance = .unguided, isTurret: Bool = false,
                 proxRadius: Double = 0, proxHitAll: Bool = true,
                 proxSafetySeconds: Double = 0, decayPerSec: Double = 0,
@@ -172,6 +179,7 @@ public struct WeaponSpec {
         self.loopSound = loopSound
         self.isPointDefense = isPointDefense; self.vulnerableToPD = vulnerableToPD
         self.ionization = ionization; self.cantFireWhileIonized = cantFireWhileIonized
+        self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
         self.guidance = guidance; self.isTurret = isTurret
         self.proxRadius = proxRadius; self.proxHitAll = proxHitAll
         self.proxSafetySeconds = proxSafetySeconds
@@ -244,6 +252,8 @@ public struct WeaponSpec {
         vulnerableToPD = w.vulnerableToPD
         ionization = Double(w.ionization)
         cantFireWhileIonized = w.cantFireWhileIonized
+        confusedByInterference = w.confusedByInterference
+        turnsAwayIfJammed = w.turnsAwayIfJammed
     }
 }
 
@@ -364,6 +374,10 @@ public final class Projectile {
     /// Shot sprite (`spïn` id) and whether it spins, for the renderer.
     public let graphicSpinID: Int?
     public let spinShots: Bool
+    /// Seeker 0x0008: tracking degrades as system Interference rises.
+    public let confusedByInterference: Bool
+    /// Seeker 0x0010: can lose lock on a target whose government jams hard enough.
+    public let turnsAwayIfJammed: Bool
 
     public init(position: Vec2, velocity: Vec2, life: Double,
                 shieldDamage: Double, armorDamage: Double, blastRadius: Double,
@@ -373,7 +387,9 @@ public final class Projectile {
                 decayPerSec: Double = 0, proxRadius: Double = 0, proxSafetyRemaining: Double = 0,
                 proxHitAll: Bool = true, detonateOnExpire: Bool = false, impact: Double = 0,
                 submunition: Submunition? = nil, subDepth: Int = 0,
-                explosionBoomID: Int? = nil, graphicSpinID: Int? = nil, spinShots: Bool = false) {
+                explosionBoomID: Int? = nil, graphicSpinID: Int? = nil, spinShots: Bool = false,
+                confusedByInterference: Bool = false, turnsAwayIfJammed: Bool = false) {
+        self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
         self.position = position; self.velocity = velocity; self.life = life
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.blastRadius = blastRadius; self.ownerID = ownerID; self.ownerGovt = ownerGovt
@@ -543,4 +559,9 @@ public enum WorldEvent {
     case personGrudge(personID: Int)
     /// The player destroyed a named person; they cease to appear again. Persisted.
     case personDefeated(personID: Int)
+    /// The player's own ship was destroyed (armor reached zero). `hadEscapePod`
+    /// (`Loadout.hasEscapePod`, ModType 11) tells the app which outcome to run:
+    /// true survives via rescue at the nearest inhabited port (ship/cargo/
+    /// outfits lost); false is a real game-over. Fires once per `World`.
+    case playerDestroyed(hadEscapePod: Bool)
 }
