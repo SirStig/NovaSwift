@@ -77,6 +77,30 @@ final class FighterBayTests: XCTestCase {
         XCTAssertEqual(carrier.fighterBays.first?.docked, 2, "one fighter spent from the bay")
     }
 
+    func testLaunchedFightersGetDistinctFormationSlots() throws {
+        // Regression: `launchFighter` never assigned `formationSlot`, so every
+        // fighter from the same bay defaulted to slot 0 and piled onto the
+        // same escort position instead of fanning out.
+        let galaxy = Galaxy(game: game())
+        let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))
+        carrier.brain = nil
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        world.galaxy = galaxy
+        world.diplomacy = galaxy.makeDiplomacy()
+        _ = world.addNPC(carrier)
+        let enemyID = world.addNPC(Ship(name: "E", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        carrier.currentTargetID = enemyID
+
+        // Bay capacity 3, ~1s reload between launches — plenty of time for
+        // all three to deploy.
+        for _ in 0..<200 { world.step(1.0 / 30.0) }
+
+        let fighters = world.npcs.filter { $0.carrierID == carrier.entityID }
+        XCTAssertEqual(fighters.count, 3, "all three fighters launched")
+        let slots = Set(fighters.compactMap { $0.brain?.formationSlot })
+        XCTAssertEqual(slots.count, 3, "each fighter got its own formation slot instead of stacking on 0")
+    }
+
     func testFightersDockWhenCarrierLeavesCombat() throws {
         let galaxy = Galaxy(game: game())
         let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))

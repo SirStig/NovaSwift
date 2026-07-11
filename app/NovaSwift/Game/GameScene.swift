@@ -154,6 +154,9 @@ final class GameScene: SKScene {
     /// Full-viewport white flash + radial star streaks, parented to the camera.
     private var jumpFlash: SKSpriteNode?
     private var jumpStreaks: SKNode?
+    /// System murk (`sÿst.Murk`) fog overlay — a camera-space dark veil whose
+    /// opacity tracks `World.effectiveMurk(for:)`.
+    private var murkFog: SKSpriteNode?
 
     private var lastUpdate: TimeInterval = 0
     private var hudClock: TimeInterval = 0
@@ -320,6 +323,7 @@ final class GameScene: SKScene {
         cameraNode.setScale(cameraZoom)
         addChild(cameraNode)
         buildJumpOverlays()
+        buildMurkFog()
         buildStarfield()
         buildPlanets()
         npcLayer.zPosition = 9
@@ -420,12 +424,17 @@ final class GameScene: SKScene {
             }
             node.position = p.position
             node.zPosition = 5
+            // Planet name label: the original never showed these in flight, so it's
+            // opt-in (Settings ▸ Interface). Named so `applyDisplaySettings` can
+            // toggle it live without rebuilding the system.
             let label = SKLabelNode(fontNamed: "Menlo")
+            label.name = "planetLabel"
             label.text = p.name
             label.fontSize = 11
             label.fontColor = SKColor(white: 0.8, alpha: 0.8)
             label.verticalAlignmentMode = .top
             label.position = CGPoint(x: 0, y: -p.radius - 6)
+            label.isHidden = !settings.showPlanetLabels
             node.addChild(label)
             addChild(node)
             planetNodes.append(node)
@@ -679,8 +688,10 @@ final class GameScene: SKScene {
                 // node is built); mid-system populate spawns appear silently.
                 if fromHyperspace { pendingEntrance[entityID] = .warpIn }
             case let .shipLaunched(entityID, _):
+                // Lifting off a planet is silent in the original — no takeoff SFX
+                // (the old snd 390 "Airlock" cue on the player's own launch read as
+                // a weird "escape hatch" noise). NPC launches were already silent.
                 pendingEntrance[entityID] = .launch
-                if entityID == 0 { audio?.play(.launch) }
             case let .shipDeparted(entityID, at, heading):
                 warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
             case let .shipLanded(entityID, spobID, at):
@@ -743,6 +754,7 @@ final class GameScene: SKScene {
 
         cameraNode.position = scenePos
         updateStarfield(cameraAt: scenePos)
+        updateMurkFog()
         updateLanding(player: p)
         updateHUD(dt: dt)
     }
@@ -872,6 +884,18 @@ final class GameScene: SKScene {
         if world.player.hasCloak {
             hud?.post(world.player.cloakEngaged ? "Cloaking device engaged." : "Cloaking device disengaged.")
         }
+    }
+
+    /// Scramble every docked fighter from the player's own bays right now.
+    func launchPlayerFighters() {
+        guard !world.player.fighterBays.isEmpty else { return }
+        world.playerLaunchFighters()
+    }
+
+    /// Call every deployed player fighter back to dock, regardless of combat.
+    func recallPlayerFighters() {
+        guard !world.player.fighterBays.isEmpty else { return }
+        world.playerRecallFighters()
     }
 
     /// One entry in the combined Tab-cycle order: every in-range ship plus
@@ -1405,7 +1429,10 @@ final class GameScene: SKScene {
         fill.anchorPoint = CGPoint(x: 0, y: 0.5)
         fill.position = CGPoint(x: -barWidth / 2, y: 0)
         let barHolder = SKNode()
-        barHolder.position = CGPoint(x: 0, y: n.radius + 8)
+        // Above (default), below, or hidden entirely, per Settings ▸ Graphics.
+        // The original never floated these over ships, so `off` is the faithful
+        // look. `updateNPCHealth` respects `off` too, so it can't un-hide them.
+        barHolder.position = CGPoint(x: 0, y: barOffsetY(radius: n.radius))
         barHolder.addChild(barBG)
         barHolder.addChild(fill)
         barHolder.isHidden = true
@@ -1467,6 +1494,30 @@ final class GameScene: SKScene {
         }
         cameraNode.addChild(streaks)
         jumpStreaks = streaks
+    }
+
+    /// The system-murk fog veil: same oversized camera-parented sprite trick
+    /// as the jump flash above, so it always covers the viewport regardless of
+    /// zoom. Starts fully transparent; `updateMurkFog` drives its opacity.
+    private func buildMurkFog() {
+        let fog = SKSpriteNode(color: .black, size: CGSize(width: 8000, height: 8000))
+        fog.zPosition = 480       // above the starfield/planets/ships, below jump overlays
+        fog.alpha = 0
+        fog.isHidden = true
+        cameraNode.addChild(fog)
+        murkFog = fog
+    }
+
+    /// Fog opacity tracks `World.effectiveMurk(for:)` (0 = clear, 100 = the
+    /// Bible's own "question your glasses prescription"); a negative value
+    /// hides the starfield entirely instead of thickening the fog.
+    private func updateMurkFog() {
+        let murk = world.effectiveMurk(for: world.player)
+        for layer in starLayers { layer.container.isHidden = murk < 0 }
+        guard let murkFog else { return }
+        let alpha = CGFloat(max(0, min(100, murk))) / 100 * 0.85
+        murkFog.alpha = alpha
+        murkFog.isHidden = alpha <= 0.001
     }
 
     /// Begin the player's hyperspace jump to `destSystemID`. The scene owns the
@@ -1688,12 +1739,13 @@ final class GameScene: SKScene {
         clearSystemNodes()
         buildPlanets()
 
-        // Snap camera + ship node onto the launch point and play the takeoff cue.
+        // Snap camera + ship node onto the launch point. No takeoff sound —
+        // leaving a planet is silent in the original (the old snd 390 "Airlock"
+        // cue here was the odd "escape hatch" noise on launch).
         let scenePos = CGPoint(x: player.position.x, y: player.position.y)
         shipNode.position = scenePos
         cameraNode.position = scenePos
         applyEntrance(.launch, to: shipNode, at: scenePos, heading: player.angle)
-        audio?.play(.launch)
         Log.scene.debug("reloadForDeparture: launched from spob \(spobID) in \(self.systemName) [\(self.systemID)], \(w.npcs.count) NPCs")
     }
 
@@ -1895,12 +1947,61 @@ final class GameScene: SKScene {
         // Only redraw when it actually changed; hide the bar at full health.
         if npc.armor == n.lastArmor { return }
         n.lastArmor = npc.armor
-        holder.isHidden = frac >= 0.999
+        // Hidden when the player turned bars off, otherwise shown only when hurt.
+        holder.isHidden = settings.shipBarPosition == .off || frac >= 0.999
         fill.xScale = CGFloat(max(0.001, frac))
         // Green when healthy, through amber, to red when critical.
         fill.color = SKColor(red: CGFloat(1 - frac) * 0.9 + 0.1,
                              green: CGFloat(frac) * 0.9,
                              blue: 0.25, alpha: 1)
+    }
+
+    /// Y offset for a ship's hull/shield bar, per the player's chosen position.
+    /// `off` is positioned like `above` but kept hidden (bars never un-hide when off).
+    private func barOffsetY(radius: CGFloat) -> CGFloat {
+        switch settings.shipBarPosition {
+        case .above, .off: return radius + 8
+        case .below:       return -(radius + 8)
+        }
+    }
+
+    /// Re-apply the display settings that affect already-built nodes — planet name
+    /// labels and hull/shield bar position/visibility — so toggling them from
+    /// Settings updates the live scene without waiting for a system rebuild.
+    func applyDisplaySettings(_ newSettings: GameSettings) {
+        settings = newSettings
+        for node in planetNodes {
+            node.childNode(withName: "planetLabel")?.isHidden = !settings.showPlanetLabels
+        }
+        for (_, n) in npcNodes {
+            guard let holder = n.healthBar else { continue }
+            holder.position = CGPoint(x: 0, y: barOffsetY(radius: n.radius))
+            if settings.shipBarPosition == .off {
+                holder.isHidden = true
+            } else {
+                n.lastArmor = -1   // force updateNPCHealth to re-evaluate visibility
+            }
+        }
+    }
+
+    // MARK: Hyperspace no-jump zone
+
+    /// EV Nova's "no-jump zone": you can't enter hyperspace within this radius of
+    /// the system centre (Bible: the standard radius is 1000px, adjustable by the
+    /// "hyperspace dist mod" outfit #23). Fixed at the stock 1000 for now.
+    var hyperspaceNoJumpRadius: Double = 1000
+
+    /// True when the player is clear of the no-jump zone and may jump. Too close,
+    /// it posts the original's "fly further out" nudge and returns false so the
+    /// caller refuses the jump.
+    func canEnterHyperspace() -> Bool {
+        guard let w = world else { return true }
+        let dist = (w.player.position - w.systemContext.center).length
+        if dist < hyperspaceNoJumpRadius {
+            hud?.post("You are too close to the system's center to enter hyperspace.")
+            return false
+        }
+        return true
     }
 
     /// The rotation textures for a `röid` type, decoded once and cached (a

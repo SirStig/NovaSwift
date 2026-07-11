@@ -61,6 +61,60 @@ final class CombatTests: XCTestCase {
         XCTAssertTrue(world.npcs.isEmpty, "dead ship is removed from the roster")
     }
 
+    // MARK: player death (SESSION_AUDIT_FOLLOWUPS.md §C — escape-pod survival)
+
+    func testPlayerDeathReportsHadEscapePodFlag() {
+        let player = makeShip("Player", govt: 0, at: Vec2())
+        player.hasEscapePod = true
+        player.armor = 0; player.shield = 0
+        let world = World(player: player)
+
+        world.step(1.0 / 30.0)
+        let reported = world.events.contains {
+            if case let .playerDestroyed(hadEscapePod) = $0 { return hadEscapePod }
+            return false
+        }
+        XCTAssertTrue(reported, "a dead player with an escape pod should report hadEscapePod=true")
+    }
+
+    func testPlayerDeathWithoutEscapePodReportsFalse() {
+        let player = makeShip("Player", govt: 0, at: Vec2())
+        player.armor = 0; player.shield = 0
+        let world = World(player: player)
+
+        world.step(1.0 / 30.0)
+        let reported = world.events.contains {
+            if case let .playerDestroyed(hadEscapePod) = $0 { return !hadEscapePod }
+            return false
+        }
+        XCTAssertTrue(reported, "a dead player with no escape pod should report hadEscapePod=false")
+    }
+
+    func testPlayerDeathReportsOnlyOnce() {
+        let player = makeShip("Player", govt: 0, at: Vec2())
+        player.armor = 0; player.shield = 0
+        let world = World(player: player)
+
+        world.step(1.0 / 30.0)
+        let firstStepEvents = world.drainEvents()
+        world.step(1.0 / 30.0)   // armor is still 0 — must not re-report
+        let secondStepEvents = world.drainEvents()
+
+        func deathCount(_ events: [WorldEvent]) -> Int {
+            events.filter { if case .playerDestroyed = $0 { return true } else { return false } }.count
+        }
+        XCTAssertEqual(deathCount(firstStepEvents), 1)
+        XCTAssertEqual(deathCount(secondStepEvents), 0, "must not re-report on a later step while armor stays at 0")
+    }
+
+    func testLivingPlayerNeverReportsDestroyed() {
+        let player = makeShip("Player", govt: 0, at: Vec2())   // full armor/shield
+        let world = World(player: player)
+
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(world.events.contains { if case .playerDestroyed = $0 { return true } else { return false } })
+    }
+
     func testHitCrossingArmorThresholdDisablesNotDestroys() {
         // EV Nova disables a ship the instant its armor crosses a fixed
         // percentage of max armor (33% by default) — deterministically, not by

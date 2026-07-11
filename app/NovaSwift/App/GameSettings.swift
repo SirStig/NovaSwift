@@ -50,6 +50,21 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
+    /// Where the slim armor/shield bar sits relative to a ship (or off entirely).
+    /// The original EV Nova didn't float bars over ships at all, so `off` is the
+    /// faithful look — but `above`/`below` are offered for players who want them.
+    enum ShipBarPosition: String, Codable, CaseIterable, Identifiable {
+        case above, below, off
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .above: return "Above Ships"
+            case .below: return "Below Ships"
+            case .off:   return "Hidden"
+            }
+        }
+    }
+
     enum ColorblindMode: String, Codable, CaseIterable, Identifiable {
         case none, protanopia, deuteranopia, tritanopia
         var id: String { rawValue }
@@ -100,6 +115,12 @@ struct GameSettings: Codable, Equatable {
     var engineGlow: Bool = true
     /// Camera shake on impacts / explosions.
     var screenShake: Bool = true
+    /// Where hull/shield bars appear over ships. Default `above` (the current
+    /// look); `off` matches the original, which never floated bars over ships.
+    var shipBarPosition: ShipBarPosition = .above
+    /// Show the planet/station name under each stellar. The original never labelled
+    /// planets in-flight, so this is off by default.
+    var showPlanetLabels: Bool = false
 
     // MARK: Audio
 
@@ -191,6 +212,8 @@ struct GameSettings: Codable, Equatable {
         frameRateCap          = v(.frameRateCap, d.frameRateCap)
         engineGlow            = v(.engineGlow, d.engineGlow)
         screenShake           = v(.screenShake, d.screenShake)
+        shipBarPosition       = v(.shipBarPosition, d.shipBarPosition)
+        showPlanetLabels      = v(.showPlanetLabels, d.showPlanetLabels)
         masterVolume          = v(.masterVolume, d.masterVolume)
         musicVolume           = v(.musicVolume, d.musicVolume)
         sfxVolume             = v(.sfxVolume, d.sfxVolume)

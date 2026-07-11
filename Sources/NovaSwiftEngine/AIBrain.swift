@@ -315,13 +315,15 @@ public final class AIBrain {
             if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
         }
 
-        // If an escort and its leader is alive, prefer escorting/adopting target.
-        // Player escorts (leaderID == 0) additionally obey their standing order.
+        // If an escort and its leader is alive, prefer escorting/adopting target,
+        // honoring its own standing order. Ordinary NPC-fleet escorts are never
+        // assigned anything but the default `.defensive`, so this only actually
+        // changes behavior for carrier-launched fighters (`.aggressive`, set by
+        // `World.launchFighter`) and the player's own escort wing (set via the
+        // escort command window).
         if let lid = leaderID {
             if let leader = world.ship(id: lid), leader.isAlive {
-                let isPlayerEscort = (lid == World.playerEntityID)
-                let order: EscortOrder = isPlayerEscort ? escortOrder : .defensive
-                switch order {
+                switch escortOrder {
                 case .hold:
                     // Hold position: don't follow or fight; coast to a stop.
                     targetID = nil

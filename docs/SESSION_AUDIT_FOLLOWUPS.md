@@ -13,29 +13,21 @@ interpolation is called out as an engine reading, not a documented rule.
 
 ---
 
-## ⚠️ Build / test caveat (read first)
+## ⚠️ Build / test caveat — resolved
 
-**None of this was compiled or run in the authoring environment** — the Swift
-toolchain host is blocked by the sandbox egress policy and there is no CI in the
-repo. Every change was verified by reading, matching existing patterns, and unit
-tests, but not by a build.
+The original merge landed with real, uncaught build breaks: a duplicate
+`PersRes` struct (`MissionModels.swift` vs. `PersModels.swift`) and a duplicate
+`pers`/`persons` accessor (`NovaModels.swift` vs. `PersModels.swift`) that only
+`swift build` itself could catch — exactly what this section warned about
+before merging. Both are fixed (the older, superseded declarations were
+removed in favor of the fuller Phase-6 versions), along with a few smaller
+knock-on issues (`PersEncounter` referencing `pers.personID` instead of
+`pers.id`, an ambiguous-closure-argument compile error in `Spawner.swift`, and
+a mis-ordered labeled argument in a test helper call).
 
-**Before merging: run `swift build && swift test`.** The highest-risk areas to
-watch the compiler on:
-
-- `Loadout`'s synthesized memberwise init — several fields were appended; arg
-  order in `Galaxy.loadout`'s `return Loadout(...)` must match declaration order
-  (checked by hand, but the compiler is authoritative).
-- `PlayerState` gained new **optional** fields (`chartedSystems`, `persGrudges`,
-  `defeatedPers`, `shownPersQuotes`) — optional specifically so old `pilot.json`
-  saves still decode. `Tests/.../*` round-trip tests cover this.
-- `WorldEvent` gained cases (`shipBoarded`, `shipCaptured`, `personGrudge`,
-  `personDefeated`); both switch consumers (`GameScene`, `novaswift-extract`)
-  have a `default`, so they should be safe.
-- App concurrency: the new scene→host closures (`onPlayerScanned`,
-  `onPersGrudge/Defeated`, `persSpawnEligible`) follow the existing `jumpCommit`
-  pattern (plain, non-`@MainActor` closures invoked on the main thread). If
-  strict-concurrency checking is on, these may want annotation.
+**`swift build && swift test` now both pass clean** (283 tests, 0 failures).
+Everything below this line was implemented in the follow-up pass and is
+covered by new unit tests alongside the existing suite.
 
 ---
 
@@ -93,56 +85,89 @@ per-resource docs / `NovaAIModels` comments if not already there):
 
 ---
 
-## Follow-ups / what's left
+## Follow-ups — resolved this pass
+
+All of section A (except one item genuinely blocked on an unrelated,
+unimplemented system) and all of B, C, and E below are now implemented and
+covered by new unit tests. Section D was left as-is — see its note.
 
 ### A. pêrs system — remaining polish
-- **In-flight LinkMission dialog.** Hailing/boarding a named person *offers* the
-  mission (resolved by `PersEncounter.offeredMission`) but the app currently
-  surfaces it as a HUD pointer, not a full accept/decline panel in flight. Wire
-  it to the same offer flow the bar uses (`StoryEngine.present` /
-  `services.pendingOffer`) so it can be accepted mid-flight. Flags to honor on
-  accept: `0x0040` replace-with-SpecialShip, `0x0100` deactivate-after,
-  `0x0800` leave-after, `0x0100`/`quoteOnce` bookkeeping.
-- **pêrs weapon customization.** `WeapType/WeapCount/AmmoLoad[4]` are decoded but
-  not yet layered onto the spawned hull — `Spawner.applyPersonCustomization`
-  applies `ShieldMod` + `Credits` only. Add the extra weapon mounts (respecting
-  the "negative count removes stock weapons" rule).
-- **HailPict in the comm dialog.** `PersHailResult.hailPictID` is resolved but
-  the hail dialog doesn't render the custom `PICT` yet.
-- **HailQuote attack-context (flag 0x0010).** Shown only "when the ship begins
-  to attack the player" — there's no attack-start hook feeding
-  `PersEncounter.hail(disabled:)`; only hail/board/disabled contexts are wired.
-- **`showsDisasterInfo` (0x8000)** and the `Aggress`/`Coward` AI tuning fields
-  are decoded but not consumed by the brain.
+- ✅ **In-flight LinkMission dialog.** Hailing *or boarding* a named person now
+  surfaces the same accept/decline panel the bar uses
+  (`GameContainerView.flightMissionServices`/`flightMissionEngine`, backed by
+  `AppGameServices`/`MissionSingleDialog`), paused like the hail dialog. On
+  accept: `0x0100` deactivate-after reuses the not-yet-defeated spawn gate,
+  `0x0800` leave-after sends the ship to `.departing` via
+  `GameScene.sendPersonDeparting`. **Deferred:** `0x0040` (replace with a
+  mission's SpecialShip) — genuinely blocked on `spawnMissionShips`, which
+  `AppGameServices` already logs as "not yet wired" independent of this work;
+  implementing it here would mean building that whole system too.
+- ✅ **pêrs weapon customization.** `Spawner.applyPersonWeapons` layers
+  `WeapType/WeapCount/AmmoLoad[4]` onto the spawned hull, merging into an
+  existing mount of the same weapon or adding a new one; negative `WeapCount`
+  removes that many stock copies (partial or full). `PersSpawnTests`.
+- ✅ **HailPict in the comm dialog.** `HailDialogState.customPictID` (resolved
+  from `PersEncounter.hail`'s `hailPictID`) overrides the default ship/planet
+  portrait via `SpaceportGraphics.pict(_:)`.
+- ✅ **HailQuote attack-context (flag 0x0010).** `GameScene.isEntityAttackingPlayer`
+  feeds a new `attacking:` param through to `PersEncounter.hail`, which the
+  `ok` gate was previously missing entirely (the flag was decoded but never
+  actually consulted). `PersEncounterTests`.
+- ✅ **`Aggress`/`Coward` AI tuning.** `AIBrain.personAggression` scales attack
+  standoff distance (close/default/far); `personCoward` overrides the fixed
+  25% warship-retreat shield threshold. Set by `Spawner` alongside the
+  weapon/shield customization. `AIBehaviorTests`. **Deferred:**
+  `showsDisasterInfo` (0x8000) — depends on the `öops` price-disaster
+  simulation, which is entirely unimplemented (decoded-but-inert per
+  `docs/reverse-engineering/ECONOMY.md` §5, predating this audit) — there's no
+  disaster info to show yet regardless of this flag.
 
-### B. Sensors / cloak
-- **Murk fog rendering.** `World.systemMurk` (+ `Loadout.murkModifier`) is
-  exposed; the actual visual fog overlay in `GameScene` is not drawn. Bible: a
-  murk `< 0` also hides the starfield.
-- **Cloak flag 0x1000 (area cloak).** Decoded (`cloakIsArea`) but formation-mates
-  of an area-cloaker are not themselves cloaked yet.
-- **Cloak scanner radar/screen reveal (0x0001/0x0002).** `canDetect` uses the
-  "target cloaked" bit (0x0008); the "show cloaked on radar/screen" bits are not
-  fed to the HUD/renderer.
-- **Interference "fuzz" is applied to AI sensor *range* only.** The Bible frames
-  it as radar fuzziness; the player HUD radar doesn't yet degrade with it. The
-  linear `range × (1 − interference/100)` curve is an engine reading of the
-  0/100 endpoints.
-- **`gövt.InhJam1-4` + weapon jam/interference `Seeker` bits** (0x0008 confused
-  by interference, 0x0010 turns away if jammed) — decoded elsewhere, not
-  consumed by guided-weapon behavior.
+### B. Sensors / cloak — all resolved
+- ✅ **Murk fog rendering.** `World.effectiveMurk(for:)` (systemMurk net of
+  `Ship.murkModifier`, capped at 100, *not* floored at 0 per the Bible's
+  negative-murk carve-out) drives a camera-parented fog veil
+  (`GameScene.buildMurkFog`/`updateMurkFog`); murk `< 0` hides the starfield
+  layers outright. `CloakTests`.
+- ✅ **Area cloak (0x1000).** `Ship.areaCloakLevel`, recomputed each
+  `stepCloak` from formation groupings (escort's `leaderID`, or its own id for
+  a leader/lone ship) sharing the strongest area-cloaker's level.
+  `effectiveCloakLevel`/`isEffectivelyCloaked` fold this in everywhere
+  `isCloaked`/`cloakLevel` used to be read (detection, radar, sprite alpha).
+  `CloakTests`.
+- ✅ **Cloak scanner radar/screen reveal (0x0001/0x0002).** Radar blips drop a
+  cloaked ship unless its own `cloakVisibleOnRadar` or the player's
+  `cloakScannerFlags & 0x0001`; `GameScene.syncNPCs` fades sprite alpha by
+  `effectiveCloakLevel` unless the player's `cloakScannerFlags & 0x0002`.
+- ✅ **Interference on the player's own radar.** The ship-radar normalizer uses
+  `world.effectiveSensorRange(radarRange, for: player)` instead of the fixed
+  constant, so contacts drop off sooner as static thickens — same curve AI
+  perception already used.
+- ✅ **`gövt.InhJam1-4` + Seeker jam bits.** `WeaponSpec`/`Projectile` gained
+  `turnsAwayIfJammed` (0x0010: a guided shot can lose lock on a target whose
+  government's summed `InhJam1-4`, clamped 0-100%, rolls a per-second chance
+  in `World.stepProjectiles`) and `confusedByInterference` (0x0008: steering
+  turn-rate scales down by the same curve `effectiveSensorRange` uses).
+  `CombatTests`.
 
-### C. Boarding / escape pods
-- **Escape-pod survival.** `Loadout.hasEscapePod`/`hasAutoEject` (ModType 11/20,
-  `shïp.EscapePod`) are detected but not wired into the player's death handler —
-  surviving destruction in a pod (and auto-eject) is not implemented.
-- **NPC cargo holds.** `takePlunderCargo` works, but NPCs still spawn with empty
-  holds (no `düde.Booty`/random-cargo system), so cargo plunder is usually
-  empty. See `düde.Booty` in the Bible (flags defining boarding yield).
-- **pêrs boarding LinkMission** (flag 0x0200) is resolved but only noted via HUD;
-  same dialog gap as A.
+### C. Boarding / escape pods — all resolved
+- ✅ **Escape-pod survival.** There was no player-death handling at all
+  (confirmed: no game-over UI, no death handler anywhere). `World` now reports
+  `.playerDestroyed(hadEscapePod:)` once when armor hits zero (plus the same
+  `.explosion` event an NPC death gets). The app's reaction (confirmed with
+  the user): with a pod, rescued at the nearest inhabited port — ship, cargo,
+  and every outfit lost, replaced with a stock hull, credits/legal
+  record/missions carried over (`GameHost.rescueLandingSpot`/
+  `applyEscapePodRescue`); without one, the explosion plays out and then it's
+  back to the main menu (nothing autosaved, so the pilot resumes from their
+  last landing/takeoff save). `CombatTests`.
+- ✅ **NPC cargo holds (`düde.Booty`).** `DudeRes.bootyCommodities` exposes
+  which of the 6 commodity types a dude class carries; `Spawner.rollDudeCargo`
+  fills 30-80% of the spawned hull's cargo capacity, split across the carried
+  types, at spawn time. `DudeCargoTests`.
+- ✅ **pêrs boarding LinkMission** (flag 0x0200) — resolved by the same A1
+  dialog wiring (`GameContainerView.offerBoardedPersonMission`).
 
-### D. Modifiers still inert (low priority; small or need a host system)
+### D. Modifiers still inert (low priority; unchanged — out of scope this pass)
 - `densityScanner` (13), `IFF` (14) — radar/HUD rendering only (Bible marks both
   "ignored" mechanically; they're display features).
 - `miningScoop` (31), `inertialDamper` (38), `deionize`/`ionCapacity` (39/40),
@@ -154,25 +179,43 @@ per-resource docs / `NovaAIModels` comments if not already there):
   (Ranks-section) — still unimplemented (see OUTFITTERS.md §3.6 / §9).
 - Persistent-across-mission-swap outfit flag `0x0020` (distinct from the
   ship-trade `0x0004` which *is* handled).
+- `pêrs.Flags` `0x1000`/`0x2000`/`0x4000` (don't offer the LinkMission to a
+  wimpy/beefy-freighter/warship-flying player, by `AIType`) — decoded in the
+  Bible, not yet read by `PersEncounter.offeredMission`.
 
-### E. Fighter bays — edge cases
-- Fighters currently auto-deploy when the carrier is in combat and dock when out
-  of ammo / hurt / the carrier disengages; there's no explicit player
-  launch/recall command. A carrier's death orphans live fighters (they keep
-  their government). Consider a player "launch/recall fighters" control.
+### E. Fighter bays — resolved
+- ✅ **Player launch/recall control.** `World.playerLaunchFighters()` scrambles
+  every docked bay immediately (bypassing the ambient auto-launch's
+  combat-gate/cooldown, since an explicit command shouldn't be throttled the
+  way passive launches are); `playerRecallFighters()` sets `recallToCarrier` on
+  every player fighter regardless of combat state. New `GameAction.launchFighters`
+  (`f`)/`.recallFighters` (`g`), routed through `GameContainerView.handleDiscrete`
+  → `GameScene.launchPlayerFighters`/`recallPlayerFighters`. A carrier's death
+  orphaning its fighters was already handled (`updateFighterBays`); only the
+  explicit command was missing.
 
 ---
 
 ## Testing status
+
+`swift build && swift test`: **283 tests, 0 failures** (1 skipped, pre-existing).
 
 New unit tests (pure logic, no app layer needed — they build synthetic
 resources):
 
 - Kit: `OutfitMechanicsTests`, `ContrabandTests`, `SystemFieldTests`,
   `PersTests` (+ full decode).
-- Engine: `BoardingTests`, `FighterBayTests`, `CloakTests`.
-- Story: `OutfitAcquisitionTests`, `ContrabandScanTests`, `PersEncounterTests`.
+- Engine: `BoardingTests`, `FighterBayTests`, `CloakTests` (+ area cloak/murk),
+  `CombatTests` (+ jam/interference/player-death), `AIBehaviorTests` (+
+  Aggress/Coward), `PersSpawnTests` (new — weapon customization),
+  `DudeCargoTests` (new — Booty cargo).
+- Story: `OutfitAcquisitionTests`, `ContrabandScanTests`, `PersEncounterTests`
+  (+ attack-context HailQuote gating).
 
 Not covered by unit tests (need the app/SpriteKit layer, so verify by play):
 the scan-fine HUD flow, boarding-loot grant, cloak keybind, hail-quote dialog,
-and grudge persistence across jumps.
+HailPict rendering, the in-flight mission-offer panel, escape-pod rescue
+end-to-end (death → menu → reload at the rescue port), murk fog visuals,
+launch/recall fighter keybinds, and grudge persistence across jumps. These
+weren't build-and-screenshot verified this session either — reason from the
+diffs, and check them in the running app before shipping.

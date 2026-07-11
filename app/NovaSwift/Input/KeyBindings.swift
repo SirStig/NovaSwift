@@ -13,6 +13,7 @@ struct KeyBindings: Codable, Equatable {
         .afterburner: "shift",
         .firePrimary: "space", .fireSecondary: "return",
         .selectSecondaryPrev: "[", .selectSecondaryNext: "]", .toggleCloak: "c",
+        .launchFighters: "f", .recallFighters: "g",
         // Matches the real game's default control scheme: Tab cycles targets
         // ("Target Select"), R snaps to the closest ("Closest Targ"), Y hails.
         .targetNearest: "r", .targetNext: "tab", .nearestHostile: "t", .clearTarget: "u",

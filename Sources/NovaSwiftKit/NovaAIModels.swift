@@ -413,6 +413,25 @@ public struct DudeRes {
     /// This dude may not damage or be damaged by the player (escort/ally scenery).
     public var cantHitPlayer: Bool { flags & 0x0100 != 0 }
 
+    // `Booty` (Bible): which commodities a boarded ship of this dude class
+    // carries. Shares this same field with `cantHitPlayer` above.
+    public var carriesFood: Bool { flags & 0x0001 != 0 }
+    public var carriesIndustrial: Bool { flags & 0x0002 != 0 }
+    public var carriesMedical: Bool { flags & 0x0004 != 0 }
+    public var carriesLuxury: Bool { flags & 0x0008 != 0 }
+    public var carriesMetal: Bool { flags & 0x0010 != 0 }
+    public var carriesEquipment: Bool { flags & 0x0020 != 0 }
+    /// The commodities this dude class carries, in `Commodity` order — empty
+    /// means "you were repelled while attempting to board" (Bible), i.e. no
+    /// cargo loot at all regardless of what's actually in the hold.
+    public var bootyCommodities: [Commodity] {
+        [
+            carriesFood ? .food : nil, carriesIndustrial ? .industrial : nil,
+            carriesMedical ? .medical : nil, carriesLuxury ? .luxury : nil,
+            carriesMetal ? .metal : nil, carriesEquipment ? .equipment : nil,
+        ].compactMap { $0 }
+    }
+
     public init(_ r: Resource) {
         id = r.id
         name = r.name.isEmpty ? "Dude \(r.id)" : r.name

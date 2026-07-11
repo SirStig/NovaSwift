@@ -339,12 +339,29 @@ public final class Spawner {
         let brain = AIBrain(aiType: dude.aiType, govt: govt)
         brain.leaderID = leaderID
         ship.brain = brain
+        rollDudeCargo(dude, into: ship, world: world)
         // Bible: "When ships are created, there is a 5% chance that a specific
         // AI-person will also be created." Promote a matching hull to a named
         // përs (drives target name + ItemClass boarding loot).
         assignPersonIfLucky(to: ship, shipID: shipID, govt: govt, world: world)
         world.addNPC(ship, arrival: arrival)
         return ship
+    }
+
+    /// Fill `ship`'s hold with whatever commodities its `düde` class carries
+    /// (`Booty`, Bible) — otherwise boarding loot is empty even for a full-size
+    /// trader. The Bible names which goods a dude class carries but not how
+    /// much; filling 30-80% of the hold, split evenly across the carried
+    /// types, is this engine's reading.
+    func rollDudeCargo(_ dude: DudeRes, into ship: Ship, world: World) {
+        let commodities = dude.bootyCommodities
+        guard !commodities.isEmpty, ship.cargoCapacity > 0 else { return }
+        let total = Int(Double(ship.cargoCapacity) * world.rng.double(in: 0.3...0.8))
+        guard total > 0 else { return }
+        let perType = max(1, total / commodities.count)
+        for commodity in commodities {
+            ship.cargo[commodity.rawValue, default: 0] += perType
+        }
     }
 
     /// 5% chance to tag `ship` as an eligible `përs` character flying this hull

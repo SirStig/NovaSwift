@@ -422,6 +422,7 @@ extension Galaxy {
         ship.cloakFlags = lo.cloakFlags
         ship.cloakScannerFlags = lo.cloakScannerFlags
         ship.interferenceReduction = lo.interferenceReduction
+        ship.murkModifier = lo.murkModifier
         ship.hasEscapePod = lo.hasEscapePod
         ship.hasAutoEject = lo.hasAutoEject
 

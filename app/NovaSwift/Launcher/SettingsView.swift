@@ -101,11 +101,14 @@ struct SettingsView: View {
             Toggle("Smooth sprite scaling", isOn: binding(\.smoothSprites))
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Screen shake", isOn: binding(\.screenShake))
+            Picker("Hull / shield bars", selection: binding(\.shipBarPosition)) {
+                ForEach(GameSettings.ShipBarPosition.allCases) { Text($0.label).tag($0) }
+            }
             Toggle("Show FPS counter", isOn: binding(\.showFPS))
         } header: {
             Label("Graphics", systemImage: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Hull/shield bars over ships weren't in the original — set them to Hidden for the authentic look. A lower frame-rate limit saves battery on mobile.")
         }
     }
 
@@ -159,11 +162,12 @@ struct SettingsView: View {
         Section {
             Toggle("Use authentic EV Nova menu", isOn: binding(\.useAuthenticMenu))
             Toggle("Show radar", isOn: binding(\.showRadar))
+            Toggle("Show planet names", isOn: binding(\.showPlanetLabels))
             sliderRow("HUD opacity", binding(\.hudOpacity), 0.2...1.0)
         } header: {
             Label("Interface", systemImage: "rectangle.on.rectangle")
         } footer: {
-            Text("The authentic menu renders the original title screen from your imported data instead of the modern launcher.")
+            Text("The authentic menu renders the original title screen from your imported data instead of the modern launcher. The original never labelled planets in flight — leave planet names off for the faithful look.")
         }
     }
 

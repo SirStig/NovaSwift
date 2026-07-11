@@ -88,14 +88,24 @@ mission `ShipBehav` overrides, `gövt.SkillMult`) and why.
 
 ```
 spawning ─▶ traveling ⇄ departing        (traders: fly to a planet, then jump out)
-         ─▶ patrolling ⇄ scanning          (LOCAL-AUTHORITY warships: circuit the planets, scan traffic)
-         ─▶ orbiting  ⇄ scanning           (LOCAL-AUTHORITY interceptors: hold near a planet, scan traffic)
+         ─▶ patrolling ─▶ departing        (LOCAL-AUTHORITY warships: circuit the planets, then jump out after a tour of duty)
+         ─▶ orbiting  ⇄ scanning ─▶ departing  (LOCAL-AUTHORITY interceptors: hold near a planet, buzz-scan traffic, then jump out)
          ─▶ traveling                       (FOREIGN combat ships: just cross the system and leave)
               │
               ▼ hostile in scan range (or, for authority interceptors, a piracy-police target)
            attacking ──▶ fleeing ──▶ departing   (hurt / outmatched / out of ammo → run → jump)
            escorting  (fleet members hold a tight triangle on their leader; break off only to attack)
 ```
+
+**Ships come and go.** A local-authority warship/interceptor doesn't police one
+system forever — with no fight to be had, after a randomized *tour of duty* it
+heads for the hyperspace edge and leaves (Bible: a warship "jumps out if there
+aren't any" enemies). Traders arrive, visit a planet, and leave; fleets arrive on
+their own cadence; the spawner tops the population back up toward the system's
+`sÿst.AvgShips`. That turnover — not a fixed set of hulls looping in place — is
+what makes traffic feel alive. **Only interceptors scan the player**, and only
+about once per system visit (a per-visit latch, `World.playerScanned`), matching
+the original's "you get buzzed by roughly one ship each time you enter."
 
 **Who patrols matters.** Only the *local authority* — ships of the government
 that controls the system (`sÿst.Govt`), or an ally of it — runs the patrol beat,
@@ -116,11 +126,14 @@ Steering primitives turn a goal into a `ControlIntent`:
   within weapon range and inside a tight firing arc.
 - **flee / depart** — steer away from the threat toward the system edge and
   request a hyperspace jump; the world despawns the ship once it's past the edge.
-- **patrol** — walk an in-order circuit of the system's stellar objects; a stable,
-  purposeful beat rather than random points.
+- **patrol** — *cruise* an in-order circuit of the system's stellar objects (aiming
+  at each body's outer face in turn), flying the beat at speed and moving straight
+  on to the next waypoint rather than coasting to a stop and hovering — the
+  stop-and-hover is what used to read as "circling one point forever."
 - **orbit** — a slow, smooth circular holding pattern around the nearest stellar
   object (the Bible's "parks in orbit around a planet").
-- **scan** — the authority's "check you out" pass: break off the beat, fly over a
+- **scan** — the interceptor's "check you out" pass (only interceptors scan, per
+  the Bible; and the player at most once per visit): break off the orbit, fly over a
   passing ship (the player first), emit a one-shot `shipScanned` event at scan
   range (a visible sensor sweep — cosmetic, no contraband system yet), hold
   alongside a beat, then resume. Rate-limited so patrols don't chain-scan.

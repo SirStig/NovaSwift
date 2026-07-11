@@ -710,4 +710,40 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertTrue(closeIntent.thrust, "Aggress=1 (close) should still be closing at 2100/5000 range")
         XCTAssertFalse(farIntent.thrust, "Aggress=3 (far) should already consider 2100/5000 range close enough")
     }
+
+    // MARK: carrier-launched fighters escort their (possibly NPC) carrier
+
+    func testCarrierLaunchedFighterHonorsAggressiveEscortOrderNotForcedDefensive() {
+        // Regression: the leaderID dispatch used to force `.defensive` on any
+        // escort whose leader wasn't the player, silently discarding whatever
+        // `escortOrder` was actually set — which neutered `World.launchFighter`
+        // setting `.aggressive` on carrier-launched fighters. A wimpy-trader
+        // disposition would flee a hostile entirely on its own — proving that
+        // if it instead attacks, its `.aggressive` escort order (not its own
+        // disposition) is what's driving it, even though its "carrier" here
+        // isn't the player and isn't currently targeting anything itself.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [
+            govt(300, classes: [30], enemies: [31]),
+            govt(301, classes: [31], enemies: [30]),
+        ])
+        let carrier = warship("Carrier", govt: 300, at: Vec2())
+        world.addNPC(carrier)   // no brain, no currentTargetID — an idle "leader"
+
+        let fighter = warship("Fighter", govt: 300, at: Vec2())
+        let brain = AIBrain(aiType: .wimpyTrader, govt: 300)   // would flee on its own disposition
+        brain.leaderID = carrier.entityID
+        brain.escortOrder = .aggressive
+        fighter.brain = brain
+        world.addNPC(fighter)
+
+        let hostile = warship("Hostile", govt: 301, at: Vec2(0, 300))
+        world.addNPC(hostile)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(fighter.brain?.state, .attacking,
+                       "an aggressive escort engages even though its wimpy-trader disposition would otherwise flee, "
+                       + "and even though its leader is an NPC with no target of its own")
+    }
 }

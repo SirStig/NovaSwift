@@ -289,6 +289,9 @@ public final class Ship {
     /// Anti-interference (oütf ModType 24): subtracted from the system's sensor
     /// static when computing this ship's effective sensor range.
     public var interferenceReduction: Int = 0
+    /// Murk modifier (oütf ModType 28): added to/subtracted from the system's
+    /// `sÿst.Murk` visual fog when computing this ship's effective murk.
+    public var murkModifier: Int = 0
     /// ModType 11 (`escapePod`): if the player is flying this hull when
     /// destroyed, they eject and survive instead of a real game-over.
     public var hasEscapePod: Bool = false
@@ -1598,8 +1601,8 @@ public final class World {
     /// the world is built for a system; degrades effective sensor range.
     public var systemInterference: Int = 0
     /// The current system's visual murk (`sÿst.Murk`, 0-100; <0 also hides the
-    /// starfield). A renderer hook — the app draws a fog whose depth tracks this
-    /// (net of the player's ModType-28 murk outfits). No gameplay effect.
+    /// starfield). Set when the world is built for a system; the app draws a
+    /// fog whose depth tracks `effectiveMurk(for:)`. No gameplay effect.
     public var systemMurk: Int = 0
 
     /// `base` sensor range reduced by the effective interference `observer`
@@ -1611,6 +1614,14 @@ public final class World {
     public func effectiveSensorRange(_ base: Double, for observer: Ship) -> Double {
         let net = max(0, min(100, systemInterference - observer.interferenceReduction))
         return base * (1 - Double(net) / 100)
+    }
+
+    /// `systemMurk` net of `observer`'s ModType-28 murk outfits, capped at the
+    /// documented 100 max. Not clamped below 0: per the Bible, a negative
+    /// value is "equivalent to zero murk but also hides the starfield" — a
+    /// distinct visual state from 0, not just an extra-clear one.
+    public func effectiveMurk(for observer: Ship) -> Int {
+        min(100, systemMurk - observer.murkModifier)
     }
 
     /// Whether `observer` can detect (and therefore target) `target`, accounting
@@ -1739,11 +1750,36 @@ public final class World {
         fighter.brain = brain
         brain.leaderID = carrier.entityID
         brain.escortOrder = .aggressive
+        // Distinct slots so a bay's fighters fan out into their own formation
+        // positions behind the carrier instead of converging on the same spot.
+        brain.formationSlot = allShips.filter { $0.brain?.leaderID == carrier.entityID }.count
         brain.provokedByPlayer = carrier.isPlayer ? false : (carrier.brain?.provokedByPlayer ?? false)
         fighter.carrierID = carrier.entityID
         fighter.velocity = carrier.velocity
         _ = addNPC(fighter, arrival: .launch)
         return fighter
+    }
+
+    /// Player command: launch every docked fighter from the player's own bays
+    /// right now, bypassing the ambient auto-launch's combat gate/cooldown —
+    /// an explicit "scramble" isn't throttled the way passive combat launches are.
+    public func playerLaunchFighters() {
+        for bay in player.fighterBays {
+            while bay.docked > 0, let fighter = launchFighter(from: player, bay: bay) {
+                bay.docked -= 1
+                bay.deployed.insert(fighter.entityID)
+            }
+        }
+    }
+
+    /// Player command: recall every fighter currently flying from the
+    /// player's own bays — they head back and dock regardless of whether the
+    /// player is still in combat (the ambient auto-recall only docks once
+    /// combat ends).
+    public func playerRecallFighters() {
+        for f in npcs where f.carrierID == World.playerEntityID {
+            f.recallToCarrier = true
+        }
     }
 
     // MARK: Boarding / plunder

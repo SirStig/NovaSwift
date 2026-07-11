@@ -153,6 +153,25 @@ final class GameHost {
             scene.onPersDefeated = { [weak pilotStore] pid in
                 pilotStore?.state.recordPersDefeated(pid); pilotStore?.save()
             }
+            // The player's own ship was destroyed. With an escape pod: rescued
+            // at the nearest inhabited port, ship/cargo/outfits lost — saved,
+            // then back to the main menu. Without one: a real game-over — the
+            // explosion (already emitted alongside this event) gets a moment
+            // to play out before returning to the main menu; nothing is saved,
+            // so the pilot resumes from their last landing/takeoff autosave.
+            scene.onPlayerDestroyed = { [weak pilotStore, weak scene] hadEscapePod in
+                guard let pilotStore else { return }
+                if hadEscapePod, let deathPosition = scene?.playerShip?.position,
+                   let rescue = Self.rescueLandingSpot(diedIn: aiSystemID, near: deathPosition, game: scanGame) {
+                    Self.applyEscapePodRescue(to: &pilotStore.state, systemID: rescue.systemID, game: scanGame)
+                    pilotStore.save()
+                    model.returnToMainMenu()
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+                        model.returnToMainMenu()
+                    }
+                }
+            }
             // The world was already built by `configure` above — push the pilot's
             // existing grudges/eligibility onto it now.
             scene.syncPersStateToWorld()
@@ -194,13 +213,25 @@ final class GameHost {
         return PlayerSession(ship: ship, textures: textures, engineTextures: engineTextures, shipName: name)
     }
 
-    /// The nearest inhabited `spöb` to `position` within `systemID`, or nil if
-    /// the system has none (an escape-pod rescue needs somewhere to land).
-    static func nearestInhabitedSpob(in systemID: Int, near position: Vec2, game: NovaGame) -> SpobRes? {
+    /// The nearest inhabited `spöb` to `position` within `systemID`, paired
+    /// with that system's id, or nil if the system has none.
+    static func nearestInhabitedSpob(in systemID: Int, near position: Vec2,
+                                     game: NovaGame) -> (spob: SpobRes, systemID: Int)? {
         let candidates = game.stellarObjects(in: systemID).map(\.spob).filter { !$0.isUninhabited }
-        return candidates.min { a, b in
-            (Vec2(a.x, a.y) - position).length < (Vec2(b.x, b.y) - position).length
-        }
+        guard let nearest = candidates.min(by: {
+            (Vec2(Double($0.x), Double($0.y)) - position).length < (Vec2(Double($1.x), Double($1.y)) - position).length
+        }) else { return nil }
+        return (nearest, systemID)
+    }
+
+    /// Where an escape pod drops the pilot: the nearest inhabited spöb in the
+    /// system they died in, or — for the rare uninhabited-only system — the
+    /// pilot's own starting system, which is always inhabited.
+    static func rescueLandingSpot(diedIn systemID: Int, near position: Vec2,
+                                  game: NovaGame) -> (spob: SpobRes, systemID: Int)? {
+        if let here = nearestInhabitedSpob(in: systemID, near: position, game: game) { return here }
+        guard let start = game.startingSystem() else { return nil }
+        return nearestInhabitedSpob(in: start.id, near: Vec2(), game: game)
     }
 
     /// Apply an escape-pod rescue to a persisted pilot: the ship, its cargo,
@@ -208,8 +239,13 @@ final class GameHost {
     /// a last resort, not a lifeboat that tows your hull home); the pilot is
     /// dropped at `spob` with a stock replacement hull and full fuel/armor/
     /// shield. Credits, legal record, missions, and combat rating carry over.
-    static func applyEscapePodRescue(to state: inout PlayerState, droppedAt spob: SpobRes, game: NovaGame) {
-        let stockShipID = game.startingChar()?.shipID.flatMap { $0 >= 128 ? $0 : nil } ?? game.ships().first?.id
+    static func applyEscapePodRescue(to state: inout PlayerState, systemID: Int, game: NovaGame) {
+        let stockShipID: Int?
+        if let scenarioShip = game.startingChar()?.shipID, scenarioShip >= 128 {
+            stockShipID = scenarioShip
+        } else {
+            stockShipID = game.ships().first?.id
+        }
         if let stockShipID {
             state.shipType = stockShipID
             state.shipName = game.ship(stockShipID)?.name ?? ""
@@ -217,8 +253,8 @@ final class GameHost {
         state.outfits = [:]
         state.cargo = [:]
         state.armor = nil; state.shield = nil; state.fuel = nil
-        state.currentSystem = spob.systemID
-        state.exploredSystems.insert(spob.systemID)
+        state.currentSystem = systemID
+        state.exploredSystems.insert(systemID)
     }
 
     /// Decode the authentic status bar: the ïntf interface definition + its
@@ -558,6 +594,8 @@ struct GameContainerView: View {
             }
         }
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
+        .onChange(of: model.settings.shipBarPosition) { _, _ in host?.scene.applyDisplaySettings(model.settings) }
+        .onChange(of: model.settings.showPlanetLabels) { _, _ in host?.scene.applyDisplaySettings(model.settings) }
         .onChange(of: nav.currentSystemID) { _, newID in
             // `navReady` alone doesn't catch the initial `nav.configure(...)`
             // notification racing this handler (see `hostSystemID`'s doc
@@ -718,23 +756,58 @@ struct GameContainerView: View {
         return "\(d.day) \(mon) \(d.year)"
     }
 
-    /// Free hull + shield restore on landing — but **only at an inhabited port**
-    /// (a planet/station people actually live on). Uninhabited rocks give
-    /// nothing free: no repair, no shield restore (and no Recharge either). Fuel
-    /// is never topped off here — refuelling is the paid Recharge service.
-    /// Writes both the live ship (instant HUD feedback) and the persisted pilot,
-    /// so the repaired state survives the takeoff `GameHost` rebuild; if the
-    /// port is uninhabited we persist the *current* (damaged) values instead, so
-    /// the damage carries out with the player.
+    /// Landing services at an **inhabited port**. Shields recharge for free (they
+    /// regen anywhere while docked). Hull repair, though, costs money, billed
+    /// automatically on landing like the original — free only at an allied/owned
+    /// port (the port's govt runs "Roadside Assistance", gövt 0x0010, or you hold a
+    /// rank from it with the free-repair flag 0x0800; the Bible's routes to free
+    /// service, the same test the paid Recharge uses). If the player can't afford a
+    /// full repair, the hull is patched as far as their credits stretch. Fuel is
+    /// never topped off here — that's the paid Recharge service. Uninhabited rocks
+    /// give nothing. Writes both the live ship and the persisted pilot so the state
+    /// survives the takeoff `GameHost` rebuild.
     private func repairOnLanding(spobID: Int) {
         guard let ship = host?.scene.playerShip else { return }
-        let inhabited = host?.game?.spob(spobID)?.isUninhabited == false
-        if inhabited {
-            ship.shield = ship.maxShield
-            ship.armor = ship.maxArmor
+        if let game = host?.game, let spob = game.spob(spobID), !spob.isUninhabited {
+            ship.shield = ship.maxShield                    // shields regen free
+            let missing = ship.maxArmor - ship.armor
+            if missing > 0.5 {
+                if repairIsFree(spob: spob, game: game) {
+                    ship.armor = ship.maxArmor
+                } else {
+                    // ~2cr per hull point (hull is pricier than fuel). Full repair
+                    // if affordable, otherwise patch up as far as credits allow.
+                    let creditsPerPoint = 2.0
+                    let fullCost = Int((missing * creditsPerPoint).rounded())
+                    let credits = model.pilot.state.credits
+                    if credits >= fullCost {
+                        model.pilot.state.credits -= fullCost
+                        ship.armor = ship.maxArmor
+                        if fullCost > 0 { host?.hud.post("Hull repaired — \(fullCost)cr.") }
+                    } else if credits > 0 {
+                        ship.armor = min(ship.maxArmor, ship.armor + Double(credits) / creditsPerPoint)
+                        model.pilot.state.credits = 0
+                        host?.hud.post("Hull partially repaired — \(credits)cr (not enough for a full repair).")
+                    } else {
+                        host?.hud.post("Not enough credits to repair your hull.")
+                    }
+                }
+            }
         }
         model.pilot.state.armor = ship.armor
         model.pilot.state.shield = ship.shield
+    }
+
+    /// Free hull repair / refuel when the port's govt or your rank comps it — the
+    /// Bible's "Roadside Assistance" (gövt flags1 0x0010) or an allied rank (rank
+    /// flags 0x0800), i.e. an allied/owned world. Mirrors `SpaceportView`'s
+    /// `rechargeIsFree` so paid refuel and paid repair agree on who's "allied".
+    private func repairIsFree(spob: SpobRes, game: NovaGame) -> Bool {
+        let govtID = spob.government
+        if govtID >= 128, let g = game.govt(govtID), g.flags1 & 0x0010 != 0 { return true }
+        return model.pilot.state.activeRanks.contains {
+            game.rank($0)?.govt == govtID && (game.rank($0)?.flags ?? 0) & 0x0800 != 0
+        }
     }
 
     /// Persists whatever combat/legal-standing consequences played out this
@@ -768,6 +841,12 @@ struct GameContainerView: View {
         guard let host, !host.scene.isJumping else { return false }
         let hops = nav.nextJumpHopCount
         guard hops > 0, nav.canAfford(hops: hops) else { return false }
+        // No-jump zone: you can't enter hyperspace too close to the system centre
+        // (Bible: 1000px). The scene posts a "fly further out" message; close the
+        // map (if it was the trigger) so that message is visible, and return `true`
+        // (handled) so a `J` press doesn't then re-open the map over it — the
+        // player has a course, they're just too close to use it yet.
+        guard host.scene.canEnterHyperspace() else { nav.showingMap = false; return true }
         let destID = nav.route[hops - 1]
         let outbound = outboundHeading(from: nav.currentSystemID, to: destID)
         let instant = host.galaxy.map { model.pilot.hasInstantJump(galaxy: $0) } ?? false
@@ -1080,6 +1159,10 @@ struct GameContainerView: View {
             host?.scene.cycleSecondaryWeapon(forward: false)
         case .toggleCloak:
             host?.scene.togglePlayerCloak()
+        case .launchFighters:
+            host?.scene.launchPlayerFighters()
+        case .recallFighters:
+            host?.scene.recallPlayerFighters()
         case .board:
             // Board the targeted hulk if it's disabled and in reach.
             if let m = host?.scene.attemptBoard() {

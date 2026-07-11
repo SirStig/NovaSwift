@@ -156,4 +156,27 @@ final class CloakTests: XCTestCase {
         observer.interferenceReduction = 50   // anti-interference cancels it
         XCTAssertEqual(world.effectiveSensorRange(1500, for: observer), 1500, accuracy: 0.1)
     }
+
+    // MARK: murk (sÿst.Murk / ModType 28)
+
+    func testEffectiveMurkNetsObserversMurkModifier() {
+        let observer = Ship(name: "O", stats: stats())
+        let world = World(player: observer)
+        world.systemMurk = 60
+        XCTAssertEqual(world.effectiveMurk(for: observer), 60)
+        observer.murkModifier = 20   // a murk-reducing outfit
+        XCTAssertEqual(world.effectiveMurk(for: observer), 40)
+    }
+
+    func testEffectiveMurkCapsAtOneHundredButNotBelowZero() {
+        let observer = Ship(name: "O", stats: stats())
+        let world = World(player: observer)
+        world.systemMurk = 90
+        observer.murkModifier = -50   // a murk-worsening outfit pushes past the 100 cap
+        XCTAssertEqual(world.effectiveMurk(for: observer), 100, "murk is documented 0-100 at the high end")
+
+        world.systemMurk = 0
+        observer.murkModifier = 10   // a murk-reducing outfit can push it negative
+        XCTAssertEqual(world.effectiveMurk(for: observer), -10, "can still go negative — a distinct \"hides the starfield\" state")
+    }
 }
