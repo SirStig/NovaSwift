@@ -123,4 +123,59 @@ final class FighterBayTests: XCTestCase {
         XCTAssertFalse(world.npcs.contains { $0.entityID == fighter.entityID }, "fighter docked away")
         XCTAssertEqual(carrier.fighterBays.first?.docked, 3, "bay restored on dock")
     }
+
+    // MARK: a live, brain-driven (not manually-targeted) NPC carrier
+
+    private func govtData(classes: [Int], enemies: [Int] = []) -> Data {
+        var d = [UInt8](repeating: 0, count: 60)
+        func putW(_ off: Int, _ v: Int) {
+            let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
+            d[off] = UInt8(u >> 8); d[off + 1] = UInt8(u & 0xff)
+        }
+        for i in 0..<4 { putW(24 + i * 2, i < classes.count ? classes[i] : -1) }
+        for i in 0..<4 { putW(32 + i * 2, -1) }
+        for i in 0..<4 { putW(40 + i * 2, i < enemies.count ? enemies[i] : -1) }
+        return Data(d)
+    }
+    private func govt(_ id: Int, classes: [Int], enemies: [Int] = []) -> GovtRes {
+        GovtRes(Resource(type: NovaType.govt, id: id, name: "G\(id)", data: govtData(classes: classes, enemies: enemies)))
+    }
+
+    /// Regression-guarding the gap the other tests in this file leave open:
+    /// they all strip `carrier.brain` and hand-set `currentTargetID`, so the
+    /// carrier's *own* AI decision to fight (and thereby trigger
+    /// `carrierInCombat`) was never actually exercised end-to-end. Here the
+    /// carrier keeps its real brain and only diplomacy/proximity drive it
+    /// into combat, same as it would in a live system.
+    func testLiveBrainDrivenCarrierLaunchesFightersWithoutManualTargeting() throws {
+        let galaxy = Galaxy(game: game())
+        let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 300, extraOutfits: [200: 1]))
+        carrier.weapons = [WeaponMount(spec: WeaponSpec(id: 999, name: "Gun", shieldDamage: 10, armorDamage: 10,
+                                                        reloadSeconds: 1, projectileSpeed: 1000, range: 3000,
+                                                        accuracyRadians: 0, isBeam: false, isGuided: false,
+                                                        turnRate: 0, blastRadius: 0, ammoPerShot: 0))]
+        carrier.brain = AIBrain(aiType: .warship, govt: 300)
+
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.galaxy = galaxy
+        world.diplomacy = Diplomacy(govts: [
+            govt(300, classes: [30], enemies: [31]),
+            govt(301, classes: [31], enemies: [30]),
+        ])
+        _ = world.addNPC(carrier)
+        let hostile = Ship(name: "Hostile", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3), position: Vec2(0, 400))
+        hostile.government = 301
+        hostile.weapons = [WeaponMount(spec: WeaponSpec(id: 998, name: "Gun", shieldDamage: 10, armorDamage: 10,
+                                                        reloadSeconds: 1, projectileSpeed: 1000, range: 3000,
+                                                        accuracyRadians: 0, isBeam: false, isGuided: false,
+                                                        turnRate: 0, blastRadius: 0, ammoPerShot: 0))]
+        _ = world.addNPC(hostile)
+
+        for _ in 0..<90 { world.step(1.0 / 30.0) }   // up to 3s for the carrier to close/engage/launch
+
+        XCTAssertEqual(carrier.brain?.state, .attacking, "the carrier's own brain should pick the hostile as a target")
+        let fighters = world.npcs.filter { $0.carrierID == carrier.entityID }
+        XCTAssertFalse(fighters.isEmpty, "a live, brain-driven carrier in real combat should launch fighters on its own")
+    }
 }
