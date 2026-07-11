@@ -1,6 +1,7 @@
 import SwiftUI
 import EVNovaKit
 import EVNovaEngine
+import EVNovaStory
 
 /// The landed spaceport, rendered entirely from the player's own EV Nova data:
 /// the `Spaceport` frame PICT (8500), the planet's landscape PICT, its spaceport
@@ -16,6 +17,14 @@ struct SpaceportView: View {
 
     @State private var screen: Screen = .hub
     enum Screen { case hub, trade, outfit, shipyard, bar, missions }
+
+    // Story runtime for the location-triggered offers this view owns —
+    // mainSpaceport (on landing) and the Trade/Shipyard/Outfitter screens. (The
+    // Bar and Mission BBS build their own engines for their own AvailLocations.)
+    @StateObject private var services = AppGameServices()
+    @State private var engine: StoryEngine?
+    @State private var offered: [MissionRes] = []
+    @State private var rolledLanding = false
 
     private var game: NovaGame { graphics.game }
 
@@ -48,14 +57,78 @@ struct SpaceportView: View {
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
             }
+
+            // A location-triggered mission offer (landing / trade / shipyard /
+            // outfitter) stacks over everything, as its own authentic dialog.
+            if let offer = services.pendingOffer {
+                Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
+                                    onPage: { _ in },
+                                    onAccept: { acceptOffer(offer) }, onDecline: { declineOffer(offer) })
+                    .transition(.opacity)
+            }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.86), value: screen)
         .onAppear {
             Log.spaceport.info("Landed at spöb \(spob.id, privacy: .public) (\(spob.name, privacy: .public)) — shipyard=\(spob.hasShipyard, privacy: .public) outfitter=\(spob.hasOutfitter, privacy: .public) trade=\(spob.hasCommodityExchange, privacy: .public) bar=\(spob.hasBar, privacy: .public) uninhabited=\(spob.isUninhabited, privacy: .public)")
+            rollLandingOffer()
         }
         .onChange(of: screen) { _, newValue in
             Log.spaceport.debug("Spaceport screen -> \(String(describing: newValue), privacy: .public) at spöb \(spob.id, privacy: .public)")
+            // Opening a shop can also surface an offer (its own AvailLocation),
+            // exactly as EV Nova can hand you a mission when you walk into the
+            // trade centre / shipyard / outfitter.
+            switch newValue {
+            case .trade:    rollOffer(at: .tradeCenter)
+            case .shipyard: rollOffer(at: .shipyard)
+            case .outfit:   rollOffer(at: .outfitter)
+            default: break
+            }
         }
+    }
+
+    // MARK: Location-triggered mission offers
+
+    /// The one-per-landing mainSpaceport roll — this is what lets simply
+    /// touching down hand the player a mission (a new pilot's first landing
+    /// surfaces the intro/opening mission here when the data defines one).
+    private func rollLandingOffer() {
+        guard !rolledLanding else { return }
+        rolledLanding = true
+        let e = StoryEngine(game: game, player: pilot.state, services: services,
+                            seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        engine = e
+        rollOffer(at: .mainSpaceport, engine: e)
+    }
+
+    /// Present the top eligible offer for `location` (if any) — availability is
+    /// fully gated by `missionsOffered` (AvailBits test + AvailRandom % + record/
+    /// rating/ship/stellar), so nothing surfaces that the pilot can't get yet.
+    private func rollOffer(at location: MissionOfferLocation, engine e: StoryEngine? = nil) {
+        guard services.pendingOffer == nil else { return }   // don't stack offers
+        let eng = e ?? engine ?? StoryEngine(game: game, player: pilot.state, services: services,
+                                             seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        engine = eng
+        offered = eng.missionsOffered(at: location, spob: spob.id)
+        guard let mission = offered.first(where: { !eng.briefing(for: $0).isEmpty }) else { return }
+        Log.spaceport.debug("Location offer at spöb \(spob.id, privacy: .public) loc=\(String(describing: location), privacy: .public): mission \(mission.id, privacy: .public)")
+        eng.present(mission)
+    }
+
+    private func acceptOffer(_ offer: MissionOffer) {
+        guard let engine else { return }
+        _ = engine.accept(offer.mission.id)
+        pilot.state = engine.player
+        pilot.save()
+        services.pendingOffer = nil
+    }
+
+    private func declineOffer(_ offer: MissionOffer) {
+        guard let engine else { return }
+        engine.decline(offer.mission.id)
+        pilot.state = engine.player
+        pilot.save()
+        services.pendingOffer = nil
     }
 
     // MARK: Hub (frame 8500)
@@ -72,9 +145,11 @@ struct SpaceportView: View {
                 // Planet name, centred just below the landscape.
                 NovaText(spob.name, size: 18, width: 470, align: .center)
                     .novaPlace(space, -235, 30)
-                // Spaceport description, in the centre panel (wrap 301, as EV Nova).
+                // Spaceport description, in the centre panel (wrap 301, as EV Nova;
+                // Geneva 10 ≈ the reference's 9pt, kept one up for readability and
+                // matching every other in-frame body text in this port).
                 ScrollView(showsIndicators: false) {
-                    NovaText(game.descText(spob.id), size: 11, width: 301, align: .leading)
+                    NovaText(game.descText(spob.id), size: 10, width: 301, align: .leading)
                 }
                 .frame(width: 301, height: 175)
                 .novaPlace(space, -149, 70)
@@ -95,23 +170,16 @@ struct SpaceportView: View {
     /// from DITL #1000 against the real 618×517 Spaceport frame (PICT 8500 —
     /// matches DLOG #1000's own bounds exactly): each side column is 4 slots
     /// (items 10/9/6/12 left, items 8/7/3/11 right; all 145×25 at x=3/471),
-    /// not 3 — cy = itemTop − 258.5, e.g. right column 74.5/116.5/157.5/197.5.
-    /// `leave` used to occupy the right column's 4th slot; DITL item 0 —
-    /// (242,551)-(442,576), 200×25, *not* part of either column — shows it's
-    /// really a separate, large, centred control below both columns (see
-    /// `leaveCX`/`leaveCY`), so it's been moved out here and that 4th slot is
-    /// free for a real service. Each role sits at a fixed position regardless
-    /// of what else the spöb offers (a planet missing a Shipyard doesn't shift
-    /// Outfitter up).
-    private static let rightSlotY: [String: CGFloat] = ["shipyard": 74, "outfitter": 116, "recharge": 158]
+    /// cy = itemTop − 258.5, i.e. right column 74.5/116.5/157.5/197.5.
+    /// **Leave** goes in the right column's 4th slot, directly under Recharge
+    /// — DITL item 0's own y=551 rect sits ~34px *below* the 517px-tall frame
+    /// (the stale-bounds junk this dialog family carries), so a big centred
+    /// button there floated in black under the artwork. Using the real 4th
+    /// slot keeps it inside the frame and reads cleanly under Recharge.
+    private static let rightSlotY: [String: CGFloat] = ["shipyard": 74, "outfitter": 116, "recharge": 158, "leave": 198]
     private static let leftSlotY: [String: CGFloat] = ["tradeCenter": 74, "bar": 116, "missionBBS": 158]
     private static let leftX: CGFloat = -304
     private static let rightX: CGFloat = 160
-    /// DITL #1000 item 0: cx = 242 − 309 ≈ −67, cy = 551 − 258.5 ≈ 293, width
-    /// 200 (NovaButton's `width` is the middle span, so pass 200 − 26 = 174).
-    private static let leaveCX: CGFloat = -67
-    private static let leaveCY: CGFloat = 293
-    private static let leaveWidth: CGFloat = 174
 
     private typealias ButtonItem = (key: String, title: String, action: () -> Void)
 
@@ -139,14 +207,44 @@ struct SpaceportView: View {
         if spob.hasOutfitter {
             items.append(("outfitter", graphics.buttonLabel(SpaceportLabel.outfitter, fallback: "Outfitter"), { screen = .outfit }))
         }
-        // Recharge/refuel — the right column's real 4th slot (DITL item 3).
-        // No dedicated `spöb.flags` service bit exists for it (fuel is a base
-        // spaceport service, not a togglable one like the bar/shipyard/etc.),
-        // so it's gated the same way Mission BBS is: any real, inhabited port.
-        if !spob.isUninhabited {
-            items.append(("recharge", graphics.buttonLabel(SpaceportLabel.recharge, fallback: "Recharge"), { rechargeShip() }))
+        // Recharge/refuel — the right column's 4th slot. Per the Bible, refuel
+        // is a *paid* service by default (free only via a govt's Roadside-
+        // Assistance flag or a rank's free-repair flag). So it appears only at
+        // an inhabited port AND only when the tank isn't already full — "hides
+        // when you don't need to recharge".
+        if !spob.isUninhabited, needsRecharge {
+            let label = graphics.buttonLabel(SpaceportLabel.recharge, fallback: "Recharge")
+            items.append(("recharge", label, { rechargeShip() }))
         }
         return items
+    }
+
+    // MARK: Refuel (paid)
+
+    private var maxFuel: Double? {
+        galaxy.loadout(shipID: pilot.state.shipType, extraOutfits: pilot.state.outfits)?.maxFuel
+    }
+    /// Current fuel; a nil saved level (new pilot / never spent) reads as full.
+    private var currentFuel: Double { pilot.state.fuel ?? (maxFuel ?? 0) }
+    /// True when the tank has room — the only time Recharge is offered.
+    private var needsRecharge: Bool {
+        guard let maxFuel else { return false }
+        return currentFuel < maxFuel - 0.5
+    }
+    /// Free refuel if the port's government runs "Roadside Assistance" (govt
+    /// flag 0x0010) or the player holds a rank from that govt with the
+    /// free-repair/refuel flag (0x0800) — both the Bible's routes to free
+    /// service. Otherwise it's paid.
+    private var rechargeIsFree: Bool {
+        let govtID = spob.government
+        if govtID >= 128, let g = game.govt(govtID), g.flags1 & 0x0010 != 0 { return true }
+        return pilot.state.activeRanks.contains { game.rank($0)?.govt == govtID && (game.rank($0)?.flags ?? 0) & 0x0800 != 0 }
+    }
+    /// Cost to top off: ~1cr per missing fuel unit (a ~jump's worth ≈ 100cr),
+    /// zero when a friendly government/rank comps it.
+    private var rechargeCost: Int {
+        guard let maxFuel, !rechargeIsFree else { return 0 }
+        return max(0, Int((maxFuel - currentFuel).rounded()))
     }
 
     @ViewBuilder private func buttonColumn(_ space: NovaSpace) -> some View {
@@ -158,23 +256,29 @@ struct SpaceportView: View {
             NovaButton(graphics: graphics, title: item.title, width: 120, action: item.action)
                 .novaPlace(space, Self.rightX, Self.rightSlotY[item.key] ?? 74)
         }
+        // Leave sits directly below Recharge in the right column's 4th slot.
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
-                   width: Self.leaveWidth, action: onDepart)
-            .novaPlace(space, Self.leaveCX, Self.leaveCY)
+                   width: 120, action: onDepart)
+            .novaPlace(space, Self.rightX, Self.rightSlotY["leave"] ?? 198)
     }
 
-    /// Tops off the tank — EV Nova refuels for free at any real spaceport, and
-    /// this port already does that automatically on landing (`GameContainerView.
-    /// refuel()`), so this is mostly a no-op confirmation by the time the
-    /// player can tap it; wired for real in case that ever changes.
+    /// Pay to top off the tank. Free when the port's govt/your rank comps it;
+    /// otherwise it costs `rechargeCost` and no-ops if the player can't afford
+    /// it (the button only shows when the tank has room in the first place).
     private func rechargeShip() {
-        guard let maxFuel = galaxy.loadout(shipID: pilot.state.shipType, extraOutfits: pilot.state.outfits)?.maxFuel else {
+        guard let maxFuel else {
             Log.spaceport.error("Recharge tapped at spöb \(spob.id, privacy: .public) but no loadout for ship \(pilot.state.shipType, privacy: .public) — no-op")
             return
         }
+        let cost = rechargeCost
+        guard pilot.state.credits >= cost else {
+            Log.spaceport.notice("Recharge no-op at spöb \(spob.id, privacy: .public): cost \(cost, privacy: .public)cr > credits \(pilot.state.credits, privacy: .public)")
+            return
+        }
+        pilot.state.credits -= cost
         pilot.state.fuel = maxFuel
         pilot.save()
-        Log.spaceport.debug("Recharged fuel to \(maxFuel, privacy: .public) at spöb \(spob.id, privacy: .public)")
+        Log.spaceport.debug("Recharged fuel to \(maxFuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(cost, privacy: .public)cr")
     }
 
     // MARK: Fallback (data has no interface PICT)
@@ -199,36 +303,119 @@ struct SpaceportView: View {
 
 /// The Mission BBS (bulletin board) at a spaceport — `mïsn.AvailLoc ==
 /// .missionComputer` (0). Rendered on the mission-BBS frame PICT (8505),
-/// listing real offers from `StoryEngine` via `MissionBoardView`.
+/// with real offers from `StoryEngine`.
+///
+/// Layout straight from DLOG/DITL #1006 "Mission Select" against the real
+/// 510×201 frame (PICT 8505; DLOG bounds agree exactly — centre 255,100.5),
+/// matching the original's two-pane design:
+///   item 7  (14,3)-(410,18)      — header text strip
+///   item 1  (10,30)-(205,174)    — mission list, left black panel
+///   item 2  (205,30)-(220,174)   — its scrollbar strip
+///   item 4  (233,34)-(502,55)    — selected mission's title + pay
+///   item 3  (233,60)-(500,153)   — its briefing text, right black panel
+///   item 0  (266,170) 99×25      — Accept
+///   item 6  (368,170) 99×25      — Done
+/// Selecting a row presents that mission through the real `StoryEngine`
+/// (`present` → offer with substituted briefing text); Accept runs the full
+/// accept flow so every control bit fires. Done just leaves — browsing the
+/// board never fires OnRefuse, exactly like the game's mission computer.
 struct MissionBBSView: View {
     let graphics: SpaceportGraphics
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
     var onDone: () -> Void
 
+    @StateObject private var services = AppGameServices()
+    @State private var engine: StoryEngine?
+    @State private var offered: [MissionRes] = []
     private var game: NovaGame { graphics.game }
 
     var body: some View {
-        if let frame = graphics.frame(.missionBBS) {
-            NovaMenu(frame: frame, overlay: true) { space in
-                NovaText("Mission BBS", size: 16, color: .white, width: 300, align: .center)
-                    .novaPlace(space, -150, -150)
-                ScrollView(showsIndicators: false) {
-                    MissionBoardView(game: game, pilot: pilot, spob: spob, location: .missionComputer, width: 300)
+        Group {
+            if let frame = graphics.frame(.missionBBS) {
+                NovaMenu(frame: frame, overlay: true) { space in
+                    NovaText("Mission BBS", size: 10, width: 396, align: .leading, weight: .bold)
+                        .novaPlace(space, -241, -97.5)
+                    offerList
+                        .frame(width: 195, height: 144)
+                        .clipped()
+                        .novaPlace(space, -245, -70.5)
+                    if let offer = services.pendingOffer {
+                        HStack(spacing: 4) {
+                            NovaText(offer.mission.displayName, size: 10, width: 185, weight: .bold)
+                            Spacer(minLength: 0)
+                            NovaText(creditsLabel(offer.mission.pay), size: 10,
+                                     color: Color(red: 1, green: 0.85, blue: 0.4), width: 80, align: .trailing)
+                        }
+                        .frame(width: 269, height: 21)
+                        .novaPlace(space, -22, -66.5)
+                        ScrollView(showsIndicators: false) {
+                            NovaText(offer.briefingText, size: 10, width: 267, align: .leading)
+                        }
+                        .frame(width: 267, height: 93)
+                        .clipped()
+                        .novaPlace(space, -22, -40.5)
+                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73) { accept(offer) }
+                            .novaPlace(space, 11, 69.5)
+                    }
+                    NovaButton(graphics: graphics,
+                               title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                               width: 73, action: onDone)
+                        .novaPlace(space, 113, 69.5)
                 }
-                .frame(width: 300, height: 220)
-                .novaPlace(space, -150, -110)
-                NovaButton(graphics: graphics,
-                           title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                           width: 60, action: onDone)
-                    .novaPlace(space, -43, 120)
+            } else {
+                VStack {
+                    Text("Mission BBS").foregroundStyle(.white)
+                    MissionBoardView(game: game, pilot: pilot, spob: spob, location: .missionComputer)
+                    Button("Done", action: onDone)
+                }.padding()
             }
-        } else {
-            VStack {
-                Text("Mission BBS").foregroundStyle(.white)
-                MissionBoardView(game: game, pilot: pilot, spob: spob, location: .missionComputer)
-                Button("Done", action: onDone)
-            }.padding()
         }
+        .onAppear(perform: buildEngine)
+    }
+
+    private var offerList: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                if offered.isEmpty {
+                    NovaText("No missions available.", size: 10, color: Color(white: 0.6), width: 191)
+                        .padding(.top, 2).padding(.leading, 2)
+                }
+                ForEach(offered, id: \.id) { mission in
+                    let isSelected = services.pendingOffer?.mission.id == mission.id
+                    Button { engine?.present(mission) } label: {
+                        NovaText(mission.displayName, size: 10,
+                                 color: isSelected ? .white : Color(white: 0.65), width: 189)
+                            .padding(.vertical, 1.5).padding(.horizontal, 3)
+                            .background(isSelected ? Color.white.opacity(0.14) : .clear)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func buildEngine() {
+        let e = StoryEngine(game: game, player: pilot.state, services: services,
+                            seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        engine = e
+        offered = e.missionsOffered(at: .missionComputer, spob: spob.id)
+        if let first = offered.first { e.present(first) }
+    }
+
+    private func accept(_ offer: MissionOffer) {
+        guard let engine else { return }
+        _ = engine.accept(offer.mission.id)
+        pilot.state = engine.player
+        pilot.save()
+        services.pendingOffer = nil
+        offered = engine.missionsOffered(at: .missionComputer, spob: spob.id)
+        if let first = offered.first { engine.present(first) }
+    }
+
+    private func creditsLabel(_ n: Int) -> String {
+        let f = NumberFormatter(); f.numberStyle = .decimal
+        return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
     }
 }

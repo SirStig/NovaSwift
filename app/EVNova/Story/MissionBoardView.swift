@@ -61,7 +61,7 @@ struct MissionBoardView: View {
                                       onSelect: { engine?.present($0) },
                                       onAccept: { accept(offer) }, onDecline: { decline(offer) })
                 case .bar:
-                    MissionSingleSheet(graphics: graphics, offer: offer, offered: offered,
+                    MissionSingleDialog(graphics: graphics, offer: offer, offered: offered,
                                         onPage: { engine?.present($0) },
                                         onAccept: { accept(offer) }, onDecline: { decline(offer) })
                 // persShip/mainSpaceport/tradeCenter/shipyard/outfitter/unknown: no dedicated
@@ -78,7 +78,8 @@ struct MissionBoardView: View {
     }
 
     private func buildEngine() {
-        let e = StoryEngine(game: game, player: pilot.state, services: services)
+        let e = StoryEngine(game: game, player: pilot.state, services: services,
+                            seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
         engine = e
         offered = e.missionsOffered(at: location, spob: spob.id)
         if graphics == nil { graphics = SpaceportGraphics(game: game) }
@@ -275,7 +276,7 @@ private struct MissionInfoSheet: View {
 /// between multiple simultaneous bar offers with items #8/#9 instead — two
 /// 23×23 icons that already sit inside that frame, to the right of the
 /// button row.
-private struct MissionSingleSheet: View {
+struct MissionSingleDialog: View {
     let graphics: SpaceportGraphics
     let offer: MissionOffer
     let offered: [MissionRes]
@@ -291,7 +292,20 @@ private struct MissionSingleSheet: View {
 
     private var index: Int? { offered.firstIndex { $0.id == offer.mission.id } }
 
+    // Rendered as a full-screen overlay at the shared 1024×768 reference scale
+    // (like every NovaMenu dialog), so the patron's offer stacks over the bar
+    // at its true relative size instead of appearing in a native sheet.
     var body: some View {
+        GeometryReader { geo in
+            let scale = novaFrameScale(frame: CGSize(width: Self.frameWidth, height: Self.frameHeight),
+                                       viewport: geo.size)
+            frameBody
+                .scaleEffect(scale)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+    }
+
+    @ViewBuilder private var frameBody: some View {
         Group {
             if let top = graphics.pict(Self.upperID), let middle = graphics.pict(Self.middleID),
                let bottom = graphics.pict(Self.lowerID) {

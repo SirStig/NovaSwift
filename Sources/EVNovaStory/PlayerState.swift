@@ -83,6 +83,14 @@ public struct PlayerState: Codable, Sendable {
     /// Optional (rather than defaulted) so older saves without this field decode
     /// via `decodeIfPresent` instead of failing `Codable` decode entirely.
     public var fuel: Double?
+    /// Current hull (armor) and shield, carried across landings so damage
+    /// persists — only an **inhabited** port restores them (free), an
+    /// uninhabited rock does not. `nil` = uninitialized (full). Optional for the
+    /// same save-compatibility reason as `fuel`. Shields still regenerate in
+    /// flight; persisting them just preserves a damaged state through a dock
+    /// where no repair was available.
+    public var armor: Double?
+    public var shield: Double?
 
     // Reputation
     public var combatRating: Int

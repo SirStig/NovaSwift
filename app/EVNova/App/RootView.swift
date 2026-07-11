@@ -19,7 +19,11 @@ struct RootView: View {
                     AuthenticMainMenuView(assets: assets)
                         .transition(.opacity)
                 } else {
-                    LoadingView().transition(.opacity)   // still decoding menu art
+                    // Still decoding menu art — show the loading visual, but it
+                    // must NOT auto-advance into the game (that would open the
+                    // saved pilot the instant the menu is ready). `entersGame:
+                    // false` keeps us on the menu once the art appears.
+                    LoadingView(entersGame: false).transition(.opacity)
                 }
             case .loading:
                 LoadingView()

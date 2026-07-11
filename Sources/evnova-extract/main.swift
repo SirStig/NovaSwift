@@ -725,8 +725,17 @@ case "ai":
         FileHandle.standardError.write(Data("error: no system \(sysID)\n".utf8)); exit(1)
     }
     let govName = aiGame.govt(sys.government)?.name ?? "Independent"
-    print("System #\(sys.id) \"\(sys.name)\"  govt: \(govName)  avgShips: \(sys.averageShips)")
+    print("System #\(sys.id) \"\(sys.name)\"  govt: \(govName) (id \(sys.government))  avgShips: \(sys.averageShips)")
     print("spawn table: \(sys.dudeSpawns.count) dude(s), \(sys.fleetSpawns.count) fleet(s)")
+    for (fid, prob) in sys.fleetSpawns {
+        if let f = aiGame.fleet(fid) {
+            let leadName = aiGame.ship(f.leadShip)?.name ?? "?"
+            let esc = f.escorts.map { "\(aiGame.ship($0.shipID)?.name ?? "?")×\($0.min)-\($0.max)" }.joined(separator: ", ")
+            print("  fleet #\(fid) (prob \(prob)): lead \(leadName), escorts [\(esc.isEmpty ? "none" : esc)] linkSys \(f.linkSystem)")
+        } else {
+            print("  fleet #\(fid) (prob \(prob)): <unresolved>")
+        }
+    }
 
     // A player ship at the centre (using the system's dominant hull if we can).
     let playerHull = aiGame.ship(sys.spawns.first?.id ?? 128).map { _ in sys.spawns.first!.id } ?? 128
@@ -741,7 +750,8 @@ case "ai":
     print("populated with \(world.npcs.count) NPC(s); jumpRadius \(Int(world.systemContext.jumpRadius))")
 
     var arrivals = 0, departures = 0, kills = 0, shots = 0, beams = 0
-    var landings = 0, launches = 0, disables = 0, jumpIns = 0
+    var landings = 0, launches = 0, disables = 0, jumpIns = 0, scans = 0
+    var scansOfPlayer = 0
     var stateHistogram: [String: Int] = [:]
     let dt = 1.0 / 30.0
     let steps = Int(seconds / dt)
@@ -757,6 +767,7 @@ case "ai":
             case .shipDestroyed: kills += 1
             case .weaponFired: shots += 1
             case .beam(_, _, _, _, let hit, _): if hit { beams += 1 }
+            case let .shipScanned(_, targetID, _): scans += 1; if targetID == 0 { scansOfPlayer += 1 }
             default: break
             }
         }
@@ -769,6 +780,7 @@ case "ai":
     print("after \(Int(seconds))s:  live NPCs \(world.npcs.count)   projectiles \(world.projectiles.count)")
     print("  arrivals \(arrivals) (jump-in \(jumpIns), launch \(launches))   departures \(departures)   landings \(landings)")
     print("  kills \(kills)   disabled \(disables)   shots fired \(shots)   beam hits \(beams)")
+    print("  scans \(scans) (of player \(scansOfPlayer))")
     let hist = stateHistogram.sorted { $0.value > $1.value }
         .map { "\($0.key)×\($0.value)" }.joined(separator: "  ")
     print("  behavior samples: \(hist)")
@@ -777,12 +789,14 @@ case "ai":
         let gov = aiGame.govt(npc.government)?.name ?? "indep"
         let tgt = npc.currentTargetID.map { " → target #\($0)" } ?? ""
         let ab = npc.afterburner != nil ? " AB" : ""
+        // Show fleet role: leader id + this ship's formation slot when escorting.
+        let wing = npc.brain?.leaderID.map { " wing→#\($0) slot \(npc.brain?.formationSlot ?? 0)" } ?? ""
         let fit = String(format: "wpn %d fuel %3.0f spd %3.0f%@",
                          npc.weapons.count, npc.maxFuel, npc.stats.maxSpeed, ab)
-        print(String(format: "    #%-3d %-22@ [%@] %@  sh %3.0f ar %3.0f  %@%@",
+        print(String(format: "    #%-3d %-22@ [%@] %@  sh %3.0f ar %3.0f  %@%@%@",
                      npc.entityID, npc.name as NSString, gov as NSString,
                      npc.brain?.state.rawValue ?? "?",
-                     npc.maxShield, npc.maxArmor, fit as NSString, tgt))
+                     npc.maxShield, npc.maxArmor, fit as NSString, tgt as NSString, wing as NSString))
     }
 
 case "mission":

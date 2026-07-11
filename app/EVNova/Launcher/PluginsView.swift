@@ -7,7 +7,8 @@ import EVNovaKit
 /// drop-in plug-in folders (see docs/MOBILE_AND_PLUGINS.md §3).
 struct PluginsView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    /// Closes this dialog (injected by the full-screen overlay presenter).
+    var onClose: () -> Void = {}
     @State private var tab: Tab = .installed
 
     private enum Tab: String, CaseIterable, Identifiable {
@@ -15,22 +16,31 @@ struct PluginsView: View {
         var id: String { rawValue }
     }
 
+    // The plug-in hub keeps its native list/search structure, but sits on the
+    // same dimmed-title-screen surface as `NovaDialog` (via `DialogChrome`) so
+    // it reads as part of the game's UI. The Store's detail pages and search
+    // field need a `NavigationStack`, so its list/detail flow is wrapped in one
+    // *inside* the chrome (the old macOS `.sheet` supplied that stack; the
+    // full-screen overlay doesn't). No `.novaResponsive()` here — it scales
+    // ambient text by window width, which at full-screen size blew every row up
+    // ~1.6×; the List/Form controls want their own native point sizes.
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding([.horizontal, .top])
+        DialogChrome(title: "Plug-ins", onClose: onClose) {
+            VStack(spacing: 0) {
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .padding([.horizontal, .top])
 
-            switch tab {
-            case .installed: installedList
-            case .store: PluginStoreView()
+                switch tab {
+                case .installed:
+                    installedList.scrollContentBackground(.hidden)
+                case .store:
+                    NavigationStack { PluginStoreView() }
+                }
             }
         }
-        .novaResponsive()
-        .navigationTitle("Plug-ins")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
 
     private var installedList: some View {

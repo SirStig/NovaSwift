@@ -8,16 +8,22 @@ import EVNovaStory
 /// a pilot; the row menu duplicates or deletes.
 struct PilotListView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    /// Closes this dialog (injected by the full-screen overlay presenter).
+    var onClose: () -> Void = {}
     @State private var showNewPilot = false
     @State private var pendingDelete: PilotSave?
 
     var body: some View {
-        NovaDialog(title: "Select a Pilot", width: 480, buttons: buttons) {
-            if model.roster.isEmpty { emptyState }
-            else { pilotList }
+        ZStack {
+            NovaDialog(title: "Select a Pilot", width: 480, buttons: buttons) {
+                if model.roster.isEmpty { emptyState }
+                else { pilotList }
+            }
+            if showNewPilot {
+                NewPilotView(onClose: { showNewPilot = false })
+                    .transition(.opacity)
+            }
         }
-        .sheet(isPresented: $showNewPilot) { NewPilotView().preferredColorScheme(.dark) }
         .alert("Delete pilot?", isPresented: Binding(get: { pendingDelete != nil },
                                                      set: { if !$0 { pendingDelete = nil } })) {
             Button("Delete", role: .destructive) {
@@ -43,7 +49,7 @@ struct PilotListView: View {
                 Log.pilot.debug("PilotListView: opening New Pilot sheet")
                 showNewPilot = true
             },
-            NovaDialogButton(title: "Close") { dismiss() },
+            NovaDialogButton(title: "Close") { onClose() },
         ]
     }
 
@@ -60,7 +66,7 @@ struct PilotListView: View {
     private func pilotRow(_ save: PilotSave) -> some View {
         Button {
             Log.pilot.debug("PilotListView: play pilot \(save.id, privacy: .public) \"\(save.displayName, privacy: .public)\"")
-            model.audio.play(.uiSelect); dismiss(); model.play(save)
+            model.audio.play(.uiSelect); onClose(); model.play(save)
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -88,7 +94,7 @@ struct PilotListView: View {
                             model.audio.play(.uiSelect)
                             Log.pilot.debug("PilotListView: loading earlier save for pilot \(save.id, privacy: .public) from \(entry.url.lastPathComponent, privacy: .public)")
                             if let restored = model.roster.restore(save.id, from: entry) {
-                                dismiss(); model.play(restored)
+                                onClose(); model.play(restored)
                             }
                         } label: {
                             Text("\(entry.save.snapshot.systemName.isEmpty ? "—" : entry.save.snapshot.systemName) · \(relative(entry.save.updatedAt))")

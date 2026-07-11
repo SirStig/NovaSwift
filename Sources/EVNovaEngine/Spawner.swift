@@ -56,9 +56,19 @@ public final class Spawner {
     /// How many NPCs to keep around; derived from the system's average count.
     public var targetPopulation: Int
     public var maxPopulation = 18
-    /// Seconds between arrival attempts once below target.
-    public var spawnInterval: Double = 2.5
+    /// Seconds between ambient single-ship arrival attempts once below target.
+    /// Deliberately unhurried — a fresh ship warping in every couple of seconds
+    /// made systems feel like a churning airport; real traffic trickles in.
+    public var spawnInterval: Double = 6.0
     private var timer: Double = 0
+
+    /// Seconds between deliberate *fleet* arrivals, tracked separately from the
+    /// ambient single-ship trickle so fleets actually show up on a predictable
+    /// cadence instead of losing every weighted coin-flip to lone traders (which
+    /// is why the player "never saw fleets"). A fleet is a group event, so it's
+    /// spaced further apart than ambient singles.
+    public var fleetInterval: Double = 26
+    private var fleetTimer: Double = 8
 
     /// Sim-seconds since this spawner was created — drives the reactive
     /// reinforcement-fleet timers below (FLEETS.md §5), independent of
@@ -93,8 +103,16 @@ public final class Spawner {
     private enum SpawnOrigin { case interior, edge, planet }
 
     /// Fill the system to its target population immediately (used on entry so the
-    /// system isn't empty for the first few seconds).
+    /// system isn't empty for the first few seconds). If the system has any
+    /// eligible fleet, one is placed up front so the player often finds a
+    /// formation already on station instead of only ever catching lone ships.
     public func populate(_ world: World) {
+        let eligibleFleets = table.fleets.filter { isFleetEligible($0.fleetID, world: world) }
+        if !eligibleFleets.isEmpty,
+           let fid = weightedPick(eligibleFleets.map { ($0.fleetID, $0.prob) },
+                                  roll: world.rng.int(in: 0...9999), world: world) {
+            spawnFleet(fid, into: world, origin: .interior)
+        }
         var guardCount = 0
         while world.npcs.count < targetPopulation && guardCount < maxPopulation * 2 {
             spawnOne(into: world, origin: .interior)
@@ -107,13 +125,29 @@ public final class Spawner {
         simClock += dt
         updateReinforcements(world)
 
+        // Deliberate fleet cadence, independent of the ambient trickle so fleets
+        // reliably appear. A fleet is a group, so it may push a little past the
+        // ambient target population (capped by `maxPopulation` inside spawnFleet).
+        fleetTimer -= dt
+        if fleetTimer <= 0 {
+            fleetTimer = fleetInterval
+            if world.npcs.count < maxPopulation {
+                let eligibleFleets = table.fleets.filter { isFleetEligible($0.fleetID, world: world) }
+                if !eligibleFleets.isEmpty,
+                   let fid = weightedPick(eligibleFleets.map { ($0.fleetID, $0.prob) },
+                                          roll: world.rng.int(in: 0...9999), world: world) {
+                    spawnFleet(fid, into: world, origin: .edge)
+                }
+            }
+        }
+
         timer -= dt
         guard world.npcs.count < targetPopulation, timer <= 0 else { return }
         timer = spawnInterval
         // Most arrivals jump in from hyperspace; some lift off from a spaceport so
         // the player also sees traffic *leaving* planets, not only inbound.
         let hasPads = world.systemContext.bodies.contains { $0.canLand }
-        let origin: SpawnOrigin = (hasPads && world.rng.double(in: 0...1) < 0.35) ? .planet : .edge
+        let origin: SpawnOrigin = (hasPads && world.rng.double(in: 0...1) < 0.25) ? .planet : .edge
         spawnOne(into: world, origin: origin)
     }
 
@@ -167,23 +201,28 @@ public final class Spawner {
     /// fleet itself belonging to the Federation). Ally/enemy tests reuse
     /// `Diplomacy.areAllied`/`.areEnemies` — no new relational logic, per
     /// FLEETS.md §3's own analysis.
-    private func isFleetEligible(_ fleet: FleetRes, world: World) -> Bool {
+    func isFleetEligible(_ fleet: FleetRes, world: World) -> Bool {
         let link = fleet.linkSystem
+        // The banded government ranges below encode a government by its 0-based
+        // *index*; the system/diplomacy layer speaks resource ids (128+), so add
+        // `govtResourceBase` before comparing. (Getting this wrong silently made
+        // every govt-banded fleet ineligible — Federation is govt id 128, so
+        // `LinkSyst 10000` meant "index 0" i.e. id 128, but was compared to 0.)
         switch link {
         case -1:
             return true
         case 128...2175:
             return link == table.systemID
         case 10000...10255:
-            return table.systemGovt == link - 10000
+            return table.systemGovt == (link - 10000) + govtResourceBase
         case 15000...15255:
             guard let dip = world.diplomacy else { return true }
-            return dip.areAllied(table.systemGovt, link - 15000)
+            return dip.areAllied(table.systemGovt, (link - 15000) + govtResourceBase)
         case 20000...20255:
-            return table.systemGovt != link - 20000
+            return table.systemGovt != (link - 20000) + govtResourceBase
         case 25000...25255:
             guard let dip = world.diplomacy else { return true }
-            return dip.areEnemies(table.systemGovt, link - 25000)
+            return dip.areEnemies(table.systemGovt, (link - 25000) + govtResourceBase)
         default:
             // Outside the documented bands (or 0/blank on non-`flët` test
             // fixtures) — permissive default so it doesn't silently zero out

@@ -260,6 +260,42 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertTrue(trader.brain?.state == .traveling || trader.brain?.state == .departing)
     }
 
+    func testShipWithSidewaysMomentumCancelsDriftInsteadOfLoopingBack() {
+        // The drift fix: a ship whose momentum is carrying it *across* its course
+        // must steer that momentum back onto the line and settle onto the target,
+        // not sail off to the side and loop back (naïve "point the nose at the
+        // target and thrust" steering). Trader at the origin heading for a planet
+        // due north, but launched with a strong sideways (+x) velocity.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(90_000, 90_000)))   // far — no threat
+        world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 2500), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 8000, spawnRadius: 7000)
+
+        let trader = warship("Trader", govt: 202, at: Vec2(), armed: false)
+        trader.velocity = Vec2(300, 0)                                   // full-cruise drift straight sideways
+        trader.brain = AIBrain(aiType: .braveTrader, govt: 202)
+        world.addNPC(trader)
+
+        // Track how far off the straight-north course line (the x axis) the ship
+        // ever strays, and whether it reaches the planet.
+        var maxCrossTrack = 0.0
+        var landed = false
+        for _ in 0..<600 {                                              // up to 20s
+            world.step(1.0 / 30.0)
+            maxCrossTrack = max(maxCrossTrack, abs(trader.position.x))
+            if world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }) {
+                landed = true; break
+            }
+        }
+        // Velocity-compensated steering pulls the +x drift back toward the course:
+        // the excursion stays bounded (naïve steering would fling it far off and
+        // orbit), and it still sets down on the planet.
+        XCTAssertLessThan(maxCrossTrack, 900, "sideways momentum should be steered back onto course, not looped")
+        XCTAssertTrue(landed, "even launched off-axis, the trader should still settle onto the planet")
+    }
+
     func testDepartedShipJumpsOutPastEdge() {
         let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
         world.systemContext = SystemContext(bodies: [], center: Vec2(), jumpRadius: 1000, spawnRadius: 800)
@@ -386,5 +422,104 @@ final class AIBehaviorTests: XCTestCase {
             if !b.isAlive || !a.isAlive { destroyed = true; break }
         }
         XCTAssertTrue(destroyed, "a duel between two armed, hostile interceptors should resolve")
+    }
+
+    // MARK: government-gated patrols + scanning
+
+    func testOnlyLocalAuthorityPatrolsForeignersTravelThrough() {
+        // In a Federation-owned (govt 500) system: a Federation warship runs the
+        // patrol beat; a warship of an unrelated government (501) has no business
+        // policing someone else's space, so it just crosses the system.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(90_000, 90_000))        // far — nothing to scan/fight
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50]), govt(501, classes: [51])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 2000), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
+
+        // Keep them beyond scan reach of each other so this test isolates the
+        // patrol-vs-travel decision (a nearby neutral would be scanned instead).
+        let local = warship("Local", govt: 500, at: Vec2())
+        local.brain = AIBrain(aiType: .warship, govt: 500)
+        world.addNPC(local)
+        let foreign = warship("Foreign", govt: 501, at: Vec2(40_000, 0))
+        foreign.brain = AIBrain(aiType: .warship, govt: 501)
+        world.addNPC(foreign)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(local.brain?.state, .patrolling, "the system's own government patrols")
+        XCTAssertEqual(foreign.brain?.state, .traveling, "a foreign warship passes through, it doesn't patrol")
+    }
+
+    func testLocalAuthorityScansThePlayer() {
+        // An armed authority ship with the player close by and non-hostile flies
+        // a scan pass and emits a shipScanned event aimed at the player.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(0, 180))                 // within scan-complete range
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 1500), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
+
+        let patrol = warship("Patrol", govt: 500, at: Vec2())
+        patrol.brain = AIBrain(aiType: .warship, govt: 500)
+        world.addNPC(patrol)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(patrol.brain?.state, .scanning, "authority breaks off its beat to scan a passing ship")
+        let scanned = world.events.contains {
+            if case let .shipScanned(_, targetID, _) = $0 { return targetID == player.entityID }
+            return false
+        }
+        XCTAssertTrue(scanned, "the scan pass should emit a shipScanned event targeting the player")
+    }
+
+    // MARK: fleet spawn eligibility (the LinkSyst govt-index → resource-id fix)
+
+    func testFleetGovtBandEligibilityUsesResourceBase() {
+        // A fleet with LinkSyst 10000 means "any system of government *index 0*",
+        // and governments are resources 128+, so index 0 = resource id 128. The
+        // fleet must be eligible in a system owned by govt 128 and ineligible in
+        // one owned by govt 129 — the off-by-128 bug made it eligible in neither.
+        func fleet(linkSystem: Int) -> FleetRes {
+            var d = [UInt8](repeating: 0, count: 306)
+            func putW(_ off: Int, _ v: Int) {
+                let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
+                d[off] = UInt8(u >> 8); d[off + 1] = UInt8(u & 0xff)
+            }
+            putW(0, 128)              // leadShip
+            putW(26, -1)              // fleet's own govt: none
+            putW(28, linkSystem)      // LinkSyst
+            return FleetRes(Resource(type: NovaType.fleet, id: 128, name: "F", data: Data(d)))
+        }
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        world.diplomacy = Diplomacy(govts: [govt(128, classes: [0]), govt(129, classes: [1])])
+
+        let galaxy = Galaxy(game: NovaGame(ResourceCollection()))
+        let ownedBy128 = Spawner(galaxy: galaxy, table: SpawnTable(systemGovt: 128))
+        let ownedBy129 = Spawner(galaxy: galaxy, table: SpawnTable(systemGovt: 129))
+        XCTAssertTrue(ownedBy128.isFleetEligible(fleet(linkSystem: 10000), world: world),
+                      "LinkSyst 10000 (govt index 0 = resource 128) is eligible in a govt-128 system")
+        XCTAssertFalse(ownedBy129.isFleetEligible(fleet(linkSystem: 10000), world: world),
+                       "…and not in a govt-129 system")
+    }
+
+    func testHyperspaceArrivalTearsInAboveCruise() {
+        // A jump-in should enter above its cruise cap (the visible inrush) and
+        // then decelerate, rather than snapping straight to cruise speed.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        world.systemContext = SystemContext(bodies: [], center: Vec2(), jumpRadius: 6000, spawnRadius: 5000)
+        let arrival = warship("Inbound", govt: 500, at: Vec2(0, 5000), angle: .pi)  // pointed inward (−y)
+        arrival.brain = AIBrain(aiType: .warship, govt: 500)
+        world.addNPC(arrival, arrival: .hyperspace)
+
+        world.step(1.0 / 30.0)
+        XCTAssertGreaterThan(arrival.velocity.length, arrival.stats.maxSpeed,
+                             "immediately after a jump-in the ship is still above cruise speed")
+        for _ in 0..<120 { world.step(1.0 / 30.0) }              // ~4s later
+        XCTAssertLessThanOrEqual(arrival.velocity.length, arrival.stats.maxSpeed + 1,
+                                 "the entry over-speed bleeds back down to cruise")
     }
 }

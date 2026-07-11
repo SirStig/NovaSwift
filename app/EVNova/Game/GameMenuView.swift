@@ -1,4 +1,6 @@
 import SwiftUI
+import EVNovaKit
+import EVNovaStory
 
 /// The in-game menu — a single, clean, animated panel that slides in from the
 /// left and hosts every non-flight action: resume, galaxy map, mission log,
@@ -18,6 +20,7 @@ struct GameMenuView: View {
 
     @State private var showSettings = false
     @State private var storyModel: StoryGuideModel?
+    @State private var storyTab: StoryGuideView.Tab = .pilot
     @State private var info: String?
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
@@ -39,15 +42,16 @@ struct GameMenuView: View {
         }
         .novaResponsive()
         .sheet(isPresented: $showSettings) {
-            NavigationStack { SettingsView() }
-                .frame(minWidth: 420, minHeight: 520)
+            SettingsView(onClose: { showSettings = false })
+                .frame(minWidth: 640, minHeight: 580)
                 .preferredColorScheme(.dark)
         }
         .sheet(isPresented: Binding(get: { storyModel != nil },
                                     set: { if !$0 { storyModel = nil } })) {
             if let storyModel {
-                StoryGuideView(model: storyModel, initialTab: .map,
-                               onClose: { self.storyModel = nil })
+                StoryGuideView(model: storyModel, initialTab: storyTab,
+                               onClose: { self.storyModel = nil },
+                               onAbort: { abortMission($0) })
                     .frame(minWidth: 900, minHeight: 620)
                     .preferredColorScheme(.dark)
             }
@@ -66,8 +70,9 @@ struct GameMenuView: View {
                 VStack(spacing: 2) {
                     row("Resume", "play.fill", tint: amber) { onResume() }
                     row("Galaxy Map", "map.fill") { onResume(); onOpenMap() }
+                    row("Pilot Info", "person.crop.circle") { openStoryGuide(.pilot) }
                     row("Story Map", "point.3.connected.trianglepath.dotted") {
-                        openStoryMap()
+                        openStoryGuide(.map)
                     }
                     row("Preferences", "gearshape.fill") { showSettings = true }
                     if showDebug {
@@ -119,15 +124,29 @@ struct GameMenuView: View {
         .padding(16)
     }
 
-    /// Open the full-screen Story Map over the live game + current pilot. Builds
-    /// a fresh guide model (indexing the mission graph) on demand; without loaded
-    /// game data there's nothing to chart, so explain that instead.
-    private func openStoryMap() {
-        if let game = model.data.game {
-            storyModel = .over(game, player: model.pilot.state)
-        } else {
-            info = "Load your EV Nova data to chart the storyline map."
+    /// Open the Pilot Log over the live game + current pilot, on `tab`. Builds a
+    /// fresh guide model (indexing the mission graph) on demand; without loaded
+    /// game data there's nothing to show, so explain that instead.
+    private func openStoryGuide(_ tab: StoryGuideView.Tab) {
+        guard let game = model.data.game else {
+            info = "Load your EV Nova data to view your pilot log."
+            return
         }
+        storyTab = tab
+        storyModel = .over(game, player: model.pilot.state)
+    }
+
+    /// Abort an active mission from the pilot panel and reflect it immediately:
+    /// runs the real `StoryEngine` abort (applying the mission's OnAbort bits),
+    /// writes the mutated pilot back to the live store, saves, and refreshes the
+    /// panel so the mission drops off the list.
+    private func abortMission(_ missionID: Int) {
+        guard let game = model.data.game else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state)
+        engine.abortMission(missionID)
+        model.pilot.state = engine.player
+        model.pilot.save()
+        storyModel?.update(player: model.pilot.state)
     }
 
     private var sectionGap: some View {

@@ -43,7 +43,7 @@ struct PluginStoreView: View {
                 }
             }
         }
-        .novaResponsive()
+        .scrollContentBackground(.hidden)
         .searchable(text: $query, prompt: "Search plug-ins")
         .navigationTitle("Store")
     }

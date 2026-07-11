@@ -166,6 +166,21 @@ final class PilotStore: ObservableObject {
         galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.maxJumpHops ?? 1
     }
 
+    /// True if the ship has an instant-jump / jump-control outfit (`oütf` ModType
+    /// 37): jumps skip the slow turn-and-align spin-up and fire almost instantly.
+    func hasInstantJump(galaxy: Galaxy) -> Bool {
+        galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.instantJump ?? false
+    }
+
+    /// How much faster than stock the jump sequence runs, from hyperspace-speed
+    /// outfits (`oütf` ModType 22). 1.0 = stock; each point of bonus is +1%,
+    /// clamped so it stays a speed-up and never gets absurd. The scene divides
+    /// its jump-phase durations by this.
+    func jumpSpeedFactor(galaxy: Galaxy) -> Double {
+        let bonus = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.hyperspaceSpeedBonus ?? 0
+        return min(4.0, max(1.0, 1.0 + Double(bonus) / 100.0))
+    }
+
     /// True if any installed outfit is a map/chart (reveals the whole galaxy).
     func ownsMapOutfit(game: NovaGame) -> Bool {
         state.outfits.keys.contains { game.outfit($0)?.has(.map) ?? false }

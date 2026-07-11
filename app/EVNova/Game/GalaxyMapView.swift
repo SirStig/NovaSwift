@@ -568,11 +568,15 @@ struct GalaxyMapView: View {
                 bottomButtons(space: space, nw: nw, nh: nh)
 
                 // Relation key, tucked into the star-map's lower-left corner so
-                // the dot colours are readable. (Positioned by eye — nudge with
-                // the ⇧⌘D debug grid.)
+                // the dot colours are readable. Bottom-anchored inside a fixed
+                // box whose floor sits 4px above the canvas's bottom edge — the
+                // legend's height varies (gate rows appear only in systems with
+                // gates), and the old top-anchored placement let the tall
+                // variant spill out of the canvas onto the route bar.
                 relationLegend
+                    .frame(height: 116, alignment: .bottomLeading)
                     .novaPlace(space, CGFloat(Item.canvas.left) + 4 - nw / 2,
-                               CGFloat(Item.canvas.top + Item.canvas.h) - 72 - nh / 2)
+                               CGFloat(Item.canvas.top + Item.canvas.h) - 120 - nh / 2)
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .scaleEffect(scale)
@@ -680,28 +684,30 @@ struct GalaxyMapView: View {
                                                mapRevealAll: pilot.ownsMapOutfit(game: game))
                     != .adjacent
                 let destName = destKnown ? dest.name : "Unexplored"
+                // Frame-pixel Geneva (like all in-frame text), not `.novaFont`
+                // chrome roles — the route bar lives inside the scaled map
+                // frame, where the roles' 13-15pt sizes render oversized.
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("COURSE: \(destName) — \(nav.route.count) JUMP\(nav.route.count == 1 ? "" : "S")")
-                        .novaFont(.hud, weight: .semibold)
-                        .foregroundStyle(nav.route.count <= nav.availableJumps ? routeGreen : routeWarn)
-                    Text("FUEL: \(Int(nav.currentFuel))/\(Int(nav.shipMaxFuel))  (\(nav.availableJumps) jump\(nav.availableJumps == 1 ? "" : "s"))")
-                        .novaFont(.hud).monospacedDigit()
-                        .foregroundStyle(.secondary)
+                    NovaText("COURSE: \(destName) — \(nav.route.count) JUMP\(nav.route.count == 1 ? "" : "S")",
+                             size: 11, color: nav.route.count <= nav.availableJumps ? routeGreen : routeWarn,
+                             weight: .semibold)
+                    NovaText("FUEL: \(Int(nav.currentFuel))/\(Int(nav.shipMaxFuel))  (\(nav.availableJumps) jump\(nav.availableJumps == 1 ? "" : "s"))",
+                             size: 10, color: Color(white: 0.65))
+                        .monospacedDigit()
                 }
                 Spacer()
                 Button(action: onJump) {
-                    Text(canGo ? (hops > 1 ? "JUMP ×\(hops)" : "JUMP") : "NO FUEL")
-                        .novaFont(.button, weight: .bold)
-                        .padding(.horizontal, 14).padding(.vertical, 6)
+                    NovaText(canGo ? (hops > 1 ? "JUMP ×\(hops)" : "JUMP") : "NO FUEL",
+                             size: 11, color: canGo ? routeGreen : routeWarn, weight: .bold)
+                        .padding(.horizontal, 12).padding(.vertical, 4)
                         .background((canGo ? routeGreen : routeWarn).opacity(0.18), in: Capsule())
                         .overlay(Capsule().strokeBorder((canGo ? routeGreen : routeWarn).opacity(0.6)))
-                        .foregroundStyle(canGo ? routeGreen : routeWarn)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canGo)
             } else {
-                Text("Click a system to plot a course · drag to pan · pinch or +/− to zoom")
-                    .novaFont(.caption).foregroundStyle(.secondary)
+                NovaText("Click a system to plot a course · drag to pan · pinch or +/− to zoom",
+                         size: 10, color: Color(white: 0.65))
                 Spacer()
             }
         }
@@ -730,22 +736,13 @@ struct GalaxyMapView: View {
             NovaButton(graphics: graphics, title: "Named System",
                        width: CGFloat(Item.named.w - 26)) { showingFinder = true }
                 .novaPlace(space, cx(Item.named, nw), cy(Item.named, nh))
+            // idx3/idx4 (25×25) — the authentic button art at its minimum
+            // 26×25 geometry with −/+ glyphs, not a translucent system chip.
+            NovaIconButton(graphics: graphics, systemName: "minus") { setZoom(zoom / 1.4) }
+                .novaPlace(space, cx(Item.zoomOut, nw), cy(Item.zoomOut, nh))
+            NovaIconButton(graphics: graphics, systemName: "plus") { setZoom(zoom * 1.4) }
+                .novaPlace(space, cx(Item.zoomIn, nw), cy(Item.zoomIn, nh))
         }
-        zoomIconButton("minus") { setZoom(zoom / 1.4) }
-            .novaPlace(space, cx(Item.zoomOut, nw), cy(Item.zoomOut, nh))
-        zoomIconButton("plus") { setZoom(zoom * 1.4) }
-            .novaPlace(space, cx(Item.zoomIn, nw), cy(Item.zoomIn, nh))
-    }
-
-    /// idx3/idx4 are 25×25 — too small for the three-slice button art (which
-    /// has a fixed 25pt-tall, ≥26pt-wide geometry), so these stay simple icon
-    /// buttons rather than `NovaButton`, sized to their real rects.
-    private func zoomIconButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon).font(.system(size: 12, weight: .bold))
-                .frame(width: 25, height: 25)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
-        }.buttonStyle(.plain)
     }
 
     // MARK: Chrome — fallback (no Map PICT resolved)

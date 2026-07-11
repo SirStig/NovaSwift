@@ -5,29 +5,31 @@ import SwiftUI
 /// graphics, audio (with a live sound test), interface and accessibility.
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    /// Closes this dialog (injected by the full-screen overlay presenter).
+    var onClose: () -> Void = {}
 
     @State private var previewSoundID: Int = 128
     @State private var showResetConfirm = false
 
     var body: some View {
-        Form {
-            gameplaySection
-            controlsSection
-            graphicsSection
-            audioSection
-            interfaceSection
-            accessibilitySection
-            developerSection
+        DialogChrome(title: "Settings", onClose: onClose) {
+            Form {
+                gameplaySection
+                controlsSection
+                graphicsSection
+                audioSection
+                interfaceSection
+                accessibilitySection
+                developerSection
 
-            Section {
-                Button("Reset All Settings", role: .destructive) { showResetConfirm = true }
+                Section {
+                    Button("Reset All Settings", role: .destructive) { showResetConfirm = true }
+                }
             }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
-        .formStyle(.grouped)
         .novaResponsive()
-        .navigationTitle("Settings")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .onAppear {
             // Populate the sound library so the sound test works (and enables menu music).
             if model.data.hasBaseData || model.data.game != nil { model.prepareAudioAndData() }

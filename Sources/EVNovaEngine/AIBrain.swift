@@ -11,6 +11,9 @@ public enum AIState: String, Sendable {
     /// Interceptor idle default: holds a slow orbit near a stellar object,
     /// buzzing passing ships, instead of walking the warship patrol beat.
     case orbiting
+    /// Local authority (system-govt / allied police) closing on a ship to run a
+    /// scan pass over it, then peeling back to its patrol/orbit.
+    case scanning
     case attacking     // engaged with a target
     case fleeing       // hurt / outmatched; running for the hyperspace edge
     case departing     // leaving the system (heading to the jump edge)
@@ -67,12 +70,16 @@ public final class AIBrain {
     /// our target (in range + aimed) — flips are exactly the "why didn't my
     /// weapon fire" moments for AI-controlled ships.
     private var hadFiringSolution: Bool?
-    /// Cooldown before another "sweep past the player" patrol leg (or, for an
-    /// orbiting interceptor, another "buzz a passing ship" leg) can be picked,
-    /// so a ship can't get yanked across the system on back-to-back rolls.
-    var sweepCooldown: Double = 0
     /// Slow rotation used to walk an interceptor's holding-pattern orbit.
     var orbitAngle: Double = 0
+    /// The ship this authority vessel is currently flying over to scan.
+    var scanTargetID: Int?
+    /// Set once the current scan pass has been reported (so we emit the world
+    /// scan event exactly once per pass), reset when a new pass begins.
+    private var scanReported = false
+    /// Time before this ship will look to scan another passing vessel — keeps
+    /// patrols from chain-scanning everything in sight.
+    var scanCooldown: Double = 0
 
     public init(aiType: AIType, govt: Int) {
         self.aiType = aiType
@@ -147,11 +154,26 @@ public final class AIBrain {
         return best
     }
 
-    /// Where a disposition idles when it has nothing better to do: traders
-    /// travel, interceptors hold orbit (park/scan/piracy-police), everyone
-    /// else walks the warship patrol beat.
-    private var defaultIdleState: AIState {
+    /// Is this ship the local authority — i.e. does it belong to the government
+    /// that controls this system, or an ally of it? Only the local authority
+    /// runs the patrol beat / scans traffic; a foreign warship passing through
+    /// doesn't police someone else's space. When the system is unowned
+    /// (`independentGovt`), anyone armed may patrol.
+    func isSystemAuthority(_ me: Ship, _ world: World) -> Bool {
+        let sg = world.systemContext.systemGovt
+        guard sg >= 128 else { return true }
+        if me.government == sg { return true }
+        return world.diplomacy?.areAllied(me.government, sg) ?? false
+    }
+
+    /// Where a disposition idles when it has nothing better to do. Traders
+    /// always travel to a planet. Warships/interceptors only *patrol* (or hold
+    /// orbit and scan) when they're the local authority; a foreign combat ship
+    /// with no fight to join just crosses the system like a trader and leaves,
+    /// so patrols read as "this government's police," not a free-for-all.
+    private func defaultIdleState(_ me: Ship, _ world: World) -> AIState {
         if aiType.isTrader { return .traveling }
+        guard isSystemAuthority(me, world) else { return .traveling }
         return aiType == .interceptor ? .orbiting : .patrolling
     }
 
@@ -190,7 +212,7 @@ public final class AIBrain {
         shipTag = "\(me.name) [\(me.entityID)]"
         stateClock += dt
         repathClock -= dt
-        sweepCooldown -= dt
+        scanCooldown -= dt
 
         // Validate / refresh combat target.
         if let tid = targetID, let t = world.ship(id: tid), t.isAlive,
@@ -231,9 +253,13 @@ public final class AIBrain {
             } else if warshipRetreat { enter(.fleeing) }
             else if let th = threat, armed, state == .attacking || favorableOdds(me, world) {
                 targetID = th.entityID; enter(.attacking)
-            } else if aiType == .interceptor, armed, let culprit = pickPirateInterventionTarget(me, world) {
+            } else if aiType == .interceptor, armed, isSystemAuthority(me, world),
+                      favorableOdds(me, world), let culprit = pickPirateInterventionTarget(me, world) {
                 // No direct threat of our own — but someone's picking on a
-                // non-enemy while we're watching. Piracy police intervenes.
+                // non-enemy while we're watching. Only the local authority
+                // steps in (it's *their* space to police), and only when the
+                // odds favor it — so interventions stay occasional, not a
+                // system-wide brawl every time two ships tangle.
                 targetID = culprit.entityID; enter(.attacking)
             }
         case .unknown:
@@ -256,7 +282,7 @@ public final class AIBrain {
 
         // First goal after spawning.
         if state == .spawning {
-            enter(defaultIdleState)
+            enter(defaultIdleState(me, world))
         }
 
         // Drop out of combat if the target is gone. Re-resolves `targetID`
@@ -265,7 +291,19 @@ public final class AIBrain {
         // a piracy-police intervention target the switch just picked this
         // same frame, which would otherwise immediately undo it.
         if state == .attacking, targetID == nil || world.ship(id: targetID ?? -999)?.isAlive != true {
-            enter(defaultIdleState)
+            enter(defaultIdleState(me, world))
+        }
+
+        // Local authority on its idle beat (patrolling or holding orbit) will,
+        // now and then, break off to fly over and scan a passing ship — the
+        // player first. This is what makes police "check you out" instead of
+        // ignoring you. Not while escorting a leader, and never chain-scanning.
+        if (state == .patrolling || state == .orbiting), armed, scanCooldown <= 0,
+           leaderID == nil, isSystemAuthority(me, world),
+           let mark = pickScanTarget(me, world) {
+            scanTargetID = mark.entityID
+            scanReported = false
+            enter(.scanning)
         }
 
         me.currentTargetID = (state == .attacking) ? targetID : nil
@@ -277,6 +315,7 @@ public final class AIBrain {
         case .landing:    return land(me, world)
         case .patrolling: return patrol(me, world, dt)
         case .orbiting:   return orbit(me, world, dt)
+        case .scanning:   return scan(me, world)
         case .departing:  return depart(me, world)
         case .escorting:  return escort(me, world)
         case .assisting:  return assist(me, world)
@@ -310,7 +349,7 @@ public final class AIBrain {
             // stops fighting/sits there" fallback path.
             let tag = shipTag, fallback = aiType.isTrader ? "traveling" : "patrolling"
             Log.ai.debug("\(tag) attack target invalid or gone — falling back to \(fallback)")
-            enter(defaultIdleState)
+            enter(defaultIdleState(me, world))
             return ControlIntent()
         }
         var intent = ControlIntent()
@@ -411,7 +450,7 @@ public final class AIBrain {
             let tag = shipTag, spobDesc = destSpob.map(String.init) ?? "nil"
             Log.ai.debug("\(tag) landing target spob \(spobDesc) no longer resolves — aborting approach")
             destination = nil; destSpob = nil
-            enter(defaultIdleState)
+            enter(defaultIdleState(me, world))
             return ControlIntent()
         }
         let dist = (body.position - me.position).length
@@ -426,53 +465,125 @@ public final class AIBrain {
         return arrive(me, to: body.position, slowRadius: max(160, body.radius + 120))
     }
 
-    /// Warship patrol: walk a beat between the system's stellar objects, with the
-    /// occasional deliberate sweep past the player — so patrols read as *on duty*,
-    /// not drifting at random.
+    /// Warship patrol: fly a steady beat from one stellar object to the next — a
+    /// believable circuit of the system. No random cross-system yanks: the
+    /// "check the player out" behavior now lives in the dedicated `.scanning`
+    /// state, so a patrol on its beat reads as *on duty*, not wandering in
+    /// circles. Repaths only when it actually reaches a waypoint (or a long
+    /// safety timeout), not every few seconds.
     private func patrol(_ me: Ship, _ world: World, _ dt: Double) -> ControlIntent {
-        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 220 {
+        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 240 {
             destination = pickPatrolPoint(me, world)
-            repathClock = 7
+            repathClock = 14
         }
-        return arrive(me, to: destination ?? me.position, slowRadius: 160)
+        return arrive(me, to: destination ?? me.position, slowRadius: 180)
     }
 
-    /// Interceptor idle default: hold a slow orbit near a stellar object — the
-    /// Bible's "parks in orbit around a planet if he can't find any [enemies]"
-    /// — occasionally peeling off to buzz the nearest passing ship ("scan them
-    /// for illegal cargo"; we model the flyby, not cargo-legality consequences,
-    /// since this engine has no illegal-cargo/ScanMask system yet).
+    /// Interceptor idle default: hold a slow, wide orbit around the nearest
+    /// stellar object — the Bible's "parks in orbit around a planet if he can't
+    /// find any [enemies]." The old random "buzz a passing ship" leg is gone;
+    /// scanning traffic is now the deliberate `.scanning` state, so orbit is
+    /// just a calm holding pattern.
     private func orbit(_ me: Ship, _ world: World, _ dt: Double) -> ControlIntent {
-        if destination == nil || repathClock <= 0 || (destination! - me.position).length < 160 {
-            destination = pickOrbitPoint(me, world)
-            repathClock = 6
-        }
+        // Advance slowly around a fixed hub so the path is a smooth ring, not a
+        // twitchy re-pick every few seconds.
+        orbitAngle += 0.6 * dt
+        let ctx = world.systemContext
+        let hub = ctx.bodies.min(by: {
+            ($0.position - me.position).length < ($1.position - me.position).length
+        })
+        let center = hub?.position ?? ctx.center
+        let radius = (hub?.radius ?? 200) + 320
+        destination = center + Vec2(sin(orbitAngle), cos(orbitAngle)) * radius
         return arrive(me, to: destination ?? me.position, slowRadius: 150)
     }
 
-    /// Escort: hold a numbered slot in a V-wing behind the leader, rotated to the
-    /// leader's heading, so a fleet flies as a tidy formation instead of a swarm.
+    /// Scanning pass: the local authority flies over a ship to look it over,
+    /// then peels back to its beat. Closes to a scan range, fires the world's
+    /// (cosmetic) scan event once, holds a beat alongside, then resumes.
+    private func scan(_ me: Ship, _ world: World) -> ControlIntent {
+        guard let tid = scanTargetID, let target = world.ship(id: tid),
+              target.isAlive, !target.disabled else {
+            scanTargetID = nil
+            enter(defaultIdleState(me, world))
+            return ControlIntent()
+        }
+        let dist = (target.position - me.position).length
+        let scanCompleteRange = 240.0
+        if dist < scanCompleteRange {
+            if !scanReported {
+                scanReported = true
+                stateClock = 0
+                world.reportScan(scannerID: me.entityID, targetID: tid, at: target.position)
+                Log.ai.debug("\(self.shipTag) scanned [\(tid)] (\(target.name))")
+            }
+            // Hold formation alongside briefly, then break off.
+            if stateClock > 1.5 {
+                scanTargetID = nil
+                scanCooldown = 22
+                enter(defaultIdleState(me, world))
+            }
+            return arrive(me, to: target.position, slowRadius: 260)
+        }
+        // Give up if the mark runs and we can't close in reasonable time.
+        if stateClock > 12 {
+            scanTargetID = nil
+            scanCooldown = 18
+            enter(defaultIdleState(me, world))
+            return ControlIntent()
+        }
+        // Lead the target a touch so we actually intercept rather than tail-chase.
+        let lead = target.velocity * 0.5
+        return arrive(me, to: target.position + lead, slowRadius: 200)
+    }
+
+    /// Escort: hold a numbered slot in a tight triangle wing off the leader,
+    /// rotated to the leader's heading. The leader flies the point; escorts fill
+    /// alternating left/right rows stepping back and out, so the group flies as a
+    /// crisp delta, not a swarm — and holds it while the leader cruises (matching
+    /// its heading and keeping pace) instead of braking every time it catches up.
+    /// They only leave this to attack when the leader actually engages (handled
+    /// in `think`), then fall straight back into the wing.
     private func escort(_ me: Ship, _ world: World) -> ControlIntent {
         guard let lid = leaderID, let leader = world.ship(id: lid),
               leader.isAlive, !leader.disabled else {
             let tag = shipTag, leaderDesc = leaderID.map(String.init) ?? "nil"
             Log.ai.debug("\(tag) escort leader [\(leaderDesc)] gone — reverting to own disposition")
             leaderID = nil
-            enter(defaultIdleState)
+            enter(defaultIdleState(me, world))
             return ControlIntent()
         }
-        // Slot → (side, rank): even slots to the right, odd to the left, stepping
-        // further back and out each rank.
+        // Slot → (side, rank): even slots to the right, odd to the left, each
+        // successive rank stepping one notch further back and out — the two
+        // trailing edges of a triangle with the leader at its apex.
         let side: Double = (formationSlot % 2 == 0) ? 1 : -1
         let rank = Double(formationSlot / 2 + 1)
-        let lateral = side * 90 * rank   // right of the leader (+) / left (−)
-        let behind = -110 * rank         // trailing the leader
+        let lateral = side * 72 * rank   // right of the leader (+) / left (−)
+        let behind = -64 * rank          // trailing the leader
         // Leader frame: forward = (sin a, cos a); right = (cos a, −sin a).
         let fwd = Vec2(sin(leader.angle), cos(leader.angle))
         let right = Vec2(cos(leader.angle), -sin(leader.angle))
         let station = leader.position + fwd * behind + right * lateral
-        if (station - me.position).length < 70 { return ControlIntent() }
-        return arrive(me, to: station, slowRadius: 130)
+        let toStation = station - me.position
+        let d = toStation.length
+        let leaderMoving = leader.velocity.length > leader.stats.maxSpeed * 0.12
+
+        // On station: lock to the leader's heading so the wing points as one. If
+        // the leader is under way, keep thrusting to hold pace (a purely braking
+        // `arrive` would sag out of formation the moment the leader accelerates).
+        if d < 46 {
+            var intent = ControlIntent()
+            intent.desiredHeading = leader.angle
+            if leaderMoving, abs(angleDelta(from: me.angle, to: leader.angle)) < .pi / 2,
+               me.velocity.length < leader.velocity.length { intent.thrust = true }
+            return intent
+        }
+        // Off station: while the leader is moving, aim a bit ahead of the slot so
+        // we close the gap and keep up rather than tail-chasing a moving point.
+        if leaderMoving {
+            return seek(me, to: station + leader.velocity * 0.4)
+        }
+        return arrive(me, to: station, slowRadius: 120)
     }
 
     /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
@@ -506,35 +617,60 @@ public final class AIBrain {
 
     // MARK: Steering primitives (each returns a ControlIntent)
 
-    /// Face a point and thrust toward it (no slowing).
-    private func seek(_ me: Ship, to point: Vec2) -> ControlIntent {
+    /// Velocity-compensated steering — the one primitive behind every non-combat
+    /// navigation state. Flight here is pure Newtonian (no drag), so the old
+    /// "point the nose at the target and thrust" made a ship with any built-up
+    /// momentum slide off-course and then loop back to re-correct — the drift
+    /// the player sees. Instead we steer along the *difference* between the
+    /// velocity we want and the velocity we have:
+    ///
+    ///   • cruising dead-on at the target → the correction is ~0, so we just
+    ///     coast in a straight line (no thrust, no twitch);
+    ///   • sliding sideways → the correction tilts back onto the course line and
+    ///     cancels the drift, instead of the nose flip-flopping between "face the
+    ///     point" and "face reverse-velocity to brake";
+    ///   • overshooting an arrival → `slowRadius > 0` tapers the desired speed to
+    ///     zero as we close, so the correction becomes a smooth brake and the
+    ///     ship *settles* onto the point rather than blasting past it (the
+    ///     overshoot that made traders look like they flew through a system).
+    ///
+    /// This is what lets EV Nova's NPCs fly clean lines without cheating the
+    /// physics: they simply steer their momentum, not just their nose.
+    private func navigate(_ me: Ship, to point: Vec2, slowRadius: Double = 0) -> ControlIntent {
         var intent = ControlIntent()
-        let desired = (point - me.position).angle
-        intent.desiredHeading = desired
-        if abs(angleDelta(from: me.angle, to: desired)) < .pi / 2 { intent.thrust = true }
+        let toTarget = point - me.position
+        let dist = toTarget.length
+        let cruise = me.stats.maxSpeed
+
+        // The velocity we'd like to have: full cruise straight at the point,
+        // easing down inside the slow zone so arrivals brake instead of overshoot.
+        let desiredSpeed = (slowRadius > 0 && dist < slowRadius) ? cruise * (dist / slowRadius) : cruise
+        let desiredVel = dist > 1 ? toTarget * (desiredSpeed / dist) : Vec2()
+
+        // Thrust along the correction (want − have), not straight at the target.
+        let correction = desiredVel - me.velocity
+        let deadband = cruise * 0.03    // ignore trivial corrections so we don't jitter on course
+        if correction.length > deadband {
+            let heading = correction.angle
+            intent.desiredHeading = heading
+            if abs(angleDelta(from: me.angle, to: heading)) < .pi / 2 { intent.thrust = true }
+        } else {
+            // On course at speed — hold the nose toward the point and coast.
+            intent.desiredHeading = dist > 1 ? toTarget.angle : me.angle
+        }
         return intent
     }
 
-    /// Face a point, thrust while far, and coast/brake within `slowRadius`.
+    /// Head for a point at cruise (no arrival slowdown), steering momentum so we
+    /// track the line rather than drift off it.
+    private func seek(_ me: Ship, to point: Vec2) -> ControlIntent {
+        navigate(me, to: point)
+    }
+
+    /// Fly to a point and settle onto it, braking smoothly inside `slowRadius`
+    /// so the ship arrives instead of wheeling around the waypoint in little loops.
     private func arrive(_ me: Ship, to point: Vec2, slowRadius: Double) -> ControlIntent {
-        var intent = ControlIntent()
-        let to = point - me.position
-        let dist = to.length
-        let desired = to.angle
-        intent.desiredHeading = desired
-        let aligned = abs(angleDelta(from: me.angle, to: desired)) < .pi / 2
-        if dist > slowRadius {
-            if aligned { intent.thrust = true }
-        } else {
-            // Inside the slow zone: gently brake by facing our velocity's reverse.
-            if me.velocity.length > me.stats.maxSpeed * 0.25 {
-                intent.desiredHeading = (me.velocity * -1).angle
-                if abs(angleDelta(from: me.angle, to: intent.desiredHeading!)) < .pi / 3 {
-                    intent.thrust = true
-                }
-            }
-        }
-        return intent
+        navigate(me, to: point, slowRadius: slowRadius)
     }
 
     // MARK: Waypoint helpers
@@ -547,68 +683,51 @@ public final class AIBrain {
         return pool[world.rng.int(in: 0...(pool.count - 1))]
     }
 
-    /// The next stop on a patrol beat: usually the following stellar object in the
-    /// system (a believable circuit), and now and then a pass over the player so
-    /// police/warships visibly "check out" passing traffic.
+    /// The next stop on a patrol beat: the following stellar object in the
+    /// system, walked in order so a patrol traces a believable circuit of the
+    /// system's planets rather than picking random points (which read as aimless
+    /// circling). Scanning traffic is a separate deliberate state now.
     private func pickPatrolPoint(_ me: Ship, _ world: World) -> Vec2 {
         let ctx = world.systemContext
-
-        // ~1 leg in 4: sweep past where the player is heading — but never on
-        // consecutive picks, and only if the player isn't absurdly far away, so
-        // patrols read as "checking you out" rather than teleporting cross-system.
-        if sweepCooldown <= 0, world.rng.double(in: 0...1) < 0.25 {
-            let p = world.player
-            let toPlayer = p.position - me.position
-            if toPlayer.length < ctx.jumpRadius {
-                sweepCooldown = 30
-                let ahead = p.velocity.length > 20 ? p.velocity.normalized * 260 : Vec2()
-                let jitter = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
-                return p.position + ahead + jitter
-            }
-        }
-
-        // Otherwise advance around the ring of stellar objects.
         let stops = ctx.bodies
         if !stops.isEmpty {
             patrolIndex = (patrolIndex + 1) % stops.count
             let b = stops[patrolIndex]
-            let off = Vec2(world.rng.double(in: -170...170), world.rng.double(in: -170...170))
+            // A small fixed standoff off the body, not a big random jitter, so
+            // the waypoint is stable and the ship doesn't wander around it.
+            let off = Vec2(world.rng.double(in: -110...110), world.rng.double(in: -110...110))
             return b.position + off
         }
-
         // Empty system: loiter somewhere inside the jump radius.
         let r = ctx.jumpRadius * 0.5
         return ctx.center + Vec2(world.rng.double(in: -r...r), world.rng.double(in: -r...r))
     }
 
-    /// Either the next point along a slow circular holding pattern around the
-    /// nearest stellar object, or — occasionally — a flyby aim point on the
-    /// nearest non-hostile ship (a "buzz": a close pass, not an attack).
-    private func pickOrbitPoint(_ me: Ship, _ world: World) -> Vec2 {
+    /// Who this authority ship should fly over and scan, if anyone. The player
+    /// is the priority mark (that's the "police check you out" beat the player
+    /// actually notices); otherwise the nearest passing non-hostile ship of a
+    /// *different* government (you don't scan your own side). `nil` when nothing
+    /// worth scanning is close enough.
+    private func pickScanTarget(_ me: Ship, _ world: World) -> Ship? {
         let ctx = world.systemContext
-
-        // ~1 leg in 3: buzz the nearest ship that isn't already an enemy.
-        if sweepCooldown <= 0, world.rng.double(in: 0...1) < 0.34 {
-            let candidates = world.allShips.filter {
-                $0.entityID != me.entityID && $0.isAlive && !$0.disabled && !isHostile(me, $0, world)
-            }
-            if let nearest = candidates.min(by: {
-                ($0.position - me.position).length < ($1.position - me.position).length
-            }), (nearest.position - me.position).length < ctx.jumpRadius {
-                sweepCooldown = 20
-                let ahead = nearest.velocity.length > 20 ? nearest.velocity.normalized * 200 : Vec2()
-                return nearest.position + ahead
-            }
+        let reach = min(scanRange, ctx.jumpRadius * 0.7)
+        let player = world.player
+        let toPlayer = (player.position - me.position).length
+        // Prefer the player when reasonably close and not already hostile.
+        if player.isAlive, toPlayer < reach,
+           world.diplomacy?.isHostileToPlayer(me.government) != true, !provokedByPlayer {
+            return player
         }
-
-        // Otherwise hold a slow orbit around the nearest stellar object (or
-        // the system centre, in an empty system).
-        orbitAngle += 0.12
-        let hub = ctx.bodies.min(by: {
-            ($0.position - me.position).length < ($1.position - me.position).length
-        })
-        let center = hub?.position ?? ctx.center
-        let radius = (hub?.radius ?? 200) + 260
-        return center + Vec2(sin(orbitAngle), cos(orbitAngle)) * radius
+        // Otherwise the nearest neutral ship of another government.
+        var best: Ship?
+        var bestDist = reach
+        for other in world.allShips
+        where other.entityID != me.entityID && !other.isPlayer && other.isAlive
+              && !other.disabled && other.government != me.government
+              && !isHostile(me, other, world) {
+            let d = (other.position - me.position).length
+            if d < bestDist { bestDist = d; best = other }
+        }
+        return best
     }
 }

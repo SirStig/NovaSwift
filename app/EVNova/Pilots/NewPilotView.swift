@@ -8,7 +8,10 @@ import EVNovaKit
 /// plays, then the game begins.
 struct NewPilotView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    /// Closes this dialog. Injected by the presenter (the menu shows dialogs as
+    /// full-screen overlays, not macOS sheets, so there's no `@Environment(\.dismiss)`
+    /// to lean on) — see `AuthenticMainMenuView.dialogOverlay`.
+    var onClose: () -> Void = {}
 
     private enum Step { case scenario, name }
     @State private var step: Step = .scenario
@@ -40,7 +43,7 @@ struct NewPilotView: View {
 
     private var scenarioDialog: some View {
         NovaDialog(title: "Select a Scenario", width: 500, buttons: [
-            NovaDialogButton(title: "Cancel") { dismiss() },
+            NovaDialogButton(title: "Cancel") { onClose() },
             NovaDialogButton(title: "Continue", isDefault: true) { step = .name },
         ]) {
             VStack(spacing: 8) {
@@ -74,7 +77,7 @@ struct NewPilotView: View {
         let scenario = scenarios[min(scenarioIndex, scenarios.count - 1)]
         return NovaDialog(title: "Create a New Pilot", width: 400, buttons: [
             NovaDialogButton(title: "Cancel") {
-                if scenarios.count > 1 { step = .scenario } else { dismiss() }
+                if scenarios.count > 1 { step = .scenario } else { onClose() }
             },
             NovaDialogButton(title: "Create", isDefault: true, enabled: true) {
                 start(scenario)
@@ -101,7 +104,7 @@ struct NewPilotView: View {
 
     private var noDataDialog: some View {
         NovaDialog(title: "No Scenarios", width: 420, buttons: [
-            NovaDialogButton(title: "OK", isDefault: true) { dismiss() },
+            NovaDialogButton(title: "OK", isDefault: true) { onClose() },
         ]) {
             NovaText("No starting scenarios were found. Import your EV Nova data first.",
                      size: 13, width: 360)
@@ -112,7 +115,7 @@ struct NewPilotView: View {
 
     private func start(_ scenario: CharRes) {
         _ = model.createPilot(name: name, isMale: isMale, scenario: scenario)
-        dismiss()
+        onClose()
         if scenario.introSlides.isEmpty && scenario.introTextID == nil {
             model.beginPlay()
         } else {

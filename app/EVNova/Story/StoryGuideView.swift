@@ -13,13 +13,18 @@ struct StoryGuideView: View {
     @ObservedObject var model: StoryGuideModel
     @State private var tab: Tab
     var onClose: (() -> Void)?
+    /// Abort an active mission (by mïsn id). Wired by the game to the live pilot;
+    /// nil in previews / read-only contexts, where the Abort buttons hide.
+    var onAbort: ((Int) -> Void)?
 
     enum Tab: String, CaseIterable { case pilot = "Pilot", story = "Story Guide", map = "Story Map" }
 
-    init(model: StoryGuideModel, initialTab: Tab = .pilot, onClose: (() -> Void)? = nil) {
+    init(model: StoryGuideModel, initialTab: Tab = .pilot,
+         onClose: (() -> Void)? = nil, onAbort: ((Int) -> Void)? = nil) {
         self.model = model
         self._tab = State(initialValue: initialTab)
         self.onClose = onClose
+        self.onAbort = onAbort
     }
 
     var body: some View {
@@ -34,7 +39,7 @@ struct StoryGuideView: View {
             Divider().opacity(0.3)
 
             switch tab {
-            case .pilot: PilotInfoView(pilot: model.pilot)
+            case .pilot: PilotInfoView(pilot: model.pilot, onAbort: onAbort)
             case .story: StorylineBrowserView(storylines: model.storylines,
                                               untaggedCount: model.untaggedCount)
             case .map:   StorylineMapView(map: model.storyMap)
@@ -66,6 +71,7 @@ struct StoryGuideView: View {
 
 struct PilotInfoView: View {
     let pilot: PilotSummary
+    var onAbort: ((Int) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -113,12 +119,25 @@ struct PilotInfoView: View {
                         Text("No active missions.").foregroundStyle(.secondary).novaFont(.body)
                     } else {
                         ForEach(pilot.activeMissions) { m in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(m.name).novaFont(.body, weight: .bold)
-                                Text(m.objective).novaFont(.caption).foregroundStyle(.secondary)
-                                Text("Reward: \(m.reward)").novaFont(.caption).foregroundStyle(EVTheme.accent)
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(m.name).novaFont(.body, weight: .bold)
+                                    Text(m.objective).novaFont(.caption).foregroundStyle(.secondary)
+                                    Text("Reward: \(m.reward)").novaFont(.caption).foregroundStyle(EVTheme.accent)
+                                }
+                                Spacer(minLength: 8)
+                                // Abort, disabled when the mission can't be aborted
+                                // (mïsn "can be aborted" flag) — same rule the real
+                                // game uses to grey out its abort control.
+                                if let onAbort {
+                                    Button("Abort") { onAbort(m.id) }
+                                        .buttonStyle(.bordered).tint(.red)
+                                        .controlSize(.small)
+                                        .disabled(!m.canAbort)
+                                }
                             }
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 3)
+                            Divider().overlay(.white.opacity(0.06))
                         }
                     }
                 }

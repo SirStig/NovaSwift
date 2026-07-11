@@ -17,6 +17,9 @@ struct ShipSilhouetteView: View {
     /// Small in-flight sprites are pixel art and stay crisp; dedicated shipyard
     /// art (much larger) scales smoothly.
     var pixelated: Bool = true
+    /// Overlay the target scope's faint horizontal scan lines. On by default —
+    /// the game's target readout has them; turn off for a plain silhouette.
+    var scanLines: Bool = true
 
     var body: some View {
         Image(decorative: sprite, scale: 1)
@@ -26,9 +29,39 @@ struct ShipSilhouetteView: View {
             // Desaturate to the sprite's own luminance, then multiply by the
             // tint: a *shaded* red monochrome (bright hull → bright red, dark
             // detail → dark red), matching the game's target render. Both
-            // modifiers preserve the sprite's alpha, so the silhouette keeps the
-            // ship's real outline.
+            // modifiers preserve the sprite's alpha — so the ONLY thing tinted is
+            // the ship's actual outline (a sprite with a real transparency mask),
+            // never a solid backing box.
             .grayscale(1)
             .colorMultiply(tint)
+            // Scope scan lines drawn only over the ship itself (masked to the
+            // sprite's alpha), so they never paint a rectangle behind it.
+            .overlay {
+                if scanLines {
+                    ScanLines()
+                        .mask(Image(decorative: sprite, scale: 1)
+                            .interpolation(pixelated ? .none : .high).resizable().scaledToFit())
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+}
+
+/// The thin, evenly-spaced dark horizontal lines of EV Nova's target scope,
+/// drawn as a repeating gradient so they scale with whatever size they're given.
+private struct ScanLines: View {
+    var body: some View {
+        GeometryReader { geo in
+            let lineGap: CGFloat = 3
+            Canvas { ctx, size in
+                var y: CGFloat = 0
+                while y < size.height {
+                    ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
+                             with: .color(.black.opacity(0.35)))
+                    y += lineGap
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
     }
 }

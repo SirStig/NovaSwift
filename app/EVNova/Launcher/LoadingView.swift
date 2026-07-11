@@ -6,6 +6,14 @@ import SwiftUI
 struct LoadingView: View {
     @EnvironmentObject private var model: AppModel
 
+    /// Whether finishing the prewarm should enter the game. True on the real
+    /// launcher→game transition (`screen == .loading`); **false** when this view
+    /// is only standing in as the brief placeholder while the main-menu art
+    /// decodes (`RootView`'s `.mainMenu` branch). Without this, decoding the menu
+    /// art would silently launch straight into the saved pilot — the menu should
+    /// appear and stay put until the player chooses.
+    var entersGame = true
+
     /// How far the bar has crept while the data set merges. `reloadIfNeeded` is
     /// synchronous and reports nothing, so this stretch is a time-based tease;
     /// everything from `prewarmShare` on is driven by real counts.
@@ -104,6 +112,11 @@ struct LoadingView: View {
             await model.data.prewarm()
             // Let the bar visibly land on full before the screen swaps out.
             try? await Task.sleep(for: .milliseconds(260))
+            // Only advance into the game on the real load; if the task was
+            // cancelled (e.g. the menu art finished decoding and this placeholder
+            // was replaced), don't yank the player out of the menu. The `try?`
+            // above swallows cancellation, so check it explicitly here.
+            guard entersGame, !Task.isCancelled else { return }
             model.finishLoadingIntoGame()
         }
     }

@@ -27,7 +27,7 @@ struct PluginDetailView: View {
             }
             .padding()
         }
-        .novaResponsive()
+        .scrollContentBackground(.hidden)
         .navigationTitle(entry.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)

@@ -212,6 +212,10 @@ public enum WorldEvent {
     case shipLaunched(entityID: Int, at: Vec2)
     /// A ship's armor was knocked out but it survived as a drifting hulk.
     case shipDisabled(entityID: Int, at: Vec2)
+    /// A government patrol/interceptor ran a scan pass on another ship (checking
+    /// for contraband in EV Nova; here it's the visible fly-by + scan sweep).
+    /// `scannerID` is the authority ship, `targetID` the ship being scanned.
+    case shipScanned(scannerID: Int, targetID: Int, at: Vec2)
     /// A paid "Request Assistance" ally docked with the player and delivered
     /// fuel/repairs — `entityID` is the ally, for the renderer's banner text.
     case assistanceDelivered(entityID: Int)

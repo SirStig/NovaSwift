@@ -24,10 +24,13 @@ final class GameHost {
     private var targetSpriteCache: [Int: CGImage?] = [:]
 
     /// The source sprite for a target ship's red silhouette (`ShipSilhouetteView`
-    /// applies the red tint). Nil when the data has no art for that hull.
+    /// applies the red tint + scanlines). Uses the **in-flight sprite**, which
+    /// carries a transparency mask, so only the ship's shape tints — the
+    /// dedicated shipyard art (`shipPicture`) has a baked opaque background that
+    /// would tint into a solid red rectangle. Nil when the data has no sprite.
     func targetSilhouette(shipType id: Int) -> CGImage? {
         if let cached = targetSpriteCache[id] { return cached }
-        let img = game?.ship(id).flatMap { graphics?.shipPicture($0) ?? graphics?.shipFallbackPicture($0) }
+        let img = game?.ship(id).flatMap { graphics?.shipFallbackPicture($0) }
         targetSpriteCache[id] = img
         return img
     }
@@ -54,27 +57,15 @@ final class GameHost {
             let galaxy = Galaxy(game: game)
             aiGame = game
             aiGalaxy = galaxy
-            let shipID = pilot.shipType
-            let res = game.ship(shipID)
-            ship = galaxy.makeLoadedShip(shipID, extraOutfits: pilot.outfits)
-                ?? Ship(name: res?.displayName ?? "Ship",
-                        stats: ShipStats(speed: res?.speed ?? 300, acceleration: res?.acceleration ?? 400,
-                                         turnRate: res?.turnRate ?? 30, rotationFrames: 36))
-            ship.cargo = pilot.cargo
-            // Fuel doesn't reset on takeoff/jump — seed it from the pilot's saved
-            // level (nil = new pilot / never set, so start with a full tank).
-            if let lo = galaxy.loadout(shipID: shipID, extraOutfits: pilot.outfits) {
-                ship.fuel = pilot.fuel.map { min($0, lo.maxFuel) } ?? lo.maxFuel
-            }
-            hud.shipName = pilot.shipName.isEmpty ? (res?.displayName ?? "") : pilot.shipName
-            if let sheet = game.shipSprite(shipID) {
-                textures = SpriteTextures.rotationFrames(from: sheet)
-            }
-            // The ship's own authored engine-glow overlay, if this hull has one
-            // (real per-hull thruster art from the shän engine layer).
-            if let glow = game.engineGlowSprite(shipID) {
-                engineTextures = SpriteTextures.rotationFrames(from: glow)
-            }
+            // Player ship + sprite textures from the current pilot loadout (see
+            // `buildPlayerShip`) — the exact same construction the in-place
+            // takeoff reload (`GameScene.reloadForDeparture`) uses, so a newly
+            // bought hull/outfit takes effect identically on both paths.
+            let session = GameHost.buildPlayerShip(model: model, galaxy: galaxy, game: game)
+            ship = session.ship
+            textures = session.textures
+            engineTextures = session.engineTextures
+            hud.shipName = session.shipName
             // Load the requested system (or the pilot's current one — every call
             // site passes an explicit systemID today, but this stays as a safe
             // default if that ever changes).
@@ -94,7 +85,9 @@ final class GameHost {
                 }
                 // Start the player a little "south" of the system's actual centre
                 // (the centroid of its stellar bodies, not necessarily world origin)
-                // so planets are in view.
+                // so planets are in view. (Takeoff positions the ship at the
+                // departed body instead — that's handled in the in-place
+                // `GameScene.reloadForDeparture`, not this fresh-build path.)
                 let sysCenter = galaxy.systemContext(for: system.id).center
                 ship.position = sysCenter + Vec2(0, -700)
             }
@@ -113,6 +106,41 @@ final class GameHost {
                         planets: planets, systemName: systemName,
                         game: aiGame, systemID: aiSystemID, galaxy: aiGalaxy,
                         arrivedViaJump: arrivedViaJump)
+    }
+
+    /// The player's live ship + its sprite textures, built from the current pilot
+    /// loadout (hull + installed outfits → shields/armor/fuel/afterburner/cargo +
+    /// resolved weapons). Shared by the initial `GameHost` build and the in-place
+    /// takeoff reload (`GameScene.reloadForDeparture`) so a newly bought hull or
+    /// outfit takes effect identically on both paths. Fuel/armor/shield are seeded
+    /// from the pilot's saved levels (nil = full — new pilot / just repaired), so
+    /// they persist across a takeoff; the pilot's cargo is carried into the hold.
+    struct PlayerSession {
+        let ship: Ship
+        let textures: [SKTexture]
+        let engineTextures: [SKTexture]
+        let shipName: String
+    }
+    static func buildPlayerShip(model: AppModel, galaxy: Galaxy, game: NovaGame) -> PlayerSession {
+        let pilot = model.pilot.state
+        let shipID = pilot.shipType
+        let res = game.ship(shipID)
+        let ship = galaxy.makeLoadedShip(shipID, extraOutfits: pilot.outfits)
+            ?? Ship(name: res?.displayName ?? "Ship",
+                    stats: ShipStats(speed: res?.speed ?? 300, acceleration: res?.acceleration ?? 400,
+                                     turnRate: res?.turnRate ?? 30, rotationFrames: 36))
+        ship.cargo = pilot.cargo
+        if let lo = galaxy.loadout(shipID: shipID, extraOutfits: pilot.outfits) {
+            ship.fuel = pilot.fuel.map { min($0, lo.maxFuel) } ?? lo.maxFuel
+        }
+        ship.armor = pilot.armor.map { min($0, ship.maxArmor) } ?? ship.maxArmor
+        ship.shield = pilot.shield.map { min($0, ship.maxShield) } ?? ship.maxShield
+        var textures: [SKTexture] = []
+        var engineTextures: [SKTexture] = []
+        if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.rotationFrames(from: sheet) }
+        if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.rotationFrames(from: glow) }
+        let name = pilot.shipName.isEmpty ? (res?.displayName ?? "") : pilot.shipName
+        return PlayerSession(ship: ship, textures: textures, engineTextures: engineTextures, shipName: name)
     }
 
     /// Decode the authentic status bar: the ïntf interface definition + its
@@ -343,7 +371,11 @@ struct GameContainerView: View {
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
             if let id {
                 DispatchQueue.main.async {
-                    refuel()                                   // landing tops off the tank, free
+                    // Inhabited ports restore hull + shields to full for free
+                    // (shields regen while docked; hull is patched up). Fuel is
+                    // NOT topped off here — refuelling is the paid "Recharge"
+                    // service, per the Bible (free only via govt/rank flags).
+                    repairOnLanding(spobID: id)
                     model.autosave(reason: .land)               // EV Nova saves on every landing
                 }
                 model.audio.startAmbient(soundID: host?.game?.spob(id)?.ambientSoundID)
@@ -451,30 +483,42 @@ struct GameContainerView: View {
     /// as EV Nova does on takeoff — and resume flight. Fuel carries over as-is
     /// (landing already topped it off; taking off doesn't spend or grant any).
     private func depart() {
+        let departedSpob = landedSpobID     // capture before the line below clears it
         landedSpobID = nil
-        // Deferred a tick, same reason as the jump-rebuild block below:
-        // `landedSpobID = nil` above fires its own `onChange` (against the
-        // *old* host, since this rebuild hasn't run yet — see that handler's
-        // comment) in the same transaction the SpaceportView's
-        // `.transition(.opacity)` removal belongs to. Rebuilding `host` here
-        // — which swaps the `SpriteView`'s `scene` — inside that same
-        // transaction was the "left a planet and the game froze" bug: the
-        // new scene came back with `isPaused == false` (logged correctly)
-        // but was never actually re-presented, so the SKView kept showing
-        // the old, still-paused scene forever. `update(_:)`'s heartbeat
-        // simply stops appearing — no crash, no error — while native mouse/
-        // key events (routed to whatever the SKView *is* presenting) keep
-        // working, which is what made this look like a silent freeze rather
-        // than a crash.
+        // Deferred a tick: `landedSpobID = nil` above fires its own `onChange` in
+        // the same transaction as the SpaceportView's `.transition(.opacity)`
+        // removal; doing the reload as its own clean update avoids piling model
+        // mutations onto that in-flight one.
         DispatchQueue.main.async {
             model.pilot.save()
             model.autosave(reason: .manual)   // catch any shopping done during this landing
-            host = GameHost(model: model, systemID: nav.currentSystemID)
-            hostSystemID = nav.currentSystemID
-            debug.attach(host?.scene)         // re-point the debug suite at the rebuilt scene
-            setScenePaused(false, reason: "depart")
-            syncNav(host)
-            grabSceneFocus(reason: "depart")
+            // Takeoff = reload the current system *in place* in the existing
+            // scene (rebuilding the ship from the possibly-changed pilot loadout),
+            // NOT a fresh `GameHost`. Rebuilding the host swaps the `SpriteView`'s
+            // scene, which SwiftUI can only do by tearing the view down and back
+            // up (`.id` on the SpriteView) — and that one blank frame during the
+            // swap is the "weird screen flash on depart." Reusing the same scene
+            // keeps its identity stable (no `.id` teardown → no flash) and leaves
+            // keyboard input wired to the same `InputController`. Same pattern the
+            // hyperjump uses. Falls back to a full rebuild only if something's
+            // missing (no live host/galaxy/game, or an unknown spöb).
+            if let host, let galaxy = host.galaxy, let game = host.game, let spob = departedSpob {
+                let session = GameHost.buildPlayerShip(model: model, galaxy: galaxy, game: game)
+                host.hud.shipName = session.shipName
+                host.scene.reloadForDeparture(spobID: spob, player: session.ship,
+                                              textures: session.textures,
+                                              engineTextures: session.engineTextures)
+                setScenePaused(false, reason: "depart (in place)")
+                syncNav(host)
+                grabSceneFocus(reason: "depart")
+            } else {
+                host = GameHost(model: model, systemID: nav.currentSystemID)
+                hostSystemID = nav.currentSystemID
+                debug.attach(host?.scene)
+                setScenePaused(false, reason: "depart (rebuild)")
+                syncNav(host)
+                grabSceneFocus(reason: "depart")
+            }
         }
     }
 
@@ -504,24 +548,67 @@ struct GameContainerView: View {
         }
     }
 
-    /// Top off the tank for free — EV Nova refuels on landing at any world you
-    /// can set down on. Updates both the live ship (instant HUD feedback) and
-    /// the pilot's persisted level (so it survives the next `GameHost` rebuild).
-    private func refuel() {
-        guard let galaxy = host?.galaxy,
-              let maxFuel = galaxy.loadout(shipID: model.pilot.state.shipType,
-                                           extraOutfits: model.pilot.state.outfits)?.maxFuel else { return }
-        host?.scene.playerShip?.fuel = maxFuel
-        model.pilot.state.fuel = maxFuel
+    /// Free hull + shield restore on landing — but **only at an inhabited port**
+    /// (a planet/station people actually live on). Uninhabited rocks give
+    /// nothing free: no repair, no shield restore (and no Recharge either). Fuel
+    /// is never topped off here — refuelling is the paid Recharge service.
+    /// Writes both the live ship (instant HUD feedback) and the persisted pilot,
+    /// so the repaired state survives the takeoff `GameHost` rebuild; if the
+    /// port is uninhabited we persist the *current* (damaged) values instead, so
+    /// the damage carries out with the player.
+    private func repairOnLanding(spobID: Int) {
+        guard let ship = host?.scene.playerShip else { return }
+        let inhabited = host?.game?.spob(spobID)?.isUninhabited == false
+        if inhabited {
+            ship.shield = ship.maxShield
+            ship.armor = ship.maxArmor
+        }
+        model.pilot.state.armor = ship.armor
+        model.pilot.state.shield = ship.shield
     }
 
     /// The single path a hyperjump commits through, whether triggered from the
-    /// map's JUMP button or the `J` key: spends fuel and advances `nav` together.
+    /// map's JUMP button or the `J` key. Rather than instantly swapping systems
+    /// (which read as "the HUD says I've arrived but I still see the old system"),
+    /// this hands the whole thing to the live scene: it flies the jump maneuver
+    /// (turn → tear away → white flash) and swaps the world *in place* at the
+    /// flash peak. The `commit` closure — run by the scene at that peak — is what
+    /// actually advances the model (spend fuel, follow the pilot, save), so
+    /// `nav.currentSystemID`/the HUD only change at the moment you truly arrive.
     @discardableResult
     private func attemptJump() -> Bool {
-        let didJump = nav.jumpAlongRoute()
-        if didJump { model.audio.play(.hyperspaceCharge) }   // spin-up, before the scene rebuild
-        return didJump
+        guard let host, !host.scene.isJumping else { return false }
+        let hops = nav.nextJumpHopCount
+        guard hops > 0, nav.canAfford(hops: hops) else { return false }
+        let destID = nav.route[hops - 1]
+        let outbound = outboundHeading(from: nav.currentSystemID, to: destID)
+        let instant = host.galaxy.map { model.pilot.hasInstantJump(galaxy: $0) } ?? false
+        let speed = host.galaxy.map { model.pilot.jumpSpeedFactor(galaxy: $0) } ?? 1
+        nav.showingMap = false
+        host.scene.beginJump(to: destID, outboundHeading: outbound, instant: instant, speed: speed) {
+            // Flash peak: commit the arrival in the model. `commitArrival` spends
+            // the fuel and pins the destination even if the route drifted during
+            // the animation, so nav and the loaded system can't disagree.
+            hostSystemID = destID                              // set first: keeps onChange from also rebuilding the host
+            _ = nav.commitArrival(at: destID, hops: hops)
+            model.pilot.state.fuel = host.scene.playerShip?.fuel
+            model.pilot.state.currentSystem = destID
+            model.pilot.state.exploredSystems.insert(destID)
+            model.pilot.save()
+            model.autosave(reason: .jump)                      // EV Nova saves on every hyperjump
+            syncNav(host)                                      // refresh course/HUD (ship instance persists the swap)
+        }
+        return true
+    }
+
+    /// Compass heading (world radians, 0 = up) from one system toward another on
+    /// the galactic map — the direction the ship turns to before jumping. The map
+    /// stores +y downward, so it's flipped into the world's +y-up convention
+    /// (`Vec2.angle` == `atan2(x, y)`).
+    private func outboundHeading(from: Int, to: Int) -> Double {
+        guard let g = model.data.game, let a = g.system(from), let b = g.system(to),
+              a.x != b.x || a.y != b.y else { return 0 }
+        return atan2(Double(b.x - a.x), Double(-(b.y - a.y)))
     }
 
     /// How much width the authentic status bar (`AuthenticHUDView`, whose own
@@ -556,6 +643,20 @@ struct GameContainerView: View {
             SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
                 .frame(width: playWidth, height: geo.size.height)
                 .position(x: playWidth / 2, y: geo.size.height / 2)
+                // Tie this view's identity to the scene instance. `SpriteView`
+                // presents its `scene:` only when the underlying native view is
+                // first created; handing it a *new* scene at the same structural
+                // position — which `depart()` does when it rebuilds `host` to
+                // pick up a newly-bought hull/outfits — does NOT re-present it.
+                // The old scene keeps ticking (and reading the old
+                // `InputController`) while the keyboard now writes to the new
+                // host's input: keys reach one instance, the visible/ticking
+                // scene reads the other. That split is the "movement breaks
+                // after departing a planet/station" bug. Keying on the scene's
+                // identity forces SwiftUI to rebuild the SpriteView (presenting
+                // the new scene) on a host swap, while leaving the in-place
+                // hyperjump — which reuses the same `host.scene` — untouched.
+                .id(ObjectIdentifier(host.scene))
         }
         .ignoresSafeArea()
         .focusable()
@@ -565,6 +666,12 @@ struct GameContainerView: View {
     }
 
     private func handleDiscrete(_ action: GameAction) {
+        // Ignore sim-affecting flight commands mid-jump — the scene has locked
+        // control for the maneuver; landing or re-jumping through it would corrupt
+        // the sequence (and pressing J would otherwise pop the map open).
+        if host?.scene.isJumping == true {
+            switch action { case .land, .hyperjump: return; default: break }
+        }
         switch action {
         case .land:
             // Set down on the nearest landable stellar if we're in reach and slow.
@@ -606,9 +713,9 @@ struct GameContainerView: View {
                 kind: .ship(entityID: entityID, shipTypeID: shipTypeID),
                 name: name, govtLabel: govt.targetCode, hostile: hostile,
                 responseText: hostile ? "They aren't interested in talking." : "This is \(name). Go ahead.")
-        case let .planet(name, govt, landable):
+        case let .planet(spobID, name, govt, landable):
             hailDialogState = HailDialogState(
-                kind: .planet, name: name, govtLabel: govt?.targetCode ?? "", hostile: false,
+                kind: .planet(spobID: spobID), name: name, govtLabel: govt?.targetCode ?? "", hostile: false,
                 // "Channel open to X" is the manual's own wording for a stellar hail.
                 responseText: landable ? "Channel open to \(name)."
                                        : "Channel open to \(name). Landing clearance is not currently granted.")
@@ -663,8 +770,16 @@ struct GameContainerView: View {
     }
 
     private func hailPortrait(_ state: HailDialogState) -> CGImage? {
-        guard case let .ship(_, shipTypeID) = state.kind, let res = host?.game?.ship(shipTypeID) else { return nil }
-        return host?.graphics?.shipPicture(res)
+        switch state.kind {
+        case let .ship(_, shipTypeID):
+            guard let res = host?.game?.ship(shipTypeID) else { return nil }
+            return host?.graphics?.shipPicture(res)
+        case let .planet(spobID):
+            // A stellar comm shows the planet's own art — its landing PICT, the
+            // same image the spaceport hub and galaxy-map panel use.
+            guard let spob = host?.game?.spob(spobID) else { return nil }
+            return host?.graphics?.landscape(for: spob)
+        }
     }
 
     /// The developer entry point shown while debug mode is on: a debug button
@@ -780,7 +895,7 @@ private struct HailBannerView: View {
 struct HailDialogState {
     enum Kind {
         case ship(entityID: Int, shipTypeID: Int)
-        case planet
+        case planet(spobID: Int)
     }
     let kind: Kind
     let name: String

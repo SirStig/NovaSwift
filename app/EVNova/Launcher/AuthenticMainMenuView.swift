@@ -157,12 +157,11 @@ struct AuthenticMainMenuView: View {
                     Image(decorative: logo, scale: 1)
                         .resizable().interpolation(.medium)
                         // The logo is a separate PICT keyed to alpha from its own
-                        // luminance; a screen blend composites its glow additively
-                        // into the starfield so it reads as one image with the
-                        // background instead of a distinct panel with a dark seam.
-                        // (Safe now that the black backing box is keyed to alpha 0
-                        // — the double-brighten hazard was the *opaque* box, gone.)
-                        .blendMode(.screen)
+                        // luminance (the black backing box → alpha 0). A plain
+                        // over-composite keeps its colours at their true tone; a
+                        // `.screen` blend (used before) additively brightened
+                        // every logo pixel against the starfield, making the logo
+                        // read lighter/hotter than the rest of the chrome.
                         .novaPlace(layout,
                                    x: logoOrigin.x, y: logoOrigin.y,
                                    w: assets.logoSize.width, h: assets.logoSize.height)
@@ -178,23 +177,33 @@ struct AuthenticMainMenuView: View {
         }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
+        .overlay { dialogOverlay }
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
             model.audio.play(.uiSelect)         // menu appears
             model.prepareAudioAndData()         // ensure main-menu background music is playing
         }
-        .sheet(item: $sheet) { which in
-            NavigationStack {
+    }
+
+    /// The active dialog, shown as a **full-screen overlay** rather than a macOS
+    /// `.sheet`. A sheet renders a fixed-size centred card; our `NovaDialog`/
+    /// `DialogChrome` already fill their surface with the dimmed title-screen
+    /// backdrop, so a sheet card just doubled the panel ("an extra view behind
+    /// it"). As an overlay the backdrop fills the window and only the metal
+    /// panel floats over the menu — exactly like the in-game spaceport dialogs.
+    @ViewBuilder private var dialogOverlay: some View {
+        if let which = sheet {
+            Group {
                 switch which {
-                case .newPilot: NewPilotView()
-                case .openPilot: PilotListView()
-                case .settings: SettingsView()
-                case .about: AboutView()
-                case .plugins: PluginsView()
-                case .importData: ImportDataView()
+                case .newPilot:   NewPilotView(onClose: { sheet = nil })
+                case .openPilot:  PilotListView(onClose: { sheet = nil })
+                case .settings:   SettingsView(onClose: { sheet = nil })
+                case .about:      AboutView(onClose: { sheet = nil })
+                case .plugins:    PluginsView(onClose: { sheet = nil })
+                case .importData: ImportDataView(onClose: { sheet = nil })
                 }
             }
-            .frame(minWidth: 420, minHeight: 520)
+            .transition(.opacity)
             .preferredColorScheme(.dark)
         }
     }
@@ -202,25 +211,30 @@ struct AuthenticMainMenuView: View {
     /// The current-pilot/ship status readout for "Enter Ship" — a bright/dim
     /// two-tone line using the `cölr` resource's real `MenuColor1`/`MenuColor2`
     /// ("bright & dim colors for main menu") and Geneva, the game's real main
-    /// menu font (`NovaFontRole.body`/`.caption`'s family — see NovaFont.swift),
-    /// backed by a plain dark plate outlined in the resource's `ProgOutline`
-    /// gray so it reads as period Mac OS chrome rather than a floating modern
-    /// overlay. Exact position isn't specified anywhere (the real main menu has
-    /// no such readout — this box is a pure port invention), so it stays where
-    /// it's always been, under the button columns. Falls back to the port's
-    /// generic amber styling if the player's data has no cölr resource.
+    /// menu font (`NovaFontRole.body`/`.caption`'s family — see NovaFont.swift).
+    /// Drawn **directly on the backdrop's dark bottom band with no plate or
+    /// border** — the bordered box it used to sit in read as a floating modern
+    /// overlay and collided with the menu's centre knob. The readout itself is
+    /// a port invention (the real menu has none), so it borrows the band the
+    /// backdrop art leaves empty below the button columns. Falls back to the
+    /// port's generic amber styling if the player's data has no cölr resource.
     @ViewBuilder private func pilotStatus(layout: NovaLayout) -> some View {
         if let save = model.roster.mostRecent {
             let bright = assets.colr.map { color($0.menuColor1) } ?? novaAmber
             let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.6)
-            let border = assets.colr.map { color($0.progOutline) } ?? Color.white.opacity(0.15)
             // Scale the panel's own metrics (ship size, padding, gaps) by the same
             // layout scale `.novaFont` scales its text by, so the whole readout
             // grows/shrinks as one piece with the window instead of the text
             // scaling while the ship stayed a fixed point size.
             let sc = layout.scale
 
-            HStack(alignment: .center, spacing: 20 * sc) {
+            // Both text columns get the SAME fixed width so the ship stays the
+            // HStack's true midpoint — otherwise the wider right column shoved
+            // the ship left of centre (the "not centred correctly" the readout
+            // showed before). Centring the symmetric HStack now centres the ship
+            // under the menu knob.
+            let columnWidth = 190 * sc
+            HStack(alignment: .center, spacing: 16 * sc) {
                 // Left: pilot identity + wealth, pushed toward the ship.
                 VStack(alignment: .trailing, spacing: 3 * sc) {
                     Text(save.displayName).novaFont(.body, weight: .bold)
@@ -231,10 +245,11 @@ struct AuthenticMainMenuView: View {
                         Text(save.snapshot.ratingTitle).novaFont(.caption).foregroundStyle(dim)
                     }
                 }
+                .frame(width: columnWidth, alignment: .trailing)
 
                 // Centre: the current ship, in the game's red target-display style.
                 pilotShip(shipType: save.player.shipType)
-                    .frame(width: 120 * sc, height: 80 * sc)
+                    .frame(width: 100 * sc, height: 62 * sc)
 
                 // Right: ship + location, pushed away from the ship.
                 VStack(alignment: .leading, spacing: 3 * sc) {
@@ -244,28 +259,25 @@ struct AuthenticMainMenuView: View {
                         .novaFont(.caption).foregroundStyle(dim)
                     Text("Enter Ship to continue").novaFont(.caption).foregroundStyle(dim.opacity(0.85))
                 }
+                .frame(width: columnWidth, alignment: .leading)
             }
-            .padding(.horizontal, 18 * sc).padding(.vertical, 10 * sc)
-            .background(Color.black.opacity(0.5))
-            .overlay(Rectangle().strokeBorder(border, lineWidth: 1))
             .fixedSize()
-            // Centre the readout in the lower band of the design space (this is a
-            // port addition — the game's own menu has no pilot readout — so it's
-            // positioned by eye; nudge with the ⇧⌘D debug grid).
-            .position(layout.point(base.width / 2, 632))
+            // Centred in the backdrop's dark bottom band, below the knob and
+            // button columns (positioned by eye; nudge with the ⇧⌘D debug grid).
+            .position(layout.point(base.width / 2, 722))
             .opacity(appeared ? 1 : 0)
             .animation(.easeOut(duration: 0.4).delay(0.45), value: appeared)
         }
     }
 
-    /// The current pilot's ship in EV Nova's red silhouette style, from the live
-    /// pilot's `shipType` and the player's own shipyard/flight art.
+    /// The current pilot's ship in EV Nova's red silhouette style. Uses the
+    /// **in-flight sprite** (which carries a real transparency mask) rather than
+    /// the dedicated shipyard art (whose baked opaque background would tint into
+    /// a solid red box) — so only the ship shape shows, with the scope scanlines.
     @ViewBuilder private func pilotShip(shipType id: Int) -> some View {
-        if let game = model.data.game, let graphics = model.uiGraphics, let res = game.ship(id) {
-            let dedicated = graphics.shipPicture(res)
-            if let sprite = dedicated ?? graphics.shipFallbackPicture(res) {
-                ShipSilhouetteView(sprite: sprite, pixelated: dedicated == nil)
-            }
+        if let game = model.data.game, let graphics = model.uiGraphics, let res = game.ship(id),
+           let sprite = graphics.shipFallbackPicture(res) {
+            ShipSilhouetteView(sprite: sprite, pixelated: true)
         }
     }
 

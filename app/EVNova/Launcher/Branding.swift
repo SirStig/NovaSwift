@@ -138,17 +138,20 @@ struct AppMark: View {
     }
 }
 
+/// The About box, in the game's own dialog chrome (`NovaDialog` — mission-panel
+/// art, three-slice Done button) instead of a bare system sheet.
 struct AboutView: View {
-    @Environment(\.dismiss) private var dismiss
+    /// Closes this dialog (injected by the full-screen overlay presenter).
+    var onClose: () -> Void = {}
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    AppMark().frame(width: 64, height: 64)
-                    Text("EV Nova").novaFont(.title, weight: .bold)
+        NovaDialog(title: "About EV Nova", width: 460, buttons: [
+            NovaDialogButton(title: "Done", isDefault: true) { onClose() },
+        ]) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    AppMark().frame(width: 48, height: 48)
                     Text("an unofficial port").novaFont(.body).foregroundStyle(.secondary)
                 }
-                Divider()
                 Text("A non-commercial, fan-made port of EV Nova to Apple platforms. Not affiliated with or endorsed by Ambrosia Software, ATMOS, or the original authors.")
                     .novaFont(.body)
                 Text("Game data is not included. You supply your own legally-obtained EV Nova data via Import Data. Community plug-ins are the property of their respective authors.")
@@ -156,11 +159,6 @@ struct AboutView: View {
                 Text("Built on the open reimplementation work of the Escape Velocity community.")
                     .novaFont(.caption).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
         }
-        .novaResponsive()
-        .navigationTitle("About")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
 }

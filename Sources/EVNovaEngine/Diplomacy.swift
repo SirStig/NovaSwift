@@ -6,6 +6,13 @@ import EVNovaKit
 /// one by default and are only fought if provoked.
 public let independentGovt = -1
 
+/// EV Nova governments are resources 128…383, but several fields (e.g.
+/// `flët.LinkSyst`'s banded government ranges) encode a government by its
+/// 0-based *index* rather than its resource id. Add this base to turn such an
+/// index into the resource id everything else here (system/ship `government`,
+/// `Diplomacy`) speaks in.
+public let govtResourceBase = 128
+
 /// Resolves who fights whom, exactly the way EV Nova's `gövt` relations work:
 /// governments carry *class* memberships plus lists of ally/enemy classes, and
 /// two governments are enemies when one's enemy-classes intersect the other's

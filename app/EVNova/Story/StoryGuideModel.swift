@@ -21,7 +21,12 @@ struct PilotSummary {
     var activeMissions: [MissionBrief]
 
     struct Relation: Identifiable { let id = UUID(); let govt: String; let standing: Int }
-    struct MissionBrief: Identifiable { let id: Int; let name: String; let objective: String; let reward: String }
+    struct MissionBrief: Identifiable {
+        let id: Int; let name: String; let objective: String; let reward: String
+        /// Whether the player may abort this mission (mïsn "can be aborted" flag).
+        /// Drives the Abort button's enabled state in the pilot panel.
+        var canAbort: Bool = true
+    }
 }
 
 @MainActor
@@ -79,7 +84,8 @@ final class StoryGuideModel: ObservableObject {
         let active = player.activeMissions.compactMap { am -> PilotSummary.MissionBrief? in
             guard let s = analyzer.brief(forMission: am.missionID, player: player) else { return nil }
             return PilotSummary.MissionBrief(id: am.missionID, name: s.displayName,
-                                             objective: s.objective, reward: s.reward)
+                                             objective: s.objective, reward: s.reward,
+                                             canAbort: game.mission(am.missionID)?.canAbort ?? true)
         }
         pilot = PilotSummary(
             name: player.pilotName,

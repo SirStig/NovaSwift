@@ -205,6 +205,15 @@ public final class Ship {
     /// The stellar object being landed on (paired with `wantsToLand`).
     public var landingSpob: Int?
 
+    // Hyperspace entry over-speed: a ship tearing in from hyperspace briefly
+    // travels above its cruise cap, then bleeds down to normal speed — that
+    // decelerating inrush is what "warping in" looks like. `entryOverspeed` is
+    // the extra px/sec allowed on top of the normal cap right now; it decays by
+    // `entryOverspeedDecayPerSec` each second back to zero (set on a hyperspace
+    // arrival, otherwise 0 and inert). Applied in `step` before the speed clamp.
+    public var entryOverspeed: Double = 0
+    public var entryOverspeedDecayPerSec: Double = 0
+
     /// A drifting hulk: armor was knocked out but the ship wasn't destroyed. It
     /// carries no thrust or weapons and other ships leave it be; further damage
     /// finishes it off. Set by the world's damage handler.
@@ -371,7 +380,13 @@ public final class Ship {
             let k = max(0, 1 - tuning.dragPerSecond * dt)
             velocity = velocity * k
         }
-        // Clamp to max speed (raised while the afterburner is lit).
+        // Hyperspace-entry over-speed: allow briefly exceeding cruise, decaying
+        // to zero, so a jump-in decelerates in rather than snapping to cruise.
+        if entryOverspeed > 0 {
+            topSpeed += entryOverspeed
+            entryOverspeed = max(0, entryOverspeed - entryOverspeedDecayPerSec * dt)
+        }
+        // Clamp to max speed (raised while the afterburner is lit / entering).
         let speed = velocity.length
         if speed > topSpeed, speed > 0 {
             velocity = velocity.normalized * topSpeed
@@ -463,12 +478,32 @@ public final class World {
         case .populate:
             events.append(.shipArrived(entityID: ship.entityID, at: ship.position, fromHyperspace: false))
         case .hyperspace:
+            // A hyperspace jump-in isn't a standing start: the ship tears in along
+            // its inbound heading well above cruise, then its AI brakes down to
+            // normal speed. That physical inrush — not just a fade/scale pop — is
+            // what reads as "warping in." Capped so a very fast hull doesn't shoot
+            // clear across the system before it can slow.
+            let inbound = Vec2(sin(ship.angle), cos(ship.angle))
+            let entrySpeed = min(ship.stats.maxSpeed * 2.4, 3200)
+            ship.velocity = inbound * entrySpeed
+            // Let the speed cap start at the entry speed and bleed back to cruise
+            // over ~1.3s, so the ship visibly rushes in and slows down.
+            ship.entryOverspeed = max(0, entrySpeed - ship.stats.maxSpeed)
+            ship.entryOverspeedDecayPerSec = ship.entryOverspeed / 1.3
             events.append(.shipArrived(entityID: ship.entityID, at: ship.position, fromHyperspace: true))
         case .launch:
             events.append(.shipLaunched(entityID: ship.entityID, at: ship.position))
         }
         refreshRoster()
         return ship.entityID
+    }
+
+    /// A government patrol/interceptor completed a scan pass on another ship.
+    /// Called from `AIBrain.scan` when it closes to scan range; the renderer
+    /// turns it into a visible scan sweep. Purely cosmetic in this engine —
+    /// there's no contraband/ScanMask system yet to key consequences off.
+    public func reportScan(scannerID: Int, targetID: Int, at: Vec2) {
+        events.append(.shipScanned(scannerID: scannerID, targetID: targetID, at: at))
     }
 
     public func drainEvents() -> [WorldEvent] {

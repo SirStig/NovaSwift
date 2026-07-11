@@ -87,7 +87,7 @@ struct HailDialogView: View {
                 .frame(width: 200, height: 200)
                 .novaPlace(space, 4.5, -100.5)   // item 10: (216,7)-(416,207) 200×200
         }
-        NovaText(state.responseText, size: 11, width: 188)
+        NovaText(state.responseText, size: 10, width: 188)
             .novaPlace(space, -200.5, -99.5)     // item 9: (11,8)-(203,66) 192×58
         identifierText(width: 130)
             .novaPlace(space, -171.5, -34.5)     // item 11: (40,73)-(174,119) 134×46
@@ -114,7 +114,7 @@ struct HailDialogView: View {
                 .frame(width: 310, height: 283)
                 .novaPlace(space, -48, -142.5)    // item 4: (222,5)-(532,288) 310×283
         }
-        NovaText(state.responseText, size: 11, width: 196)
+        NovaText(state.responseText, size: 10, width: 196)
             .novaPlace(space, -265, -142.5)       // item 3: (5,5)-(205,65) 200×60
         identifierText(width: 116)
             .novaPlace(space, -254, -65.5)        // item 5: (16,82)-(136,132) 120×50
@@ -130,12 +130,15 @@ struct HailDialogView: View {
 
     // MARK: - Shared pieces
 
+    // Frame-pixel `NovaText`, not `.novaFont` roles — this sits inside a
+    // `NovaMenu`'s native coordinate space, where the roles' 13–15pt chrome
+    // sizes render oversized once the frame is scaled up.
     private func identifierText(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(state.name).novaFont(.body, weight: .bold).foregroundStyle(novaAmber)
+            NovaText(state.name, size: 12, color: novaAmber, width: width, weight: .bold)
             if !state.govtLabel.isEmpty {
-                Text(state.govtLabel).novaFont(.caption)
-                    .foregroundStyle(state.hostile ? .red : Color(white: 0.75))
+                NovaText(state.govtLabel, size: 10,
+                         color: state.hostile ? .red : Color(white: 0.75), width: width)
             }
         }
         .frame(width: width, alignment: .leading)

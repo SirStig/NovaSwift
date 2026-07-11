@@ -4,10 +4,12 @@ import GameController
 import AppKit
 #endif
 
-/// Pages the Outfitter/Shipyard item grid through every input method a player
-/// actually has, not just the on-screen chevrons (`GridPager`): mouse wheel /
+/// Scrolls the Outfitter/Shipyard item grid through every input method a
+/// player actually has, not just the on-screen arrow buttons: mouse wheel /
 /// trackpad scroll and arrow keys on macOS, touch swipe on iOS/iPadOS, and a
-/// connected game controller's d-pad/left-stick on both.
+/// connected game controller's d-pad/left-stick on both. Each step is one
+/// unit of whatever the caller passes — the grids pass top-row indices, so
+/// every input scrolls one ROW at a time like the real game's arrows.
 struct GridPagingModifier: ViewModifier {
     let currentPage: Int
     let pageCount: Int

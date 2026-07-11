@@ -55,6 +55,28 @@ outfit mass`. Cargo is a separate pool (`cargoCapacity` tons).
 - HUD reflects all of it (shield/armor/fuel bars, jump count, cargo tonnage,
   active weapon + ammo, thrust vs. burn).
 
+## Hyperspace jumps
+
+Pressing `J` (or the map's JUMP button) with a plotted course engages the
+hyperdrive. The jump is a scene-owned animation — turn to face the destination
+(the outbound galactic-map direction), tear away as the stars streak, white
+flash, and pop out at the new system's hyperspace edge coasting inward — with the
+world swapped **in place** (no scene rebuild). Fuel (100/hop) is spent and the
+pilot follows the course only at the flash peak, so the HUD/map never claim you've
+arrived before you actually have. The nav readout shows the plotted destination
+and remaining jumps the whole time, as in the original. See `docs/AI.md` for the
+matching NPC jump-ins and `GameScene`/`NavigationModel`/`GameContainerView` for
+the player path.
+
+Jump behaviour is modified by the real jump `oütf` ModTypes, folded into the
+`Loadout`:
+
+| ModType | Field | Effect |
+| --- | --- | --- |
+| 32 `multiJump` | `maxJumpHops` | one jump command crosses N linked systems at once |
+| 37 `fastJump` | `instantJump` | inertialess jump — skips the slow turn/align spin-up, near-instant |
+| 22 `hyperspaceSpeed` | `hyperspaceSpeedBonus` → `PilotStore.jumpSpeedFactor` | speeds up the jump sequence (engine interpretation: +1%/point, clamped) |
+
 ## Not yet (future)
 
 - Buying/selling outfits at an outfitter and persisting them per pilot (needs the

@@ -51,7 +51,16 @@ final class SpaceportGraphics {
     // MARK: Buttons — three-slice PICTs (left cap / tiling middle / right cap)
     enum ButtonState { case normal, clicked, grey }
 
-    /// (left, middle, right) PICT ids for a button state.
+    private var buttonSliceCache: [Int: CGImage] = [:]
+
+    /// (left, middle, right) PICT ids for a button state, with their baked
+    /// neutral-grey backing keyed to transparent. The cap PICTs (7500-7508) carry
+    /// a flat grey (≈0x424242) frame around the red pill, meant to vanish into the
+    /// grey button recesses the game's dialogs are drawn with. Our frames don't
+    /// reproduce those exact recesses pixel-for-pixel, so that grey read as a hard
+    /// box around every button. Keying just the neutral-grey pixels (leaving the
+    /// red pill and its dark-red bevel untouched, since those aren't R≈G≈B) lets
+    /// the pill sit cleanly on any surface.
     func buttonSlices(_ state: ButtonState) -> (left: CGImage?, middle: CGImage?, right: CGImage?) {
         let base: Int
         switch state {
@@ -59,7 +68,42 @@ final class SpaceportGraphics {
         case .clicked: base = 7503
         case .grey:    base = 7506
         }
-        return (pict(base), pict(base + 1), pict(base + 2))
+        return (keyedSlice(base), keyedSlice(base + 1), keyedSlice(base + 2))
+    }
+
+    private func keyedSlice(_ id: Int) -> CGImage? {
+        if let c = buttonSliceCache[id] { return c }
+        guard let raw = pict(id) else { return nil }
+        let keyed = Self.keyOutNeutralGrey(raw) ?? raw
+        buttonSliceCache[id] = keyed
+        return keyed
+    }
+
+    /// Make flat neutral-grey pixels (R≈G≈B, mid-dark brightness) transparent,
+    /// leaving coloured (e.g. red) pixels intact. Used to lift the button caps'
+    /// grey backing so only the pill shows.
+    private static func keyOutNeutralGrey(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard w > 0, h > 0 else { return nil }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8,
+                                  bytesPerRow: w * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        for i in stride(from: 0, to: px.count, by: 4) {
+            let r = Int(px[i]), g = Int(px[i + 1]), b = Int(px[i + 2])
+            let mx = max(r, g, b), mn = min(r, g, b)
+            // Neutral (low chroma) AND not near-black / not bright: the grey frame.
+            if mx - mn <= 14, mx >= 32, mx <= 120 {
+                px[i] = 0; px[i + 1] = 0; px[i + 2] = 0; px[i + 3] = 0
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(px) as CFData) else { return nil }
+        return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: w * 4, space: cs,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
     /// A label from `STR# 150` ("button labels"): Leave, Buy, Sell, Buy Ship,

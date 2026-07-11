@@ -1,6 +1,7 @@
 import SwiftUI
 import EVNovaKit
 import EVNovaEngine
+import EVNovaStory
 
 // The spaceport sub-screens, each drawn on its own EV Nova frame PICT: the Trade
 // Center (8510), Outfitter (8502), Shipyard (8501) and Bar (8503). Item lists,
@@ -20,18 +21,14 @@ private let tradeStep = 10
 
 /// Outfitter/Shipyard item-grid metrics, verified against the vendored NovaJS
 /// reference (`nova/src/spaceport/item_grid.ts`: `TILE_SIZE = [83, 54]`,
-/// `BOX_COUNT = [4, 5]`) — a fixed, paged 4×5 grid of 83×54 tiles, not a
-/// freeform wrapping scroll.
+/// `BOX_COUNT = [4, 5]`) — a fixed 4×5 grid of 83×54 tiles that scrolls one
+/// ROW at a time (like the real game's up/down arrows), not page-by-page.
+/// The grid's own rect is DITL #1002/#1004 item 4: (9,8)-(342,279), 333×271.
 private let gridTileSize = CGSize(width: 83, height: 54)
 private let gridCols = 4
 private let gridRows = 5
-private let gridPageSize = gridCols * gridRows
-/// Vertical room reserved *below* the 5 tile rows for the `GridPager` chevrons.
-/// Without it the grid frame is exactly `54×5 = 270pt` — the tile rows fill it
-/// edge-to-edge and the pager gets pushed out of the frame and `.clipped()`
-/// away (which is why the scroll buttons rendered "behind" / off-screen).
-private let gridPagerHeight: CGFloat = 22
-private let gridHeight = gridTileSize.height * CGFloat(gridRows) + gridPagerHeight
+private let gridSlotCount = gridCols * gridRows
+private let gridHeight = gridTileSize.height * CGFloat(gridRows)
 
 // MARK: - Trade Center (commodity exchange)
 
@@ -53,12 +50,32 @@ struct TradeCenterView: View {
         game.commodityMarket(at: spob)
     }
 
+    // Layout straight from DLOG/DITL #1001 "Trade" against the real 426×252
+    // frame (PICT 8510; DLOG bounds agree exactly — centre 213,126):
+    //   item 2      (38,9)-(390,26)     — column header strip
+    //   items 3–10  (38,25)-(390,125)   — eight 352×13 commodity rows
+    //   item 14     (41,190)-(387,214)  — the narrow status strip between the
+    //                                     list panel and the button strip
+    //   items 12/13/0 (60/166/272,221) 99×25 — Buy / Sell / Done, all INSIDE
+    //                                     the frame's bottom grey strip
+    // (Items 1/15/16 sit at y≥299, past the 252px frame — the stale-bounds
+    // junk this dialog family carries; the previous layout had used invented
+    // positions that pushed the whole control row below the artwork.)
     var body: some View {
         Group {
             if let frame = graphics.frame(.trade) {
                 NovaMenu(frame: frame, overlay: true) { space in
-                    list.frame(width: 372).novaPlace(space, -186, -96)
-                    controls.novaPlace(space, -150, 92)
+                    list.frame(width: 352, alignment: .top).novaPlace(space, -175, -117)
+                    statusLine.novaPlace(space, -172, 64)
+                    NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
+                               width: 73, enabled: canBuy) { buy() }
+                        .novaPlace(space, -153, 95)
+                    NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
+                               width: 73, enabled: canSell) { sell() }
+                        .novaPlace(space, -47, 95)
+                    NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                               width: 73, action: onDone)
+                        .novaPlace(space, 59, 95)
                 }
             } else {
                 fallback
@@ -84,23 +101,27 @@ struct TradeCenterView: View {
         return max(1, buyLimit, sellLimit)
     }
 
+    // Column widths sum to the DITL rows' 352px; Geneva 10 fits the 13px row
+    // pitch the DITL prescribes (the previous 11px text + 4px padding made
+    // ~23px rows that overran the list panel).
     private var list: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 0) {
             HStack(spacing: 0) {
-                NovaText("Commodity", size: 10, color: .gray, width: 150)
-                NovaText("Price", size: 10, color: .gray, width: 70, align: .center)
-                NovaText("Cost/ton", size: 10, color: .gray, width: 80, align: .center)
+                NovaText("Commodity", size: 10, color: .gray, width: 160)
+                NovaText("Price", size: 10, color: .gray, width: 62, align: .center)
+                NovaText("Cost/ton", size: 10, color: .gray, width: 70, align: .center)
                 NovaText("Hold", size: 10, color: .gray, width: 60, align: .trailing)
             }
+            .frame(height: 17, alignment: .top)
             ForEach(Array(market.enumerated()), id: \.offset) { i, row in
                 let held = pilot.held(cargo: row.commodity.cargoID)
                 HStack(spacing: 0) {
-                    NovaText(game.commodityName(row.commodity), size: 11, width: 150)
-                    NovaText(row.level.label, size: 11, color: levelColor(row.level), width: 70, align: .center)
-                    NovaText("\(row.price)", size: 11, width: 80, align: .center)
-                    NovaText(held > 0 ? "\(held)" : "—", size: 11, color: held > 0 ? .white : .gray, width: 60, align: .trailing)
+                    NovaText(game.commodityName(row.commodity), size: 10, width: 160)
+                    NovaText(row.level.label, size: 10, color: levelColor(row.level), width: 62, align: .center)
+                    NovaText("\(row.price)", size: 10, width: 70, align: .center)
+                    NovaText(held > 0 ? "\(held)" : "—", size: 10, color: held > 0 ? .white : .gray, width: 60, align: .trailing)
                 }
-                .padding(.vertical, 2)
+                .frame(height: 13)
                 .background(i == selected ? Color.white.opacity(0.14) : .clear)
                 .contentShape(Rectangle())
                 .onTapGesture { selected = i }
@@ -108,29 +129,21 @@ struct TradeCenterView: View {
         }
     }
 
-    private var controls: some View {
-        HStack(spacing: 8) {
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                       width: 42, enabled: canBuy) { buy() }
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
-                       width: 42, enabled: canSell) { sell() }
-            qtyControl
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: 42, action: onDone)
-            NovaText(creditString(pilot.state.credits), size: 11,
+    /// DITL #1001 item 14 — the narrow strip between list and buttons. The
+    /// game shows status text here; this port uses it for the credits readout
+    /// and the tap-to-edit transaction quantity (real DITL #1003 "qty" prompt).
+    private var statusLine: some View {
+        HStack(spacing: 0) {
+            Button { showQtyPrompt = true } label: {
+                NovaText("×\(pendingQty) per tap", size: 10, color: .gray, width: 90)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 0)
+            NovaText(creditString(pilot.state.credits), size: 10,
                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 130, align: .trailing)
         }
-    }
-
-    /// Opens `TradeQuantityPrompt` to type an exact tonnage; Buy/Sell then
-    /// transact that amount instead of the fixed `tradeStep`.
-    private var qtyControl: some View {
-        Button { showQtyPrompt = true } label: {
-            NovaText("×\(pendingQty)", size: 10, color: .gray, width: 32, align: .center)
-                .padding(.vertical, 4)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
-        }
-        .buttonStyle(.plain)
+        .frame(width: 346, height: 24)
     }
 
     private var current: (commodity: Commodity, level: PriceLevel, price: Int)? {
@@ -199,7 +212,7 @@ struct OutfitterView: View {
     var onDone: () -> Void
 
     @State private var selectedID: Int?
-    @State private var page = 0
+    @State private var topRow = 0
     private var game: NovaGame { graphics.game }
     private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
@@ -220,7 +233,15 @@ struct OutfitterView: View {
         if let frame = graphics.frame(.outfit) {
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)
-                    .clipped().novaPlace(space, -373, -153)
+                    .clipped().novaPlace(space, -373.5, -152.5)
+                // DITL #1002 items 9/10: the real 25×25 up/down scroll-arrow
+                // buttons at (148,288)/(178,288) — one row per tap.
+                NovaIconButton(graphics: graphics, systemName: "arrowtriangle.up.fill",
+                               enabled: currentTopRow > 0) { scroll(-1) }
+                    .novaPlace(space, -234.5, 127.5)
+                NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
+                               enabled: currentTopRow < maxTopRow) { scroll(1) }
+                    .novaPlace(space, -204.5, 127.5)
                 detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
                 if let o = selected, let pic = graphics.outfitPicture(o) {
                     Image(decorative: pic, scale: 1).interpolation(.high).resizable().scaledToFit()
@@ -234,40 +255,36 @@ struct OutfitterView: View {
         }
     }
 
-    private var pageCount: Int { max(1, (stock.count + gridPageSize - 1) / gridPageSize) }
-    private var currentPage: Int { min(page, pageCount - 1) }
-    /// One fixed page of exactly `gridCols`×`gridRows` slots (nil-padded), matching
-    /// the authentic paged grid rather than a continuous scroll.
-    private var pageItems: [OutfRes?] {
-        let start = currentPage * gridPageSize
-        let end = min(start + gridPageSize, stock.count)
+    private var rowCount: Int { max(1, (stock.count + gridCols - 1) / gridCols) }
+    private var maxTopRow: Int { max(0, rowCount - gridRows) }
+    private var currentTopRow: Int { min(topRow, maxTopRow) }
+    private func scroll(_ delta: Int) { topRow = min(max(currentTopRow + delta, 0), maxTopRow) }
+    /// The visible 4×5 window starting at `currentTopRow` (nil-padded).
+    private var visibleItems: [OutfRes?] {
+        let start = currentTopRow * gridCols
+        let end = min(start + gridSlotCount, stock.count)
         var items: [OutfRes?] = start < end ? stock[start..<end].map { $0 } : []
-        items += Array(repeating: nil, count: gridPageSize - items.count)
+        items += Array(repeating: nil, count: gridSlotCount - items.count)
         return items
     }
 
     private var grid: some View {
-        VStack(spacing: 0) {
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
-                ForEach(Array(pageItems.enumerated()), id: \.offset) { _, o in
-                    if let o {
-                        ItemTile(name: o.displayName, image: graphics.outfitPicture(o),
-                                 quantity: pilot.owned(outfit: o.id),
-                                 selected: (selectedID ?? stock.first?.id) == o.id,
-                                 locked: lockState(for: o) == .locked)
-                            .onTapGesture { selectedID = o.id }
-                    } else {
-                        Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
-                    }
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
+            ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, o in
+                if let o {
+                    ItemTile(name: o.displayName, image: graphics.outfitPicture(o),
+                             quantity: pilot.owned(outfit: o.id),
+                             selected: (selectedID ?? stock.first?.id) == o.id,
+                             locked: lockState(for: o) == .locked)
+                        .onTapGesture { selectedID = o.id }
+                } else {
+                    Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
                 }
             }
-            Spacer(minLength: 0)
-            GridPager(page: currentPage, pageCount: pageCount) { page = $0 }
         }
-        // Swipe / mouse-wheel / arrow-key / controller paging — previously written
-        // (GridPagingModifier) but never attached, so the grid only paged via the
-        // chevrons. Now the whole grid responds like the real game's does.
-        .gridPaging(currentPage: currentPage, pageCount: pageCount) { page = $0 }
+        // Mouse wheel / trackpad, touch drag, arrow keys and controller all
+        // scroll by single rows (GridPagingModifier steps of 1 == one row).
+        .gridPaging(currentPage: currentTopRow, pageCount: maxTopRow + 1) { topRow = $0 }
     }
 
     private var detail: some View {
@@ -316,7 +333,7 @@ struct OutfitterView: View {
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                   width: 60, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) && lockState(for: $0) == .available } ?? false) {
+                   width: 73, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) && lockState(for: $0) == .available } ?? false) {
             guard let o else {
                 Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
@@ -329,7 +346,7 @@ struct OutfitterView: View {
         }
         .novaPlace(space, -94, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
-                   width: 60, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
+                   width: 73, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
             guard let o else {
                 Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
@@ -342,7 +359,7 @@ struct OutfitterView: View {
         }
         .novaPlace(space, 12, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                   width: 60, action: onDone)
+                   width: 73, action: onDone)
             .novaPlace(space, 118, 128)
     }
 
@@ -361,7 +378,7 @@ struct ShipyardView: View {
     var onDone: () -> Void
 
     @State private var selectedID: Int?
-    @State private var page = 0
+    @State private var topRow = 0
     private var game: NovaGame { graphics.game }
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
     /// hulls that opt into full hiding (Bible `shïp.Flags3` 0x0100/0x0200)
@@ -379,7 +396,15 @@ struct ShipyardView: View {
         if let frame = graphics.frame(.shipyard) {
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)
-                    .clipped().novaPlace(space, -373, -153)
+                    .clipped().novaPlace(space, -373.5, -152.5)
+                // DITL #1004 items 11/12: the real 25×25 up/down scroll-arrow
+                // buttons at (141,288)/(171,288) — one row per tap.
+                NovaIconButton(graphics: graphics, systemName: "arrowtriangle.up.fill",
+                               enabled: currentTopRow > 0) { scroll(-1) }
+                    .novaPlace(space, -241.5, 126.5)
+                NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
+                               enabled: currentTopRow < maxTopRow) { scroll(1) }
+                    .novaPlace(space, -211.5, 126.5)
                 detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
@@ -393,37 +418,35 @@ struct ShipyardView: View {
         }
     }
 
-    private var pageCount: Int { max(1, (stock.count + gridPageSize - 1) / gridPageSize) }
-    private var currentPage: Int { min(page, pageCount - 1) }
-    private var pageItems: [ShipRes?] {
-        let start = currentPage * gridPageSize
-        let end = min(start + gridPageSize, stock.count)
+    private var rowCount: Int { max(1, (stock.count + gridCols - 1) / gridCols) }
+    private var maxTopRow: Int { max(0, rowCount - gridRows) }
+    private var currentTopRow: Int { min(topRow, maxTopRow) }
+    private func scroll(_ delta: Int) { topRow = min(max(currentTopRow + delta, 0), maxTopRow) }
+    private var visibleItems: [ShipRes?] {
+        let start = currentTopRow * gridCols
+        let end = min(start + gridSlotCount, stock.count)
         var items: [ShipRes?] = start < end ? stock[start..<end].map { $0 } : []
-        items += Array(repeating: nil, count: gridPageSize - items.count)
+        items += Array(repeating: nil, count: gridSlotCount - items.count)
         return items
     }
 
     private var grid: some View {
-        VStack(spacing: 0) {
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
-                ForEach(Array(pageItems.enumerated()), id: \.offset) { _, s in
-                    if let s {
-                        let picture = shipPicture(s)
-                        ItemTile(name: s.displayName, image: picture?.image,
-                                 pixelated: picture?.isDedicated == false,
-                                 quantity: s.id == pilot.state.shipType ? 1 : 0,
-                                 selected: (selectedID ?? stock.first?.id) == s.id,
-                                 locked: lockState(for: s) == .locked)
-                            .onTapGesture { selectedID = s.id }
-                    } else {
-                        Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
-                    }
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
+            ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, s in
+                if let s {
+                    let picture = shipPicture(s)
+                    ItemTile(name: s.displayName, image: picture?.image,
+                             pixelated: picture?.isDedicated == false,
+                             quantity: s.id == pilot.state.shipType ? 1 : 0,
+                             selected: (selectedID ?? stock.first?.id) == s.id,
+                             locked: lockState(for: s) == .locked)
+                        .onTapGesture { selectedID = s.id }
+                } else {
+                    Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
                 }
             }
-            Spacer(minLength: 0)
-            GridPager(page: currentPage, pageCount: pageCount) { page = $0 }
         }
-        .gridPaging(currentPage: currentPage, pageCount: pageCount) { page = $0 }
+        .gridPaging(currentPage: currentTopRow, pageCount: maxTopRow + 1) { topRow = $0 }
     }
 
     /// The shipyard's dedicated display picture for a hull, falling back to the
@@ -504,7 +527,7 @@ struct ShipyardView: View {
                 && lockState(for: $0) == .available
         } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
-                   width: 60, enabled: canBuy) {
+                   width: 83, enabled: canBuy) {
             guard let s else {
                 Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
@@ -517,7 +540,7 @@ struct ShipyardView: View {
         }
         .novaPlace(space, -18, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                   width: 60, action: onDone)
+                   width: 83, action: onDone)
             .novaPlace(space, 98, 128)
     }
 
@@ -535,6 +558,9 @@ struct BarView: View {
     var onDone: () -> Void
 
     @State private var showGambling = false
+    @StateObject private var services = AppGameServices()
+    @State private var engine: StoryEngine?
+    @State private var rolledPatron = false
     private var game: NovaGame { graphics.game }
     /// EV Nova's bar description lives at `dësc` (spöb id + 9872).
     private var barText: String {
@@ -542,52 +568,114 @@ struct BarView: View {
         return t.isEmpty ? "The spaceport bar is quiet tonight." : t
     }
 
+    // Layout straight from DLOG/DITL #1013 "Bar" against the real 263×185
+    // frame (PICT 8503 — centre 131.5,92.5):
+    //   item 6  (16,10)-(246,116)   — the bar description, in the top black panel
+    //   item 4  (6,125)  146×26     — wide button, grey strip top-left
+    //   item 2  (6,154)  146×26     — wide button, grey strip bottom-left
+    //   item 1  (156,125) 99×26     — button, grey strip top-right
+    //   item 0  (156,154) 99×26     — button, grey strip bottom-right
+    // (Items 3/5/7-9 sit at y≥214, past the 185px frame — stale-bounds junk;
+    // the previous layout had used those, floating Gamble/Leave below the
+    // artwork over the hub text, which also exposed the button art's baked
+    // grey bezel against a black background.)
+    //
+    // Bar missions are NOT a browsable list (that's the Mission BBS). Like the
+    // real game, a patron approaches at most once per visit: the StoryEngine
+    // rolls the bar-location offers (control-bit gates + random-appearance %)
+    // and one of them, picked at random, is presented in the authentic Single
+    // Mission dialog (DITL #1016) over the bar. Accept/refuse run the real
+    // engine flow, so all mission bits fire.
     var body: some View {
-        Group {
-            if let frame = graphics.frame(.bar) {
-                NovaMenu(frame: frame, overlay: true) { space in
-                    ScrollView(showsIndicators: false) {
-                        NovaText(barText, size: 11, width: 220, align: .leading)
+        ZStack {
+            Group {
+                if let frame = graphics.frame(.bar) {
+                    NovaMenu(frame: frame, overlay: true) { space in
+                        ScrollView(showsIndicators: false) {
+                            NovaText(barText, size: 10, width: 230, align: .leading)
+                        }
+                        .frame(width: 230, height: 106)
+                        .novaPlace(space, -115.5, -82.5)
+                        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
+                                   width: 120, enabled: false) {}
+                            .novaPlace(space, -125.5, 32.5)
+                        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.holovid, fallback: "Holovid"),
+                                   width: 120, enabled: false) {}
+                            .novaPlace(space, -125.5, 61.5)
+                        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.gamble, fallback: "Gamble"),
+                                   width: 73) { showGambling = true }
+                            .novaPlace(space, 24.5, 32.5)
+                        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
+                                   width: 73, action: onDone)
+                            .novaPlace(space, 24.5, 61.5)
                     }
-                    .frame(width: 220, height: 60)
-                    .novaPlace(space, -112, -80)
-                    // Patrons occasionally have work — mïsn.AvailLoc == .bar.
-                    ScrollView(showsIndicators: false) {
-                        MissionBoardView(game: game, pilot: pilot, spob: spob, location: .bar, width: 220)
-                    }
-                    .frame(width: 220, height: 60)
-                    .novaPlace(space, -112, -14)
-                    // Re-derived from DITL #1013 items 3/5 — (54,214)-(175,239)
-                    // and (105,227)-(226,252), both ~121×25 — against the real
-                    // 263×185 Bar frame (PICT 8503, confirmed via
-                    // `evnova-extract pict`/`dlog`): cy = 214…227 − 92.5 ≈
-                    // 122…135, well below the picture's own bottom edge (185)
-                    // in the dialog's native-control strip — not cy=62, which
-                    // sat ~65px too high (inside the artwork). The two items'
-                    // raw x-spans overlap once click regions are this
-                    // generous, so cx keeps the existing non-overlapping
-                    // Gamble/Leave spacing rather than reproducing that overlap.
-                    NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.gamble, fallback: "Gamble"),
-                               width: 60) { showGambling = true }
-                        .novaPlace(space, -77, 128)
-                    NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Leave"),
-                               width: 60, action: onDone)
-                        .novaPlace(space, 20, 128)
-                }
-            } else {
-                VStack {
-                    Text(barText).foregroundStyle(.white).padding()
-                    MissionBoardView(game: game, pilot: pilot, spob: spob, location: .bar)
-                    HStack {
-                        Button("Gamble") { showGambling = true }
-                        Button("Leave", action: onDone)
+                } else {
+                    VStack {
+                        Text(barText).foregroundStyle(.white).padding()
+                        HStack {
+                            Button("Gamble") { showGambling = true }
+                            Button("Leave", action: onDone)
+                        }
                     }
                 }
             }
+
+            if let offer = services.pendingOffer {
+                Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
+                                    onPage: { _ in },
+                                    onAccept: { accept(offer) }, onDecline: { decline(offer) })
+            }
+
+            if showGambling {
+                Color.black.opacity(0.5).ignoresSafeArea()
+                    .onTapGesture { showGambling = false }
+                    .transition(.opacity)
+                GamblingView(graphics: graphics, pilot: pilot, onDone: { showGambling = false })
+            }
         }
-        .sheet(isPresented: $showGambling) {
-            GamblingView(graphics: graphics, pilot: pilot, onDone: { showGambling = false })
+        .onAppear(perform: rollPatron)
+    }
+
+    /// One roll per bar visit: build the engine, gather the bar's real offers
+    /// (already control-bit- and random-%-gated by `missionsOffered`), and have
+    /// a random one of the eligible patrons make their pitch.
+    private func rollPatron() {
+        guard !rolledPatron else { return }
+        rolledPatron = true
+        // Per-landing seed so which bar missions pass their random-appearance
+        // roll actually varies day to day (the fixed default seed made the bar
+        // present the same patron on every single visit).
+        let e = StoryEngine(game: game, player: pilot.state, services: services,
+                            seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        engine = e
+        // `missionsOffered` already applied each mission's AvailBits test and
+        // random % — the survivors are genuinely on offer here right now. The
+        // bar picks the highest-weighted one to make its pitch (deterministic
+        // within a landing), skipping any with no briefing text to show.
+        let offers = e.missionsOffered(at: .bar, spob: spob.id)
+        guard let mission = offers.first(where: { !e.briefing(for: $0).isEmpty }) else {
+            Log.spaceport.debug("Bar at spöb \(spob.id, privacy: .public): no eligible bar mission with briefing this visit")
+            return
         }
+        Log.spaceport.debug("Bar patron offers mission \(mission.id, privacy: .public) at spöb \(spob.id, privacy: .public) (of \(offers.count, privacy: .public) eligible)")
+        e.present(mission)
+    }
+
+    private func accept(_ offer: MissionOffer) {
+        guard let engine else { return }
+        _ = engine.accept(offer.mission.id)
+        pilot.state = engine.player
+        pilot.save()
+        services.pendingOffer = nil
+    }
+
+    private func decline(_ offer: MissionOffer) {
+        guard let engine else { return }
+        engine.decline(offer.mission.id)
+        pilot.state = engine.player
+        pilot.save()
+        services.pendingOffer = nil
     }
 }
 
@@ -664,34 +752,3 @@ struct ItemTile: View {
     }
 }
 
-/// Discrete-page up/down control for the Outfitter/Shipyard grids. The real
-/// game's paging arrows are a small clickable control near the grid's bottom
-/// edge; the exact baked icon asset wasn't identified in the base data
-/// (`cicn` 10000–10023 are cursor graphics, not scroll arrows), so this uses
-/// plain chevrons in the game's button-red accent rather than invented art.
-private struct GridPager: View {
-    let page: Int
-    let pageCount: Int
-    let onChange: (Int) -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            arrow("chevron.up", enabled: page > 0) { onChange(page - 1) }
-            arrow("chevron.down", enabled: page < pageCount - 1) { onChange(page + 1) }
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, 2).padding(.top, 2)
-    }
-
-    private func arrow(_ systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 9, weight: .bold))
-                .frame(width: 16, height: 16)
-                .foregroundStyle(enabled ? .white : .white.opacity(0.3))
-                .background(Circle().fill(enabled ? Color(red: 0.75, green: 0.15, blue: 0.15) : Color.white.opacity(0.08)))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-    }
-}

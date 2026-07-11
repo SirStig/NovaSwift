@@ -64,6 +64,34 @@ final class GameScene: SKScene {
     /// hyperspace (not a fresh game start, a landing depart, or a load) — the
     /// only case that should show the player's own warp-in effect.
     private var arrivedViaJump = false
+
+    // MARK: Hyperspace jump sequence
+    /// Phases of the player's own hyperspace jump. `.none` = ordinary flight;
+    /// during a jump the scene locks manual control and flies the maneuver:
+    /// turn to the outbound heading, tear away as the stars streak, white-flash,
+    /// then pop out already moving in the destination system. See `beginJump`.
+    private enum JumpPhase { case none, align, accelerate, flash, arrive }
+    private var jumpPhase: JumpPhase = .none
+    private var jumpClock: Double = 0
+    /// Heading the ship turns to before the jump (toward the destination system
+    /// on the galactic map).
+    private var jumpOutboundHeading: Double = 0
+    /// Instant-jump outfit installed → skip the slow align/spin-up.
+    private var jumpInstant = false
+    /// Jump-animation speed-up from hyperspace-speed outfits (1 = stock timing).
+    private var jumpSpeed: Double = 1
+    /// Destination system loaded at the white-flash peak.
+    private var jumpDestSystemID = 0
+    /// Ran once at the flash peak to commit the jump in the app model (spend
+    /// fuel, advance the route, follow the pilot, save). Supplied by the container.
+    private var jumpCommit: (() -> Void)?
+    private var jumpCommitted = false
+    /// True while a jump wants manual input suppressed (the whole sequence).
+    var isJumping: Bool { jumpPhase != .none }
+    /// Full-viewport white flash + radial star streaks, parented to the camera.
+    private var jumpFlash: SKSpriteNode?
+    private var jumpStreaks: SKNode?
+
     private var lastUpdate: TimeInterval = 0
     private var hudClock: TimeInterval = 0
     private var moveDiagClock: TimeInterval = 0
@@ -230,6 +258,7 @@ final class GameScene: SKScene {
         camera = cameraNode
         cameraNode.setScale(cameraZoom)
         addChild(cameraNode)
+        buildJumpOverlays()
         buildStarfield()
         buildPlanets()
         npcLayer.zPosition = 9
@@ -454,7 +483,14 @@ final class GameScene: SKScene {
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
 
         controllerInput?.poll()
-        let intent = input?.intent ?? .init()
+        // During a hyperspace jump the scene flies the ship (locking manual
+        // control); otherwise the player's own intent drives it.
+        let intent: ControlIntent
+        if jumpPhase != .none {
+            intent = stepJump(dt)
+        } else {
+            intent = input?.intent ?? .init()
+        }
         world.intent = intent
         world.step(dt)
 
@@ -550,6 +586,15 @@ final class GameScene: SKScene {
                 if entityID == 0 { audio?.play(.docking) }
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
+            case let .shipScanned(_, targetID, at):
+                spawnScanSweep(at: CGPoint(x: at.x, y: at.y))
+                if targetID == 0 {
+                    let msg = "You are being scanned."
+                    hud?.hailMessage = msg
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak hud] in
+                        if hud?.hailMessage == msg { hud?.hailMessage = "" }
+                    }
+                }
             case let .assistanceDelivered(entityID):
                 let name = world.ship(id: entityID)?.name ?? "Ally"
                 let msg = "\(name) transfers fuel and makes repairs."
@@ -637,7 +682,7 @@ final class GameScene: SKScene {
     /// players who haven't discovered click-targeting.
     enum HailResult {
         case ship(entityID: Int, name: String, shipTypeID: Int, govt: GovtRes, hostile: Bool)
-        case planet(name: String, govt: GovtRes?, landable: Bool)
+        case planet(spobID: Int, name: String, govt: GovtRes?, landable: Bool)
     }
 
     func attemptHail() -> HailResult? {
@@ -651,7 +696,7 @@ final class GameScene: SKScene {
         }
         if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
             let landable = world.systemContext.bodies.first { $0.id == pid }?.canLand ?? false
-            return .planet(name: pv.name, govt: galaxy?.game.govt(pv.government), landable: landable)
+            return .planet(spobID: pid, name: pv.name, govt: galaxy?.game.govt(pv.government), landable: landable)
         }
         if let ship = world.nearestHailable(), let r = shipResult(ship) {
             return r
@@ -971,6 +1016,309 @@ final class GameScene: SKScene {
         }
     }
 
+    // MARK: Hyperspace jump (player)
+
+    /// Build the two camera-space overlays a jump uses: a full-viewport white
+    /// flash and a fan of radial star-streak lines. Both start hidden and are
+    /// reused every jump (no per-jump allocation). Parented to the camera so they
+    /// cover the viewport no matter where the ship is in the system.
+    private func buildJumpOverlays() {
+        let flash = SKSpriteNode(color: .white, size: CGSize(width: 8000, height: 8000))
+        flash.zPosition = 500
+        flash.alpha = 0
+        flash.isHidden = true
+        cameraNode.addChild(flash)
+        jumpFlash = flash
+
+        let streaks = SKNode()
+        streaks.zPosition = 490
+        streaks.alpha = 0
+        streaks.isHidden = true
+        // A field of thin bright lines running along +y (the container is rotated
+        // to the outbound heading at jump time), spread across the viewport.
+        for _ in 0..<28 {
+            let len = CGFloat.random(in: 300...900)
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: 0, y: -len / 2))
+            path.addLine(to: CGPoint(x: 0, y: len / 2))
+            let line = SKShapeNode(path: path)
+            line.strokeColor = SKColor(red: 0.8, green: 0.9, blue: 1.0, alpha: 0.9)
+            line.lineWidth = CGFloat.random(in: 1...2.5)
+            line.blendMode = .add
+            line.position = CGPoint(x: .random(in: -1400...1400), y: .random(in: -1400...1400))
+            streaks.addChild(line)
+        }
+        cameraNode.addChild(streaks)
+        jumpStreaks = streaks
+    }
+
+    /// Begin the player's hyperspace jump to `destSystemID`. The scene owns the
+    /// whole sequence: it turns the ship to `outboundHeading`, accelerates away
+    /// with streaking stars, white-flashes, swaps the world to the destination
+    /// in place (no scene teardown — so keyboard focus and the presented scene
+    /// survive), and pops out already moving. `commit` runs once at the flash
+    /// peak to update the app model (fuel/route/pilot/save). `instant` skips the
+    /// slow align (an instant-jump outfit). No-op if a jump is already running.
+    func beginJump(to destSystemID: Int, outboundHeading: Double, instant: Bool,
+                   speed: Double = 1, commit: @escaping () -> Void) {
+        guard jumpPhase == .none, world != nil else { return }
+        jumpDestSystemID = destSystemID
+        jumpOutboundHeading = outboundHeading
+        jumpInstant = instant
+        jumpSpeed = max(1, speed)
+        jumpCommit = commit
+        jumpCommitted = false
+        jumpClock = 0
+        jumpPhase = instant ? .accelerate : .align
+        // Orient the streak fan along the direction of travel.
+        jumpStreaks?.zRotation = -CGFloat(outboundHeading)
+        // Spin-up sound as the maneuver starts.
+        audio?.play(.hyperspaceCharge)
+        Log.scene.debug("beginJump -> system \(destSystemID) heading \(outboundHeading, format: .fixed(precision: 2)) instant=\(instant)")
+    }
+
+    /// Advance the jump one frame and return the `ControlIntent` that flies it.
+    /// Called from `update` in place of manual input while `jumpPhase != .none`.
+    private func stepJump(_ dt: Double) -> ControlIntent {
+        jumpClock += dt
+        let p = world.player
+        var intent = ControlIntent()
+
+        switch jumpPhase {
+        case .none:
+            break
+
+        case .align:
+            // Turn to the outbound heading and bleed off speed. This is the
+            // deliberate "swing around to point at the destination" maneuver.
+            intent.desiredHeading = jumpOutboundHeading
+            let aimErr = abs(angleDelta(from: p.angle, to: jumpOutboundHeading))
+            // Brake by facing our velocity's reverse once roughly aligned, so we
+            // launch from near a standstill.
+            if p.velocity.length > p.stats.maxSpeed * 0.15, aimErr < 0.6 {
+                intent.desiredHeading = (p.velocity * -1).angle
+                if abs(angleDelta(from: p.angle, to: intent.desiredHeading!)) < .pi / 3 { intent.thrust = true }
+            }
+            let aligned = aimErr < 0.1 && p.velocity.length < p.stats.maxSpeed * 0.2
+            if aligned || jumpClock > 3.0 {         // 3s safety cap so a slow turner can't stall
+                enterJumpPhase(.accelerate)
+            }
+
+        case .accelerate:
+            // Point at the exit and pour on speed; the stars streak. We lift the
+            // player's own speed cap (the same over-speed mechanism NPC jump-ins
+            // use) so the ship visibly tears away rather than crawling to cruise.
+            intent.desiredHeading = jumpOutboundHeading
+            if abs(angleDelta(from: p.angle, to: jumpOutboundHeading)) < .pi / 2 { intent.thrust = true }
+            p.entryOverspeed = max(p.entryOverspeed, p.stats.maxSpeed * 4)
+            p.entryOverspeedDecayPerSec = 0        // hold the boost through the launch
+            let streak = min(1 + jumpClock * 12, 9)
+            showJumpStreaks(intensity: CGFloat(min(1, jumpClock / 0.35)), stretch: CGFloat(streak))
+            // Hyperspace-speed outfits (ModType 22) shorten the launch.
+            if jumpClock > (jumpInstant ? 0.18 : 0.45) / jumpSpeed {
+                enterJumpPhase(.flash)
+            }
+
+        case .flash:
+            intent.desiredHeading = jumpOutboundHeading
+            // Ramp the white flash up fast; at its peak commit + swap the system.
+            let t = min(1, jumpClock / 0.14)
+            jumpFlash?.isHidden = false
+            jumpFlash?.alpha = CGFloat(t)
+            showJumpStreaks(intensity: 1, stretch: 9)
+            if !jumpCommitted, t >= 1 {
+                jumpCommitted = true
+                jumpCommit?()                          // app model: spend fuel, advance route, follow pilot, save
+                reloadSystem(to: jumpDestSystemID, outboundHeading: jumpOutboundHeading)
+                enterJumpPhase(.arrive)
+            }
+
+        case .arrive:
+            // New system is loaded and the ship is coasting in from the edge.
+            // Fade the flash + streaks out to reveal it, then hand back control.
+            let t = min(1, jumpClock / 0.35)
+            jumpFlash?.alpha = CGFloat(1 - t)
+            jumpStreaks?.alpha = CGFloat((1 - t) * 0.6)
+            if jumpClock > 0.35 {
+                jumpFlash?.isHidden = true
+                jumpFlash?.alpha = 0
+                jumpStreaks?.isHidden = true
+                jumpStreaks?.alpha = 0
+                jumpPhase = .none
+                jumpCommit = nil
+            }
+        }
+        return intent
+    }
+
+    private func enterJumpPhase(_ phase: JumpPhase) {
+        jumpPhase = phase
+        jumpClock = 0
+    }
+
+    /// Show/scale the streak overlay: `intensity` (0…1) drives its opacity,
+    /// `stretch` elongates the lines along the travel direction.
+    private func showJumpStreaks(intensity: CGFloat, stretch: CGFloat) {
+        guard let streaks = jumpStreaks else { return }
+        streaks.isHidden = false
+        streaks.alpha = intensity * 0.7
+        streaks.yScale = stretch
+    }
+
+    /// Swap the simulated world to `systemID` *in place* — no scene/host
+    /// teardown, so the presented `SKScene` and keyboard focus are untouched
+    /// (rebuilding the host was the source of the "HUD says I've arrived but I
+    /// still see the old system and can't move" bug). Rebuilds the world +
+    /// stellar geometry, repositions the player at the hyperspace edge pointed
+    /// inward and coasting fast (like an NPC jump-in), and clears every transient
+    /// node from the old system.
+    private func reloadSystem(to systemID: Int, outboundHeading: Double) {
+        guard let galaxy else {
+            Log.scene.error("reloadSystem(\(systemID)): no galaxy — cannot load the destination system")
+            return
+        }
+        let game = galaxy.game
+        let player = world.player
+        // Fresh, populated world for the destination, reusing the player ship
+        // (its fuel/damage/cargo carry over) and the same galaxy catalog.
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy)
+
+        // Enter from the edge on the side we *came from* — the origin system's
+        // direction, which is opposite the outbound bearing we jumped along — then
+        // fly inward, continuing that same direction of travel. (Placing us on the
+        // outbound side instead made us pop in on the far edge, facing back the
+        // way we came.) Pointed inward, tearing in and decelerating like an NPC.
+        let ctx = w.systemContext
+        let travelDir = Vec2(sin(outboundHeading), cos(outboundHeading))   // A→B, the way we're heading
+        player.position = ctx.center - travelDir * ctx.spawnRadius          // arrive on B's A-facing edge
+        player.angle = (ctx.center - player.position).angle                 // face inward == the travel direction
+        let entrySpeed = min(player.stats.maxSpeed * 2.4, 3200)
+        player.velocity = Vec2(sin(player.angle), cos(player.angle)) * entrySpeed
+        player.entryOverspeed = max(0, entrySpeed - player.stats.maxSpeed)
+        player.entryOverspeedDecayPerSec = player.entryOverspeed / 1.3
+        player.currentTargetID = nil
+        player.wantsToDepart = false
+
+        self.world = w
+        self.galaxy = gx
+        self.systemID = systemID
+
+        // Swap the stellar geometry + labels for the new system and drop every
+        // transient node (NPCs/projectiles/beams/effects/labels/selection).
+        self.planetVisuals = makePlanetVisuals(systemID: systemID, game: game)
+        clearSystemNodes()
+        buildPlanets()
+
+        // Recentre camera + ship node on the arrival point immediately (don't
+        // wait a frame — the flash is covering this) and refresh the HUD name.
+        let scenePos = CGPoint(x: player.position.x, y: player.position.y)
+        shipNode.position = scenePos
+        cameraNode.position = scenePos
+        systemName = game.system(systemID)?.name ?? ""
+        hud?.systemName = systemName
+        audio?.play(.hyperspaceArrive)
+        Log.scene.debug("reloadSystem: now in \(self.systemName) [\(systemID)], \(w.npcs.count) NPCs")
+    }
+
+    /// Take off from stellar object `spobID`, reloading the *current* system in
+    /// place — the takeoff twin of `reloadSystem`. Unlike a jump (same hull, same
+    /// player object), a takeoff may follow a shipyard/outfitter visit, so it takes
+    /// a freshly-built `player` (from the pilot loadout) and its `textures`,
+    /// swapping the ship node's sprite too. Positions the ship just clear of the
+    /// departed body, nosed outward and drifting gently out, and plays the launch
+    /// (airlock) cue + grow-out-of-planet effect — NOT the hyperspace arrival cue.
+    /// **No scene/host teardown** → the `SpriteView` keeps its identity (no
+    /// re-present flash) and keyboard focus/input stay wired to this same scene.
+    func reloadForDeparture(spobID: Int, player: Ship, textures: [SKTexture], engineTextures: [SKTexture]) {
+        guard let galaxy else {
+            Log.scene.error("reloadForDeparture(\(spobID)): no galaxy — cannot reload the system")
+            return
+        }
+        let game = galaxy.game
+        // Fresh, populated world for the current system, built around the newly
+        // constructed player ship (its fuel/damage/cargo already seeded from the pilot).
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy)
+
+        // Lift off from the departed body: sit just clear of its surface, nose
+        // pointed away from the system centre, drifting gently outward.
+        let ctx = w.systemContext
+        if let body = ctx.bodies.first(where: { $0.id == spobID }) {
+            var outward = body.position - ctx.center
+            if outward.length < 1 { outward = Vec2(0, -1) }
+            let dir = outward.normalized
+            player.position = body.position + dir * (body.radius + 60)
+            player.angle = dir.angle
+            player.velocity = dir * (player.stats.maxSpeed * 0.25)
+        } else {
+            // Departed body isn't a navigable stellar (shouldn't happen from the
+            // landing screen) — fall back to the generic mid-system start point.
+            player.position = ctx.center + Vec2(0, -700)
+        }
+        player.currentTargetID = nil
+        player.wantsToDepart = false
+
+        self.world = w
+        self.galaxy = gx
+
+        // Rebuild the player ship node from the (possibly new) hull sprite, then
+        // swap the stellar geometry + drop every transient node from the old view.
+        self.rotationTextures = textures
+        self.engineGlowTextures = engineTextures
+        shipNode?.removeFromParent()
+        buildShip()
+        self.planetVisuals = makePlanetVisuals(systemID: systemID, game: game)
+        clearSystemNodes()
+        buildPlanets()
+
+        // Snap camera + ship node onto the launch point and play the takeoff cue.
+        let scenePos = CGPoint(x: player.position.x, y: player.position.y)
+        shipNode.position = scenePos
+        cameraNode.position = scenePos
+        applyEntrance(.launch, to: shipNode, at: scenePos, heading: player.angle)
+        audio?.play(.launch)
+        Log.scene.debug("reloadForDeparture: launched from spob \(spobID) in \(self.systemName) [\(self.systemID)], \(w.npcs.count) NPCs")
+    }
+
+    /// Build the render-side stellar visuals for a system from game data — the
+    /// same construction `GameHost` does on a fresh build, so an in-place system
+    /// reload gets identical planets without a host rebuild.
+    private func makePlanetVisuals(systemID: Int, game: NovaGame) -> [PlanetVisual] {
+        game.stellarObjects(in: systemID).map { entry in
+            let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
+            let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
+            return PlanetVisual(id: entry.spob.id, name: entry.spob.name,
+                                position: CGPoint(x: entry.spob.x, y: entry.spob.y),
+                                texture: tex, radius: radius,
+                                government: entry.spob.government,
+                                isUninhabited: entry.spob.isUninhabited)
+        }
+    }
+
+    /// Remove every node tied to the *old* system before loading a new one:
+    /// planets, NPC ships, projectiles, asteroids, beam loops, transient effects,
+    /// AI-debug labels, and the current selection/target. The player ship node,
+    /// starfield, camera, and jump overlays persist across the swap.
+    private func clearSystemNodes() {
+        for n in planetNodes { n.removeFromParent() }
+        planetNodes.removeAll()
+        for (_, n) in npcNodes { n.container.removeFromParent() }
+        npcNodes.removeAll()
+        for n in projectileNodes { n.removeFromParent() }
+        projectileNodes.removeAll()
+        for (_, n) in asteroidNodes { n.container.removeFromParent() }
+        asteroidNodes.removeAll()
+        for (key, n) in beamLoopNodes { audio?.stopLoop(key: key); n.removeFromParent() }
+        beamLoopNodes.removeAll()
+        activeBeamLoops.removeAll()
+        effectsLayer.removeAllChildren()
+        for (_, n) in aiLabelNodes { n.removeFromParent() }
+        aiLabelNodes.removeAll()
+        pendingEntrance.removeAll()
+        selectedPlanetID = nil
+        shipBracket.isHidden = true
+        planetBracket.isHidden = true
+    }
+
     // MARK: Jump / landing effects
 
     /// Fade + scale a freshly-built node in, either as a hyperspace jump-in (a
@@ -1052,6 +1400,27 @@ final class GameScene: SKScene {
         ring.run(.sequence([.group([.scale(to: 2.0, duration: 0.3),
                                     .fadeOut(withDuration: 0.3)]),
                             .removeFromParent()]))
+    }
+
+    /// A scan sweep over a ship: a soft expanding ring, evoking a sensor pass —
+    /// what the local authority does when it flies over to "check you out."
+    private func spawnScanSweep(at point: CGPoint) {
+        for i in 0..<2 {
+            let ring = SKShapeNode(circleOfRadius: 10)
+            ring.position = point
+            ring.strokeColor = SKColor(red: 0.4, green: 1.0, blue: 0.6, alpha: 0.85)
+            ring.fillColor = .clear
+            ring.lineWidth = 2
+            ring.blendMode = .add
+            ring.zPosition = 13
+            ring.alpha = 0
+            effectsLayer.addChild(ring)
+            ring.run(.sequence([.wait(forDuration: Double(i) * 0.25),
+                                .group([.fadeIn(withDuration: 0.05),
+                                        .sequence([.scale(to: 3.2, duration: 0.55),
+                                                   .fadeOut(withDuration: 0.2)])]),
+                                .removeFromParent()]))
+        }
     }
 
     /// Pull a live NPC's node out of the pool so subsequent syncs won't touch it,
@@ -1690,6 +2059,7 @@ final class GameScene: SKScene {
         case .departing:  return "DEPRT"
         case .escorting:  return "ESCRT"
         case .assisting:  return "ASSIST"
+        case .scanning:   return "SCAN"
         }
     }
 
@@ -1703,7 +2073,7 @@ final class GameScene: SKScene {
             return SKColor(red: 1.0, green: 0.7, blue: 0.3, alpha: 1)
         case .traveling, .landing:
             return SKColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1)
-        case .escorting, .assisting:
+        case .escorting, .assisting, .scanning:
             return SKColor(red: 0.45, green: 0.9, blue: 0.5, alpha: 1)
         case .patrolling, .orbiting, .spawning:
             return SKColor(white: 0.85, alpha: 1)

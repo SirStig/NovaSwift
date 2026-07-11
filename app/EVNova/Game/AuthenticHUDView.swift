@@ -206,11 +206,18 @@ struct AuthenticHUDView: View {
     /// the same way it scales every role's built-in `baseSize`. Falls back to
     /// the generic `.hud` role size if a given `ïntf` (e.g. an unusual
     /// government skin) leaves the field zeroed.
+    ///
+    /// The `hudTextTighten` factor pulls the readouts back toward the original's
+    /// compact look: the status bar's `NovaCanvas(fit: .right)` scales to fill
+    /// the *window* height (≈1.25× the 767pt design height on a desktop window),
+    /// which scaled the text up in proportion; the original's text sat visibly
+    /// smaller against the same chrome, so we shrink it a touch to match.
+    private static let hudTextTighten: CGFloat = 0.8
     private var statusSize: CGFloat {
-        style.intf.statusFontSize > 0 ? CGFloat(style.intf.statusFontSize) : NovaFontRole.hud.baseSize
+        (style.intf.statusFontSize > 0 ? CGFloat(style.intf.statusFontSize) : NovaFontRole.hud.baseSize) * Self.hudTextTighten
     }
     private var subtitleSize: CGFloat {
-        style.intf.subtitleFontSize > 0 ? CGFloat(style.intf.subtitleFontSize) : NovaFontRole.hud.baseSize
+        (style.intf.subtitleFontSize > 0 ? CGFloat(style.intf.subtitleFontSize) : NovaFontRole.hud.baseSize) * Self.hudTextTighten
     }
 
     private func origin(_ r: NovaRect) -> CGPoint { CGPoint(x: r.left, y: r.top) }

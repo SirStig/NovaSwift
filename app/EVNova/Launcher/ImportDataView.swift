@@ -7,13 +7,22 @@ import EVNovaKit
 /// base game is never bundled — the user supplies it once. See docs/GET_THE_DATA.md.
 struct ImportDataView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
+    /// Closes this dialog (injected by the full-screen overlay presenter).
+    var onClose: () -> Void = {}
     @State private var importing = false
     @State private var message: String?
 
+    // Presented in the game's own dialog chrome (`NovaDialog`). Note the
+    // "Choose data…" action degrades gracefully by design: before any data is
+    // imported there is no game art, so NovaDialog and this button render
+    // their clean fallback style — after a successful import they pick up the
+    // real panel/button art.
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        NovaDialog(title: "Import Data", width: 480, buttons: [
+            NovaDialogButton(title: "Choose data…", isDefault: true) { importing = true },
+            NovaDialogButton(title: "Done") { onClose() },
+        ]) {
+            VStack(alignment: .leading, spacing: 14) {
                 Label("Bring your own data", systemImage: "externaldrive.badge.person.crop")
                     .novaFont(.heading, weight: .bold)
                 Text("EV Nova's game data is copyrighted and not included. To play, import your own legally-obtained EV Nova install — pick the top-level game folder (or a .rez/.ndat file). Picking the whole folder, not just **Nova Files**, also picks up the original Charcoal/Geneva fonts and soundtrack if your copy includes them.")
@@ -21,25 +30,12 @@ struct ImportDataView: View {
                 Text("On iPhone/iPad you can bring it in via the Files app, AirDrop, or “Open in”. Community plug-ins are already bundled and can be toggled under Plug-ins.")
                     .novaFont(.caption).foregroundStyle(.secondary)
 
-                Button {
-                    importing = true
-                } label: {
-                    Label("Choose data…", systemImage: "folder.fill.badge.plus")
-                        .novaFont(.button)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
-                }
-                .buttonStyle(.borderedProminent)
-
                 if let message {
                     Text(message).novaFont(.caption).foregroundStyle(.secondary)
                 }
                 Text(model.data.status).novaFont(.caption).foregroundStyle(.secondary)
             }
-            .padding()
         }
-        .novaResponsive()
-        .navigationTitle("Import Data")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.folder, .data],
                       allowsMultipleSelection: false) { result in

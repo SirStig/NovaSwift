@@ -77,6 +77,36 @@ final class ShipSystemTests: XCTestCase {
         XCTAssertEqual(Set(lo.weapons.map(\.id)), [128, 129])
     }
 
+    func testJumpOutfitsAggregateHopsAndInstantJump() throws {
+        // A hull carrying a multi-jump drive (ModType 32, +2 hops) and an
+        // instant-jump outfit (ModType 37) reports both on its loadout.
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 6, 300)                          // speed
+        put16(&ship, 10, 400)                         // fuel
+        put16(&ship, 12, 40)                          // free mass
+        put16(&ship, 78, 201); put16(&ship, 86, 1)    // preinstalled jump outfit 201 ×1
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Runner", data: Data(ship)))
+
+        var out = [UInt8](repeating: 0, count: 40)
+        put16(&out, 6, 32);  put16(&out, 8, 2)        // multiJump +2 hops
+        put16(&out, 18, 37); put16(&out, 20, 0)       // fastJump (instant; value ignored)
+        col.add(Resource(type: NovaType.outfit, id: 201, name: "Jump Organ", data: Data(out)))
+
+        let lo = try XCTUnwrap(Galaxy(game: NovaGame(col)).loadout(shipID: 128))
+        XCTAssertEqual(lo.maxJumpHops, 3, "base 1 + multiJump 2")
+        XCTAssertTrue(lo.instantJump, "a fastJump outfit makes jumps instant")
+
+        // A plain hull with no jump outfits keeps the single-hop, slow-jump default.
+        var plain = [UInt8](repeating: 0, count: 2000)
+        put16(&plain, 6, 300); put16(&plain, 10, 400); put16(&plain, 12, 40)
+        var col2 = ResourceCollection()
+        col2.add(Resource(type: NovaType.ship, id: 128, name: "Plain", data: Data(plain)))
+        let lo2 = try XCTUnwrap(Galaxy(game: NovaGame(col2)).loadout(shipID: 128))
+        XCTAssertEqual(lo2.maxJumpHops, 1)
+        XCTAssertFalse(lo2.instantJump)
+    }
+
     func testMakeLoadedShipAppliesEverything() throws {
         let galaxy = Galaxy(game: makeGame())
         let ship = try XCTUnwrap(galaxy.makeLoadedShip(128))

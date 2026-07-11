@@ -82,7 +82,9 @@ struct GamblingView: View {
     private var choosingView: some View {
         Group {
             if let bg = graphics.pict(8529) {
-                NovaMenu(frame: bg) { space in
+                // `overlay: true`: gambling stacks over the bar (which provides
+                // the dim backdrop), it doesn't black out the whole screen.
+                NovaMenu(frame: bg, overlay: true) { space in
                     ForEach(RaceColor.allCases, id: \.rawValue) { colorButton($0, space) }
                     // Items 1/0: (129,196)-(228,221), (243,196)-(342,221), 99×25 —
                     // cx = itemLeft − 235, cy = 196 − 115 = 81.
@@ -90,14 +92,16 @@ struct GamblingView: View {
                         .novaPlace(space, -106, 81)
                     stakeButton(5000, label: graphics.buttonLabel(SpaceportLabel.bet5000, fallback: "Bet 5000"))
                         .novaPlace(space, 8, 81)
-                    // No DITL #1023 item covers credits/Leave — placed just below
-                    // the real 4-box/2-button layout rather than invented mid-art.
-                    NovaText(creditsLabel(pilot.state.credits), size: 12,
-                             color: Color(red: 1, green: 0.85, blue: 0.4), width: 200, align: .center)
-                        .novaPlace(space, -100, 106)
+                    // DITL #1023 defines no credits/Leave items; they share the
+                    // real button row (y=196) flanking the two stake buttons —
+                    // INSIDE the 230px-tall frame (the old cy=106/128 spots put
+                    // Leave past the frame's bottom edge, floating on nothing).
+                    NovaText(creditsLabel(pilot.state.credits), size: 10,
+                             color: Color(red: 1, green: 0.85, blue: 0.4), width: 100, align: .center)
+                        .novaPlace(space, -222, 88)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
-                               width: 42, action: onDone)
-                        .novaPlace(space, -21, 128)
+                               width: 73, action: onDone)
+                        .novaPlace(space, 122, 81)
                 }
             } else {
                 fallbackChoosing
@@ -297,6 +301,7 @@ private struct BareNovaPanel<Content: View>: View {
             .scaleEffect(scale)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
-        .background(Color.black.ignoresSafeArea())
+        // No opaque background — this panel overlays the bar screen, which
+        // already dims what's behind it (matching NovaMenu's overlay mode).
     }
 }

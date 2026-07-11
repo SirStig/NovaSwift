@@ -95,6 +95,26 @@ final class NavigationModel: ObservableObject {
         return true
     }
 
+    /// Commit a hyperspace *arrival* at `dest` after crossing `hops` hops: spend
+    /// the fuel, drop those hops from the plotted route, and set the current
+    /// system. Used by the in-scene jump animation's flash-peak commit so the
+    /// arrival is atomic and the destination can't drift even if the route was
+    /// re-plotted mid-animation (in which case the stale route is just cleared).
+    /// Returns false (spending nothing) if the fuel isn't there.
+    @discardableResult
+    func commitArrival(at dest: Int, hops: Int) -> Bool {
+        guard hops > 0, canAfford(hops: hops), let ship else { return false }
+        for _ in 0..<hops { _ = ship.consumeJumpFuel() }
+        if route.count >= hops, route[hops - 1] == dest {
+            route.removeFirst(hops)
+        } else {
+            route = []                       // route drifted under us — drop it
+        }
+        currentSystemID = dest
+        showingMap = false
+        return true
+    }
+
     /// Every system directly linked to a system in `explored` (the "you can see
     /// there's something there" ring around what you've actually visited).
     func adjacentToExplored(_ explored: Set<Int>) -> Set<Int> {

@@ -94,6 +94,14 @@ public struct Loadout {
     /// Hyperlane hops a single hyperspace jump command can cross (1 = standard
     /// single-jump; higher only with a multi-jump outfit installed).
     public var maxJumpHops: Int
+    /// `oütf` ModType 37 (`fastJump`): a "jump control"/inertialess-jump outfit
+    /// that removes the slow spin-up — the ship jumps almost instantly without
+    /// the deliberate turn-and-align maneuver. False = the standard slow jump.
+    public var instantJump: Bool = false
+    /// `oütf` ModType 22 (`hyperspaceSpeed`): summed bonus that shortens the
+    /// jump's entry/exit sequence. Interpreted by the app as a percentage speed-up
+    /// of the jump animation (0 = stock timing). See `PilotStore.jumpSpeedFactor`.
+    public var hyperspaceSpeedBonus: Int = 0
 }
 
 extension OutfRes {
@@ -179,6 +187,8 @@ extension Galaxy {
         var usedGunSlots = 0, usedTurretSlots = 0
         var afterburnerFuel = 0
         var multiJumpBonus = 0
+        var fastJump = false
+        var hyperspaceSpeed = 0
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
@@ -217,6 +227,8 @@ extension Galaxy {
                 case .maxTurrets:      maxTurrets += v
                 case .afterburner:     afterburnerFuel += value   // fuel cost per unit
                 case .multiJump:       multiJumpBonus += v        // extra hops per hyperjump
+                case .fastJump:        fastJump = true            // inertialess/instant jump (no spin-up)
+                case .hyperspaceSpeed: hyperspaceSpeed += v        // faster jump entry/exit sequence
                 case .weapon:          grantedWeapons[value, default: 0] += count
                 case .ammunition:      ammoAdds[value, default: 0] += count
                 default: break
@@ -257,7 +269,9 @@ extension Galaxy {
             maxGuns: maxGuns, maxTurrets: maxTurrets,
             usedGunSlots: usedGunSlots, usedTurretSlots: usedTurretSlots,
             outfits: outfitCounts, weapons: weapons,
-            maxJumpHops: max(1, 1 + multiJumpBonus))
+            maxJumpHops: max(1, 1 + multiJumpBonus),
+            instantJump: fastJump,
+            hyperspaceSpeedBonus: hyperspaceSpeed)
     }
 
     /// Build a live ship with its **full loadout** applied: outfit-modified flight

@@ -30,6 +30,20 @@ public final class StoryEngine {
         self.rng = StoryRNG(seed: seed)
     }
 
+    /// A seed that varies per landing (galaxy date × spob) but is **stable
+    /// within one landing**, so mission random-appearance rolls actually change
+    /// day to day and port to port — instead of the fixed default seed, which
+    /// made every roll come out identically every visit (a mission's random %
+    /// either always passed or always failed, so the bar always had the same
+    /// patron). Stable within a landing keeps the bar and the mission BBS
+    /// showing a consistent set while the player is docked.
+    public static func landingSeed(player: PlayerState, spobID: Int) -> UInt64 {
+        var h = UInt64(bitPattern: Int64(player.date.julianDay)) &* 0x9E3779B97F4A7C15
+        h ^= UInt64(bitPattern: Int64(spobID)) &* 0xD1B54A32D192ED03
+        h ^= UInt64(player.pilotName.count) &* 0x2545F4914F6CDD1D
+        return h == 0 ? 0xE7CA11 : h
+    }
+
     // MARK: - NCB evaluation
 
     /// Evaluate a control-bit TEST expression against the current pilot.
@@ -153,10 +167,20 @@ public final class StoryEngine {
 
     /// The missions on offer at a spot, after applying each mission's random
     /// appearance chance. Deterministic given the engine's RNG state.
+    ///
+    /// **AvailRandom is a hard gate, not a "usually":** the Bible defines it as
+    /// "100 = always available, 1–99 = available this % of the time" — and by
+    /// omission **0 = never offered this way**. The hundreds of "Silent Mission"
+    /// resources (started programmatically by another mission's `S<id>` SET or
+    /// by a crön, never browsed) all carry AvailRandom 0; they must not surface
+    /// at a bar/BBS. `rng.chance(percent:)` already returns false for 0, so we
+    /// simply roll every candidate (the old `availRandom <= 0 ? true` short-
+    /// circuit did the exact opposite — it forced every 0% silent mission to
+    /// always appear, which is why the board was full of them).
     public func missionsOffered(at location: MissionOfferLocation, spob spobID: Int?) -> [MissionRes] {
         let offered = game.missions()
             .filter { isEligible($0, at: location, spobID: spobID) }
-            .filter { $0.availRandom <= 0 ? true : rng.chance(percent: $0.availRandom) }
+            .filter { rng.chance(percent: $0.availRandom) }
             .sorted { $0.displayWeight > $1.displayWeight }
         Log.mission.debug("missionsOffered: location=\(String(describing: location), privacy: .public) spob=\(spobID ?? -1) -> \(offered.count) mission(s)")
         return offered
@@ -291,8 +315,8 @@ public final class StoryEngine {
 
         apply(set: m.onSuccess)
 
-        let text = game.descText(m.completionText)
-        if !text.isEmpty { services?.showStoryText(text, title: m.name) }
+        let text = resolveMissionText(game.descText(m.completionText, context: textContext), for: m)
+        if !text.isEmpty { services?.showStoryText(text, title: m.displayName) }
         services?.notify(.missionCompleted(missionID: missionID, name: m.name))
 
         if m.datePostIncrement > 0 { advanceDays(m.datePostIncrement) }
@@ -311,8 +335,8 @@ public final class StoryEngine {
         player.failedMissions.insert(missionID)
         apply(set: m.onFailure)
         if !m.canAbort {
-            let text = game.descText(m.failureText)
-            if !text.isEmpty { services?.showStoryText(text, title: m.name) }
+            let text = resolveMissionText(game.descText(m.failureText, context: textContext), for: m)
+            if !text.isEmpty { services?.showStoryText(text, title: m.displayName) }
         }
         services?.notify(.missionFailed(missionID: missionID, name: m.name))
     }
@@ -593,13 +617,37 @@ public final class StoryEngine {
         game.stringList(strID)?.string(at: index)
     }
 
+    /// The fully-resolved offer briefing for a mission (conditionals + `<…>`
+    /// wildcards expanded). Public so callers can skip presenting an offer that
+    /// has no text to show (e.g. a background "silent" mission).
+    public func briefing(for m: MissionRes) -> String { briefingText(for: m) }
+
     /// The text shown when offering a mission: the explicit BriefText `dësc` if
     /// set, otherwise EV Nova's conventional offer text at dësc(3872 + id).
+    /// Both the `{…}` conditionals (via `descText`) and the mission `<…>`
+    /// wildcards (via `MissionText.resolve`) are expanded before display.
     private func briefingText(for m: MissionRes) -> String {
+        let raw: String
         if m.briefText >= 128 {
-            let t = game.descText(m.briefText)
-            if !t.isEmpty { return t }
+            let t = game.descText(m.briefText, context: textContext)
+            raw = t.isEmpty ? game.descText(m.offerTextID, context: textContext) : t
+        } else {
+            raw = game.descText(m.offerTextID, context: textContext)
         }
-        return game.descText(m.offerTextID)
+        return resolveMissionText(raw, for: m)
+    }
+
+    /// Expand a mission-related `dësc` body's `<…>` wildcards (`<PN>`, `<CQ>`,
+    /// `<DSY>`…) for this mission and the current pilot. Callers pass text that
+    /// has already had its `{…}` conditionals resolved by `descText`.
+    func resolveMissionText(_ text: String, for m: MissionRes) -> String {
+        MissionText.resolve(text, mission: m, player: player, game: game, initialSpob: initialSpob)
+    }
+
+    /// The `{…}`-conditional context for this pilot (control bits + gender),
+    /// so mission/desc text resolves its `{bXXX …}`/`{G …}` segments correctly.
+    var textContext: NovaTextContext {
+        NovaTextContext(isBitSet: { [player] in player.setBits.contains($0) },
+                        isMale: player.isMale)
     }
 }

@@ -88,25 +88,46 @@ mission `ShipBehav` overrides, `gövt.SkillMult`) and why.
 
 ```
 spawning ─▶ traveling ⇄ departing        (traders: fly to a planet, then jump out)
-         ─▶ patrolling                     (warships: roam waypoints, scan)
-         ─▶ orbiting                       (interceptors: hold near a planet, buzz traffic)
+         ─▶ patrolling ⇄ scanning          (LOCAL-AUTHORITY warships: circuit the planets, scan traffic)
+         ─▶ orbiting  ⇄ scanning           (LOCAL-AUTHORITY interceptors: hold near a planet, scan traffic)
+         ─▶ traveling                       (FOREIGN combat ships: just cross the system and leave)
               │
-              ▼ hostile in scan range (or, for interceptors, a piracy-police target)
+              ▼ hostile in scan range (or, for authority interceptors, a piracy-police target)
            attacking ──▶ fleeing ──▶ departing   (hurt / outmatched / out of ammo → run → jump)
-           escorting  (fleet members stay on their leader, adopt its target)
+           escorting  (fleet members hold a tight triangle on their leader; break off only to attack)
 ```
+
+**Who patrols matters.** Only the *local authority* — ships of the government
+that controls the system (`sÿst.Govt`), or an ally of it — runs the patrol beat,
+holds orbit, and scans traffic. A warship or interceptor of any *other*
+government has no business policing someone else's space, so with no fight to
+join it just travels across the system and leaves, like a trader. In an unowned
+(independent) system anyone armed may patrol. This is what makes a Federation
+system feel like Federation space instead of a free-for-all of every faction's
+warships wandering in circles.
 
 Steering primitives turn a goal into a `ControlIntent`:
 
-- **seek / arrive** — face a point and thrust, braking inside a slow radius.
+- **seek / arrive** — face a point and thrust; `arrive` coasts to a stop inside a
+  slow radius and only reverse-thrusts to scrub speed when coming in hot, so idle
+  ships *settle* on a waypoint instead of wheeling around it in little loops.
 - **attack** — lead the target by `distance / projectileSpeed`, hold at a
   standoff range (interceptors crowd closer), and fire only when the target is
   within weapon range and inside a tight firing arc.
 - **flee / depart** — steer away from the threat toward the system edge and
   request a hyperspace jump; the world despawns the ship once it's past the edge.
-- **orbit** — a slow circular holding pattern around the nearest stellar
-  object, occasionally diverting to fly close past the nearest non-hostile
-  ship (a "buzz," not an attack) before resuming the orbit.
+- **patrol** — walk an in-order circuit of the system's stellar objects; a stable,
+  purposeful beat rather than random points.
+- **orbit** — a slow, smooth circular holding pattern around the nearest stellar
+  object (the Bible's "parks in orbit around a planet").
+- **scan** — the authority's "check you out" pass: break off the beat, fly over a
+  passing ship (the player first), emit a one-shot `shipScanned` event at scan
+  range (a visible sensor sweep — cosmetic, no contraband system yet), hold
+  alongside a beat, then resume. Rate-limited so patrols don't chain-scan.
+- **escort** — hold a numbered slot in a tight triangle off the leader (leader at
+  the apex, escorts filling alternating left/right rows), matched to the leader's
+  heading and pace so the wing stays crisp while cruising; leave formation only to
+  attack when the leader engages, then fall straight back in.
 
 ## Combat — what makes "attack" real
 
@@ -146,13 +167,25 @@ Steering primitives turn a goal into a `ControlIntent`:
 `Spawner` reads a system's `SpawnTable` (its `düde`/`flët` list + average ship
 count) and keeps the system inhabited:
 
-- On entry it fills to the target population; thereafter it tops up over time as
-  ships jump out or die.
+- On entry it fills to the target population (and places one eligible fleet up
+  front, so you often arrive to find a formation already on station); thereafter
+  it tops up over time as ships jump out or die. The ambient trickle is
+  deliberately unhurried (`spawnInterval`) so a system doesn't churn like an
+  airport.
 - Dudes are picked by probability, then a ship class is picked from the dude's
   weighted table; a brain is attached matching the dude's disposition.
-- Fleets spawn a flagship plus its escorts, formed up and escorting.
-- Arrivals appear at the hyperspace edge and fly inward; departures leave past
-  the edge (`shipArrived` / `shipDeparted` events for audio/visuals).
+- **Fleets** spawn a flagship plus its escorts, formed up and escorting. They run
+  on their *own* cadence (`fleetInterval`), separate from the ambient single-ship
+  trickle — otherwise a lone-trader coin-flip won them every time and the player
+  "never saw fleets." A fleet's `flët.LinkSyst` government bands are read against
+  the system's government correctly (the index is `+128` to a resource id — an
+  earlier off-by-128 silently made every govt-banded fleet ineligible).
+- **Jump-in** isn't a standing start: an arrival tears in along its inbound
+  heading well above its cruise cap (`Ship.entryOverspeed`, applied before the
+  speed clamp in `Ship.step`) and decelerates to normal speed over ~1.3s — the
+  visible inrush that reads as "warping in," on top of the renderer's warp
+  streak. Departures leave past the edge (`shipArrived` / `shipDeparted` events
+  for audio/visuals; the renderer also draws a `shipScanned` sensor sweep).
 
 ## Wiring it up
 

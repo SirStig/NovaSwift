@@ -23,12 +23,19 @@ public struct SystemContext {
     public var jumpRadius: Double = 4200
     /// Where arriving NPCs pop in (just inside the edge).
     public var spawnRadius: Double = 3600
+    /// The government that controls this system (`sÿst.Govt`). Drives which
+    /// ships count as "the local authority" and may run the patrol beat / scan
+    /// traffic — foreign combat ships just pass through. `independentGovt`
+    /// (unowned) means anyone armed may patrol.
+    public var systemGovt: Int = independentGovt
 
     public init() {}
     public init(bodies: [StellarBody], center: Vec2 = Vec2(),
-                jumpRadius: Double = 4200, spawnRadius: Double = 3600) {
+                jumpRadius: Double = 4200, spawnRadius: Double = 3600,
+                systemGovt: Int = independentGovt) {
         self.bodies = bodies; self.center = center
         self.jumpRadius = jumpRadius; self.spawnRadius = spawnRadius
+        self.systemGovt = systemGovt
     }
 }
 
@@ -233,6 +240,7 @@ public final class Galaxy {
             : dists[min(dists.count - 1, Int((Double(dists.count - 1) * 0.8).rounded()))]
         let jumpRadius = min(6000, max(2600, ref * 1.5 + 700))
         return SystemContext(bodies: bodies, center: center,
-                             jumpRadius: jumpRadius, spawnRadius: jumpRadius * 0.85)
+                             jumpRadius: jumpRadius, spawnRadius: jumpRadius * 0.85,
+                             systemGovt: sys.government)
     }
 }

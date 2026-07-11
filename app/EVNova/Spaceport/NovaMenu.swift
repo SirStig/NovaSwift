@@ -23,32 +23,35 @@ extension View {
     }
 }
 
-/// The device-responsive scale for an authentic frame of `frame` native pixels
-/// shown in `viewport`, shared by every `scaleEffect`-based authentic screen
+/// EV Nova's design screen. Every authentic frame PICT was authored to sit on
+/// a 1024×768 game screen at 1:1 pixels — the 618×517 spaceport hub filled
+/// ~60% of it, the 263×185 bar panel ~25%, and so on.
+let novaReferenceScreen = CGSize(width: 1024, height: 768)
+
+/// The scale for an authentic frame of `frame` native pixels shown in
+/// `viewport`, shared by every `scaleEffect`-based authentic screen
 /// (`NovaMenu`, the galaxy map, the gambling panels).
 ///
-/// This replaces the old `min(viewportW/1024, viewportH/768)` formula, whose
-/// fixed 1024×768 reference made small dialogs microscopic on phones (a 263×185
-/// bar frame scaled to 0.38× on a portrait iPhone → ~4pt text) while merely
-/// capping on a 4K desktop — the same UI ranging 6× across devices. Referencing
-/// the frame's **own** size against the **actual** viewport self-corrects: a
-/// small frame gets a larger multiplier (readable everywhere), a large frame a
-/// smaller one, and everything fills a consistent fraction of the screen.
+/// Every frame renders at the **same** scale: the one the shared 1024×768 game
+/// screen gets when letterboxed into the viewport. That is what keeps relative
+/// sizes authentic — a small bar panel stays a small window over the spaceport
+/// hub instead of each frame independently blowing up to fill the viewport
+/// (which made a 263×185 bar dialog render as large as the 765×321 outfitter,
+/// and everything ~2.5× the size the original game ever showed it).
 ///
-/// - `fill`: fraction of the viewport the frame should occupy (letterbox margin).
-/// - `minScale`: readability floor — never scale below this *unless* the frame
-///   is larger than the viewport, in which case it shrinks to fit rather than
-///   clipping off-screen.
-/// - `maxScale`: ceiling so a tiny frame doesn't balloon on a huge display.
+/// - `minScale`: readability floor for small devices — a frame never renders
+///   below this *unless* it wouldn't fit the viewport at all, in which case it
+///   shrinks to fit rather than clipping off-screen. (On a phone the shared
+///   screen scale is ~0.4×, which would make dialog text unreadable; small
+///   frames get floored to 1× there and only the largest frames shrink.)
+/// - `maxScale`: ceiling so the whole UI doesn't balloon on a huge display.
 func novaFrameScale(frame: CGSize, viewport: CGSize,
-                    fill: CGFloat = 0.9, minScale: CGFloat = 1.0, maxScale: CGFloat = 2.6) -> CGFloat {
+                    minScale: CGFloat = 1.0, maxScale: CGFloat = 2.6) -> CGFloat {
     guard frame.width > 0, frame.height > 0, viewport.width > 0, viewport.height > 0 else { return 1 }
-    let fitScale = min(viewport.width / frame.width, viewport.height / frame.height)
-    let target = fill * fitScale
-    // If even `minScale` overflows the viewport (big frame, small window), fall
-    // back to `fitScale` so the frame fits instead of clipping.
-    let floor = min(minScale, fitScale)
-    return min(maxScale, max(floor, target))
+    let screenFit = min(viewport.width / novaReferenceScreen.width,
+                        viewport.height / novaReferenceScreen.height)
+    let frameFit = min(viewport.width / frame.width, viewport.height / frame.height)
+    return min(frameFit, maxScale, max(screenFit, minScale))
 }
 
 /// A full-screen EV Nova menu: draws the frame PICT from the player's data,
@@ -138,6 +141,57 @@ struct NovaButton: View {
     }
 }
 
+/// A small square authentic button (the full three-slice art at its minimum
+/// 26×25 geometry) with an SF Symbol glyph instead of a text label — for the
+/// controls the game draws as bare 25×25 `userItem`s (the Outfitter/Shipyard
+/// scroll arrows, the galaxy map's zoom −/+). The game's own art for these
+/// (PICT #134/#135 "Up arrow"/"Down Arrow") uses a vector PICT opcode our
+/// decoder doesn't handle, so the glyph stands in on the real button chrome.
+struct NovaIconButton: View {
+    let graphics: SpaceportGraphics
+    let systemName: String
+    var enabled: Bool = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: { if enabled { action() } }) { Color.clear }
+            .buttonStyle(NovaIconButtonStyle(graphics: graphics, systemName: systemName, enabled: enabled))
+            .disabled(!enabled)
+    }
+}
+
+struct NovaIconButtonStyle: ButtonStyle {
+    let graphics: SpaceportGraphics
+    let systemName: String
+    let enabled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let state: SpaceportGraphics.ButtonState =
+            !enabled ? .grey : (configuration.isPressed ? .clicked : .normal)
+        let slices = graphics.buttonSlices(state)
+        HStack(spacing: 0) {
+            slice(slices.left)
+            slice(slices.right)
+        }
+        .frame(width: 26, height: 25)
+        .overlay(
+            Image(systemName: systemName)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(enabled ? .white : Color(white: 0.15))
+        )
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder private func slice(_ image: CGImage?) -> some View {
+        if let image {
+            Image(decorative: image, scale: 1).interpolation(.high).resizable()
+                .frame(width: 13, height: 25)
+        } else {
+            Color(white: 0.2).frame(width: 13, height: 25)
+        }
+    }
+}
+
 struct NovaButtonStyle: ButtonStyle {
     let graphics: SpaceportGraphics
     let title: String
@@ -155,8 +209,12 @@ struct NovaButtonStyle: ButtonStyle {
         }
         .frame(width: 26 + width, height: 25)
         .overlay(
+            // Geneva 12, fixed in frame pixels like all authentic-screen text
+            // (verified against the vendored NovaJS `button.ts` text style).
+            // `.novaFont(.button)` is for native chrome — its 15pt base and
+            // 13pt floor overflow a 25px-tall authentic button.
             Text(title)
-                .novaFont(.button)
+                .font(.custom(NovaFontRole.button.family, size: 12))
                 .foregroundStyle(labelColor(state))
         )
         .contentShape(Rectangle())

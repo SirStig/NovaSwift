@@ -30,16 +30,22 @@ struct LauncherView: View {
             .padding(.vertical, 28)
         }
         .novaResponsive()
-        .sheet(item: $sheet) { which in
-            NavigationStack {
+        .overlay { dialogOverlay }
+    }
+
+    /// Full-screen dialog overlay (not a macOS `.sheet`, whose fixed card would
+    /// double the panel) — matches `AuthenticMainMenuView.dialogOverlay`.
+    @ViewBuilder private var dialogOverlay: some View {
+        if let which = sheet {
+            Group {
                 switch which {
-                case .plugins: PluginsView()
-                case .settings: SettingsView()
-                case .importData: ImportDataView()
-                case .about: AboutView()
+                case .plugins:    PluginsView(onClose: { sheet = nil })
+                case .settings:   SettingsView(onClose: { sheet = nil })
+                case .importData: ImportDataView(onClose: { sheet = nil })
+                case .about:      AboutView(onClose: { sheet = nil })
                 }
             }
-            .frame(minWidth: 400, minHeight: 500)
+            .transition(.opacity)
             .preferredColorScheme(.dark)
         }
     }
