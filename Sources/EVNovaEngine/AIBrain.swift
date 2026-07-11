@@ -617,46 +617,70 @@ public final class AIBrain {
 
     // MARK: Steering primitives (each returns a ControlIntent)
 
-    /// Velocity-compensated steering — the one primitive behind every non-combat
-    /// navigation state. Flight here is pure Newtonian (no drag), so the old
-    /// "point the nose at the target and thrust" made a ship with any built-up
-    /// momentum slide off-course and then loop back to re-correct — the drift
-    /// the player sees. Instead we steer along the *difference* between the
-    /// velocity we want and the velocity we have:
+    /// Steering — the one primitive behind every non-combat navigation state.
+    /// Flight here is pure Newtonian (no drag), so naive "point the nose at the
+    /// target and thrust" lets a ship with any built-up momentum slide off-course
+    /// and loop back to re-correct — the drift the player sees. An earlier version
+    /// of this fix steered along the raw *difference* between the velocity we want
+    /// and the velocity we have, but that blends two independently-changing
+    /// quantities (our shrinking distance and our own thrust-shifted velocity)
+    /// into one heading — close to a target, that blend swings fast enough that
+    /// the turn-rate-limited nose can never catch it and just spins in place
+    /// (confirmed against real ship stats: an Argosy-class hull span 500°+ of
+    /// nose rotation approaching a planet while its velocity barely turned at
+    /// all — "angled one way, flying towards another"). Two stable, slow-changing
+    /// headings instead of one jumpy blended one:
     ///
-    ///   • cruising dead-on at the target → the correction is ~0, so we just
-    ///     coast in a straight line (no thrust, no twitch);
-    ///   • sliding sideways → the correction tilts back onto the course line and
-    ///     cancels the drift, instead of the nose flip-flopping between "face the
-    ///     point" and "face reverse-velocity to brake";
-    ///   • overshooting an arrival → `slowRadius > 0` tapers the desired speed to
-    ///     zero as we close, so the correction becomes a smooth brake and the
-    ///     ship *settles* onto the point rather than blasting past it (the
-    ///     overshoot that made traders look like they flew through a system).
-    ///
-    /// This is what lets EV Nova's NPCs fly clean lines without cheating the
-    /// physics: they simply steer their momentum, not just their nose.
+    ///   • normally: aim at the point, nudged opposite our own cross-track drift
+    ///     so the path straightens instead of curving in — a smooth, position-
+    ///     driven aim that only shifts as fast as we actually move;
+    ///   • badly overshooting an arrival (closing much faster than this range
+    ///     calls for): aim retrograde — straight opposite our *current* velocity
+    ///     — a heading that only drifts as fast as thrust itself changes it, so
+    ///     the brake is a clean flip-and-burn instead of a chase.
     private func navigate(_ me: Ship, to point: Vec2, slowRadius: Double = 0) -> ControlIntent {
         var intent = ControlIntent()
         let toTarget = point - me.position
         let dist = toTarget.length
+        guard dist > 1 else { intent.desiredHeading = me.angle; return intent }
+        let dir = toTarget * (1 / dist)
         let cruise = me.stats.maxSpeed
+        let along = me.velocity.dot(dir)   // speed component closing on the point
+        let speed = me.velocity.length
 
-        // The velocity we'd like to have: full cruise straight at the point,
-        // easing down inside the slow zone so arrivals brake instead of overshoot.
-        let desiredSpeed = (slowRadius > 0 && dist < slowRadius) ? cruise * (dist / slowRadius) : cruise
-        let desiredVel = dist > 1 ? toTarget * (desiredSpeed / dist) : Vec2()
+        // A sluggish turner can't just start braking at a fixed distance — the
+        // 180° flip to point retrograde itself eats runway (it coasts forward the
+        // whole time it's turning), so a slow-turning hull needs to start easing
+        // off much further out than a nimble one or it'll still be mid-turn when
+        // it reaches the point. Budget the flip's coast distance plus the actual
+        // braking distance, and widen the slow zone to whichever of that or the
+        // caller's `slowRadius` is bigger — so the desired-speed taper below
+        // actually gives it enough room to execute. Sized off `cruise`, the
+        // ship's fixed top speed, not the current (shrinking-as-we-brake) `along`
+        // — basing it on a live, decelerating value would shrink the zone as we
+        // slow down, which can flag us as "out of the zone" again mid-brake and
+        // flip straight back to full-cruise thrust: an oscillation that repeatedly
+        // re-triggers the flip, the actual cause of the endless-spin bug.
+        let flipTime = Double.pi / max(me.stats.turnRate, 0.05)
+        let stopDistance = cruise * flipTime + (cruise * cruise) / (2 * max(me.stats.acceleration, 1))
+        let effectiveSlowRadius = slowRadius > 0 ? max(slowRadius, stopDistance) : 0
+        let desiredSpeed = (effectiveSlowRadius > 0 && dist < effectiveSlowRadius)
+            ? cruise * (dist / effectiveSlowRadius) : cruise
 
-        // Thrust along the correction (want − have), not straight at the target.
-        let correction = desiredVel - me.velocity
-        let deadband = cruise * 0.03    // ignore trivial corrections so we don't jitter on course
-        if correction.length > deadband {
-            let heading = correction.angle
-            intent.desiredHeading = heading
-            if abs(angleDelta(from: me.angle, to: heading)) < .pi / 2 { intent.thrust = true }
-        } else {
-            // On course at speed — hold the nose toward the point and coast.
-            intent.desiredHeading = dist > 1 ? toTarget.angle : me.angle
+        if effectiveSlowRadius > 0, dist < effectiveSlowRadius, along > desiredSpeed + cruise * 0.15, speed > cruise * 0.1 {
+            let retro = (me.velocity * -1).angle
+            intent.desiredHeading = retro
+            if abs(angleDelta(from: me.angle, to: retro)) < .pi / 2 { intent.thrust = true }
+            return intent
+        }
+
+        let crossVel = me.velocity - dir * along
+        let aim = toTarget - crossVel * 0.6
+        let heading = aim.length > 1 ? aim.angle : dir.angle
+        intent.desiredHeading = heading
+        let deadband = cruise * 0.03    // ignore trivial shortfalls so we don't jitter on course
+        if along < desiredSpeed - deadband, abs(angleDelta(from: me.angle, to: heading)) < .pi / 2 {
+            intent.thrust = true
         }
         return intent
     }

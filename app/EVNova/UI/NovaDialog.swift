@@ -185,7 +185,7 @@ struct NovaTextField: View {
 
     var body: some View {
         TextField("", text: $text, prompt: Text(placeholder)
-            .font(.custom("Geneva", size: NovaFontRole.body.baseSize)).foregroundColor(.secondary))
+            .font(.custom(NovaFontRole.body.family, size: NovaFontRole.body.baseSize)).foregroundColor(.secondary))
             .textFieldStyle(.plain)
             .novaFont(.body)
             .foregroundStyle(.white)

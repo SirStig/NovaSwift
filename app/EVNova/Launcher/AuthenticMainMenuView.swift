@@ -17,6 +17,9 @@ struct MainMenuAssets {
         let size: CGSize
         /// Top-left position in the 1024×768 design space (from the cölr resource).
         let origin: CGPoint
+        /// This button's frame from the main-screen rollover sheet (spïn 607) —
+        /// shown centred at cölr's `rollover` anchor while the button is hovered.
+        let rolloverIcon: CGImage?
     }
     let background: CGImage?
     let logo: CGImage?
@@ -26,6 +29,10 @@ struct MainMenuAssets {
     /// layout) — nil only if the resource is missing, in which case callers fall
     /// back to hand-coded values that mirror the base game's cölr contents.
     let colr: ColrRes?
+    /// The main-screen rollover sheet's 7th frame — the gold "ATMOS" wordmark —
+    /// shown at rest when no button is hovered.
+    let rolloverDefault: CGImage?
+    let rolloverSize: CGSize
 
     // Fallback button top-left positions, used only when `game.colr()` can't be
     // decoded — matches cölr #128's Button1X/Y..Button6X/Y in the base game
@@ -50,6 +57,19 @@ struct MainMenuAssets {
             return s.makeCGImage()
         }
 
+        // Main-screen rollover images (spïn 607 → rlëD 8020 in the base game): a
+        // 7-frame sheet of red silhouette icons, one per button in the same
+        // Button1..6 order as cölr's buttonPositions/spïn 600-605 (frame 2 is a
+        // literal "EXIT" icon, which lines up exactly with the Quit button at
+        // index 2 — confirming the ordering), plus a 7th frame that's the gold
+        // "ATMOS" wordmark shown when nothing is hovered.
+        var rolloverFrames: [CGImage] = []
+        var rolloverSize = CGSize(width: 136, height: 98)
+        if let rolloverSpin = game.spin(607), let sheet = rle(rolloverSpin.spriteID) {
+            rolloverFrames = (0..<sheet.frameCount).compactMap { sheet.frameCGImage($0) }
+            rolloverSize = CGSize(width: sheet.frameWidth, height: sheet.frameHeight)
+        }
+
         let specs: [(MainMenuAction, Int)] = [
             (.newPilot, 8050), (.openPilot, 8051), (.quitNova, 8052),
             (.enterShip, 8053), (.setPrefs, 8054), (.aboutNova, 8055),
@@ -60,7 +80,8 @@ struct MainMenuAssets {
                   let n = sheet.frameCGImage(0), let p = sheet.frameCGImage(1) else { continue }
             buttons.append(.init(action: spec.0, normal: n, pressed: p,
                                  size: CGSize(width: sheet.frameWidth, height: sheet.frameHeight),
-                                 origin: positions[min(i, positions.count - 1)]))
+                                 origin: positions[min(i, positions.count - 1)],
+                                 rolloverIcon: i < rolloverFrames.count ? rolloverFrames[i] : nil))
         }
         guard !buttons.isEmpty else { return nil }
 
@@ -92,7 +113,9 @@ struct MainMenuAssets {
             }
         }
 
-        return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons, colr: colr)
+        return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons, colr: colr,
+                              rolloverDefault: rolloverFrames.count > 6 ? rolloverFrames[6] : rolloverFrames.last,
+                              rolloverSize: rolloverSize)
     }
 
 }
@@ -103,6 +126,7 @@ struct AuthenticMainMenuView: View {
 
     @State private var appeared = false
     @State private var sheet: Sheet?
+    @State private var hoveredAction: MainMenuAction?
     private enum Sheet: String, Identifiable {
         case newPilot, openPilot, settings, about, plugins, importData
         var id: String { rawValue }
@@ -149,6 +173,7 @@ struct AuthenticMainMenuView: View {
                 }
 
                 buttons(layout: layout)
+                rolloverIndicator(layout: layout)
                 pilotStatus(layout: layout)
                 modernExtras   // port-added features not in the original menu
             }
@@ -215,7 +240,12 @@ struct AuthenticMainMenuView: View {
                     infoField("Ship Name", save.snapshot.shipName.isEmpty ? "—" : save.snapshot.shipName, bright, dim, sc)
                     infoField("Ship Class", game?.ship(save.player.shipType)?.displayName ?? "—", bright, dim, sc)
                 }
-                .frame(width: 150 * sc, alignment: .leading)
+                // Trailing, not leading: this box's far edge is away from the
+                // ship icon, so anchoring the (internally left-aligned) text
+                // block to the near/right edge instead keeps it flanking the
+                // ship rather than pinned to the outer edge of a fixed-width
+                // box regardless of how short the text is.
+                .frame(width: 150 * sc, alignment: .trailing)
 
                 pilotShip(shipType: save.player.shipType)
                     .frame(width: 88 * sc, height: 54 * sc)
@@ -286,6 +316,34 @@ struct AuthenticMainMenuView: View {
         }
     }
 
+    /// The main menu's centre indicator, at cölr's real `RolloverX`/`RolloverY`
+    /// anchor (fallback (444, 465) matches the base game's real cölr #128
+    /// values) — the gold "ATMOS" wordmark at rest, swapping to the hovered
+    /// button's red silhouette icon (spïn 607) with a crossfade + scale-in as
+    /// the pointer moves between buttons.
+    @ViewBuilder private func rolloverIndicator(layout: NovaLayout) -> some View {
+        let origin = assets.colr?.rollover ?? CGPoint(x: 444, y: 465)
+        let size = assets.rolloverSize
+        ZStack {
+            if let icon = currentRolloverIcon {
+                Image(decorative: icon, scale: 1)
+                    .resizable().interpolation(.medium)
+                    .transition(.opacity.combined(with: .scale(scale: 0.82)))
+                    .id(hoveredAction)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: hoveredAction)
+        .novaPlace(layout, x: origin.x, y: origin.y, w: size.width, h: size.height)
+        .opacity(appeared ? 1 : 0)
+        .animation(.easeOut(duration: 0.4).delay(0.55), value: appeared)
+    }
+
+    private var currentRolloverIcon: CGImage? {
+        guard let hoveredAction, let art = assets.buttons.first(where: { $0.action == hoveredAction })
+        else { return assets.rolloverDefault }
+        return art.rolloverIcon ?? assets.rolloverDefault
+    }
+
     /// `NovaColor` (the `cölr` resource's raw 0x00RRGGBB fields) as a SwiftUI
     /// `Color` — same conversion AuthenticHUDView.swift uses for `IntfRes` colors.
     private func color(_ c: NovaColor) -> Color {
@@ -327,7 +385,14 @@ struct AuthenticMainMenuView: View {
     private func buttons(layout: NovaLayout) -> some View {
         ForEach(Array(assets.buttons.enumerated()), id: \.offset) { i, art in
             MenuSpriteButton(art: art,
-                             onRollover: { model.audio.play(.uiSelect) },
+                             onHoverChange: { isHovering in
+                                 if isHovering {
+                                     if hoveredAction != art.action { model.audio.play(.uiSelect) }
+                                     hoveredAction = art.action
+                                 } else if hoveredAction == art.action {
+                                     hoveredAction = nil
+                                 }
+                             },
                              action: { activate(art.action) })
                 .novaPlace(layout, origin: art.origin, size: art.size)
                 .opacity(appeared ? 1 : 0)
@@ -357,7 +422,7 @@ struct AuthenticMainMenuView: View {
 /// highlighted frame on hover (rollover) or press.
 private struct MenuSpriteButton: View {
     let art: MainMenuAssets.ButtonArt
-    var onRollover: () -> Void = {}
+    var onHoverChange: (Bool) -> Void = { _ in }
     let action: () -> Void
     @State private var hovering = false
     @State private var pressing = false
@@ -372,7 +437,7 @@ private struct MenuSpriteButton: View {
             .contentShape(Rectangle())
             .onHover { h in
                 hovering = h
-                if h { onRollover() }
+                onHoverChange(h)
             }
             .gesture(
                 DragGesture(minimumDistance: 0)

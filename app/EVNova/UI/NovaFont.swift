@@ -1,16 +1,17 @@
 import SwiftUI
+import CoreText
 
 /// EV Nova's typography, centralized: which of the game's two original fonts
 /// (Charcoal for chrome/titles, Geneva for everything else — the classic Mac OS 8
 /// "Charcoal" appearance pairing the game itself used) a role renders in, and how
 /// big it gets on the device in front of the player.
 ///
-/// **Charcoal does not ship with macOS or iOS**; Geneva does. So when the
-/// player's data hasn't been imported yet, `Font.custom("Charcoal", …)` silently
-/// resolves to the system font while body text still looks right — which is
-/// exactly why "the fonts seem off" reads as a titles-only problem.
-/// `GameDataController.registerFonts(from:)` registers both from the imported
-/// data; nothing here needs to guard for it.
+/// Charcoal and Geneva are Apple's copyrighted fonts, so the app never bundles
+/// them — `GameDataController.registerFonts(from:)` registers the genuine
+/// article from the player's own imported data. Until then, `family` falls
+/// back to `NovaFontFallback`'s bundled free lookalikes (registered at launch
+/// by `GameDataController.registerBundledFallbackFonts()`) rather than the
+/// plain system font, so chrome and titles still look intentional.
 enum NovaFontRole {
     case title      // Charcoal — large screen/app titles
     case heading    // Charcoal — dialog titles, section headers
@@ -21,8 +22,8 @@ enum NovaFontRole {
 
     var family: String {
         switch self {
-        case .title, .heading: return "Charcoal"
-        case .body, .caption, .button, .hud: return "Geneva"
+        case .title, .heading: return NovaFontFallback.resolve("Charcoal", fallback: NovaFontFallback.chrome)
+        case .body, .caption, .button, .hud: return NovaFontFallback.resolve("Geneva", fallback: NovaFontFallback.text)
         }
     }
 
@@ -62,6 +63,43 @@ enum NovaFontRole {
 
     /// The largest size, so a 4K display doesn't render 50pt body copy.
     var maximumSize: CGFloat { baseSize * 1.6 }
+}
+
+/// The free, SIL-OFL-licensed fonts bundled in `Resources/Fonts/` as stand-ins
+/// for Charcoal/Geneva — chosen for family resemblance, not pixel-identity:
+/// **Rubik** (corner-rounded grotesque) for Charcoal's chrome/titles, and
+/// **Arimo** (a Helvetica/Arial-lineage redraw — the same substitution
+/// cross-platform font tables historically used for Geneva itself) for body
+/// text. Registered by `GameDataController.registerBundledFallbackFonts()`.
+enum NovaFontFallback {
+    static let chrome = "Rubik"
+    static let text = "Arimo"
+    static let bundledFontFileNames = [chrome, text]
+
+    /// `family` if it's actually registered (real imported font or, first
+    /// launch, one of these bundled fallbacks), else `fallback`.
+    static func resolve(_ family: String, fallback: String) -> String {
+        NovaFontAvailability.isAvailable(family) ? family : fallback
+    }
+}
+
+/// Whether a font family resolves to itself under CoreText rather than
+/// silently substituting — the only reliable way to tell if it's registered.
+/// Cached because `NovaFontRole.family` is read on every render; invalidated
+/// by `GameDataController.registerFonts`/`registerBundledFallbackFonts` after
+/// registering something new.
+enum NovaFontAvailability {
+    private static var cache: [String: Bool] = [:]
+
+    static func isAvailable(_ family: String) -> Bool {
+        if let cached = cache[family] { return cached }
+        let font = CTFontCreateWithName(family as CFString, 12, nil)
+        let resolved = (CTFontCopyFamilyName(font) as String) == family
+        cache[family] = resolved
+        return resolved
+    }
+
+    static func reset() { cache.removeAll() }
 }
 
 private struct NovaTextScaleKey: EnvironmentKey {

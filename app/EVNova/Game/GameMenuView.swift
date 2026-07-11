@@ -20,7 +20,9 @@ struct GameMenuView: View {
 
     @State private var showSettings = false
     @State private var storyModel: StoryGuideModel?
-    @State private var storyTab: StoryGuideView.Tab = .pilot
+    @State private var storyTab: StoryGuideView.Tab = .story
+    @State private var showPlayerInfo = false
+    @State private var showMissions = false
     @State private var info: String?
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
@@ -39,6 +41,27 @@ struct GameMenuView: View {
                     Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
                 }
                 .transition(.move(edge: .leading).combined(with: .opacity))
+
+            // The authentic 4-tab player-info dialog (DITL #1017), stacked over
+            // the menu like the game's own dialogs.
+            if showPlayerInfo, let graphics = model.uiGraphics {
+                Color.black.opacity(0.5).ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { showPlayerInfo = false }
+                    .transition(.opacity)
+                PlayerInfoView(graphics: graphics, pilot: model.pilot,
+                               onJettison: { jettisonCargo() },
+                               onDone: { showPlayerInfo = false })
+                    .transition(.opacity)
+            }
+
+            // The authentic Mission Info dialog (DITL #1012 / PICT #8517):
+            // active missions, their destinations, and Abort Mission.
+            if showMissions, let graphics = model.uiGraphics, let game = model.data.game {
+                MissionInfoView(graphics: graphics, game: game, pilot: model.pilot,
+                                onClose: { showMissions = false })
+                    .transition(.opacity)
+            }
         }
         .novaResponsive()
         .sheet(isPresented: $showSettings) {
@@ -70,7 +93,14 @@ struct GameMenuView: View {
                 VStack(spacing: 2) {
                     row("Resume", "play.fill", tint: amber) { onResume() }
                     row("Galaxy Map", "map.fill") { onResume(); onOpenMap() }
-                    row("Pilot Info", "person.crop.circle") { openStoryGuide(.pilot) }
+                    row("Pilot Info", "person.crop.circle") {
+                        if model.uiGraphics != nil { showPlayerInfo = true }
+                        else { info = "Import your EV Nova data to view pilot info." }
+                    }
+                    row("Missions", "list.bullet.clipboard") {
+                        if model.uiGraphics != nil, model.data.game != nil { showMissions = true }
+                        else { info = "Import your EV Nova data to view missions." }
+                    }
                     row("Story Map", "point.3.connected.trianglepath.dotted") {
                         openStoryGuide(.map)
                     }
@@ -140,6 +170,14 @@ struct GameMenuView: View {
     /// runs the real `StoryEngine` abort (applying the mission's OnAbort bits),
     /// writes the mutated pilot back to the live store, saves, and refreshes the
     /// panel so the mission drops off the list.
+    /// Dump the hold (the player-info dialog's "Jettison Cargo"). Clears the
+    /// persisted pilot's cargo immediately; the live ship's hold syncs from the
+    /// pilot on the next takeoff/jump rebuild.
+    private func jettisonCargo() {
+        model.pilot.state.cargo = [:]
+        model.pilot.save()
+    }
+
     private func abortMission(_ missionID: Int) {
         guard let game = model.data.game else { return }
         let engine = StoryEngine(game: game, player: model.pilot.state)

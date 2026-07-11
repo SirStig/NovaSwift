@@ -632,6 +632,7 @@ public struct NovaGame {
     /// last of its 7-id block. Callers fall back to `-1`/`-2` if it's absent.
     public func nebulaImageID(index: Int) -> Int { 9502 + 7 * index }
     public func spob(_ id: Int) -> SpobRes? { resources.resource(NovaType.spob, id).map(SpobRes.init) }
+    public func spobs() -> [SpobRes] { resources.resources(of: NovaType.spob).map(SpobRes.init) }
 
     // AI-driving resources.
     public func govt(_ id: Int) -> GovtRes? { resources.resource(NovaType.govt, id).map(GovtRes.init) }
@@ -766,6 +767,20 @@ public struct NovaGame {
             return try? RLED.decode(rle)
         }
         if let rle = resources.resource(NovaType.rleD, spob.graphicSpinID)?.data {
+            return try? RLED.decode(rle)
+        }
+        return nil
+    }
+
+    /// Resolve a weapon's shot graphic (`wëap.graphicSpinID` → `spïn` → `rlëD`)
+    /// into a sprite sheet — the real torpedo/rocket/bolt animation, so shots
+    /// draw their authored art instead of a generic dot. Uncached (the renderer
+    /// caches the decoded textures per graphic id).
+    public func weaponSprite(spinID: Int) -> SpriteSheet? {
+        if let spin = spin(spinID), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
+            return try? RLED.decode(rle)
+        }
+        if let rle = resources.resource(NovaType.rleD, spinID)?.data {
             return try? RLED.decode(rle)
         }
         return nil

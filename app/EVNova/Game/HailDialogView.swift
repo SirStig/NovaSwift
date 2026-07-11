@@ -32,6 +32,11 @@ struct HailDialogView: View {
     let assistEnabled: Bool
     var onGreetings: () -> Void
     var onRequestAssistance: () -> Void
+    /// Planet-hail actions: ask for landing clearance (shown in place of
+    /// Greetings when clearance isn't granted) and demand tribute (attempt to
+    /// dominate the stellar). Default no-ops so ship hails ignore them.
+    var onRequestLanding: () -> Void = {}
+    var onDemandTribute: () -> Void = {}
     var onClose: () -> Void
 
     private static let shipFrameID = 8511    // PICT "Communications" (DITL #1007)
@@ -109,9 +114,11 @@ struct HailDialogView: View {
     @ViewBuilder
     private func planetContent(_ space: NovaSpace, _ graphics: SpaceportGraphics) -> some View {
         if let portrait {
+            // Fill the 310×283 comm box edge-to-edge (the landscape is a wide
+            // panorama; `.fit` letterboxed it and left the box mostly empty).
             Image(decorative: portrait, scale: 1)
-                .resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
-                .frame(width: 310, height: 283)
+                .resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+                .frame(width: 310, height: 283).clipped()
                 .novaPlace(space, -48, -142.5)    // item 4: (222,5)-(532,288) 310×283
         }
         NovaText(state.responseText, size: 10, width: 196)
@@ -119,14 +126,28 @@ struct HailDialogView: View {
         identifierText(width: 116)
             .novaPlace(space, -254, -65.5)        // item 5: (16,82)-(136,132) 120×50
 
-        // Items 1/2/0 top-to-bottom (146×26 each, stacked left column, x=27). Only
-        // the top and bottom slots are wired (no "assist" for a planet) — the
-        // middle slot is left empty rather than filled with an unused button.
-        responseButton("Greetings", width: 120, action: onGreetings, graphics: graphics)
-            .novaPlace(space, -243, 36.5)         // item 1 (top): (27,184)-(173,210)
-        responseButton("Close Channel", width: 120, action: onClose, graphics: graphics)
+        // Items 1/2/0 top-to-bottom (146×26 each, stacked left column, x=27):
+        //  • top: Greetings, or "Request Landing" when clearance isn't granted
+        //  • middle: Demand Tribute — the forceful-takeover option
+        //  • bottom: Close Channel
+        if planetLandable {
+            responseButton(graphics.buttonLabel(SpaceportLabel.greetings, fallback: "Greetings"),
+                           width: 120, action: onGreetings, graphics: graphics)
+                .novaPlace(space, -243, 36.5)     // item 1 (top): (27,184)-(173,210)
+        } else {
+            responseButton(graphics.buttonLabel(SpaceportLabel.requestLanding, fallback: "Request Landing"),
+                           width: 120, action: onRequestLanding, graphics: graphics)
+                .novaPlace(space, -243, 36.5)
+        }
+        responseButton(graphics.buttonLabel(SpaceportLabel.demandTribute, fallback: "Demand Tribute"),
+                       width: 120, action: onDemandTribute, graphics: graphics)
+            .novaPlace(space, -243, 66.5)         // item 2 (middle): (27,214)-(173,240)
+        responseButton(graphics.buttonLabel(SpaceportLabel.closeChannel, fallback: "Close Channel"),
+                       width: 120, action: onClose, graphics: graphics)
             .novaPlace(space, -243, 96.5)         // item 0 (bottom): (27,244)-(173,270)
     }
+
+    private var planetLandable: Bool { state.landable }
 
     // MARK: - Shared pieces
 

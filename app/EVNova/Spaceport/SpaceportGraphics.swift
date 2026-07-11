@@ -191,4 +191,20 @@ enum SpaceportLabel {
     static let tradeCenter = 7, outfitter = 8, shipyard = 9, bar = 10
     static let gamble = 11, holovid = 12, hireEscort = 13, bet1000 = 14, bet5000 = 15
     static let missionBBS = 16
+    // Player-info dialog (DITL #1017): its four tab buttons, plus the controls
+    // that share this list (verified in the same raw dump: 29 Cancel, 35 Abort,
+    // 36–39 General/Cargo/Extras/Honors, 48 Info, 61 Jettison Cargo).
+    static let abort = 35
+    static let infoGeneral = 36, infoCargo = 37, infoExtras = 38, infoHonors = 39
+    static let info = 48
+    static let jettisonCargo = 61
+    // Communication buttons, indices verified by re-parsing STR# 150 with the
+    // real Pascal-string parser (count=61): 21 Close Channel, 22 Greetings, 23
+    // Request Assistance, 24 Offer Bribe, 45 Demand Tribute. (An earlier guess
+    // of 15/16/39 was off — those are Bet 5000 / Mission BBS / Honors, which is
+    // exactly what the planet-hail buttons wrongly showed.) No dedicated
+    // "Request Landing" entry exists, so that button uses a literal fallback.
+    static let closeChannel = 21, greetings = 22, requestAssistance = 23
+    static let offerBribe = 24, demandTribute = 45
+    static let requestLanding = -1   // no STR# entry — literal fallback only
 }

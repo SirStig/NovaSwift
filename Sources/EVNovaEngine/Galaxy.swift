@@ -65,8 +65,9 @@ public struct ShipSpec {
     public let ionizeMax: Double
     /// `shïp.Deionize`, converted to charge points dissipated per second.
     public let deionizePerSec: Double
-    /// (weapon spec, ammo) mounts. A stock weapon with count N becomes N mounts.
-    public let mounts: [(spec: WeaponSpec, ammo: Int)]
+    /// (weapon spec, ammo, count) — one entry per weapon *type*; `count` is how
+    /// many copies are fitted (EV Nova groups by type, not by barrel).
+    public let mounts: [(spec: WeaponSpec, ammo: Int, count: Int)]
     /// `snd ` id for this hull's death explosion (final explosion, falling back
     /// to the breakup explosion), or nil if neither resolves to a sound.
     public let explosionSoundID: Int?
@@ -86,9 +87,14 @@ extension Galaxy {
         func conv(_ pts: [ShanExitPoint]) -> [Vec2] {
             pts.map { Vec2(Double($0.x), Double($0.y)) }
         }
+        func zs(_ pts: [ShanExitPoint]) -> [Double] {
+            pts.map { Double($0.z) }
+        }
         return ShipExitPoints(
             gun: conv(shan.gunPoints), turret: conv(shan.turretPoints),
             guided: conv(shan.guidedPoints), beam: conv(shan.beamPoints),
+            gunZ: zs(shan.gunPoints), turretZ: zs(shan.turretPoints),
+            guidedZ: zs(shan.guidedPoints), beamZ: zs(shan.beamPoints),
             upCompress: (x: Double(shan.upCompress.x), y: Double(shan.upCompress.y)),
             downCompress: (x: Double(shan.downCompress.x), y: Double(shan.downCompress.y)))
     }
@@ -170,12 +176,13 @@ public final class Galaxy {
                               turnRate: s.turnRate, rotationFrames: frames, tuning: flightTuning)
         let radius: Double = game.shan(id).map { max(10, Double(max($0.baseWidth, $0.baseHeight)) / 2) } ?? 18
 
-        var mounts: [(WeaponSpec, Int)] = []
+        var mounts: [(WeaponSpec, Int, Int)] = []
         for w in s.weapons {
             guard let spec = weaponSpec(w.id) else { continue }
-            // A hull lists a weapon once with a count; make that many mounts.
-            let n = max(1, min(w.count, 8))
-            for _ in 0..<n { mounts.append((spec, w.ammo > 0 ? max(1, w.ammo / n) : -1)) }
+            // One mount per weapon *type* (EV Nova groups by type); `count` copies
+            // stagger their fire and cycle exit points. Ammo pools across the group.
+            let n = max(1, min(w.count, 12))
+            mounts.append((spec, w.ammo > 0 ? w.ammo : -1, n))
         }
 
         let spec = ShipSpec(
@@ -214,7 +221,7 @@ public final class Galaxy {
         ship.maxArmor = spec.maxArmor; ship.armor = spec.maxArmor
         ship.shieldRechargePerSec = spec.shieldRechargePerSec
         ship.armorRechargePerSec = spec.armorRechargePerSec
-        ship.weapons = spec.mounts.map { WeaponMount(spec: $0.spec, ammo: $0.ammo) }
+        ship.weapons = spec.mounts.map { WeaponMount(spec: $0.spec, ammo: $0.ammo, count: $0.count) }
         ship.combatStrength = Double(max(1, spec.strength))
         ship.disableArmorFraction = spec.disableArmorFraction
         ship.fleeWhenOutOfAmmo = spec.fleeWhenOutOfAmmo

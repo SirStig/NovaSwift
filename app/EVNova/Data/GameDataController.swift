@@ -28,6 +28,12 @@ final class GameDataController: ObservableObject {
     private(set) var game: NovaGame?
     private var loaded = false
 
+    init() {
+        // So titles/chrome look intentional (not system-font-default) even
+        // before any game data is imported.
+        Self.registerBundledFallbackFonts()
+    }
+
     // MARK: Locations
 
     private var appSupport: URL {
@@ -79,19 +85,40 @@ final class GameDataController: ObservableObject {
 
     /// Registers any imported font files with CoreText for this process, so
     /// `Font.custom("Charcoal"/"Geneva", size:)` resolves to the game's actual
-    /// fonts instead of silently falling back to a system font. Safe to call
-    /// repeatedly (e.g. on every `reload()`) — duplicate registration errors
-    /// are expected and ignored.
+    /// fonts instead of the bundled free lookalikes (see `registerBundledFallbackFonts()`).
+    /// Safe to call repeatedly (e.g. on every `reload()`) — duplicate
+    /// registration errors are expected and ignored.
     nonisolated static func registerFonts(from directory: URL) {
-        for url in discoverFontFiles(in: directory) {
-            var error: Unmanaged<CFError>?
-            let ok = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
-            if !ok, let error {
-                let nsError = error.takeUnretainedValue() as Error as NSError
-                // kCTFontManagerErrorAlreadyRegistered — expected on repeat calls.
-                if nsError.code != CTFontManagerError.alreadyRegistered.rawValue {
-                    Log.data.error("Font registration failed for \(url.lastPathComponent, privacy: .public): \(nsError, privacy: .public)")
-                }
+        for url in discoverFontFiles(in: directory) { registerFont(at: url) }
+        NovaFontAvailability.reset()
+    }
+
+    /// Registers the free, SIL-OFL-licensed fonts bundled with the app
+    /// (`Resources/Fonts/`) — close visual stand-ins for Charcoal/Geneva, used
+    /// until the player imports their own copy of the real fonts. See
+    /// `NovaFontFallback` for the family-name mapping. Called once at launch;
+    /// safe to call repeatedly.
+    nonisolated static func registerBundledFallbackFonts() {
+        for name in NovaFontFallback.bundledFontFileNames {
+            guard let url = Bundle.main.url(forResource: name, withExtension: "ttf")
+                ?? Bundle.main.url(forResource: name, withExtension: "ttf", subdirectory: "Fonts")
+            else {
+                Log.data.error("Bundled fallback font \(name, privacy: .public).ttf not found in app bundle")
+                continue
+            }
+            registerFont(at: url)
+        }
+        NovaFontAvailability.reset()
+    }
+
+    private nonisolated static func registerFont(at url: URL) {
+        var error: Unmanaged<CFError>?
+        let ok = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+        if !ok, let error {
+            let nsError = error.takeUnretainedValue() as Error as NSError
+            // kCTFontManagerErrorAlreadyRegistered — expected on repeat calls.
+            if nsError.code != CTFontManagerError.alreadyRegistered.rawValue {
+                Log.data.error("Font registration failed for \(url.lastPathComponent, privacy: .public): \(nsError, privacy: .public)")
             }
         }
     }

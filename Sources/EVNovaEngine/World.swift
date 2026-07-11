@@ -125,31 +125,21 @@ public final class Ship {
     public var armor: Double = 100
     public var shieldRechargePerSec: Double = 8
     public var armorRechargePerSec: Double = 0
-    public var weapons: [WeaponMount] = [] {
-        didSet { assignExitIndices() }
-    }
-    /// Spread each weapon's mounts across the hull's exit points of its type:
-    /// the Nth mount of a given `exitType` takes hardpoint N (wrapped), so
-    /// simultaneous barrels leave distinct points instead of stacking on one.
-    private func assignExitIndices() {
-        var next: [WeaponExitType: Int] = [:]
-        for mount in weapons {
-            let t = mount.spec.exitType
-            let i = next[t, default: 0]
-            mount.exitIndex = i
-            next[t] = i + 1
-        }
-    }
+    public var weapons: [WeaponMount] = []
 
-    /// World-space muzzle for `mount` given the ship's live position and heading —
-    /// the real hardpoint the shot leaves from.
-    public func muzzle(for mount: WeaponMount) -> Vec2 {
+    /// World-space muzzle for exit point `index` of `exitType`, given the ship's
+    /// live position/heading — the real hardpoint the shot leaves from.
+    public func muzzle(exitType: WeaponExitType, index: Int) -> Vec2 {
         let nose = radius + 4
-        guard let ep = exitPoints, mount.spec.exitType != .center else {
+        guard let ep = exitPoints, exitType != .center else {
             return position + Vec2.heading(angle) * nose
         }
-        return position + ep.muzzleOffset(type: mount.spec.exitType, index: mount.exitIndex,
-                                          angle: angle, nose: nose)
+        return position + ep.muzzleOffset(type: exitType, index: index, angle: angle, nose: nose)
+    }
+
+    /// Convenience: the muzzle for `mount`'s current exit cursor.
+    public func muzzle(for mount: WeaponMount) -> Vec2 {
+        muzzle(exitType: mount.spec.exitType, index: mount.exitCursor)
     }
 
     /// EV Nova's `shïp.Strength` — relative combat power, used for the
@@ -688,7 +678,7 @@ public final class World {
             for mount in ship.weapons where mount.spec.isPointDefense {
                 guard mount.ready else { mount.logBlockedIfNeeded(for: ship); continue }
                 let incoming = projectiles.filter { p in
-                    p.alive && p.guided && p.vulnerableToPD
+                    p.alive && p.homing && p.vulnerableToPD
                         && canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: ship)
                         && (p.position - ship.position).length <= mount.spec.range
                 }
@@ -696,7 +686,7 @@ public final class World {
                     ($0.position - ship.position).length < ($1.position - ship.position).length
                 }) else { continue }
                 target.alive = false
-                mount.didFire()
+                mount.didFire(shots: 1)
                 events.append(.weaponFired(shooterID: ship.entityID, at: ship.position,
                                            heading: (target.position - ship.position).angle,
                                            soundID: mount.spec.fireSoundID))
@@ -709,54 +699,170 @@ public final class World {
     // MARK: Weapons
 
     private func fireWeapons(from ship: Ship, intent: ControlIntent) {
-        let held = intent.firePrimary || intent.fireSecondary
-        updateBeamLoops(for: ship, held: held)
-        guard held else { return }
-        guard ship.isAlive else { return }
+        let primary = intent.firePrimary
+        let secondary = intent.fireSecondary
+        let anyTrigger = primary || secondary
+        // NPCs only ever set `firePrimary`; let them fire every weapon group they
+        // carry (guns AND missiles) whenever their brain wants to shoot.
+        let isAI = ship.brain != nil
+        updateBeamLoops(for: ship, primary: primary, secondary: secondary, isAI: isAI)
+        guard anyTrigger, ship.isAlive else { return }
         let target = ship.currentTargetID.flatMap { self.ship(id: $0) }
 
         for (mountIndex, mount) in ship.weapons.enumerated() {
+            let spec = mount.spec
+            // Point-defense mounts fire themselves via `runPointDefense`.
+            if spec.isPointDefense { continue }
+            // Fire-group gating: guns on the primary trigger, missiles/rockets on
+            // the secondary. NPCs fire everything on whichever trigger their AI held.
+            let triggered = isAI ? anyTrigger : (spec.isSecondary ? secondary : primary)
+            guard triggered else { continue }
             // Reload not ready / dry on ammo: the classic invisible "why didn't
-            // my weapon fire" bug. Logged once per block-reason transition —
-            // see `WeaponMount.logBlockedIfNeeded` — not every held-fire frame.
+            // my weapon fire" bug. Logged once per block-reason transition.
             guard mount.ready else {
                 mount.logBlockedIfNeeded(for: ship)
                 continue
             }
-            let spec = mount.spec
             // Seeker 0x0020: this guided weapon refuses to fire while its own
             // ship is fully ionized.
             if spec.cantFireWhileIonized && ship.isIonized { continue }
-            // Aim: turrets/guided track the target; fixed guns fire along heading.
-            var aim = ship.angle
-            if let t = target, spec.isBeam || spec.isGuided || mount.spec.turnRate > 0 || target != nil {
-                if spec.isBeam || spec.isGuided {
-                    aim = (t.position - ship.position).angle
-                }
-            }
-            if spec.accuracyRadians > 0 {
-                aim += rng.double(in: -spec.accuracyRadians...spec.accuracyRadians)
-            }
 
-            if spec.isBeam {
-                fireBeam(from: ship, mount: mount, mountIndex: mountIndex, spec: spec, aim: aim, target: target)
-            } else {
-                let dir = Vec2.heading(aim)
-                let muzzle = ship.muzzle(for: mount)
-                let vel = dir * spec.projectileSpeed + ship.velocity * 0.5
-                let life = spec.range / max(1, spec.projectileSpeed)
-                let p = Projectile(position: muzzle, velocity: vel, life: life,
-                                   shieldDamage: spec.shieldDamage, armorDamage: spec.armorDamage,
-                                   blastRadius: spec.blastRadius, ownerID: ship.entityID,
-                                   ownerGovt: ship.government, guided: spec.isGuided,
-                                   turnRate: spec.turnRate, speed: spec.projectileSpeed,
-                                   targetID: spec.isGuided ? ship.currentTargetID : nil,
-                                   vulnerableToPD: spec.vulnerableToPD, ionization: spec.ionization)
-                projectiles.append(p)
-                events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID))
+            // A group fires ONE barrel per event (cycling exit points) — unless
+            // it has the "fire simultaneously" flag, which volleys all `count`.
+            let barrels = max(1, mount.count)
+            let shots = spec.fireSimultaneously ? barrels : 1
+            var fired = 0
+            for k in 0..<shots {
+                let exitIndex = spec.fireSimultaneously ? k : mount.exitCursor
+                let muzzle = ship.muzzle(exitType: spec.exitType, index: exitIndex)
+                // Nil = can't fire (turret/quadrant with no target in arc): hold fire.
+                guard var aim = fireAngle(for: spec, ship: ship, muzzle: muzzle, target: target) else { continue }
+                if spec.accuracyRadians > 0 && !spec.firesAtFixedAngle {
+                    aim += rng.double(in: -spec.accuracyRadians...spec.accuracyRadians)
+                }
+                if spec.isBeam {
+                    fireBeam(from: ship, mount: mount, mountIndex: mountIndex, spec: spec, aim: aim, target: target)
+                } else {
+                    spawnProjectile(spec: spec, muzzle: muzzle, aim: aim,
+                                    ownerID: ship.entityID, ownerGovt: ship.government,
+                                    ownerVelocity: ship.velocity,
+                                    targetID: spec.homes ? ship.currentTargetID : nil,
+                                    subDepth: 0)
+                    events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID))
+                }
+                fired += 1
+                if !spec.fireSimultaneously { mount.exitCursor = (mount.exitCursor + 1) % barrels }
             }
-            mount.didFire()
+            // Only spend the reload/ammo if a shot actually left (a turret with no
+            // target produces `fired == 0` and stays ready).
+            if fired > 0 { mount.didFire(shots: fired) }
         }
+    }
+
+    /// The world angle a weapon fires at this frame given its guidance, or nil if
+    /// it can't fire (turret/quadrant with no target in arc). Mirrors EV Nova /
+    /// NovaJS: turrets and in-arc quadrant guns lead the moving target; guided,
+    /// rockets, and plain guns fire along the hull heading (the projectile does
+    /// any homing itself).
+    private func fireAngle(for spec: WeaponSpec, ship: Ship, muzzle: Vec2, target: Ship?) -> Double? {
+        switch spec.guidance {
+        case .turret, .beamTurret:
+            guard let t = target else { return nil }
+            return leadAngle(from: muzzle, shooterVel: ship.velocity, target: t,
+                             shotSpeed: spec.projectileSpeed, instantHit: spec.isBeam)
+        case .frontQuadrant, .rearQuadrant:
+            let base = spec.guidance == .rearQuadrant ? ship.angle + .pi : ship.angle
+            guard let t = target else { return base }
+            let q = quadrant(source: ship.position, facing: ship.angle, target: t.position)
+            let inArc = (spec.guidance == .frontQuadrant && q == .front)
+                     || (spec.guidance == .rearQuadrant && q == .rear)
+            return inArc ? leadAngle(from: muzzle, shooterVel: ship.velocity, target: t,
+                                     shotSpeed: spec.projectileSpeed, instantHit: false) : base
+        default:
+            // guided / rocket / plain gun / plain beam: along the hull heading.
+            return ship.angle
+        }
+    }
+
+    enum FireQuadrant { case front, sides, rear }
+    private func quadrant(source: Vec2, facing: Double, target: Vec2) -> FireQuadrant {
+        let rel = abs(angleDelta(from: facing, to: (target - source).angle))
+        if rel < .pi / 4 { return .front }
+        if rel > 3 * .pi / 4 { return .rear }
+        return .sides
+    }
+
+    /// First-order intercept ("lead"): the world angle to fire a shot of
+    /// `shotSpeed` so it meets a moving target. Falls back to aiming straight at
+    /// the target when there's no real solution (or the shot is an instant-hit
+    /// beam). Ported from NovaJS `guidance.ts` `firstOrderWithFallback`.
+    private func leadAngle(from origin: Vec2, shooterVel: Vec2, target: Ship,
+                           shotSpeed: Double, instantHit: Bool) -> Double {
+        let straight = (target.position - origin).angle
+        guard !instantHit, shotSpeed > 0 else { return straight }
+        let pos = (target.position - origin) * (1.0 / shotSpeed)
+        let vel = (target.velocity - shooterVel) * (1.0 / shotSpeed)
+        let a = vel.dot(vel) - 1
+        let b = 2 * pos.dot(vel)
+        let c = pos.dot(pos)
+        var time: Double?
+        if abs(a) < 1e-9 {
+            if abs(b) > 1e-9 { let t = -c / b; if t >= 0 { time = t } }
+        } else {
+            let det = b * b - 4 * a * c
+            if det >= 0 {
+                let s = det.squareRoot()
+                time = [(-s - b) / (2 * a), (s - b) / (2 * a)].filter { $0 >= 0 }.sorted().first
+            }
+        }
+        guard let t = time else { return straight }
+        return (pos + vel * t).angle
+    }
+
+    /// Build and register a projectile (primary shot or submunition). Movement
+    /// follows guidance: guided homes inertialessly, rockets accelerate from the
+    /// owner's velocity, everything else inherits the owner's velocity plus the
+    /// muzzle vector.
+    @discardableResult
+    private func spawnProjectile(spec: WeaponSpec, muzzle: Vec2, aim: Double,
+                                 ownerID: Int, ownerGovt: Int, ownerVelocity: Vec2,
+                                 targetID: Int?, subDepth: Int) -> Projectile {
+        let dir = Vec2.heading(aim)
+        let homing = spec.homes
+        let accelerating = spec.accelerates
+        let vel: Vec2
+        if homing { vel = dir * spec.projectileSpeed }
+        else if accelerating { vel = ownerVelocity }
+        else { vel = ownerVelocity + dir * spec.projectileSpeed }
+        let life = spec.range / max(1, spec.projectileSpeed)
+        let p = Projectile(position: muzzle, velocity: vel, life: life,
+                           shieldDamage: spec.shieldDamage, armorDamage: spec.armorDamage,
+                           blastRadius: spec.blastRadius, ownerID: ownerID, ownerGovt: ownerGovt,
+                           homing: homing, turnRate: spec.turnRate, speed: spec.projectileSpeed,
+                           targetID: homing ? targetID : nil,
+                           vulnerableToPD: spec.vulnerableToPD, ionization: spec.ionization,
+                           accelerating: accelerating, facing: aim,
+                           decayPerSec: spec.decayPerSec, proxRadius: spec.proxRadius,
+                           proxSafetyRemaining: spec.proxSafetySeconds, proxHitAll: spec.proxHitAll,
+                           detonateOnExpire: spec.detonateOnExpire, impact: spec.impact,
+                           submunition: spec.submunition, subDepth: subDepth,
+                           explosionBoomID: spec.explosionBoomID,
+                           graphicSpinID: spec.graphicSpinID, spinShots: spec.spinShots)
+        projectiles.append(p)
+        return p
+    }
+
+    /// Nearest hittable ship to `pos` (for submunitions that seek the nearest
+    /// valid target). Skips the owner and its own faction.
+    private func nearestHostile(to pos: Vec2, ownerID: Int, ownerGovt: Int) -> Ship? {
+        var best: Ship?
+        var bestD = Double.greatestFiniteMagnitude
+        for other in allShips where other.isAlive {
+            guard canHit(owner: ownerID, ownerGovt: ownerGovt, victim: other) else { continue }
+            let d = (other.position - pos).length
+            if d < bestD { bestD = d; best = other }
+        }
+        return best
     }
 
     /// Start/stop a real audio loop for each `loopSound` beam mount as its
@@ -765,8 +871,10 @@ public final class World {
     /// one-shot sample retriggered up to 10×/sec while held. Also creates/removes
     /// the persistent `ActiveBeam` whose geometry `refreshActiveBeams` welds to
     /// the ship every frame.
-    private func updateBeamLoops(for ship: Ship, held: Bool) {
+    private func updateBeamLoops(for ship: Ship, primary: Bool, secondary: Bool, isAI: Bool) {
         for (idx, mount) in ship.weapons.enumerated() where mount.spec.isBeam && mount.spec.loopSound {
+            // A continuous beam loops while its own fire group's trigger is held.
+            let held = isAI ? (primary || secondary) : (mount.spec.isSecondary ? secondary : primary)
             let looping = ship.activeBeamLoopMounts.contains(idx)
             if held && ship.isAlive {
                 if !looping {
@@ -928,52 +1036,143 @@ public final class World {
     // MARK: Projectiles
 
     private func stepProjectiles(_ dt: Double) {
+        // Submunitions spawned this frame are collected and appended after the
+        // loop so we don't mutate `projectiles` while iterating it.
+        var spawned: [Projectile] = []
         for p in projectiles where p.alive {
-            // Guided steering toward the (still-living) target.
-            if p.guided, let tid = p.targetID, let t = ship(id: tid), t.isAlive {
-                let desired = (t.position - p.position).angle
-                let cur = p.velocity.angle
-                var d = angleDelta(from: cur, to: desired)
-                let maxTurn = p.turnRate * dt
-                d = max(-maxTurn, min(maxTurn, d))
-                p.velocity = Vec2.heading(cur + d) * p.speed
+            p.proxSafetyRemaining = max(0, p.proxSafetyRemaining - dt)
+
+            // Movement by guidance.
+            if p.homing {
+                // Steer the heading toward the first-order intercept, then fly
+                // inertialessly at cruise speed along it (EV Nova guided shots
+                // don't drift — they point where they're going).
+                if let tid = p.targetID, let t = ship(id: tid), t.isAlive {
+                    let lead = leadAngle(from: p.position, shooterVel: p.velocity, target: t,
+                                         shotSpeed: p.speed, instantHit: false)
+                    var d = angleDelta(from: p.facing, to: lead)
+                    let maxTurn = p.turnRate * dt
+                    d = max(-maxTurn, min(maxTurn, d))
+                    p.facing += d
+                }
+                p.velocity = Vec2.heading(p.facing) * p.speed
+            } else if p.accelerating {
+                // Rocket: accelerate forward up to cruise speed (reach it in ~0.5s).
+                let along = Vec2.heading(p.facing)
+                p.velocity += along * (p.speed / 0.5 * dt)
+                if p.velocity.length > p.speed { p.velocity = p.velocity.normalized * p.speed }
+            } else {
+                p.facing = p.velocity.angle
             }
             p.position += p.velocity * dt
-            p.life -= dt
-            if p.life <= 0 { p.alive = false; continue }
 
+            // Power decay: the shot loses damage the longer it flies.
+            if p.decayPerSec > 0 {
+                p.shieldDamage = max(0, p.shieldDamage - p.decayPerSec * dt)
+                p.armorDamage = max(0, p.armorDamage - p.decayPerSec * dt)
+            }
+
+            p.life -= dt
+            if p.life <= 0 {
+                p.alive = false
+                detonate(p, at: p.position, directHit: nil, expired: true, spawned: &spawned)
+                continue
+            }
+
+            // Collision — direct hit, or within the proximity radius once armed.
+            guard p.proxSafetyRemaining <= 0 else { continue }
+            let reach = p.proxRadius
+            var struck: Ship?
             for other in allShips where other.isAlive {
-                if !canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) { continue }
-                if (other.position - p.position).length <= other.radius {
-                    applyHit(to: other, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
-                             ionization: p.ionization)
-                    // Splash damage.
-                    if p.blastRadius > 0 {
-                        for splash in allShips where splash.entityID != other.entityID && splash.isAlive {
-                            if canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: splash),
-                               (splash.position - p.position).length <= p.blastRadius {
-                                applyHit(to: splash, shield: p.shieldDamage * 0.5,
-                                         armor: p.armorDamage * 0.5, ownerID: p.ownerID,
-                                         ionization: p.ionization * 0.5)
-                            }
-                        }
+                guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) else { continue }
+                let dist = (other.position - p.position).length
+                if dist <= other.radius {
+                    struck = other; break
+                }
+                // Proximity fuse: detonate near a valid ship. When the shot only
+                // arms on its own target, ignore proximity to anyone else.
+                if reach > 0 && dist <= other.radius + reach {
+                    if p.proxHitAll || p.targetID == nil || p.targetID == other.entityID {
+                        struck = other; break
                     }
-                    p.alive = false
-                    break
                 }
             }
-            guard p.alive else { continue }
+            if let h = struck {
+                p.alive = false
+                detonate(p, at: p.position, directHit: h, expired: false, spawned: &spawned)
+                continue
+            }
 
             for rock in asteroids where rock.isAlive {
-                if (rock.position - p.position).length <= rock.radius {
+                if (rock.position - p.position).length <= rock.radius + reach {
                     applyAsteroidHit(rock, shield: p.shieldDamage, armor: p.armorDamage)
                     p.alive = false
+                    detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
                     break
                 }
             }
         }
+        projectiles.append(contentsOf: spawned)
         projectiles.removeAll { !$0.alive }
         asteroids.removeAll { !$0.isAlive }
+    }
+
+    /// Resolve a shot ending: apply its direct/blast damage and knockback, emit
+    /// the explosion effect, and launch any submunitions. `expired` distinguishes
+    /// end-of-life (which only detonates flak / expiry-submunition shots) from a
+    /// real hit.
+    private func detonate(_ p: Projectile, at pos: Vec2, directHit: Ship?, expired: Bool,
+                          spawned: inout [Projectile]) {
+        if let h = directHit {
+            applyHit(to: h, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
+                     ionization: p.ionization)
+            if p.impact > 0 {
+                // Knockback along the shot's travel, inversely ∝ target size
+                // (a proxy for mass — heavier hulls barely budge).
+                h.velocity += p.velocity.normalized * (p.impact * 6.0 / max(4, h.radius))
+            }
+        }
+        // Blast splash to everyone else in radius.
+        if p.blastRadius > 0 {
+            for splash in allShips where splash.isAlive && splash.entityID != directHit?.entityID {
+                guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: splash) else { continue }
+                if (splash.position - pos).length <= p.blastRadius {
+                    applyHit(to: splash, shield: p.shieldDamage * 0.5, armor: p.armorDamage * 0.5,
+                             ownerID: p.ownerID, ionization: p.ionization * 0.5)
+                }
+            }
+        }
+        // Explosion effect (skip a silent end-of-life fizzle for a plain shot
+        // that isn't flak and has no blast).
+        let shouldExplode = directHit != nil || p.blastRadius > 0 || p.detonateOnExpire || p.explosionBoomID != nil
+        if shouldExplode {
+            let boomSound = p.explosionBoomID.flatMap { galaxy?.game.boom($0)?.soundID }
+            let radius = p.blastRadius > 0 ? p.blastRadius : 12
+            events.append(.explosion(at: pos, radius: max(8, radius), soundID: boomSound))
+        }
+        // Submunitions: split into child weapons on detonation (and on expiry
+        // when `subIfExpire`), capped by the recursion limit.
+        if let sub = p.submunition, sub.count > 0, p.subDepth <= sub.limit,
+           !(expired && !sub.ifExpire), let subSpec = galaxy?.weaponSpec(sub.weaponID) {
+            for _ in 0..<sub.count {
+                var aim = p.facing
+                var subTarget = p.targetID
+                if sub.fireAtNearest, let near = nearestHostile(to: pos, ownerID: p.ownerID, ownerGovt: p.ownerGovt) {
+                    aim = subSpec.guidance == .guided ? aim : (near.position - pos).angle
+                    subTarget = near.entityID
+                }
+                if sub.thetaRadians > 0 {
+                    aim += rng.double(in: -sub.thetaRadians...sub.thetaRadians)
+                }
+                let child = spawnProjectile(spec: subSpec, muzzle: pos, aim: aim,
+                                            ownerID: p.ownerID, ownerGovt: p.ownerGovt,
+                                            ownerVelocity: Vec2(), targetID: subTarget,
+                                            subDepth: p.subDepth + 1)
+                // `spawnProjectile` appended to `projectiles`; move it to the
+                // deferred list so we don't process it again this same frame.
+                if projectiles.last === child { projectiles.removeLast(); spawned.append(child) }
+            }
+        }
     }
 
     /// Whether a shot from `owner` (faction `ownerGovt`) may damage `victim`.
@@ -1115,25 +1314,6 @@ public final class World {
         return nearest
     }
 
-    /// Cycle to the next in-range ship past the current target (wrapping),
-    /// ordered by distance so repeated presses sweep outward-then-around.
-    /// Falls back to `selectNearestTarget` if nothing is currently locked.
-    @discardableResult
-    public func cycleTarget() -> Ship? {
-        let inRange = npcs.filter {
-            $0.isAlive && !$0.disabled && (($0.position - player.position).length <= Self.targetLockRange)
-        }.sorted { ($0.position - player.position).length < ($1.position - player.position).length }
-        guard !inRange.isEmpty else { return nil }
-        guard let currentID = player.currentTargetID,
-              let idx = inRange.firstIndex(where: { $0.entityID == currentID }) else {
-            return selectNearestTarget(hostileOnly: false)
-        }
-        let next = inRange[(idx + 1) % inRange.count]
-        player.currentTargetID = next.entityID
-        events.append(.targetAcquired(entityID: next.entityID))
-        return next
-    }
-
     /// Drop the player's current target lock, if any.
     public func clearPlayerTarget() {
         player.currentTargetID = nil
@@ -1149,16 +1329,6 @@ public final class World {
         player.currentTargetID = id
         events.append(.targetAcquired(entityID: id))
         return ship
-    }
-
-    /// The nearest ship within hail range, regardless of relationship — hailing
-    /// doesn't require a prior target lock. `range` is deliberately shorter than
-    /// `targetLockRange`: hailing is a close-range action in the real game.
-    public func nearestHailable(range: Double = 900) -> Ship? {
-        let candidates = npcs.filter { $0.isAlive }
-        return candidates
-            .filter { ($0.position - player.position).length <= range }
-            .min { ($0.position - player.position).length < ($1.position - player.position).length }
     }
 
     /// Apply a paid "Request Assistance" ally's delivery once it docks with

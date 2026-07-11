@@ -17,9 +17,12 @@ struct StoryGuideView: View {
     /// nil in previews / read-only contexts, where the Abort buttons hide.
     var onAbort: ((Int) -> Void)?
 
-    enum Tab: String, CaseIterable { case pilot = "Pilot", story = "Story Guide", map = "Story Map" }
+    // Pilot status/cargo/equipment/honors lives in the authentic 4-tab player
+    // info dialog (`PlayerInfoView`, DITL #1017), not here — this window is the
+    // story companion only.
+    enum Tab: String, CaseIterable { case story = "Story Guide", map = "Story Map" }
 
-    init(model: StoryGuideModel, initialTab: Tab = .pilot,
+    init(model: StoryGuideModel, initialTab: Tab = .story,
          onClose: (() -> Void)? = nil, onAbort: ((Int) -> Void)? = nil) {
         self.model = model
         self._tab = State(initialValue: initialTab)
@@ -39,7 +42,6 @@ struct StoryGuideView: View {
             Divider().opacity(0.3)
 
             switch tab {
-            case .pilot: PilotInfoView(pilot: model.pilot, onAbort: onAbort)
             case .story: StorylineBrowserView(storylines: model.storylines,
                                               untaggedCount: model.untaggedCount)
             case .map:   StorylineMapView(map: model.storyMap)
@@ -67,119 +69,4 @@ struct StoryGuideView: View {
     }
 }
 
-// MARK: - Pilot dossier
-
-struct PilotInfoView: View {
-    let pilot: PilotSummary
-    var onAbort: ((Int) -> Void)?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                // Headline stats
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(pilot.name).novaFont(.heading, weight: .bold)
-                    HStack(spacing: 16) {
-                        stat("Credits", "\(pilot.credits.formatted()) cr")
-                        stat("Ship", pilot.shipName)
-                    }
-                    HStack(spacing: 16) {
-                        stat("System", pilot.currentSystem)
-                        stat("Date", pilot.date)
-                        stat("Combat", ratingName(pilot.combatRating))
-                    }
-                }
-
-                if !pilot.ranks.isEmpty {
-                    section("Ranks & Titles") {
-                        ForEach(pilot.ranks, id: \.self) { r in
-                            Label(r, systemImage: "rosette").novaFont(.body)
-                        }
-                    }
-                }
-
-                section("Standings") {
-                    if pilot.relations.isEmpty {
-                        Text("No notable reputations yet.").foregroundStyle(.secondary).novaFont(.body)
-                    } else {
-                        ForEach(pilot.relations) { rel in
-                            HStack {
-                                Text(rel.govt).novaFont(.body)
-                                Spacer()
-                                Text(standingText(rel.standing))
-                                    .foregroundStyle(rel.standing >= 0 ? .green : .red)
-                                    .novaFont(.body).monospacedDigit()
-                            }
-                        }
-                    }
-                }
-
-                section("Active Missions") {
-                    if pilot.activeMissions.isEmpty {
-                        Text("No active missions.").foregroundStyle(.secondary).novaFont(.body)
-                    } else {
-                        ForEach(pilot.activeMissions) { m in
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(m.name).novaFont(.body, weight: .bold)
-                                    Text(m.objective).novaFont(.caption).foregroundStyle(.secondary)
-                                    Text("Reward: \(m.reward)").novaFont(.caption).foregroundStyle(EVTheme.accent)
-                                }
-                                Spacer(minLength: 8)
-                                // Abort, disabled when the mission can't be aborted
-                                // (mïsn "can be aborted" flag) — same rule the real
-                                // game uses to grey out its abort control.
-                                if let onAbort {
-                                    Button("Abort") { onAbort(m.id) }
-                                        .buttonStyle(.bordered).tint(.red)
-                                        .controlSize(.small)
-                                        .disabled(!m.canAbort)
-                                }
-                            }
-                            .padding(.vertical, 3)
-                            Divider().overlay(.white.opacity(0.06))
-                        }
-                    }
-                }
-
-                section("Escorts") {
-                    EscortsView()
-                }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func stat(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label.uppercased()).novaFont(.caption).foregroundStyle(.secondary)
-            Text(value).novaFont(.body, weight: .bold)
-        }
-    }
-
-    private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).novaFont(.body, weight: .bold).foregroundStyle(EVTheme.accent)
-            content()
-        }
-    }
-
-    private func standingText(_ n: Int) -> String {
-        switch n {
-        case ..<(-200): return "Hunted (\(n))"
-        case ..<0:      return "Wanted (\(n))"
-        case 0:         return "Neutral"
-        case 1..<200:   return "Liked (+\(n))"
-        default:        return "Honored (+\(n))"
-        }
-    }
-
-    private func ratingName(_ r: Int) -> String {
-        let names = ["Harmless", "Mostly Harmless", "Poor", "Average", "Above Average",
-                     "Competent", "Dangerous", "Deadly", "Elite"]
-        return names[min(max(r, 0), names.count - 1)]
-    }
-}
-
-#Preview("Pilot") { StoryGuideView(model: .sample) }
+#Preview("Story Guide") { StoryGuideView(model: .sample) }

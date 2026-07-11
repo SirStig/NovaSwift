@@ -296,6 +296,47 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertTrue(landed, "even launched off-axis, the trader should still settle onto the planet")
     }
 
+    func testTraderNoseDoesNotSpinChasingTheArrivalBrake() {
+        // Regression for "ship is angled one way but flying towards another" —
+        // steering the final approach off a raw (desiredVelocity − velocity)
+        // heading recomputes a target bearing that shifts faster than a
+        // turn-rate-limited hull can track, so the nose just spins in place
+        // (confirmed against real Argosy-class stats: 500°+ of continuous
+        // rotation on final approach while velocity barely turned at all).
+        // Track the ship's *total* rotation over the whole approach — clean
+        // steering costs at most an initial turn-to-course plus one flip-and-burn
+        // braking maneuver (comfortably under 3 full turns); the spin bug blew
+        // well past that without ever settling.
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(90_000, 90_000)))
+        world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 2500), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 8000, spawnRadius: 7000)
+
+        // Real Argosy hull stats (speed/accel/turn), not the tests' generic slow
+        // fixture — this bug only shows up at realistic turn rates.
+        let trader = Ship(name: "Trader", stats: ShipStats(speed: 250, acceleration: 350, turnRate: 35),
+                           position: Vec2())
+        trader.government = 202
+        trader.brain = AIBrain(aiType: .braveTrader, govt: 202)
+        world.addNPC(trader)
+
+        var totalRotation = 0.0
+        var landed = false
+        for _ in 0..<600 {                                              // up to 20s
+            let before = trader.angle
+            world.step(1.0 / 30.0)
+            totalRotation += abs(trader.angle - before)
+            if world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }) {
+                landed = true; break
+            }
+        }
+        XCTAssertTrue(landed, "a trader on a clean, direct approach should still land")
+        XCTAssertLessThan(totalRotation, 3 * 2 * .pi,
+                          "the nose shouldn't spin chasing a jittery brake heading — total turning should stay near one course correction + one flip-and-burn")
+    }
+
     func testDepartedShipJumpsOutPastEdge() {
         let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
         world.systemContext = SystemContext(bodies: [], center: Vec2(), jumpRadius: 1000, spawnRadius: 800)

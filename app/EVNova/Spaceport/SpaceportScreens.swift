@@ -242,10 +242,19 @@ struct OutfitterView: View {
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
                                enabled: currentTopRow < maxTopRow) { scroll(1) }
                     .novaPlace(space, -204.5, 127.5)
-                detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
+                // Description pane — DITL #1002 item 5 (354,10)-(546,277),
+                // 192×267 (was clipped to 185 tall, so long text was cut off).
+                detail.frame(width: 190, height: 265, alignment: .topLeading)
+                    .clipped().novaPlace(space, -28.5, -150.5)
+                // Item picture — DITL #1002 item 7 (557,8)-(757,208), the full
+                // 200×200 box. The art is a 200×200 canvas, so `.fill` makes it
+                // fill the box edge-to-edge (was 190×185 with `.fit`, which
+                // letterboxed the square art and left a black margin).
                 if let o = selected, let pic = graphics.outfitPicture(o) {
-                    Image(decorative: pic, scale: 1).interpolation(.high).resizable().scaledToFit()
-                        .frame(width: 190, height: 185).novaPlace(space, 178, -150)
+                    Image(decorative: pic, scale: 1).interpolation(.high).resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 200, height: 200).clipped()
+                        .novaPlace(space, 174.5, -152.5)
                 }
                 info(space)
                 buttons(space)
@@ -290,7 +299,8 @@ struct OutfitterView: View {
     private var detail: some View {
         ScrollView(showsIndicators: false) {
             if let o = selected {
-                NovaText(game.descText(o.id - 128 + 3000), size: 11, width: 195, align: .leading)
+                NovaText(game.descText(o.id - 128 + 3000), size: 10, width: 184, align: .leading)
+                    .padding(.top, 3).padding(.leading, 3)
             }
         }
     }
@@ -405,10 +415,15 @@ struct ShipyardView: View {
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
                                enabled: currentTopRow < maxTopRow) { scroll(1) }
                     .novaPlace(space, -211.5, 126.5)
-                detail.frame(width: 205, height: 185).clipped().novaPlace(space, -27, -150)
+                // Description pane — DITL #1004 item 5 (354,10)-(546,277),
+                // 192×267 (was clipped to 185 tall, cutting the class blurb).
+                detail.frame(width: 190, height: 265, alignment: .topLeading)
+                    .clipped().novaPlace(space, -28.5, -150.5)
+                // Ship picture — DITL #1004 item 7 (557,8)-(757,208), 200×200.
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
-                        .frame(width: 190, height: 185).novaPlace(space, 178, -152)
+                        .frame(width: 200, height: 200).clipped()
+                        .novaPlace(space, 174.5, -152.5)
                 }
                 info(space)
                 buttons(space)
@@ -474,21 +489,22 @@ struct ShipyardView: View {
     // clipping at the panel's bottom edge.
     private var detail: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 if let s = selected {
-                    NovaText(s.displayName, size: 13, weight: .bold)
-                    NovaText("Cargo: \(s.cargoSpace) tons", size: 11)
-                    NovaText("Free mass: \(s.freeMass) tons", size: 11)
-                    NovaText("Shield / Armor: \(s.shield) / \(s.armor)", size: 11)
-                    NovaText("Guns / Turrets: \(s.maxGuns) / \(s.maxTurrets)", size: 11)
+                    NovaText(s.displayName, size: 12, weight: .bold)
+                    NovaText("Cargo: \(s.cargoSpace) tons", size: 10)
+                    NovaText("Free mass: \(s.freeMass) tons", size: 10)
+                    NovaText("Shield / Armor: \(s.shield) / \(s.armor)", size: 10)
+                    NovaText("Guns / Turrets: \(s.maxGuns) / \(s.maxTurrets)", size: 10)
                     let blurb = classDescription(s)
                     if !blurb.isEmpty {
-                        NovaText(blurb, size: 11, width: 195, align: .leading)
+                        NovaText(blurb, size: 10, width: 184, align: .leading)
                             .padding(.top, 4)
                     }
                 }
             }
-            .frame(width: 200, alignment: .leading)
+            .padding(.top, 3).padding(.leading, 3)
+            .frame(width: 190, alignment: .leading)
         }
     }
 
@@ -689,8 +705,11 @@ private struct ShipyardPictureView: View {
 
     var body: some View {
         if picture.isDedicated {
+            // The dedicated shipyard art is a full 200×200 canvas (ship on its
+            // own backdrop), so fill the box edge-to-edge rather than fitting it
+            // (which left a margin around the near-square art).
             Image(decorative: picture.image, scale: 1)
-                .interpolation(.high).resizable().scaledToFit()
+                .interpolation(.high).resizable().aspectRatio(contentMode: .fill)
         } else {
             let native = CGSize(width: picture.image.width, height: picture.image.height)
             let cappedScale: CGFloat = 4

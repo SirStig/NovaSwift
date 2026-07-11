@@ -54,7 +54,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .selectSecondaryPrev: return "Previous Secondary"
         case .selectSecondaryNext: return "Next Secondary"
         case .targetNearest: return "Target Nearest Ship"
-        case .targetNext: return "Target Next Ship"
+        case .targetNext: return "Cycle Target"
         case .nearestHostile: return "Target Nearest Hostile"
         case .clearTarget: return "Clear Target"
         case .land: return "Land / Depart"

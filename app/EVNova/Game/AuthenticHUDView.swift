@@ -253,15 +253,19 @@ private struct RadarContactsView: View {
                     }
                 }
                 Canvas { ctx, _ in
+                    // Stellar objects: hollow ring outlines (EV Nova draws worlds
+                    // as circles, distinct from the small filled ship dots).
                     for b in model.planetBlips {
-                        let r = CGRect(x: cx + b.x * radius - 2.5, y: cy + b.y * radius - 2.5, width: 5, height: 5)
-                        ctx.fill(Path(ellipseIn: r), with: .color(b.relationship.color))
+                        let r = CGRect(x: cx + b.x * radius - 3, y: cy + b.y * radius - 3, width: 6, height: 6)
+                        ctx.stroke(Path(ellipseIn: r), with: .color(b.relationship.color), lineWidth: 1)
                     }
+                    // Ships: small filled dots.
                     for b in model.blips {
                         let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
                         ctx.fill(Path(ellipseIn: r), with: .color(b.relationship.color))
                     }
                 }
+                .clipShape(Circle())   // contacts scroll off the rim, never pile on it
                 ZStack {
                     RadarPlayerArrow().fill(playerMarker)
                     RadarPlayerArrow().stroke(.white.opacity(0.7), lineWidth: 0.5)

@@ -192,6 +192,7 @@ public final class StoryEngine {
         let brief = briefingText(for: mission)
         let offer = MissionOffer(
             mission: mission,
+            title: resolvedName(for: mission),
             briefingText: brief,
             acceptButton: mission.acceptButton.isEmpty ? "Accept" : mission.acceptButton,
             refuseButton: mission.refuseButton.isEmpty ? "Decline" : mission.refuseButton,
@@ -240,7 +241,9 @@ public final class StoryEngine {
             acceptedDate: player.date,
             deadline: deadline,
             cargoPickedUp: cargoAtStart,
-            shipObjectivesRemaining: shipObjectives))
+            shipObjectivesRemaining: shipObjectives,
+            travelSpobID: concreteStellar(m.travelStellar, salt: 0x7 &* UInt64(bitPattern: Int64(m.id))),
+            returnSpobID: concreteStellar(m.returnStellar, salt: 0x51 &* UInt64(bitPattern: Int64(m.id)))))
 
         if cargoAtStart, m.cargoQty != 0 {
             player.cargo[m.cargoType, default: 0] += abs(m.cargoQty)
@@ -248,6 +251,11 @@ public final class StoryEngine {
 
         apply(set: m.onAccept)
         services?.notify(.missionAccepted(missionID: missionID, name: m.name))
+
+        // The post-accept briefing (BriefText) — "the dialog that comes up when
+        // you accept a mission" — shown now, after the offer is accepted.
+        let brief = acceptBriefing(for: m)
+        if !brief.isEmpty { services?.showStoryText(brief, title: m.displayName) }
 
         // Missions whose special ships appear in the current system spawn now.
         if m.hasShipObjective { services?.spawnMissionShips(missionID: missionID, mission: m) }
@@ -622,26 +630,123 @@ public final class StoryEngine {
     /// has no text to show (e.g. a background "silent" mission).
     public func briefing(for m: MissionRes) -> String { briefingText(for: m) }
 
-    /// The text shown when offering a mission: the explicit BriefText `dësc` if
-    /// set, otherwise EV Nova's conventional offer text at dësc(3872 + id).
-    /// Both the `{…}` conditionals (via `descText`) and the mission `<…>`
-    /// wildcards (via `MissionText.resolve`) are expanded before display.
-    private func briefingText(for m: MissionRes) -> String {
-        let raw: String
-        if m.briefText >= 128 {
-            let t = game.descText(m.briefText, context: textContext)
-            raw = t.isEmpty ? game.descText(m.offerTextID, context: textContext) : t
-        } else {
-            raw = game.descText(m.offerTextID, context: textContext)
+    /// The mission's player-visible **name** with its `<…>` wildcards expanded —
+    /// e.g. "Ferry Passengers to <DST>" → "Ferry Passengers to New Babylon".
+    /// The generic BBS/bar missions put the destination in their name, so the
+    /// list and offer title must resolve it too, not just the briefing body.
+    public func resolvedName(for m: MissionRes) -> String {
+        resolveMissionText(m.displayName, for: m)
+    }
+
+    /// A UI-ready snapshot of one accepted mission: its resolved name, where to
+    /// go next (the concrete destination stellar + its system), the deadline, and
+    /// whether the player is allowed to abort it. Drives the Mission list dialog
+    /// and the galaxy-map destination arrow.
+    public struct MissionSummary: Identifiable, Hashable, Sendable {
+        public let id: Int                 // missionID
+        public let name: String
+        public let payload: String         // one-line "quick brief" (dësc pitch, trimmed)
+        public let destinationSpobID: Int? // where to fly next
+        public let destinationSpob: String // stellar name ("" if none)
+        public let destinationSystemID: Int?
+        public let destinationSystem: String
+        public let deadline: GameDate?
+        public let canAbort: Bool
+    }
+
+    /// Summaries of every currently-accepted mission, in acceptance order.
+    public func activeMissionSummaries() -> [MissionSummary] {
+        player.activeMissions.compactMap { am in
+            guard let m = game.mission(am.missionID) else { return nil }
+            // Before the travel stellar is reached, point at it; afterward point
+            // at the return stellar (the drop-off), mirroring EV Nova's arrow.
+            let targetSpob: Int?
+            if !am.visitedTravelStellar, let t = am.travelSpobID {
+                targetSpob = t
+            } else {
+                targetSpob = am.returnSpobID ?? am.travelSpobID
+            }
+            let sys = targetSpob.flatMap { s in game.systems().first { $0.spobs.contains(s) } }
+            return MissionSummary(
+                id: am.missionID,
+                name: resolvedName(for: m),
+                payload: missionQuickBrief(for: m),
+                destinationSpobID: targetSpob,
+                destinationSpob: targetSpob.flatMap { game.spob($0)?.displayName } ?? "",
+                destinationSystemID: sys?.id,
+                destinationSystem: sys?.name ?? "",
+                deadline: am.deadline,
+                canAbort: m.canAbort)
         }
-        return resolveMissionText(raw, for: m)
+    }
+
+    /// A trimmed one-liner describing an accepted mission (its pitch text with
+    /// wildcards resolved, whitespace collapsed) for compact list rows.
+    private func missionQuickBrief(for m: MissionRes) -> String {
+        let full = resolveMissionText(game.descText(m.offerTextID, context: textContext), for: m)
+        let collapsed = full.split(whereSeparator: \.isNewline).joined(separator: " ")
+        return collapsed.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The systems that currently hold an active-mission destination — used by the
+    /// galaxy map to draw its orange "go here" arrows.
+    public func missionDestinationSystemIDs() -> [Int] {
+        Array(Set(activeMissionSummaries().compactMap(\.destinationSystemID))).sorted()
+    }
+
+    /// The text shown in the **offer** dialog: EV Nova's initial mission
+    /// description (dësc 4000-4255, by convention `offerTextID` = 3872 + id) —
+    /// the pitch. NOT `BriefText`, which the Bible defines as "the desc to show
+    /// in the dialog that comes up when you accept a mission" (a *post-accept*
+    /// briefing); showing that here put a mission's acceptance/farewell text in
+    /// front of the still-live Accept/Decline buttons. `BriefText` is instead
+    /// shown by `acceptBriefing(for:)` after the player accepts. Both the `{…}`
+    /// conditionals and the `<…>` wildcards are expanded.
+    private func briefingText(for m: MissionRes) -> String {
+        resolveMissionText(game.descText(m.offerTextID, context: textContext), for: m)
+    }
+
+    /// The post-accept briefing (mïsn `BriefText`, "the dialog that comes up
+    /// when you accept") — empty when the mission defines none.
+    public func acceptBriefing(for m: MissionRes) -> String {
+        guard m.briefText >= 128 else { return "" }
+        return resolveMissionText(game.descText(m.briefText, context: textContext), for: m)
     }
 
     /// Expand a mission-related `dësc` body's `<…>` wildcards (`<PN>`, `<CQ>`,
     /// `<DSY>`…) for this mission and the current pilot. Callers pass text that
     /// has already had its `{…}` conditionals resolved by `descText`.
     func resolveMissionText(_ text: String, for m: MissionRes) -> String {
-        MissionText.resolve(text, mission: m, player: player, game: game, initialSpob: initialSpob)
+        // An accepted mission has its concrete destination frozen at accept time;
+        // an offer resolves one deterministically so the offer text and the later
+        // accepted text name the same world.
+        let active = player.activeMissions.first { $0.missionID == m.id }
+        let travel = active?.travelSpobID ?? concreteStellar(m.travelStellar, salt: 0x7 &* UInt64(bitPattern: Int64(m.id)))
+        let ret = active?.returnSpobID ?? concreteStellar(m.returnStellar, salt: 0x51 &* UInt64(bitPattern: Int64(m.id)))
+        return MissionText.resolve(text, mission: m, player: player, game: game, initialSpob: initialSpob,
+                                   travelSpob: travel, returnSpob: ret)
+    }
+
+    /// Resolve a mission travel/return selector to a **concrete** stellar id.
+    /// Fixed ids (≥128) pass through; random selectors (-2 any inhabited, -3 any
+    /// uninhabited, 9999-10255 a govt's stellar, …) are matched via `StellarMatch`
+    /// and one candidate is picked **deterministically** from the current landing
+    /// (date × spob × mission), so the same destination shows in the list, the
+    /// offer, and the accepted mission — not a different world each render.
+    /// Returns nil for "-1 no destination" or when nothing matches.
+    public func concreteStellar(_ code: Int, salt: UInt64) -> Int? {
+        if code >= 128 { return code }
+        if code == -1 { return nil }
+        let candidates = game.spobs()
+            .filter { $0.id != (initialSpob ?? -1) }   // not where the mission is offered
+            .filter { StellarMatch.spob(code: code, spobID: $0.id, game: game, initialSpob: initialSpob) }
+            .map { $0.id }
+            .sorted()
+        guard !candidates.isEmpty else { return nil }
+        var h = UInt64(bitPattern: Int64(player.date.julianDay)) &* 0x9E3779B97F4A7C15
+        h ^= UInt64(bitPattern: Int64(initialSpob ?? 0)) &* 0xD1B54A32D192ED03
+        h ^= salt
+        return candidates[Int(h % UInt64(candidates.count))]
     }
 
     /// The `{…}`-conditional context for this pilot (control bits + gender),

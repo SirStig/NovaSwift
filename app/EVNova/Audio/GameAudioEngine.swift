@@ -31,6 +31,11 @@ final class GameAudioEngine {
     /// these live until explicitly stopped rather than being subject to
     /// stealing by unrelated one-shot SFX.
     private var loopVoices: [String: AVAudioPlayerNode] = [:]
+    /// Free, pre-attached loop voices. Attaching/detaching a node to a *running*
+    /// `AVAudioEngine` reconfigures the whole graph (an audible hitch) — so loop
+    /// voices are attached once up front and recycled through this pool rather
+    /// than attached per beam-start and detached per beam-stop.
+    private var loopPool: [AVAudioPlayerNode] = []
 
     private var started = false
     private var musicURL: URL?
@@ -46,6 +51,14 @@ final class GameAudioEngine {
             engine.attach(v)
             engine.connect(v, to: sfxBus, format: Self.canonicalFormat)
             voices.append(v)
+        }
+        // A pool of loop voices, attached once here so beam-start/stop never
+        // reconfigures the running graph.
+        for _ in 0..<8 {
+            let v = AVAudioPlayerNode()
+            engine.attach(v)
+            engine.connect(v, to: sfxBus, format: Self.canonicalFormat)
+            loopPool.append(v)
         }
         engine.attach(musicPlayer)
         // Music is (re)connected with the file's own format when a track starts.
@@ -77,7 +90,9 @@ final class GameAudioEngine {
         guard started else { return }
         musicPlayer.stop()
         voices.forEach { $0.stop() }
-        loopVoices.values.forEach { $0.stop(); engine.detach($0) }
+        // Loop voices are pool-managed (attached once, never detached); just stop
+        // them and return them to the free pool.
+        for (_, voice) in loopVoices { voice.stop(); loopPool.append(voice) }
         loopVoices.removeAll()
         engine.stop()
         started = false
@@ -123,11 +138,16 @@ final class GameAudioEngine {
         }
         nextVoice = (chosen + 1) % voices.count
         let voice = voices[chosen]
-        voice.stop()                 // reuse this voice, interrupting whatever it played
         voice.volume = max(0, min(1, volume))
         voice.pan = max(-1, min(1, pan))
+        // Do NOT call `voice.stop()` here. `AVAudioPlayerNode.stop()` blocks the
+        // calling (render-loop) thread until the audio render cycle acknowledges
+        // — a multi-millisecond stall on EVERY shot, which is exactly the hitch
+        // felt each time a weapon fires. The `.interrupts` option already stops
+        // whatever this voice was playing and starts the new buffer; the node
+        // stays "playing" after its first `play()`, so no per-shot stop/start.
         voice.scheduleBuffer(buffer, at: nil, options: [.interrupts], completionHandler: nil)
-        voice.play()
+        if !voice.isPlaying { voice.play() }
     }
 
     // MARK: Looping SFX (continuous-fire weapons, etc.)
@@ -145,9 +165,9 @@ final class GameAudioEngine {
             existing.pan = max(-1, min(1, pan))
             return
         }
-        let voice = AVAudioPlayerNode()
-        engine.attach(voice)
-        engine.connect(voice, to: sfxBus, format: Self.canonicalFormat)
+        // Recycle a pre-attached loop voice (no graph reconfiguration). If the
+        // pool is momentarily exhausted, skip rather than attach on the fly.
+        guard let voice = loopPool.popLast() else { return }
         voice.volume = max(0, min(1, volume))
         voice.pan = max(-1, min(1, pan))
         voice.scheduleBuffer(buffer, at: nil, options: [.loops], completionHandler: nil)
@@ -163,12 +183,12 @@ final class GameAudioEngine {
         voice.pan = max(-1, min(1, pan))
     }
 
-    /// Stop and release a loop started by `playLoop`. No-op if not looping.
+    /// Stop a loop started by `playLoop` and return its voice to the pool (no
+    /// detach → no graph reconfiguration).
     func stopLoop(id: String) {
         guard let voice = loopVoices.removeValue(forKey: id) else { return }
         voice.stop()
-        engine.disconnectNodeOutput(voice)
-        engine.detach(voice)
+        loopPool.append(voice)
     }
 
     // MARK: Music playback (streamed from a file, seamless loop)

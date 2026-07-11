@@ -63,14 +63,19 @@ public protocol GameServices: AnyObject {
 /// A mission the engine wants to offer, with its presentation text resolved.
 public struct MissionOffer: Sendable {
     public let mission: MissionRes
+    /// The mission's display **name** with `<…>` wildcards expanded (e.g. the
+    /// destination filled in). Use this as the dialog/list title rather than
+    /// `mission.displayName`, which still holds the raw `<DST>` etc.
+    public let title: String
     public let briefingText: String
     public let acceptButton: String
     public let refuseButton: String
     public let canRefuse: Bool
 
-    public init(mission: MissionRes, briefingText: String,
+    public init(mission: MissionRes, title: String, briefingText: String,
                 acceptButton: String, refuseButton: String, canRefuse: Bool) {
         self.mission = mission
+        self.title = title
         self.briefingText = briefingText
         self.acceptButton = acceptButton
         self.refuseButton = refuseButton

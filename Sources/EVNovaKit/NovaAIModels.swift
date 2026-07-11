@@ -490,7 +490,11 @@ public struct WeapRes {
     public let speed: Int           // projectile speed (px per frame at 30 fps)
     public let ammoType: Int        // −1 = no ammo; ≥0 draws from that ammo
     public let accuracy: Int        // spread in degrees (0 = perfect)
-    public let impact: Int
+    /// `wëap` accuracy is stored signed; a negative value means "fires at a
+    /// fixed angle" (no target lead even for turrets). We keep `accuracy` as the
+    /// magnitude and expose the sign here.
+    public let firesAtFixedAngle: Bool
+    public let impact: Int          // @20 knockback impulse (inversely ∝ target mass)
     /// `snd ` id played when this weapon fires, or nil if it's silent.
     public let fireSoundID: Int?
     /// `bööm` id detonated on impact/expiry (drives the hit/explosion sound and
@@ -525,7 +529,51 @@ public struct WeapRes {
     /// `WeapResource.ts` (`ionization`).
     public let ionization: Int      // @74
 
+    /// `spïn` id of this weapon's own shot graphic (`wëap` @14, +3000 base), or
+    /// nil if it draws no sprite. Lets a torpedo/rocket/bolt render its real
+    /// animation instead of a generic dot.
+    public let graphicSpinID: Int?
+    /// "How fast to decay each shot's power: remove one point of shield & armor
+    /// damage every this-many frames" (Bible, `wëap` @34). 0/-1 = no decay.
+    public let decay: Int
+    /// Submunition on shot expiry/detonation: how many, which `wëap` id, angular
+    /// spread (deg), and recursion limit. Nil when the shot doesn't split.
+    public let subCount: Int        // @62
+    public let subID: Int           // @64 (>=128 to be valid)
+    public let subTheta: Int        // @66 spread in degrees
+    public let subLimit: Int        // @68 recursion cap
+    /// "Time delay for the proximity fuse, in 30ths of a second" (Bible, @70).
+    public let proxSafety: Int
+    /// Burst fire: fire `burstCount` shots at the fast `reload` cadence, then a
+    /// long `burstReload` cooldown (Bible, @90/@92). 0/-1 = no burst.
+    public let burstCount: Int
+    public let burstReload: Int
+    /// Recoil impulse applied to the firing ship (@86). -1 → 0.
+    public let recoil: Int
+    /// Raw `Flags2` field (@72), for submunition/prox behaviour flags.
+    public let flags2Raw: UInt16
+
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
+    /// `Flags` 0x0002: this weapon fires on the *secondary* trigger (typically
+    /// missiles/torpedoes), not the primary.
+    public var firedBySecondTrigger: Bool { flagsRaw & 0x0002 != 0 }
+    /// `Flags` 0x0040: "multiple weapons of this type fire simultaneously". When
+    /// off (the default), several copies of the weapon stagger — one barrel at a
+    /// time at `reload / count` — instead of volleying every reload.
+    public var fireSimultaneously: Bool { flagsRaw & 0x0040 != 0 }
+    /// `Flags` 0x8000: "shot detonates at the end of its lifespan" (flak).
+    public var detonateOnExpire: Bool { flagsRaw & 0x8000 != 0 }
+    /// `Flags` 0x0001: spin the shot graphic continuously.
+    public var spinShots: Bool { flagsRaw & 0x0001 != 0 }
+    /// `Flags2` 0x0020 (inverted): launch submunitions when the shot expires.
+    public var subIfExpire: Bool { flags2Raw & 0x0020 == 0 }
+    /// `Flags2` 0x0010: submunitions fire toward the nearest valid target.
+    public var subFireAtNearest: Bool { flags2Raw & 0x0010 != 0 }
+    /// `Flags2` 0x0008 (or any non-guided weapon): the proximity fuse triggers on
+    /// ships other than the target too.
+    public var proxHitAll: Bool { flags2Raw & 0x0008 != 0 || guidance != .guided }
+    /// True when this weapon splits into submunitions.
+    public var hasSubmunition: Bool { subID >= 128 && subCount > 0 }
     public var isBeam: Bool { guidance == .beam || guidance == .beamTurret || guidance == .pointDefenseBeam }
     public var isGuided: Bool {
         switch guidance { case .guided, .rocket, .frontQuadrant, .rearQuadrant: return true; default: return false }
@@ -559,7 +607,11 @@ public struct WeapRes {
         guidanceRaw = ai16(d, 8)
         speed = ai16(d, 10)
         ammoType = ai16(d, 12)
-        accuracy = abs(ai16(d, 16))
+        let rawGraphic = ai16(d, 14)
+        graphicSpinID = rawGraphic <= 0 ? nil : rawGraphic + 3000
+        let rawAccuracy = ai16(d, 16)
+        accuracy = abs(rawAccuracy)
+        firesAtFixedAngle = rawAccuracy < 0
         let rawSound = ai16(d, 18)
         fireSoundID = rawSound == -1 ? nil : rawSound + 200
         impact = ai16(d, 20)
@@ -568,13 +620,23 @@ public struct WeapRes {
         loopSound = flags & 0x0010 != 0
         flagsRaw = flags
         seekerFlagsRaw = ai16(d, 30)
+        decay = ai16(d, 34)
         ionization = ai16(d, 74)
         proxRadius = ai16(d, 24)
         blastRadius = ai16(d, 26)
         beamLength = ai16(d, 48)
         beamWidth = ai16(d, 50)
         beamColor = acolor(d, 54)
+        subCount = ai16(d, 62)
+        subID = ai16(d, 64)
+        subTheta = ai16(d, 66)
+        subLimit = ai16(d, 68)
+        proxSafety = ai16(d, 70)
+        flags2Raw = au16(d, 72)
+        recoil = max(0, ai16(d, 86))
         exitType = ai16(d, 88)
+        burstCount = ai16(d, 90)
+        burstReload = ai16(d, 92)
         turnRate = ai16(d, 106)
         maxAmmo = ai16(d, 108)
         count = ai16(d, 118)

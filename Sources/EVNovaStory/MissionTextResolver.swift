@@ -21,8 +21,13 @@ enum MissionText {
     /// Resolve every `<…>` wildcard in `text` for `mission`, given the current
     /// `player` and `game`. `initialSpob` resolves the "-4 initial stellar"
     /// selector the same way availability matching does.
+    /// `travelSpob`/`returnSpob` are the mission's **concrete** destination /
+    /// return stellar ids, already resolved from its (possibly random) selectors
+    /// by `StoryEngine.concreteStellar` — so `<DST>`/`<DSY>` name a real world
+    /// even for the generic "random Federation stellar" cargo runs.
     static func resolve(_ text: String, mission: MissionRes,
-                        player: PlayerState, game: NovaGame, initialSpob: Int?) -> String {
+                        player: PlayerState, game: NovaGame, initialSpob: Int?,
+                        travelSpob: Int? = nil, returnSpob: Int? = nil) -> String {
         guard text.contains("<") else { return text }
         var out = ""
         out.reserveCapacity(text.count)
@@ -36,7 +41,8 @@ enum MissionText {
             }
             let tag = String(text[text.index(after: i)..<close])
             if let value = value(for: tag, mission: mission, player: player,
-                                  game: game, initialSpob: initialSpob) {
+                                  game: game, initialSpob: initialSpob,
+                                  travelSpob: travelSpob, returnSpob: returnSpob) {
                 out += value
                 i = text.index(after: close)
             } else {
@@ -52,7 +58,8 @@ enum MissionText {
     // MARK: - Tag values
 
     private static func value(for tag: String, mission: MissionRes, player: PlayerState,
-                              game: NovaGame, initialSpob: Int?) -> String? {
+                              game: NovaGame, initialSpob: Int?,
+                              travelSpob: Int?, returnSpob: Int?) -> String? {
         switch tag {
         case "PN":  return player.pilotName
         case "PNN": return player.pilotName          // no separate nickname stored
@@ -60,10 +67,10 @@ enum MissionText {
         case "PST": return shipTypeName(player.shipType, game)
         case "CQ":  return "\(abs(mission.cargoQty))"
         case "CT":  return cargoName(mission.cargoType, game)
-        case "DSY": return systemName(ofStellar: mission.travelStellar, game: game, initialSpob: initialSpob)
-        case "DST": return stellarName(mission.travelStellar, game: game, initialSpob: initialSpob)
-        case "RSY": return systemName(ofStellar: mission.returnStellar, game: game, initialSpob: initialSpob)
-        case "RST": return stellarName(mission.returnStellar, game: game, initialSpob: initialSpob)
+        case "DSY": return systemName(ofSpob: travelSpob, game: game)
+        case "DST": return stellarName(travelSpob, game: game)
+        case "RSY": return systemName(ofSpob: returnSpob, game: game)
+        case "RST": return stellarName(returnSpob, game: game)
         case "DL":  return deadlineString(mission, player: player)
         case "PAY": return mission.pay != 0 ? "\(abs(mission.pay))" : ""
         case "REG": return player.pilotName          // this port has no shareware registration
@@ -95,30 +102,17 @@ enum MissionText {
         return "cargo"
     }
 
-    /// The stellar (planet/station) a travel/return code points at. For a fixed
-    /// spob id we name it directly; random/special selectors aren't resolved to
-    /// a concrete stellar until accept, so they read as "your destination".
-    private static func stellarName(_ code: Int, game: NovaGame, initialSpob: Int?) -> String {
-        if let spobID = resolvedSpob(code, game: game, initialSpob: initialSpob),
-           let spob = game.spob(spobID) {
-            return spob.displayName
-        }
+    /// The name of an already-resolved concrete destination/return stellar.
+    private static func stellarName(_ spobID: Int?, game: NovaGame) -> String {
+        if let spobID, let spob = game.spob(spobID) { return spob.displayName }
         return "your destination"
     }
 
-    private static func systemName(ofStellar code: Int, game: NovaGame, initialSpob: Int?) -> String {
-        if let spobID = resolvedSpob(code, game: game, initialSpob: initialSpob),
-           let sys = game.systems().first(where: { $0.spobs.contains(spobID) }) {
+    private static func systemName(ofSpob spobID: Int?, game: NovaGame) -> String {
+        if let spobID, let sys = game.systems().first(where: { $0.spobs.contains(spobID) }) {
             return sys.name
         }
         return "an unknown system"
-    }
-
-    /// A travel/return selector that is already a concrete spob id (≥128).
-    /// Random selectors (negative / special-range codes) return nil — their
-    /// concrete stellar is only chosen when the mission is accepted.
-    private static func resolvedSpob(_ code: Int, game: NovaGame, initialSpob: Int?) -> Int? {
-        code >= 128 ? code : nil
     }
 
     private static func deadlineString(_ mission: MissionRes, player: PlayerState) -> String {

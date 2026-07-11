@@ -100,10 +100,12 @@ enum RadarRelationship {
 
     var color: Color {
         switch self {
-        case .hostile: return Color(red: 0.95, green: 0.3, blue: 0.25)
-        case .neutral: return Color(red: 0.95, green: 0.85, blue: 0.25)
-        case .friendlyOrOwned: return Color(red: 0.4, green: 0.9, blue: 0.4)
-        case .disabled: return Color(white: 0.55)
+        case .hostile: return Color(red: 0.95, green: 0.3, blue: 0.25)      // red
+        // Neutral contacts read grey on EV Nova's scope, not yellow — yellow
+        // over-signalled every independent ship/world as "notable".
+        case .neutral: return Color(white: 0.7)
+        case .friendlyOrOwned: return Color(red: 0.4, green: 0.9, blue: 0.4) // green
+        case .disabled: return Color(white: 0.4)
         }
     }
 }

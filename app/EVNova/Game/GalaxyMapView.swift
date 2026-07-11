@@ -1,5 +1,6 @@
 import SwiftUI
 import EVNovaKit
+import EVNovaStory
 
 /// The galaxy map, in the spirit of EV Nova's: systems plotted at their real
 /// coordinates centered on the current system, hyperspace links as thin lines,
@@ -40,6 +41,11 @@ struct GalaxyMapView: View {
     /// coordinate system), scaled by the current zoom.
     @State private var nebulae: [MapNebula] = []
 
+    /// Systems that hold an active mission's destination — the galaxy map draws
+    /// EV Nova's orange "go here" arrow over each. Rebuilt from the story engine
+    /// when the map opens (accepted missions don't change while it's up).
+    @State private var missionDestinations: [Int] = []
+
     private struct MapNebula { let x, y, w, h: Int; let image: CGImage }
 
     /// Hypergate/wormhole connections between systems (`spöb` HyperLink1-8),
@@ -53,6 +59,8 @@ struct GalaxyMapView: View {
     private let maxZoom: CGFloat = 16     // a linked neighbor fills most of the screen
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
+    /// EV Nova's mission-destination marker colour — a saturated orange arrow.
+    private let missionOrange = Color(red: 1.0, green: 0.52, blue: 0.0)
     private let routeGreen = Color(red: 0.3, green: 0.95, blue: 0.4)
     private let routeWarn = Color(red: 1.0, green: 0.4, blue: 0.32)
     private let adjacentGrey = Color(white: 0.42)
@@ -94,6 +102,7 @@ struct GalaxyMapView: View {
             if graphics == nil { graphics = g }
             rebuildNebulae(using: g)
             rebuildGateLinks()
+            rebuildMissionDestinations()
         }
         .sheet(isPresented: $showingFinder) {
             SystemFinderView(nav: nav, pilot: pilot) { system in centerOn(system) }
@@ -186,6 +195,15 @@ struct GalaxyMapView: View {
             }
         }
         gateLinks = links
+    }
+
+    /// Ask the story engine which systems currently hold an accepted mission's
+    /// destination stellar. Built from a transient engine over the live pilot
+    /// state (the same throwaway-engine pattern the spaceport screens use).
+    private func rebuildMissionDestinations() {
+        guard let game = nav.game else { return }
+        let engine = StoryEngine(game: game, player: pilot.state)
+        missionDestinations = engine.missionDestinationSystemIDs()
     }
 
     private func factionColor(for government: Int) -> Color {
@@ -418,6 +436,45 @@ struct GalaxyMapView: View {
                 )
             }
         }
+
+        // Mission-destination arrows: EV Nova marks each system a currently-
+        // accepted mission wants you to visit with a bobbing orange arrow. Drawn
+        // last so it sits over the dots/labels. A mission destination is always
+        // marked regardless of fog of war — the game reveals where a mission
+        // sends you so you can navigate there. The arrow bobs with the blink tick.
+        let bob: CGFloat = blinkOn ? 0 : 3
+        for destID in missionDestinations {
+            guard let s = byID[destID] else { continue }
+            let p = plot(s.x, s.y)
+            guard visibleRect.contains(p) else { continue }
+            drawMissionArrow(ctx: &ctx, at: p, bob: bob)
+        }
+    }
+
+    /// A downward-pointing orange arrow hovering just above a system, the EV Nova
+    /// "your mission wants you here" marker. Anchored so its tip sits a few points
+    /// above the star dot; `bob` nudges it up/down for a subtle pulse.
+    private func drawMissionArrow(ctx: inout GraphicsContext, at p: CGPoint, bob: CGFloat) {
+        let tipY = p.y - 12 + bob          // arrow tip, above the dot
+        let headW: CGFloat = 7             // half-width of the arrowhead
+        let headH: CGFloat = 9             // arrowhead height
+        let shaftH: CGFloat = 9            // shaft length above the head
+        let shaftW: CGFloat = 2.4          // half-width of the shaft
+
+        var head = Path()
+        head.move(to: CGPoint(x: p.x, y: tipY))                       // tip
+        head.addLine(to: CGPoint(x: p.x - headW, y: tipY - headH))    // upper-left
+        head.addLine(to: CGPoint(x: p.x + headW, y: tipY - headH))    // upper-right
+        head.closeSubpath()
+
+        let shaft = Path(CGRect(x: p.x - shaftW, y: tipY - headH - shaftH,
+                                width: shaftW * 2, height: shaftH + 1))
+
+        // A soft dark outline first so the arrow reads over bright nebulae/dots.
+        ctx.stroke(head, with: .color(.black.opacity(0.6)), lineWidth: 2.4)
+        ctx.stroke(shaft, with: .color(.black.opacity(0.6)), lineWidth: 2.4)
+        ctx.fill(head, with: .color(missionOrange))
+        ctx.fill(shaft, with: .color(missionOrange))
     }
 
     /// Four corner brackets around a point (the classic map cursor).

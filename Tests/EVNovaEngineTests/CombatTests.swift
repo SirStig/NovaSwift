@@ -194,14 +194,48 @@ final class CombatTests: XCTestCase {
         XCTAssertEqual(m.y, -10, accuracy: 1e-6)        // "right" is now -y
     }
 
-    func testMountsSpreadAcrossExitPoints() {
+    func testExitPointZNudgesScreenVertical() {
+        let s = makeShip("A", govt: 1, at: Vec2())
+        // Gun 3px right, 10 forward, with a +4 z (screen-up) nudge.
+        s.exitPoints = ShipExitPoints(gun: [Vec2(3, 10)], turret: [], guided: [], beam: [],
+                                      gunZ: [4])
+        s.weapons = [WeaponMount(spec: exitGun())]
+        s.angle = 0
+        let m = s.muzzle(for: s.weapons[0])
+        XCTAssertEqual(m.x, 3, accuracy: 1e-6)
+        XCTAssertEqual(m.y, 14, accuracy: 1e-6)   // 10 forward + 4 unscaled z
+    }
+
+    func testMuzzleIndexesHardpoints() {
         let s = makeShip("A", govt: 1, at: Vec2())
         s.exitPoints = ShipExitPoints(gun: [Vec2(-10, 0), Vec2(10, 0)], turret: [], guided: [], beam: [])
-        s.weapons = [WeaponMount(spec: exitGun()), WeaponMount(spec: exitGun())]
-        XCTAssertEqual(s.weapons[0].exitIndex, 0)
-        XCTAssertEqual(s.weapons[1].exitIndex, 1)
-        XCTAssertEqual(s.muzzle(for: s.weapons[0]).x, -10, accuracy: 1e-6)
-        XCTAssertEqual(s.muzzle(for: s.weapons[1]).x, 10, accuracy: 1e-6)
+        s.angle = 0
+        XCTAssertEqual(s.muzzle(exitType: .gun, index: 0).x, -10, accuracy: 1e-6)
+        XCTAssertEqual(s.muzzle(exitType: .gun, index: 1).x, 10, accuracy: 1e-6)
+    }
+
+    func testMultipleCopiesStaggerAndCycleBarrels() {
+        // One gun *type*, two copies, reload 0.2s → one shot every 0.1s from
+        // alternating barrels (not a 2-shot volley every 0.2s).
+        let s = makeShip("A", govt: 1, at: Vec2())
+        s.exitPoints = ShipExitPoints(gun: [Vec2(-10, 0), Vec2(10, 0)], turret: [], guided: [], beam: [])
+        s.angle = 0
+        let spec = WeaponSpec(id: 300, name: "G", shieldDamage: 1, armorDamage: 1, reloadSeconds: 0.2,
+                              projectileSpeed: 500, range: 500, accuracyRadians: 0, isBeam: false,
+                              isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0, exitType: .gun)
+        let world = World(player: s)
+        s.weapons = [WeaponMount(spec: spec, count: 2)]
+        world.intent.firePrimary = true
+
+        world.step(1.0 / 60.0)
+        XCTAssertEqual(world.projectiles.count, 1, "a 2-copy group fires one barrel at a time, not a volley")
+        XCTAssertEqual(world.projectiles[0].position.x, -10, accuracy: 2, "first shot from the first barrel")
+
+        // Next barrel becomes ready after reload/count = 0.1s.
+        for _ in 0..<8 { world.step(1.0 / 60.0) }
+        XCTAssertGreaterThanOrEqual(world.projectiles.count, 2, "the group refires after reload/count, not reload")
+        XCTAssertTrue(world.projectiles.contains { abs($0.position.x - 10) < 2 },
+                      "the second shot leaves the other barrel (+10)")
     }
 
     func testContinuousBeamStaysWeldedToMovingShip() {
@@ -224,6 +258,68 @@ final class CombatTests: XCTestCase {
         world.intent.firePrimary = false
         world.step(1.0 / 30.0)
         XCTAssertTrue(world.activeBeams.isEmpty, "beam ends when the trigger releases")
+    }
+
+    // MARK: guidance, turrets, rockets, burst
+
+    func testTurretHoldsFireWithoutTargetAndAimsIndependently() {
+        let turret = WeaponSpec(id: 210, name: "Turret", shieldDamage: 10, armorDamage: 10,
+                                reloadSeconds: 0.05, projectileSpeed: 500, range: 2000,
+                                accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
+                                blastRadius: 0, ammoPerShot: 0, guidance: .turret, isTurret: true)
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        attacker.angle = 0                                      // hull faces +y (north)
+        let world = World(player: attacker)
+        attacker.weapons = [WeaponMount(spec: turret)]
+        world.intent.firePrimary = true
+
+        world.step(1.0 / 30.0)
+        XCTAssertTrue(world.projectiles.isEmpty, "a turret with no target holds fire")
+
+        // Target directly behind the ship (south): a turret still engages it.
+        let target = makeShip("B", govt: 2, at: Vec2(0, -300))
+        attacker.currentTargetID = world.addNPC(target)
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(world.projectiles.isEmpty, "a turret fires at a target regardless of hull facing")
+        XCTAssertLessThan(world.projectiles[0].velocity.y, 0,
+                          "the turret shot flies toward the target (south), not along the hull heading (north)")
+    }
+
+    func testGuidedMissileHomesOntoTarget() {
+        let missile = WeaponSpec(id: 211, name: "Missile", shieldDamage: 40, armorDamage: 40,
+                                 reloadSeconds: 1, projectileSpeed: 500, range: 6000,
+                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 8,
+                                 blastRadius: 0, ammoPerShot: 0, guidance: .guided)
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        attacker.angle = 0                                      // launches north
+        let world = World(player: attacker)
+        let target = makeShip("B", govt: 2, at: Vec2(350, 450)) // off to the side
+        let tid = world.addNPC(target)
+        attacker.weapons = [WeaponMount(spec: missile)]
+        attacker.currentTargetID = tid
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)
+        world.intent.firePrimary = false                       // just the one missile
+
+        var hit = false
+        for _ in 0..<150 {
+            world.step(1.0 / 30.0)
+            if target.shield < 100 { hit = true; break }
+        }
+        XCTAssertTrue(hit, "a guided missile launched north curves to hit a target off to the side")
+    }
+
+    func testBurstFireCadence() {
+        let burst = WeaponSpec(id: 212, name: "Burst", shieldDamage: 5, armorDamage: 5,
+                               reloadSeconds: 0.05, projectileSpeed: 500, range: 1000,
+                               accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
+                               blastRadius: 0, ammoPerShot: 0, burstCount: 3, burstReloadSeconds: 2.0)
+        let mount = WeaponMount(spec: burst)          // one copy → burst threshold = 3
+        XCTAssertEqual(mount.burstShots, 0)
+        mount.didFire(shots: 1); XCTAssertEqual(mount.cooldown, 0.05, accuracy: 1e-9)  // shot 1 of burst
+        mount.cooldown = 0; mount.didFire(shots: 1); XCTAssertEqual(mount.cooldown, 0.05, accuracy: 1e-9)  // shot 2
+        mount.cooldown = 0; mount.didFire(shots: 1); XCTAssertEqual(mount.cooldown, 2.0, accuracy: 1e-9)   // burst spent → long reload
+        XCTAssertEqual(mount.burstShots, 0, "the burst counter resets after the long reload")
     }
 
     // MARK: ionization

@@ -292,6 +292,8 @@ struct GameContainerView: View {
                         onRequestAssistance: {
                             if case let .ship(entityID, _) = state.kind { requestAssistance(entityID: entityID) }
                         },
+                        onRequestLanding: { requestPlanetLanding() },
+                        onDemandTribute: { demandPlanetTribute() },
                         onClose: { hailDialogState = nil })
                 }
 
@@ -722,10 +724,10 @@ struct GameContainerView: View {
         }
     }
 
-    /// Hail whatever `GameScene.attemptHail()` resolves to — the locked ship
-    /// target, else the click-selected planet, else the nearest ship in
-    /// range — and open the communication dialog. Silently does nothing with
-    /// no valid target — matches `attemptLand()`'s "no prompt, no action" pattern.
+    /// Hail whatever `GameScene.attemptHail()` resolves to — the current
+    /// selection, ship or planet — and open the communication dialog.
+    /// Silently does nothing with no selection — matches `attemptLand()`'s
+    /// "no prompt, no action" pattern.
     private func hail() {
         guard let scene = host?.scene, let result = scene.attemptHail() else { return }
         switch result {
@@ -736,8 +738,14 @@ struct GameContainerView: View {
                 name: name, govtLabel: govt.targetCode, hostile: hostile,
                 responseText: hostile ? "They aren't interested in talking." : "This is \(name). Go ahead.")
         case let .planet(spobID, name, govt, landable):
+            // Hostile when the player is deeply wanted by the stellar's govt
+            // (a wanted rating turns its defenders on you) — read straight from
+            // the pilot's own legal record so it needs no scene internals.
+            let record = govt.flatMap { model.pilot.state.legalRecord[$0.id] } ?? 0
+            let hostile = record <= -150
             hailDialogState = HailDialogState(
-                kind: .planet(spobID: spobID), name: name, govtLabel: govt?.targetCode ?? "", hostile: false,
+                kind: .planet(spobID: spobID), name: name, govtLabel: govt?.targetCode ?? "", hostile: hostile,
+                landable: landable,
                 // "Channel open to X" is the manual's own wording for a stellar hail.
                 responseText: landable ? "Channel open to \(name)."
                                        : "Channel open to \(name). Landing clearance is not currently granted.")
@@ -781,6 +789,34 @@ struct GameContainerView: View {
         hailDialogState = state
     }
 
+    /// Ask a stellar for landing clearance. A non-hostile world grants it (the
+    /// dialog switches to "cleared to land"); a hostile one refuses — you'd have
+    /// to bribe or dominate it. Updates the open dialog in place.
+    private func requestPlanetLanding() {
+        guard var state = hailDialogState, case .planet = state.kind else { return }
+        if state.hostile {
+            state.responseText = "Request denied. You are not welcome here."
+        } else {
+            state.landable = true
+            state.responseText = "Landing clearance granted. You are cleared to land."
+        }
+        hailDialogState = state
+    }
+
+    /// Demand tribute from a stellar — EV Nova's path to forcefully dominating a
+    /// planet/station. The world refuses and turns hostile; defeating its
+    /// defenders is what actually dominates it. Full domination combat (spawning
+    /// the defense fleet, tribute income, forced landing rights) is a follow-up
+    /// that belongs in `GameScene`; this opens hostilities and posts the notice.
+    private func demandPlanetTribute() {
+        guard var state = hailDialogState, case .planet = state.kind else { return }
+        state.hostile = true
+        state.landable = false
+        state.responseText = "\"You'll get nothing from us!\" The stellar's defenders turn hostile."
+        hailDialogState = state
+        host?.hud.post("\(state.name) refuses your demand for tribute.")
+    }
+
     private func hailShowsAssistButton(_ state: HailDialogState) -> Bool {
         if case .ship = state.kind { return true }
         return false
@@ -797,8 +833,11 @@ struct GameContainerView: View {
             guard let res = host?.game?.ship(shipTypeID) else { return nil }
             return host?.graphics?.shipPicture(res)
         case let .planet(spobID):
-            // A stellar comm shows the planet's own art — its landing PICT, the
-            // same image the spaceport hub and galaxy-map panel use.
+            // A stellar comm shows the world/station itself — its **space
+            // sprite** (the sphere or station you see in-system), not the
+            // ground-level landing landscape. Fall back to the landscape only if
+            // the spob defines no sprite.
+            if let sprite = host?.game?.spobSprite(spobID)?.frameCGImage(0) { return sprite }
             guard let spob = host?.game?.spob(spobID) else { return nil }
             return host?.graphics?.landscape(for: spob)
         }
@@ -874,6 +913,7 @@ private struct LandPromptView: View {
                     .transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity)
         .novaResponsive()
         .animation(.easeInOut(duration: 0.15), value: hud.landPrompt)
         .allowsHitTesting(false)
@@ -919,7 +959,10 @@ struct HailDialogState {
     let kind: Kind
     let name: String
     let govtLabel: String
-    let hostile: Bool
+    /// Mutable: demanding tribute turns a stellar hostile in place.
+    var hostile: Bool
+    /// Whether the player currently has landing clearance here (planet hails).
+    var landable = true
     var responseText: String
     var assistRequested = false
 }

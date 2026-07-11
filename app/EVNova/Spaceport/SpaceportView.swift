@@ -136,15 +136,32 @@ struct SpaceportView: View {
     @ViewBuilder private var hub: some View {
         if let frame = graphics.frame(.spaceport) {
             NovaMenu(frame: frame) { space in
-                // The planet's landscape fills the frame's top black area.
+                // The landing view's top area — DITL #1000 item 4 (3,3)-(615,288),
+                // 612×285. A planet fills it with its landscape PICT; a station
+                // (no landing PICT — its `landingPictID` is 0xFFFF) has none, so
+                // fall back to the station's own space sprite, centred, rather
+                // than leaving the whole area black.
                 if let land = graphics.landscape(for: spob) {
                     Image(decorative: land, scale: 1).interpolation(.high).resizable()
                         .frame(width: CGFloat(land.width), height: CGFloat(land.height))
                         .novaPlace(space, -306, -256)
+                } else if let sprite = game.spobSprite(spob.id)?.frameCGImage(0) {
+                    // Station sprites are low-res (40–300px); fitting one to the
+                    // full 612×285 area upscaled it 2–3× into a blur. Fit it to
+                    // the area but cap the upscale at 1.5× so it stays crisp,
+                    // centred in the top black region.
+                    let w = CGFloat(sprite.width), h = CGFloat(sprite.height)
+                    let s = min(1.5, min(560 / w, 265 / h))
+                    let dw = w * s, dh = h * s
+                    Image(decorative: sprite, scale: 1).interpolation(.high).resizable()
+                        .frame(width: dw, height: dh)
+                        .novaPlace(space, -dw / 2, -113 - dh / 2)
                 }
-                // Planet name, centred just below the landscape.
-                NovaText(spob.name, size: 18, width: 470, align: .center)
-                    .novaPlace(space, -235, 30)
+                // Planet/station name — DITL #1000 item 2 (159,297)-(462,315),
+                // 303×18, centred just below the top image (was ~8px too high,
+                // overlapping the image's bottom edge).
+                NovaText(spob.name, size: 15, width: 303, align: .center)
+                    .novaPlace(space, -150, 39)
                 // Spaceport description, in the centre panel (wrap 301, as EV Nova;
                 // Geneva 10 ≈ the reference's 9pt, kept one up for readability and
                 // matching every other in-frame body text in this port).
@@ -342,7 +359,7 @@ struct MissionBBSView: View {
                         .novaPlace(space, -245, -70.5)
                     if let offer = services.pendingOffer {
                         HStack(spacing: 4) {
-                            NovaText(offer.mission.displayName, size: 10, width: 185, weight: .bold)
+                            NovaText(offer.title, size: 10, width: 185, weight: .bold)
                             Spacer(minLength: 0)
                             NovaText(creditsLabel(offer.mission.pay), size: 10,
                                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 80, align: .trailing)
@@ -384,7 +401,7 @@ struct MissionBBSView: View {
                 ForEach(offered, id: \.id) { mission in
                     let isSelected = services.pendingOffer?.mission.id == mission.id
                     Button { engine?.present(mission) } label: {
-                        NovaText(mission.displayName, size: 10,
+                        NovaText(engine?.resolvedName(for: mission) ?? mission.displayName, size: 10,
                                  color: isSelected ? .white : Color(white: 0.65), width: 189)
                             .padding(.vertical, 1.5).padding(.horizontal, 3)
                             .background(isSelected ? Color.white.opacity(0.14) : .clear)

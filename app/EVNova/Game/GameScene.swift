@@ -69,6 +69,22 @@ final class GameScene: SKScene {
     /// Shared textures for the pools above (built once, lazily).
     private lazy var projectileTexture: SKTexture = GameScene.makeDotTexture()
     private lazy var beamTexture: SKTexture = GameScene.makeBeamTexture()
+
+    /// Pooled expanding explosion/hit flashes, animated in `updateFlashes`
+    /// instead of allocating an `SKShapeNode` + `SKAction` per world event.
+    private struct Flash {
+        let node: SKSpriteNode
+        var age: Double
+        let duration: Double
+        let startDiameter: CGFloat
+        let endDiameter: CGFloat
+    }
+    private var activeFlashes: [Flash] = []
+    private var flashPool: [SKSpriteNode] = []
+    /// Decoded shot-graphic frames per weapon spïn id (data-keyed, kept across systems).
+    private var weaponGraphicCache: [Int: [SKTexture]] = [:]
+    /// Monotonic clock for looping shot-spin / effect animation.
+    private var effectClock: Double = 0
     private var systemName = ""
     /// True when this scene was just built because the player jumped in from
     /// hyperspace (not a fresh game start, a landing depart, or a load) — the
@@ -123,10 +139,11 @@ final class GameScene: SKScene {
     // allowed; the HUD shows `landPrompt` while a pad is in reach.
     private(set) var nearestLandableID: Int?
     private(set) var canLandNow = false
-    /// The click-selected nav destination (planet/station) — independent of
-    /// `nearestLandableID`, which stays proximity-only and keeps driving the
-    /// land prompt. A ship target and a planet nav-selection can coexist, as
-    /// in the real game.
+    /// The click/hotkey-selected nav destination (planet/station) —
+    /// independent of `nearestLandableID`, which stays proximity-only and
+    /// keeps driving the land prompt. Mutually exclusive with
+    /// `world.player.currentTargetID`: selecting a planet clears the ship
+    /// target and vice versa, so only one thing is ever selected at a time.
     private(set) var selectedPlanetID: Int?
     private let landingSpeedLimit: Double = 130
     /// Read-only handle to the live player ship (fuel top-up / cargo sync on land).
@@ -207,7 +224,7 @@ final class GameScene: SKScene {
         var thruster: SKNode?
         var engineGlow: SKSpriteNode?
         var engineGlowTextures: [SKTexture] = []
-        var healthFill: SKShapeNode?
+        var healthFill: SKSpriteNode?
         var healthBar: SKNode?
         var textures: [SKTexture] = []
         var radius: CGFloat = 16
@@ -458,24 +475,39 @@ final class GameScene: SKScene {
         shipNode = node
     }
 
-    /// A simple additive flame: an outer amber and inner white teardrop. `scale`
-    /// sizes it relative to the hull it's mounted on (a fighter and a capital
-    /// ship shouldn't get the same absolute-size flame).
+    /// A simple additive flame as a *single* batched `SKSpriteNode` (not the two
+    /// per-ship `SKShapeNode`s it replaced — those were non-batching draw calls
+    /// on every ship and a real frame-rate cost in a crowded fight). The flame
+    /// art (amber body + white core) is baked into one shared texture; `scale`
+    /// sizes it to the hull. Anchored at its top so it hangs off the tail mount.
     private func makeThruster(scale: CGFloat = 1.0) -> SKNode {
-        let container = SKNode()
-        func flame(_ w: CGFloat, _ h: CGFloat, _ color: SKColor) -> SKShapeNode {
-            let p = CGMutablePath()
-            p.move(to: CGPoint(x: 0, y: 0))
-            p.addQuadCurve(to: CGPoint(x: 0, y: -h), control: CGPoint(x: w, y: -h * 0.4))
-            p.addQuadCurve(to: CGPoint(x: 0, y: 0), control: CGPoint(x: -w, y: -h * 0.4))
-            let s = SKShapeNode(path: p)
-            s.fillColor = color; s.strokeColor = .clear; s.blendMode = .add
-            return s
-        }
-        container.addChild(flame(7 * scale, 26 * scale, SKColor(red: 1.0, green: 0.5, blue: 0.15, alpha: 0.9)))
-        container.addChild(flame(3.5 * scale, 16 * scale, SKColor(red: 1.0, green: 0.95, blue: 0.8, alpha: 0.95)))
-        return container
+        let flame = SKSpriteNode(texture: GameScene.flameTexture)
+        flame.anchorPoint = CGPoint(x: 0.5, y: 1.0)     // top-centre = the nozzle
+        flame.blendMode = .add
+        flame.size = CGSize(width: 18 * scale, height: 34 * scale)
+        return flame
     }
+
+    /// Shared additive flame texture: an amber teardrop with a hot white core,
+    /// widest at the top (nozzle) tapering to the tip. Built once.
+    private static let flameTexture: SKTexture = {
+        let w = 32, h = 64
+        return imageTexture(width: w, height: h) { ctx in
+            // CG origin is bottom-left, y up; SpriteKit maps image-top → sprite +y,
+            // so the wide/hot end must be drawn at the top of the bitmap.
+            func teardrop(width: CGFloat, color: SKColor) {
+                let cx = CGFloat(w) / 2
+                let top = CGFloat(h) * 0.96, tip = CGFloat(h) * 0.06
+                let p = CGMutablePath()
+                p.move(to: CGPoint(x: cx, y: top))
+                p.addQuadCurve(to: CGPoint(x: cx, y: tip), control: CGPoint(x: cx + width, y: CGFloat(h) * 0.55))
+                p.addQuadCurve(to: CGPoint(x: cx, y: top), control: CGPoint(x: cx - width, y: CGFloat(h) * 0.55))
+                ctx.addPath(p); ctx.setFillColor(color.cgColor); ctx.fillPath()
+            }
+            teardrop(width: CGFloat(w) * 0.42, color: SKColor(red: 1.0, green: 0.5, blue: 0.15, alpha: 0.9))
+            teardrop(width: CGFloat(w) * 0.20, color: SKColor(red: 1.0, green: 0.95, blue: 0.8, alpha: 0.95))
+        }
+    }()
 
     // MARK: Loop
 
@@ -597,7 +629,9 @@ final class GameScene: SKScene {
             }
         }
         wasFiring = intent.firePrimary
+        effectClock += dt
         updateBeamLoopPositions(listener: scenePos)
+        updateFlashes(dt)
         syncProjectiles()
         syncBeams()
         syncNPCs()
@@ -666,30 +700,25 @@ final class GameScene: SKScene {
 
     // MARK: Hailing + target-lock
 
-    /// Who `.hailTarget` reaches: the locked ship target if any, else the
-    /// click-selected planet/station nav destination, else (unchanged
-    /// fallback) the nearest ship in hail range — so hailing still works for
-    /// players who haven't discovered click-targeting.
+    /// Who `.hailTarget` reaches: whatever is currently selected — the locked
+    /// ship target, or else the selected planet/station. Nil (no hail) when
+    /// nothing is selected; hailing never falls back to a nearby-but-unselected
+    /// ship, so pressing Hail with no selection does nothing rather than
+    /// contacting a ship the player never actually chose.
     enum HailResult {
         case ship(entityID: Int, name: String, shipTypeID: Int, govt: GovtRes, hostile: Bool)
         case planet(spobID: Int, name: String, govt: GovtRes?, landable: Bool)
     }
 
     func attemptHail() -> HailResult? {
-        func shipResult(_ ship: Ship) -> HailResult? {
+        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
             guard let game = galaxy?.game, let govt = game.govt(ship.government) else { return nil }
             return .ship(entityID: ship.entityID, name: ship.name, shipTypeID: ship.shipTypeID,
                         govt: govt, hostile: world.diplomacy?.isHostileToPlayer(ship.government) == true)
         }
-        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid), let r = shipResult(ship) {
-            return r
-        }
         if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
             let landable = world.systemContext.bodies.first { $0.id == pid }?.canLand ?? false
             return .planet(spobID: pid, name: pv.name, govt: galaxy?.game.govt(pv.government), landable: landable)
-        }
-        if let ship = world.nearestHailable(), let r = shipResult(ship) {
-            return r
         }
         return nil
     }
@@ -720,13 +749,67 @@ final class GameScene: SKScene {
         world.ship(id: entityID)?.brain?.beginAssisting()
     }
 
-    func selectNearestTarget() { world.selectNearestTarget(hostileOnly: false) }
-    func selectNearestHostile() { world.selectNearestTarget(hostileOnly: true) }
-    func cycleTarget() { world.cycleTarget() }
-    func clearTarget() { world.clearPlayerTarget() }
+    /// Select ship `id`, clearing any planet selection — only one thing is
+    /// ever selected at a time.
+    private func selectShip(_ id: Int) {
+        world.selectTarget(id: id)
+        selectedPlanetID = nil
+    }
+
+    /// Select planet/station `id`, clearing any ship target — only one thing
+    /// is ever selected at a time.
+    private func selectPlanet(_ id: Int) {
+        selectedPlanetID = id
+        world.clearPlayerTarget()
+    }
+
+    func selectNearestTarget() {
+        guard world.selectNearestTarget(hostileOnly: false) != nil else { return }
+        selectedPlanetID = nil
+    }
+
+    func selectNearestHostile() {
+        guard world.selectNearestTarget(hostileOnly: true) != nil else { return }
+        selectedPlanetID = nil
+    }
+
+    /// One entry in the combined Tab-cycle order: every in-range ship plus
+    /// every planet in the system, ordered by distance from the player, so
+    /// Tab reaches planets too — not just ships found by clicking.
+    private func cycleCandidates() -> [(isShip: Bool, id: Int, dist: Double)] {
+        let p = world.player.position
+        // Tab-cycling (and the nearest/hostile hotkeys) target **ships only** —
+        // planets/stations are selected by clicking them, not by the ship
+        // targeting cycle, matching EV Nova.
+        var items: [(isShip: Bool, id: Int, dist: Double)] = []
+        for npc in world.npcs where npc.isAlive && !npc.disabled {
+            let d = (npc.position - p).length
+            if d <= World.targetLockRange { items.append((true, npc.entityID, d)) }
+        }
+        return items.sorted { $0.dist < $1.dist }
+    }
+
+    /// Cycle the single selection forward through every in-range ship plus
+    /// every planet in the system, ordered by distance, wrapping around.
+    func cycleTarget() {
+        let candidates = cycleCandidates()
+        guard !candidates.isEmpty else { return }
+        let currentIdx = candidates.firstIndex { c in
+            c.isShip ? c.id == world.player.currentTargetID : c.id == selectedPlanetID
+        }
+        let next = candidates[(currentIdx.map { $0 + 1 } ?? 0) % candidates.count]
+        if next.isShip { selectShip(next.id) } else { selectPlanet(next.id) }
+    }
+
+    /// Drop the current selection entirely, ship or planet — after this,
+    /// nothing is selected.
+    func clearTarget() {
+        world.clearPlayerTarget()
+        selectedPlanetID = nil
+    }
 
     /// Click/tap hit-test in scene space (== world space here): nearest ship
-    /// first, then nearest planet; clears both selections if nothing was hit.
+    /// first, then nearest planet; clears the selection if nothing was hit.
     /// Called by `GameContainerView` off a tap gesture on the `SpriteView`.
     @discardableResult
     func selectAt(scenePoint: CGPoint) -> Bool {
@@ -743,7 +826,7 @@ final class GameScene: SKScene {
         Log.input.debug("selectAt scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public)) playerPos=(\(playerPos.x, privacy: .public),\(playerPos.y, privacy: .public)) nearestShipDist=\(nearestShipDist, privacy: .public) nearestPlanetDist=\(nearestPlanetDist, privacy: .public)")
         if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + 10 })
             .min(by: { ($0.position - p).length < ($1.position - p).length }) {
-            world.selectTarget(id: ship.entityID)
+            selectShip(ship.entityID)
             return true
         }
         if let planet = planetVisuals.filter({ pv in
@@ -754,11 +837,10 @@ final class GameScene: SKScene {
             let ea = Double(b.position.x) - p.x, eb = Double(b.position.y) - p.y
             return (da * da + db * db) < (ea * ea + eb * eb)
         }) {
-            selectedPlanetID = planet.id
+            selectPlanet(planet.id)
             return true
         }
-        world.clearPlayerTarget()
-        selectedPlanetID = nil
+        clearTarget()
         return false
     }
 
@@ -823,29 +905,65 @@ final class GameScene: SKScene {
         thruster.alpha = thrusterAlpha
     }
 
-    /// Mirror the world's live projectiles into a pool of dot nodes (reusing nodes
-    /// across frames, hiding the surplus). Beams are instantaneous and handled via
-    /// events, so only travelling projectiles are drawn here.
+    /// Mirror the world's live projectiles into a pooled set of sprites. Each shot
+    /// draws its real weapon graphic (`wëap` spïn art) oriented to its heading —
+    /// a torpedo points where it flies, a spinning mine animates — falling back to
+    /// a soft additive dot for weapons that ship no graphic. Nodes are reused
+    /// across frames and re-textured in place (cheap); same-weapon volleys batch.
     private func syncProjectiles() {
         let shots = world.projectiles
         while projectileNodes.count < shots.count {
             let dot = SKSpriteNode(texture: projectileTexture)
-            dot.size = CGSize(width: 9, height: 9)
-            dot.color = SKColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1)
-            dot.colorBlendFactor = 1
-            dot.blendMode = .add
             projectileLayer.addChild(dot)
             projectileNodes.append(dot)
         }
         for (i, node) in projectileNodes.enumerated() {
-            if i < shots.count {
-                let s = shots[i]
-                node.position = CGPoint(x: s.position.x, y: s.position.y)
-                node.isHidden = false
+            guard i < shots.count else { node.isHidden = true; continue }
+            let s = shots[i]
+            node.position = CGPoint(x: s.position.x, y: s.position.y)
+            node.isHidden = false
+
+            let frames = s.graphicSpinID.map { weaponGraphicTextures($0) } ?? []
+            if !frames.isEmpty {
+                // Real shot art. A many-frame sheet that doesn't spin is a
+                // rotation sheet (orient by heading); otherwise it's a looping
+                // animation drawn pointing along travel.
+                let asRotation = frames.count >= 16 && !s.spinShots
+                if asRotation {
+                    let n = frames.count
+                    var a = s.facing.truncatingRemainder(dividingBy: 2 * .pi)
+                    if a < 0 { a += 2 * .pi }
+                    node.texture = frames[Int((a / (2 * .pi) * Double(n)).rounded()) % n]
+                    node.zRotation = 0
+                } else {
+                    let idx = s.spinShots ? Int(effectClock * 15) % frames.count : 0
+                    node.texture = frames[idx]
+                    node.zRotation = -CGFloat(s.facing)
+                }
+                node.size = node.texture?.size() ?? CGSize(width: 12, height: 12)
+                node.colorBlendFactor = 0
+                node.blendMode = .alpha
             } else {
-                node.isHidden = true
+                // Generic glowing bolt.
+                node.texture = projectileTexture
+                node.size = CGSize(width: 9, height: 9)
+                node.color = SKColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1)
+                node.colorBlendFactor = 1
+                node.blendMode = .add
+                node.zRotation = 0
             }
         }
+    }
+
+    /// Decoded, cached shot-graphic frames for a weapon's spïn id.
+    private func weaponGraphicTextures(_ spinID: Int) -> [SKTexture] {
+        if let cached = weaponGraphicCache[spinID] { return cached }
+        var textures: [SKTexture] = []
+        if let sheet = galaxy?.game.weaponSprite(spinID: spinID) {
+            textures = SpriteTextures.rotationFrames(from: sheet, rotationCount: sheet.frameCount)
+        }
+        weaponGraphicCache[spinID] = textures
+        return textures
     }
 
     /// Mirror `world.activeBeams` into a pool of stretched beam sprites. The
@@ -880,6 +998,9 @@ final class GameScene: SKScene {
                 node.color = b.hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 1)
                                    : SKColor(white: 0.85, alpha: 1)
             }
+            // A continuous beam holds full brightness while its trigger is down;
+            // a pulse beam fades out over its short life instead of blinking off.
+            node.alpha = b.continuous ? 0.95 : max(0.1, CGFloat(b.life / 0.08))
             node.isHidden = false
         }
     }
@@ -1052,14 +1173,15 @@ final class GameScene: SKScene {
         n.container.addChild(thruster)
         n.thruster = thruster
 
-        // A slim armor/shield bar that only appears once the ship is hurt.
+        // A slim armor/shield bar that only appears once the ship is hurt. Solid
+        // `SKSpriteNode`s (shared white texture → they batch) instead of the two
+        // per-ship `SKShapeNode`s they replaced.
         let barWidth: CGFloat = max(20, n.radius * 1.6)
-        let barBG = SKShapeNode(rectOf: CGSize(width: barWidth, height: 3), cornerRadius: 1.5)
-        barBG.fillColor = SKColor(white: 0, alpha: 0.5)
-        barBG.strokeColor = .clear
-        let fill = SKShapeNode(rectOf: CGSize(width: barWidth, height: 3), cornerRadius: 1.5)
-        fill.fillColor = SKColor(red: 0.3, green: 0.9, blue: 0.4, alpha: 1)
-        fill.strokeColor = .clear
+        let barBG = SKSpriteNode(color: SKColor(white: 0, alpha: 0.5), size: CGSize(width: barWidth, height: 3))
+        let fill = SKSpriteNode(color: SKColor(red: 0.3, green: 0.9, blue: 0.4, alpha: 1), size: CGSize(width: barWidth, height: 3))
+        // Deplete from the right: anchor the fill at its left edge.
+        fill.anchorPoint = CGPoint(x: 0, y: 0.5)
+        fill.position = CGPoint(x: -barWidth / 2, y: 0)
         let barHolder = SKNode()
         barHolder.position = CGPoint(x: 0, y: n.radius + 8)
         barHolder.addChild(barBG)
@@ -1382,10 +1504,12 @@ final class GameScene: SKScene {
         asteroidNodes.removeAll()
         for (key, _) in activeBeamLoops { audio?.stopLoop(key: key) }
         activeBeamLoops.removeAll()
-        // Beam sprites live on effectsLayer, cleared just below; drop our
-        // handles so the pool rebuilds for the new system.
+        // Beam + flash sprites live on effectsLayer, cleared just below; drop our
+        // handles so the pools rebuild for the new system.
         effectsLayer.removeAllChildren()
         beamNodes.removeAll()
+        activeFlashes.removeAll()
+        flashPool.removeAll()
         for (_, n) in aiLabelNodes { n.removeFromParent() }
         aiLabelNodes.removeAll()
         pendingEntrance.removeAll()
@@ -1551,9 +1675,9 @@ final class GameScene: SKScene {
         holder.isHidden = frac >= 0.999
         fill.xScale = CGFloat(max(0.001, frac))
         // Green when healthy, through amber, to red when critical.
-        fill.fillColor = SKColor(red: CGFloat(1 - frac) * 0.9 + 0.1,
-                                 green: CGFloat(frac) * 0.9,
-                                 blue: 0.25, alpha: 1)
+        fill.color = SKColor(red: CGFloat(1 - frac) * 0.9 + 0.1,
+                             green: CGFloat(frac) * 0.9,
+                             blue: 0.25, alpha: 1)
     }
 
     /// The rotation textures for a `röid` type, decoded once and cached (a
@@ -1718,17 +1842,50 @@ final class GameScene: SKScene {
 
     /// An expanding, fading flash for an explosion.
     private func spawnExplosion(at point: CGPoint, radius: CGFloat) {
-        let flash = SKShapeNode(circleOfRadius: max(10, radius * 0.6))
-        flash.position = point
-        flash.fillColor = SKColor(red: 1.0, green: 0.7, blue: 0.3, alpha: 0.9)
-        flash.strokeColor = SKColor(red: 1.0, green: 0.9, blue: 0.6, alpha: 0.9)
-        flash.blendMode = .add
-        flash.zPosition = 13
-        effectsLayer.addChild(flash)
-        flash.run(.sequence([
-            .group([.scale(to: 2.2, duration: 0.35), .fadeOut(withDuration: 0.35)]),
-            .removeFromParent()
-        ]))
+        spawnFlash(at: point, startRadius: max(10, radius * 0.6), endRadius: max(10, radius * 0.6) * 2.2,
+                   color: SKColor(red: 1.0, green: 0.75, blue: 0.35, alpha: 1), duration: 0.35)
+    }
+
+    /// Spawn a pooled, additive expanding flash animated in `updateFlashes` — no
+    /// per-event `SKShapeNode` allocation or `SKAction` scheduling (both were
+    /// real churn during a fight full of explosions and point-defense hits).
+    private func spawnFlash(at point: CGPoint, startRadius: CGFloat, endRadius: CGFloat,
+                            color: SKColor, duration: Double) {
+        let node = flashPool.popLast() ?? {
+            let n = SKSpriteNode(texture: projectileTexture)
+            n.blendMode = .add
+            n.zPosition = 13
+            n.colorBlendFactor = 1
+            effectsLayer.addChild(n)
+            return n
+        }()
+        node.color = color
+        node.position = point
+        node.isHidden = false
+        node.alpha = 1
+        activeFlashes.append(Flash(node: node, age: 0, duration: duration,
+                                   startDiameter: startRadius * 2, endDiameter: endRadius * 2))
+    }
+
+    /// Advance pooled flashes: grow + fade, then return finished nodes to the pool.
+    private func updateFlashes(_ dt: Double) {
+        guard !activeFlashes.isEmpty else { return }
+        var i = 0
+        while i < activeFlashes.count {
+            activeFlashes[i].age += dt
+            let f = activeFlashes[i]
+            let t = min(1, f.age / f.duration)
+            if t >= 1 {
+                f.node.isHidden = true
+                flashPool.append(f.node)
+                activeFlashes.remove(at: i)
+                continue
+            }
+            let d = f.startDiameter + (f.endDiameter - f.startDiameter) * CGFloat(t)
+            f.node.size = CGSize(width: d, height: d)
+            f.node.alpha = CGFloat(1 - t)
+            i += 1
+        }
     }
 
     private func updateStarfield(cameraAt cam: CGPoint) {
@@ -1789,11 +1946,13 @@ final class GameScene: SKScene {
         // beyond it simply drop off, as in the original. Screen north is up, so
         // world +y maps to radar -y.
         let shipPos = p.position
-        hud.planetBlips = planetVisuals.map { pv in
-            var dx = (Double(pv.position.x) - shipPos.x) / Double(radarRange)
-            var dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
-            let m = (dx * dx + dy * dy).squareRoot()
-            if m > 1 { dx /= m; dy /= m } // clamp to the rim
+        // Both stellars and ships drop off the scope once they pass the radar
+        // range — contacts scroll out of view rather than piling on the rim
+        // (planets used to clamp to the edge and stick there).
+        hud.planetBlips = planetVisuals.compactMap { pv in
+            let dx = (Double(pv.position.x) - shipPos.x) / Double(radarRange)
+            let dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
+            guard dx * dx + dy * dy <= 1 else { return nil }
             return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv))
         }
         hud.blips = world.npcs.compactMap { npc in

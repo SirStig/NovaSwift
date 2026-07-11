@@ -349,6 +349,34 @@ case "outfit":
     """)
     for (type, value) in o.modifiers { print("    \(type) = \(value)") }
 
+case "weapon":
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do { game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    let weps: [WeapRes] = {
+        if args.count == 3, let id = Int(args[2]), let w = game.weapon(id) { return [w] }
+        return game.weapons()
+    }()
+    for w in weps {
+        var tags: [String] = ["guidance=\(w.guidance)"]
+        if w.firedBySecondTrigger { tags.append("SECONDARY") }
+        if w.fireSimultaneously { tags.append("SIMUL") }
+        if w.isBeam { tags.append("beam(len \(w.beamLength) w \(w.beamWidth))") }
+        if w.exitType != -1 { tags.append("exit=\(w.exitType)") }
+        if w.burstCount > 0 { tags.append("burst \(w.burstCount)/\(w.burstReload)") }
+        if w.proxRadius > 0 { tags.append("prox \(w.proxRadius)+safety\(w.proxSafety)") }
+        if w.blastRadius > 0 { tags.append("blast \(w.blastRadius)") }
+        if w.decay > 0 { tags.append("decay \(w.decay)") }
+        if w.impact > 0 { tags.append("impact \(w.impact)") }
+        if w.hasSubmunition { tags.append("sub \(w.subCount)×#\(w.subID)@\(w.subTheta)°/lim\(w.subLimit)") }
+        if let g = w.graphicSpinID { tags.append("graphic spïn \(g)\(w.spinShots ? " spin" : "")") }
+        print(String(format: "  #%-5d %-26@ dmg %d/%d reload %d speed %d dur %d  [%@]",
+                     w.id, w.name as NSString, w.shieldDamage, w.armorDamage, w.reload, w.speed,
+                     w.duration, tags.joined(separator: " ") as NSString))
+    }
+
 case "system":
     guard args.count == 2 || args.count == 3 else { usage() }
     let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))

@@ -323,10 +323,9 @@ extension Galaxy {
         var mounts: [WeaponMount] = []
         for w in lo.weapons {
             guard let spec = weaponSpec(w.id) else { continue }
+            // One grouped mount per weapon type; `count` copies stagger their fire.
             let n = max(1, min(w.count, 12))
-            for _ in 0..<n {
-                mounts.append(WeaponMount(spec: spec, ammo: w.ammo > 0 ? max(1, w.ammo / n) : -1))
-            }
+            mounts.append(WeaponMount(spec: spec, ammo: w.ammo > 0 ? w.ammo : -1, count: n))
         }
         ship.weapons = mounts
         return ship

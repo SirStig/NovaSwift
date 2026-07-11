@@ -16,15 +16,26 @@ public struct ActiveMission: Codable, Hashable, Sendable {
     /// The player has visited the travel stellar at least once.
     public var visitedTravelStellar: Bool
 
+    /// The concrete travel/return stellar chosen when the mission was accepted.
+    /// A mïsn's travel/return selector may be a random govt/inhabited code; we
+    /// resolve it to one real spob id at accept time so the destination shown in
+    /// briefings, the mission list, and the map arrow stays the same afterward.
+    /// nil = the selector matched nothing, or a legacy save from before capture.
+    public var travelSpobID: Int?
+    public var returnSpobID: Int?
+
     public init(missionID: Int, acceptedDate: GameDate, deadline: GameDate?,
                 cargoPickedUp: Bool, shipObjectivesRemaining: Int,
-                visitedTravelStellar: Bool = false) {
+                visitedTravelStellar: Bool = false,
+                travelSpobID: Int? = nil, returnSpobID: Int? = nil) {
         self.missionID = missionID
         self.acceptedDate = acceptedDate
         self.deadline = deadline
         self.cargoPickedUp = cargoPickedUp
         self.shipObjectivesRemaining = shipObjectivesRemaining
         self.visitedTravelStellar = visitedTravelStellar
+        self.travelSpobID = travelSpobID
+        self.returnSpobID = returnSpobID
     }
 }
 

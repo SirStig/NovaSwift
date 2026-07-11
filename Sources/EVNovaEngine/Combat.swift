@@ -41,6 +41,23 @@ public enum WeaponExitType: Equatable {
     }
 }
 
+/// A weapon's submunition burst: on expiry/detonation the shot spawns `count`
+/// copies of weapon `weaponID`, spread by `thetaRadians`, with recursion capped
+/// at `limit`. See EV Nova Bible `SubCount`/`SubType`/`SubTheta`/`SubLimit`.
+public struct Submunition {
+    public let weaponID: Int
+    public let count: Int
+    public let thetaRadians: Double
+    public let limit: Int
+    public let ifExpire: Bool
+    public let fireAtNearest: Bool
+    public init(weaponID: Int, count: Int, thetaRadians: Double, limit: Int,
+                ifExpire: Bool, fireAtNearest: Bool) {
+        self.weaponID = weaponID; self.count = count; self.thetaRadians = thetaRadians
+        self.limit = limit; self.ifExpire = ifExpire; self.fireAtNearest = fireAtNearest
+    }
+}
+
 /// A simulation-ready weapon: damage, reach, fire rate, projectile behaviour.
 /// Built from a decoded `WeapRes` via `CombatTuning`.
 public struct WeaponSpec {
@@ -54,6 +71,11 @@ public struct WeaponSpec {
     public let accuracyRadians: Double
     public let isBeam: Bool
     public let isGuided: Bool
+    /// Full EV Nova guidance kind — drives how the shot is aimed (turret lead,
+    /// quadrant lock, rocket) and how the projectile moves.
+    public let guidance: WeaponGuidance
+    /// Turreted (turret / beamTurret): aims independently of the hull's facing.
+    public let isTurret: Bool
     /// Which hull hardpoint set this weapon's shots leave from.
     public let exitType: WeaponExitType
     /// Rendered beam thickness in px (beams only; 0 → engine default).
@@ -83,6 +105,44 @@ public struct WeaponSpec {
     /// Seeker 0x0020: this (guided) weapon refuses to fire while its own ship
     /// is ionized.
     public let cantFireWhileIonized: Bool
+    /// Proximity-fuse radius in px (unguided missiles/bombs): the shot detonates
+    /// within this distance of a valid target instead of needing a direct hit.
+    public let proxRadius: Double
+    /// Whether the proximity fuse triggers on any valid ship, not just the target.
+    public let proxHitAll: Bool
+    /// Arming delay before the shot can collide/detonate (seconds).
+    public let proxSafetySeconds: Double
+    /// Damage lost per second while the shot flies (`wëap.Decay`). 0 = none.
+    public let decayPerSec: Double
+    /// Flak behaviour: detonate at the end of the shot's life.
+    public let detonateOnExpire: Bool
+    /// Knockback impulse on hit (inversely ∝ target mass).
+    public let impact: Double
+    /// `spïn` id of this weapon's own shot graphic, or nil (falls back to a dot).
+    public let graphicSpinID: Int?
+    /// Spin the shot graphic continuously.
+    public let spinShots: Bool
+    /// Fires at a fixed angle (accuracy stored negative) — no target lead.
+    public let firesAtFixedAngle: Bool
+    /// Burst fire: N shots at the fast `reloadSeconds` cadence, then a long
+    /// `burstReloadSeconds` cooldown. 0 = no burst.
+    public let burstCount: Int
+    public let burstReloadSeconds: Double
+    /// Submunition split on expiry/detonation, or nil.
+    public let submunition: Submunition?
+
+    /// Fires on the secondary trigger (missiles/rockets), not the primary.
+    public let isSecondary: Bool
+    /// Multiple copies fire in one volley (flag 0x0040). When false — the default —
+    /// copies stagger: one barrel at a time at `reload / count`.
+    public let fireSimultaneously: Bool
+
+    /// Whether shots from this weapon home on a target (fly inertialessly toward
+    /// the intercept). True for guidance `.guided`; also honours the legacy
+    /// `isGuided` flag when `guidance` was left unset (synthetic/test specs).
+    public var homes: Bool { guidance == .guided || (guidance == .unguided && isGuided) }
+    /// Whether shots accelerate forward from launch (rockets).
+    public var accelerates: Bool { guidance == .rocket }
 
     public init(id: Int, name: String, shieldDamage: Double, armorDamage: Double,
                 reloadSeconds: Double, projectileSpeed: Double, range: Double,
@@ -92,7 +152,15 @@ public struct WeaponSpec {
                 beamWidth: Double = 0, beamColor: (r: Double, g: Double, b: Double)? = nil,
                 fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false,
                 isPointDefense: Bool = false, vulnerableToPD: Bool = true,
-                ionization: Double = 0, cantFireWhileIonized: Bool = false) {
+                ionization: Double = 0, cantFireWhileIonized: Bool = false,
+                guidance: WeaponGuidance = .unguided, isTurret: Bool = false,
+                proxRadius: Double = 0, proxHitAll: Bool = true,
+                proxSafetySeconds: Double = 0, decayPerSec: Double = 0,
+                detonateOnExpire: Bool = false, impact: Double = 0,
+                graphicSpinID: Int? = nil, spinShots: Bool = false, firesAtFixedAngle: Bool = false,
+                burstCount: Int = 0, burstReloadSeconds: Double = 0,
+                submunition: Submunition? = nil,
+                isSecondary: Bool = false, fireSimultaneously: Bool = false) {
         self.id = id; self.name = name
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.reloadSeconds = reloadSeconds; self.projectileSpeed = projectileSpeed
@@ -104,6 +172,15 @@ public struct WeaponSpec {
         self.loopSound = loopSound
         self.isPointDefense = isPointDefense; self.vulnerableToPD = vulnerableToPD
         self.ionization = ionization; self.cantFireWhileIonized = cantFireWhileIonized
+        self.guidance = guidance; self.isTurret = isTurret
+        self.proxRadius = proxRadius; self.proxHitAll = proxHitAll
+        self.proxSafetySeconds = proxSafetySeconds
+        self.decayPerSec = decayPerSec; self.detonateOnExpire = detonateOnExpire
+        self.impact = impact; self.graphicSpinID = graphicSpinID; self.spinShots = spinShots
+        self.firesAtFixedAngle = firesAtFixedAngle
+        self.burstCount = burstCount; self.burstReloadSeconds = burstReloadSeconds
+        self.submunition = submunition
+        self.isSecondary = isSecondary; self.fireSimultaneously = fireSimultaneously
     }
 
     /// Convert a decoded weapon into simulation units.
@@ -119,6 +196,27 @@ public struct WeaponSpec {
         accuracyRadians = Double(w.accuracy) * .pi / 180.0
         isBeam = w.isBeam
         isGuided = w.isGuided
+        guidance = w.guidance
+        isTurret = w.isTurret
+        proxRadius = Double(max(0, w.proxRadius))
+        proxHitAll = w.proxHitAll
+        proxSafetySeconds = Double(max(0, w.proxSafety)) / tuning.framesPerSecond
+        // Decay: "-1 point of shield & armor damage every `decay` frames" →
+        // points/sec = framesPerSecond / decay.
+        decayPerSec = w.decay > 0 ? tuning.framesPerSecond / Double(w.decay) : 0
+        detonateOnExpire = w.detonateOnExpire
+        impact = Double(max(0, w.impact))
+        graphicSpinID = w.graphicSpinID
+        spinShots = w.spinShots
+        firesAtFixedAngle = w.firesAtFixedAngle
+        burstCount = max(0, w.burstCount)
+        burstReloadSeconds = w.burstReload > 0 ? Double(w.burstReload) / tuning.framesPerSecond : 0
+        submunition = w.hasSubmunition
+            ? Submunition(weaponID: w.subID, count: w.subCount,
+                          thetaRadians: Double(w.subTheta) * .pi / 180.0,
+                          limit: max(0, w.subLimit), ifExpire: w.subIfExpire,
+                          fireAtNearest: w.subFireAtNearest)
+            : nil
         // Honour the weapon's declared exit type; fall back to a sensible hardpoint
         // set by guidance when the data leaves it at "centre" (-1) so a gun still
         // leaves the gun ports rather than the hull's dead centre.
@@ -137,6 +235,8 @@ public struct WeaponSpec {
         turnRate = Double(w.turnRate) * 3.0 * .pi / 180.0
         blastRadius = Double(w.blastRadius)
         ammoPerShot = w.maxAmmo > 0 ? 1 : 0
+        isSecondary = w.firedBySecondTrigger
+        fireSimultaneously = w.fireSimultaneously
         fireSoundID = w.fireSoundID
         explosionBoomID = w.explosionBoomID
         loopSound = w.loopSound
@@ -147,26 +247,35 @@ public struct WeaponSpec {
     }
 }
 
-/// One installed weapon on a ship: its spec, remaining ammo, and cooldown.
+/// One installed *weapon type* on a ship (EV Nova groups by type, not by barrel):
+/// its spec, how many copies are fitted (`count`), the shared ammo pool, and the
+/// group's cooldown. Multiple copies stagger — one barrel at a time at
+/// `reload / count`, cycling through the hull's exit points — unless the weapon
+/// has the "fire simultaneously" flag. See `World.fireWeapons`.
 public final class WeaponMount {
     public let spec: WeaponSpec
-    public var cooldown: Double = 0      // seconds until it can fire again
-    public var ammo: Int                 // -1 = unlimited
-    /// Which of the hull's exit points (of this weapon's `spec.exitType`) this
-    /// mount fires from. Assigned by `Ship` when its weapon list is installed:
-    /// the Nth mount of a given exit type takes the Nth hardpoint, so a
-    /// four-gun hull's guns leave four distinct barrels at once. Indexed
-    /// modulo the available point count.
-    public var exitIndex: Int = 0
+    /// Number of copies of this weapon fitted (drives the staggered fire rate and
+    /// how many exit points to cycle through).
+    public var count: Int
+    public var cooldown: Double = 0      // seconds until the group can fire again
+    public var ammo: Int                 // pooled across the group; -1 = unlimited
+    /// The next hull hardpoint (of `spec.exitType`) this group fires from,
+    /// advanced each shot so successive shots leave successive barrels.
+    public var exitCursor: Int = 0
+    /// Shots fired since the last burst reload (only meaningful when
+    /// `spec.burstCount > 0`); the group bursts `burstCount × count` before the
+    /// long reload.
+    public var burstShots: Int = 0
 
     /// Which blocked-fire reason we last logged, so a held-down fire button
     /// while reloading/dry doesn't spam the log every frame — only the frame
     /// the reason first appears (or changes) gets a line.
     private var loggedBlockReason: String?
 
-    public init(spec: WeaponSpec, ammo: Int = -1) {
+    public init(spec: WeaponSpec, ammo: Int = -1, count: Int = 1) {
         self.spec = spec
         self.ammo = ammo
+        self.count = max(1, count)
     }
 
     public var ready: Bool { cooldown <= 0 && (ammo != 0) }
@@ -174,10 +283,26 @@ public final class WeaponMount {
     /// Advance the cooldown clock.
     public func tick(_ dt: Double) { if cooldown > 0 { cooldown -= dt } }
 
-    /// Mark the weapon fired: reset cooldown and spend ammo.
-    public func didFire() {
-        cooldown = spec.reloadSeconds
-        if ammo > 0 && spec.ammoPerShot > 0 { ammo = max(0, ammo - spec.ammoPerShot) }
+    /// The reload the group takes for a normal shot: `reload / count` for the
+    /// usual staggered weapons, or the flat `reload` when they fire simultaneously.
+    public var perShotReload: Double {
+        spec.fireSimultaneously ? spec.reloadSeconds : spec.reloadSeconds / Double(max(1, count))
+    }
+
+    /// Record that the group fired `shots` shots this event: spend ammo, advance
+    /// the burst counter, and set the next cooldown (the long burst reload once
+    /// the burst is spent).
+    public func didFire(shots: Int) {
+        if ammo > 0 && spec.ammoPerShot > 0 { ammo = max(0, ammo - shots * spec.ammoPerShot) }
+        if spec.burstCount > 0 {
+            burstShots += shots
+            if burstShots >= spec.burstCount * max(1, count) {
+                cooldown = spec.burstReloadSeconds > 0 ? spec.burstReloadSeconds : perShotReload
+                burstShots = 0
+                return
+            }
+        }
+        cooldown = perShotReload
     }
 
     /// Called when something tried to fire this mount but it wasn't `ready` —
@@ -193,39 +318,77 @@ public final class WeaponMount {
     }
 }
 
-/// A live projectile in the world. Guided shots steer toward `targetID`.
+/// A live projectile in the world. Guided shots steer toward `targetID`; rockets
+/// accelerate; shots can decay in power, detonate by proximity, and split into
+/// submunitions.
 public final class Projectile {
     public var position: Vec2
     public var velocity: Vec2
     public var life: Double              // seconds remaining
-    public let shieldDamage: Double
-    public let armorDamage: Double
+    public var shieldDamage: Double      // var: decays over the shot's life
+    public var armorDamage: Double
     public let blastRadius: Double
     public let ownerID: Int              // entity that fired it (no self-hit)
     public let ownerGovt: Int            // faction (no friendly fire)
-    public let guided: Bool
+    /// Homing (guided): steers toward the intercept point, flying inertialess
+    /// (velocity = heading × speed).
+    public let homing: Bool
+    /// Rocket: accelerates forward from launch up to `speed`.
+    public let accelerating: Bool
     public let turnRate: Double
-    public let speed: Double
-    public var targetID: Int?            // for guided munitions
+    public let speed: Double              // cruise / cap speed (px/sec)
+    public var facing: Double             // heading, for rendering the shot sprite
+    public var targetID: Int?            // for guided/homing munitions
     public var alive = true
     /// Whether point defense can shoot this shot down (`wëap.Flags` 0x0080
     /// inverted) — only meaningful for guided shots; see `World.runPointDefense`.
     public let vulnerableToPD: Bool
     /// Ionization energy this shot adds to whatever it hits.
     public let ionization: Double
+    /// Points of shield & armor damage lost per second in flight (`wëap.Decay`).
+    public let decayPerSec: Double
+    /// Proximity fuse radius (px) and remaining arming delay (s).
+    public let proxRadius: Double
+    public var proxSafetyRemaining: Double
+    /// Whether the proximity fuse triggers on any valid ship (not just the target).
+    public let proxHitAll: Bool
+    /// Detonate (explosion + submunitions) at the end of life, not just on hit.
+    public let detonateOnExpire: Bool
+    /// Knockback impulse imparted on hit.
+    public let impact: Double
+    /// Submunition split on expiry/detonation, and how many splits deep we are.
+    public let submunition: Submunition?
+    public let subDepth: Int
+    /// `bööm` explosion id for the detonation effect, or nil.
+    public let explosionBoomID: Int?
+    /// Shot sprite (`spïn` id) and whether it spins, for the renderer.
+    public let graphicSpinID: Int?
+    public let spinShots: Bool
 
     public init(position: Vec2, velocity: Vec2, life: Double,
                 shieldDamage: Double, armorDamage: Double, blastRadius: Double,
-                ownerID: Int, ownerGovt: Int, guided: Bool, turnRate: Double,
+                ownerID: Int, ownerGovt: Int, homing: Bool, turnRate: Double,
                 speed: Double, targetID: Int?, vulnerableToPD: Bool = true,
-                ionization: Double = 0) {
+                ionization: Double = 0, accelerating: Bool = false, facing: Double = 0,
+                decayPerSec: Double = 0, proxRadius: Double = 0, proxSafetyRemaining: Double = 0,
+                proxHitAll: Bool = true, detonateOnExpire: Bool = false, impact: Double = 0,
+                submunition: Submunition? = nil, subDepth: Int = 0,
+                explosionBoomID: Int? = nil, graphicSpinID: Int? = nil, spinShots: Bool = false) {
         self.position = position; self.velocity = velocity; self.life = life
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.blastRadius = blastRadius; self.ownerID = ownerID; self.ownerGovt = ownerGovt
-        self.guided = guided; self.turnRate = turnRate; self.speed = speed
+        self.homing = homing; self.turnRate = turnRate; self.speed = speed
         self.targetID = targetID
         self.ionization = ionization
         self.vulnerableToPD = vulnerableToPD
+        self.accelerating = accelerating; self.facing = facing
+        self.decayPerSec = decayPerSec
+        self.proxRadius = proxRadius; self.proxSafetyRemaining = proxSafetyRemaining
+        self.proxHitAll = proxHitAll; self.detonateOnExpire = detonateOnExpire
+        self.impact = impact
+        self.submunition = submunition; self.subDepth = subDepth
+        self.explosionBoomID = explosionBoomID
+        self.graphicSpinID = graphicSpinID; self.spinShots = spinShots
     }
 }
 
@@ -239,14 +402,23 @@ public struct ShipExitPoints {
     public var turret: [Vec2]
     public var guided: [Vec2]
     public var beam: [Vec2]
+    /// Per-point `z` (screen-vertical) nudges, added after x/y and compression,
+    /// **unscaled** (Bible: positive z moves up the screen). Parallel to the
+    /// point arrays; an empty array means all-zero.
+    public var gunZ: [Double]
+    public var turretZ: [Double]
+    public var guidedZ: [Double]
+    public var beamZ: [Double]
     /// Perspective foreshortening (x%, y%) for hulls facing screen-up / screen-down.
     public var upCompress: (x: Double, y: Double)
     public var downCompress: (x: Double, y: Double)
 
     public init(gun: [Vec2], turret: [Vec2], guided: [Vec2], beam: [Vec2],
+                gunZ: [Double] = [], turretZ: [Double] = [], guidedZ: [Double] = [], beamZ: [Double] = [],
                 upCompress: (x: Double, y: Double) = (100, 100),
                 downCompress: (x: Double, y: Double) = (100, 100)) {
         self.gun = gun; self.turret = turret; self.guided = guided; self.beam = beam
+        self.gunZ = gunZ; self.turretZ = turretZ; self.guidedZ = guidedZ; self.beamZ = beamZ
         self.upCompress = upCompress; self.downCompress = downCompress
     }
 
@@ -260,6 +432,16 @@ public struct ShipExitPoints {
         }
     }
 
+    private func zValues(for type: WeaponExitType) -> [Double] {
+        switch type {
+        case .gun: return gunZ
+        case .turret: return turretZ
+        case .guided: return guidedZ
+        case .beam: return beamZ
+        case .center: return []
+        }
+    }
+
     /// World-space offset (relative to the hull centre) of exit point `index` of
     /// `type`, for a hull pointing along `angle`. Falls back to a point `nose`
     /// pixels ahead of centre when the hull declares no points of that type.
@@ -267,10 +449,12 @@ public struct ShipExitPoints {
         let pts = points(for: type)
         let forward = Vec2.heading(angle)          // (sinθ, cosθ), +y = nose at θ=0
         guard !pts.isEmpty else { return forward * nose }
-        let local = pts[((index % pts.count) + pts.count) % pts.count]
+        let i = ((index % pts.count) + pts.count) % pts.count
+        let local = pts[i]
+        let z = zValues(for: type).indices.contains(i) ? zValues(for: type)[i] : 0
         // A hull that never authored this hardpoint leaves it at the origin;
         // firing from dead centre looks wrong, so fall back to a nose muzzle.
-        if local.x == 0 && local.y == 0 { return forward * nose }
+        if local.x == 0 && local.y == 0 && z == 0 { return forward * nose }
         let right = Vec2(forward.y, -forward.x)    // ship's right in world space
         var world = right * local.x + forward * local.y
         // Screen-space perspective squish (identity at 100/100).
@@ -278,7 +462,8 @@ public struct ShipExitPoints {
         let cx = (up ? upCompress.x : downCompress.x) / 100.0
         let cy = (up ? upCompress.y : downCompress.y) / 100.0
         world = Vec2(world.x * cx, world.y * cy)
-        return world
+        // Z: unscaled screen-vertical nudge (+z = up the screen = +y here).
+        return Vec2(world.x, world.y + z)
     }
 }
 
