@@ -30,6 +30,11 @@ final class GameHUDModel: ObservableObject {
     @Published var cargoByCommodity: [(name: String, tons: Int)] = []
     /// Non-empty while a landable stellar object is in reach (shown as a prompt).
     @Published var landPrompt = ""
+    /// Structured land-prompt state (drives the platform-specific prompt: a
+    /// keyboard hint on macOS, a tappable Land pill on iOS). `landName` empty =
+    /// no landable stellar in reach.
+    @Published var landName = ""
+    @Published var landReady = false   // in range AND slow enough to set down now
     /// The rolling bottom-left message log — the calendar date on each jump/land,
     /// hail replies, mission notices, etc. Each entry fades out on its own timer,
     /// exactly like EV Nova's on-screen message strip.

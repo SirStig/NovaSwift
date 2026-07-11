@@ -20,8 +20,16 @@ private struct ShrinkToFitViewport: ViewModifier {
 
     func body(content: Content) -> some View {
         GeometryReader { geo in
-            let availW = max(1, geo.size.width - margin * 2)
-            let availH = max(1, geo.size.height - margin * 2)
+            // A dialog may be presented inside a container that forces it wider
+            // than the device (a sheet with `.frame(minWidth: 640)`, say), so the
+            // local geometry over-reports the space. Cap to the real screen, and
+            // subtract the safe-area insets so nothing clips under the notch or
+            // home indicator.
+            let insets = geo.safeAreaInsets
+            let boundW = min(geo.size.width, Self.screenSize.width)
+            let boundH = min(geo.size.height, Self.screenSize.height)
+            let availW = max(1, boundW - insets.leading - insets.trailing - margin * 2)
+            let availH = max(1, boundH - insets.top - insets.bottom - margin * 2)
             let scale: CGFloat = (contentSize.width > 0 && contentSize.height > 0)
                 ? min(1, min(availW / contentSize.width, availH / contentSize.height))
                 : 1
@@ -35,6 +43,16 @@ private struct ShrinkToFitViewport: ViewModifier {
                 .frame(width: geo.size.width, height: geo.size.height)
         }
         .onPreferenceChange(DialogSizeKey.self) { contentSize = $0 }
+    }
+
+    /// The device screen size (a hard ceiling on the available space, whatever a
+    /// parent claims to offer). Falls back to the local geometry on macOS.
+    private static var screenSize: CGSize {
+        #if os(iOS)
+        return UIScreen.main.bounds.size
+        #else
+        return CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        #endif
     }
 }
 

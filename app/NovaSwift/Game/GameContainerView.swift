@@ -276,14 +276,27 @@ struct GameContainerView: View {
                         .opacity(model.settings.hudOpacity)
                 }
 
+                topLeftMenuButton
+
+                if nav.showingMap {
+                    GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() }) { nav.showingMap = false }
+                        .transition(.opacity)
+                }
+
+                MessageLogView(hud: host.hud)
+
                 #if os(iOS)
-                // The play area is free of controls (so tap/drag-to-fly and
-                // target taps work), with clusters at the corners; the right-hand
-                // ones inset by the status-bar HUD width so they never overlap it.
-                if landedSpobID == nil {
+                // Mounted ABOVE the passive HUD/message/menu-button layers so its
+                // buttons (and the expandable action grid) are never drawn under
+                // — or blocked by — them; hidden whenever a modal owns the screen
+                // so it can't intercept those. The play area stays free for
+                // tap/drag-to-fly steering and target taps. Right-hand clusters
+                // inset by the status-bar HUD width so they never overlap it.
+                if flightControlsVisible {
                     GeometryReader { geo in
                         TouchControlsOverlay(
                             input: host.input, hud: host.hud,
+                            viewportSize: geo.size,
                             tapToFly: model.settings.controlScheme == .tapToTurn,
                             rightInset: Self.sidebarWidth(in: geo.size, style: host.hudStyle),
                             onDiscrete: handleDiscrete,
@@ -292,15 +305,9 @@ struct GameContainerView: View {
                 }
                 #endif
 
-                topLeftMenuButton
-
-                if nav.showingMap {
-                    GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() }) { nav.showingMap = false }
-                        .transition(.opacity)
-                }
-
-                LandPromptView(hud: host.hud)
-                MessageLogView(hud: host.hud)
+                // The land prompt sits above the controls; on iOS it's a tappable
+                // pill that lands you (replacing the desktop "Press L" hint).
+                LandPromptView(hud: host.hud, onLand: { handleDiscrete(.land) })
 
                 if let state = hailDialogState {
                     HailDialogView(
@@ -716,6 +723,16 @@ struct GameContainerView: View {
         .focusEffectDisabled()
         .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
                                    onDiscrete: handleDiscrete))
+    }
+
+    /// The on-screen flight controls show only during actual flight — hidden
+    /// while landed or whenever a modal (map, menu, hail, a mobile panel, the
+    /// plunder dialog, the debug suite) owns the screen, so they neither draw
+    /// over nor steal touches from it.
+    private var flightControlsVisible: Bool {
+        landedSpobID == nil && !nav.showingMap && !showMenu && hailDialogState == nil
+            && !showMissionsPanel && !showPilotInfoPanel && !showEscortsPanel
+            && boardManifest == nil && !showDebugSuite
     }
 
     /// Push the touch steering mode (Settings ▸ Touch scheme) down to the live
