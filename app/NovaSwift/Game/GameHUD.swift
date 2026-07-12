@@ -10,6 +10,13 @@ final class GameHUDModel: ObservableObject {
     @Published var armor = 1.0      // 0…1
     @Published var fuel = 1.0       // 0…1
     @Published var jumps = 0        // whole hyperjumps of fuel remaining
+    /// Ion charge as a fraction of the ship's `ionizeMax` (0…1). 0 for a ship
+    /// that can't be ionized or is fully discharged — the HUD hides the bar then.
+    @Published var ionization = 0.0
+    /// True once ion charge reaches the threshold that impairs the ship (the
+    /// engine's `Ship.isIonized`) — the HUD flags it so the player knows why
+    /// their controls/weapons are sluggish.
+    @Published var ionized = false
     @Published var thrusting = false
     @Published var afterburning = false
     @Published var headingDegrees = 0.0
@@ -232,6 +239,12 @@ struct GameHUDView: View {
                 bar("ARMOR", model.armor, amber)
                 bar(model.jumps > 0 ? "FUEL · \(model.jumps) JUMP\(model.jumps == 1 ? "" : "S")" : "FUEL",
                     model.fuel, Color.green)
+                // Ion charge — only while there's a charge to show (most fights
+                // never ionize the player, so an always-on bar would be clutter).
+                if model.ionization > 0.001 {
+                    bar(model.ionized ? "ION · IONIZED" : "ION",
+                        model.ionization, Color(red: 0.6, green: 0.4, blue: 1.0))
+                }
                 HStack(spacing: 8) {
                     Label("\(model.speed)", systemImage: "gauge.with.dots.needle.67percent")
                     Text("\(Int(model.headingDegrees))°")

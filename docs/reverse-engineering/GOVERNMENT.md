@@ -38,12 +38,11 @@ that §5 originally listed as gaps:
   rank `Contribute` into the pooled bitmask, and `StoryEngine.isEligible`
   AND-gates `mission.require` against it — the mission-availability half of
   the Contribute/Require chain (§4.4) is live. The purchase-gating half
-  (`app/NovaSwift/Spaceport/ItemLocking.swift`) checks `ship.require`/
-  `outfit.require` against ship+outfit Contribute bits, but does **not**
-  fold in active-rank Contribute the way `StoryEngine` does — a
-  rank-gated purchase (the Bible's own headline example for
-  `ränk.Contribute`) is therefore still not achievable through the
-  spaceport UI today, only through mission/cron availability.
+  (`app/NovaSwift/Spaceport/ItemLocking.swift`) is **also wired as of
+  2026-07-12**: `contributedBits(pilot:)` now folds active-rank **and**
+  active-crön Contribute (mirroring `StoryEngine.activeContributeBits`), so a
+  rank-gated purchase — the Bible's own headline example for `ränk.Contribute`
+  — is now achievable through the shipyard/outfitter UI.
 
 This doc does **not** re-derive:
 - `gövt.MaxOdds` combat-odds gating — see [AI_GROUND_TRUTH.md](../AI_GROUND_TRUTH.md#2-combat-odds-gating-gövtmaxodds--completely-missing-from-our-sim),
@@ -446,18 +445,16 @@ evaluates either.
   aren't satisfied by the player's current ship/outfit/rank/cron Contribute
   bits is correctly excluded from `missionsOffered`. `crön.Require` is wired
   the same way (`StoryEngine.swift:482`, cron activation).
-- ⚠️ **Implemented but not wired (partially): `ränk.Contribute`.**
+- ✅ **Implemented and wired: `ränk.Contribute`** (fully, as of 2026-07-12).
   `RankRes.contribute` (`MissionModels.swift:414/433`) is decoded and *is*
   folded into `StoryEngine.activeContributeBits()`
   (`StoryEngine.swift:407`), so an active rank correctly unlocks
-  rank-gated missions/crons. It is **not** folded into
-  `app/NovaSwift/Spaceport/ItemLocking.swift`'s `contributedBits(pilot:)`
-  (`ItemLocking.swift:24-29`), which only pools ship+outfit Contribute — so
-  the Bible's own headline example for this field ("prevent the player from
-  buying certain items... until achieving a certain rank") still can't
-  happen through the spaceport UI. Fix: add the same active-rank loop
-  `StoryEngine.activeContributeBits()` already has to
-  `NovaGame.contributedBits(pilot:)`.
+  rank-gated missions/crons. As of 2026-07-12 it is **also** folded into
+  `app/NovaSwift/Spaceport/ItemLocking.swift`'s `contributedBits(pilot:)`,
+  which now pools ship + outfit + active-rank + active-crön Contribute
+  (mirroring `StoryEngine.activeContributeBits`) — so the Bible's own headline
+  example for this field ("prevent the player from buying certain items...
+  until achieving a certain rank") now works through the spaceport UI.
 - **`chär.Govt1-4/Status1-4` seeding** — `PilotFactory.initialLegalRecord`
   (`PilotFactory.swift:100-115`) correctly seeds starting legal record and
   propagates the negation to the starting govt's enemies' classes (this is
@@ -614,11 +611,11 @@ evaluates either.
   `app/NovaSwift/Spaceport/ItemLocking.swift` (`lockState(for:pilot:at:diplomacy:)`
   for both `OutfRes` and `ShipRes`) to grey out/hide purchases whose
   `Require` isn't satisfied, and by `StoryEngine.activeContributeBits()`
-  (`StoryEngine.swift:399-410`) for mission/cron eligibility. What's still
-  missing: `ItemLocking.contributedBits(pilot:)` doesn't fold in active-rank
-  Contribute the way `StoryEngine.activeContributeBits()` does (see the
-  `ränk.Contribute` entry above), and `gövt.require` (previous bullet) has
-  no consumer at all.
+  (`StoryEngine.swift:399-410`) for mission/cron eligibility. As of 2026-07-12
+  `ItemLocking.contributedBits(pilot:)` also folds in active-rank + active-crön
+  Contribute (matching `StoryEngine.activeContributeBits()`; see the
+  `ränk.Contribute` entry above). What's still missing: `gövt.require`
+  (previous bullet) has no consumer at all.
 - **Most `ränk.Flags` bits are unmodeled.** Only `0x0001` is checked
   (`StoryEngine.activateRank`, `StoryEngine.swift:115`). `0x0002`, `0x0004`,
   `0x0008` (permanent), `0x0010`, `0x0020`, `0x0040` have no decoded property

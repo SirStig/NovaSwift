@@ -94,22 +94,27 @@ infrastructure.
 - A contest resets when the player leaves the system (the `World` is rebuilt per
   visit), matching the transient nature of the defense fight.
 
-## Wiring status — BUILT, engine complete; app trigger IN PROGRESS
+## Wiring status — DONE (engine + app trigger both live)
 
 Engine flow + events + `spöb` decode + `PlayerState` persistence + daily tribute
 are implemented and covered by unit tests (`DominationTests`,
 `StoryEngineTests`) and a headless proof (`novaswift-extract tribute <baseDir>
-<systemID> [spobID] [rating]`). The story runtime this used to be blocked on is
-**now wired** (`StoryEngine.advanceDays` runs in the live app, and
-`payDailyTribute` runs inside it), so daily tribute income and
-`OnDominate`/`OnRelease` NCB effects will flow the moment the trigger lands.
+<systemID> [spobID] [rating]`). The story runtime is wired
+(`StoryEngine.advanceDays` runs in the live app, and `payDailyTribute` runs
+inside it), so daily tribute income and `OnDominate`/`OnRelease` NCB effects flow.
 
-**The one remaining piece is the app-side trigger.** Today the in-game "Demand
-Tribute" button in the planet hail dialog (`GameContainerView.demandPlanetTribute`)
-is a **cosmetic stub** — it flips the world hostile and posts a refusal line but
-**never calls `World.demandTribute`**, so no defenders spawn, nothing is
-dominated, and no tribute is paid. Finishing it means: call `World.demandTribute`
-from that button, surface HUD text for the
-`tributeRefused`/`stellarDefendersLaunched`/`stellarDominated` events, and call
-`StoryEngine.dominateStellar` on conquest. That is the last hookup between the
-finished engine and the player.
+**The app-side trigger is now wired (2026-07-12).** The "Demand Tribute" button
+in the planet hail dialog (`GameContainerView.demandPlanetTribute`) calls the
+real engine through `GameScene.demandTribute(spobID:combatRating:alreadyDominated:)`,
+which syncs the player's live combat rating and already-dominated set into the
+`World` and runs `World.demandTribute`. The returned `TributeOutcome` drives the
+dialog reply (defending / still-defending / dominated / refused-with-reason). The
+`stellarDefendersLaunched` and `stellarDominated` `WorldEvent`s are drained in
+`GameScene` and routed to `GameContainerView` closures: each defense wave posts a
+HUD line (fires on the first wave and every relaunch), and a surrender calls
+`GameContainerView.handleStellarDominated` → `StoryEngine.dominateStellar` (fires
+`OnDominate`, persists to `PlayerState.dominatedStellars`, enrolls the stellar for
+daily tribute) and flips the hail dialog to friendly/landable. The full loop —
+demand → defense waves → clear them → re-demand → surrender → daily tribute —
+is now playable end-to-end. `tributeRefused` is surfaced via the outcome reply
+in the dialog rather than a separate HUD closure.

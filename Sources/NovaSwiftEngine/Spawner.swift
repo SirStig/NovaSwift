@@ -427,6 +427,24 @@ public final class Spawner {
         }
     }
 
+    /// Fill a freighter's hold with random standard trade goods — the flët
+    /// `Flags` 0x0001 behavior ("Freighters in this fleet will have random cargo
+    /// when boarded"). The Bible says *that* it happens, not how much; filling
+    /// 30-90% of the hold across one or two of the six standard commodities
+    /// (types 0-5, the same pool `CargoType == 1000` missions draw from) is this
+    /// engine's reading, so a boarded convoy hauler yields a plausible haul.
+    func rollRandomFreighterCargo(into ship: Ship, world: World) {
+        guard ship.cargoCapacity > 0 else { return }
+        let total = Int(Double(ship.cargoCapacity) * world.rng.double(in: 0.3...0.9))
+        guard total > 0 else { return }
+        let typeCount = world.rng.int(in: 1...2)
+        let perType = max(1, total / typeCount)
+        for _ in 0..<typeCount {
+            let commodity = world.rng.int(in: 0...5)
+            ship.cargo[commodity, default: 0] += perType
+        }
+    }
+
     /// 5% chance to tag `ship` as an eligible `përs` character flying this hull
     /// (same ship class + compatible government), avoiding one already in-system.
     private func assignPersonIfLucky(to ship: Ship, shipID: Int, govt: Int, world: World) {
@@ -512,6 +530,11 @@ public final class Spawner {
         // trades; a warfleet's leader fights) rather than always being a warship.
         let leadAI = galaxy.game.ship(fleet.leadShip).map { AIType(raw: $0.inherentAI) } ?? .warship
         lead.brain = AIBrain(aiType: leadAI == .unknown ? .warship : leadAI, govt: govt)
+        // flët `Flags` 0x0001: freighters (InherentAI <= 2) in this fleet carry
+        // random cargo, so boarding a convoy hauler actually yields loot.
+        if fleet.freightersHaveRandomCargo, let ai = galaxy.game.ship(fleet.leadShip)?.inherentAI, ai <= 2 {
+            rollRandomFreighterCargo(into: lead, world: world)
+        }
         let leadID = world.addNPC(lead, arrival: arrival)
 
         var slot = 0
@@ -532,6 +555,9 @@ public final class Spawner {
                 brain.leaderID = leadID
                 brain.formationSlot = slot
                 e.brain = brain
+                if fleet.freightersHaveRandomCargo, let ai = galaxy.game.ship(escort.shipID)?.inherentAI, ai <= 2 {
+                    rollRandomFreighterCargo(into: e, world: world)
+                }
                 world.addNPC(e, arrival: arrival)
                 slot += 1
             }

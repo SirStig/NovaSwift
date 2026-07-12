@@ -147,6 +147,13 @@ struct MissionInfoView: View {
                     NovaText(m.name, size: 11, color: amber,
                              width: CGFloat(Item.desc.w), align: .leading, weight: .bold)
 
+                    // The current objective, with live progress folded in (ship
+                    // kills counted, the active travel/return leg named).
+                    if !m.objective.isEmpty {
+                        NovaText("Objective: \(m.objective)", size: 10, color: amber,
+                                 width: CGFloat(Item.desc.w), align: .leading)
+                    }
+
                     // Where to go — the concrete destination stellar + system,
                     // the same one the galaxy-map arrow points at.
                     if !m.destinationSpob.isEmpty {

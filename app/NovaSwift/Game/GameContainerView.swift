@@ -1004,6 +1004,16 @@ struct GameContainerView: View {
             failActiveMissions(where: { $0.flags1 & 0x8000 != 0 },
                                reason: "You were boarded — mission failed.")
         }
+        // Demand-Tribute domination feedback. Each defense wave announces itself
+        // (fires on the first wave and on every relaunch as the field is cleared);
+        // a surrender persists through the story engine + daily tribute.
+        host?.scene.onStellarDefendersLaunched = { spobID, count, _ in
+            let name = model.data.game?.spob(spobID)?.name ?? "The stellar"
+            host?.hud.post("\(name) scrambles \(count) defender\(count == 1 ? "" : "s").")
+        }
+        host?.scene.onStellarDominated = { spobID in
+            handleStellarDominated(spobID: spobID)
+        }
         // Live-world effect hooks for the flight-side story services (mission
         // OnSuccess / cron OnStart side effects that reach outside pilot state).
         flightMissionServices.onLeaveStellar = { message in
@@ -1881,17 +1891,75 @@ struct GameContainerView: View {
     }
 
     /// Demand tribute from a stellar — EV Nova's path to forcefully dominating a
-    /// planet/station. The world refuses and turns hostile; defeating its
-    /// defenders is what actually dominates it. Full domination combat (spawning
-    /// the defense fleet, tribute income, forced landing rights) is a follow-up
-    /// that belongs in `GameScene`; this opens hostilities and posts the notice.
+    /// planet/station. Runs the real domination engine (`World.demandTribute` via
+    /// the scene): a defended world scrambles its `spöb.DefenseDude` fleet in
+    /// waves; break them all and demand again and it surrenders. The immediate
+    /// `TributeOutcome` drives this dialog reply; wave launches and the surrender
+    /// itself flow through `onStellarDefendersLaunched` / `onStellarDominated`
+    /// (the latter persists the domination via `handleStellarDominated`).
     private func demandPlanetTribute() {
-        guard var state = hailDialogState, case .planet = state.kind else { return }
-        state.hostile = true
-        state.landable = false
-        state.responseText = "\"You'll get nothing from us!\" The stellar's defenders turn hostile."
+        guard var state = hailDialogState, case let .planet(spobID) = state.kind else { return }
+        guard let outcome = host?.scene.demandTribute(
+                spobID: spobID,
+                combatRating: model.pilot.state.combatRating,
+                alreadyDominated: model.pilot.state.dominatedStellars ?? []) else { return }
+        switch outcome {
+        case let .defending(launched):
+            state.hostile = true
+            state.landable = false
+            state.responseText = launched > 0
+                ? "\"You'll get nothing from us!\" The stellar scrambles its defenders."
+                : "\"You'll get nothing from us!\" The stellar's defenders turn on you."
+        case .stillDefending:
+            state.hostile = true
+            state.responseText = "\"Break our fleet first!\" Its defenders are still in the fight."
+        case .dominated:
+            // The .stellarDominated event also fires and runs handleStellarDominated
+            // (which persists it and re-flips this dialog); set the reply now too so
+            // the player sees it this frame rather than the next.
+            state.hostile = false
+            state.landable = true
+            state.responseText = "The stellar submits to your demand. It is yours."
+        case let .refused(reason):
+            state.responseText = tributeRefusalText(reason, name: state.name)
+        }
         hailDialogState = state
-        host?.hud.post("\(state.name) refuses your demand for tribute.")
+    }
+
+    /// Flavor text for a rebuffed tribute demand (`TributeRefusal`), shown in the
+    /// hail dialog reply.
+    private func tributeRefusalText(_ reason: TributeRefusal, name: String) -> String {
+        switch reason {
+        case .combatRatingTooLow:
+            return "\(name) laughs at your demand — you are not feared enough to be taken seriously."
+        case .noDefenseFleet:
+            return "\(name) has no fleet to defend it — there is no one here to compel."
+        case .alreadyDominated:
+            return "\(name) already answers to you."
+        case .notDominatable:
+            return "\(name) cannot be dominated."
+        }
+    }
+
+    /// A stellar's defenses broke and it surrendered (`onStellarDominated`).
+    /// Persist the domination through the story engine — this fires the stellar's
+    /// `OnDominate` control bits and enrolls it for daily `Tribute` income
+    /// (`StoryEngine.payDailyTribute`, run inside `advanceOneDay`) — then surface
+    /// it and flip the hail dialog (if still open on this world) to friendly.
+    private func handleStellarDominated(spobID: Int) {
+        guard let game = model.data.game else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+        engine.dominateStellar(spobID)
+        model.pilot.state = engine.player
+        model.autosave(reason: .timer)
+        let name = game.spob(spobID)?.name ?? "The stellar"
+        host?.hud.post("\(name) submits to your rule — it will pay tribute daily.")
+        if var state = hailDialogState, case let .planet(id) = state.kind, id == spobID {
+            state.hostile = false
+            state.landable = true
+            state.responseText = "The stellar submits to your demand. It is yours."
+            hailDialogState = state
+        }
     }
 
     private func hailShowsAssistButton(_ state: HailDialogState) -> Bool {

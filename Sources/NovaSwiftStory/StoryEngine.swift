@@ -1053,6 +1053,11 @@ public final class StoryEngine {
         public let id: Int                 // missionID
         public let name: String
         public let payload: String         // one-line "quick brief" (dësc pitch, trimmed)
+        /// The current next step, with live progress folded in (e.g.
+        /// "Destroy ships (1/3) · Report to Kane Station"). Reflects this pilot's
+        /// `ActiveMission` state, not just the static `mïsn`, so it updates as
+        /// ships fall and legs are completed.
+        public let objective: String
         public let destinationSpobID: Int? // where to fly next
         public let destinationSpob: String // stellar name ("" if none)
         public let destinationSystemID: Int?
@@ -1078,12 +1083,61 @@ public final class StoryEngine {
                 id: am.missionID,
                 name: resolvedName(for: m),
                 payload: missionQuickBrief(for: m),
+                objective: missionObjective(m: m, am: am, targetSpob: targetSpob),
                 destinationSpobID: targetSpob,
                 destinationSpob: targetSpob.flatMap { game.spob($0)?.displayName } ?? "",
                 destinationSystemID: sys?.id,
                 destinationSystem: sys?.name ?? "",
                 deadline: am.deadline,
                 canAbort: m.canAbort)
+        }
+    }
+
+    /// The current next step for an accepted mission, folding this pilot's live
+    /// `ActiveMission` progress into the static `mïsn`: the ship objective shows
+    /// how many of the target ships are done, and the travel/return leg names the
+    /// concrete stellar the map arrow points at. Used by the in-game Mission list.
+    private func missionObjective(m: MissionRes, am: ActiveMission, targetSpob: Int?) -> String {
+        var parts: [String] = []
+        if m.hasShipObjective {
+            let verb = shipGoalVerb(m.shipGoal)
+            switch m.shipGoal {
+            case .escort, .observe:
+                // Passive goals — no countable progress; they complete on landing.
+                parts.append("\(verb) \(m.shipCount) ship\(m.shipCount == 1 ? "" : "s")")
+            default:
+                let total = max(1, m.shipCount)
+                if am.shipObjectivesRemaining > 0 {
+                    parts.append("\(verb) ships (\(total - am.shipObjectivesRemaining)/\(total))")
+                } else {
+                    parts.append("\(verb) ships — done ✓")
+                }
+            }
+        }
+        if let t = targetSpob, let name = game.spob(t)?.displayName {
+            if m.cargoQty != 0, !am.visitedTravelStellar {
+                parts.append("Deliver cargo to \(name)")
+            } else if !am.visitedTravelStellar, am.travelSpobID == t {
+                parts.append("Travel to \(name)")
+            } else {
+                parts.append("Report to \(name)")
+            }
+        }
+        return parts.isEmpty ? "See mission briefing" : parts.joined(separator: " · ")
+    }
+
+    /// Present-tense verb for a mission's ship goal (`mïsn.ShipGoal`) — the
+    /// imperative used in the objective line ("Destroy", "Disable", …).
+    private func shipGoalVerb(_ goal: MissionShipGoal) -> String {
+        switch goal {
+        case .destroy: return "Destroy"
+        case .disable: return "Disable"
+        case .board:   return "Board"
+        case .escort:  return "Escort"
+        case .observe: return "Observe"
+        case .rescue:  return "Rescue"
+        case .chaseOff: return "Drive off"
+        case .none:    return "Deal with"
         }
     }
 

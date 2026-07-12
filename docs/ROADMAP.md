@@ -68,13 +68,15 @@ was never open-sourced, so ours is rebuilt from data + observed behavior.
   through to normal AI; tighten engagement/disengagement transitions.
 See [`AI.md`](AI.md)'s fidelity-status section for the full list.
 
-### P1 — Finish Demand Tribute / planetary domination 🟡→✅ *(engine done; app trigger in progress)*
-The engine is complete and tested (`World.demandTribute`, defense waves,
-`stellarDominated`, `PlayerState.dominatedStellars`, `payDailyTribute`). The
-one remaining piece: the in-game "Demand Tribute" hail button
-(`GameContainerView.demandPlanetTribute`) is a **cosmetic stub** — wire it to
-call `World.demandTribute`, add HUD text for the tribute events, and call
-`StoryEngine.dominateStellar` on conquest. See
+### P1 — Demand Tribute / planetary domination ✅ *(done 2026-07-12)*
+The engine (complete and tested — `World.demandTribute`, defense waves,
+`stellarDominated`, `PlayerState.dominatedStellars`, `payDailyTribute`) is now
+driven from the app: the "Demand Tribute" hail button
+(`GameContainerView.demandPlanetTribute`) calls
+`GameScene.demandTribute` → `World.demandTribute`, the outcome drives the dialog
+reply, `stellarDefendersLaunched`/`stellarDominated` events post HUD text, and a
+surrender runs `StoryEngine.dominateStellar` (OnDominate + daily tribute). The
+demand → waves → surrender → tribute loop is playable end-to-end. See
 [reverse-engineering/DOMINATION.md](reverse-engineering/DOMINATION.md).
 
 ### P2 — Wire the last built-not-wired backends 🟡
@@ -82,29 +84,33 @@ call `World.demandTribute`, add HUD text for the tribute events, and call
   in-flight `EscortsView` command window → `PilotStore`; recurring daily fees in
   the day-clock). No longer a gap. (ESCORTS.md)
 - **Junk / `öops` trading** — `junk()`/`oops()` decode but have no caller and
-  no UI; both features are still undesigned. Scope, then wire. (ECONOMY.md)
-- **`freightersHaveRandomCargo`** — dead field; add a random-freighter-cargo
-  boarding hook. (`FleetRes.appearOn`'s NCB gate is *already wired* in
-  `Spawner.fleetAppearOnAllowed`.) (FLEETS.md)
-- **Rank-gated purchases** — fold active-rank `Contribute`
-  (`StoryEngine.activeContributeBits`) into the spaceport purchase gate
-  (`ItemLocking.contributedBits` currently uses only ship+outfit bits).
-- **In-game Mission Log** — a per-mission active-objective panel (the Story Map
-  covers campaign overview, but not a live objective list).
+  no UI. Now **designed**
+  ([JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md)); implement
+  öops price disasters first, then junk trading. (ECONOMY.md)
+- ✅ **`freightersHaveRandomCargo`** — *now wired*: `Spawner.spawnFleet` rolls
+  random standard-commodity cargo into a fleet's freighters (InherentAI ≤ 2) via
+  `rollRandomFreighterCargo`. (FLEETS.md)
+- ✅ **Rank-gated purchases** — *now wired*: `ItemLocking.contributedBits` folds
+  active-rank **and** active-crön `Contribute` into the spaceport purchase gate
+  (mirrors `StoryEngine.activeContributeBits`).
+- ✅ **In-game Mission Log** — *now wired*: `MissionInfoView` shows a live
+  per-mission objective line (ship-kill progress + the active travel/return leg)
+  from a new `MissionSummary.objective`.
 
 ### P3 — Pilot management 🟡 *(mostly done)*
 - ✅ **New Pilot + multi-pilot roster** — *now wired*: `NewPilotView` →
   `AppModel.createPilot` → `PilotRoster.create`, plus an "Open Pilot" picker and
-  `enterShip()` resuming the selected save. Remaining cleanup: **delete the
-  orphaned `AppModel.startNewPilot()`** (superseded, zero callers).
+  `enterShip()` resuming the selected save. ✅ Cleanup done: the orphaned
+  `AppModel.startNewPilot()` (superseded, zero callers) was deleted.
 - Decide save format: keep native JSON `PlayerState` (current) or move to the
   built-but-unwired `PilotSave`/`CombatRating` classic-style encode path.
 
 ### P4 — Authentic UI fidelity pass
 - Full rebindable **keybindings** matching EV Nova; mouse used as the original
   does; controller + touch parity. → `docs/CONTROLS.md` *(to be written)*.
-- **Ionization HUD indicator** — the physics is live (`Ship.ionCharge`/
-  `isIonized`) but nothing on screen shows the player their own charge state.
+- ✅ **Ionization HUD indicator** — *now wired*: the flight HUD status panel
+  shows a purple ION bar (labelled "IONIZED" at the threshold) driven from
+  `Ship.ionCharge`/`isIonized` via `GameScene.updateHUD`.
 - macOS title-bar/safe-area correctness; authentic landing/mission art from the
   player's `PICT`s.
 

@@ -65,4 +65,27 @@ final class DudeCargoTests: XCTestCase {
         XCTAssertLessThanOrEqual(total, ship.cargoCapacity)
         XCTAssertEqual(ship.cargo.count, 6)
     }
+
+    // MARK: flët `Flags` 0x0001 — freighters carry random cargo when boarded.
+
+    func testFreighterRandomCargoFillsHoldWithStandardGoods() {
+        let spawner = makeSpawner()
+        let ship = Ship(name: "Hauler", stats: ShipStats(maxSpeed: 200, acceleration: 100, turnRate: 2))
+        ship.cargoCapacity = 100
+        spawner.rollRandomFreighterCargo(into: ship, world: World(player: ship))
+        let total = ship.cargo.values.reduce(0, +)
+        XCTAssertGreaterThan(total, 0, "A freighter with a hold should get some random cargo")
+        XCTAssertLessThanOrEqual(total, ship.cargoCapacity)
+        // Only the six standard commodities (types 0-5) are ever rolled.
+        XCTAssertTrue(ship.cargo.keys.allSatisfy { (0...5).contains($0) })
+        XCTAssertTrue((1...2).contains(ship.cargo.count), "Fills one or two standard goods")
+    }
+
+    func testFreighterRandomCargoNoHoldCarriesNothing() {
+        let spawner = makeSpawner()
+        let ship = Ship(name: "Fighter", stats: ShipStats(maxSpeed: 400, acceleration: 300, turnRate: 5))
+        ship.cargoCapacity = 0
+        spawner.rollRandomFreighterCargo(into: ship, world: World(player: ship))
+        XCTAssertTrue(ship.cargo.isEmpty)
+    }
 }

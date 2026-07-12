@@ -16,6 +16,8 @@ number, that's stated explicitly as an open question rather than invented.
 | [GOVERNMENT.md](GOVERNMENT.md) | `gövt`, `ränk`, Appendix I/II | Government relations, legal status/crime tolerance, combat rating, rank/reputation/salary |
 | [FLEETS.md](FLEETS.md) | `flët`, `sÿst` | Scripted fleet composition, `LinkSyst` targeting, background system traffic vs. reinforcement fleets |
 | [ECONOMY.md](ECONOMY.md) | `spöb`, `jünk`, `öops` | Commodity pricing, junk cargo, price "disaster" events |
+| [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md) | `jünk`, `öops` | **Design-first** implementation plan for wiring junk trading + price disasters into the live game (builds on ECONOMY.md §3-5) |
+| [DOMINATION.md](DOMINATION.md) | `spöb`, `düde` | Planetary domination ("Demand Tribute"): defense waves, combat-rating gate, daily tribute — **now wired end-to-end** |
 | [OUTFITTERS.md](OUTFITTERS.md) | `oütf` | Slots/mass, availability gating, pricing, ammo linkage, `BuyRandom` stocking |
 | [EVENTS.md](EVENTS.md) | `crön` | Background timed/triggered events, the activation/hold/start/end lifecycle, galaxy-news |
 | [ESCORTS.md](ESCORTS.md) | `përs`, `shïp` | Named NPCs, the real hire/requisition/capture escort system (it lives in `shïp`, not `përs`) |
@@ -81,11 +83,13 @@ Not covered here (already owned elsewhere): AI dispositions/combat behavior
   methods are correct but **`World.swift`'s actual combat code still docks
   legal record from `gov.shootPenalty` on every hit** and never calls them —
   combat rating still never increments during real play. Separately,
-  `RankRes.contribute`/`MissionRes.require` are now decoded and wired into
-  `StoryEngine`'s mission-availability check, but the spaceport purchase-gate
-  (`ItemLocking.swift`) still doesn't fold in active-rank `Contribute`, so a
-  rank-gated *purchase* — the Bible's own headline example — still isn't
-  achievable through the UI. See GOVERNMENT.md.
+  `RankRes.contribute`/`MissionRes.require` are decoded and wired into
+  `StoryEngine`'s mission-availability check, and **as of 2026-07-12 the
+  spaceport purchase-gate (`ItemLocking.contributedBits`) now folds in
+  active-rank *and* active-crön `Contribute`** (mirroring
+  `StoryEngine.activeContributeBits`), so a rank-gated *purchase* — the Bible's
+  own headline example — is finally achievable through the shipyard/outfitter UI.
+  See GOVERNMENT.md.
 - **`flët.LinkSyst` and `sÿst`'s reinforcement fields are now decoded *and*
   wired — and because `Spawner.swift` is already in the live NPC-spawning
   path (`GameSession.makeWorld`), these two are the rare case in this batch
@@ -95,20 +99,25 @@ Not covered here (already owned elsewhere): AI dispositions/combat behavior
   `reinforcementRegen` are decoded, and `Spawner.updateReinforcements`
   implements the reactive "summon reinforcements when a government's ships
   are under fire and outmatched" mechanic the Bible and `AI_GROUND_TRUTH.md`
-  §2 describe. `flët.AppearOn`/`Quote`/`Flags` (freighter random cargo on
-  boarding) are also now decoded, but still have zero readers anywhere. See
-  FLEETS.md.
+  §2 describe. `flët.AppearOn`/`Quote` are decoded and `AppearOn` is wired;
+  `flët.Flags` 0x0001 (freighter random cargo on boarding) is **now wired too
+  (2026-07-12)** — `Spawner.spawnFleet` rolls random standard-commodity cargo
+  into a fleet's freighters (InherentAI ≤ 2) via `rollRandomFreighterCargo`, so
+  boarding a convoy hauler yields loot. See FLEETS.md.
 - **`jünk`/`öops` now have real decoder models; commodity base-price
   overrides are wired into the live trade UI, though inert for stock data.**
   `JunkModels.swift`/`OopsModels.swift` add `JunkRes`/`OopsRes`, decoding
   correctly against the byte layouts ECONOMY.md documents — but nothing
   outside `NovaSwiftKit` calls `junk()`/`junks()`/`oops()`/`oopses()` yet, so
-  junk trading and price-disaster events remain decoded-but-inert. Separately,
+  junk trading and price-disaster events remain decoded-but-inert (a
+  design-first implementation plan for wiring both now exists —
+  [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md)). Separately,
   `NovaEconomy` now reads base commodity prices from `STR ` 9300-9305 (with
   fallback to the hardcoded table) through the same `commodityMarket(at:)`
   path the trade UI already calls — genuinely live, though the stock game
   never actually supplies an override, so it's currently a no-op in practice.
-  Tribute remains unimplemented. See ECONOMY.md.
+  Planetary tribute (Demand Tribute) is **now fully wired** — see DOMINATION.md.
+  See ECONOMY.md.
 - **Outfit mass/sell-flag enforcement is real and live in the spaceport;
   pricing and slot limits are computed but not enforced.** `Flags 0x0400`
   (mass-proportional mass) is fully wired into `Galaxy.loadout`'s mass

@@ -250,11 +250,35 @@ final class GameScene: SKScene {
     /// (`mïsn.Flags` 0x8000).
     var onPlayerBoarded: (() -> Void)?
 
+    /// A stellar scrambled a wave of its Demand-Tribute defense fleet (from the
+    /// planet's `spöb.DefenseDude`). Fires on the first wave and again on each
+    /// relaunch as the field is cleared, so the HUD can announce every wave.
+    var onStellarDefendersLaunched: ((_ spobID: Int, _ count: Int, _ remainingPool: Int) -> Void)?
+    /// A stellar's Demand-Tribute defenses were broken and it surrendered — the
+    /// container persists the domination (`StoryEngine.dominateStellar`), which
+    /// fires `OnDominate` and starts the daily tribute income.
+    var onStellarDominated: ((_ spobID: Int) -> Void)?
+
     /// Whether the live world already holds ships tagged with `missionID` — the
     /// container checks this before (re)spawning a mission's ships so entering a
     /// system doesn't stack duplicate sets.
     func hasMissionShips(_ missionID: Int) -> Bool {
         world?.npcs.contains { $0.missionID == missionID } ?? false
+    }
+
+    /// Demand tribute from stellar `spobID` on behalf of the player — the
+    /// in-flight path to forcefully dominating a planet/station. Syncs the
+    /// player's live combat rating and already-dominated set into the world (the
+    /// domination flow reads both: the rating gate refuses a weak demand, the set
+    /// short-circuits an already-owned planet), then runs the engine demand. The
+    /// returned `TributeOutcome` drives the hail dialog's immediate reply; the
+    /// wave-launch and surrender events surface asynchronously through
+    /// `onStellarDefendersLaunched` / `onStellarDominated` as the fight plays out.
+    func demandTribute(spobID: Int, combatRating: Int, alreadyDominated: Set<Int>) -> TributeOutcome? {
+        guard let world else { return nil }
+        world.playerCombatRating = combatRating
+        world.dominatedStellars.formUnion(alreadyDominated)
+        return world.demandTribute(spobID: spobID)
     }
 
     /// Place a mission's special ships into the live system (forwards to
@@ -463,7 +487,7 @@ final class GameScene: SKScene {
         self.controllerInput = controller
         controller?.deadzone = Float(settings.stickDeadzone)   // "Stick dead zone" setting
         #if os(iOS)
-        if let input { tiltInput = TiltInput(input: input) }
+        tiltInput = TiltInput(input: input)
         updateTiltActive()                                     // start motion updates if scheme == .tilt
         #endif
         Haptics.enabled = settings.hapticsEnabled
@@ -937,6 +961,10 @@ final class GameScene: SKScene {
                 onMissionShipGoalReached?(missionID, goal, byPlayer)
             case let .missionShipLost(missionID, goal):
                 onMissionShipLost?(missionID, goal)
+            case let .stellarDefendersLaunched(spobID, count, remaining):
+                onStellarDefendersLaunched?(spobID, count, remaining)
+            case let .stellarDominated(spobID):
+                onStellarDominated?(spobID)
             case let .shipDestroyed(entityID, _, _):
                 // A player escort tied to a persistent record just died — drop it
                 // from the pilot roster so it doesn't respawn next system (and a
@@ -2815,6 +2843,8 @@ final class GameScene: SKScene {
         hud.armor = p.maxArmor > 0 ? p.armor / p.maxArmor : 1
         hud.fuel = p.maxFuel > 0 ? p.fuel / p.maxFuel : 0
         hud.jumps = Int((p.fuel / 100).rounded(.down))
+        hud.ionization = p.ionizeMax > 0 ? min(1, p.ionCharge / p.ionizeMax) : 0
+        hud.ionized = p.isIonized
         updateWarnings(shieldFraction: hud.shield, armorFraction: hud.armor)
         updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
         updateNavTargetHUD()

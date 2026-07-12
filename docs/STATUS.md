@@ -76,7 +76,10 @@ Everything else in this doc holds up well by comparison.
 | **Player death / game-over** | `Ship.isAlive` uses `armor <= 0`; player death emits `.playerDestroyed(hadEscapePod:)` → escape-pod rescue at nearest port (+save) or a 2.2s explosion → main menu (resume from last autosave) | `World.swift`, `GameScene.swift` `onPlayerDestroyed`, `GameContainerView.swift` `applyEscapePodRescue` |
 | **Paid repairs** | `repairOnLanding` bills ~2cr/hull point (partial repair if underfunded), free only when `repairIsFree` (govt/rank comp) — no more free full heal | `GameContainerView.swift` `repairOnLanding` |
 | **Paid fuel recharge** | Jumps never refuel and landing does not top off fuel; refuel is the paid spaceport "Recharge" service (`rechargeShip`/`rechargeCost`), free only via `rechargeIsFree` | `SpaceportView.swift` `rechargeShip()` |
-| **Ionization** | Weapon `wëap.Ionization` charges `Ship.ionCharge`; past `IonizeMax` the ship can't move or fire | `World.swift` — real physics, **still no HUD indicator** for the player's own charge |
+| **Ionization** | Weapon `wëap.Ionization` charges `Ship.ionCharge`; past `IonizeMax` the ship can't move or fire; the flight HUD status panel shows a purple ION bar (labelled "IONIZED" at the threshold) whenever the player carries a charge | `World.swift` (physics), `GameHUD.swift` / `GameScene.updateHUD` (indicator) |
+| **Demand Tribute / planetary domination** | The "Demand Tribute" hail-dialog button calls `GameScene.demandTribute` → `World.demandTribute` (combat-rating gate, `DefenseDude` waves, `stellarDominated` event); each wave posts a HUD line and a surrender runs `StoryEngine.dominateStellar` (fires `OnDominate`, persists `dominatedStellars`, starts daily `payDailyTribute` income). Full demand → waves → surrender → tribute loop is playable | `GameContainerView.swift` (`demandPlanetTribute`, `handleStellarDominated`), `GameScene.swift`, `Domination.swift` — see [reverse-engineering/DOMINATION.md](reverse-engineering/DOMINATION.md) |
+| **Rank-gated purchases (`ränk.Contribute`)** | `ItemLocking.contributedBits` folds ship + outfit **and** active-rank + active-crön `Contribute` (mirroring `StoryEngine.activeContributeBits`), so a purchase gated on a rank the pilot holds unlocks in the shipyard/outfitter — the Bible's headline use | `Spaceport/ItemLocking.swift` |
+| **Freighter random cargo (`flët.Flags` 0x0001)** | `Spawner.spawnFleet` rolls random standard-commodity cargo into a fleet's freighters (InherentAI ≤ 2), so boarding a convoy hauler yields loot | `Spawner.swift` (`rollRandomFreighterCargo`) |
 | **Combat odds / armor-disable AI** | `AIBrain.power(_:)` drives odds-based flee/press; disabled-hulk transition on armor loss (NPC-only; the player-death path above owns the player) | `AIBrain.swift`, `World.swift` |
 | **Government legal-record penalties** | `Diplomacy.recordKill`/`.recordDisable` are called from `World.swift`'s combat-resolution disable/kill transitions, applying real `KillPenalty`/`DisabPenalty`; combat rating accrues in real play | `World.swift`, `Diplomacy.swift` |
 | **Target-lock + HUD + radar** | Real `selectNearestTarget`/`cycleTarget` with HUD brackets; live ship state, real planet/NPC blips with hostility color; authentic status bar from `ïntf` | `GameScene.swift`, `AuthenticHUDView.swift` |
@@ -86,7 +89,7 @@ Everything else in this doc holds up well by comparison.
 | **`përs` named captains** | The `përs` system places named NPCs with hail quotes, link-missions, and grudges into the live world | `World.swift`, `GameScene.swift`, `GameContainerView.swift` |
 | **Escort hire / upgrade / sell / release** | The Bar's "Hire Escort" button opens `HireEscortView` → `PilotStore.hireEscort` (charges the up-front fee, registers a `.hired` ship in the persistent `escortWing`); upgrade/sell/release are the in-flight `EscortsView` command window → `PilotStore.upgradeEscort`/`sellEscort` + `releaseEscort`; recurring daily fees are billed by `StoryEngine.payDailyEscortFees` in the day-clock, surfaced via the `escortDailyFeeCharged` HUD notice | `Spaceport/HireEscortView.swift`, `Game/EscortsView.swift`, `Game/PilotStore.swift`, `Story/StoryEngine.swift`, `Story/AppGameServices.swift` |
 | **Gambling (GRN holovid races)** | The Bar's "Gamble" button opens `GamblingView`; a bet debits `pilot.credits`, a random winner is drawn, the GRN race clip plays, and a win pays a 3× payout (port's own multiplier) — all persisted via `pilot.save()` | `Story/GamblingView.swift`, `Spaceport/SpaceportScreens.swift` |
-| **New-Pilot creation + multi-pilot roster** | Both menus' "New Pilot" opens `NewPilotView` → `AppModel.createPilot` → `PilotRoster.create` (real `chär`-scenario roll, becomes the selected pilot); "Open Pilot" browses the multi-pilot roster and `enterShip()` resumes the *selected* save | `Pilots/NewPilotView.swift`, `App/AppModel.swift`, `Pilots/PilotRoster.swift`, `Launcher/*MainMenuView.swift` — *caveat: `AppModel.startNewPilot()` is now orphaned dead code (no callers)* |
+| **New-Pilot creation + multi-pilot roster** | Both menus' "New Pilot" opens `NewPilotView` → `AppModel.createPilot` → `PilotRoster.create` (real `chär`-scenario roll, becomes the selected pilot); "Open Pilot" browses the multi-pilot roster and `enterShip()` resumes the *selected* save | `Pilots/NewPilotView.swift`, `App/AppModel.swift`, `Pilots/PilotRoster.swift`, `Launcher/*MainMenuView.swift` |
 | **Fleet `appearOn` NCB gate** | `Spawner.fleetAppearOnAllowed` reads `flët.AppearOn` and defers to `world.fleetSpawnEligible`; the spawner is live (`GameScene` builds it and calls `.populate(world)`), so ambient fleets are gated on their control-bit test in real play | `Spawner.swift`, `GameScene.swift` |
 | **In-game Story Map** | The in-game menu opens a live, pannable/zoomable graph of every reconstructed campaign, resolved against the current pilot — an addition the original never had | `Game/GameMenuView.swift` ("Story Map"), `Story/StorylineMapView.swift`, `StorylineBrowserView.swift` |
 | **Plug-in store** | In-app catalog browse + download/install via `NovaSwiftPluginStore` | `Launcher/PluginsView.swift` → `Store/PluginStoreView.swift` |
@@ -100,10 +103,7 @@ what's still waiting to be plugged in:
 
 | System | What's built | Why the player never sees it |
 |---|---|---|
-| **Demand Tribute / planetary domination — app trigger** | The whole engine is done and tested: `World.demandTribute` (combat-rating gate, `DefenseDude` waves via `updateStellarDefenses`, `stellarDominated` event), `spöb` Tribute/DefenseDude/DefCount decode, `PlayerState.dominatedStellars` persistence, and `StoryEngine.payDailyTribute()` (auto daily income in `advanceDays`). Covered by `DominationTests` + a headless proof (`novaswift-extract tribute`). See [reverse-engineering/DOMINATION.md](reverse-engineering/DOMINATION.md). | **The only missing piece is the app-side trigger.** The in-game "Demand Tribute" button (`GameContainerView.demandPlanetTribute`) is a **cosmetic stub** — it sets the world hostile and posts a refusal line, but never calls `World.demandTribute`, spawns no defenders, dominates nothing, pays no tribute. Wiring that one call (plus HUD text for the tribute events and `StoryEngine.dominateStellar` on conquest) makes the built engine live. **In progress.** |
-| **Junk cargo & `öops` price disasters** | `JunkModels.swift` (`JunkRes`) / `OopsModels.swift` (`OopsRes`) decode correctly | No app caller of `junk()`/`junks()`/`oops()`/`oopses()` — no junk-trade UI, no price-disaster daily roll. Both features are still undesigned, not just unwired. See [reverse-engineering/ECONOMY.md](reverse-engineering/ECONOMY.md). |
-| **`freightersHaveRandomCargo` fleet field** | `FleetRes.freightersHaveRandomCargo` decodes correctly | Dead field — its only occurrence is the property + doc comment (`NovaAIModels.swift`); no consumer in `Sources/` or `app/`, so freighters get no random-cargo boarding hook. (`appearOn` *is* now wired — see the Wired table; `hailQuote` is used via the `përs` path.) See [reverse-engineering/FLEETS.md](reverse-engineering/FLEETS.md). |
-| **Rank-gated purchases (`ränk.Contribute`)** | `RankRes.contribute` is decoded; `StoryEngine.activeContributeBits()` folds active-rank `Contribute` into *mission/cron* availability | The spaceport purchase gate (`ItemLocking.contributedBits`) folds in only *ship* + *outfit* `contribute`, not active-rank `Contribute` — so a purchase gated on a rank the pilot holds still isn't unlocked in the shop, though the Bible calls this out as the headline use. `activeContributeBits()` has no app call site. |
+| **Junk cargo & `öops` price disasters** | `JunkModels.swift` (`JunkRes`) / `OopsModels.swift` (`OopsRes`) decode correctly | No app caller of `junk()`/`junks()`/`oops()`/`oopses()` — no junk-trade UI, no price-disaster daily roll. Now **designed** (a concrete implementation plan): [reverse-engineering/JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md), building on [ECONOMY.md](reverse-engineering/ECONOMY.md). Not yet wired. |
 | **Classic pilot save format** | `PilotSave`, `CombatRating` classic-archive encode | The app persists `PlayerState` as native JSON instead (`.evpilot` via `JSONEncoder`); the classic-archive *encode* path is unused (backup/restore mechanics are used). |
 
 ## Not there yet ❌ (missing, or just a placeholder)
@@ -111,9 +111,7 @@ what's still waiting to be plugged in:
 | Gap | Detail |
 |---|---|
 | **AI / spawning / flight fidelity** | Really a quality gap more than a missing feature — see "how ships fly and spawn" above. Because it's rebuilt from data, the traffic rhythm, flight smoothness, and some combat transitions don't match the original exactly yet. |
-| **In-game Mission Log** | The Story Map covers campaign overview, but a per-mission active-objective log panel isn't a dedicated screen yet. |
-| **Ionization HUD indicator** | The ion physics is live but nothing on screen shows the player their own charge building toward immobilization. |
-| **Junk-trade / öops UI** | See built-not-wired — the decoders exist but the features are undesigned. |
+| **Junk-trade / öops UI** | The decoders exist and the wiring is now **designed** ([JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md)), but no trade UI / daily price-disaster roll is implemented yet. |
 
 ## So what's next?
 
@@ -125,14 +123,14 @@ economy all run, here's where the effort is best spent, roughly in order:
    standing between us and "it feels like EV Nova" — tighten how traffic arrives
    and smooth out the flight so the hiccups go away. It's polish on something
    that already works, not a new feature. See [`AI.md`](AI.md).
-2. **Finish Demand Tribute.** The whole domination engine is built and tested;
-   the only missing piece is the bar/planet button actually calling it (right
-   now it just talks tough and does nothing). One real hookup. **In progress.**
-3. **Junk & öops trading.** The last economy corner nobody's designed yet — it
-   needs a plan before it needs wiring. (Escorts and multi-pilot are already
-   done — see the Wired table.)
-4. **Loose ends.** Let rank-based unlocks work in the shop; drop the now-unused
-   `startNewPilot()`; show the player their own ion charge; and give missions a
-   proper objective log.
+2. **Junk & öops trading.** The last economy corner — now **designed**
+   ([JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md)); it needs the
+   implementation (öops price disasters first, then junk trading). This is the
+   biggest remaining not-wired feature.
+3. ~~**Finish Demand Tribute.**~~ **Done (2026-07-12)** — the hail-dialog button
+   drives the real engine end-to-end; see the Wired table + DOMINATION.md.
+4. ~~**Loose ends** (rank-based shop unlocks, drop `startNewPilot()`, ion-charge
+   HUD, per-mission objective log).~~ **Done (2026-07-12)** — all four landed;
+   see the Wired table and MissionInfoView's objective line.
 
 See [`ROADMAP.md`](ROADMAP.md) for the full plan in order.
