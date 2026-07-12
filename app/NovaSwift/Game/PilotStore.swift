@@ -383,36 +383,41 @@ final class PilotStore: ObservableObject {
         return roll <= percent
     }
 
-    /// Hire `ship` as an escort at `spob` today. The Bible documents
-    /// `HireRandom` (availability) and the upgrade/resale fields but never a
-    /// distinct "hire price" field — `Cost` is introduced once, for outright
-    /// shipyard purchase (ESCORTS.md §2.2 "Pricing gap"). Charging `ship.cost`
-    /// here is that doc's flagged inference, not a quoted Bible rule. Returns
-    /// false if not on offer today or unaffordable; does not (can't yet, see
-    /// above) add the hired ship to any roster.
+    /// Hire `ship` as an escort at `spob` today: charge the up-front hire fee
+    /// (`ShipRes.escortHireFee` = 10% of Cost — see that property for why this is
+    /// an engine constant, not a Bible field) and register it in the persistent
+    /// escort roster as a `.hired` ship, snapshotting its recurring daily fee.
+    /// The live ship spawns from the roster the next time a system world is built
+    /// (i.e. on takeoff), which is when a hired escort joins you in EV Nova.
+    /// Returns false if not on offer today or the hire fee is unaffordable.
     @discardableResult
     func hireEscort(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
         guard escortAvailableToday(ship, at: spob, day: day) else { return false }
-        guard state.credits >= ship.cost else { return false }
-        state.credits -= ship.cost
+        let fee = ship.escortHireFee
+        guard state.credits >= fee else { return false }
+        state.credits -= fee
+        state.registerEscort(shipType: ship.id, name: ship.name, origin: .hired,
+                             hireFee: fee, dailyFee: ship.escortDailyFee)
         save()
         return true
     }
 
-    /// Upgrade an escort of hull `ship` to `ship.escortUpgradesTo`, charging
-    /// `ship.escortUpgradeCost`. Bible `UpgradeTo`/`EscUpgrdCost`: "the ID of
-    /// the ship type that it can be upgraded to" / "the cost to upgrade an
-    /// escort ship of this type to the next more advanced version"
-    /// (ESCORTS.md §2.2). `escortUpgradesTo <= 0` means "not upgradeable".
-    /// Returns the upgraded hull's `shïp` id on success (caller is
-    /// responsible for actually swapping the roster entry once one exists).
+    /// Upgrade escort record `recordID` to its hull's `UpgradeTo`, charging
+    /// `EscUpgrdCost`. Bible `UpgradeTo`/`EscUpgrdCost` (ESCORTS.md §2.2). Swaps
+    /// the record's hull (and, for a hired escort, its daily fee) to the more
+    /// advanced ship; the live ship takes the new hull the next time the wing is
+    /// respawned (on takeoff / entering a system), i.e. the upgrade "applies at
+    /// the next landing" as in EV Nova. Returns the new hull's id, or nil if the
+    /// escort can't upgrade or the cost is unaffordable.
     @discardableResult
-    func upgradeEscort(_ ship: ShipRes) -> Int? {
-        guard ship.escortUpgradesTo > 0 else { return nil }
+    func upgradeEscort(recordID: Int, game: NovaGame) -> Int? {
+        guard let rec = state.escort(id: recordID), let ship = game.ship(rec.shipType),
+              ship.escortUpgradesTo > 0, let target = game.ship(ship.escortUpgradesTo) else { return nil }
         guard state.credits >= ship.escortUpgradeCost else { return nil }
         state.credits -= ship.escortUpgradeCost
+        state.upgradeEscort(id: recordID, to: target.id, dailyFee: target.escortDailyFee)
         save()
-        return ship.escortUpgradesTo
+        return target.id
     }
 
     /// Credits refunded for selling off a captured/hired escort of hull
@@ -425,11 +430,16 @@ final class PilotStore: ObservableObject {
         ship.escortSellValue > 0 ? ship.escortSellValue : Int(Double(ship.cost) * 0.1)
     }
 
-    /// Sell off an escort of hull `ship`, crediting `escortSellValue(for:)`.
+    /// Sell captured escort `recordID` for its `escortSellValue`, removing it from
+    /// the roster. Returns the credits received, or nil if the record is unknown.
+    /// (Hired escorts are released, not sold — this is for captured ships.)
     @discardableResult
-    func sellEscort(_ ship: ShipRes) -> Bool {
-        state.credits += escortSellValue(for: ship)
+    func sellEscort(recordID: Int, game: NovaGame) -> Int? {
+        guard let rec = state.escort(id: recordID), let ship = game.ship(rec.shipType) else { return nil }
+        let value = escortSellValue(for: ship)
+        state.credits += value
+        state.removeEscort(id: recordID)
         save()
-        return true
+        return value
     }
 }

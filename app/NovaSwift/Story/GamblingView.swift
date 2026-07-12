@@ -68,6 +68,9 @@ struct GamblingView: View {
     @State private var phase: Phase = .choosing
     @State private var winner: RaceColor?
     @State private var player: AVPlayer?
+    /// Bumped per race so the racing-phase watchdog (`.task(id:)`) restarts for
+    /// each new bet rather than reusing the previous run.
+    @State private var raceID = 0
 
     var body: some View {
         switch phase {
@@ -182,7 +185,10 @@ struct GamblingView: View {
         if let url = model.data.raceVideoURL(index: winIndex) {
             player = AVPlayer(url: url)
             player?.play()
+        } else {
+            player = nil
         }
+        raceID += 1
         phase = .racing
     }
 
@@ -197,6 +203,12 @@ struct GamblingView: View {
                         for: .AVPlayerItemDidPlayToEndTime, object: player.currentItem)) { _ in
                         finishRace()
                     }
+                    // A clip that can't be decoded fires this instead of the
+                    // "did play to end" note — treat it the same, don't hang.
+                    .onReceive(NotificationCenter.default.publisher(
+                        for: .AVPlayerItemFailedToPlayToEndTime, object: player.currentItem)) { _ in
+                        finishRace()
+                    }
             } else {
                 ProgressView().frame(width: 440, height: 260)
             }
@@ -206,8 +218,37 @@ struct GamblingView: View {
         .background(Color.black)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.15)))
-        .novaResponsive()
+        // No `.novaResponsive()` here: its GeometryReader greedily fills the
+        // screen and pins this fixed-size card to the top-left corner. The card
+        // has no ambient NovaText to scale anyway, so drop it and let
+        // `shrinkToFitViewport` (which fills *and centres*) place the dialog.
         .shrinkToFitViewport()
+        // Safety net so the holovid can never sit on a spinner forever: advance
+        // to the result on decode failure, on a missing clip, or after a hard
+        // time cap — see `watchRace`. Re-runs each time we (re-)enter racing.
+        .task(id: raceID) { await watchRace() }
+    }
+
+    /// Backstop for the racing phase. The four base clips run ~4.5s and normally
+    /// end via `.AVPlayerItemDidPlayToEndTime`; this guarantees the screen still
+    /// advances if that never arrives — the clip stalls, can't be decoded, or
+    /// wasn't found on disk at all (`player == nil`).
+    private func watchRace() async {
+        guard let item = player?.currentItem else {
+            // No clip resolved (e.g. base data imported before the holovids were
+            // copied in). Don't sit on a spinner — show the outcome promptly.
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            finishRace()
+            return
+        }
+        // ~8s cap (comfortably past the ~4.5s clips); break out early the moment
+        // the item reports a hard decode failure.
+        for _ in 0..<32 {
+            if phase != .racing { return }
+            if item.status == .failed { break }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        finishRace()
     }
 
     private func finishRace() {

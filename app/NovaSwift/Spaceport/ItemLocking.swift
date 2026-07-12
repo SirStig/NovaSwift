@@ -17,14 +17,25 @@ enum LockState: Equatable {
 }
 
 extension NovaGame {
-    /// Bits contributed toward a `Require` check by the pilot's current ship
-    /// and everything they currently own — the Bible: Contribute fields are
-    /// "combined with the Contribute fields from the player's ship and the
-    /// other outfit items in the player's possession".
+    /// Bits contributed toward a `Require` check by the pilot's current ship,
+    /// everything they currently own, and every rank/crön they currently hold —
+    /// the Bible: Contribute fields are "combined with the Contribute fields from
+    /// the player's ship and the other outfit items in the player's possession",
+    /// and a ränk/crön contributes its bits "while active". Mirrors
+    /// `StoryEngine.activeContributeBits()` so the purchase gate and the story
+    /// engine agree on what the player has unlocked (an active-rank Contribute
+    /// used to unlock nothing here — a rank-gated hull/outfit stayed locked in
+    /// the shipyard even after the player earned the rank).
     func contributedBits(pilot: PlayerState) -> UInt64 {
         var bits: UInt64 = ship(pilot.shipType)?.contribute ?? 0
         for (outfitID, qty) in pilot.outfits where qty > 0 {
             bits |= outfit(outfitID)?.contribute ?? 0
+        }
+        for rankID in pilot.activeRanks {
+            bits |= rank(rankID)?.contribute ?? 0
+        }
+        for (cronID, rt) in pilot.cronRuntime where rt.isActive {
+            bits |= cron(cronID)?.contribute ?? 0
         }
         return bits
     }

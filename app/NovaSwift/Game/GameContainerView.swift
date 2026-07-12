@@ -1515,9 +1515,15 @@ struct GameContainerView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { showEscortsPanel = false }
             let _ = escortRefresh   // re-read the roster after each order
-            EscortsView(escorts: scene.escortRoster(),
+            EscortsView(graphics: model.uiGraphics,
+                        escorts: scene.escortRoster(),
+                        records: model.pilot.state.escortWing,
+                        game: model.data.game,
                         currentOrder: scene.escortOrder,
                         onCommand: { scene.commandEscorts($0); escortRefresh += 1 },
+                        onRelease: { releaseEscort($0) },
+                        onUpgrade: { upgradeEscort($0) },
+                        onSell: { sellEscort($0) },
                         onClose: { showEscortsPanel = false })
                 .shrinkToFitViewport()
                 .transition(.opacity)
@@ -1655,6 +1661,44 @@ struct GameContainerView: View {
         } else {
             host?.hud.post("Capture attempt failed.")
             refreshBoard(scene, shipID: shipID)
+        }
+    }
+
+    /// Release the escort with persistent `recordID` — the "Release from
+    /// Servitude" hail action. Drops it from the pilot roster (a hired one stops
+    /// billing) and flies the live ship off. Works whether or not it's currently
+    /// spawned (e.g. released while the wing is between systems).
+    private func releaseEscort(_ recordID: Int) {
+        let released = model.pilot.state.removeEscort(id: recordID)
+        model.pilot.save()
+        host?.scene.despawnEscort(recordID: recordID)
+        escortRefresh += 1
+        if let released { host?.hud.post("\(released.name) leaves your command.") }
+    }
+
+    /// Upgrade captured escort `recordID` to its hull's `UpgradeTo` (charging
+    /// `EscUpgrdCost`). The record's hull swaps now; the live ship takes the new
+    /// hull the next time the wing respawns (on takeoff / entering a system).
+    private func upgradeEscort(_ recordID: Int) {
+        guard let game = model.data.game else { return }
+        if let newHull = model.pilot.upgradeEscort(recordID: recordID, game: game) {
+            model.pilot.save()
+            escortRefresh += 1
+            let name = game.ship(newHull)?.name ?? "a better ship"
+            host?.hud.post("Escort upgrade purchased — becomes \(name) on takeoff.")
+        } else {
+            host?.hud.post("Can't upgrade that escort — not upgradeable or too costly.")
+        }
+    }
+
+    /// Sell captured escort `recordID` for its `EscSellValue` and remove it.
+    private func sellEscort(_ recordID: Int) {
+        guard let game = model.data.game else { return }
+        if let value = model.pilot.sellEscort(recordID: recordID, game: game) {
+            model.pilot.save()
+            host?.scene.despawnEscort(recordID: recordID)
+            escortRefresh += 1
+            host?.hud.post("Escort sold — \(value)cr.")
         }
     }
 

@@ -1250,8 +1250,20 @@ final class GameScene: SKScene {
     /// Respawn the saved escort wing on entering a system — each `(recordID,
     /// shipType)` becomes a live ship flying with the player, as EV Nova's
     /// escorts follow their flagship between systems.
+    ///
+    /// Idempotent by record id: a record whose escort is already live in this
+    /// world is skipped, so it's safe to call on every `syncNav` (some of which
+    /// are course/HUD refreshes of the *same* world, not fresh builds) without
+    /// spawning duplicates. A fresh world has no live escorts, so all records
+    /// spawn; this is also where an upgraded record's new hull first appears
+    /// (the old ship is gone with the previous world), matching EV Nova's
+    /// "upgrade applies at the next landing/takeoff".
     func respawnEscorts(_ records: [(recordID: Int, shipType: Int)]) {
-        for r in records { spawnRosterEscort(shipType: r.shipType, recordID: r.recordID) }
+        guard let world else { return }
+        let live = Set(world.playerEscorts.compactMap { $0.escortRecordID })
+        for r in records where !live.contains(r.recordID) {
+            spawnRosterEscort(shipType: r.shipType, recordID: r.recordID)
+        }
     }
 
     /// Remove the live ship for persistent escort `recordID` from the wing (a

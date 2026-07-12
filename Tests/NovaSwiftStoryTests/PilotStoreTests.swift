@@ -137,4 +137,59 @@ final class PilotStoreTests: XCTestCase {
         XCTAssertEqual(slot.displayName, original.displayName, "slots share the pilot's name, unlike Duplicate")
         XCTAssertEqual(store.list().count, 2, "the original and the new slot are both independently listed")
     }
+
+    // MARK: Migration (local ⇄ iCloud storage switch)
+
+    private func archive(at root: URL, clock: (() -> Date)? = nil) -> PilotArchive {
+        PilotArchive(location: .local(root), maxBackupsPerPilot: 8, now: clock ?? { Date() })
+    }
+
+    func testImportPilotsCopiesSavesAndBackups() throws {
+        var t = Date(timeIntervalSince1970: 4_000_000)
+        let source = archive(at: tempRoot.appendingPathComponent("src"),
+                             clock: { t = t.addingTimeInterval(1); return t })
+        var save = try source.save(makeSave(name: "Traveller"), backup: false)
+        save.player.credits = 5000
+        save = try source.save(save)   // produces one backup
+        XCTAssertFalse(source.backups(for: save.id).isEmpty)
+
+        let dest = archive(at: tempRoot.appendingPathComponent("dst"))
+        let copied = dest.importPilots(from: source)
+        XCTAssertEqual(copied, 1)
+        // The pilot and its identity survive the move.
+        let migrated = try dest.load(id: save.id)
+        XCTAssertEqual(migrated.displayName, "Traveller")
+        XCTAssertEqual(migrated.player.credits, 5000)
+        // Its backup history came along too.
+        XCTAssertFalse(dest.backups(for: save.id).isEmpty, "backups migrate with the pilot")
+    }
+
+    func testImportPilotsDoesNotOverwriteExistingByDefault() throws {
+        let source = archive(at: tempRoot.appendingPathComponent("src"))
+        let dest = archive(at: tempRoot.appendingPathComponent("dst"))
+        // Same id in both stores, different credits.
+        var save = makeSave(name: "Split")
+        try source.save(save, backup: false)
+        save.player.credits = 111
+        try dest.save(save, backup: false)
+
+        let copied = dest.importPilots(from: source, overwrite: false)
+        XCTAssertEqual(copied, 0, "an id already present in the destination is left untouched")
+        XCTAssertEqual(try dest.load(id: save.id).player.credits, 111, "destination stays authoritative")
+
+        // With overwrite, the source wins.
+        let copied2 = dest.importPilots(from: source, overwrite: true)
+        XCTAssertEqual(copied2, 1)
+        XCTAssertEqual(try dest.load(id: save.id).player.credits, 25000)
+    }
+
+    func testImportPilotsMergesDistinctPilots() throws {
+        let source = archive(at: tempRoot.appendingPathComponent("src"))
+        let dest = archive(at: tempRoot.appendingPathComponent("dst"))
+        try source.save(makeSave(name: "FromCloud"), backup: false)
+        try dest.save(makeSave(name: "FromLocal"), backup: false)
+        dest.importPilots(from: source)
+        XCTAssertEqual(Set(dest.list().map(\.displayName)), ["FromCloud", "FromLocal"],
+                       "switching stores unions both sides' pilots")
+    }
 }

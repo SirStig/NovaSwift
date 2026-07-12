@@ -577,6 +577,7 @@ struct BarView: View {
     var onDone: () -> Void
 
     @State private var showGambling = false
+    @State private var showHire = false
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var rolledPatron = false
@@ -616,7 +617,7 @@ struct BarView: View {
                         .frame(width: 230, height: 106)
                         .novaPlace(space, -115.5, -82.5)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
-                                   width: 120, enabled: false) {}
+                                   width: 120) { showHire = true }
                             .novaPlace(space, -125.5, 32.5)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.holovid, fallback: "Holovid"),
                                    width: 120, enabled: false) {}
@@ -651,6 +652,14 @@ struct BarView: View {
                     .onTapGesture { showGambling = false }
                     .transition(.opacity)
                 GamblingView(graphics: graphics, pilot: pilot, onDone: { showGambling = false })
+            }
+
+            if showHire {
+                Color.black.opacity(0.5).ignoresSafeArea()
+                    .onTapGesture { showHire = false }
+                    .transition(.opacity)
+                HireEscortView(graphics: graphics, spob: spob, pilot: pilot,
+                               onDone: { showHire = false })
             }
         }
         .onAppear(perform: rollPatron)

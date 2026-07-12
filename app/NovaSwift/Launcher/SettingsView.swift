@@ -20,6 +20,7 @@ struct SettingsView: View {
                 graphicsSection
                 audioSection
                 interfaceSection
+                storageSection
                 accessibilitySection
                 developerSection
 
@@ -183,6 +184,27 @@ struct SettingsView: View {
             Label("Interface", systemImage: "rectangle.on.rectangle")
         } footer: {
             Text("The Nova Swift presentation mode swaps the authentic status bar, menus and dialogs for the port's own modern UI. The original never labelled planets in flight — leave planet names off for the faithful look.")
+        }
+    }
+
+    private var storageSection: some View {
+        Section {
+            Toggle("iCloud pilot sync", isOn: Binding(
+                get: { model.settings.iCloudSaves },
+                set: { model.setICloudSaves($0) }   // persists + migrates saves
+            ))
+            HStack {
+                Text("Saved to")
+                Spacer()
+                Text(model.roster.isCloudBacked ? "iCloud" : "This device")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Label("Saved Games", systemImage: "externaldrive.badge.icloud")
+        } footer: {
+            Text(model.settings.iCloudSaves && !model.roster.isCloudBacked
+                 ? "iCloud is enabled but not available right now (sign in to iCloud on this device). Pilots are saved on this device and will sync once iCloud is reachable."
+                 : "Keeps your pilots — all save slots and their auto-backups — in sync across your devices. Turning this off moves them back onto this device. Your saves are never deleted by switching.")
         }
     }
 

@@ -222,7 +222,9 @@ struct AuthenticMainMenuView: View {
     /// backdrop art leaves empty below the button columns. Falls back to the
     /// port's generic amber styling if the player's data has no cölr resource.
     @ViewBuilder private func pilotStatus(layout: NovaLayout) -> some View {
-        if let save = model.roster.mostRecent {
+        // Shows the *selected* (loaded) pilot — the one Enter Ship will resume —
+        // not merely the newest save, so the readout matches what happens next.
+        if let save = model.roster.selected {
             let bright = assets.colr.map { color($0.menuColor1) } ?? novaAmber
             let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.55)
             // Everything scales with the backdrop via `layout.scale`, so the
@@ -411,7 +413,11 @@ struct AuthenticMainMenuView: View {
         switch action {
         case .newPilot: sheet = .newPilot
         case .openPilot: sheet = .openPilot
-        case .enterShip: model.continueMostRecent()
+        case .enterShip:
+            // Resume the loaded pilot; if there's no unambiguous one to resume
+            // (none selected, or several pilots and no explicit choice), open the
+            // picker instead of silently grabbing the newest save.
+            if !model.enterShip() { sheet = .openPilot }
         case .setPrefs: sheet = .settings
         case .aboutNova: sheet = .about
         case .quitNova:

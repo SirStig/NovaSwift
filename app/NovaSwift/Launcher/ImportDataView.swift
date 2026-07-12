@@ -61,10 +61,10 @@ struct ImportDataView: View {
 /// iOS security-scoped URLs.
 ///
 /// `GameLibrary.discoverResourceFiles` deliberately only looks at resource
-/// containers, so without also copying audio/font files here, `GameDataController.
-/// musicTrackURL()`/`registerFonts(from:)` would search a sandbox copy that
-/// never had them in it — even the player's own EV Nova install ships them
-/// right alongside the `.rez`s.
+/// containers, so without also copying audio/font/video files here,
+/// `GameDataController.musicTrackURL()`/`registerFonts(from:)`/`raceVideoURL()`
+/// would search a sandbox copy that never had them in it — even the player's own
+/// EV Nova install ships them right alongside the `.rez`s.
 enum DataImporter {
     @discardableResult
     static func importBase(from src: URL, into destDir: URL) throws -> Int {
@@ -79,6 +79,7 @@ enum DataImporter {
             sources = GameLibrary.discoverResourceFiles(in: src)
                 + GameDataController.discoverAudioFiles(in: src)
                 + GameDataController.discoverFontFiles(in: src)
+                + GameDataController.discoverVideoFiles(in: src)
         } else {
             sources = [src]
         }

@@ -32,10 +32,11 @@ exist for the player.* So we prioritize **wiring what's already built** and
 
 ---
 
-## Now — what's left after the big wiring pass
+## Where we are now
 
-Since the earlier revisions of this roadmap, the whole "wiring pass" largely
-**landed**. Done and live now (see [STATUS.md](STATUS.md) for seams):
+A lot has come together since the last time this roadmap was written — most of
+the "it's built, we just need to hook it up" work is done and playable. Here's
+what's live today (see [STATUS.md](STATUS.md) for the wiring details):
 
 - ✅ **Mission/story runtime wired end-to-end** — galaxy-day clock advances on
   landing/gate/hyperjump (`advanceGameDay`), crons/news fire, missions complete
@@ -77,24 +78,27 @@ call `World.demandTribute`, add HUD text for the tribute events, and call
 [reverse-engineering/DOMINATION.md](reverse-engineering/DOMINATION.md).
 
 ### P2 — Wire the last built-not-wired backends 🟡
-- **Escort hire/upgrade/sell** — `PilotStore.hireEscort`/`upgradeEscort`/
-  `sellEscort` are built and tested, but the Bar's "Hire Escort" button is
-  `enabled: false` with a no-op action. Bind a real panel. (ESCORTS.md)
+- ✅ **Escort hire/upgrade/sell/release** — *now wired* (Bar `HireEscortView` +
+  in-flight `EscortsView` command window → `PilotStore`; recurring daily fees in
+  the day-clock). No longer a gap. (ESCORTS.md)
 - **Junk / `öops` trading** — `junk()`/`oops()` decode but have no caller and
   no UI; both features are still undesigned. Scope, then wire. (ECONOMY.md)
-- **`FleetRes.appearOn` / `freightersHaveRandomCargo`** — gate ambient fleets
-  on `appearOn`'s NCB test and add a random-freighter-cargo boarding hook.
-  (FLEETS.md)
+- **`freightersHaveRandomCargo`** — dead field; add a random-freighter-cargo
+  boarding hook. (`FleetRes.appearOn`'s NCB gate is *already wired* in
+  `Spawner.fleetAppearOnAllowed`.) (FLEETS.md)
+- **Rank-gated purchases** — fold active-rank `Contribute`
+  (`StoryEngine.activeContributeBits`) into the spaceport purchase gate
+  (`ItemLocking.contributedBits` currently uses only ship+outfit bits).
 - **In-game Mission Log** — a per-mission active-objective panel (the Story Map
   covers campaign overview, but not a live objective list).
 
-### P3 — Pilot management 🟡 *(save/restore works; creation flow doesn't)*
-- Real **New Pilot**: wire `startNewPilot()` reset+reroll via `PilotFactory`,
-  which is built but has zero app call sites.
-- **Multi-pilot selection UI**: save-history restore works, but there's no way
-  to manage more than one active pilot slot from the main menu.
-- Decide save format: keep native JSON `PlayerState` or move to the built-but-
-  unwired `PilotSave`/`CombatRating` classic-style encode path.
+### P3 — Pilot management 🟡 *(mostly done)*
+- ✅ **New Pilot + multi-pilot roster** — *now wired*: `NewPilotView` →
+  `AppModel.createPilot` → `PilotRoster.create`, plus an "Open Pilot" picker and
+  `enterShip()` resuming the selected save. Remaining cleanup: **delete the
+  orphaned `AppModel.startNewPilot()`** (superseded, zero callers).
+- Decide save format: keep native JSON `PlayerState` (current) or move to the
+  built-but-unwired `PilotSave`/`CombatRating` classic-style encode path.
 
 ### P4 — Authentic UI fidelity pass
 - Full rebindable **keybindings** matching EV Nova; mouse used as the original

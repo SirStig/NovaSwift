@@ -43,6 +43,38 @@ final class StoryEngineTests: XCTestCase {
         XCTAssertTrue(svc.log.contains { $0.contains("outfit") })
     }
 
+    // MARK: Daily escort fees
+
+    /// A hired escort's daily fee is deducted once per day; a captured escort is
+    /// free. Both stay in the wing while the fee is covered.
+    func testHiredEscortDailyFeeDeductedCapturedIsFree() {
+        var player = PlayerState(shipType: 128, currentSystem: 128)
+        player.credits = 1000
+        player.registerEscort(shipType: 128, name: "Merc", origin: .hired, hireFee: 500, dailyFee: 50)
+        player.registerEscort(shipType: 128, name: "Prize", origin: .captured)
+        let (eng, svc) = engine([], player: player)
+        eng.advanceDays(3)
+        XCTAssertEqual(eng.player.credits, 1000 - 50 * 3)   // only the hired one bills
+        XCTAssertEqual(eng.player.escortWing.count, 2)      // both still present
+        XCTAssertTrue(svc.log.contains { $0.contains("escortDailyFeeCharged") })
+    }
+
+    /// When the balance can't cover a hired escort's fee, that escort "departs
+    /// without ceremony" — cheaper escorts are paid first, the unaffordable one
+    /// leaves, and a `.escortDeparted` notification fires.
+    func testUnaffordableEscortDepartsWithoutCeremony() {
+        var player = PlayerState(shipType: 128, currentSystem: 128)
+        player.credits = 120
+        let cheap = player.registerEscort(shipType: 128, name: "Cheap", origin: .hired, hireFee: 300, dailyFee: 30)
+        let pricey = player.registerEscort(shipType: 128, name: "Pricey", origin: .hired, hireFee: 5000, dailyFee: 500)
+        let (eng, svc) = engine([], player: player)
+        eng.advanceOneDay()
+        XCTAssertEqual(eng.player.credits, 90)              // 30 paid, 500 unaffordable
+        XCTAssertNotNil(eng.player.escort(id: cheap.id))
+        XCTAssertNil(eng.player.escort(id: pricey.id))      // departed
+        XCTAssertTrue(svc.log.contains { $0.contains("escortDeparted") })
+    }
+
     // MARK: Domination / daily tribute
 
     /// A spöb with tribute@10, techLevel@12, and an OnDominate NCB set expr@54.

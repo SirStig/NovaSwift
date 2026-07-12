@@ -83,6 +83,22 @@ final class GameDataController: ObservableObject {
         return e.compactMap { $0 as? URL }.filter { fontExtensions.contains($0.pathExtension.lowercased()) }
     }
 
+    /// Holovid clip extensions — the base install's Galaxy Racing Network races
+    /// ship as "Race 1.mov".."Race 4.mov" alongside the `.rez`/`.ndat` files.
+    /// Like audio and fonts these aren't resource containers, so
+    /// `GameLibrary.discoverResourceFiles` skips them and the importer must copy
+    /// them explicitly — otherwise `raceVideoURL()` finds nothing in the sandbox
+    /// copy and the Bar's Gambling screen hangs on a loading spinner.
+    nonisolated static let videoExtensions: Set<String> = ["mov", "mp4", "m4v"]
+
+    /// Recursively find holovid files under `directory`.
+    nonisolated static func discoverVideoFiles(in directory: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil,
+                                    options: [.skipsHiddenFiles]) else { return [] }
+        return e.compactMap { $0 as? URL }.filter { videoExtensions.contains($0.pathExtension.lowercased()) }
+    }
+
     /// Registers any imported font files with CoreText for this process, so
     /// `Font.custom("Charcoal"/"Geneva", size:)` resolves to the game's actual
     /// fonts instead of the bundled free lookalikes (see `registerBundledFallbackFonts()`).

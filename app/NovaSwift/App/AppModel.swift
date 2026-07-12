@@ -53,19 +53,28 @@ final class AppModel: ObservableObject {
     }
 
     private var dataObserver: AnyCancellable?
+    private var rosterObserver: AnyCancellable?
 
     init() {
-        // Build the roster honouring the saved iCloud preference. `settings` is
-        // already initialized (stored-property initializer runs before this
-        // body), so its toggle is available here. Falls back to local storage
-        // transparently if iCloud isn't reachable.
-        roster = PilotRoster(preferICloud: settings.iCloudSaves)
+        // Build the roster honouring the saved iCloud preference. Read the
+        // preference directly (not via `self.settings`, which the class-init
+        // rule forbids touching before every stored property is set) — it's the
+        // same persisted blob `settings`'s initializer loads. Falls back to
+        // local storage transparently if iCloud isn't reachable.
+        roster = PilotRoster(preferICloud: GameSettings.load().iCloudSaves)
         // Re-publish when the data controller changes so views observing AppModel refresh.
         dataObserver = data.objectWillChange.sink { [weak self] _ in
             guard let self else { return }
             _uiGraphics = nil                // rebuild authentic-UI art against new data
             store.refresh(data: data)
             objectWillChange.send()
+        }
+        // The roster is a nested ObservableObject reached through `model.roster`;
+        // SwiftUI only re-renders on the *observed* object's change, so forward
+        // its changes (pilot list, selection, iCloud/local state) up to AppModel
+        // so the menus and Settings status update live.
+        rosterObserver = roster.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
         }
         audio.apply(settings: settings)
         store.refresh(data: data)
@@ -108,12 +117,6 @@ final class AppModel: ObservableObject {
         screen = .game
     }
 
-    /// Begin a fresh pilot from the scenario `chär`, discarding any prior save.
-    func startNewPilot() {
-        prepareAudioAndData()
-        if let game = data.game { pilot.reset(); pilot.newGame(game: game) }
-    }
-
     // MARK: Multi-pilot flow (roster + scenarios)
 
     /// Create a new pilot from a chosen starting scenario and adopt it as the
@@ -124,21 +127,39 @@ final class AppModel: ObservableObject {
         prepareAudioAndData()
         guard let game = data.game else { return nil }
         let save = roster.create(name: name, isMale: isMale, scenario: scenario, game: game)
+        roster.setSelected(save.id)                 // a new pilot becomes the loaded one
         pilot.begin(state: save.player, rosterID: save.id)
         return scenario
     }
 
-    /// Resume a saved pilot from the roster and enter the game.
+    /// Resume a saved pilot from the roster and enter the game. Marks it as the
+    /// loaded pilot so "Enter Ship" resumes *this* one next time (rather than
+    /// whatever happens to be newest).
     func play(_ save: PilotSave) {
         prepareAudioAndData()
+        roster.setSelected(save.id)
         pilot.begin(state: save.player, rosterID: save.id)
         beginPlay()
     }
 
-    /// "Enter Ship" — continue the most recently played pilot, if any.
-    func continueMostRecent() {
-        if let recent = roster.mostRecent { play(recent) }
-        else { beginPlay() }   // no roster pilot yet: fall back to the default start
+    /// "Enter Ship" — resume the *selected* (loaded) pilot. Returns false when
+    /// there's no unambiguous pilot to resume (none selected, or several exist
+    /// and the player hasn't chosen one), so the menu opens the pilot picker
+    /// instead of silently grabbing the newest save.
+    @discardableResult
+    func enterShip() -> Bool {
+        guard let save = roster.selected else { return false }
+        play(save)
+        return true
+    }
+
+    /// Turn iCloud pilot syncing on or off: persist the preference and migrate
+    /// existing pilots into the new store (local ⇄ iCloud). Falls back to local
+    /// transparently if iCloud isn't reachable.
+    func setICloudSaves(_ on: Bool) {
+        settings.iCloudSaves = on
+        commitSettings()
+        roster.useICloud(on)
     }
 
     /// Persist the live pilot into its durable roster file (+ backup on land /

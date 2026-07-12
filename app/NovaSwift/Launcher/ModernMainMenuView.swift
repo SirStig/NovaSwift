@@ -41,9 +41,11 @@ struct ModernMainMenuView: View {
                 pilotStatus
 
                 VStack(spacing: 8) {
-                    if model.roster.mostRecent != nil {
+                    if !model.roster.isEmpty {
                         menuButton("Enter Ship", icon: "airplane.departure", prominent: true) {
-                            model.continueMostRecent()
+                            // Resume the loaded pilot; open the picker when there's
+                            // no unambiguous one (rather than auto-picking newest).
+                            if !model.enterShip() { sheet = .openPilot }
                         }
                     }
                     menuButton("New Pilot", icon: "person.crop.circle.badge.plus") { sheet = .newPilot }
@@ -80,7 +82,7 @@ struct ModernMainMenuView: View {
     /// A one-line "continue where you left off" readout above the buttons, when a
     /// saved pilot exists — mirrors the authentic menu's Enter-Ship status.
     @ViewBuilder private var pilotStatus: some View {
-        if let save = model.roster.mostRecent {
+        if let save = model.roster.selected {
             let ship = model.data.game?.ship(save.player.shipType)?.displayName
             VStack(spacing: 2) {
                 Text(save.displayName)

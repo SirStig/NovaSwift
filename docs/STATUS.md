@@ -1,68 +1,55 @@
-# Status — the built-vs-wired connection map
+# Status — what actually works right now
 
-> **Source of truth for what actually works.** Verified by tracing the running
-> app (`app/NovaSwift/`) into the libraries (`Sources/`), not by reading library
-> code in isolation. Definitions come from [`CHARTER.md`](CHARTER.md):
->
-> - **Wired** — the running app drives it; the player experiences it.
-> - **Built, not wired** — code exists and is tested, but the app never calls it
->   in the play loop. The player does **not** experience it.
-> - **Missing** — not built, or a UI shell / "coming soon" placeholder only.
->
-> Last verified: 2026-07-12 (audit of `main` tracing app call sites into the
-> engine/story libraries). This pass folds in the large mission/story,
-> mission-ship, stakes, and economy wiring that landed since the 2026-07-09
-> audit — most of what earlier revisions of this doc listed as "built, not
-> wired" is now **wired**.
+This is the honest map of where NovaSwift stands: what a player really
+experiences, what's written but not yet plugged in, and what's still missing. We
+keep it honest by following the code — from the running app (`app/NovaSwift/`)
+into the libraries (`Sources/`) — rather than trusting that a system works just
+because the library compiles. The three words we use, straight from
+[`CHARTER.md`](CHARTER.md):
 
-## The headline
+- **Wired** — the app actually drives it. The player feels it in the game.
+- **Built, not wired** — the code is there and tested, but nothing in the play
+  loop calls it. As far as the player is concerned, it isn't in the game.
+- **Missing** — not built, or just a UI shell / "coming soon" placeholder.
 
-> **2026-07-12 — story/mission system wired end-to-end.** The gaps earlier
-> revisions of this document described are largely CLOSED. The app builds and
-> tests pass (0 assertion failures). Now live:
-> **missions complete** — `GameContainerView.handleStoryLanding` calls
-> `engine.playerLanded` on every dock, so cargo/courier/passenger/delivery
-> missions finish, pay out, and show completion text (`playerLanded` previously
-> had zero call sites); **mission-ship combat loop closed** — active missions'
-> `ShipSyst`-matching special ships spawn into the live `World`
-> (`spawnActiveMissionShips` from `syncNav` → `GameScene.spawnMissionShips`) and
-> the `.missionShipGoalReached` WorldEvent (formerly `default:break`) feeds
-> `engine.missionShipDestroyed/Disabled/Boarded` back via a new
-> `GameScene.onMissionShipGoalReached` closure; **the campaign clock advances**
-> and `advanceGameDay` now routes crön effects/news through the flight services;
-> **`AppGameServices` effects are real** (container-set callbacks for
-> ship-swap/move/leave-stellar/spawn/destroy-stellar; `storyText`/`showNews` now
-> render as a `NovaDialog`); **galaxy-mutation layer added** — decoded
-> `sÿst.Visibility`@150 + `spöb.OnDestroy`@582/`OnRegen`@837, engine fires spöb
-> hooks on Y/U and persists `destroyedStellars`, `GalaxyMapView` hides
-> story-invisible systems, destroyed stellars drop out of flight/landing;
-> **engine reward fidelity fixed** — PayVal all 5 ranges (was a raw
-> `credits += pay` bug), CompReward −½-on-fail/−5×-on-abort, C/E/H outfit
-> semantics, cargo ±50%/type-1000 random, crön iterative flags. A same-session
-> follow-up also closed the `ShipSyst` −1/−2/−5 selectors
-> (`ActiveMission.acceptSystemID` + `missionShipSystemMatches`) and made
-> in-flight ship swap rebuild the flight host in place (`rebuildFlightHost`).
-> Remaining low-value polish: destroyed planets show as absent (no
-> wreck/asteroid variant yet), and news has no per-station local/independent
-> precedence.
+*Last walked through: 2026-07-12.*
 
-**Beyond the story wiring above,** the same span also added the *stakes* and
-*economy* pieces that the older tables listed as missing: the player can now
-**die** (escape-pod rescue or game-over), **repairs and fuel recharge cost
-credits**, **outfit mass-proportional pricing** and **gun/turret slot limits**
-are enforced, **government legal-record penalties** accrue in combat, and the
-`përs` named-captain system and an **in-game Story Map** are live. The tables
-below reflect this current state and supersede all earlier revisions.
+## Where things stand
 
-## Biggest gap vs. the original game: AI / spawning / flight fidelity ⚠️
+The short version: **the game is a lot more complete than it used to be.** Most
+of what older versions of this doc filed under "built but not wired" is now
+genuinely wired, and the app builds and tests green.
 
-EV Nova's AI and spawning logic were **never open-sourced.** Everything in
-`AIBrain.swift`, `Spawner.swift`, and the flight/steering code is a
-**reconstruction from the game's data tables and observed behavior**, not a
-port of original logic — there is no source to copy off. It is close and covers
-the documented Bible behavior (see [`AI.md`](AI.md) and
-[`AI_GROUND_TRUTH.md`](AI_GROUND_TRUTH.md)), but three areas are the known weak
-points where it still doesn't *feel* exactly like the original:
+The big one is the **story and mission system, which now runs end to end.** You
+can pick up a mission at the bar, fly it, and finish it — cargo, courier,
+passenger, delivery, bounty, escort, all of it. Mission ships actually spawn
+into the world around you, and when you destroy, disable, or board them the
+campaign notices and moves on. The galaxy clock ticks forward every time you
+land or jump, so daily events and news fire on schedule. The universe can even
+change out from under you — systems appear and vanish, planets get destroyed —
+the way the original's storylines rewrite the map.
+
+On top of that, the game finally has **stakes and a real economy.** You can
+*die* now (escape pod if you've got one, otherwise game over), repairs and fuel
+both cost credits, outfits are priced by mass and limited by your ship's gun and
+turret slots, and shooting up the wrong government dings your record. Named
+captains from the `përs` table roam the galaxy, and there's an in-game Story Map
+the original never had.
+
+And most recently, a batch of quality-of-life systems came online: **hiring and
+managing escorts, gambling on the races at the bar, and creating and juggling
+multiple pilots** all work now. The tables below reflect all of this.
+
+## The one thing that still feels off: how ships fly and spawn
+
+Here's the catch. EV Nova's AI and spawning logic were **never open-sourced**,
+so unlike the rest of the port there was no original code to work from. The
+steering, the combat decisions, the way traffic fills a system — all of it
+(`AIBrain.swift`, `Spawner.swift`, the flight code) is **rebuilt from the game's
+data tables and hours of watching how the original behaves.** It's close, and it
+covers what the Bible documents (see [`AI.md`](AI.md) and
+[`AI_GROUND_TRUTH.md`](AI_GROUND_TRUTH.md)) — but three spots still don't quite
+*feel* like the real thing:
 
 | Area | What's off | Where |
 |---|---|---|
@@ -70,10 +57,10 @@ points where it still doesn't *feel* exactly like the original:
 | **Flight handling** | Hand-tuned turn/thrust heuristics ("thrust when roughly pointed the right way", turn-limit lifts through hard turns, escort heading-hold hacks) produce occasional wobble/overshoot "hiccups" a from-source AI wouldn't. | `AIBrain.swift` steering primitives |
 | **Combat/behavior edge cases** | One mission `ShipBehav` case falls through to normal AI; brainless ships drift; some engagement transitions approximate undocumented timing. | `AIBrain.swift`, `World.swift` |
 
-Treat this as the top fidelity backlog: **most core gameplay is replicated
-well; AI/spawning/flight naturalness is where the port is still visibly a
-reconstruction.** Everything else in this doc is comparatively close to the
-original.
+This is the honest soft spot. **Most of the game plays close to the original;
+the way ships fly and show up is where you can still tell it's a
+reconstruction** — because for that one piece, there was nothing to copy from.
+Everything else in this doc holds up well by comparison.
 
 ## Wired ✅ (the player experiences this today)
 
@@ -97,51 +84,55 @@ original.
 | **Spaceport economy** | Trade / Outfitter / Shipyard use real prices against a persistent credit/cargo/outfit balance; mission-gated items genuinely locked; **outfit mass-proportional pricing** (`effectiveCost`) and **gun/turret slot limits** (`freeGunSlots`/`freeTurretSlots`) enforced on buy/sell; can't-sell/consumed-on-purchase flags honored | `SpaceportScreens.swift`, `PilotStore.swift`, `ItemLocking.swift`, `ShipLoadout.swift` |
 | **Fleet spawn-eligibility + reinforcements** | `Spawner.isFleetEligible` filters ambient fleets by `flët.LinkSyst` bands; `Spawner.updateReinforcements` summons `sÿst.ReinfFleet` when a govt's ships are outmatched (`gövt.MaxOdds`) | `Spawner.swift` |
 | **`përs` named captains** | The `përs` system places named NPCs with hail quotes, link-missions, and grudges into the live world | `World.swift`, `GameScene.swift`, `GameContainerView.swift` |
+| **Escort hire / upgrade / sell / release** | The Bar's "Hire Escort" button opens `HireEscortView` → `PilotStore.hireEscort` (charges the up-front fee, registers a `.hired` ship in the persistent `escortWing`); upgrade/sell/release are the in-flight `EscortsView` command window → `PilotStore.upgradeEscort`/`sellEscort` + `releaseEscort`; recurring daily fees are billed by `StoryEngine.payDailyEscortFees` in the day-clock, surfaced via the `escortDailyFeeCharged` HUD notice | `Spaceport/HireEscortView.swift`, `Game/EscortsView.swift`, `Game/PilotStore.swift`, `Story/StoryEngine.swift`, `Story/AppGameServices.swift` |
+| **Gambling (GRN holovid races)** | The Bar's "Gamble" button opens `GamblingView`; a bet debits `pilot.credits`, a random winner is drawn, the GRN race clip plays, and a win pays a 3× payout (port's own multiplier) — all persisted via `pilot.save()` | `Story/GamblingView.swift`, `Spaceport/SpaceportScreens.swift` |
+| **New-Pilot creation + multi-pilot roster** | Both menus' "New Pilot" opens `NewPilotView` → `AppModel.createPilot` → `PilotRoster.create` (real `chär`-scenario roll, becomes the selected pilot); "Open Pilot" browses the multi-pilot roster and `enterShip()` resumes the *selected* save | `Pilots/NewPilotView.swift`, `App/AppModel.swift`, `Pilots/PilotRoster.swift`, `Launcher/*MainMenuView.swift` — *caveat: `AppModel.startNewPilot()` is now orphaned dead code (no callers)* |
+| **Fleet `appearOn` NCB gate** | `Spawner.fleetAppearOnAllowed` reads `flët.AppearOn` and defers to `world.fleetSpawnEligible`; the spawner is live (`GameScene` builds it and calls `.populate(world)`), so ambient fleets are gated on their control-bit test in real play | `Spawner.swift`, `GameScene.swift` |
 | **In-game Story Map** | The in-game menu opens a live, pannable/zoomable graph of every reconstructed campaign, resolved against the current pilot — an addition the original never had | `Game/GameMenuView.swift` ("Story Map"), `Story/StorylineMapView.swift`, `StorylineBrowserView.swift` |
 | **Plug-in store** | In-app catalog browse + download/install via `NovaSwiftPluginStore` | `Launcher/PluginsView.swift` → `Store/PluginStoreView.swift` |
 | **Pilot save history** | `PilotArchive` backups + `PilotRoster` history; "Load Earlier Save" restores a prior snapshot | `PilotListView.swift` |
 | **Main menu + data layer** | Authentic PICT/rlëD assets; full resource-fork/`.ndat`/`.rez` parsing, plug-in override chain, typed decoders, sprite decode | `AuthenticMainMenuView.swift`, `NovaSwiftKit` |
 
-## Built, not wired 🟡 (exists + tested, but the app never runs it)
+## Built, not wired 🟡 (the code's there, but nothing calls it yet)
 
-Much shorter than the previous audit — most of it got wired. What remains:
+This list keeps shrinking — most of what used to live here is wired now. Here's
+what's still waiting to be plugged in:
 
 | System | What's built | Why the player never sees it |
 |---|---|---|
 | **Demand Tribute / planetary domination — app trigger** | The whole engine is done and tested: `World.demandTribute` (combat-rating gate, `DefenseDude` waves via `updateStellarDefenses`, `stellarDominated` event), `spöb` Tribute/DefenseDude/DefCount decode, `PlayerState.dominatedStellars` persistence, and `StoryEngine.payDailyTribute()` (auto daily income in `advanceDays`). Covered by `DominationTests` + a headless proof (`novaswift-extract tribute`). See [reverse-engineering/DOMINATION.md](reverse-engineering/DOMINATION.md). | **The only missing piece is the app-side trigger.** The in-game "Demand Tribute" button (`GameContainerView.demandPlanetTribute`) is a **cosmetic stub** — it sets the world hostile and posts a refusal line, but never calls `World.demandTribute`, spawns no defenders, dominates nothing, pays no tribute. Wiring that one call (plus HUD text for the tribute events and `StoryEngine.dominateStellar` on conquest) makes the built engine live. **In progress.** |
-| **Escort hire / upgrade / sell** | `PilotStore.hireEscort`/`.upgradeEscort`/`.sellEscort`/`.escortAvailableToday` (decoded `ShipRes` fields + tested transaction logic) | The Bar's "Hire Escort" button (`SpaceportScreens.swift`) is rendered `enabled: false` with an empty action — no data binding to `PilotStore`. See [reverse-engineering/ESCORTS.md](reverse-engineering/ESCORTS.md). |
 | **Junk cargo & `öops` price disasters** | `JunkModels.swift` (`JunkRes`) / `OopsModels.swift` (`OopsRes`) decode correctly | No app caller of `junk()`/`junks()`/`oops()`/`oopses()` — no junk-trade UI, no price-disaster daily roll. Both features are still undesigned, not just unwired. See [reverse-engineering/ECONOMY.md](reverse-engineering/ECONOMY.md). |
-| **Fleet flavor fields** | `FleetRes.appearOn`/`.freightersHaveRandomCargo` (decoded) | No call site gates ambient fleets on `appearOn`'s NCB test, and there's no random-freighter-cargo boarding hook. (`hailQuote` *is* used via the `përs` path.) See [reverse-engineering/FLEETS.md](reverse-engineering/FLEETS.md). |
-| **Rank-gated purchases (`ränk.Contribute`)** | `RankRes.contribute` is decoded; `StoryEngine.activeContributeBits()` folds active-rank `Contribute` into *mission/cron* availability | The spaceport purchase gate (`ItemLocking.contributedBits`) folds in only *ship* + *outfit* `contribute`, not active-rank `Contribute` — so a purchase gated on a rank the pilot holds still isn't unlocked in the shop, though the Bible calls this out as the headline use. |
-| **Classic pilot save format** | `PilotSave`, `CombatRating` classic-archive encode | The app persists `PlayerState` as native JSON instead; the classic-archive *encode* path is unused (backup/restore mechanics are used). |
-| **Pilot creation** | `PilotFactory` builds a pilot from a `chär` scenario | Used by CLI + tests; `AppModel.startNewPilot()` exists but has zero app call sites. |
+| **`freightersHaveRandomCargo` fleet field** | `FleetRes.freightersHaveRandomCargo` decodes correctly | Dead field — its only occurrence is the property + doc comment (`NovaAIModels.swift`); no consumer in `Sources/` or `app/`, so freighters get no random-cargo boarding hook. (`appearOn` *is* now wired — see the Wired table; `hailQuote` is used via the `përs` path.) See [reverse-engineering/FLEETS.md](reverse-engineering/FLEETS.md). |
+| **Rank-gated purchases (`ränk.Contribute`)** | `RankRes.contribute` is decoded; `StoryEngine.activeContributeBits()` folds active-rank `Contribute` into *mission/cron* availability | The spaceport purchase gate (`ItemLocking.contributedBits`) folds in only *ship* + *outfit* `contribute`, not active-rank `Contribute` — so a purchase gated on a rank the pilot holds still isn't unlocked in the shop, though the Bible calls this out as the headline use. `activeContributeBits()` has no app call site. |
+| **Classic pilot save format** | `PilotSave`, `CombatRating` classic-archive encode | The app persists `PlayerState` as native JSON instead (`.evpilot` via `JSONEncoder`); the classic-archive *encode* path is unused (backup/restore mechanics are used). |
 
-## Missing / shells ❌ (not built, or placeholder only)
+## Not there yet ❌ (missing, or just a placeholder)
 
 | Gap | Detail |
 |---|---|
-| **AI / spawning / flight fidelity** | The biggest quality gap, not a missing feature — see the ⚠️ section above. Reconstructed-from-data, so spawn cadence, flight smoothness, and some behavior transitions don't yet match the original exactly. |
-| **New Pilot / multi-pilot UI** | `startNewPilot()` (reset+reroll) is still never called; save history/restore works, but there's no multi-pilot selection UI — the main-menu save buttons resume one save. |
+| **AI / spawning / flight fidelity** | Really a quality gap more than a missing feature — see "how ships fly and spawn" above. Because it's rebuilt from data, the traffic rhythm, flight smoothness, and some combat transitions don't match the original exactly yet. |
 | **In-game Mission Log** | The Story Map covers campaign overview, but a per-mission active-objective log panel isn't a dedicated screen yet. |
 | **Ionization HUD indicator** | The ion physics is live but nothing on screen shows the player their own charge building toward immobilization. |
 | **Junk-trade / öops UI** | See built-not-wired — the decoders exist but the features are undesigned. |
 
-## Priority implication
+## So what's next?
 
-Per [`CHARTER.md`](CHARTER.md), **a feature that isn't wired does not exist for
-the player.** With the mission/story runtime, mission ships, stakes, and
-economy now wired, the highest-leverage work has shifted:
+Our rule (from [`CHARTER.md`](CHARTER.md)) is simple: **if the player can't feel
+it, it isn't done.** Now that the story, missions, mission ships, stakes, and
+economy all run, here's where the effort is best spent, roughly in order:
 
-1. **AI / spawning / flight fidelity** — the top remaining gap between this
-   port and the original. Tighten `Spawner` cadence toward the real arrival
-   rhythm and smooth `AIBrain` steering to kill the flight hiccups. This is
-   quality-of-reconstruction work, not new features. See [`AI.md`](AI.md).
-2. **Finish Demand Tribute / domination** — replace the cosmetic
-   `demandPlanetTribute` stub with a real `World.demandTribute` call + event
-   HUD text + `StoryEngine.dominateStellar` on conquest. The engine is done;
-   this is the last app hookup. **In progress.**
-3. **Wire the last economy/escort backends** — bind escort hire/upgrade/sell
-   into a real Bar panel; design + wire junk/`öops` trading.
-4. **Pilot management** — real New Pilot reset and a multi-pilot selection UI.
+1. **Make ships fly and spawn like the real game.** This is the biggest thing
+   standing between us and "it feels like EV Nova" — tighten how traffic arrives
+   and smooth out the flight so the hiccups go away. It's polish on something
+   that already works, not a new feature. See [`AI.md`](AI.md).
+2. **Finish Demand Tribute.** The whole domination engine is built and tested;
+   the only missing piece is the bar/planet button actually calling it (right
+   now it just talks tough and does nothing). One real hookup. **In progress.**
+3. **Junk & öops trading.** The last economy corner nobody's designed yet — it
+   needs a plan before it needs wiring. (Escorts and multi-pilot are already
+   done — see the Wired table.)
+4. **Loose ends.** Let rank-based unlocks work in the shop; drop the now-unused
+   `startNewPilot()`; show the player their own ion charge; and give missions a
+   proper objective log.
 
-See [`ROADMAP.md`](ROADMAP.md) for the sequenced plan.
+See [`ROADMAP.md`](ROADMAP.md) for the full plan in order.
