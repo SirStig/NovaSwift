@@ -189,6 +189,56 @@ public final class Spawner {
         }
     }
 
+    // MARK: Galaxy-wide fleet pool
+
+    /// The set of fleets that may spawn in this system, each with a selection
+    /// weight, built once and cached. This is what fixes "you never see fleets":
+    /// instead of only the fleets a `sÿst` explicitly pins in its `DudeTypes`
+    /// table (nearly always none), it sweeps the whole `flët` catalog for any
+    /// fleet whose `LinkSyst` band matches this system (FLEETS.md §3/§8
+    /// interpretation B). `flët` carries no probability field, so swept fleets
+    /// are uniform (weight 1); a fleet the system's own table *does* pin keeps
+    /// its designer-set `%Prob` as its weight (min 1), so hand-placed fleets stay
+    /// more common than the ambient galaxy-wide sweep. Union is by id, so a fleet
+    /// that is both swept and pinned is counted once at its pinned weight. The
+    /// `AppearOn` NCB gate is *not* applied here (it can change during a visit) —
+    /// it's re-checked per draw in `fleetSpawnAllowed`.
+    private func fleetPool(world: World) -> [(fleetID: Int, weight: Int)] {
+        if let cached = linkFleetPool { return applyAppearOnGate(cached, world: world) }
+        var weights: [Int: Int] = [:]
+        for fleet in galaxy.fleetCatalog() where isFleetEligible(fleet, world: world) {
+            weights[fleet.id] = 1
+        }
+        // The system's own explicitly-pinned fleets (negative-id `DudeTypes`
+        // slots) keep their designer `%Prob` as weight, overriding the uniform 1.
+        for entry in table.fleets where isFleetEligible(entry.fleetID, world: world) {
+            weights[entry.fleetID] = max(weights[entry.fleetID] ?? 0, max(1, entry.prob))
+        }
+        let pool = weights.map { (fleetID: $0.key, weight: $0.value) }
+            .sorted { $0.fleetID < $1.fleetID }   // stable order → deterministic weightedPick
+        linkFleetPool = pool
+        return applyAppearOnGate(pool, world: world)
+    }
+
+    /// Drop any fleet whose `AppearOn` NCB gate currently forbids it (Phase 2).
+    /// Blank `AppearOn` ("if left blank it will be ignored", Bible) is always
+    /// allowed; a non-blank one is a story/plugin control-bit test the engine
+    /// can't evaluate itself, so it defers to the host's `World.fleetSpawnEligible`
+    /// — whose default suppresses gated fleets, keeping e.g. rebel/late-campaign
+    /// fleets out of a fresh galaxy until the story layer says otherwise.
+    private func applyAppearOnGate(_ pool: [(fleetID: Int, weight: Int)],
+                                   world: World) -> [(fleetID: Int, weight: Int)] {
+        pool.filter { fleetAppearOnAllowed($0.fleetID, world: world) }
+    }
+
+    /// True if fleet `fleetID`'s `AppearOn` control-bit test currently permits it.
+    /// Blank ⇒ always; non-blank ⇒ host-gated via `World.fleetSpawnEligible`.
+    private func fleetAppearOnAllowed(_ fleetID: Int, world: World) -> Bool {
+        guard let fleet = galaxy.game.fleet(fleetID) else { return false }
+        if fleet.appearOn.isEmpty { return true }
+        return world.fleetSpawnEligible(fleetID)
+    }
+
     // MARK: LinkSyst eligibility
 
     /// `flët.LinkSyst`: which systems a fleet may spawn in (FLEETS.md §3 —
@@ -255,7 +305,8 @@ public final class Spawner {
         if let dueAt = reinforcementDueAt {
             guard simClock >= dueAt else { return }
             reinforcementDueAt = nil
-            if isFleetEligible(table.reinforcementFleet, world: world) {
+            if isFleetEligible(table.reinforcementFleet, world: world),
+               fleetAppearOnAllowed(table.reinforcementFleet, world: world) {
                 spawnFleet(table.reinforcementFleet, into: world, origin: .edge)
             }
             reinforcementCooldownUntil = simClock

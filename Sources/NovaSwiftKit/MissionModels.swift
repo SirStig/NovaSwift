@@ -73,6 +73,20 @@ public enum MissionShipGoal: Int, Sendable {
     case chaseOff = 6
 }
 
+/// `mïsn.ShipBehav`: an AI override applied to a mission's special ships that
+/// replaces their normal `düde`/hull disposition (Nova Bible; see
+/// docs/AI_GROUND_TRUTH.md §6 item 12). Distinct from `MissionShipGoal`, which
+/// says what the *player* must do to those ships — this says how the ships
+/// themselves behave.
+public enum MissionShipBehavior: Int, Sendable {
+    case standard = -1          // use the ship's normal AI
+    case attackPlayer = 0       // always hostile to the player, whatever the govt
+    case protectPlayer = 1      // treats the player as its leader; fights the player's enemies
+    case attackStellars = 2     // attempt to destroy enemy stellar objects
+
+    public init(raw: Int) { self = MissionShipBehavior(rawValue: raw) ?? .standard }
+}
+
 /// Where the cargo (if any) is picked up.
 public enum MissionCargoPickup: Int, Sendable {
     case none = -1
@@ -204,6 +218,9 @@ public struct MissionRes: Sendable {
     public var hasShipObjective: Bool {
         shipCount > 0 && shipGoal != MissionShipGoal.none
     }
+
+    /// The AI override to apply to this mission's special ships (`ShipBehav`).
+    public var shipBehaviorMode: MissionShipBehavior { MissionShipBehavior(raw: shipBehavior) }
 
     public init(_ r: Resource) {
         id = r.id

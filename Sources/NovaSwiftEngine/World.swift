@@ -1669,6 +1669,19 @@ public final class World {
     /// can't evaluate NCB itself). Default: always eligible.
     public var persSpawnEligible: (Int) -> Bool = { _ in true }
 
+    /// Host gate for whether a fleet with a non-blank `flët.AppearOn` may spawn
+    /// now (the `Spawner` only calls this for fleets that *have* an `AppearOn`
+    /// control-bit test — a blank one is always eligible). The engine can't
+    /// evaluate NCB itself, so it defers to the host, which evaluates the fleet's
+    /// `AppearOn` expression against live pilot control bits. Default: **not**
+    /// eligible — a fresh game with no story layer wired must not spawn
+    /// story/late-campaign fleets (rebels, war task forces) that gate on bits
+    /// no one has set yet. When `NovaSwiftStory` is wired in, it replaces this
+    /// with a real evaluator. Mirrors `persSpawnEligible` but with the opposite
+    /// default, because a gated fleet appearing early is a visible spoiler while
+    /// a gated `pêrs` merely appearing is harmless.
+    public var fleetSpawnEligible: (Int) -> Bool = { _ in false }
+
     /// The current system's sensor static (`sÿst.Interference`, 0-100). Set when
     /// the world is built for a system; degrades effective sensor range.
     public var systemInterference: Int = 0

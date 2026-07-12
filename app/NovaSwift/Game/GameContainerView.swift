@@ -363,6 +363,9 @@ struct GameContainerView: View {
     /// A pending landing awaiting the player's confirmation (the "Confirm before
     /// landing" setting), nil when none.
     @State private var landConfirmID: Int?
+    /// When set, the origin hypergate's spöb id — the galaxy map is showing its
+    /// destination network (solid blue lines) for the player to pick a jump.
+    @State private var gateMapOrigin: Int?
     /// Whether the first-flight tutorial hints card is showing (the "Tutorial
     /// hints" setting; shown once per install until dismissed).
     @State private var showFlightHints = false
@@ -433,10 +436,26 @@ struct GameContainerView: View {
 
                 topLeftMenuButton
 
-                if nav.showingMap {
+                if nav.showingMap && gateMapOrigin == nil {
                     GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() },
                                   onClose: { nav.showingMap = false },
                                   fullscreen: model.settings.fullscreenGalaxyMap)
+                        .transition(.opacity)
+                }
+
+                // Gate map: landing on a hypergate opens the galaxy map in
+                // destination-picker mode — solid blue lines to every gate this
+                // one connects to. Tapping one jumps you through it.
+                if let gateID = gateMapOrigin, let game = host.game, let gate = game.spob(gateID) {
+                    GalaxyMapView(nav: nav, pilot: model.pilot, onJump: {},
+                                  onClose: { gateMapOrigin = nil },
+                                  fullscreen: model.settings.fullscreenGalaxyMap,
+                                  gateSelection: .init(
+                                    originSystem: nav.currentSystemID,
+                                    destinations: game.gateDestinations(from: gate),
+                                    onSelect: { destGate, destSystem in
+                                        performGateJump(toSystem: destSystem, arriveAtGate: destGate)
+                                    }))
                         .transition(.opacity)
                 }
 
@@ -551,6 +570,7 @@ struct GameContainerView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
+        .animation(.easeInOut(duration: 0.2), value: gateMapOrigin)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMenu)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showDebugSuite)
         .animation(.easeInOut(duration: 0.2), value: landedSpobID)
@@ -566,6 +586,9 @@ struct GameContainerView: View {
         }
         .onChange(of: nav.showingMap) { _, open in
             if !open { grabSceneFocus(reason: "map closed") }   // map closed: same
+        }
+        .onChange(of: gateMapOrigin) { _, id in
+            if id == nil { grabSceneFocus(reason: "gate map closed") }
         }
         .onChange(of: nav.route) { _, _ in
             syncNavCourseToHUD(host)
@@ -780,8 +803,58 @@ struct GameContainerView: View {
     /// Shared by the manual land key, the on-screen Land pill, and the
     /// auto-landing autopilot's arrival.
     private func requestLanding(_ id: Int) {
+        // A gate isn't a spaceport — landing on it *uses* it. Route gates to gate
+        // travel instead of opening the port (and skip the land confirmation).
+        if let game = host?.game, let spob = game.spob(id), spob.isGate {
+            handleGateLanding(spob)
+            return
+        }
         if model.settings.confirmLanding { landConfirmID = id }
         else { landedSpobID = id }
+    }
+
+    /// Landing on a gate. A wormhole flings you straight through (no choice); a
+    /// hypergate you're cleared for opens its destination map so you can pick a
+    /// jump; one you aren't cleared for just refuses.
+    private func handleGateLanding(_ spob: SpobRes) {
+        guard let scene = host?.scene else { return }
+        if spob.isWormhole {
+            beginWormholeTransport(from: spob)
+        } else if scene.playerMayUseGate(spob.id) {
+            scene.activateGate(spob.id)     // light it even if the player never clicked it
+            gateMapOrigin = spob.id
+        } else {
+            host?.hud.post("You are not cleared to use this hypergate.")
+        }
+    }
+
+    /// A wormhole spits you out at a linked wormhole, or a random one if it has no
+    /// links (Bible). Chaotic by design — no destination choice.
+    private func beginWormholeTransport(from wormhole: SpobRes) {
+        guard let game = host?.game else { return }
+        guard let dest = game.wormholeExitCandidates(from: wormhole).randomElement() else {
+            host?.hud.post("The wormhole collapses — it leads nowhere."); return
+        }
+        performGateJump(toSystem: dest.systemID, arriveAtGate: dest.gateSpobID)
+    }
+
+    /// Drive a gate transport through the live scene: it flashes and swaps to
+    /// `destSystem` in place, emerging from `destGate`. The flash-peak commit sets
+    /// the system, advances a day, and saves — gates spend **no** fuel (that's the
+    /// whole point of a gate network), and no hyperspace link is required.
+    private func performGateJump(toSystem destSystem: Int, arriveAtGate destGate: Int) {
+        guard let host, !host.scene.isJumping else { return }
+        gateMapOrigin = nil
+        host.scene.beginGateJump(toSystem: destSystem, arriveAtGate: destGate) {
+            hostSystemID = destSystem                     // set first: suppress the host-rebuild onChange
+            nav.arriveViaGate(at: destSystem)
+            model.pilot.state.currentSystem = destSystem
+            model.pilot.state.exploredSystems.insert(destSystem)
+            advanceGameDay()                              // gate travel still costs a calendar day
+            model.pilot.save()
+            model.autosave(reason: .jump)
+            syncNav(host)
+        }
     }
 
     /// Leave the spaceport: rebuild the ship/system from the (possibly changed)
@@ -1271,7 +1344,7 @@ struct GameContainerView: View {
         }
         switch action {
         case .land:
-            guard landedSpobID == nil, let scene = host?.scene else { break }
+            guard landedSpobID == nil, gateMapOrigin == nil, let scene = host?.scene else { break }
             if model.settings.autoLanding {
                 // Auto-landing: fly to the targeted/nearest landable body and set
                 // down on arrival. Pressing Land again cancels an in-progress
@@ -1286,6 +1359,7 @@ struct GameContainerView: View {
             }
         case .openMenu, .pauseGame:
             if landedSpobID != nil { return }
+            if gateMapOrigin != nil { gateMapOrigin = nil; return }
             if nav.showingMap { nav.showingMap = false } else { showMenu.toggle() }
         case .galaxyMap:
             nav.showingMap.toggle()

@@ -78,6 +78,21 @@ public final class AIBrain {
     /// fuel/repairs — reset every time `beginAssisting()` starts a new run.
     public var assistDelivered = false
 
+    /// Mission `ShipBehav` override (Nova Bible; docs/AI_GROUND_TRUTH.md §6
+    /// item 12). `.standard` (the default) leaves the ship on its normal
+    /// disposition; the others replace who it treats as friend/foe. Set by
+    /// `World.spawnMissionShips` on a mission's special ships:
+    /// - `.attackPlayer`  — the player is always hostile, whatever the govt;
+    ///   the ship locks the player and engages.
+    /// - `.protectPlayer` — the player is never hostile; the ship is wired as
+    ///   one of the player's escorts (`leaderID = playerEntityID`) at spawn, so
+    ///   the existing escort logic makes it defend the player. Nothing extra is
+    ///   needed here beyond the friend/foe flip.
+    /// - `.attackStellars` — no ship-vs-stellar combat exists in this engine yet,
+    ///   so this currently falls through to the ship's normal AI (documented
+    ///   stub, not silently equivalent to `.standard`).
+    public var behaviorOverride: MissionShipBehavior = .standard
+
     // Tunables (world units).
     public var scanRange: Double = 1500
     /// A steady wander/travel destination for non-combat states. Readable
@@ -149,6 +164,14 @@ public final class AIBrain {
         // can't be acquired as a target, and a target that cloaks is dropped.
         guard world.canDetect(other, by: me) else { return false }
         if other.isPlayer {
+            // Mission ShipBehav overrides trump ordinary diplomacy toward the
+            // player: an "attack the player" ship is always hostile, a "protect
+            // the player" ship never is (see AIBrain.behaviorOverride).
+            switch behaviorOverride {
+            case .attackPlayer:  return true
+            case .protectPlayer: return false
+            case .standard, .attackStellars: break
+            }
             if provokedByPlayer { return true }
             // A named person the player has wronged holds a grudge and attacks
             // wherever they meet (pêrs.Flags 0x0001).
@@ -318,6 +341,15 @@ public final class AIBrain {
             }
         case .unknown:
             if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
+        }
+
+        // Mission "always attack the player" ships lock the player and engage
+        // regardless of the base disposition above (a trader-hull assassin still
+        // hunts, rather than fleeing per its `düde` AIType) — as long as it's
+        // armed and can currently see the player.
+        if behaviorOverride == .attackPlayer, armed,
+           world.player.isAlive, world.canDetect(world.player, by: me) {
+            targetID = 0; enter(.attacking)
         }
 
         // If an escort and its leader is alive, prefer escorting/adopting target,
