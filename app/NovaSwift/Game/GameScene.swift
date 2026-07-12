@@ -243,6 +243,13 @@ final class GameScene: SKScene {
     /// — the container fails the mission via `engine.missionShipLost`.
     var onMissionShipLost: ((_ missionID: Int, _ goal: MissionShipGoal) -> Void)?
 
+    /// The player's own ship was disabled — fails any mission flagged "fail if
+    /// player is disabled" (`mïsn.Flags2` 0x0004).
+    var onPlayerDisabled: (() -> Void)?
+    /// The player was boarded — fails any mission flagged "fail if boarded"
+    /// (`mïsn.Flags` 0x8000).
+    var onPlayerBoarded: (() -> Void)?
+
     /// Whether the live world already holds ships tagged with `missionID` — the
     /// container checks this before (re)spawning a mission's ships so entering a
     /// system doesn't stack duplicate sets.
@@ -898,8 +905,11 @@ final class GameScene: SKScene {
             case let .shipLanded(entityID, spobID, at):
                 landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
                 if entityID == 0 { audio?.play(.docking); Haptics.play(.medium) }
-            case let .shipDisabled(_, at):
+            case let .shipDisabled(entityID, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
+                if entityID == 0 { onPlayerDisabled?() }
+            case let .shipBoarded(entityID, _):
+                if entityID == 0 { onPlayerBoarded?() }
             case let .shipScanned(scannerID, targetID, _):
                 // Only the player's own scan matters to the player — post the
                 // message and wire the contraband-fine consequence. NPC-on-NPC

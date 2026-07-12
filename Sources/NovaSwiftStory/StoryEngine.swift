@@ -334,7 +334,14 @@ public final class StoryEngine {
 
         let deadline = m.timeLimit > 0 ? player.date.adding(days: m.timeLimit) : nil
         let cargoAtStart = m.cargoPickup == .atStart
-        let shipObjectives = m.hasShipObjective ? max(0, m.shipCount) : 0
+        // Escort/observe goals are *passive* — the player completes them by
+        // landing at the return stellar with the ships intact, not by
+        // destroying/disabling/boarding them, so they carry no outstanding
+        // objective count (a nonzero count would block landing-completion
+        // forever, since nothing ever decrements it for these goals). Their
+        // failure path is the ship being lost (`missionShipLost`), not a count.
+        let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe
+        let shipObjectives = (m.hasShipObjective && !passiveGoal) ? max(0, m.shipCount) : 0
 
         // Resolve any randomised cargo (CargoType 1000 = random standard 0–5,
         // CargoQty <= -2 = abs(qty) ± 50%) exactly **once**, here at accept, and

@@ -132,8 +132,24 @@ final class GameHost {
         if let scanGame = aiGame {
             let pilotStore = model.pilot
             scene.onPlayerScanned = { [weak pilotStore, weak hud] scannerGovt in
-                guard let pilotStore,
-                      let result = ContrabandScan.enforce(on: &pilotStore.state,
+                guard let pilotStore else { return }
+                // Smuggling missions (mïsn Flags 0x0020 "fail if scanned") are
+                // blown when this govt's scan finds their illegal cargo aboard —
+                // independent of the general-contraband fine below.
+                let scanFailIDs = pilotStore.state.activeMissions.map(\.missionID).filter { id in
+                    guard let m = scanGame.mission(id), m.failIfScanned else { return false }
+                    let cargoType = pilotStore.state.activeMission(id)?.resolvedCargoType ?? m.cargoType
+                    let carrying = (pilotStore.state.cargo[cargoType] ?? 0) > 0
+                    return carrying && scanGame.isMissionCargoContraband(id, to: scannerGovt)
+                }
+                if !scanFailIDs.isEmpty {
+                    let engine = StoryEngine(game: scanGame, player: pilotStore.state)
+                    for id in scanFailIDs { engine.failMission(id) }
+                    pilotStore.state = engine.player
+                    hud?.post("Your illicit cargo was detected — mission failed.")
+                    pilotStore.save()
+                }
+                guard let result = ContrabandScan.enforce(on: &pilotStore.state,
                                                            game: scanGame, govtID: scannerGovt),
                       result.foundContraband else { return }
                 let name = scanGame.govt(scannerGovt)?.name ?? "Patrol"
@@ -950,6 +966,15 @@ struct GameContainerView: View {
         host?.scene.onMissionShipLost = { missionID, _ in
             handleMissionShipLost(missionID: missionID)
         }
+        host?.scene.onPlayerDisabled = {
+            failActiveMissions(where: { $0.failIfPlayerDisabled },
+                               reason: "Your ship was disabled — mission failed.")
+        }
+        host?.scene.onPlayerBoarded = {
+            // mïsn.Flags 0x8000 — "mission fails if you're boarded by pirates".
+            failActiveMissions(where: { $0.flags1 & 0x8000 != 0 },
+                               reason: "You were boarded — mission failed.")
+        }
         // Live-world effect hooks for the flight-side story services (mission
         // OnSuccess / cron OnStart side effects that reach outside pilot state).
         flightMissionServices.onLeaveStellar = { message in
@@ -1096,6 +1121,26 @@ struct GameContainerView: View {
         model.autosave(reason: .timer)
     }
 
+    /// Fail every active mission whose static `mïsn` matches `predicate` (the
+    /// `fail-if-scanned/disabled/boarded` conditions). Snapshots the id list
+    /// first since `failMission` mutates `activeMissions`, routes through the
+    /// flight services so OnFailure/failure-text surface, and persists once.
+    private func failActiveMissions(where predicate: (MissionRes) -> Bool, reason: String) {
+        guard let game = model.data.game else { return }
+        let ids = model.pilot.state.activeMissions.map(\.missionID)
+        let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+        var failedAny = false
+        for id in ids {
+            guard let m = game.mission(id), predicate(m) else { continue }
+            engine.failMission(id)
+            failedAny = true
+        }
+        guard failedAny else { return }
+        model.pilot.state = engine.player
+        host?.hud.post(reason)
+        model.autosave(reason: .timer)
+    }
+
     /// Map a `mïsn.ShipStart` code to a spawn arrival: `1` = jump in from
     /// hyperspace; everything else (nav-defaults −4…−1, random 0, cloaked 2) just
     /// appears in-system. The jump-in *delay* and cloak aren't modelled.
@@ -1141,12 +1186,16 @@ struct GameContainerView: View {
         model.pilot.state.currentSystem = systemID
         model.pilot.state.exploredSystems.insert(systemID)
         guard landedSpobID == nil, let game = model.data.game, game.system(systemID) != nil else { return }
+        // N-op keeps the player's exact x/y relative to system centre; M-op drops
+        // them at the new system's default entry. Capture before the rebuild.
+        let keptPosition = keepPosition ? host?.scene.playerShip?.position : nil
         nav.configure(game: game, startSystemID: systemID)
         hostSystemID = systemID
         host = GameHost(model: model, systemID: systemID)
         debug.attach(host?.scene)
         setScenePaused(false, reason: "story relocate")
         syncNav(host)
+        if let keptPosition { host?.scene.playerShip?.position = keptPosition }
         grabSceneFocus(reason: "story relocate")
         host?.hud.post("Relocated to \(game.system(systemID)?.name ?? "a new system").")
     }
