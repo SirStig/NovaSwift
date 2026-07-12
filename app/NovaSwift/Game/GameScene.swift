@@ -315,6 +315,7 @@ final class GameScene: SKScene {
         self.input = input
         self.controllerInput = controller
         controller?.deadzone = Float(settings.stickDeadzone)   // "Stick dead zone" setting
+        Haptics.enabled = settings.hapticsEnabled
         self.hud = hud
         self.audio = audio
         self.planetVisuals = planets
@@ -700,6 +701,7 @@ final class GameScene: SKScene {
                 addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
             case .targetAcquired:
                 audio?.play(.targetLock)
+                Haptics.play(.selection)
             case let .shipArrived(entityID, _, fromHyperspace):
                 // Only inbound hyperspace jumps get the warp effect (played when the
                 // node is built); mid-system populate spawns appear silently.
@@ -713,7 +715,7 @@ final class GameScene: SKScene {
                 warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
             case let .shipLanded(entityID, spobID, at):
                 landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
-                if entityID == 0 { audio?.play(.docking) }
+                if entityID == 0 { audio?.play(.docking); Haptics.play(.medium) }
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
             case let .shipScanned(scannerID, targetID, _):
@@ -742,6 +744,12 @@ final class GameScene: SKScene {
             default:
                 break
             }
+        }
+        // "Auto-target after firing": on the shot that opens fire with nothing
+        // locked, lock onto the nearest hostile.
+        if settings.autoTargetAfterFiring, intent.firePrimary, !wasFiring,
+           world.player.currentTargetID == nil {
+            selectNearestHostile()
         }
         wasFiring = intent.firePrimary
         effectClock += dt
@@ -1139,10 +1147,13 @@ final class GameScene: SKScene {
     /// went off and how big it was. Gated by the "Screen shake" setting and
     /// suppressed entirely by "Reduce flashing & motion".
     private func addShake(at world: CGPoint, radius: CGFloat) {
-        guard settings.screenShake, !settings.reduceFlashing, let player = playerShip else { return }
+        guard let player = playerShip else { return }
         let d = hypot(world.x - CGFloat(player.position.x), world.y - CGFloat(player.position.y))
         let falloff = max(0, 1 - d / 900)           // felt within ~900px
         guard falloff > 0 else { return }
+        // Haptics are independent of the visual-shake preference.
+        if falloff > 0.35 { Haptics.play(.light) }
+        guard settings.screenShake, !settings.reduceFlashing else { return }
         shakeMag = min(20, max(shakeMag, (6 + radius * 0.35) * falloff))
         shakeTime = shakeDuration
     }
@@ -2009,6 +2020,7 @@ final class GameScene: SKScene {
         let filterChanged = newSettings.smoothSprites != settings.smoothSprites
         settings = newSettings
         controllerInput?.deadzone = Float(settings.stickDeadzone)   // live "Stick dead zone"
+        Haptics.enabled = settings.hapticsEnabled
         for node in planetNodes {
             node.childNode(withName: "planetLabel")?.isHidden = !settings.showPlanetLabels
         }

@@ -418,7 +418,9 @@ struct GameContainerView: View {
                     }
                     .opacity(model.settings.hudOpacity)
                 } else {
-                    GameHUDView(model: host.hud, showRadar: model.settings.showRadar)                      // fallback (no ïntf in data)
+                    GameHUDView(model: host.hud, showRadar: model.settings.showRadar,       // modern HUD (Nova Swift, or no ïntf in data)
+                                largerHUD: model.settings.largerHUD,
+                                highContrast: model.settings.highContrastHUD)
                         .opacity(model.settings.hudOpacity)
                 }
 

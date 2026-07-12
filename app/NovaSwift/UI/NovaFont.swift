@@ -106,6 +106,10 @@ private struct NovaTextScaleKey: EnvironmentKey {
     static let defaultValue: CGFloat = 1
 }
 
+private struct NovaUIScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
 extension EnvironmentValues {
     /// The device-responsive scale ambient text should render at. Set once per
     /// screen (see `NovaCanvas`, `NovaMenu`, `.novaResponsive()`) — individual
@@ -113,6 +117,14 @@ extension EnvironmentValues {
     var novaTextScale: CGFloat {
         get { self[NovaTextScaleKey.self] }
         set { self[NovaTextScaleKey.self] = newValue }
+    }
+
+    /// The player's global "Overall UI scale" accessibility setting (0.8…1.4),
+    /// injected once at the app root. Multiplied into every `.novaFont()` size on
+    /// top of the device scale, so all port chrome text grows/shrinks with it.
+    var novaUIScale: CGFloat {
+        get { self[NovaUIScaleKey.self] }
+        set { self[NovaUIScaleKey.self] = newValue }
     }
 }
 
@@ -142,6 +154,7 @@ extension View {
 
 private struct NovaFontModifier: ViewModifier {
     @Environment(\.novaTextScale) private var scale
+    @Environment(\.novaUIScale) private var uiScale
     let role: NovaFontRole
     let weight: Font.Weight
     let baseSize: CGFloat
@@ -149,7 +162,10 @@ private struct NovaFontModifier: ViewModifier {
     let maximumSize: CGFloat
 
     func body(content: Content) -> some View {
-        let size = (baseSize * scale).clamped(to: minimumSize...maximumSize)
+        // The role's readable min/max floor/ceiling apply to the device-scaled
+        // size; the player's global UI-scale then multiplies on top so it can go
+        // beyond those bounds intentionally.
+        let size = (baseSize * scale).clamped(to: minimumSize...maximumSize) * uiScale
         content.font(.custom(role.family, size: size).weight(weight))
     }
 }

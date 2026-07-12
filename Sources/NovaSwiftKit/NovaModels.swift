@@ -579,11 +579,51 @@ public struct SpobRes {
     /// with all −1 connects randomly). Empty for a non-gate stellar.
     public let hyperLinks: [Int]
 
+    /// `MinStatus` (@22, `int16`): the point on your legal record with this
+    /// stellar's `government` at or below which you're denied landing clearance
+    /// (Nova Bible): `-32767` = always land, `-1…-32766` = "you can be this evil
+    /// before we shun you", `0…32766` = "we have to like you this much", `32767`
+    /// = never land. Ignored by the base game when the stellar is uninhabited —
+    /// but the stock hypergates (govt #183 "Hypergate") all carry `32767`, so
+    /// gate access is deliberately a *clearance* mechanic, not a standing one
+    /// (see `playerMayUseGate`).
+    public let minStatus: Int
+
+    /// For a gate, the fixed angle (degrees, `0..<360`) at which ships emerge
+    /// from it — the Bible repurposes `CustSndID` (@26) for this on hypergates
+    /// and wormholes. `nil` = emerge in a random direction (any out-of-range
+    /// value), or a non-gate stellar. HG-V01 (#1400) carries `120`.
+    public let gateEmergeAngle: Double?
+
     /// This stellar is a hypergate (lands → pick a connected hypergate).
     public var isHypergate: Bool { flags2 & 0x1000 != 0 }
     /// This stellar is a wormhole (lands → transported to a linked wormhole).
     public var isWormhole: Bool { flags2 & 0x2000 != 0 }
     public var isGate: Bool { isHypergate || isWormhole }
+
+    /// Gates are always something the player can fly to and set down on, even
+    /// when the stock data flags them a "station"/uninhabited (HG-V01 is flagged
+    /// a station) — landing on one is how you *use* it. Non-gates fall back to
+    /// the normal landable test.
+    public var isLandableStellar: Bool { isGate || isLandable }
+
+    /// Whether the player may pass through this gate given their relationship to
+    /// its owning `government`. Wormholes are open to everyone (no requirements).
+    /// Hypergates require landing *clearance* from the owner: independent gates
+    /// are open; a hostile owner always refuses; a "restricted network" gate
+    /// (`minStatus == 32767`, the stock case) needs the player allied-with or in
+    /// positive standing with the owner; otherwise the ordinary `MinStatus`
+    /// threshold applies. Pure — the caller supplies the relationship, so this
+    /// stays in NovaSwiftKit with no dependency on the engine's `Diplomacy`.
+    public func playerMayUseGate(standing: Int, hostile: Bool, allied: Bool) -> Bool {
+        if isWormhole { return true }
+        guard isHypergate else { return false }
+        if government < 128 { return true }        // independent gate: open to all
+        if hostile { return false }                // enemies never get clearance
+        if minStatus >= 32767 { return allied || standing > 0 }
+        if minStatus <= -32767 { return true }
+        return standing >= minStatus
+    }
 
     public init(_ r: Resource) {
         id = r.id
@@ -599,9 +639,16 @@ public struct SpobRes {
         techLevel = i16(d, 12)
         government = i16(d, 20)
         landingPictID = u16(d, 24)
-        let rawAmbient = i16(d, 26)
-        ambientSoundID = rawAmbient == -1 ? nil : rawAmbient
-        flags2 = u32(d, 30)
+        minStatus = i16(d, 22)
+        let flags2v = u32(d, 30)
+        flags2 = flags2v
+        // @26 (CustSndID) is an ambient-sound id on ordinary stellars but the
+        // ships-emerge angle on gates (Bible) — so a gate has no ambient sound,
+        // and its @26 becomes the emerge angle (nil = random / out-of-range).
+        let rawCust = i16(d, 26)
+        let isGateStellar = flags2v & 0x3000 != 0
+        ambientSoundID = (isGateStellar || rawCust == -1) ? nil : rawCust
+        gateEmergeAngle = (isGateStellar && (0...359).contains(rawCust)) ? Double(rawCust) : nil
         hyperLinks = (0..<8).map { i16(d, 38 + $0 * 2) }.filter { $0 >= 128 }
     }
 }
@@ -624,6 +671,10 @@ private final class NovaGameCache {
     var engineGlowSprites: [Int: SpriteSheet?] = [:]
     var asteroidSprites: [Int: SpriteSheet?] = [:]
     var starfieldSprite: SpriteSheet??
+    /// `spöb` id → the id of the system that lists it in its `spobs`. Built once
+    /// (walking every system) so gate transport can resolve a linked gate's
+    /// destination system without re-scanning the galaxy each time.
+    var spobSystemIndex: [Int: Int]?
 }
 
 /// Typed, indexed view of a merged `ResourceCollection`. Decodes resource bodies
@@ -651,6 +702,36 @@ public struct NovaGame {
     public func nebulaImageID(index: Int) -> Int { 9502 + 7 * index }
     public func spob(_ id: Int) -> SpobRes? { resources.resource(NovaType.spob, id).map(SpobRes.init) }
     public func spobs() -> [SpobRes] { resources.resources(of: NovaType.spob).map(SpobRes.init) }
+
+    /// The id of the system that contains `spobID`, or nil if no system lists it.
+    /// Backed by a one-time index over every system's `spobs` (see `spobSystemIndex`).
+    public func systemContaining(spob spobID: Int) -> Int? {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if cache.spobSystemIndex == nil {
+            var idx: [Int: Int] = [:]
+            for sys in resources.resources(of: NovaType.syst).map(SystRes.init) {
+                for sp in sys.spobs where idx[sp] == nil { idx[sp] = sys.id }
+            }
+            cache.spobSystemIndex = idx
+        }
+        return cache.spobSystemIndex?[spobID]
+    }
+
+    /// The destinations a hypergate offers: for each valid `HyperLink` gate, the
+    /// linked gate's `spöb` and the system that holds it. Skips links that don't
+    /// resolve to a real gate in a real system (bad/self data), deduped by
+    /// destination system so the galaxy map draws one line per reachable system.
+    public func gateDestinations(from gate: SpobRes) -> [(gateSpobID: Int, systemID: Int)] {
+        var seenSystems = Set<Int>()
+        var out: [(Int, Int)] = []
+        for linkID in gate.hyperLinks {
+            guard linkID != gate.id, let linked = spob(linkID), linked.isGate,
+                  let sysID = systemContaining(spob: linkID), seenSystems.insert(sysID).inserted
+            else { continue }
+            out.append((linkID, sysID))
+        }
+        return out
+    }
 
     // AI-driving resources.
     public func govt(_ id: Int) -> GovtRes? { resources.resource(NovaType.govt, id).map(GovtRes.init) }

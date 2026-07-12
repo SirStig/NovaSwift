@@ -57,6 +57,7 @@ struct RootView: View {
             debugControls
         }
         .environment(\.novaDebugEnabled, model.settings.uiDebugOverlay)
+        .environment(\.novaUIScale, model.settings.uiScale)   // "Overall UI scale"
         .animation(.easeInOut(duration: 0.25), value: model.screen)
         .animation(.easeInOut(duration: 0.3), value: model.pendingIntro != nil)
         .task(id: model.data.hasBaseData) {

@@ -345,6 +345,12 @@ public struct GovtRes {
     /// "Can't Request Assist/Mercy, non-talkative" — never has anything to say
     /// when hailed even though `cantBeHailed` is false.
     public var nonTalkative: Bool     { flags2 & 0x0001 != 0 }
+    /// `gövt.Flags2` gate-travel dispositions (Bible): whether this govt's ships
+    /// avoid hypergates, prefer them over jumping out, or prefer wormholes.
+    /// Drives which govts' ships emerge from / depart via a system's gates.
+    public var avoidsHypergates: Bool  { flags2 & 0x0020 != 0 }
+    public var prefersHypergates: Bool { flags2 & 0x0040 != 0 }
+    public var prefersWormholes: Bool  { flags2 & 0x0080 != 0 }
 
     public init(_ r: Resource) {
         id = r.id

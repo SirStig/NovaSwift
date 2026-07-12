@@ -150,10 +150,16 @@ struct RadarPlayerArrow: Shape {
 struct GameHUDView: View {
     @ObservedObject var model: GameHUDModel
     var showRadar: Bool = true
+    /// "Larger HUD" accessibility setting — scales the whole sidebar up.
+    var largerHUD: Bool = false
+    /// "High-contrast HUD" accessibility setting — darker panels, brighter edges.
+    var highContrast: Bool = false
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
-    private let panel = Color.black.opacity(0.42)
     private let sidebarW: CGFloat = 196
+
+    private var panel: Color { Color.black.opacity(highContrast ? 0.75 : 0.42) }
+    private var edge: Color { .white.opacity(highContrast ? 0.4 : 0.12) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -166,6 +172,9 @@ struct GameHUDView: View {
                 targetPanel
             }
             .frame(width: sidebarW)
+            // "Larger HUD" scales the whole stack up, anchored to the top-right
+            // corner so it still hugs the edge.
+            .scaleEffect(largerHUD ? 1.28 : 1.0, anchor: .topTrailing)
             .padding(.top, 12).padding(.trailing, 12)
         }
         .allowsHitTesting(false)
@@ -179,7 +188,7 @@ struct GameHUDView: View {
             .frame(width: sidebarW, alignment: .leading)
             .padding(.horizontal, 10).padding(.vertical, 9)
             .background(panel, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(edge))
     }
 
     /// Ship name, current system, credits and cargo — the "you & where you are"

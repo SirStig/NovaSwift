@@ -12,8 +12,22 @@ public struct StellarBody {
     public let position: Vec2
     public let radius: Double
     public let canLand: Bool
-    public init(id: Int, position: Vec2, radius: Double, canLand: Bool) {
+    /// The government that owns this stellar (`spöb.Govt`; < 128 = independent).
+    /// Drives hypergate clearance and which government's ships emerge from a gate.
+    public let government: Int
+    public let isHypergate: Bool
+    public let isWormhole: Bool
+    /// Fixed emerge angle (radians, engine convention) for ships appearing from
+    /// this gate, or nil to pick a random direction. Non-gates: nil.
+    public let gateEmergeAngle: Double?
+    public var isGate: Bool { isHypergate || isWormhole }
+
+    public init(id: Int, position: Vec2, radius: Double, canLand: Bool,
+                government: Int = independentGovt, isHypergate: Bool = false,
+                isWormhole: Bool = false, gateEmergeAngle: Double? = nil) {
         self.id = id; self.position = position; self.radius = radius; self.canLand = canLand
+        self.government = government; self.isHypergate = isHypergate
+        self.isWormhole = isWormhole; self.gateEmergeAngle = gateEmergeAngle
     }
 }
 
@@ -262,8 +276,16 @@ public final class Galaxy {
             // PlanetVisual), so landing/collision geometry agrees with what's on screen
             // instead of every body sharing one hardcoded radius.
             let radius = Double(game.spobSprite(spobID)?.frameWidth ?? 48) / 2
-            bodies.append(StellarBody(id: spobID, position: pos, radius: radius,
-                                      canLand: s.isLandable && !s.isUninhabited))
+            // `canLand` stays "landable AND inhabited" so AI traders/patrols keep
+            // treating only real ports as destinations — gates are handled by the
+            // player-landing/gate paths separately (see `isGate`), never as trade
+            // stops. EV Nova gate emerge angles are degrees clockwise from north,
+            // which matches this engine's `Vec2(sinθ, cosθ)` heading directly.
+            bodies.append(StellarBody(
+                id: spobID, position: pos, radius: radius,
+                canLand: s.isLandable && !s.isUninhabited,
+                government: s.government, isHypergate: s.isHypergate, isWormhole: s.isWormhole,
+                gateEmergeAngle: s.gateEmergeAngle.map { $0 * .pi / 180 }))
         }
         // The system's actual centre of mass — not the world origin, which a
         // system's stellar objects don't necessarily cluster around. Everything
