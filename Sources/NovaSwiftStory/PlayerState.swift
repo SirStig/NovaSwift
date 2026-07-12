@@ -135,6 +135,21 @@ public struct EscortRecord: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// A planet's one-day escort-hire tally — how many of each hull the player has
+/// hired at a specific shipyard on a specific day. Scoped to that single
+/// (day, spöb) so it self-expires: the first hire on a new day or at a new
+/// station replaces it wholesale.
+public struct EscortHireTally: Codable, Sendable {
+    public var day: Int
+    public var spob: Int
+    public var counts: [Int: Int]   // shïp id → hired today
+    public init(day: Int, spob: Int, counts: [Int: Int] = [:]) {
+        self.day = day
+        self.spob = spob
+        self.counts = counts
+    }
+}
+
 /// The complete, serialisable player / campaign state — the "pilot file". Owns
 /// the control-bit vector, mission log, ranks, standings and galaxy clock. This
 /// is the single source of truth the story engine reads and mutates; combat,
@@ -244,6 +259,31 @@ public struct PlayerState: Codable, Sendable {
         var m = (barOfferDays ?? [:]).filter { $0.value == day }
         m[spob] = day
         barOfferDays = m
+    }
+
+    /// How many escorts of each hull the player has already hired *today at the
+    /// current shipyard*, so the planet's limited daily stock of a given ship
+    /// type can't be over-hired by re-opening the browser. Scoped to one
+    /// (day, spöb) — the moment either changes, the whole tally is replaced.
+    /// Optional for save-compat.
+    public var escortHireTally: EscortHireTally? = nil
+
+    /// Escorts of `shipType` already hired at `spob` on `day` (0 once the day or
+    /// station changes, since the tally only tracks the current one).
+    public func escortsHired(shipType: Int, spob: Int, day: Int) -> Int {
+        guard let t = escortHireTally, t.day == day, t.spob == spob else { return 0 }
+        return t.counts[shipType] ?? 0
+    }
+
+    /// Record one hire of `shipType` at `spob` on `day`, starting a fresh tally
+    /// whenever the day or station differs from the last one.
+    public mutating func recordEscortHire(shipType: Int, spob: Int, day: Int) {
+        if var t = escortHireTally, t.day == day, t.spob == spob {
+            t.counts[shipType, default: 0] += 1
+            escortHireTally = t
+        } else {
+            escortHireTally = EscortHireTally(day: day, spob: spob, counts: [shipType: 1])
+        }
     }
 
     // Story

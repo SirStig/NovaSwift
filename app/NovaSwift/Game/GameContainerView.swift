@@ -564,7 +564,6 @@ struct GameContainerView: View {
                     GameMenuView(hud: host.hud,
                                  onResume: { showMenu = false },
                                  onOpenMap: { nav.showingMap = true },
-                                 onOpenEscorts: { showEscortsPanel = true },
                                  showDebug: model.settings.debugModeEnabled,
                                  onOpenDebug: { showMenu = false; showDebugSuite = true })
                 }
@@ -649,6 +648,12 @@ struct GameContainerView: View {
         .onChange(of: hailDialogState != nil) { _, open in
             setScenePaused(open, reason: "hailDialogState=\(open)")
             if !open { grabSceneFocus(reason: "hail dialog closed") }
+        }
+        .onChange(of: showEscortsPanel) { _, open in
+            // The Escorts window is an escort's hail — pause the sim behind it and
+            // return focus to flight when it closes, exactly like the comm dialog.
+            setScenePaused(open, reason: "showEscortsPanel=\(open)")
+            if !open { grabSceneFocus(reason: "escorts window closed") }
         }
         .onChange(of: flightMissionServices.pendingOffer != nil) { _, open in
             setScenePaused(open, reason: "flightMissionOffer=\(open)")
@@ -1714,7 +1719,6 @@ struct GameContainerView: View {
         switch panel {
         case .missions:  showMissionsPanel = true
         case .pilotInfo: showPilotInfoPanel = true
-        case .escorts:   showEscortsPanel = true
         }
     }
 
@@ -1796,6 +1800,13 @@ struct GameContainerView: View {
         guard let scene = host?.scene, let result = scene.attemptHail() else { return }
         switch result {
         case let .ship(entityID, name, shipTypeID, govt, hostile):
+            // Hailing one of your own escorts opens its command window (EV Nova's
+            // Escorts dialog, DITL #1022) rather than the generic comm dialog.
+            if scene.isPlayerEscort(entityID) {
+                model.audio.play(.uiSelect)
+                showEscortsPanel = true
+                return
+            }
             model.audio.playHailVoice(govt: govt, hostile: hostile)
             var displayName = name
             var response = hostile ? "They aren't interested in talking." : "This is \(name). Go ahead."

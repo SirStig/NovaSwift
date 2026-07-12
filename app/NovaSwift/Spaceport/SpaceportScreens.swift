@@ -617,8 +617,10 @@ struct BarView: View {
                         }
                         .frame(width: 230, height: 106)
                         .novaPlace(space, -115.5, -82.5)
+                        // Escorts are hired from the port's shipyard stock, so the
+                        // option is only live where there's a shipyard to hire from.
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
-                                   width: 120) { showHire = true }
+                                   width: 120, enabled: spob.hasShipyard) { showHire = true }
                             .novaPlace(space, -125.5, 32.5)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.holovid, fallback: "Holovid"),
                                    width: 120) { showHolovid = true }

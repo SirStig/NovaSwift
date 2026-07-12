@@ -38,11 +38,18 @@ struct HireEscortView: View {
     /// Today's galaxy day — the seed for the per-day availability roll.
     private var day: Int { pilot.state.date.julianDay }
 
-    /// Ships offered for hire at this bar today: `HireRandom > 0` and passing the
-    /// day/spöb availability roll. Grouped by escort category, then hire fee, so
-    /// fighters/medium/warships/freighters cluster the way the escort menu does.
+    /// Ships offered for hire here today. The pool is what this planet's
+    /// *shipyard* deals in — `game.shipsSold(at:day:)` is tech-level-eligible and
+    /// returns nothing when the spöb has no shipyard, so a bar without a shipyard
+    /// offers no escorts (you can only hire hulls the port actually stocks). From
+    /// that pool, only the hulls whose `HireRandom` roll passes today are on
+    /// offer, so it's a random planet-specific subset that changes day to day —
+    /// never every ship. Grouped by escort category, then fee, the way the escort
+    /// menu clusters fighters/medium/warships/freighters. Passing `day: nil` uses
+    /// the shipyard's tech eligibility without its separate `BuyRandom` stock
+    /// roll — hire availability is the `HireRandom` roll's job.
     private var stock: [ShipRes] {
-        game.ships()
+        game.shipsSold(at: spob, day: nil)
             .filter { $0.hireRandom > 0 && pilot.escortAvailableToday($0, at: spob, day: day) }
             .sorted { ($0.escortCategory, $0.escortHireFee) < ($1.escortCategory, $1.escortHireFee) }
     }
@@ -102,9 +109,15 @@ struct HireEscortView: View {
             ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, s in
                 if let s {
                     let picture = shipPicture(s)
+                    let remaining = pilot.escortHireRemaining(s, at: spob, day: day)
+                    // The quantity badge is this station's remaining daily stock
+                    // of the hull (1–5, varies by type); a hull hired out for the
+                    // day dims as "locked" (sold out) rather than vanishing.
                     ItemTile(name: s.displayName, image: picture?.image,
                              pixelated: picture?.isDedicated == false,
-                             selected: (selectedID ?? stock.first?.id) == s.id)
+                             quantity: remaining,
+                             selected: (selectedID ?? stock.first?.id) == s.id,
+                             locked: remaining == 0)
                         .onTapGesture { selectedID = s.id }
                 } else {
                     Color.clear.frame(width: hireGridTileSize.width, height: hireGridTileSize.height)
@@ -152,12 +165,13 @@ struct HireEscortView: View {
 
     private func info(_ space: NovaSpace) -> some View {
         let s = selected
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 8) {
             infoRow("Hire:", s.map { hireCreditString($0.escortHireFee) } ?? "—")
             infoRow("Per day:", s.map { hireCreditString($0.escortDailyFee) } ?? "—")
+            infoRow("Available:", s.map { "\(pilot.escortHireRemaining($0, at: spob, day: day))" } ?? "—")
             infoRow("You Have:", hireCreditString(pilot.state.credits))
         }
-        .novaPlace(space, 232, 52)
+        .novaPlace(space, 232, 46)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -169,7 +183,8 @@ struct HireEscortView: View {
 
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
-        let canHire = s.map { pilot.state.credits >= $0.escortHireFee } ?? false
+        let remaining = s.map { pilot.escortHireRemaining($0, at: spob, day: day) } ?? 0
+        let canHire = (s.map { pilot.state.credits >= $0.escortHireFee } ?? false) && remaining > 0
         NovaButton(graphics: graphics,
                    title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
                    width: 83, enabled: canHire) {

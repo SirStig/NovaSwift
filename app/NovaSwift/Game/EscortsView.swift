@@ -3,27 +3,33 @@ import NovaSwiftEngine
 import NovaSwiftStory
 import NovaSwiftKit
 
-/// The in-flight **Escorts** command window — an authentic-geometry recreation
-/// of DLOG/DITL #1022 "Escorts" (`novaswift-extract dlog/ditl "data/EV Nova/
-/// Nova.rez" 1022` → bounds 424×259, 12 `userItem`/`statText` items whose rects
-/// ARE the pixel layout; frame art PICT #8513 "Escort communications"). The four
-/// 146×26 buttons (items 0–3) issue standing orders to the wing; the big 200×200
-/// panel (item 10) lists the ships under your command.
+/// The in-flight **Escorts** command window — an authentic recreation of
+/// DLOG/DITL #1022 "Escorts" (`novaswift-extract dlog "data/EV Nova/Nova.rez"
+/// 1022` → DLOG bounds 424×259, DITL "Escorts" 12 items whose rects ARE the
+/// pixel layout; frame art PICT #8513 "Escort communications").
 ///
-/// Now wired to the live escort roster (`GameScene.escortRoster()` /
-/// `commandEscorts`): the buttons command every escort, the current order is
-/// highlighted, and the list shows each escort's name and condition. With no
-/// escorts it shows the honest empty state, buttons disabled — matching the real
-/// window when your wing is empty.
+/// EV Nova opens this window when you **hail one of your own escorts** — so the
+/// container gates it on hailing a targeted escort ship, exactly as the generic
+/// comm dialog (`HailDialogView`, DITL #1007) is gated on hailing anyone else.
+/// It is built from the same authentic pieces every other game screen uses —
+/// the real frame PICT, three-slice `NovaButton` art, and Geneva `NovaText`,
+/// placed straight from the DITL item rects (via `NovaSpace`/`.novaPlace`, see
+/// `NovaMenu.swift`) — with no native SwiftUI chrome.
 ///
-/// It still degrades to plain chrome (Geneva text + grey pills) rather than the
-/// three-slice PICT art, since its call sites aren't wired with the
-/// `SpaceportGraphics` environment — the same documented no-graphics branch
-/// `HailDialogView` uses — but at the exact same `NovaSpace`/`.novaPlace`
-/// coordinates as every authentic screen.
+/// Live layout, from DITL #1022 (top,left)-(bottom,right):
+///  - items 2/3/1/0 (146×26, x=29) → the four stacked standing-order buttons
+///  - item 9  (14,9)-(206,67)   192×58 → wing summary  (drawn on the PICT's box)
+///  - item 11 (14,79)-(206,131) 192×52 → current standing order
+///  - item 10 (217,30)-(417,230) 200×200 → the roster list / empty state
+///
+/// The captured-escort economy actions (Release / Upgrade / Sell) that EV Nova
+/// itself routes through this hail have no on-PICT slot inside the 259px frame
+/// (the DITL's own action items 4–7 sit *below* the visible window), so they
+/// live in an action strip appended under the frame — styled to read as part of
+/// the window, still built entirely from `NovaButton` art.
 struct EscortsView: View {
     /// The session's interface art, for the real frame PICT #8513 and three-slice
-    /// buttons. Nil in the no-data demo path → falls back to plain chrome.
+    /// buttons. Nil only in the no-data preview path → falls back to plain chrome.
     var graphics: SpaceportGraphics? = nil
     var escorts: [GameScene.EscortInfo] = []
     /// The persistent escort records (origin, daily fee) joined to the live wing
@@ -46,12 +52,15 @@ struct EscortsView: View {
 
     @State private var selectedRecordID: Int? = nil
 
-    // PICT #8513's own decoded size — the coordinate origin every item below
-    // is placed relative to (frame-centre, top-left anchored; see NovaMenu.swift).
+    // PICT #8513's decoded size — the coordinate origin every item is placed
+    // relative to (frame centre, top-left anchored; see NovaMenu.swift).
     private static let framePICT = 8513
     private static let frameW: CGFloat = 424
     private static let frameH: CGFloat = 259
+    private static let actionBarH: CGFloat = 42
     private let space = NovaSpace(width: frameW, height: frameH)
+
+    private var hasEscorts: Bool { !escorts.isEmpty }
 
     /// The persistent record backing a live escort row (nil for an untracked
     /// wing member, e.g. a debug-spawned escort).
@@ -65,68 +74,83 @@ struct EscortsView: View {
         return records.first { $0.id == rid }
     }
 
-    // Full footprint including the plain lower strip for items 4/8.
-    private static let totalW: CGFloat = 424
-    private static let totalH: CGFloat = 340
-
-    private var hasEscorts: Bool { !escorts.isEmpty }
-
     var body: some View {
+        VStack(spacing: 0) {
+            frameLayer
+            actionBar
+        }
+        .frame(width: Self.frameW, alignment: .top)
+        .background(Color(white: 0.06))
+    }
+
+    // MARK: - The authentic frame + placed items
+
+    private var frameLayer: some View {
         ZStack(alignment: .topLeading) {
             art
 
-            // Item 9: (14,9)-(206,67) 192×58 — wing summary.
-            sidePanel(width: 192, height: 58) {
-                VStack(spacing: 3) {
-                    NovaText(hasEscorts ? "Escort Wing" : "No escorts",
-                             size: 12, color: hasEscorts ? .white : Color(white: 0.5), weight: .bold)
-                    NovaText(hasEscorts ? "\(escorts.count) ship\(escorts.count == 1 ? "" : "s") under command"
-                                        : "Capture or hire ships to command",
-                             size: 10, color: Color(white: 0.55), width: 180, align: .center)
-                }
+            // Item 9: (14,9)-(206,67) 192×58 — wing summary, on the PICT's box.
+            VStack(spacing: 3) {
+                NovaText(hasEscorts ? "Escort Wing" : "No escorts",
+                         size: 12, color: hasEscorts ? .white : Color(white: 0.5), weight: .bold)
+                NovaText(hasEscorts ? "\(escorts.count) ship\(escorts.count == 1 ? "" : "s") under command"
+                                    : "Capture or hire ships to command",
+                         size: 10, color: Color(white: 0.6), width: 180, align: .center)
             }
+            .frame(width: 192, height: 58)
             .novaPlace(space, -198, -120.5)
 
             // Item 11: (14,79)-(206,131) 192×52 — current standing order.
-            sidePanel(width: 192, height: 52) {
-                NovaText(hasEscorts ? "Order: \(currentOrder?.title ?? "Mixed")" : "—",
-                         size: 11, color: hasEscorts ? novaAmber : Color(white: 0.4))
-            }
-            .novaPlace(space, -198, -50.5)
+            NovaText(hasEscorts ? "Order: \(currentOrder?.title ?? "Mixed")" : "—",
+                     size: 11, color: hasEscorts ? novaAmber : Color(white: 0.4), width: 180, align: .center)
+                .frame(width: 192, height: 52)
+                .novaPlace(space, -198, -50.5)
 
             // Item 10: (217,30)-(417,230) 200×200 — the roster list / empty state.
-            sidePanel(width: 200, height: 200, amber: true) {
-                if hasEscorts {
-                    ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(escorts) { escortRow($0) }
-                        }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                } else {
-                    VStack(spacing: 6) {
-                        Image(systemName: "person.2.slash")
-                            .font(.system(size: 22)).foregroundStyle(Color(white: 0.45))
-                        NovaText("No escorts hired.", size: 12, color: Color(white: 0.6),
-                                 width: 160, align: .center)
-                    }
-                }
-            }
-            .novaPlace(space, 5, -99.5)
+            roster
+                .frame(width: 200, height: 200)
+                .novaPlace(space, 5, -99.5)
 
             // Items 2,3,1,0 top-to-bottom — the four escort-command buttons.
-            commandButton(.aggressive).novaPlace(space, -183, 11.5)
-            commandButton(.defensive).novaPlace(space, -183, 39.5)
-            commandButton(.evasive).novaPlace(space, -183, 67.5)
-            commandButton(.hold).novaPlace(space, -183, 95.5)
-
+            commandButton(.aggressive).novaPlace(space, -183, 11.5)  // item 2 (141,29)
+            commandButton(.defensive).novaPlace(space, -183, 39.5)   // item 3 (169,29)
+            commandButton(.evasive).novaPlace(space, -183, 67.5)     // item 1 (197,29)
+            commandButton(.hold).novaPlace(space, -183, 95.5)        // item 0 (225,29)
         }
-        .overlay(alignment: .bottom) { bottomBar.padding(.bottom, 8).padding(.horizontal, 10) }
-        .frame(width: Self.totalW, height: Self.totalH, alignment: .topLeading)
-        .background(Color(white: 0.07))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(novaAmber.opacity(0.22)))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(width: Self.frameW, height: Self.frameH, alignment: .topLeading)
+    }
+
+    /// The real frame PICT #8513 "Escort communications" when the session's
+    /// graphics are available, else a dark plate the same footprint so every
+    /// item still lands where the real frame would put it.
+    private var art: some View {
+        Group {
+            if let img = graphics?.pict(Self.framePICT) {
+                Image(decorative: img, scale: 1).resizable().interpolation(.high)
+            } else {
+                Rectangle().fill(Color(white: 0.1))
+            }
+        }
+        .frame(width: Self.frameW, height: Self.frameH)
+    }
+
+    // MARK: - Roster list (item 10)
+
+    @ViewBuilder
+    private var roster: some View {
+        if hasEscorts {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(escorts) { escortRow($0) }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            NovaText("No escorts under your command.", size: 11, color: Color(white: 0.55),
+                     width: 168, align: .center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private func escortRow(_ e: GameScene.EscortInfo) -> some View {
@@ -134,9 +158,9 @@ struct EscortsView: View {
         let selected = rec != nil && rec?.id == selectedRecordID
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
-                NovaText(e.name, size: 11, color: .white, width: 120, align: .leading, weight: .semibold)
+                NovaText(e.name, size: 11, color: .white, width: 118, align: .leading, weight: .semibold)
                 Spacer(minLength: 0)
-                if let rec { originBadge(rec) }
+                if let rec { originLabel(rec) }
             }
             HStack(spacing: 6) {
                 bar("SH", e.shieldFraction, Color(red: 0.4, green: 0.7, blue: 1))
@@ -145,10 +169,10 @@ struct EscortsView: View {
         }
         .padding(.vertical, 3).padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? novaAmber.opacity(0.18) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3)
-            .strokeBorder(novaAmber.opacity(selected ? 0.5 : 0), lineWidth: 1))
+        // Squared, inverted selection box — the classic Mac list-selection look,
+        // not a rounded native pill.
+        .background(selected ? novaAmber.opacity(0.16) : Color.clear)
+        .overlay(Rectangle().strokeBorder(novaAmber.opacity(selected ? 0.55 : 0), lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture {
             // "Hail" the escort — select it to reveal its lifecycle action. Only
@@ -158,9 +182,9 @@ struct EscortsView: View {
         }
     }
 
-    /// A small tag showing how the escort was acquired and, for a hired one, its
-    /// daily upkeep — the money the player is on the hook for each day.
-    private func originBadge(_ rec: EscortRecord) -> some View {
+    /// How the escort was acquired and, for a hired one, its daily upkeep — plain
+    /// coloured Geneva, no native capsule pill.
+    private func originLabel(_ rec: EscortRecord) -> some View {
         let (text, color): (String, Color) = {
             switch rec.origin {
             case .hired:    return ("\(rec.dailyFee)cr/day", novaAmber)
@@ -169,110 +193,85 @@ struct EscortsView: View {
             }
         }()
         return NovaText(text, size: 8, color: color)
-            .padding(.horizontal, 4).padding(.vertical, 1)
-            .background(color.opacity(0.14), in: Capsule())
     }
 
     private func bar(_ label: String, _ frac: Double, _ color: Color) -> some View {
         HStack(spacing: 3) {
             NovaText(label, size: 8, color: Color(white: 0.5))
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.12))
-                    Capsule().fill(color).frame(width: geo.size.width * max(0, min(1, frac)))
-                }
+            ZStack(alignment: .leading) {
+                Rectangle().fill(Color.white.opacity(0.12))
+                Rectangle().fill(color).frame(width: 56 * max(0, min(1, frac)))
             }
             .frame(width: 56, height: 4)
         }
     }
 
-    /// The real frame PICT #8513 "Escort communications" when the session's
-    /// graphics are available, else a dark plate the same 424×259 footprint so
-    /// every item still lands where the real frame would put it.
-    private var art: some View {
-        Group {
-            if let img = graphics?.pict(Self.framePICT) {
-                Image(decorative: img, scale: 1).resizable().interpolation(.medium)
-            } else {
-                Rectangle().fill(Color(white: 0.1))
-            }
-        }
-        .frame(width: Self.frameW, height: Self.frameH)
-    }
+    // MARK: - Command buttons (items 0–3)
 
-    @ViewBuilder
-    private func sidePanel<Content: View>(width: CGFloat, height: CGFloat, amber: Bool = false,
-                                          @ViewBuilder content: () -> Content) -> some View {
-        ZStack { content() }
-            .frame(width: width, height: height)
-            .background(Color.black.opacity(0.35))
-            .overlay(RoundedRectangle(cornerRadius: 3)
-                .strokeBorder((amber ? novaAmber : Color.white).opacity(amber ? 0.25 : 0.12)))
-    }
-
-    /// A 146×26 command button. Enabled only when there's a wing to command;
-    /// the active order is highlighted amber.
+    /// A 146×26 authentic command button. Enabled only when there's a wing to
+    /// command; the wing's current standing order is shown in the order panel.
     private func commandButton(_ order: EscortOrder) -> some View {
-        let active = hasEscorts && currentOrder == order
-        return Button { if hasEscorts { onCommand(order) } } label: {
-            Text(order.title)
-                .novaFont(.button)
-                .foregroundStyle(!hasEscorts ? Color(white: 0.45) : (active ? .black : .white))
-                .frame(width: 146, height: 26)
-                .background(active ? novaAmber : Color(white: 0.15), in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(white: 0.26)))
+        authButton(order.title, width: 120, enabled: hasEscorts) {
+            if hasEscorts { onCommand(order) }
         }
-        .buttonStyle(.plain)
-        .disabled(!hasEscorts)
     }
 
-    /// The lower action strip: contextual "hail" actions for the selected escort
-    /// (Release, and Upgrade/Sell for a captured ship) on the left, Done on the
-    /// right.
-    private var bottomBar: some View {
-        HStack(spacing: 8) {
+    // MARK: - Action strip (captured-escort economy, below the frame)
+
+    private var actionBar: some View {
+        HStack(spacing: 6) {
             if let sel = selectedRecord {
+                hailStatus(sel)
+                Spacer(minLength: 6)
                 hailActions(sel)
             } else {
-                NovaText("Select an escort to hail it.", size: 10, color: Color(white: 0.4))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                NovaText(hasEscorts ? "Select an escort to hail it." : "Hail an escort to command it.",
+                         size: 10, color: Color(white: 0.45))
+                Spacer(minLength: 6)
             }
-            Button(action: onClose) {
-                Text("Done")
-                    .novaFont(.button).foregroundStyle(.white)
-                    .frame(width: 90, height: 25)
-                    .background(Color(white: 0.18), in: RoundedRectangle(cornerRadius: 3))
-                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color(white: 0.3)))
-            }
-            .buttonStyle(.plain)
+            authButton("Done", width: 60, action: onClose)
         }
+        .padding(.horizontal, 10)
+        .frame(width: Self.frameW, height: Self.actionBarH)
+        .background(Color(white: 0.08))
+        .overlay(Rectangle().fill(novaAmber.opacity(0.22)).frame(height: 1), alignment: .top)
     }
 
-    /// The hail-menu actions for the selected escort. A captured ship can also be
-    /// upgraded (`UpgradeTo`, applied when the wing next respawns — i.e. at the
-    /// next landing/takeoff, as in EV Nova) and sold (`EscSellValue`); a hired one
-    /// can only be released.
+    /// The selected escort's name and, for a captured ship, its upgrade/resale
+    /// costs — the detail the button verbs stay short by not repeating.
+    private func hailStatus(_ sel: EscortRecord) -> some View {
+        let detail: String = {
+            guard sel.origin == .captured, let ship = game?.ship(sel.shipType) else {
+                return sel.origin == .hired ? "Hired · \(sel.dailyFee)cr/day" : "Under command"
+            }
+            var parts = ["Captured"]
+            if ship.escortUpgradesTo > 0 { parts.append("upgrade \(ship.escortUpgradeCost)cr") }
+            parts.append("sell \(escortSellValue(ship))cr")
+            return parts.joined(separator: " · ")
+        }()
+        return VStack(alignment: .leading, spacing: 1) {
+            NovaText(sel.name, size: 11, color: novaAmber, weight: .bold)
+            NovaText(detail, size: 9, color: Color(white: 0.55))
+        }
+        .frame(minWidth: 90, alignment: .leading)
+    }
+
+    /// The hail-menu actions for the selected escort. A captured ship can be
+    /// upgraded (`UpgradeTo`, applied when the wing next respawns) and sold
+    /// (`EscSellValue`); every escort can be released/dismissed.
     @ViewBuilder
     private func hailActions(_ sel: EscortRecord) -> some View {
         let ship = game?.ship(sel.shipType)
         let canUpgrade = sel.origin == .captured && (ship?.escortUpgradesTo ?? 0) > 0
-        HStack(spacing: 6) {
-            hailButton(sel.origin == .hired ? "Release from Servitude" : "Dismiss",
-                       tint: Color(red: 0.4, green: 0.12, blue: 0.12)) {
-                onRelease(sel.id); selectedRecordID = nil
-            }
-            if canUpgrade, let ship {
-                hailButton("Upgrade \(ship.escortUpgradeCost)cr", tint: Color(white: 0.16)) {
-                    onUpgrade(sel.id)
-                }
-            }
-            if sel.origin == .captured, let ship {
-                hailButton("Sell \(escortSellValue(ship))cr", tint: Color(white: 0.16)) {
-                    onSell(sel.id); selectedRecordID = nil
-                }
-            }
+        if canUpgrade {
+            authButton("Upgrade", width: 46) { onUpgrade(sel.id) }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        if sel.origin == .captured {
+            authButton("Sell", width: 32) { onSell(sel.id); selectedRecordID = nil }
+        }
+        authButton(sel.origin == .hired ? "Release" : "Dismiss", width: 46) {
+            onRelease(sel.id); selectedRecordID = nil
+        }
     }
 
     /// EV Nova's resale value: `EscSellValue`, or 10% of Cost when unset (≤0).
@@ -280,16 +279,26 @@ struct EscortsView: View {
         ship.escortSellValue > 0 ? ship.escortSellValue : Int(Double(ship.cost) * 0.1)
     }
 
-    private func hailButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .novaFont(.button).foregroundStyle(.white)
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .padding(.horizontal, 8).frame(height: 25)
-                .background(tint, in: RoundedRectangle(cornerRadius: 3))
-                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color(white: 0.3)))
+    // MARK: - Authentic button (three-slice art, plain fallback in the demo path)
+
+    @ViewBuilder
+    private func authButton(_ title: String, width: CGFloat, enabled: Bool = true,
+                            action: @escaping () -> Void) -> some View {
+        if let graphics {
+            NovaButton(graphics: graphics, title: title, width: width, enabled: enabled, action: action)
+        } else {
+            // No game data loaded — no button art to decode (preview path only).
+            Button { if enabled { action() } } label: {
+                Text(title)
+                    .font(.custom(NovaFontRole.button.family, size: 12))
+                    .foregroundStyle(enabled ? .white : Color(white: 0.4))
+                    .frame(width: 26 + width, height: 25)
+                    .background(Color(white: 0.18))
+                    .overlay(Rectangle().strokeBorder(Color(white: 0.3)))
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
         }
-        .buttonStyle(.plain)
     }
 }
 

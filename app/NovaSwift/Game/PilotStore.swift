@@ -383,6 +383,30 @@ final class PilotStore: ObservableObject {
         return roll <= percent
     }
 
+    /// How many of `ship` the station has to hire out today — a deterministic
+    /// 1...5 per (day, spöb, hull), stable within the day. EV Nova's escort
+    /// stock varied by type (you might find one warship but five fighters), and
+    /// no `shïp` field encodes a count, so this stands in for it, seeded like the
+    /// availability roll but with an extra salt so the *count* doesn't track the
+    /// *availability* roll. Only meaningful once `escortAvailableToday` passes.
+    func escortHireStock(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Int {
+        var hash: UInt64 = 14_695_981_039_346_656_037            // FNV-1a offset basis
+        for value in [day, spob.id, ship.id, 0x1E5C07] {         // extra salt decorrelates count from availability
+            for byte in withUnsafeBytes(of: Int64(value).bigEndian, Array.init) {
+                hash ^= UInt64(byte)
+                hash = hash &* 1_099_511_628_211                 // FNV-1a prime
+            }
+        }
+        return 1 + Int(hash % 5)                                 // 1...5
+    }
+
+    /// How many of `ship` are still available to hire at `spob` today, after any
+    /// the player has already hired here today.
+    func escortHireRemaining(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Int {
+        max(0, escortHireStock(ship, at: spob, day: day)
+            - state.escortsHired(shipType: ship.id, spob: spob.id, day: day))
+    }
+
     /// Hire `ship` as an escort at `spob` today: charge the up-front hire fee
     /// (`ShipRes.escortHireFee` = 10% of Cost — see that property for why this is
     /// an engine constant, not a Bible field) and register it in the persistent
@@ -393,11 +417,14 @@ final class PilotStore: ObservableObject {
     @discardableResult
     func hireEscort(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
         guard escortAvailableToday(ship, at: spob, day: day) else { return false }
+        // The station's daily stock of this hull is finite; don't over-hire.
+        guard escortHireRemaining(ship, at: spob, day: day) > 0 else { return false }
         let fee = ship.escortHireFee
         guard state.credits >= fee else { return false }
         state.credits -= fee
         state.registerEscort(shipType: ship.id, name: ship.name, origin: .hired,
                              hireFee: fee, dailyFee: ship.escortDailyFee)
+        state.recordEscortHire(shipType: ship.id, spob: spob.id, day: day)
         save()
         return true
     }

@@ -1231,6 +1231,13 @@ final class GameScene: SKScene {
         }
     }
 
+    /// Whether `entityID` is one of the player's own escorts — the gate the
+    /// container uses to open the Escorts command window (DITL #1022) instead of
+    /// the generic comm dialog when you hail a targeted ship, as EV Nova does.
+    func isPlayerEscort(_ entityID: Int) -> Bool {
+        world?.playerEscorts.contains { $0.entityID == entityID } ?? false
+    }
+
     /// The wing's shared standing order (nil if mixed / no escorts).
     var escortOrder: EscortOrder? { world?.playerEscortOrder }
 

@@ -3,7 +3,7 @@ import NovaSwiftEngine
 
 /// Container-owned panels the mobile controls can open (these live in
 /// `GameContainerView`, not reachable through `handleDiscrete`).
-enum MobilePanel { case missions, pilotInfo, escorts }
+enum MobilePanel { case missions, pilotInfo }
 
 /// The on-screen "virtual cockpit" for touch play. Deliberately sparse: only the
 /// controls you hold constantly are always visible — **turn on the left, thrust
@@ -169,7 +169,6 @@ struct TouchControlsOverlay: View {
             ("bolt.horizontal.circle.fill", "Jump", { onDiscrete(.hyperjump) }, true),
             ("arrow.down.to.line", "Land", { onDiscrete(.land) }, hud.landReady),
             ("list.bullet.clipboard", "Missions", { onOpenPanel(.missions) }, true),
-            ("person.2.fill", "Escorts", { onOpenPanel(.escorts) }, true),
             ("person.crop.circle", "Pilot", { onOpenPanel(.pilotInfo) }, true),
             ("line.3.horizontal", "Menu", { onDiscrete(.openMenu) }, true),
         ]
