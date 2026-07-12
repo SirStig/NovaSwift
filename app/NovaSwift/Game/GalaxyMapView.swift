@@ -61,6 +61,10 @@ struct GalaxyMapView: View {
     /// EV Nova's orange "go here" arrow over each. Rebuilt from the story engine
     /// when the map opens (accepted missions don't change while it's up).
     @State private var missionDestinations: [Int] = []
+    /// Systems the story currently hides (`sÿst.Visibility` NCB evaluates false
+    /// against the pilot's control bits) — not drawn and not selectable, EV
+    /// Nova's mechanism for systems appearing/disappearing mid-campaign.
+    @State private var hiddenSystems: Set<Int> = []
 
     private struct MapNebula { let x, y, w, h: Int; let image: CGImage }
 
@@ -206,6 +210,7 @@ struct GalaxyMapView: View {
         guard let game = nav.game else { return }
         let engine = StoryEngine(game: game, player: pilot.state)
         missionDestinations = engine.missionDestinationSystemIDs()
+        hiddenSystems = engine.hiddenSystemIDs()
     }
 
     /// A government's authentic **territory** colour — its real `gövt.mapColor`
@@ -245,7 +250,9 @@ struct GalaxyMapView: View {
     // MARK: Drawing
 
     private func drawMap(ctx: inout GraphicsContext, size: CGSize, blinkOn: Bool) {
-        let systems = nav.systems()
+        // Story-hidden systems are dropped up front, so every downstream pass
+        // (links, stars, labels, `byID`) excludes them uniformly.
+        let systems = nav.systems().filter { !hiddenSystems.contains($0.id) }
         guard let cur = nav.current, let game = nav.game else { return }
         var byID: [Int: SystRes] = [:]
         for s in systems { byID[s.id] = s }
@@ -526,6 +533,8 @@ struct GalaxyMapView: View {
         let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
         var best: (id: Int, dist: CGFloat)?
         for s in nav.systems() {
+            // Story-hidden systems can't be targeted at all.
+            guard !hiddenSystems.contains(s.id) else { continue }
             // Fog of war: only known systems are selectable.
             guard nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted) != .unknown else { continue }
             let p = CGPoint(x: center.x + CGFloat(s.x - cur.x) * zoom,

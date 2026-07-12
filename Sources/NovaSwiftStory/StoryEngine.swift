@@ -94,7 +94,7 @@ public final class StoryEngine {
             services?.movePlayer(toSystem: id, keepPosition: keep)
 
         case .changeShip(let id, let mode):
-            player.shipType = id
+            applyShipChange(to: id, mode: mode)
             services?.changePlayerShip(to: id, mode: mode)
 
         case .activateRank(let id):
@@ -107,9 +107,17 @@ public final class StoryEngine {
             services?.playSound(id: id)
 
         case .destroyStellar(let id):
+            player.markStellarDestroyed(id)
             services?.setStellarDestroyed(spobID: id, destroyed: true)
+            // The stellar's own OnDestroy control bits fire when it is destroyed
+            // (a mission `Y` op is exactly that trigger). `apply` is a flat op
+            // list, so this doesn't recurse unless the data itself re-destroys the
+            // same id (which stock data never does).
+            if let s = game.spob(id), !s.onDestroy.isEmpty { apply(set: s.onDestroy) }
         case .regenerateStellar(let id):
+            player.markStellarRegenerated(id)
             services?.setStellarDestroyed(spobID: id, destroyed: false)
+            if let s = game.spob(id), !s.onRegen.isEmpty { apply(set: s.onRegen) }
 
         case .exploreSystem(let id):
             player.exploredSystems.insert(id)
@@ -139,6 +147,69 @@ public final class StoryEngine {
         }
         player.activeRanks.insert(id)
         services?.notify(.rankActivated(rankID: id))
+    }
+
+    // MARK: - Ship change (C / E / H)
+
+    /// Apply the SET `C`/`E`/`H` ship-change ops to `player.shipType` **and**
+    /// `player.outfits`, per the Bible's three distinct modes:
+    ///   • `C` (`.keepOutfits`)       — keep every current outfit, add nothing.
+    ///   • `E` (`.addDefaultOutfits`) — keep current outfits AND add the new
+    ///                                  hull's built-in (default) outfits.
+    ///   • `H` (`.defaultOutfits`)    — drop non-persistent outfits, then add the
+    ///                                  new hull's built-in outfits.
+    ///
+    /// Only the hull's preinstalled `oütf` items (`ShipRes.outfits`) are added to
+    /// `player.outfits`. The hull's built-in **weapons** (`ShipRes.weapons`) are
+    /// wëap ids, not oütf ids, and are applied to the effective ship by the
+    /// loadout layer (`Loadout.loadout` merges `ShipRes.weapons` from the hull
+    /// itself) — folding them into the outfit-id-keyed `player.outfits` dict would
+    /// misread a weapon id as an outfit id, so they are intentionally left to the
+    /// hull. (See NovaSwiftEngine/ShipLoadout.swift.)
+    private func applyShipChange(to shipID: Int, mode: ChangeShipMode) {
+        player.shipType = shipID
+        switch mode {
+        case .keepOutfits:
+            break                              // C: keep outfits, add nothing.
+        case .addDefaultOutfits:
+            addDefaultOutfits(ofShip: shipID)  // E: keep + defaults.
+        case .defaultOutfits:                  // H: drop non-persistent + defaults.
+            dropNonPersistentOutfits()
+            addDefaultOutfits(ofShip: shipID)
+        }
+    }
+
+    /// Add the hull's built-in `oütf` items to the player's owned outfits.
+    private func addDefaultOutfits(ofShip shipID: Int) {
+        guard let s = game.ship(shipID) else {
+            Log.mission.error("addDefaultOutfits: unknown ship id \(shipID)")
+            return
+        }
+        for (oid, count) in s.outfits { player.grantOutfit(oid, count: max(1, count)) }
+    }
+
+    /// Remove every non-persistent outfit the player currently owns (the `H`
+    /// op's "lose any nonpersistent outfit items").
+    ///
+    /// TODO(accessor): `OutfRes` exposes no dedicated `persistent`/`fixed`
+    /// accessor, so persistence is approximated from the outfit flag bits the
+    /// codebase already recognises: can't-sell (`0x0008`) and fixed gun/turret
+    /// mounts (`0x0001`/`0x0002`, per ShipLoadout.swift) — these are the
+    /// permanently-attached items that survive a hull swap. This deliberately
+    /// errs toward *keeping* an outfit when its persistence is ambiguous (safer
+    /// than wrongly deleting the player's gear). If a real `oütf` persistent flag
+    /// is decoded on `OutfRes`, switch `isOutfitPersistent` to read it.
+    private func dropNonPersistentOutfits() {
+        for oid in Array(player.outfits.keys) where !isOutfitPersistent(oid) {
+            player.outfits[oid] = nil
+        }
+    }
+
+    /// Best-effort "is this outfit persistent across a hull swap?" See the TODO
+    /// on `dropNonPersistentOutfits`.
+    private func isOutfitPersistent(_ outfitID: Int) -> Bool {
+        guard let o = game.outfit(outfitID) else { return false }
+        return o.flags & (0x0008 | 0x0001 | 0x0002) != 0
     }
 
     // MARK: - Mission availability
@@ -265,6 +336,12 @@ public final class StoryEngine {
         let cargoAtStart = m.cargoPickup == .atStart
         let shipObjectives = m.hasShipObjective ? max(0, m.shipCount) : 0
 
+        // Resolve any randomised cargo (CargoType 1000 = random standard 0–5,
+        // CargoQty <= -2 = abs(qty) ± 50%) exactly **once**, here at accept, and
+        // freeze it on the ActiveMission so pickup / drop-off / release all move
+        // the same concrete commodity and tonnage every time.
+        let (resolvedCargoType, resolvedCargoQty) = resolveCargo(for: m)
+
         player.activeMissions.append(ActiveMission(
             missionID: missionID,
             acceptedDate: player.date,
@@ -272,11 +349,18 @@ public final class StoryEngine {
             cargoPickedUp: cargoAtStart,
             shipObjectivesRemaining: shipObjectives,
             travelSpobID: concreteStellar(m.travelStellar, salt: 0x7 &* UInt64(bitPattern: Int64(m.id))),
-            returnSpobID: concreteStellar(m.returnStellar, salt: 0x51 &* UInt64(bitPattern: Int64(m.id)))))
+            returnSpobID: concreteStellar(m.returnStellar, salt: 0x51 &* UInt64(bitPattern: Int64(m.id))),
+            resolvedCargoType: resolvedCargoType,
+            resolvedCargoQty: resolvedCargoQty))
 
-        if cargoAtStart, m.cargoQty != 0 {
-            player.cargo[m.cargoType, default: 0] += abs(m.cargoQty)
+        if cargoAtStart, resolvedCargoQty != 0 {
+            player.cargo[resolvedCargoType, default: 0] += resolvedCargoQty
         }
+
+        // PayVal's up-front-fee range (-50000 and below) is charged now, at
+        // mission start — not on completion. Every other PayVal range applies
+        // only on success (see `completeMission`).
+        applyPayVal(m.pay, atAccept: true)
 
         apply(set: m.onAccept)
         services?.notify(.missionAccepted(missionID: missionID, name: m.name))
@@ -313,8 +397,15 @@ public final class StoryEngine {
             return
         }
         let m = game.mission(missionID)
-        releaseCargo(for: m)
+        let am = player.activeMissions[idx]
+        releaseCargo(for: m, active: am)
         player.activeMissions.remove(at: idx)
+        // CompReward reversal on abort: a mission flagged Flags 0x0040 ("big rep
+        // hit for bailing") makes its CompGovt take the abort personally,
+        // decreasing the player's record with that govt by 5× the CompReward.
+        if let m, m.flags1 & 0x0040 != 0, m.compRewardGovt >= 128, m.compLegalReward != 0 {
+            player.legalRecord[m.compRewardGovt, default: 0] += -5 * m.compLegalReward
+        }
         if let m { apply(set: m.onAbort) }
         Log.mission.notice("abortMission: mission \(missionID) (\"\(m?.name ?? "?", privacy: .public)\") aborted (silent=\(silent))")
         if !silent, let m {
@@ -337,15 +428,15 @@ public final class StoryEngine {
         }
         Log.mission.notice("completeMission: mission \(missionID) (\"\(m.name, privacy: .public)\") completed, pay=\(m.pay)")
 
-        releaseCargo(for: m)
+        let am = player.activeMissions[idx]
+        releaseCargo(for: m, active: am)
         player.activeMissions.remove(at: idx)
         player.completedMissions.insert(missionID)
 
-        // Reward: pay (negative pay = a cost), govt standing, legal record.
-        if m.pay != 0 {
-            player.credits += m.pay
-            services?.notify(.creditsChanged(delta: m.pay, total: player.credits))
-        }
+        // Reward: PayVal (credits / clean-record ±allies/classmates / %-of-cash;
+        // the up-front-fee range was already charged at accept), plus CompGovt
+        // standing.
+        applyPayVal(m.pay, atAccept: false)
         if m.compRewardGovt >= 128, m.compLegalReward != 0 {
             player.legalRecord[m.compRewardGovt, default: 0] += m.compLegalReward
         }
@@ -367,9 +458,16 @@ public final class StoryEngine {
             return
         }
         Log.mission.notice("failMission: mission \(missionID) (\"\(m.name, privacy: .public)\") failed")
-        releaseCargo(for: m)
+        let am = player.activeMissions[idx]
+        releaseCargo(for: m, active: am)
         player.activeMissions.remove(at: idx)
         player.failedMissions.insert(missionID)
+        // CompReward reversal on failure: the Bible's "if you have a CompGovt and
+        // reward defined and you fail the mission, that govt will take it
+        // personally and decrease your record by 1/2 the amount."
+        if m.compRewardGovt >= 128, m.compLegalReward != 0 {
+            player.legalRecord[m.compRewardGovt, default: 0] += -(m.compLegalReward / 2)
+        }
         apply(set: m.onFailure)
         if !m.canAbort {
             let text = resolveMissionText(game.descText(m.failureText, context: textContext), for: m)
@@ -391,8 +489,10 @@ public final class StoryEngine {
             // Cargo pickup at the travel stellar.
             if m.cargoPickup == .atTravelStellar,
                StellarMatch.spob(code: m.travelStellar, spobID: spobID, game: game, initialSpob: initialSpob) {
-                if !updated.cargoPickedUp, m.cargoQty != 0 {
-                    player.cargo[m.cargoType, default: 0] += abs(m.cargoQty)
+                let type = am.resolvedCargoType ?? m.cargoType
+                let qty = am.resolvedCargoQty ?? abs(m.cargoQty)
+                if !updated.cargoPickedUp, qty != 0 {
+                    player.cargo[type, default: 0] += qty
                 }
                 updated.cargoPickedUp = true
                 updated.visitedTravelStellar = true
@@ -412,6 +512,28 @@ public final class StoryEngine {
     public func playerJumped(toSystem systemID: Int) {
         player.currentSystem = systemID
         player.exploredSystems.insert(systemID)
+    }
+
+    // MARK: - System visibility (bit-gated map objects)
+
+    /// Whether system `systemID` is currently visible on the map / in nav. A
+    /// `sÿst`'s `visibility` NCB **test** string gates its presence: blank (the
+    /// common case) or true ⇒ visible; false ⇒ hidden. An unknown system id is
+    /// treated as visible (don't hide things we can't resolve). This is how EV
+    /// Nova makes systems appear/disappear mid-game via control bits.
+    public func isSystemVisible(_ systemID: Int) -> Bool {
+        guard let test = game.system(systemID)?.visibility, !test.isEmpty else { return true }
+        return NCBTest(test).evaluate(player)
+    }
+
+    /// Every system currently hidden — those whose `visibility` NCB test is
+    /// non-empty and evaluates false against the current pilot.
+    public func hiddenSystemIDs() -> Set<Int> {
+        var hidden = Set<Int>()
+        for s in game.systems() where !s.visibility.isEmpty {
+            if !NCBTest(s.visibility).evaluate(player) { hidden.insert(s.id) }
+        }
+        return hidden
     }
 
     /// A mission special ship was destroyed (combat reports this by mission id).
@@ -552,7 +674,7 @@ public final class StoryEngine {
 
             // End an active event whose duration has elapsed.
             if rt.isActive, let end = rt.endDate, player.date >= end {
-                apply(set: c.onEnd)
+                runCronHook(c.onEnd, loop: c.loopEndUntilFalse, cron: c)
                 Log.mission.debug("cron \(c.id) ended on \(String(describing: self.player.date), privacy: .public)")
                 services?.notify(.cronEnded(cronID: c.id))
                 rt.startedDate = nil
@@ -581,13 +703,38 @@ public final class StoryEngine {
             }
             if c.random > 0, !rng.chance(percent: c.random) { player.cronRuntime[c.id] = rt; continue }
 
-            apply(set: c.onStart)
+            runCronHook(c.onStart, loop: c.loopStartUntilFalse, cron: c)
             Log.mission.debug("cron \(c.id) started on \(String(describing: self.player.date), privacy: .public)")
             services?.notify(.cronStarted(cronID: c.id))
             announceNews(for: c)
             rt.startedDate = player.date
             rt.endDate = player.date.adding(days: max(0, c.duration))
             player.cronRuntime[c.id] = rt
+        }
+    }
+
+    /// Hard cap on iterative-cron re-evaluation, so a `Flags 0x0001`/`0x0002`
+    /// cron whose OnStart/OnEnd never falsifies its own `EnableOn` can't spin
+    /// forever (the Bible warns these "can infinite-loop!").
+    private static let cronLoopCap = 1000
+
+    /// Run a cron's OnStart/OnEnd SET expression. Normally (loop == false) this
+    /// applies it exactly once — the unchanged legacy path. When the cron sets
+    /// its iterative flag (`0x0001` entry / `0x0002` exit), keep re-running the
+    /// expression while `EnableOn` still evaluates true **and** the `Require`
+    /// capability gate is still satisfied, up to `cronLoopCap` iterations.
+    private func runCronHook(_ expr: String, loop: Bool, cron c: CronRes) {
+        apply(set: expr)
+        guard loop else { return }
+        var iterations = 1
+        while iterations < Self.cronLoopCap {
+            guard NCBTest(c.enableOn).evaluate(player) else { break }
+            if c.require != 0, (activeContributeBits() & c.require) != c.require { break }
+            apply(set: expr)
+            iterations += 1
+        }
+        if iterations >= Self.cronLoopCap {
+            Log.mission.error("cron \(c.id) iterative hook hit cap \(Self.cronLoopCap); aborting loop (possible infinite EnableOn)")
         }
     }
 
@@ -668,11 +815,110 @@ public final class StoryEngine {
         }
     }
 
-    private func releaseCargo(for m: MissionRes?) {
-        guard let m, m.cargoQty != 0 else { return }
-        let held = player.cargo[m.cargoType] ?? 0
-        let remaining = held - abs(m.cargoQty)
-        player.cargo[m.cargoType] = remaining > 0 ? remaining : nil
+    private func releaseCargo(for m: MissionRes?, active: ActiveMission?) {
+        guard let m else { return }
+        // Use the concrete commodity/tonnage frozen at accept when present, so a
+        // randomised cargo is *removed* in exactly the amount it was *added*.
+        // Legacy saves (nil) fall back to the static mïsn fields.
+        let type = active?.resolvedCargoType ?? m.cargoType
+        let qty = active?.resolvedCargoQty ?? abs(m.cargoQty)
+        guard qty != 0 else { return }
+        let held = player.cargo[type] ?? 0
+        let remaining = held - qty
+        player.cargo[type] = remaining > 0 ? remaining : nil
+    }
+
+    /// Resolve a mission's cargo commodity + tonnage to concrete values, rolling
+    /// the two randomised codes with the engine RNG:
+    ///   • `CargoType == 1000` → a random standard commodity 0–5.
+    ///   • `CargoQty  <= -2`   → `abs(qty)` ± 50% (uniform over `[½·n … 1½·n]`).
+    /// Every other value passes through unchanged (`CargoType` literal, `CargoQty`
+    /// its absolute tonnage). Called exactly once per accept.
+    private func resolveCargo(for m: MissionRes) -> (type: Int, qty: Int) {
+        let type = m.cargoType == 1000 ? rng.int(6) : m.cargoType
+        let qty: Int
+        if m.cargoQty <= -2 {
+            let base = abs(m.cargoQty)
+            let low = base - base / 2          // ½·n (floored)
+            let high = base + base / 2         // 1½·n (floored)
+            qty = low + rng.int(high - low + 1)
+        } else {
+            qty = abs(m.cargoQty)
+        }
+        return (type, qty)
+    }
+
+    // MARK: - PayVal (the overloaded mïsn `pay` field)
+
+    /// Apply a mïsn `PayVal` (`pay`) code with its full overloaded semantics.
+    /// `atAccept == true` runs only the up-front-fee branch (the `-50000`-and-
+    /// below range, charged when the mission starts); `atAccept == false` (on
+    /// success) runs every other range. Ranges are guarded precisely so an
+    /// ordinary positive pay or a plain uncoded negative fee (e.g. `-500`) stays a
+    /// literal credit delta — only the exact documented ranges are special.
+    private func applyPayVal(_ code: Int, atAccept: Bool) {
+        // Up-front fee: -50000 and below → charge (abs(code) - 50000) credits at
+        // mission start, and NOT again on completion.
+        if code <= -50000 {
+            guard atAccept else { return }
+            let fee = abs(code) - 50000
+            if fee != 0 { changeCredits(by: -fee) }
+            return
+        }
+        // Everything else applies on completion only.
+        guard !atAccept else { return }
+
+        switch code {
+        case 0, -1:
+            return                                      // no pay
+
+        case -10383 ... -10128:                         // clean record with a govt
+            player.clearLegalRecord(govt: -10000 - code)
+
+        case -20383 ... -20128:                         // …and all its allies
+            cleanLegalRecord(govt: -20000 - code, includeAllies: true, includeClassmates: false)
+
+        case -30383 ... -30128:                         // …and all its classmates
+            cleanLegalRecord(govt: -30000 - code, includeAllies: false, includeClassmates: true)
+
+        case -40099 ... -40001:                         // take this % of the cash
+            let pct = -40000 - code                     // -40001 → 1 … -40099 → 99
+            let take = player.credits * pct / 100
+            if take != 0 { changeCredits(by: -take) }
+
+        default:
+            // Positive pay, or any uncoded negative value, is a literal delta.
+            changeCredits(by: code)
+        }
+    }
+
+    /// Adjust the player's credit balance and surface the change.
+    private func changeCredits(by delta: Int) {
+        guard delta != 0 else { return }
+        player.credits += delta
+        services?.notify(.creditsChanged(delta: delta, total: player.credits))
+    }
+
+    /// Clean the player's legal record with `govt`, and optionally with every
+    /// government allied with it (govts whose `classes` intersect `govt`'s ally
+    /// classes) and/or its classmates (govts sharing one of `govt`'s classes) —
+    /// the `PayVal` -20128/-30128 ranges. Allies/classmates are class-based in
+    /// `gövt`, so we resolve them by class intersection.
+    private func cleanLegalRecord(govt: Int, includeAllies: Bool, includeClassmates: Bool) {
+        player.clearLegalRecord(govt: govt)
+        guard let g = game.govt(govt) else {
+            Log.mission.error("cleanLegalRecord: unknown govt \(govt); cleared only that record")
+            return
+        }
+        var classes = Set<Int>()
+        if includeAllies { classes.formUnion(g.allies) }
+        if includeClassmates { classes.formUnion(g.classes) }
+        guard !classes.isEmpty else { return }
+        for other in game.govts() where other.id != govt {
+            if !Set(other.classes).isDisjoint(with: classes) {
+                player.clearLegalRecord(govt: other.id)
+            }
+        }
     }
 
     private func replace(_ am: ActiveMission) {

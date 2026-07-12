@@ -19,6 +19,20 @@ final class AppGameServices: GameServices, ObservableObject {
 
     var audio: GameAudio?
 
+    // Live-world effect hooks. The engine mutates the persistent `PlayerState`
+    // itself (credits, bits, `shipType`, `currentSystem`, outfits, ranks), so
+    // those survive regardless. These callbacks are what makes the *running*
+    // game react — swap the live hull, relocate/rebuild the world, force a
+    // takeoff, drop mission ships into the current system. The container sets
+    // them on the flight-side services instance; the bar/spaceport per-view
+    // instances leave them nil (the mutation still lands and takes visible
+    // effect on the next takeoff, which rebuilds the ship/system from state).
+    var onChangePlayerShip: ((_ shipID: Int, _ mode: ChangeShipMode) -> Void)?
+    var onMovePlayer: ((_ systemID: Int, _ keepPosition: Bool) -> Void)?
+    var onLeaveStellar: ((_ message: String?) -> Void)?
+    var onSetStellarDestroyed: ((_ spobID: Int, _ destroyed: Bool) -> Void)?
+    var onSpawnMissionShips: ((_ missionID: Int, _ mission: MissionRes) -> Void)?
+
     // `GameServices` itself isn't main-actor-isolated (the CLI's
     // `LoggingGameServices` runs off the main actor), but every conformer in
     // this app is only ever driven by `StoryEngine` from SwiftUI/MainActor
@@ -40,33 +54,60 @@ final class AppGameServices: GameServices, ObservableObject {
     }
 
     nonisolated func spawnMissionShips(missionID: Int, mission: MissionRes) {
-        Log.story.notice("spawnMissionShips: not yet wired to combat/AI (mission #\(missionID, privacy: .public), count \(mission.shipCount, privacy: .public))")
+        MainActor.assumeIsolated {
+            if let onSpawnMissionShips {
+                onSpawnMissionShips(missionID, mission)
+            } else {
+                // No live world attached (e.g. accepted from a bar/spaceport view):
+                // the container spawns from the active-mission list on the next
+                // system (re)build, so nothing to do here.
+                Log.story.debug("spawnMissionShips: no live world (mission #\(missionID, privacy: .public)); deferred to next system build")
+            }
+        }
     }
 
     nonisolated func changePlayerShip(to shipID: Int, mode: ChangeShipMode) {
-        Log.story.notice("changePlayerShip: not yet wired (ship #\(shipID, privacy: .public))")
+        MainActor.assumeIsolated {
+            // The engine already set `PlayerState.shipType` (and adjusted outfits
+            // per C/E/H), so the swap persists and rebuilds on takeoff regardless;
+            // the callback makes it happen live when the player is already flying.
+            onChangePlayerShip?(shipID, mode)
+        }
     }
 
     nonisolated func movePlayer(toSystem systemID: Int, keepPosition: Bool) {
-        Log.story.notice("movePlayer: not yet wired (system #\(systemID, privacy: .public))")
+        MainActor.assumeIsolated {
+            // `PlayerState.currentSystem` is already updated by the engine; the
+            // callback relocates/rebuilds the live world when in flight.
+            onMovePlayer?(systemID, keepPosition)
+        }
     }
 
     nonisolated func setStellarDestroyed(spobID: Int, destroyed: Bool) {
-        Log.story.notice("setStellarDestroyed: not yet wired (spöb #\(spobID, privacy: .public) destroyed=\(destroyed, privacy: .public))")
+        MainActor.assumeIsolated { onSetStellarDestroyed?(spobID, destroyed) }
     }
 
     nonisolated func leaveStellar(message: String?) {
-        Log.story.notice("leaveStellar: not yet wired (\(message ?? "", privacy: .public))")
+        MainActor.assumeIsolated {
+            if let onLeaveStellar {
+                onLeaveStellar(message)
+            } else if let message {
+                // No takeoff hook wired here — at least surface the message.
+                storyText = ("", message)
+            }
+        }
     }
 
     nonisolated func notify(_ event: StoryNotification) {
         Log.story.debug("notify: \(String(describing: event), privacy: .public)")
     }
 
-    // Active-cron news isn't surfaced yet: there's no news dialog, and the
-    // Bible's local-over-independent precedence is resolved at the station the
-    // player lands at, not here.
+    // Surface active-crön news as a dialog. The Bible's local-over-independent
+    // precedence is a per-station rendering rule; here (fired at cron start,
+    // station unknown) we simply show the text so it isn't dropped. A dedicated
+    // news reader can refine presentation later.
     nonisolated func showNews(text: String, govt: Int?) {
-        Log.story.notice("showNews: not yet wired (govt \(govt.map(String.init) ?? "independent", privacy: .public)): \(text.prefix(60), privacy: .public)")
+        guard !text.isEmpty else { return }
+        MainActor.assumeIsolated { storyText = ("Galactic News", text) }
     }
 }

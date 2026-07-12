@@ -24,10 +24,21 @@ public struct ActiveMission: Codable, Hashable, Sendable {
     public var travelSpobID: Int?
     public var returnSpobID: Int?
 
+    /// The concrete cargo type/quantity resolved **once** at accept time. A
+    /// mïsn's `CargoType == 1000` means "random standard commodity 0–5" and a
+    /// `CargoQty <= -2` means "abs(qty) ± 50%"; both are rolled at accept and
+    /// frozen here so pickup, drop-off and release all move the *same* concrete
+    /// tonnage of the *same* commodity. `nil` = a non-random cargo mission or a
+    /// legacy save from before this field existed (callers fall back to the
+    /// static `mïsn` fields). Optional for save-compat (like `travelSpobID`).
+    public var resolvedCargoType: Int?
+    public var resolvedCargoQty: Int?
+
     public init(missionID: Int, acceptedDate: GameDate, deadline: GameDate?,
                 cargoPickedUp: Bool, shipObjectivesRemaining: Int,
                 visitedTravelStellar: Bool = false,
-                travelSpobID: Int? = nil, returnSpobID: Int? = nil) {
+                travelSpobID: Int? = nil, returnSpobID: Int? = nil,
+                resolvedCargoType: Int? = nil, resolvedCargoQty: Int? = nil) {
         self.missionID = missionID
         self.acceptedDate = acceptedDate
         self.deadline = deadline
@@ -36,6 +47,8 @@ public struct ActiveMission: Codable, Hashable, Sendable {
         self.visitedTravelStellar = visitedTravelStellar
         self.travelSpobID = travelSpobID
         self.returnSpobID = returnSpobID
+        self.resolvedCargoType = resolvedCargoType
+        self.resolvedCargoQty = resolvedCargoQty
     }
 }
 
@@ -133,6 +146,13 @@ public struct PlayerState: Codable, Sendable {
     /// (see `StoryEngine.payDailyTribute`). Optional so pilots saved before this
     /// feature still decode (treated as empty). See docs/reverse-engineering/DOMINATION.md.
     public var dominatedStellars: Set<Int>?
+    /// `spöb` ids destroyed by the story (SET op `Y`, "destroy stellar") and not
+    /// since regenerated (`U`). Persisting this here (rather than only pushing it
+    /// out through `GameServices.setStellarDestroyed`) carries galaxy mutation
+    /// across sessions, so a planet a mission blew up stays destroyed after a
+    /// save/reload. Optional so pilots saved before this feature still decode
+    /// (treated as empty), like `fuel`.
+    public var destroyedStellars: Set<Int>?
 
     // Story
     public var setBits: Set<Int>          // the NCB control-bit vector
@@ -196,6 +216,16 @@ public struct PlayerState: Codable, Sendable {
         let remaining = (outfits[id] ?? 0) - count
         if remaining > 0 { outfits[id] = remaining } else { outfits[id] = nil }
     }
+
+    /// Whether stellar `id` is currently destroyed (blown up by a story `Y` op
+    /// and not since regenerated).
+    public func isStellarDestroyed(_ id: Int) -> Bool { destroyedStellars?.contains(id) ?? false }
+    /// Record stellar `id` as destroyed (idempotent) — the `Y` SET op.
+    public mutating func markStellarDestroyed(_ id: Int) {
+        destroyedStellars = (destroyedStellars ?? []).union([id])
+    }
+    /// Regenerate stellar `id` (undo a destroy) — the `U` SET op.
+    public mutating func markStellarRegenerated(_ id: Int) { destroyedStellars?.remove(id) }
 
     /// Whether the player has dominated stellar `id`.
     public func hasDominated(_ id: Int) -> Bool { dominatedStellars?.contains(id) ?? false }

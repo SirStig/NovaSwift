@@ -17,6 +17,36 @@
 
 ## The headline
 
+> **2026-07-12 — story/mission system wired end-to-end.** The gaps this
+> document describes below (in the pre-2026-07-12 tables) are largely CLOSED.
+> The app builds and 124 tests pass (0 assertion failures). Now live:
+> **missions complete** — `GameContainerView.handleStoryLanding` calls
+> `engine.playerLanded` on every dock, so cargo/courier/passenger/delivery
+> missions finish, pay out, and show completion text (`playerLanded` previously
+> had zero call sites); **mission-ship combat loop closed** — active missions'
+> `ShipSyst`-matching special ships spawn into the live `World`
+> (`spawnActiveMissionShips` from `syncNav` → `GameScene.spawnMissionShips`) and
+> the `.missionShipGoalReached` WorldEvent (formerly `default:break`) feeds
+> `engine.missionShipDestroyed/Disabled/Boarded` back via a new
+> `GameScene.onMissionShipGoalReached` closure; **the campaign clock advances**
+> and `advanceGameDay` now routes crön effects/news through the flight services;
+> **`AppGameServices` effects are real** (container-set callbacks for
+> ship-swap/move/leave-stellar/spawn/destroy-stellar; `storyText`/`showNews` now
+> render as a `NovaDialog`); **galaxy-mutation layer added** — decoded
+> `sÿst.Visibility`@150 + `spöb.OnDestroy`@582/`OnRegen`@837, engine fires spöb
+> hooks on Y/U and persists `destroyedStellars`, `GalaxyMapView` hides
+> story-invisible systems, destroyed stellars drop out of flight/landing;
+> **engine reward fidelity fixed** — PayVal all 5 ranges (was a raw
+> `credits += pay` bug), CompReward −½-on-fail/−5×-on-abort, C/E/H outfit
+> semantics, cargo ±50%/type-1000 random, crön iterative flags (116 story
+> tests). Follow-ups: ShipSyst −1/−2/−5 selectors unresolved, in-flight
+> hull-swap/relocate lean on the takeoff rebuild for full visuals, destroyed
+> planets show as absent (no wreck/asteroid variant yet), news has no
+> per-station local/independent precedence. A combined-run `swift test` SIGBUS
+> at teardown exists in `NovaSwiftEngineTests` (every suite passes in isolation;
+> a runner artifact in the concurrent domination work's new tests, not the story
+> wiring). The tables below predate this and are being superseded.
+
 We have a **real, connected vertical slice** — flight, combat/AI, navigation,
 and the spaceport economy all run on the player's real data, and since the
 last audit the game has gained real stakes on the *travel* side: jumps now

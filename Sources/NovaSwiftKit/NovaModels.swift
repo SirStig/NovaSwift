@@ -453,6 +453,16 @@ public struct SystRes {
     /// Minimum interval, in days, between `reinforcementFleet` regenerations
     /// (Bible's `ReinfIntrval`). @410, `DWRD`.
     public let reinforcementRegen: Int
+    /// `sÿst.Visibility` (@150, 256-byte NCB **test** expression): when it
+    /// evaluates false against the player's control bits, the whole system is
+    /// hidden from the map and can't be entered — EV Nova's mechanism for making
+    /// systems appear/disappear mid-game (new territory opening up, or replacing
+    /// a system with an identical-coordinate copy for a "the system changed"
+    /// illusion; Bible §sÿst "Visibility"). Empty = always visible. Offset
+    /// cross-validated: every surrounding `sÿst` field the decoder already reads
+    /// (`links@4`, `spobs@36`, `spawns@68`, `murk@146`, `reinfFleet@406`…) lands
+    /// exactly where computed from the ResForge `sÿst` TMPL (#521) field order.
+    public let visibility: String
 
     /// Spawn entries that reference dudes directly.
     public var dudeSpawns: [(dudeID: Int, prob: Int)] {
@@ -498,6 +508,7 @@ public struct SystRes {
         reinforcementFleet = i16(d, 406)
         reinforcementDelay = i16(d, 408)
         reinforcementRegen = i16(d, 410)
+        visibility = cstr(d, 150, 256)
     }
 }
 
@@ -605,6 +616,15 @@ public struct SpobRes {
     /// `OnRelease` (@309, 255-byte NCB set expression): control bits set when the
     /// stellar is released from the player's domination. Empty = none.
     public let onRelease: String
+    /// `OnDestroy` (@582, 255-byte NCB set expression): control bits set when the
+    /// stellar is destroyed (by weapon fire or a mission `Y` op). Empty = none.
+    /// Offset cross-validated: every surrounding `spöb` field the existing
+    /// decoder reads (`hyperLinks@38`, `graphic@4`, `minStatus@22`…) lands
+    /// exactly where computed from the ResForge `spöb` TMPL (#520) field order.
+    public let onDestroy: String
+    /// `OnRegen` (@837, 255-byte NCB set expression): control bits set when the
+    /// stellar regenerates after being destroyed (a mission `U` op). Empty = none.
+    public let onRegen: String
 
     /// Total number of ships in this stellar's defense fleet (decoded from
     /// `defenseCountRaw`). 0 = no defenders.
@@ -710,6 +730,8 @@ public struct SpobRes {
         defenseCountRaw = i16(d, 30)
         onDominate = cstr(d, 54, 255)
         onRelease = cstr(d, 309, 255)
+        onDestroy = cstr(d, 582, 255)
+        onRegen = cstr(d, 837, 255)
     }
 }
 

@@ -231,6 +231,32 @@ final class GameScene: SKScene {
     /// the landing (opens the spaceport).
     var onAutoLandArrived: ((Int) -> Void)?
 
+    /// A mission's special ship met its player-side goal (`mïsn.ShipGoal` —
+    /// destroyed / disabled / boarded / observed / chased off). The container
+    /// feeds this back into the story engine (`missionShipDestroyed` etc.) so the
+    /// objective count decrements and the mission completes when the last one is
+    /// done (or, if it has a return leg, when the player next lands there).
+    /// `byPlayer` distinguishes a kill the player made from one an ally made.
+    var onMissionShipGoalReached: ((_ missionID: Int, _ goal: MissionShipGoal, _ byPlayer: Bool) -> Void)?
+
+    /// Whether the live world already holds ships tagged with `missionID` — the
+    /// container checks this before (re)spawning a mission's ships so entering a
+    /// system doesn't stack duplicate sets.
+    func hasMissionShips(_ missionID: Int) -> Bool {
+        world?.npcs.contains { $0.missionID == missionID } ?? false
+    }
+
+    /// Place a mission's special ships into the live system (forwards to
+    /// `World.spawnMissionShips`). The container decides *when* (the mission's
+    /// `ShipSyst` matches the current system) and supplies the resolved fields.
+    @discardableResult
+    func spawnMissionShips(missionID: Int, dudeID: Int, count: Int,
+                           goal: MissionShipGoal, behavior: MissionShipBehavior,
+                           government: Int?) -> [Int] {
+        world?.spawnMissionShips(missionID: missionID, dudeID: dudeID, count: count,
+                                 goal: goal, behavior: behavior, government: government) ?? []
+    }
+
     /// Engage auto-landing toward the currently-selected planet, or the nearest
     /// landable body if none/the selection can't be landed on. Returns false if
     /// there's nothing landable to fly to.
@@ -891,6 +917,8 @@ final class GameScene: SKScene {
                 onPersDefeated?(pid)
             case let .playerDestroyed(hadEscapePod):
                 onPlayerDestroyed?(hadEscapePod)
+            case let .missionShipGoalReached(missionID, _, goal, byPlayer):
+                onMissionShipGoalReached?(missionID, goal, byPlayer)
             default:
                 break
             }
