@@ -380,6 +380,30 @@ public final class Ship {
     /// player's legal record).
     public var killedByPlayer = false
 
+    /// Debug/cheat only: when set, `applyDamage` is a no-op — shields and armor
+    /// never drop and the ship can't be destroyed or disabled by weapon fire.
+    /// The debug suite drives this on the player ship for "god mode"; nothing in
+    /// normal gameplay ever sets it, so it's inert unless a developer flips it.
+    public var invulnerable = false
+
+    /// A rigid formation weld requested by this ship's AI *this frame*. When set,
+    /// `World.step` places the ship at exactly this transform instead of stepping
+    /// it from a `ControlIntent` — the "welded triangle" that lets an escort track
+    /// its leader with zero lag (matching EV Nova's perfect formation flying).
+    /// The brain re-sets it every frame it wants the weld; `World.step` consumes
+    /// and clears it, so a ship that stops requesting it reverts to real physics
+    /// on the very next frame. Nil for every ship not currently holding station.
+    var formationHold: FormationHold?
+
+    /// The transform a `formationHold` welds a ship to: its leader-relative slot
+    /// position, the velocity to carry (cosmetic — drives thruster/radar), and the
+    /// heading to point (the whole wing shares the leader's heading).
+    struct FormationHold {
+        var position: Vec2
+        var velocity: Vec2
+        var angle: Double
+    }
+
     // Diagnostics: last known-good motion state (NaN/Infinity guard) and
     // one-shot flags so we log state *transitions*, never every frame.
     private var lastFinitePosition = Vec2()
@@ -422,6 +446,10 @@ public final class Ship {
     /// hit destroyed the ship.
     @discardableResult
     public func applyDamage(shield dmgShield: Double, armor dmgArmor: Double) -> Bool {
+        // God mode (debug suite): swallow every hit whole — no shield/armor loss,
+        // never reports a kill. Kept as the very first check so no damage math or
+        // side effect runs for an invulnerable ship.
+        if invulnerable { return false }
         // A shot's shield and armor damage are separate figures in EV Nova; when
         // shields are up they soak the shield-damage, and leftover proportion
         // carries into armor.
@@ -796,6 +824,20 @@ public final class World {
             } else {
                 npc.logNoBrainOnce()
                 npcIntent = ControlIntent()
+            }
+            // Rigid formation weld: an escort holding station is placed exactly at
+            // its leader-relative slot rather than flown there under physics, so
+            // the wing tracks the leader's every turn/accel/stop with zero lag —
+            // the "perfect triangle". The brain re-requests this each frame it
+            // wants it; we consume and clear it so dropping formation (to fight,
+            // flee, or a Hold order) hands control straight back to real physics.
+            if let hold = npc.formationHold {
+                npc.formationHold = nil
+                npc.angle = hold.angle
+                npc.velocity = hold.velocity
+                npc.position = hold.position
+                wrapIntoSystem(npc)
+                continue
             }
             fireWeapons(from: npc, intent: npcIntent)
             npc.step(dt, intent: npcIntent, tuning: tuning)

@@ -18,6 +18,8 @@ struct DebugSuiteView: View {
     var onClose: () -> Void
 
     @State private var showGameState = false
+    @State private var showDiagnostics = false
+    @State private var showTests = false
 
     /// Fleet sizes the stress test offers.
     private let shipCountPresets = [20, 40, 60, 100, 150, 200]
@@ -45,6 +47,86 @@ struct DebugSuiteView: View {
                 .environmentObject(model)
                 .environmentObject(model.pilot)
         }
+        .sheet(isPresented: $showDiagnostics) {
+            DebugDiagnosticsView(debug: debug)
+                .environmentObject(model)
+                .environmentObject(model.pilot)
+        }
+        .sheet(isPresented: $showTests) {
+            DebugTestsView()
+                .environmentObject(model)
+        }
+    }
+
+    // MARK: Cheats (quick toggles)
+
+    private var cheatsSection: some View {
+        sectionCard(title: "CHEATS", systemImage: "wand.and.stars") {
+            debugToggle("God mode", "Player takes no damage; health stays full.",
+                        isOn: $debug.godMode)
+            debugToggle("Infinite fuel", "Fuel never drains from burners or jumps.",
+                        isOn: $debug.infiniteFuel)
+            if debug.scene?.playerShip == nil {
+                Text("Applies once you're flying.")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: Diagnostics
+
+    private var diagnosticsSection: some View {
+        sectionCard(title: "DIAGNOSTICS & TESTS", systemImage: "stethoscope") {
+            Text("Integrity checks the data set, pilot, and live world (nav links, sprites, hull validity). Self-tests drive the engine itself — damage, physics, projectiles, regen.")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            actionButton("Run Diagnostics", systemImage: "checkmark.seal") {
+                showDiagnostics = true
+            }
+            actionButton("Run Self-Tests", systemImage: "testtube.2") {
+                showTests = true
+            }
+        }
+    }
+
+    /// A full-width green action button used by the diagnostics/tests section.
+    private func actionButton(_ title: String, systemImage: String,
+                              _ action: @escaping () -> Void) -> some View {
+        Button {
+            model.audio.play(.uiSelect)
+            action()
+        } label: {
+            HStack {
+                Image(systemName: systemImage)
+                Text(title)
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 10))
+            }
+            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            .padding(.vertical, 11).padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 9).fill(green.opacity(0.18)))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(green.opacity(0.6)))
+            .foregroundStyle(green)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A compact green-tinted toggle row for the suite's own switches.
+    private func debugToggle(_ title: String, _ subtitle: String,
+                             isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                Text(subtitle)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .tint(green)
     }
 
     // MARK: Game state
@@ -116,7 +198,9 @@ struct DebugSuiteView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     performanceSection
+                    cheatsSection
                     gameStateSection
+                    diagnosticsSection
                     stressTestSection
                     aiSection
                     overlaysSection

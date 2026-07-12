@@ -620,6 +620,11 @@ final class GameScene: SKScene {
 
         let p = world.player
 
+        // Debug suite live cheats (god mode, infinite fuel). Enforced every
+        // frame so they hold against the world's own regen/drain; a no-op unless
+        // a developer has flipped a switch in the suite.
+        if debug != nil { applyDebugCheats(to: p) }
+
         // Once-a-second heartbeat, independent of the throttled HUD readout —
         // if this never appears in Console at all, `update(_:)` itself isn't
         // running (the scene is effectively frozen despite `isPaused == false`
@@ -2045,6 +2050,11 @@ final class GameScene: SKScene {
     /// hull tint, so the two stay consistent.
     private func relationship(for npc: Ship) -> RadarRelationship {
         if npc.disabled { return .disabled }
+        // Your own escorts always read as friendly (green), whatever their base
+        // government or the current diplomacy — a ship flying in your wing is
+        // yours. Checked before hostility so a mercenary of an otherwise-hostile
+        // government still shows green while it's escorting you.
+        if npc.brain?.leaderID == World.playerEntityID { return .friendlyOrOwned }
         if world.diplomacy?.isHostileToPlayer(npc.government) == true { return .hostile }
         if npc.government == world.player.government
             || world.diplomacy?.areAllied(npc.government, world.player.government) == true {
@@ -2476,6 +2486,151 @@ final class GameScene: SKScene {
     func debugSetLiveRelation(govt: Int, record: Int) {
         world.diplomacy?.setPlayerRecord(govt, to: record)
     }
+
+    // MARK: - Debug suite: live cheats
+
+    /// Hold the debug suite's continuous cheats against the world each frame.
+    /// God mode marks the player ship invulnerable (the world's damage handler
+    /// then swallows every hit); infinite fuel pins the tank full so afterburner
+    /// and jumps never run it down. Both clear cleanly when their switch is off.
+    private func applyDebugCheats(to player: Ship) {
+        guard let debug else { return }
+        // Only write when the value actually needs to change — cheap, and avoids
+        // fighting the ship's own state when the cheat is off.
+        if player.invulnerable != debug.godMode { player.invulnerable = debug.godMode }
+        if debug.godMode {
+            // Keep the health bars pinned up too, so god mode reads as god mode
+            // even against pre-existing damage or ion drain.
+            player.shield = player.maxShield
+            player.armor = player.maxArmor
+            player.ionCharge = 0
+        }
+        if debug.infiniteFuel, player.maxFuel > 0 {
+            player.fuel = player.maxFuel
+        }
+    }
+
+    // MARK: - Debug suite: fleet & escorts
+
+    /// Spawn `count` friendly ships of the given hull already recruited into the
+    /// player's escort wing (flying formation, defending the player). Returns how
+    /// many actually spawned. Hull `nil` picks varied combat hulls like the
+    /// stress test does.
+    @discardableResult
+    func debugSpawnEscorts(count: Int, hull: Int? = nil) -> Int {
+        guard let galaxy, world != nil else {
+            Log.scene.error("debugSpawnEscorts: no galaxy/world (game data not loaded)")
+            return 0
+        }
+        let hulls = hull.map { [$0] } ?? pickCombatHulls(galaxy: galaxy)
+        guard !hulls.isEmpty else { return 0 }
+        let player = world.player
+        var spawned = 0
+        for i in 0..<max(0, count) {
+            let h = hulls[i % hulls.count]
+            let bearing = world.rng.double(in: 0...(2 * .pi))
+            let dist = world.rng.double(in: 300...600)
+            let pos = player.position + Vec2(sin(bearing), cos(bearing)) * dist
+            guard let ship = galaxy.makeLoadedShip(h, government: player.government,
+                                                   at: pos, angle: player.angle,
+                                                   skillRoll: world.rng.double(in: 0...1)) else { continue }
+            world.addNPC(ship, arrival: .hyperspace)
+            world.recruitEscort(ship)      // wire the AI into the player's wing
+            spawned += 1
+        }
+        Log.scene.debug("debugSpawnEscorts: recruited \(spawned) escorts (hull \(hull.map(String.init) ?? "varied"))")
+        return spawned
+    }
+
+    /// Spawn a single ship of `hull` near the player with a chosen disposition:
+    /// `.hostile` (provoked, locked on), `.escort` (recruited into the wing), or
+    /// `.neutral` (ambient traffic of its own government). Returns whether it
+    /// spawned.
+    enum DebugDisposition { case hostile, escort, neutral }
+    @discardableResult
+    func debugSpawnShip(hull: Int, govt: Int? = nil, as disposition: DebugDisposition) -> Bool {
+        guard let galaxy, world != nil else { return false }
+        let player = world.player
+        let bearing = world.rng.double(in: 0...(2 * .pi))
+        let dist = world.rng.double(in: 400...800)
+        let pos = player.position + Vec2(sin(bearing), cos(bearing)) * dist
+        let ang = (player.position - pos).angle
+        let team = disposition == .escort ? player.government : govt
+        guard let ship = galaxy.makeLoadedShip(hull, government: team, at: pos, angle: ang,
+                                               skillRoll: world.rng.double(in: -1...1)) else { return false }
+        switch disposition {
+        case .hostile:
+            let brain = AIBrain(aiType: .interceptor, govt: ship.government)
+            brain.provokedByPlayer = true
+            brain.targetID = player.entityID
+            ship.brain = brain
+            world.addNPC(ship, arrival: .hyperspace)
+        case .escort:
+            world.addNPC(ship, arrival: .hyperspace)
+            world.recruitEscort(ship)
+        case .neutral:
+            ship.brain = AIBrain(aiType: .braveTrader, govt: ship.government)
+            world.addNPC(ship, arrival: .hyperspace)
+        }
+        return true
+    }
+
+    /// Knock every hostile NPC down to a drifting, boardable hulk (shields gone,
+    /// armor to a sliver so the world's damage handler disables rather than
+    /// destroys it). Returns how many were affected.
+    @discardableResult
+    func debugDisableAllHostiles() -> Int {
+        guard world != nil else { return 0 }
+        var n = 0
+        for s in world.npcs where s.isAlive && !s.disabled && isHostileToPlayer(s) {
+            s.shield = 0
+            s.armor = max(1, s.maxArmor * 0.05)
+            s.disabled = true
+            n += 1
+        }
+        Log.scene.debug("debugDisableAllHostiles: disabled \(n) ships")
+        return n
+    }
+
+    /// Destroy every hostile NPC outright (a battlefield wipe). Returns the count
+    /// removed. Uses the normal death path so wrecks/explosions still play.
+    @discardableResult
+    func debugDestroyAllHostiles() -> Int {
+        guard world != nil else { return 0 }
+        var n = 0
+        for s in world.npcs where s.isAlive && isHostileToPlayer(s) {
+            s.shield = 0
+            s.armor = 0                 // next despawn sweep clears it as a kill
+            n += 1
+        }
+        Log.scene.debug("debugDestroyAllHostiles: killed \(n) ships")
+        return n
+    }
+
+    /// Remove every NPC from the system immediately (traffic, hostiles, escorts).
+    /// Returns how many were cleared. Leaves the ambient spawner running so the
+    /// system slowly re-populates.
+    @discardableResult
+    func debugClearAllNPCs() -> Int {
+        guard world != nil else { return 0 }
+        let n = world.npcs.count
+        world.removeAllNPCs()
+        return n
+    }
+
+    /// Whether an NPC currently counts as hostile to the player — provoked, or an
+    /// enemy of the player by the live diplomacy table.
+    private func isHostileToPlayer(_ s: Ship) -> Bool {
+        if s.brain?.provokedByPlayer == true { return true }
+        return world.diplomacy?.areEnemies(s.government, world.player.government) ?? false
+    }
+
+    /// Live counts for the debug suite's fleet read-out.
+    var liveHostileCount: Int {
+        guard world != nil else { return 0 }
+        return world.npcs.filter { $0.isAlive && isHostileToPlayer($0) }.count
+    }
+    var liveEscortCount: Int { world?.playerEscorts.count ?? 0 }
 
     /// The live world's per-government legal record right now — read at
     /// natural save points (landing, jump-out) to persist into

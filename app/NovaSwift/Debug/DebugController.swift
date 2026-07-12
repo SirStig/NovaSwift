@@ -50,6 +50,20 @@ final class DebugController: ObservableObject {
     /// of presets; this is the chosen one.
     @Published var perfTestShipCount: Int = 60
 
+    // MARK: Live cheats
+    //
+    // Continuous player-ship cheats the scene enforces every frame (see
+    // `GameScene.applyDebugCheats`). Reset whenever a fresh scene attaches so a
+    // new session never silently inherits god mode from the last one.
+
+    /// God mode: the player ship takes no damage and its shields/armor stay
+    /// pinned full. Drives `Ship.invulnerable` on the live player.
+    @Published var godMode = false
+
+    /// Infinite fuel: the player's fuel tank is held full, so afterburner and
+    /// hyperjumps never deplete it.
+    @Published var infiniteFuel = false
+
     // MARK: AI debug overlay
 
     /// Draw each NPC's live AI state, combat target, navigation goal ("path"),
@@ -68,6 +82,10 @@ final class DebugController: ObservableObject {
         self.scene = scene
         scene?.debug = self
         perfTestActive = false
+        // A new world starts clean — never carry cheats across a jump/departure
+        // without the developer re-enabling them.
+        godMode = false
+        infiniteFuel = false
     }
 
     /// Flood the live world with `perfTestShipCount` mutually-hostile

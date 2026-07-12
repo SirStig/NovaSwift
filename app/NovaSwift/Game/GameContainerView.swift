@@ -11,8 +11,11 @@ final class GameHost {
     let input = InputController()
     let hud = GameHUDModel()
     let controller: GameControllerInput
-    /// The authentic status-bar style (ïntf + backdrop PICT), when the data has one.
-    let hudStyle: AuthenticHUDStyle?
+    /// The authentic status-bar style (ïntf + backdrop PICT), when the data has
+    /// one. Not `let`: it reskins to the player's current hull government (see
+    /// `refreshHUDStyle`) whenever the ship changes (e.g. buying a new hull then
+    /// taking off, which reuses this host rather than rebuilding it).
+    private(set) var hudStyle: AuthenticHUDStyle?
     /// The loaded game + galaxy + spaceport graphics, exposed so the container can
     /// present the landing screen (which needs `spöb` data and interface PICTs).
     let game: NovaGame?
@@ -38,7 +41,8 @@ final class GameHost {
 
     init(model: AppModel, systemID: Int? = nil, arrivedViaJump: Bool = false) {
         controller = GameControllerInput(input: input)
-        hudStyle = GameHost.makeHUDStyle(model.data.game)
+        hudStyle = GameHost.makeHUDStyle(model.data.game, shipType: model.pilot.state.shipType)
+        hud.credits = model.pilot.state.credits
         scene.scaleMode = .resizeFill
 
         let pilot = model.pilot.state
@@ -257,16 +261,37 @@ final class GameHost {
         state.exploredSystems.insert(systemID)
     }
 
+    /// Recompute the status-bar skin for the player's current hull — call after
+    /// the ship changes without a full host rebuild (buy a new hull, then take
+    /// off, which reuses this host). Also refreshes the credit balance shown in
+    /// the bottom readout. The container reads `hudStyle` on its next render, so
+    /// the new skin appears as soon as the departure re-renders the view.
+    func refreshHUDStyle(model: AppModel) {
+        hudStyle = GameHost.makeHUDStyle(model.data.game, shipType: model.pilot.state.shipType)
+        hud.credits = model.pilot.state.credits
+    }
+
     /// Decode the authentic status bar: the ïntf interface definition + its
     /// backdrop PICT, from the player's own data. Returns nil if unavailable
     /// (the container then falls back to `GameHUDView`, our own non-authentic HUD).
-    static func makeHUDStyle(_ game: NovaGame?) -> AuthenticHUDStyle? {
+    ///
+    /// The HUD reskins with the ship being flown: the player hull's inherent
+    /// government picks the interface (Nova Bible `gövt.Interface`), so a
+    /// Federation hull wears the Fed status bar, a Polaris hull the Polaris one,
+    /// etc. Anything the data leaves under 128 clamps back to the Default (128).
+    static func makeHUDStyle(_ game: NovaGame?, shipType: Int? = nil) -> AuthenticHUDStyle? {
         guard let game else {
             Log.hud.debug("makeHUDStyle: no game loaded — falling back to GameHUDView")
             return nil
         }
-        guard let intf = game.interface() else {
-            Log.hud.error("makeHUDStyle: no ïntf(128) resource — falling back to GameHUDView")
+        let intfID: Int = {
+            guard let shipType,
+                  let govtID = game.ship(shipType)?.inherentGovt, govtID >= 128,
+                  let iid = game.govt(govtID)?.interface, iid >= 128 else { return 128 }
+            return iid
+        }()
+        guard let intf = game.interface(intfID) ?? game.interface() else {
+            Log.hud.error("makeHUDStyle: no ïntf(\(intfID)) or ïntf(128) resource — falling back to GameHUDView")
             return nil
         }
         guard let pictData = game.resources.resource(NovaType.pict, intf.backgroundPictID)?.data else {
@@ -694,6 +719,9 @@ struct GameContainerView: View {
             if let host, let galaxy = host.galaxy, let game = host.game, let spob = departedSpob {
                 let session = GameHost.buildPlayerShip(model: model, galaxy: galaxy, game: game)
                 host.hud.shipName = session.shipName
+                // A hull bought at this spaceport changes the HUD skin (and the
+                // credit balance changed too); reskin before the scene reloads.
+                host.refreshHUDStyle(model: model)
                 host.scene.reloadForDeparture(spobID: spob, player: session.ship,
                                               textures: session.textures,
                                               engineTextures: session.engineTextures)
@@ -1016,6 +1044,7 @@ struct GameContainerView: View {
         guard credits > 0 else { return }
         model.pilot.state.credits += credits
         model.pilot.save()
+        host?.hud.credits = model.pilot.state.credits
         host?.hud.post("Took \(credits) credits.")
         refreshBoard(scene, shipID: shipID)
     }

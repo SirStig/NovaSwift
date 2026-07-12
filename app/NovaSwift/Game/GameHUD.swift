@@ -20,6 +20,11 @@ final class GameHUDModel: ObservableObject {
     @Published var weaponAmmo = -1      // rounds left; -1 = unlimited / n/a
     @Published var cargoUsed = 0
     @Published var cargoCapacity = 0
+    /// The player's credit balance, shown in the status bar's bottom readout
+    /// (the HUD abbreviates it, e.g. "6.08M"). Pushed from the container at
+    /// build/departure and whenever an in-flight event changes it (plunder,
+    /// hull repairs).
+    @Published var credits = 0
     /// Cargo hold contents by commodity, display-ready (name already resolved
     /// — e.g. via `NovaGame.commodityName` — matching how `weaponName` etc.
     /// arrive pre-resolved rather than as raw ids). Mirrors the per-commodity

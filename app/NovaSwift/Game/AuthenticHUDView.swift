@@ -61,27 +61,68 @@ struct AuthenticHUDView: View {
                        w: CGFloat(r.width) * v, h: CGFloat(r.height))
     }
 
-    /// The real target-lock display: the selected ship's name, `shïp.Subtitle`,
-    /// government, and shield/armor line (or the selected planet's name, or a
-    /// dim "No Target"). The shield/armor line respects the target's own
-    /// `shïp.Flags` per the Bible: 0x0200 hides it outright, 0x0100 substitutes
-    /// armor % for the literal "Shields Down" text once shields hit 0.
-    /// The target box: the ship's red silhouette (when the target is a ship the
-    /// data has art for) beside the text readout, sized to scale with the HUD.
+    /// The real target-lock display, laid out like EV Nova's: the target's name
+    /// (bold, bright) and `shïp.Subtitle` centered up top, the ship's red
+    /// silhouette below, and a bottom row pairing the shield/armor readout
+    /// (bright) with the government label (dim). Falls back to a centered nav
+    /// destination, then a centered dim "No Target". The shield/armor line
+    /// respects the target's own `shïp.Flags` per the Bible: 0x0200 hides it
+    /// outright, 0x0100 substitutes armor % for "Shields Down" once shields
+    /// hit 0.
+    @ViewBuilder
     private func targetReadout(_ layout: NovaLayout) -> some View {
-        let sprite = model.targetShipTypeID.flatMap { targetSprite($0) }
-        // The placed box is `targetArea` design-units × layout.scale tall, so a
-        // silhouette sized off that height scales in lockstep with the HUD.
-        let boxSide = CGFloat(style.intf.targetArea.height) * layout.scale * 0.82
-        return HStack(alignment: .center, spacing: 5) {
-            if !model.targetName.isEmpty, let sprite {
-                ShipSilhouetteView(sprite: sprite, tint: targetTint)
-                    .frame(width: boxSide, height: boxSide)
+        if !model.targetName.isEmpty {
+            let sprite = model.targetShipTypeID.flatMap { targetSprite($0) }
+            // The placed box is `targetArea` design-units × layout.scale tall;
+            // the stacked silhouette takes a fraction of that height so it scales
+            // in lockstep with the HUD without crowding the text rows.
+            let boxSide = CGFloat(style.intf.targetArea.height) * layout.scale * 0.42
+            VStack(spacing: 2) {
+                Text(model.targetName)
+                    .novaFont(.hud, weight: .bold, size: statusSize)
+                    .foregroundStyle(model.targetHostile ? Color.red : color(style.intf.brightText))
+                    .multilineTextAlignment(.center)
+                if !model.targetSubtitle.isEmpty {
+                    Text(model.targetSubtitle).novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                        .multilineTextAlignment(.center)
+                }
+                if let sprite {
+                    ShipSilhouetteView(sprite: sprite, tint: targetTint)
+                        .frame(width: boxSide, height: boxSide)
+                }
+                Spacer(minLength: 2)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    if !model.targetHidesShieldArmorLine {
+                        Text(targetShieldArmorLine)
+                            .novaFont(.hud, weight: .semibold, size: subtitleSize).monospacedDigit()
+                            .foregroundStyle(color(style.intf.brightText))
+                    }
+                    Spacer(minLength: 0)
+                    if !model.targetGovtLabel.isEmpty {
+                        Text(model.targetGovtLabel).novaFont(.hud, size: subtitleSize)
+                            .foregroundStyle(color(style.intf.dimText))
+                    }
+                }
             }
-            targetText
-            Spacer(minLength: 0)
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        } else if !model.navTargetName.isEmpty {
+            VStack(spacing: 2) {
+                Text(model.navTargetName)
+                    .novaFont(.hud, weight: .bold, size: statusSize)
+                    .foregroundStyle(color(style.intf.brightText))
+                    .multilineTextAlignment(.center)
+                Text(model.navTargetLandable ? "Landable" : "No landing clearance")
+                    .novaFont(.hud, size: subtitleSize)
+                    .foregroundStyle(color(style.intf.dimText))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else {
+            Text("No Target").novaFont(.hud, size: subtitleSize)
+                .foregroundStyle(color(style.intf.dimText))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// EV Nova draws the target silhouette in red; a brighter red reads a
@@ -89,41 +130,6 @@ struct AuthenticHUDView: View {
     private var targetTint: Color {
         model.targetHostile ? Color(red: 0.98, green: 0.28, blue: 0.22)
                             : Color(red: 0.85, green: 0.34, blue: 0.28)
-    }
-
-    @ViewBuilder
-    private var targetText: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            if !model.targetName.isEmpty {
-                Text(model.targetName)
-                    .novaFont(.hud, weight: .bold, size: statusSize)
-                    .foregroundStyle(model.targetHostile ? Color.red : color(style.intf.brightText))
-                if !model.targetSubtitle.isEmpty {
-                    Text(model.targetSubtitle).novaFont(.hud, size: subtitleSize)
-                        .foregroundStyle(color(style.intf.dimText))
-                }
-                if !model.targetGovtLabel.isEmpty {
-                    Text(model.targetGovtLabel).novaFont(.hud, size: subtitleSize)
-                        .foregroundStyle(color(style.intf.dimText))
-                }
-                if !model.targetHidesShieldArmorLine {
-                    Text(targetShieldArmorLine)
-                        .novaFont(.hud, size: subtitleSize).monospacedDigit()
-                        .foregroundStyle(color(style.intf.dimText))
-                }
-            } else if !model.navTargetName.isEmpty {
-                Text(model.navTargetName)
-                    .novaFont(.hud, weight: .bold, size: statusSize)
-                    .foregroundStyle(color(style.intf.brightText))
-                Text(model.navTargetLandable ? "Landable" : "No landing clearance")
-                    .novaFont(.hud, size: subtitleSize)
-                    .foregroundStyle(color(style.intf.dimText))
-            } else {
-                Text("No Target").novaFont(.hud, size: subtitleSize)
-                    .foregroundStyle(color(style.intf.dimText))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// "Shield N%" while shields remain; once depleted, literal "Shields Down"
@@ -138,66 +144,87 @@ struct AuthenticHUDView: View {
         }
     }
 
-    /// Active weapon + remaining ammo (blank when unarmed — an empty box here
-    /// reads as "no weapon selected", matching an unarmed shuttle).
+    /// The selected secondary weapon (EV Nova's status bar shows the *secondary*
+    /// here) with its ammo count appended — e.g. "Polaron Multi-Torp. - 7".
+    /// Centered and bright when armed; a dim "No Secondary Weapon" otherwise.
     private var weaponReadout: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(spacing: 1) {
             if !model.weaponName.isEmpty {
-                Text(model.weaponName).novaFont(.hud, weight: .semibold, size: statusSize)
+                Text(weaponLabel).novaFont(.hud, weight: .semibold, size: statusSize)
                     .foregroundStyle(color(style.intf.brightText))
-                if model.weaponAmmo >= 0 {
-                    Text("\(model.weaponAmmo) rounds").novaFont(.hud, size: subtitleSize).monospacedDigit()
-                        .foregroundStyle(color(style.intf.dimText))
-                }
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("No Secondary Weapon").novaFont(.hud, size: subtitleSize)
+                    .foregroundStyle(color(style.intf.dimText))
+                    .multilineTextAlignment(.center)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    /// The nav computer's rect: the player's own ship name/system, plus the
-    /// plotted hyperspace course (`ïntf.NavArea` — the real "navigation
-    /// display" per the Bible) when one is set. Replaces an earlier
-    /// placeholder that showed fabricated speed/heading readouts here, which
-    /// the real interface data has no field for at all.
+    /// The secondary weapon name plus its remaining ammo, inline in EV Nova's
+    /// "Name - N" form (no suffix for unlimited-ammo weapons).
+    private var weaponLabel: String {
+        model.weaponAmmo >= 0 ? "\(model.weaponName) - \(model.weaponAmmo)" : model.weaponName
+    }
+
+    /// The nav computer's rect (`ïntf.NavArea` — the real "navigation display"
+    /// per the Bible): the plotted hyperspace destination and its jump count,
+    /// centered, bright when a course is set; a dim "No Destination" otherwise.
+    /// (The ship name/system that used to live here overflowed the box — that
+    /// data belongs to the info/status screens, not the flight HUD, which
+    /// matches the original, whose nav box shows only the destination.)
     private var navReadout: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(model.shipName).novaFont(.hud, weight: .semibold, size: statusSize)
-                .foregroundStyle(color(style.intf.brightText))
-            if !model.systemName.isEmpty {
-                Text(model.systemName).novaFont(.hud, size: subtitleSize)
-                    .foregroundStyle(color(style.intf.dimText))
-            }
+        VStack(spacing: 1) {
             if !model.navCourseSystemName.isEmpty {
-                Text("Course: \(model.navCourseSystemName)").novaFont(.hud, size: subtitleSize)
+                Text(model.navCourseSystemName)
+                    .novaFont(.hud, weight: .semibold, size: statusSize)
+                    .foregroundStyle(color(style.intf.brightText))
+                    .multilineTextAlignment(.center)
                 Text("\(model.navCourseJumps) jump\(model.navCourseJumps == 1 ? "" : "s")")
                     .novaFont(.hud, size: subtitleSize).monospacedDigit()
+                    .foregroundStyle(color(style.intf.dimText))
+            } else {
+                Text("No Destination").novaFont(.hud, size: subtitleSize)
+                    .foregroundStyle(color(style.intf.dimText))
             }
         }
-        .foregroundStyle(color(style.intf.dimText))
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    /// Cargo hold usage — hidden entirely for holds with no capacity (e.g. an
-    /// unmodified shuttle), matching how the bar areas above stay blank too.
-    /// The real `CargoArea` rect is sized for a per-commodity list (e.g.
-    /// "Food 4t" / "Metal 2t"); `model.cargoByCommodity` supplies those lines
-    /// when the caller has wired up a per-commodity source, on top of the
-    /// aggregate total this always shows.
-    @ViewBuilder
+    /// EV Nova's bottom status readout (`ïntf.CargoArea`): free cargo space up
+    /// top ("Free: N") and the credit balance below ("Credits:" / abbreviated
+    /// value), centered, with the labels dim and the values bright.
     private var cargoReadout: some View {
-        if model.cargoCapacity > 0 {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("CARGO \(model.cargoUsed)/\(model.cargoCapacity)t")
-                    .novaFont(.hud, size: statusSize).monospacedDigit()
+        VStack(spacing: 2) {
+            HStack(spacing: 4) {
+                Text("Free:").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
-                ForEach(model.cargoByCommodity, id: \.name) { item in
-                    Text("\(item.name) \(item.tons)t")
-                        .novaFont(.hud, size: subtitleSize).monospacedDigit()
-                        .foregroundStyle(color(style.intf.dimText))
-                }
+                Text("\(max(0, model.cargoCapacity - model.cargoUsed))")
+                    .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
+                    .foregroundStyle(color(style.intf.brightText))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 2)
+            VStack(spacing: 1) {
+                Text("Credits:").novaFont(.hud, size: subtitleSize)
+                    .foregroundStyle(color(style.intf.dimText))
+                Text(creditsLabel)
+                    .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
+                    .foregroundStyle(color(style.intf.brightText))
+            }
+            Spacer(minLength: 2)
         }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// The credit balance in EV Nova's compact status-bar form: millions as
+    /// "6.08M", large thousands as "45.0K", smaller balances in full.
+    private var creditsLabel: String {
+        let n = model.credits, a = abs(n)
+        if a >= 1_000_000 { return String(format: "%.2fM", Double(n) / 1_000_000) }
+        if a >= 100_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
     }
 
     /// The `ïntf` resource's own font sizes (`StatusFontSize`/`SubtitleFontSize`)

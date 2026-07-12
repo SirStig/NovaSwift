@@ -38,6 +38,22 @@ struct StorylineMapView: View {
     /// crash on iPhone when this view drew everything.
     @State private var scrollContainerSize: CGSize = .zero
 
+    // On a compact-width device (iPhone) the fixed sidebar-beside-canvas layout
+    // that reads well in a wide macOS window instead eats most of the screen and
+    // leaves the tree looking zoomed-in. There the sidebar collapses into a
+    // header menu, the canvas takes the full width, and the tree opens a touch
+    // further out. `horizontalSizeClass` is iOS-only, so guard for macOS.
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var hSize
+    private var isCompact: Bool { hSize == .compact }
+    #else
+    private var isCompact: Bool { false }
+    #endif
+
+    /// The zoom a freshly-opened storyline starts at — pulled out a little
+    /// further on a phone so more of the tree fits the narrow canvas.
+    private var defaultZoom: CGFloat { isCompact ? 0.6 : 0.85 }
+
     private enum Layout {
         static let columnWidth: CGFloat = 226
         static let columnGap: CGFloat = 44
@@ -67,10 +83,12 @@ struct StorylineMapView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            StorylineSidebar(lanes: model.storyMap.lanes, untaggedCount: model.storyMap.untaggedCount,
-                             selectedKey: $selectedKey, pluginFilter: $pluginFilter,
-                             pluginLabel: model.pluginLabel, governmentColor: model.governmentColor)
-            Divider().overlay(.white.opacity(0.12))
+            if !isCompact {
+                StorylineSidebar(lanes: model.storyMap.lanes, untaggedCount: model.storyMap.untaggedCount,
+                                 selectedKey: $selectedKey, pluginFilter: $pluginFilter,
+                                 pluginLabel: model.pluginLabel, governmentColor: model.governmentColor)
+                Divider().overlay(.white.opacity(0.12))
+            }
             VStack(spacing: 0) {
                 detailHeader
                 Divider().overlay(.white.opacity(0.12))
@@ -87,7 +105,10 @@ struct StorylineMapView: View {
         .background(EVTheme.panel)
         .foregroundStyle(EVTheme.text)
         .novaResponsive()
-        .onAppear { if selectedKey == nil { selectedKey = model.storyMap.lanes.first?.key } }
+        .onAppear {
+            if selectedKey == nil { selectedKey = model.storyMap.lanes.first?.key }
+            zoom = defaultZoom; zoomBase = defaultZoom
+        }
         .onChange(of: model.storyMap.lanes.map(\.key)) { _, keys in
             guard !keys.isEmpty else { selectedKey = nil; return }
             if let k = selectedKey, !keys.contains(k) { selectedKey = keys.first }
@@ -95,7 +116,7 @@ struct StorylineMapView: View {
         }
         // A shorter tree shouldn't open still panned/zoomed from the last one.
         .onChange(of: selectedKey) { _, _ in
-            pan = .zero; dragLast = .zero; zoom = 0.85; zoomBase = 0.85
+            pan = .zero; dragLast = .zero; zoom = defaultZoom; zoomBase = defaultZoom
         }
     }
 
@@ -109,16 +130,23 @@ struct StorylineMapView: View {
         HStack(spacing: 12) {
             if let lane = selectedLane {
                 Circle().fill(model.governmentColor(lane.governmentID)).frame(width: 10, height: 10)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(lane.title).novaFont(.heading, weight: .bold)
-                    Text(detailSubtitle(lane)).novaFont(.caption).foregroundStyle(.secondary)
+                // On a phone the sidebar is gone, so the title doubles as the
+                // storyline switcher; on desktop it's just the title.
+                if isCompact {
+                    laneSelector(lane)
+                } else {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(lane.title).novaFont(.heading, weight: .bold)
+                        Text(detailSubtitle(lane)).novaFont(.caption).foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 Image(systemName: "map.circle.fill").foregroundStyle(EVTheme.accent).font(.title2)
                 Text("Story Map").novaFont(.heading, weight: .bold)
             }
             Spacer()
-            if selectedLane != nil { legend }
+            // The two-row legend is too wide for a phone header; drop it there.
+            if selectedLane != nil && !isCompact { legend }
             if let onClose {
                 Button(action: onClose) { Image(systemName: "xmark.circle.fill").font(.title2) }
                     .buttonStyle(.plain)
@@ -127,6 +155,29 @@ struct StorylineMapView: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    /// Compact-width storyline switcher: taps the lane title to pick another
+    /// campaign from a menu, replacing the sidebar that a phone has no room for.
+    private func laneSelector(_ lane: StoryMapLane) -> some View {
+        Menu {
+            ForEach(model.storyMap.lanes) { l in
+                Button { selectedKey = l.key } label: {
+                    if l.key == selectedKey { Label(l.title, systemImage: "checkmark") }
+                    else { Text(l.title) }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(lane.title).novaFont(.heading, weight: .bold).lineLimit(1)
+                    Text(detailSubtitle(lane)).novaFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(EVTheme.text)
     }
 
     private func detailSubtitle(_ lane: StoryMapLane) -> String {
@@ -396,7 +447,7 @@ struct StorylineMapView: View {
         HStack(spacing: 2) {
             zoomButton("minus.magnifyingglass") { setZoom(zoom - 0.15) }
             Divider().frame(height: 18).overlay(.white.opacity(0.15))
-            Button { setZoom(0.85) } label: {
+            Button { setZoom(defaultZoom) } label: {
                 Text("\(Int(zoom * 100))%").novaFont(.caption, weight: .bold)
                     .frame(width: 44)
             }

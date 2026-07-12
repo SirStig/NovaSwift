@@ -57,49 +57,18 @@ struct LoadingView: View {
         ZStack {
             StarfieldBackground()
 
-            VStack(spacing: 0) {
-                Spacer()
-
-                AppLogo()
-                    .frame(width: 88, height: 88)
-                    .shadow(color: novaAmber.opacity(0.28), radius: 28)
-
-                Text("NOVA SWIFT")
-                    .novaFont(.title, weight: .heavy, size: 34)
-                    .tracking(8)
-                    .foregroundStyle(.white)
-                    .padding(.top, 18)
-
-                hairline.padding(.top, 16)
-
-                Spacer()
-
-                VStack(spacing: 9) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(phaseLabel)
-                            .novaFont(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 12)
-                        // Monospaced digits + a reserved trailing slot: the
-                        // count changes every few frames and would otherwise
-                        // shimmy the phase label around as digits grow.
-                        Text(countLabel ?? " ")
-                            .novaFont(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.tertiary)
-                    }
-                    NovaProgressBar(value: progress)
-                }
-                .frame(maxWidth: 380)
-                // The phase label swaps between stages; crossfade it rather
-                // than letting it pop.
-                .animation(.easeOut(duration: 0.25), value: progress)
-
-                tipBlock.padding(.top, 34)
-
-                Spacer()
-            }
-            .padding(40)
+            // The key art, sitting on the starfield. It already carries the
+            // NOVA branding, so there's no separate logo or title over it — the
+            // progress and tip are layered onto the art's lower edge instead.
+            Image("LaunchBanner")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: 1100)
+                .overlay(alignment: .bottom) { statusOverlay }
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .shadow(color: novaAmber.opacity(0.22), radius: 44)
+                .shadow(color: .black.opacity(0.6), radius: 24, y: 10)
+                .padding(.horizontal, 28)
         }
         .novaResponsive()
         .task {
@@ -121,12 +90,43 @@ struct LoadingView: View {
         }
     }
 
-    /// A rule that fades out at both ends, echoing the engraved dividers on the
-    /// game's own dialogs.
-    private var hairline: some View {
-        LinearGradient(colors: [.clear, novaAmber.opacity(0.55), .clear],
-                       startPoint: .leading, endPoint: .trailing)
-            .frame(width: 260, height: 1)
+    /// Progress bar + tip, welded to the bottom edge of the key art. A scrim
+    /// fades the busy lower band of the image into darkness so the text and bar
+    /// stay legible over it.
+    private var statusOverlay: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 9) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(phaseLabel)
+                        .novaFont(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    // Monospaced digits + a reserved trailing slot: the count
+                    // changes every few frames and would otherwise shimmy the
+                    // phase label around as digits grow.
+                    Text(countLabel ?? " ")
+                        .novaFont(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+                NovaProgressBar(value: progress)
+            }
+            .frame(maxWidth: 380)
+            // The phase label swaps between stages; crossfade it rather than
+            // letting it pop.
+            .animation(.easeOut(duration: 0.25), value: progress)
+
+            tipBlock
+        }
+        .padding(.horizontal, 30)
+        .padding(.top, 60)
+        .padding(.bottom, 22)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(colors: [.clear, .black.opacity(0.35),
+                                    .black.opacity(0.82)],
+                           startPoint: .top, endPoint: .bottom)
+        )
     }
 
     private var tipBlock: some View {

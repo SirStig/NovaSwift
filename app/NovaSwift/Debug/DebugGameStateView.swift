@@ -28,8 +28,10 @@ struct DebugGameStateView: View {
         NavigationStack {
             Form {
                 pilotSection
+                cheatsSection
                 shipSection
                 healthSection
+                fleetSection
                 timeSection
                 relationsSection
                 missionBitsSection
@@ -120,6 +122,84 @@ struct DebugGameStateView: View {
             Text("Ship Health")
         } footer: {
             Text("Shield, armor and fuel act on the ship you're flying right now.")
+        }
+    }
+
+    // MARK: Cheats — live player toggles
+
+    private var cheatsSection: some View {
+        Section {
+            Toggle(isOn: $debug.godMode) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("God mode")
+                    Text("Player takes no damage; shields & armor stay full.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Toggle(isOn: $debug.infiniteFuel) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Infinite fuel")
+                    Text("Fuel tank stays full — afterburner and jumps never drain it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Cheats")
+        } footer: {
+            Text(liveShip == nil
+                 ? "Toggles take effect the moment you're flying."
+                 : "Enforced every frame on the ship you're flying now.")
+        }
+    }
+
+    // MARK: Fleet & escorts (live)
+
+    @ViewBuilder
+    private var fleetSection: some View {
+        Section {
+            if debug.scene?.playerShip != nil {
+                LabeledContent("In system") {
+                    Text("\(debug.scene?.liveEscortCount ?? 0) escorts · \(debug.scene?.liveHostileCount ?? 0) hostile")
+                        .foregroundStyle(.secondary).monospacedDigit()
+                }
+                Stepper("Escorts to add: \(escortCount)", value: $escortCount, in: 1...12)
+                Button {
+                    let n = debug.scene?.debugSpawnEscorts(count: escortCount) ?? 0
+                    model.audio.play(.uiSelect)
+                    fleetResult = "Recruited \(n) escort\(n == 1 ? "" : "s")."
+                } label: {
+                    Label("Add \(escortCount) Escorts", systemImage: "person.2.fill")
+                }
+                NavigationLink {
+                    DebugFleetSpawnPicker(debug: debug)
+                } label: {
+                    Label("Spawn specific ship…", systemImage: "plus.viewfinder")
+                }
+                HStack {
+                    quickButton("Disable hostiles") {
+                        let n = debug.scene?.debugDisableAllHostiles() ?? 0
+                        fleetResult = "Disabled \(n) ship\(n == 1 ? "" : "s")."
+                    }
+                    quickButton("Destroy hostiles", role: .destructive) {
+                        let n = debug.scene?.debugDestroyAllHostiles() ?? 0
+                        fleetResult = "Destroyed \(n) ship\(n == 1 ? "" : "s")."
+                    }
+                }
+                quickButton("Clear all NPCs", role: .destructive) {
+                    let n = debug.scene?.debugClearAllNPCs() ?? 0
+                    fleetResult = "Cleared \(n) ship\(n == 1 ? "" : "s")."
+                }
+                if let fleetResult {
+                    Text(fleetResult).font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("No live scene — enter the game to manage the fleet.")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Fleet & Escorts")
+        } footer: {
+            Text("Escorts join your wing and defend you. Disable leaves boardable hulks; destroy and clear remove ships outright.")
         }
     }
 
@@ -241,6 +321,8 @@ struct DebugGameStateView: View {
     @State private var bitInput: Int = 1000
     @State private var spawnCount: Int = 5
     @State private var spawnResult: String?
+    @State private var escortCount: Int = 2
+    @State private var fleetResult: String?
 
     // MARK: Helpers
 
@@ -357,9 +439,65 @@ private struct DebugShipPicker: View {
     }
 }
 
+// MARK: - Fleet spawn picker
+
+/// Pick any hull and drop it into the live world with a chosen disposition —
+/// hostile (attacks you), escort (joins your wing), or neutral traffic.
+private struct DebugFleetSpawnPicker: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject var debug: DebugController
+    @State private var query = ""
+    @State private var note: String?
+
+    private var ships: [ShipRes] {
+        let all = (model.data.game?.ships() ?? []).sorted { $0.displayName < $1.displayName }
+        guard !query.isEmpty else { return all }
+        return all.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        List {
+            if let note {
+                Section { Text(note).font(.caption).foregroundStyle(.secondary) }
+            }
+            ForEach(ships, id: \.id) { ship in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(ship.displayName)
+                        Spacer()
+                        Text("#\(ship.id)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        spawnButton("Hostile", ship.id, .hostile, role: .destructive)
+                        spawnButton("Escort", ship.id, .escort)
+                        spawnButton("Neutral", ship.id, .neutral)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .searchable(text: $query)
+        .navigationTitle("Spawn Ship")
+    }
+
+    private func spawnButton(_ title: String, _ hull: Int,
+                             _ disposition: GameScene.DebugDisposition,
+                             role: ButtonRole? = nil) -> some View {
+        Button(role: role) {
+            let ok = debug.scene?.debugSpawnShip(hull: hull, as: disposition) ?? false
+            model.audio.play(.uiSelect)
+            note = ok ? "Spawned \(title.lowercased()) ship #\(hull)."
+                      : "Couldn't spawn #\(hull) (no live scene?)."
+        } label: {
+            Text(title).font(.caption.weight(.semibold)).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+    }
+}
+
 // MARK: - Outfit add/remove
 
-/// Add or remove any `oütf` from the pilot's inventory.
+/// Add or remove any `oütf` from the pilot's inventory, plus bulk grant/strip.
 private struct DebugOutfitsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var pilot: PilotStore
@@ -372,19 +510,46 @@ private struct DebugOutfitsView: View {
     }
 
     var body: some View {
-        List(outfits, id: \.id) { outfit in
-            HStack {
-                VStack(alignment: .leading) {
-                    Text(outfit.displayName)
-                    Text("#\(outfit.id)").font(.caption).foregroundStyle(.secondary)
+        List {
+            Section {
+                HStack {
+                    Button {
+                        for o in (model.data.game?.outfits() ?? []) where (pilot.state.outfits[o.id] ?? 0) == 0 {
+                            pilot.state.grantOutfit(o.id)
+                        }
+                        pilot.save()
+                    } label: {
+                        Label("Grant one of each", systemImage: "square.stack.3d.up.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    Button(role: .destructive) {
+                        pilot.state.outfits = [:]; pilot.save()
+                    } label: {
+                        Label("Strip all", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
-                Spacer()
-                Stepper("\(pilot.state.outfits[outfit.id] ?? 0)",
-                        onIncrement: { pilot.state.grantOutfit(outfit.id); pilot.save() },
-                        onDecrement: { pilot.state.removeOutfit(outfit.id); pilot.save() })
-                    .labelsHidden()
-                Text("×\(pilot.state.outfits[outfit.id] ?? 0)")
-                    .monospacedDigit().frame(width: 36, alignment: .trailing)
+            } footer: {
+                Text("Bulk changes apply on the next ship rebuild (takeoff, jump, or departure).")
+            }
+            Section {
+                ForEach(outfits, id: \.id) { outfit in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(outfit.displayName)
+                            Text("#\(outfit.id)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Stepper("\(pilot.state.outfits[outfit.id] ?? 0)",
+                                onIncrement: { pilot.state.grantOutfit(outfit.id); pilot.save() },
+                                onDecrement: { pilot.state.removeOutfit(outfit.id); pilot.save() })
+                            .labelsHidden()
+                        Text("×\(pilot.state.outfits[outfit.id] ?? 0)")
+                            .monospacedDigit().frame(width: 36, alignment: .trailing)
+                    }
+                }
             }
         }
         .searchable(text: $query)

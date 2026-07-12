@@ -11,17 +11,66 @@ struct StorylineBrowserView: View {
     var untaggedCount: Int = 0
     @State private var selectedKey: String?
 
+    // On a phone the fixed 200pt master column beside the detail leaves the
+    // step text cramped and oversized-looking; there the list collapses into a
+    // top selector menu and the detail takes the full width. iOS-only API.
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var hSize
+    private var isCompact: Bool { hSize == .compact }
+    #else
+    private var isCompact: Bool { false }
+    #endif
+
     private var selected: Storyline? {
         storylines.first { $0.key == selectedKey } ?? storylines.first
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            list
-            Divider().opacity(0.3)
-            detail
+        Group {
+            if isCompact {
+                VStack(spacing: 0) {
+                    selectorBar
+                    Divider().opacity(0.3)
+                    detail
+                }
+            } else {
+                HStack(spacing: 0) {
+                    list
+                    Divider().opacity(0.3)
+                    detail
+                }
+            }
         }
         .novaResponsive()
+    }
+
+    /// Compact-width storyline picker, replacing the master list a phone has no
+    /// room for.
+    private var selectorBar: some View {
+        Menu {
+            ForEach(storylines) { line in
+                Button { selectedKey = line.key } label: {
+                    if line.key == selected?.key { Label(line.title, systemImage: "checkmark") }
+                    else { Text(line.title) }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(selected?.title ?? "Storylines").novaFont(.body, weight: .bold).lineLimit(1)
+                    if let line = selected {
+                        Text("\(line.completedCount)/\(line.totalCount) steps")
+                            .novaFont(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(EVTheme.text)
     }
 
     private var list: some View {
