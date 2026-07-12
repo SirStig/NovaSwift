@@ -1115,15 +1115,12 @@ struct GameContainerView: View {
         engine.playerLanded(onSpob: spobID)
         model.pilot.state = engine.player
 
-        // Spaceport news: active-crön news for this station's government (local),
-        // falling back to the independent pool only when there's no local news —
-        // the Bible's per-station precedence, resolved here where the govt is
-        // known (not popped when the cron fired). Shown after any mission text.
-        let stationGovt = game.spob(spobID)?.government
-        let news = engine.stationNews(forGovt: stationGovt.flatMap { $0 >= 128 ? $0 : nil })
-        if !news.isEmpty, flightMissionServices.storyText == nil {
-            flightMissionServices.storyText = ("Spaceport News", news.joined(separator: "\n\n"))
-        }
+        // Spaceport news is NOT force-shown on landing — the original never
+        // interrupted every dock with a news dialog. It's on-demand instead,
+        // behind the bar's "Holovid" button (`HolovidView`), which reads the
+        // same `engine.stationNews(forGovt:)` feed when the player chooses to
+        // watch it. See docs/reverse-engineering — the beta history calls this
+        // the "holovid dialog."
     }
 
     /// A mission special-ship reached its player-side goal in combat (destroyed /

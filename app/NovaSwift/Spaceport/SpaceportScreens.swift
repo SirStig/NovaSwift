@@ -578,6 +578,7 @@ struct BarView: View {
 
     @State private var showGambling = false
     @State private var showHire = false
+    @State private var showHolovid = false
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var rolledPatron = false
@@ -620,7 +621,7 @@ struct BarView: View {
                                    width: 120) { showHire = true }
                             .novaPlace(space, -125.5, 32.5)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.holovid, fallback: "Holovid"),
-                                   width: 120, enabled: false) {}
+                                   width: 120) { showHolovid = true }
                             .novaPlace(space, -125.5, 61.5)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.gamble, fallback: "Gamble"),
                                    width: 73) { showGambling = true }
@@ -661,6 +662,14 @@ struct BarView: View {
                 HireEscortView(graphics: graphics, spob: spob, pilot: pilot,
                                onDone: { showHire = false })
             }
+
+            if showHolovid {
+                Color.black.opacity(0.5).ignoresSafeArea()
+                    .onTapGesture { showHolovid = false }
+                    .transition(.opacity)
+                HolovidView(graphics: graphics, spob: spob, pilot: pilot,
+                            onDone: { showHolovid = false })
+            }
         }
         .onAppear(perform: rollPatron)
     }
@@ -671,19 +680,29 @@ struct BarView: View {
     private func rollPatron() {
         guard !rolledPatron else { return }
         rolledPatron = true
+        let today = pilot.state.date.julianDay
+        // One patron offer per bar per day. If this bar already took its daily
+        // roll, don't roll again on re-entry — the original never re-pestered
+        // the player with the same patron every time they walked back in, which
+        // is what made the bar feel like it was throwing missions constantly.
+        guard !pilot.state.barOffered(spob: spob.id, day: today) else { return }
         // Per-landing seed so which bar missions pass their random-appearance
         // roll actually varies day to day (the fixed default seed made the bar
         // present the same patron on every single visit).
         let e = StoryEngine(game: game, player: pilot.state, services: services,
                             seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
         engine = e
+        // Mark the bar as having taken its daily roll *now* — whether or not a
+        // patron actually turns up — so a re-entry today is a no-op.
+        pilot.state.markBarOffered(spob: spob.id, day: today)
+        pilot.save()
         // `missionsOffered` already applied each mission's AvailBits test and
         // random % — the survivors are genuinely on offer here right now. The
         // bar picks the highest-weighted one to make its pitch (deterministic
         // within a landing), skipping any with no briefing text to show.
         let offers = e.missionsOffered(at: .bar, spob: spob.id)
         guard let mission = offers.first(where: { !e.briefing(for: $0).isEmpty }) else {
-            Log.spaceport.debug("Bar at spöb \(spob.id, privacy: .public): no eligible bar mission with briefing this visit")
+            Log.spaceport.debug("Bar at spöb \(spob.id, privacy: .public): no eligible bar mission with briefing today")
             return
         }
         Log.spaceport.debug("Bar patron offers mission \(mission.id, privacy: .public) at spöb \(spob.id, privacy: .public) (of \(offers.count, privacy: .public) eligible)")
@@ -707,12 +726,89 @@ struct BarView: View {
     }
 }
 
+// MARK: - Holovid (news)
+
+/// The bar's **Holovid** screen — EV Nova's spaceport news broadcast. The beta
+/// history calls this the "holovid dialog," where generic, disaster, and crön
+/// news are shown; a `gövt` can supply a custom `NewsPic` backdrop, otherwise
+/// the generic PICT 9000 is used. News is read here on demand (the original
+/// never force-popped it on every landing) and comes from the same feed the day
+/// clock drives, `StoryEngine.stationNews(forGovt:)`, resolved for this
+/// station's government (local news, with the independent pool as fallback).
+struct HolovidView: View {
+    let graphics: SpaceportGraphics
+    let spob: SpobRes
+    @ObservedObject var pilot: PilotStore
+    var onDone: () -> Void
+
+    private var game: NovaGame { graphics.game }
+
+    /// The station government's own news id (≥128), used both to pick its custom
+    /// backdrop and to resolve which local news applies.
+    private var stationGovt: Int? { spob.government >= 128 ? spob.government : nil }
+
+    /// Custom `gövt.NewsPic` backdrop, falling back to the generic news PICT 9000
+    /// (Bible: `NewsPic < 128` ⇒ generic).
+    private var newsPictID: Int {
+        if let g = stationGovt.flatMap({ game.govt($0) }), g.newsPic >= 128 { return g.newsPic }
+        return 9000
+    }
+
+    /// This station's live news feed, read on demand. Empty when nothing in the
+    /// galaxy is currently generating news.
+    private var news: [String] {
+        StoryEngine(game: game, player: pilot.state,
+                    seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+            .stationNews(forGovt: stationGovt)
+    }
+
+    var body: some View {
+        let items = news
+        let bodyText = items.isEmpty
+            ? "The news networks are quiet. Nothing of note is happening in this region of the galaxy right now."
+            : items.joined(separator: "\n\n")
+        if let frame = graphics.pict(newsPictID) {
+            let fw = CGFloat(frame.width), fh = CGFloat(frame.height)
+            let textW = fw * 0.80
+            NovaMenu(frame: frame, overlay: true) { space in
+                ScrollView(showsIndicators: false) {
+                    NovaText(bodyText, size: 11, width: textW, align: .leading)
+                }
+                .frame(width: textW, height: fh * 0.58, alignment: .topLeading)
+                .novaPlace(space, -textW / 2, -fh / 2 + 20)
+                NovaButton(graphics: graphics,
+                           title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
+                           width: 96, action: onDone)
+                    .novaPlace(space, -48, fh / 2 - 40)
+            }
+        } else {
+            // No news backdrop art in the data — plain framed panel.
+            VStack(spacing: 12) {
+                NovaText("Galactic News Network", size: 14, weight: .bold)
+                ScrollView(showsIndicators: false) {
+                    NovaText(bodyText, size: 11, width: 300, align: .leading)
+                }
+                .frame(width: 300, height: 200)
+                NovaButton(graphics: graphics,
+                           title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
+                           width: 96, action: onDone)
+            }
+            .padding(20)
+            .frame(width: 360)
+            .background(Color(white: 0.08))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(novaAmber.opacity(0.35)))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .novaResponsive()
+        }
+    }
+}
+
 /// The shipyard's large ship-preview picture. Dedicated shipyard art (large,
 /// meant to fill the panel) scales smoothly to fit as before; the small
 /// in-flight sprite fallback is instead capped to a modest integer upscale
 /// and drawn with crisp, pixel-art (nearest-neighbor) sampling so a 24×24
 /// sprite reads as a small crisp ship icon instead of a blurry, blown-up smear.
-private struct ShipyardPictureView: View {
+struct ShipyardPictureView: View {
     let picture: (image: CGImage, isDedicated: Bool)
 
     var body: some View {

@@ -228,6 +228,24 @@ public struct PlayerState: Codable, Sendable {
     /// escort never collides with a live one. Optional for save-compat.
     public var nextEscortRecordID: Int?
 
+    /// Per-bar daily patron-offer marker: spöb id → the julian day this bar last
+    /// rolled its one-per-day mission offer. The original never re-pestered you
+    /// with the same patron every time you re-entered the bar the same day; this
+    /// gates the roll to once per bar per day. Optional + defaulted for
+    /// save-compat (older pilots decode as "no bar has rolled yet").
+    public var barOfferDays: [Int: Int]? = nil
+
+    /// Whether `spob`'s bar has already made its daily patron offer on `day`.
+    public func barOffered(spob: Int, day: Int) -> Bool { barOfferDays?[spob] == day }
+
+    /// Record that `spob`'s bar made its daily offer on `day`, pruning entries
+    /// from earlier days so the map stays bounded to the bars visited today.
+    public mutating func markBarOffered(spob: Int, day: Int) {
+        var m = (barOfferDays ?? [:]).filter { $0.value == day }
+        m[spob] = day
+        barOfferDays = m
+    }
+
     // Story
     public var setBits: Set<Int>          // the NCB control-bit vector
     public var date: GameDate
