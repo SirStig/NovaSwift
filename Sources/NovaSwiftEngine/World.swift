@@ -705,7 +705,7 @@ public final class World {
     /// How a new NPC came into being, so the renderer can play the right effect:
     /// a mid-system populate (no effect), a hyperspace jump-in (warp streak at the
     /// edge), or a lift-off from a planet (grows out of the stellar).
-    public enum ArrivalMode { case populate, hyperspace, launch }
+    public enum ArrivalMode { case populate, hyperspace, launch, gate(spobID: Int) }
 
     /// Add an NPC, assigning it a fresh entity id. Returns the id.
     @discardableResult
@@ -732,6 +732,13 @@ public final class World {
             events.append(.shipArrived(entityID: ship.entityID, at: ship.position, fromHyperspace: true))
         case .launch:
             events.append(.shipLaunched(entityID: ship.entityID, at: ship.position))
+        case let .gate(spobID):
+            // Emerge from a hypergate: a gentle outward push (like a launch, not a
+            // hyperspace tear-in) along the gate's emerge heading, then the
+            // renderer plays the gate open→emerge→close beat.
+            let outward = Vec2(sin(ship.angle), cos(ship.angle))
+            ship.velocity = outward * min(ship.stats.maxSpeed * 0.6, 180)
+            events.append(.shipEmergedFromGate(entityID: ship.entityID, gateSpobID: spobID, at: ship.position))
         }
         refreshRoster()
         return ship.entityID

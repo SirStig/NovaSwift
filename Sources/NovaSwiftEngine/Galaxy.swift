@@ -155,6 +155,7 @@ public final class Galaxy {
     private var weaponCache: [Int: WeaponSpec] = [:]
     private var shipCache: [Int: ShipSpec] = [:]
     private var diplomacyCache: Diplomacy?
+    private var fleetCatalogCache: [FleetRes]?
 
     public init(game: NovaGame, flightTuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
@@ -170,6 +171,20 @@ public final class Galaxy {
         let d = Diplomacy(govts: game.govts())
         diplomacyCache = d
         return d
+    }
+
+    /// Every `flët` the data defines, decoded once and cached. EV Nova spawns
+    /// fleets galaxy-wide by `flët.LinkSyst` (a fleet listed in *no* system's
+    /// own spawn table still appears across every system its `LinkSyst` matches —
+    /// this is how the game is full of Federation patrols, pirate packs, and
+    /// cargo convoys even though almost no `sÿst` pins a fleet in its `DudeTypes`
+    /// table). The `Spawner` sweeps this catalog per system; decoding all ~256
+    /// fleets on every system entry was needless churn, so it's cached here.
+    public func fleetCatalog() -> [FleetRes] {
+        if let cached = fleetCatalogCache { return cached }
+        let fleets = game.fleets()
+        fleetCatalogCache = fleets
+        return fleets
     }
 
     // MARK: Specs

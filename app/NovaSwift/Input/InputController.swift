@@ -10,15 +10,18 @@ final class InputController {
     var touch = ControlIntent()
     var controller = ControlIntent()
     var mouse = ControlIntent()
+    /// Device-tilt steering (iOS "Tilt to Turn" scheme). Its own source so it
+    /// merges with the others without clobbering them.
+    var tilt = ControlIntent()
 
     /// The merged intent the simulation consumes.
     var intent: ControlIntent {
-        ControlIntent.combined(keyboard, touch, controller, mouse)
+        ControlIntent.combined(keyboard, touch, controller, mouse, tilt)
     }
 
     func reset() {
         keyboard = ControlIntent(); touch = ControlIntent()
-        controller = ControlIntent(); mouse = ControlIntent()
+        controller = ControlIntent(); mouse = ControlIntent(); tilt = ControlIntent()
     }
 
     // MARK: Keyboard

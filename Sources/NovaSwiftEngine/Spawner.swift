@@ -70,6 +70,17 @@ public final class Spawner {
     public var fleetInterval: Double = 26
     private var fleetTimer: Double = 8
 
+    /// The system's galaxy-wide fleet pool: every `flët` whose `LinkSyst` band
+    /// matches this system (FLEETS.md §3), merged with any fleets the system's
+    /// own spawn table explicitly pins, each carrying a selection weight. This is
+    /// the real backbone of EV Nova's fleet traffic — nearly no `sÿst` lists a
+    /// fleet in its `DudeTypes` table, yet the galaxy is full of patrols and
+    /// convoys because fleets sweep in by `LinkSyst`. Computed lazily on first use
+    /// (needs `world.diplomacy` for the ally/enemy bands) and cached, since
+    /// `LinkSyst` eligibility is static for a system's lifetime; the *dynamic*
+    /// `AppearOn` gate is applied per-draw on top, not baked into this cache.
+    private var linkFleetPool: [(fleetID: Int, weight: Int)]?
+
     /// Sim-seconds since this spawner was created — drives the reactive
     /// reinforcement-fleet timers below (FLEETS.md §5), independent of
     /// `timer` (which only gates *ambient* dude/fleet arrivals).
@@ -106,16 +117,16 @@ public final class Spawner {
 
     /// Where a spawn comes from: mid-system (initial fill), the hyperspace edge
     /// (a jump-in), or lifting off from a stellar object (planet launch).
-    private enum SpawnOrigin { case interior, edge, planet }
+    private enum SpawnOrigin { case interior, edge, planet, hypergate(spobID: Int) }
 
     /// Fill the system to its target population immediately (used on entry so the
     /// system isn't empty for the first few seconds). If the system has any
     /// eligible fleet, one is placed up front so the player often finds a
     /// formation already on station instead of only ever catching lone ships.
     public func populate(_ world: World) {
-        let eligibleFleets = table.fleets.filter { isFleetEligible($0.fleetID, world: world) }
-        if !eligibleFleets.isEmpty,
-           let fid = weightedPick(eligibleFleets.map { ($0.fleetID, $0.prob) },
+        let pool = fleetPool(world: world)
+        if !pool.isEmpty,
+           let fid = weightedPick(pool.map { ($0.fleetID, $0.weight) },
                                   roll: world.rng.int(in: 0...9999), world: world) {
             spawnFleet(fid, into: world, origin: .interior)
         }
@@ -136,11 +147,14 @@ public final class Spawner {
         // ambient target population (capped by `maxPopulation` inside spawnFleet).
         fleetTimer -= dt
         if fleetTimer <= 0 {
-            fleetTimer = fleetInterval
+            // Jitter the next fleet arrival ±40% so convoys don't march in on a
+            // metronome; a fleet is a group event, spaced well apart from the
+            // ambient single-ship trickle.
+            fleetTimer = fleetInterval * world.rng.double(in: 0.6...1.4)
             if world.npcs.count < maxPopulation {
-                let eligibleFleets = table.fleets.filter { isFleetEligible($0.fleetID, world: world) }
-                if !eligibleFleets.isEmpty,
-                   let fid = weightedPick(eligibleFleets.map { ($0.fleetID, $0.prob) },
+                let pool = fleetPool(world: world)
+                if !pool.isEmpty,
+                   let fid = weightedPick(pool.map { ($0.fleetID, $0.weight) },
                                           roll: world.rng.int(in: 0...9999), world: world) {
                     spawnFleet(fid, into: world, origin: .edge)
                 }
@@ -160,27 +174,16 @@ public final class Spawner {
     // MARK: Spawning
 
     private func spawnOne(into world: World, origin: SpawnOrigin) {
-        // Decide fleet vs. dude across the combined weighted table. Fleets always
-        // jump in as a group (they don't lift off a single pad together), and a
-        // fleet a system's own DudeTypes table lists is still filtered here by
-        // its own `LinkSyst` (FLEETS.md §3/§8: treated as a second validity
-        // check on top of the system's explicit reference, since the current
-        // `SpawnTable` is built solely from one system's own spawn table and
-        // has no way to sweep in fleets that aren't listed anywhere).
-        let eligibleFleets = origin == .planet ? [] : table.fleets.filter { isFleetEligible($0.fleetID, world: world) }
+        // The ambient trickle is dudes only — the per-system `DudeTypes`/`%Prob`
+        // background traffic (traders and lone patrols coming and going). Fleets
+        // are a separate mechanism (FLEETS.md §0): they arrive as a group on the
+        // dedicated `fleetTimer` cadence, drawn from the galaxy-wide `LinkSyst`
+        // pool (`fleetPool`), never one-at-a-time here. Routing all fleets through
+        // that one path keeps them from being double-spawned (once here, once on
+        // the timer) and keeps the "traders wander / convoys jump in" split clean.
         let dudeWeight = table.dudes.reduce(0) { $0 + $1.prob }
-        let fleetWeight = eligibleFleets.reduce(0) { $0 + $1.prob }
-        let total = dudeWeight + fleetWeight
-        guard total > 0 else { return }
-
-        let roll = world.rng.int(in: 0...(total - 1))
-        if !eligibleFleets.isEmpty, roll < fleetWeight {
-            if let fid = weightedPick(eligibleFleets.map { ($0.fleetID, $0.prob) }, roll: roll, world: world) {
-                spawnFleet(fid, into: world, origin: origin)
-                return
-            }
-        }
-        let dRoll = world.rng.int(in: 0...(max(1, dudeWeight) - 1))
+        guard dudeWeight > 0 else { return }
+        let dRoll = world.rng.int(in: 0...(dudeWeight - 1))
         if let did = weightedPick(table.dudes.map { ($0.dudeID, $0.prob) }, roll: dRoll, world: world) {
             spawnDude(did, into: world, origin: origin, leaderID: nil)
         }
@@ -330,7 +333,16 @@ public final class Spawner {
         guard let shipID = dude.pickShip(roll: roll) else { return nil }
         let govt = dude.govt >= 128 ? dude.govt : (galaxy.shipSpec(shipID)?.government ?? independentGovt)
 
-        let (pos, ang, arrival) = spawnPose(world, origin: origin)
+        // A lone hyperspace arrival may instead emerge from one of the system's
+        // hypergates — often for govts that prefer gate travel, rarely for the
+        // rest (fleet escorts always stay with their leader, so only leaders/solo
+        // dudes are redirected).
+        var effectiveOrigin = origin
+        if case .edge = origin, leaderID == nil,
+           let gate = emergenceGate(for: govt, world: world) {
+            effectiveOrigin = .hypergate(spobID: gate.id)
+        }
+        let (pos, ang, arrival) = spawnPose(world, origin: effectiveOrigin)
         // Equip NPCs from their real hull loadout (preinstalled outfits: afterburner,
         // extra shields/weapons, fuel) — the same aggregation the player uses — so a
         // spawned ship matches its authentic EV Nova fit, not a bare hull.
@@ -479,9 +491,38 @@ public final class Spawner {
     /// spawns jump in on a random bearing pointed inward; interior (initial fill)
     /// spawns scatter mid-system with no effect; planet spawns lift off a landable
     /// stellar object, facing outward.
+    /// A hypergate in the current system this govt's ship may emerge from this
+    /// spawn, or nil to arrive from the edge as usual. Govts flagged "prefer
+    /// hypergates" emerge fairly often; everyone else only occasionally, so the
+    /// player still sees the odd ship materialise from a gate. Govts flagged
+    /// "don't use hypergates" never do. Prefers a gate the govt owns, else any
+    /// gate present (stock gates all belong to the neutral "Hypergate" govt).
+    private func emergenceGate(for govt: Int, world: World) -> StellarBody? {
+        let gates = world.systemContext.bodies.filter { $0.isHypergate }
+        guard !gates.isEmpty else { return nil }
+        guard let g = galaxy.game.govt(govt), !g.avoidsHypergates else { return nil }
+        let chancePercent = g.prefersHypergates ? 35 : 4
+        guard world.rng.int(in: 0...99) < chancePercent else { return nil }
+        let owned = gates.filter { $0.government == govt }
+        let pool = owned.isEmpty ? gates : owned
+        return pool[world.rng.int(in: 0...(pool.count - 1))]
+    }
+
     private func spawnPose(_ world: World, origin: SpawnOrigin) -> (Vec2, Double, World.ArrivalMode) {
         let ctx = world.systemContext
         switch origin {
+        case let .hypergate(spobID):
+            // Emerge just clear of the gate along its emerge heading (a random
+            // direction if the gate defines none). If the gate has since vanished
+            // from the system geometry, fall back to an ordinary edge arrival.
+            if let gate = ctx.bodies.first(where: { $0.id == spobID }) {
+                let ang = gate.gateEmergeAngle ?? world.rng.double(in: 0...(2 * .pi))
+                let pos = gate.position + Vec2(sin(ang), cos(ang)) * (gate.radius + 30)
+                return (pos, ang, .gate(spobID: spobID))
+            }
+            let bearing = world.rng.double(in: 0...(2 * .pi))
+            let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * ctx.spawnRadius
+            return (pos, (ctx.center - pos).angle, .hyperspace)
         case .planet:
             // `canLand` already means landable AND inhabited (see `StellarBody`'s
             // doc comment) — a system with no such body has nowhere to launch a

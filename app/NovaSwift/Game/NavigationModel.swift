@@ -156,6 +156,17 @@ final class NavigationModel: ObservableObject {
         return true
     }
 
+    /// Arrive at `dest` via a gate (hypergate/wormhole): no fuel spent and no
+    /// hyperspace link required — the gate did the travelling. Clears any plotted
+    /// course that doesn't continue from `dest`.
+    @discardableResult
+    func arriveViaGate(at dest: Int) -> Bool {
+        if route.first == dest { route.removeFirst() } else { route = [] }
+        currentSystemID = dest
+        showingMap = false
+        return true
+    }
+
     /// Breadth-first fewest-jumps path (excluding `from`, ending at `to`).
     private func shortestPath(from: Int, to: Int) -> [Int]? {
         guard let game else { return nil }

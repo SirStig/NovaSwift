@@ -70,13 +70,14 @@ struct SettingsView: View {
                 ForEach(GameSettings.Difficulty.allCases) { Text($0.label).tag($0) }
             }
             Toggle("Auto-target after firing", isOn: binding(\.autoTargetAfterFiring))
+            Toggle("Auto-landing", isOn: binding(\.autoLanding))
             Toggle("Confirm before landing", isOn: binding(\.confirmLanding))
             Toggle("Tutorial hints", isOn: binding(\.tutorialHints))
             Toggle("Pause when app loses focus", isOn: binding(\.pauseOnFocusLoss))
         } header: {
             Label("Gameplay", systemImage: "gamecontroller")
         } footer: {
-            Text("Difficulty scales the damage you take. Auto-target locks onto the nearest hostile the moment you open fire.")
+            Text("Difficulty scales the damage you take. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically.")
         }
     }
 

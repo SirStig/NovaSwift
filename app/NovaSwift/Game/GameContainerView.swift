@@ -360,6 +360,13 @@ struct GameContainerView: View {
     @StateObject private var debug = DebugController()
     /// The spöb the player is currently landed on (nil = flying).
     @State private var landedSpobID: Int?
+    /// A pending landing awaiting the player's confirmation (the "Confirm before
+    /// landing" setting), nil when none.
+    @State private var landConfirmID: Int?
+    /// Whether the first-flight tutorial hints card is showing (the "Tutorial
+    /// hints" setting; shown once per install until dismissed).
+    @State private var showFlightHints = false
+    private static let seenHintsKey = "novaswift.seenFlightHints"
     /// Keyboard focus for the flight scene. `.focusable()` alone never actually
     /// grabs focus — without binding + explicitly setting this, `.onKeyPress` in
     /// `KeyboardControls` silently never fires and the ship can't be flown at
@@ -434,6 +441,10 @@ struct GameContainerView: View {
                 }
 
                 MessageLogView(hud: host.hud)
+
+                if showFlightHints && landedSpobID == nil && !showMenu && !nav.showingMap {
+                    flightHintsOverlay
+                }
 
                 #if os(iOS)
                 // Mounted ABOVE the passive HUD/message/menu-button layers so its
@@ -629,7 +640,19 @@ struct GameContainerView: View {
                 // arrive because nothing ever became key.
                 grabSceneFocus(reason: "initial host build")
                 applyControlScheme()
+                // First-flight tutorial hints (the setting), shown once per install.
+                if model.settings.tutorialHints,
+                   !UserDefaults.standard.bool(forKey: Self.seenHintsKey) {
+                    showFlightHints = true
+                }
             }
+        }
+        .confirmationDialog("Land here?",
+                            isPresented: Binding(get: { landConfirmID != nil },
+                                                 set: { if !$0 { landConfirmID = nil } }),
+                            titleVisibility: .visible) {
+            Button("Land") { if let id = landConfirmID { landConfirmID = nil; landedSpobID = id } }
+            Button("Cancel", role: .cancel) { landConfirmID = nil }
         }
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
         // Push any settings change into the live scene's own copy so display
@@ -707,6 +730,60 @@ struct GameContainerView: View {
         }
     }
 
+    /// First-flight tutorial hints — a compact, dismissible card of the core
+    /// controls, shown once per install when "Tutorial hints" is on. Platform
+    /// wording differs (touch vs. keyboard). Dismissing remembers it.
+    private var flightHintsOverlay: some View {
+        #if os(iOS)
+        let tips = ["Drag to fly, or use the on-screen controls",
+                    "Tap a ship to target it · tap a planet to set a course",
+                    "Tap Land near a planet — or turn on Auto-landing in Settings",
+                    "Open the map to plot a hyperspace jump"]
+        #else
+        let tips = ["Steer with WASD or the arrow keys · Space to fire",
+                    "Click a ship to target it · click a planet to set a course",
+                    "Press L to land · J for the galaxy map · Tab to cycle targets"]
+        #endif
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Getting started", systemImage: "lightbulb")
+                    .novaFont(.body, weight: .bold).foregroundStyle(novaAmber)
+                Spacer()
+                Button {
+                    UserDefaults.standard.set(true, forKey: Self.seenHintsKey)
+                    withAnimation { showFlightHints = false }
+                } label: {
+                    Text("Got it").novaFont(.caption, weight: .semibold)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(novaAmber.opacity(0.18), in: Capsule())
+                        .overlay(Capsule().strokeBorder(novaAmber.opacity(0.5)))
+                }.buttonStyle(.plain)
+            }
+            ForEach(tips, id: \.self) { tip in
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Text(tip).novaFont(.caption).foregroundStyle(.white.opacity(0.9))
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: 340, alignment: .leading)
+        .background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(novaAmber.opacity(0.3)))
+        .padding(.top, 70)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .transition(.opacity)
+    }
+
+    /// Commit a landing, honoring the "Confirm before landing" setting: with it
+    /// on, stash the spöb and show a confirmation; otherwise land immediately.
+    /// Shared by the manual land key, the on-screen Land pill, and the
+    /// auto-landing autopilot's arrival.
+    private func requestLanding(_ id: Int) {
+        if model.settings.confirmLanding { landConfirmID = id }
+        else { landedSpobID = id }
+    }
+
     /// Leave the spaceport: rebuild the ship/system from the (possibly changed)
     /// pilot so new outfits/hull/cargo take effect, with shields/armor restored —
     /// as EV Nova does on takeoff — and resume flight. Fuel carries over as-is
@@ -758,6 +835,10 @@ struct GameContainerView: View {
     /// ship — needed every time `host` is (re)built, since neither survives a
     /// system rebuild on its own.
     private func syncNav(_ host: GameHost?) {
+        // Re-bind the auto-landing arrival callback for whatever scene is current
+        // (this runs at every host build/rebuild) so the autopilot can commit the
+        // landing through the same confirm-aware path as the manual Land key.
+        host?.scene.onAutoLandArrived = { id in requestLanding(id) }
         nav.attachShip(host?.scene.playerShip)
         if let galaxy = host?.galaxy {
             nav.maxJumpHops = model.pilot.maxJumpHops(galaxy: galaxy)
@@ -1190,8 +1271,19 @@ struct GameContainerView: View {
         }
         switch action {
         case .land:
-            // Set down on the nearest landable stellar if we're in reach and slow.
-            if landedSpobID == nil, let id = host?.scene.attemptLand() { landedSpobID = id }
+            guard landedSpobID == nil, let scene = host?.scene else { break }
+            if model.settings.autoLanding {
+                // Auto-landing: fly to the targeted/nearest landable body and set
+                // down on arrival. Pressing Land again cancels an in-progress
+                // approach. Falls back to an immediate land if we're already
+                // parked on a pad with nothing to fly to.
+                if scene.isAutoLanding { scene.cancelAutoLand() }
+                else if scene.beginAutoLandOnSelected() { /* autopilot engaged */ }
+                else if let id = scene.attemptLand() { requestLanding(id) }
+            } else if let id = scene.attemptLand() {
+                // Classic: only when in range and slow.
+                requestLanding(id)
+            }
         case .openMenu, .pauseGame:
             if landedSpobID != nil { return }
             if nav.showingMap { nav.showingMap = false } else { showMenu.toggle() }

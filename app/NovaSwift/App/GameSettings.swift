@@ -119,6 +119,10 @@ struct GameSettings: Codable, Equatable {
     var autoTargetAfterFiring: Bool = false
     /// Ask for confirmation before landing / departing.
     var confirmLanding: Bool = false
+    /// Auto-landing: pressing Land flies the ship to the targeted (or nearest)
+    /// landable stellar and sets down automatically, instead of requiring you to
+    /// be in range and slow first.
+    var autoLanding: Bool = false
     /// Show first-time tutorial hints.
     var tutorialHints: Bool = true
     /// Pause the simulation when the window/app loses focus.
@@ -239,6 +243,7 @@ struct GameSettings: Codable, Equatable {
         difficulty            = v(.difficulty, d.difficulty)
         autoTargetAfterFiring = v(.autoTargetAfterFiring, d.autoTargetAfterFiring)
         confirmLanding        = v(.confirmLanding, d.confirmLanding)
+        autoLanding           = v(.autoLanding, d.autoLanding)
         tutorialHints         = v(.tutorialHints, d.tutorialHints)
         pauseOnFocusLoss      = v(.pauseOnFocusLoss, d.pauseOnFocusLoss)
         controlScheme         = v(.controlScheme, d.controlScheme)

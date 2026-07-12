@@ -733,6 +733,24 @@ public struct NovaGame {
         return out
     }
 
+    /// Where a wormhole can spit the player out. If it has `HyperLink`s, those are
+    /// its exits (same as a hypergate). If it has none, the Bible says it connects
+    /// to another *link-less* wormhole picked at random — so the candidates are
+    /// every other link-less wormhole in the galaxy (falling back to any other
+    /// wormhole if none are link-less). Each candidate carries its own system.
+    public func wormholeExitCandidates(from wormhole: SpobRes) -> [(gateSpobID: Int, systemID: Int)] {
+        if !wormhole.hyperLinks.isEmpty { return gateDestinations(from: wormhole) }
+        func collect(_ predicate: (SpobRes) -> Bool) -> [(Int, Int)] {
+            var out: [(Int, Int)] = []
+            for s in spobs() where s.id != wormhole.id && s.isWormhole && predicate(s) {
+                if let sys = systemContaining(spob: s.id) { out.append((s.id, sys)) }
+            }
+            return out
+        }
+        let linkless = collect { $0.hyperLinks.isEmpty }
+        return linkless.isEmpty ? collect { _ in true } : linkless
+    }
+
     // AI-driving resources.
     public func govt(_ id: Int) -> GovtRes? { resources.resource(NovaType.govt, id).map(GovtRes.init) }
     public func govts() -> [GovtRes] {

@@ -1,4 +1,5 @@
 import SpriteKit
+import CoreImage
 import NovaSwiftKit
 import NovaSwiftEngine
 #if os(macOS)
@@ -17,6 +18,11 @@ struct PlanetVisual {
     let government: Int
     /// A dead rock / derelict station with no functioning population — greyed on radar.
     let isUninhabited: Bool
+    /// Gate flags, so the scene can draw the gate glow and route "land on it"
+    /// to gate travel rather than the spaceport.
+    var isHypergate: Bool = false
+    var isWormhole: Bool = false
+    var isGate: Bool { isHypergate || isWormhole }
 }
 
 /// The live game scene. Runs the `NovaSwiftEngine` simulation and draws it: an
@@ -45,6 +51,9 @@ final class GameScene: SKScene {
     var onPlayerDestroyed: ((_ hadEscapePod: Bool) -> Void)?
     private var input: InputController!
     private var controllerInput: GameControllerInput?
+    #if os(iOS)
+    private var tiltInput: TiltInput?
+    #endif
 
     /// When true (Settings ▸ Touch scheme = "Tap to Turn"), touching the space
     /// view points the ship where you touch; a tap that doesn't drag no longer
@@ -146,6 +155,10 @@ final class GameScene: SKScene {
     /// fuel, advance the route, follow the pilot, save). Supplied by the container.
     private var jumpCommit: (() -> Void)?
     private var jumpCommitted = false
+    /// When the jump is a *gate* transport, the destination gate's spöb id — the
+    /// player emerges out of it (rather than at the hyperspace edge) and it plays
+    /// the open→close flourish. nil for an ordinary hyperjump.
+    private var jumpArriveGateID: Int?
 
     /// Invoked when a government ship completes a scan of the player, with that
     /// ship's government id. The host wires this to the contraband scan-and-fine
@@ -193,6 +206,101 @@ final class GameScene: SKScene {
     var playerShip: Ship? { world?.player }
     /// The spöb to land on if the player may set down this instant, else nil.
     func attemptLand() -> Int? { canLandNow ? nearestLandableID : nil }
+
+    // MARK: Hypergate / wormhole state
+    /// Hypergates the player has switched on this session (wormholes are always
+    /// live and need no activation). Drives the gate's on-screen glow and whether
+    /// landing on it opens the gate map. Cleared per-system on reload.
+    private var openGateIDs: Set<Int> = []
+    /// spöb id → its render node, so gate glow/flash can find the right planet
+    /// node without a linear scan. Rebuilt in `buildPlanets`, cleared on reload.
+    private var planetNodeByID: [Int: SKNode] = [:]
+    /// Set by `reloadSystem` when the arrival is *out of a gate*, consumed by the
+    /// gate open→close flourish once the new system's nodes are built.
+    private var pendingGateArrivalID: Int?
+    /// A body the player can set down on: an inhabited port (`canLand`) OR any
+    /// gate — you land on a gate to use it, even one flagged uninhabited.
+    private func isPlayerLandTarget(_ body: StellarBody) -> Bool { body.canLand || body.isGate }
+
+    /// Auto-landing autopilot target (a landable body id), or nil when not
+    /// engaged. While set, the scene flies the ship to that body and calls
+    /// `onAutoLandArrived` once it's in range and slow (see `stepAutoLand`).
+    private(set) var autoLandTargetID: Int?
+    var isAutoLanding: Bool { autoLandTargetID != nil }
+    /// Invoked when the autopilot reaches the pad — the container then commits
+    /// the landing (opens the spaceport).
+    var onAutoLandArrived: ((Int) -> Void)?
+
+    /// Engage auto-landing toward the currently-selected planet, or the nearest
+    /// landable body if none/the selection can't be landed on. Returns false if
+    /// there's nothing landable to fly to.
+    func beginAutoLandOnSelected() -> Bool {
+        if let sel = selectedPlanetID, beginAutoLand(spobID: sel) { return true }
+        if let near = nearestLandableID, beginAutoLand(spobID: near) { return true }
+        return false
+    }
+
+    @discardableResult
+    func beginAutoLand(spobID: Int) -> Bool {
+        guard world?.systemContext.bodies.contains(where: { $0.id == spobID && isPlayerLandTarget($0) }) == true else { return false }
+        autoLandTargetID = spobID
+        selectedPlanetID = spobID
+        hud?.post("Auto-landing engaged.")
+        return true
+    }
+
+    func cancelAutoLand() {
+        guard autoLandTargetID != nil else { return }
+        autoLandTargetID = nil
+        hud?.post("Auto-landing disengaged.")
+    }
+
+    /// Apply the player's turn preferences (invert / sensitivity) to a raw intent.
+    private func playerIntent(_ raw: ControlIntent) -> ControlIntent {
+        var i = raw
+        if settings.invertTurn { swap(&i.turnLeft, &i.turnRight) }   // "Invert turn direction"
+        i.turnScale = settings.controlSensitivity                    // "Turn sensitivity"
+        return i
+    }
+
+    /// One frame of the auto-landing autopilot: hand control back the instant the
+    /// player touches the stick; otherwise fly toward the target body, braking
+    /// into the approach, and commit the landing once in range and slow.
+    private func stepAutoLand() -> ControlIntent {
+        let manual = input?.intent ?? .init()
+        if manual.turnLeft || manual.turnRight || manual.thrust || manual.reverse {
+            cancelAutoLand()
+            return playerIntent(manual)
+        }
+        guard let id = autoLandTargetID, let world,
+              let body = world.systemContext.bodies.first(where: { $0.id == id && isPlayerLandTarget($0) }) else {
+            cancelAutoLand(); return .init()
+        }
+        let p = world.player
+        let to = body.position - p.position
+        let dist = to.length
+        let reach = body.radius + 55
+        let speed = p.velocity.length
+        if dist <= reach && speed <= landingSpeedLimit {
+            autoLandTargetID = nil
+            onAutoLandArrived?(id)              // container opens the spaceport
+            return .init()
+        }
+        var i = ControlIntent()
+        i.desiredHeading = atan2(to.x, to.y)   // 0 = +y (up), clockwise — matches the engine
+        var da = (i.desiredHeading! - p.angle).truncatingRemainder(dividingBy: 2 * .pi)
+        if da > .pi { da -= 2 * .pi }
+        if da < -.pi { da += 2 * .pi }
+        let aligned = abs(da) < 0.5
+        if dist > reach * 1.8 {
+            if aligned { i.thrust = true }             // cruise in while pointed at it
+        } else if speed > landingSpeedLimit * 0.75 {
+            i.reverse = true                           // brake into the pad
+        } else if aligned && dist > reach {
+            i.thrust = true                            // nudge the last stretch
+        }
+        return i
+    }
 
     // NPC rendering: the catalog for per-hull sprites, a layer for NPC ships, a
     // layer for transient effects (explosions / beams), and the live node pool.
@@ -315,7 +423,12 @@ final class GameScene: SKScene {
         self.input = input
         self.controllerInput = controller
         controller?.deadzone = Float(settings.stickDeadzone)   // "Stick dead zone" setting
+        #if os(iOS)
+        if let input { tiltInput = TiltInput(input: input) }
+        updateTiltActive()                                     // start motion updates if scheme == .tilt
+        #endif
         Haptics.enabled = settings.hapticsEnabled
+        applyColorblindFilter()
         self.hud = hud
         self.audio = audio
         self.planetVisuals = planets
@@ -326,6 +439,12 @@ final class GameScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = SKColor(red: 0.02, green: 0.02, blue: 0.06, alpha: 1)
         scaleMode = .resizeFill
+        #if os(macOS)
+        // Needed for `mouseMoved` (the "Aim toward mouse cursor" option) to fire;
+        // the window may not be attached yet, so set it next runloop too.
+        view.window?.acceptsMouseMovedEvents = true
+        DispatchQueue.main.async { [weak view] in view?.window?.acceptsMouseMovedEvents = true }
+        #endif
         camera = cameraNode
         cameraNode.setScale(cameraZoom)
         addChild(cameraNode)
@@ -380,6 +499,24 @@ final class GameScene: SKScene {
         let p = event.location(in: self)
         Log.input.debug("mouseDown -> scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public))")
         selectAt(scenePoint: p)
+    }
+
+    override func mouseMoved(with event: NSEvent) { updateMouseAim(event) }
+    override func mouseDragged(with event: NSEvent) { updateMouseAim(event) }
+
+    /// "Aim toward mouse cursor": steer the ship toward the pointer while the
+    /// setting is on. The player sits at the camera centre, so the cursor's
+    /// offset from there is the desired heading (0 = up, clockwise — the engine's
+    /// convention). Cleared when the setting is off so it never lingers.
+    private func updateMouseAim(_ event: NSEvent) {
+        guard settings.mouseAiming, jumpPhase == .none, autoLandTargetID == nil else {
+            input?.mouse.desiredHeading = nil; return
+        }
+        let p = event.location(in: self)
+        let dx = p.x - cameraNode.position.x
+        let dy = p.y - cameraNode.position.y
+        guard hypot(dx, dy) > 10 else { return }        // ignore tiny jitter at centre
+        input?.mouse.desiredHeading = atan2(Double(dx), Double(dy))
     }
     #else
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -445,6 +582,15 @@ final class GameScene: SKScene {
             node.addChild(label)
             addChild(node)
             planetNodes.append(node)
+            planetNodeByID[p.id] = node
+            // Wormholes always shimmer (anyone can use them); a hypergate glows
+            // only once switched on (via a click or an arrival). Re-applied here
+            // so the glow survives a system reload.
+            if p.isWormhole {
+                setGateGlow(node: node, radius: p.radius, kind: .wormhole)
+            } else if p.isHypergate && openGateIDs.contains(p.id) {
+                setGateGlow(node: node, radius: p.radius, kind: .hypergate)
+            }
         }
     }
 
@@ -599,6 +745,9 @@ final class GameScene: SKScene {
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
 
         controllerInput?.poll()
+        #if os(iOS)
+        if settings.controlScheme == .tilt { tiltInput?.poll(sensitivity: settings.tiltSensitivity) }
+        #endif
 
         // Tap/drag-to-fly steering: turn the finger's offset from the view centre
         // (= the follow-camera-centred ship) into a compass heading the ship
@@ -619,13 +768,10 @@ final class GameScene: SKScene {
         let intent: ControlIntent
         if jumpPhase != .none {
             intent = stepJump(dt)
+        } else if autoLandTargetID != nil {
+            intent = stepAutoLand()
         } else {
-            var i = input?.intent ?? .init()
-            // "Invert turn direction" swaps the discrete left/right steering.
-            if settings.invertTurn { swap(&i.turnLeft, &i.turnRight) }
-            // "Turn sensitivity" scales the player's turn budget this frame.
-            i.turnScale = settings.controlSensitivity
-            intent = i
+            intent = playerIntent(input?.intent ?? .init())
         }
         world.intent = intent
         world.step(dt)
@@ -711,6 +857,10 @@ final class GameScene: SKScene {
                 // (the old snd 390 "Airlock" cue on the player's own launch read as
                 // a weird "escape hatch" noise). NPC launches were already silent.
                 pendingEntrance[entityID] = .launch
+            case let .shipEmergedFromGate(entityID, gateSpobID, _):
+                // A gate flashes open, the ship grows out of it, then it closes.
+                pendingEntrance[entityID] = .launch
+                playGateArrivalFlourish(gateSpobID)
             case let .shipDeparted(entityID, at, heading):
                 warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
             case let .shipLanded(entityID, spobID, at):
@@ -788,7 +938,7 @@ final class GameScene: SKScene {
         var bestID: Int?
         var bestDist = Double.greatestFiniteMagnitude
         var bestReach = 0.0
-        for body in world.systemContext.bodies where body.canLand {
+        for body in world.systemContext.bodies where isPlayerLandTarget(body) {
             let d = (body.position - p.position).length
             if d < bestDist { bestDist = d; bestID = body.id; bestReach = body.radius + 55 }
         }
@@ -1101,10 +1251,92 @@ final class GameScene: SKScene {
             return (da * da + db * db) < (ea * ea + eb * eb)
         }) {
             selectPlanet(planet.id)
+            // Clicking a hypergate powers it up if you're cleared to use it (a
+            // wormhole needs nothing). Selection still happens either way.
+            if planet.isGate { handleGateClick(planet.id) }
             return true
         }
         clearTarget()
         return false
+    }
+
+    // MARK: Hypergate / wormhole gameplay
+
+    private enum GateGlowKind { case hypergate, wormhole }
+
+    /// Whether the player is cleared to use hypergate `spobID` right now — a
+    /// clearance check against the gate's owning government (see
+    /// `SpobRes.playerMayUseGate`). Wormholes always pass.
+    func playerMayUseGate(_ spobID: Int) -> Bool {
+        guard let spob = galaxy?.game.spob(spobID) else { return false }
+        let dip = world?.diplomacy
+        let govt = spob.government
+        let standing = dip?.playerRecord[govt] ?? 0
+        let hostile = dip?.isHostileToPlayer(govt) ?? false
+        let allied = dip?.areAllied(govt, world?.player.government ?? independentGovt) ?? false
+        return spob.playerMayUseGate(standing: standing, hostile: hostile, allied: allied)
+    }
+
+    /// Handle a click on a gate. A wormhole just notes it's usable; a hypergate
+    /// switches on (glow + charge sound) if the player is cleared, or refuses
+    /// with a message and does nothing if not.
+    private func handleGateClick(_ spobID: Int) {
+        guard let spob = galaxy?.game.spob(spobID) else { return }
+        if spob.isWormhole {
+            hud?.post("Wormhole — fly into it to be swept across the galaxy.")
+            return
+        }
+        guard spob.isHypergate else { return }
+        if playerMayUseGate(spobID) {
+            if openGateIDs.insert(spobID).inserted {
+                if let node = planetNodeByID[spobID] {
+                    setGateGlow(node: node, radius: planetVisuals.first { $0.id == spobID }?.radius ?? 40,
+                                kind: .hypergate)
+                }
+                audio?.play(.hyperspaceCharge)
+                hud?.post("\(spob.name) hypergate online — land on it to travel.")
+            } else {
+                hud?.post("\(spob.name) hypergate is online.")
+            }
+        } else {
+            audio?.play(.uiError)
+            let owner = galaxy?.game.govt(spob.government)?.name ?? "controlling"
+            hud?.post("You are not cleared to use the \(owner) hypergate.")
+        }
+    }
+
+    /// Mark hypergate `spobID` on (used when landing auto-activates a gate the
+    /// player is cleared for but never clicked). No-op for a non-gate.
+    func activateGate(_ spobID: Int) {
+        guard let spob = galaxy?.game.spob(spobID), spob.isHypergate, openGateIDs.insert(spobID).inserted else { return }
+        if let node = planetNodeByID[spobID] {
+            setGateGlow(node: node, radius: planetVisuals.first { $0.id == spobID }?.radius ?? 40, kind: .hypergate)
+        }
+    }
+
+    /// Add (or refresh) the pulsing aura that marks a live gate: cyan for a
+    /// hypergate, violet for a wormhole — the same palette the galaxy map uses.
+    private func setGateGlow(node: SKNode, radius: CGFloat, kind: GateGlowKind) {
+        let glowName = "gateGlow"
+        node.childNode(withName: glowName)?.removeFromParent()
+        let color: SKColor = kind == .wormhole
+            ? SKColor(red: 0.78, green: 0.45, blue: 1.0, alpha: 1)
+            : SKColor(red: 0.30, green: 0.85, blue: 0.98, alpha: 1)
+        let glow = SKShapeNode(circleOfRadius: max(20, radius) * 1.2)
+        glow.name = glowName
+        glow.lineWidth = 3
+        glow.glowWidth = 7
+        glow.strokeColor = color
+        glow.fillColor = color.withAlphaComponent(0.12)
+        glow.zPosition = -1
+        glow.blendMode = .add
+        glow.run(.repeatForever(.sequence([
+            .fadeAlpha(to: 0.5, duration: 0.7), .fadeAlpha(to: 1.0, duration: 0.7)])))
+        node.addChild(glow)
+    }
+
+    private func clearGateGlow(_ spobID: Int) {
+        planetNodeByID[spobID]?.childNode(withName: "gateGlow")?.removeFromParent()
     }
 
     private func updateTargetHUD(_ target: Ship?) {
@@ -1132,7 +1364,7 @@ final class GameScene: SKScene {
             return
         }
         hud.navTargetName = pv.name
-        hud.navTargetLandable = world.systemContext.bodies.first { $0.id == id }?.canLand ?? false
+        hud.navTargetLandable = world.systemContext.bodies.first { $0.id == id }.map(isPlayerLandTarget) ?? false
     }
 
     // MARK: Screen shake
@@ -1595,7 +1827,9 @@ final class GameScene: SKScene {
     func beginJump(to destSystemID: Int, outboundHeading: Double, instant: Bool,
                    speed: Double = 1, commit: @escaping () -> Void) {
         guard jumpPhase == .none, world != nil else { return }
+        cancelAutoLand()                       // a jump overrides any landing autopilot
         jumpDestSystemID = destSystemID
+        jumpArriveGateID = nil                 // ordinary hyperjump: arrive at the edge
         jumpOutboundHeading = outboundHeading
         jumpInstant = instant
         jumpSpeed = max(1, speed)
@@ -1608,6 +1842,28 @@ final class GameScene: SKScene {
         // Spin-up sound as the maneuver starts.
         audio?.play(.hyperspaceCharge)
         Log.scene.debug("beginJump -> system \(destSystemID) heading \(outboundHeading, format: .fixed(precision: 2)) instant=\(instant)")
+    }
+
+    /// Travel through a gate to `systemID`, emerging from gate `destGateID` on the
+    /// far side. No align/tear-away maneuver — the gate does the work, so it's a
+    /// quick white flash and you're there ("bam"). `commit` runs at the flash peak
+    /// (model: set system, advance the day, save — gates spend no fuel). No-op if
+    /// a jump is already running.
+    func beginGateJump(toSystem systemID: Int, arriveAtGate destGateID: Int, commit: @escaping () -> Void) {
+        guard jumpPhase == .none, world != nil else { return }
+        cancelAutoLand()
+        jumpDestSystemID = systemID
+        jumpArriveGateID = destGateID
+        jumpOutboundHeading = world.player.angle
+        jumpInstant = true
+        jumpSpeed = 1
+        jumpCommit = commit
+        jumpCommitted = false
+        jumpClock = 0
+        world.player.velocity = Vec2()      // you're sitting on the gate — no run-up
+        jumpPhase = .flash                   // straight to the white-out; no maneuver
+        audio?.play(.hyperspaceCharge)
+        Log.scene.debug("beginGateJump -> system \(systemID), emerge at gate \(destGateID)")
     }
 
     /// Advance the jump one frame and return the `ControlIntent` that flies it.
@@ -1664,7 +1920,8 @@ final class GameScene: SKScene {
             if !jumpCommitted, t >= 1 {
                 jumpCommitted = true
                 jumpCommit?()                          // app model: spend fuel, advance route, follow pilot, save
-                reloadSystem(to: jumpDestSystemID, outboundHeading: jumpOutboundHeading)
+                reloadSystem(to: jumpDestSystemID, outboundHeading: jumpOutboundHeading,
+                             arriveAtGate: jumpArriveGateID)
                 enterJumpPhase(.arrive)
             }
 
@@ -1707,7 +1964,7 @@ final class GameScene: SKScene {
     /// stellar geometry, repositions the player at the hyperspace edge pointed
     /// inward and coasting fast (like an NPC jump-in), and clears every transient
     /// node from the old system.
-    private func reloadSystem(to systemID: Int, outboundHeading: Double) {
+    private func reloadSystem(to systemID: Int, outboundHeading: Double, arriveAtGate gateID: Int? = nil) {
         guard let galaxy else {
             Log.scene.error("reloadSystem(\(systemID)): no galaxy — cannot load the destination system")
             return
@@ -1719,19 +1976,34 @@ final class GameScene: SKScene {
         var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
         let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, combatTuning: tuning, galaxy: galaxy)
 
-        // Enter from the edge on the side we *came from* — the origin system's
-        // direction, which is opposite the outbound bearing we jumped along — then
-        // fly inward, continuing that same direction of travel. (Placing us on the
-        // outbound side instead made us pop in on the far edge, facing back the
-        // way we came.) Pointed inward, tearing in and decelerating like an NPC.
         let ctx = w.systemContext
-        let travelDir = Vec2(sin(outboundHeading), cos(outboundHeading))   // A→B, the way we're heading
-        player.position = ctx.center - travelDir * ctx.spawnRadius          // arrive on B's A-facing edge
-        player.angle = (ctx.center - player.position).angle                 // face inward == the travel direction
-        let entrySpeed = min(player.stats.maxSpeed * 2.4, 3200)
-        player.velocity = Vec2(sin(player.angle), cos(player.angle)) * entrySpeed
-        player.entryOverspeed = max(0, entrySpeed - player.stats.maxSpeed)
-        player.entryOverspeedDecayPerSec = player.entryOverspeed / 1.3
+        var arrivalGate: StellarBody?
+        if let gateID, let gate = ctx.bodies.first(where: { $0.id == gateID }) {
+            // Gate arrival: emerge *out of* the destination gate along its emerge
+            // heading (or facing away from the system centre), drifting clear —
+            // not the fast tear-in of an ordinary hyperspace jump.
+            arrivalGate = gate
+            let ang = gate.gateEmergeAngle ?? (gate.position - ctx.center).angle
+            let outward = Vec2(sin(ang), cos(ang))
+            player.position = gate.position + outward * (gate.radius + player.radius + 25)
+            player.angle = ang
+            player.velocity = outward * min(player.stats.maxSpeed * 0.5, 160)
+            player.entryOverspeed = 0
+            player.entryOverspeedDecayPerSec = 0
+        } else {
+            // Enter from the edge on the side we *came from* — the origin system's
+            // direction, which is opposite the outbound bearing we jumped along — then
+            // fly inward, continuing that same direction of travel. (Placing us on the
+            // outbound side instead made us pop in on the far edge, facing back the
+            // way we came.) Pointed inward, tearing in and decelerating like an NPC.
+            let travelDir = Vec2(sin(outboundHeading), cos(outboundHeading))   // A→B, the way we're heading
+            player.position = ctx.center - travelDir * ctx.spawnRadius          // arrive on B's A-facing edge
+            player.angle = (ctx.center - player.position).angle                 // face inward == the travel direction
+            let entrySpeed = min(player.stats.maxSpeed * 2.4, 3200)
+            player.velocity = Vec2(sin(player.angle), cos(player.angle)) * entrySpeed
+            player.entryOverspeed = max(0, entrySpeed - player.stats.maxSpeed)
+            player.entryOverspeedDecayPerSec = player.entryOverspeed / 1.3
+        }
         player.currentTargetID = nil
         player.wantsToDepart = false
 
@@ -1743,7 +2015,12 @@ final class GameScene: SKScene {
         // transient node (NPCs/projectiles/beams/effects/labels/selection).
         self.planetVisuals = makePlanetVisuals(systemID: systemID, game: game)
         clearSystemNodes()
+        // Mark the arrival gate open *before* building nodes so it glows as we
+        // pop out of it (buildPlanets reads `openGateIDs`); the flourish closes
+        // it again shortly after (unless it's a wormhole, which stays live).
+        if let arrivalGate { openGateIDs.insert(arrivalGate.id) }
         buildPlanets()
+        if let arrivalGate { playGateArrivalFlourish(arrivalGate.id) }
 
         // Recentre camera + ship node on the arrival point immediately (don't
         // wait a frame — the flash is covering this) and refresh the HUD name.
@@ -1753,7 +2030,33 @@ final class GameScene: SKScene {
         systemName = game.system(systemID)?.name ?? ""
         hud?.systemName = systemName
         audio?.play(.hyperspaceArrive)
+        jumpArriveGateID = nil
         Log.scene.debug("reloadSystem: now in \(self.systemName) [\(systemID)], \(w.npcs.count) NPCs")
+    }
+
+    /// The destination gate opens with a bright ring as the player pops out, then
+    /// (for a hypergate) closes again a moment later. A wormhole stays shimmering.
+    private func playGateArrivalFlourish(_ gateID: Int) {
+        guard let node = planetNodeByID[gateID] else { return }
+        let radius = planetVisuals.first { $0.id == gateID }?.radius ?? 40
+        let ring = SKShapeNode(circleOfRadius: max(20, radius) * 1.4)
+        ring.strokeColor = SKColor(red: 0.65, green: 0.95, blue: 1.0, alpha: 1)
+        ring.lineWidth = 4
+        ring.glowWidth = 12
+        ring.blendMode = .add
+        ring.zPosition = 6
+        ring.setScale(0.5)
+        node.addChild(ring)
+        ring.run(.sequence([.group([.scale(to: 1.4, duration: 0.45), .fadeOut(withDuration: 0.55)]),
+                            .removeFromParent()]))
+        let isWormhole = planetVisuals.first { $0.id == gateID }?.isWormhole ?? false
+        if !isWormhole {
+            // Hypergate: closes behind you after the emerge.
+            node.run(.sequence([.wait(forDuration: 1.5), .run { [weak self] in
+                self?.openGateIDs.remove(gateID)
+                self?.clearGateGlow(gateID)
+            }]))
+        }
     }
 
     /// Take off from stellar object `spobID`, reloading the *current* system in
@@ -1829,7 +2132,9 @@ final class GameScene: SKScene {
                                 position: CGPoint(x: entry.spob.x, y: entry.spob.y),
                                 texture: tex, radius: radius,
                                 government: entry.spob.government,
-                                isUninhabited: entry.spob.isUninhabited)
+                                isUninhabited: entry.spob.isUninhabited,
+                                isHypergate: entry.spob.isHypergate,
+                                isWormhole: entry.spob.isWormhole)
         }
     }
 
@@ -1840,6 +2145,10 @@ final class GameScene: SKScene {
     private func clearSystemNodes() {
         for n in planetNodes { n.removeFromParent() }
         planetNodes.removeAll()
+        planetNodeByID.removeAll()
+        // Open-gate state is per-system: the old system's gate ids mean nothing
+        // in the new one. The arrival gate (if any) is re-opened in `reloadSystem`.
+        openGateIDs.removeAll()
         for (_, n) in npcNodes { n.container.removeFromParent() }
         npcNodes.removeAll()
         for n in projectileNodes { n.removeFromParent() }
@@ -2021,6 +2330,13 @@ final class GameScene: SKScene {
         settings = newSettings
         controllerInput?.deadzone = Float(settings.stickDeadzone)   // live "Stick dead zone"
         Haptics.enabled = settings.hapticsEnabled
+        applyColorblindFilter()
+        #if os(macOS)
+        if !settings.mouseAiming { input?.mouse.desiredHeading = nil }   // clear stale mouse-aim
+        #endif
+        #if os(iOS)
+        updateTiltActive()
+        #endif
         for node in planetNodes {
             node.childNode(withName: "planetLabel")?.isHidden = !settings.showPlanetLabels
         }
@@ -2037,6 +2353,47 @@ final class GameScene: SKScene {
         // it applies without waiting for a system rebuild. (engineGlow / screenShake
         // / reduceFlashing are read live each frame, so they need no node pass.)
         if filterChanged { applySpriteFiltering(to: self) }
+    }
+
+    /// Apply the colorblind assist to the whole scene. `SKScene` is an
+    /// `SKEffectNode`, so a `CIColorMatrix` on `filter` transforms the entire
+    /// rendered frame. Each mode nudges the axis the deficiency confuses onto a
+    /// channel the viewer still sees (red↔green difference into blue for
+    /// prot/deuteranopia; blue↔red difference into green for tritanopia), so the
+    /// game's colour-coded ships/blips/bars stay distinguishable. Off = no filter
+    /// (and no offscreen render cost).
+    #if os(iOS)
+    /// Start/stop device-motion updates so tilt steering only runs while the
+    /// "Tilt to Turn" scheme is selected.
+    private func updateTiltActive() {
+        if settings.controlScheme == .tilt { tiltInput?.start() }
+        else { tiltInput?.stop() }
+    }
+    #endif
+
+    private func applyColorblindFilter() {
+        guard settings.colorblindMode != .none else {
+            shouldEnableEffects = false
+            filter = nil
+            return
+        }
+        let f = CIFilter(name: "CIColorMatrix")
+        let k: CGFloat = 0.5
+        switch settings.colorblindMode {
+        case .protanopia, .deuteranopia:
+            f?.setValue(CIVector(x: 1, y: 0, z: 0, w: 0), forKey: "inputRVector")
+            f?.setValue(CIVector(x: 0, y: 1, z: 0, w: 0), forKey: "inputGVector")
+            f?.setValue(CIVector(x: k, y: -k, z: 1, w: 0), forKey: "inputBVector")
+        case .tritanopia:
+            f?.setValue(CIVector(x: 1, y: 0, z: 0, w: 0), forKey: "inputRVector")
+            f?.setValue(CIVector(x: -k, y: 1, z: k, w: 0), forKey: "inputGVector")
+            f?.setValue(CIVector(x: 0, y: 0, z: 1, w: 0), forKey: "inputBVector")
+        case .none:
+            break
+        }
+        f?.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        filter = f
+        shouldEnableEffects = true
     }
 
     /// Recursively set every sprite's texture filtering to the current mode.

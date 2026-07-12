@@ -545,6 +545,10 @@ public enum WorldEvent {
     case shipLanded(entityID: Int, spobID: Int, at: Vec2)
     /// A ship lifted off from a stellar object.
     case shipLaunched(entityID: Int, at: Vec2)
+    /// A ship emerged from a hypergate: the renderer flashes the gate open,
+    /// pops the ship out of it, then closes the gate. `gateSpobID` is the gate
+    /// spöb to animate; the ship starts at its position heading outward.
+    case shipEmergedFromGate(entityID: Int, gateSpobID: Int, at: Vec2)
     /// A ship's armor was knocked out but it survived as a drifting hulk.
     case shipDisabled(entityID: Int, at: Vec2)
     /// A government patrol/interceptor ran a scan pass on another ship (checking
