@@ -32,6 +32,11 @@ final class AppGameServices: GameServices, ObservableObject {
     var onLeaveStellar: ((_ message: String?) -> Void)?
     var onSetStellarDestroyed: ((_ spobID: Int, _ destroyed: Bool) -> Void)?
     var onSpawnMissionShips: ((_ missionID: Int, _ mission: MissionRes) -> Void)?
+    /// The daily hired-escort upkeep was just deducted (total credits charged).
+    var onEscortFeeCharged: ((_ total: Int) -> Void)?
+    /// A hired escort left the wing because its daily fee went unpaid — the
+    /// container despawns the live ship whose `escortRecordID` matches.
+    var onEscortDeparted: ((_ escortID: Int, _ name: String) -> Void)?
 
     // `GameServices` itself isn't main-actor-isolated (the CLI's
     // `LoggingGameServices` runs off the main actor), but every conformer in
@@ -100,14 +105,24 @@ final class AppGameServices: GameServices, ObservableObject {
 
     nonisolated func notify(_ event: StoryNotification) {
         Log.story.debug("notify: \(String(describing: event), privacy: .public)")
+        MainActor.assumeIsolated {
+            switch event {
+            case let .escortDailyFeeCharged(total):
+                onEscortFeeCharged?(total)
+            case let .escortDeparted(escortID, name):
+                onEscortDeparted?(escortID, name)
+            default:
+                break
+            }
+        }
     }
 
-    // Surface active-crön news as a dialog. The Bible's local-over-independent
-    // precedence is a per-station rendering rule; here (fired at cron start,
-    // station unknown) we simply show the text so it isn't dropped. A dedicated
-    // news reader can refine presentation later.
+    // Crön news is NOT popped when the event fires — that's not how EV Nova
+    // presents it. It's read at a spaceport, where the station's government
+    // decides which local (or, failing that, independent) news applies. The
+    // container resolves that on landing via `StoryEngine.stationNews(forGovt:)`;
+    // this callback only logs, so the cron-start path stays a no-op.
     nonisolated func showNews(text: String, govt: Int?) {
-        guard !text.isEmpty else { return }
-        MainActor.assumeIsolated { storyText = ("Galactic News", text) }
+        Log.story.debug("showNews (cron fired; read at station via stationNews): govt \(govt.map(String.init) ?? "independent", privacy: .public)")
     }
 }

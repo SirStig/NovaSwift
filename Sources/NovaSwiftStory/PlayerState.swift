@@ -82,6 +82,59 @@ public struct CronRuntime: Codable, Hashable, Sendable {
     public var isActive: Bool { startedDate != nil }
 }
 
+/// How a ship under the player's command was acquired — this is what decides
+/// whether it costs money. EV Nova charges a recurring daily fee for **hired**
+/// escorts only; captured and mission-granted escorts are free.
+public enum EscortOrigin: String, Codable, Sendable {
+    /// Rented at a spaceport bar. Paid a flat hire fee up front and a recurring
+    /// daily fee; released (not sold) and departs on its own if you can't pay.
+    case hired
+    /// Boarded and captured in combat. Free — no daily fee. Can be sold or
+    /// upgraded at a shipyard, and stays until sold/released/destroyed.
+    case captured
+    /// Granted by a mission. Free, and only lasts the mission's duration.
+    case mission
+}
+
+/// One ship in the player's persistent escort wing. This is the durable record
+/// that survives save/reload and system jumps; the live `World.playerEscorts`
+/// scene entities are (re)spawned from these when the player enters a system and
+/// carry the matching `id` back so per-escort commands (release/upgrade/sell)
+/// map to the right record. Kept in `NovaSwiftStory` next to `PlayerState`
+/// because the roster is pilot-save state, not engine state.
+public struct EscortRecord: Codable, Hashable, Sendable, Identifiable {
+    /// Stable per-escort id assigned from `PlayerState.nextEscortID` at hire /
+    /// capture time. Not a `shïp` id and not a live `entityID` — it's the link
+    /// between this record and whatever scene ship currently represents it.
+    public var id: Int
+    /// The `shïp` resource id (the hull). Mutated in place when the escort is
+    /// upgraded (`UpgradeTo`).
+    public var shipType: Int
+    /// Display name shown in the escort control window.
+    public var name: String
+    public var origin: EscortOrigin
+    /// Flat price paid to hire (0 for captured/mission). Snapshotted at hire so
+    /// the deal doesn't retroactively change.
+    public var hireFee: Int
+    /// Recurring daily upkeep in credits (0 for captured/mission). Charged per
+    /// in-game day for `.hired` escorts; refreshed to the new hull's rate on
+    /// upgrade.
+    public var dailyFee: Int
+    /// The mission this escort is tied to, when `origin == .mission`.
+    public var missionID: Int?
+
+    public init(id: Int, shipType: Int, name: String, origin: EscortOrigin,
+                hireFee: Int = 0, dailyFee: Int = 0, missionID: Int? = nil) {
+        self.id = id
+        self.shipType = shipType
+        self.name = name
+        self.origin = origin
+        self.hireFee = hireFee
+        self.dailyFee = dailyFee
+        self.missionID = missionID
+    }
+}
+
 /// The complete, serialisable player / campaign state — the "pilot file". Owns
 /// the control-bit vector, mission log, ranks, standings and galaxy clock. This
 /// is the single source of truth the story engine reads and mutates; combat,
@@ -163,6 +216,18 @@ public struct PlayerState: Codable, Sendable {
     /// (treated as empty), like `fuel`.
     public var destroyedStellars: Set<Int>?
 
+    /// The player's persistent escort wing — hired (paying a daily fee),
+    /// captured (free), or mission-granted (free, temporary). Source of truth
+    /// that survives save/reload and system jumps; `World.playerEscorts` is a
+    /// transient scene view respawned from this on entering a system. The daily
+    /// fee for `.hired` entries is deducted as the galaxy clock advances (see
+    /// `StoryEngine.payDailyEscortFees`). Optional so pilots saved before the
+    /// escort roster existed still decode (treated as empty), like `fuel`.
+    public var escorts: [EscortRecord]?
+    /// Monotonic counter backing `EscortRecord.id`, so a released-then-rehired
+    /// escort never collides with a live one. Optional for save-compat.
+    public var nextEscortRecordID: Int?
+
     // Story
     public var setBits: Set<Int>          // the NCB control-bit vector
     public var date: GameDate
@@ -242,6 +307,52 @@ public struct PlayerState: Codable, Sendable {
     public mutating func dominate(_ id: Int) { dominatedStellars = (dominatedStellars ?? []).union([id]) }
     /// Release stellar `id` from domination (it stops paying tribute).
     public mutating func releaseDomination(_ id: Int) { dominatedStellars?.remove(id) }
+
+    // MARK: Escort roster helpers
+
+    /// The player's escort wing (empty for pilots saved before the roster).
+    public var escortWing: [EscortRecord] { escorts ?? [] }
+    /// Escorts that cost a daily fee (rented at a bar).
+    public var hiredEscorts: [EscortRecord] { escortWing.filter { $0.origin == .hired } }
+    /// Total credits/day owed for the whole hired wing — what
+    /// `StoryEngine.payDailyEscortFees` deducts each day.
+    public var totalDailyEscortFee: Int { hiredEscorts.reduce(0) { $0 + $1.dailyFee } }
+
+    /// Add `record` to the wing, returning it (id already assigned).
+    @discardableResult
+    public mutating func addEscort(_ record: EscortRecord) -> EscortRecord {
+        escorts = (escorts ?? []) + [record]
+        return record
+    }
+    /// Register a new escort, assigning it a fresh stable `id`. The single entry
+    /// point for both hiring and capturing so ids never collide.
+    @discardableResult
+    public mutating func registerEscort(shipType: Int, name: String, origin: EscortOrigin,
+                                        hireFee: Int = 0, dailyFee: Int = 0,
+                                        missionID: Int? = nil) -> EscortRecord {
+        let newID = nextEscortRecordID ?? 1
+        nextEscortRecordID = newID + 1
+        return addEscort(EscortRecord(id: newID, shipType: shipType, name: name,
+                                      origin: origin, hireFee: hireFee, dailyFee: dailyFee,
+                                      missionID: missionID))
+    }
+    /// Remove escort `id` from the wing (release/sell/depart/destroy). Returns the
+    /// removed record, or nil if it wasn't in the roster.
+    @discardableResult
+    public mutating func removeEscort(id: Int) -> EscortRecord? {
+        guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return nil }
+        return escorts?.remove(at: idx)
+    }
+    /// Look up an escort record by its stable id.
+    public func escort(id: Int) -> EscortRecord? { escortWing.first { $0.id == id } }
+    /// Swap escort `id` to hull `newShipType` (an `UpgradeTo`), refreshing its
+    /// daily fee to the new hull's rate (`dailyFee` supplied by the caller, which
+    /// has the `shïp` record). Hired escorts keep paying — at the new rate.
+    public mutating func upgradeEscort(id: Int, to newShipType: Int, dailyFee newDaily: Int) {
+        guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return }
+        escorts?[idx].shipType = newShipType
+        if escorts?[idx].origin == .hired { escorts?[idx].dailyFee = newDaily }
+    }
 
     /// Whether system `id` has been revealed by a map/chart outfit (but not
     /// necessarily visited). See `chartedSystems`.

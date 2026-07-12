@@ -937,6 +937,15 @@ final class GameScene: SKScene {
                 onMissionShipGoalReached?(missionID, goal, byPlayer)
             case let .missionShipLost(missionID, goal):
                 onMissionShipLost?(missionID, goal)
+            case let .shipDestroyed(entityID, _, _):
+                // A player escort tied to a persistent record just died — drop it
+                // from the pilot roster so it doesn't respawn next system (and a
+                // hired one stops being billed). Resolved via the entity→record
+                // map since the Ship may already be torn down.
+                if let recordID = escortRecordByEntity[entityID] {
+                    escortRecordByEntity[entityID] = nil
+                    onEscortLost?(recordID)
+                }
             default:
                 break
             }
@@ -1172,7 +1181,13 @@ final class GameScene: SKScene {
 
     /// A snapshot of one player escort for the command UI.
     struct EscortInfo: Identifiable {
+        /// The live scene `entityID` (per-spawn). Use `recordID` to map to the
+        /// persistent roster; `id` only needs to be Identifiable-stable per frame.
         let id: Int
+        /// The persistent `EscortRecord.id`, when this live ship was spawned from
+        /// the roster (captured/hired/mission escorts). nil for any escort not
+        /// tied to a record (e.g. debug-spawned wing).
+        let recordID: Int?
         let name: String
         let shipType: Int
         let shieldFraction: Double
@@ -1182,7 +1197,8 @@ final class GameScene: SKScene {
     /// The player's current escort wing (captured / recruited ships).
     func escortRoster() -> [EscortInfo] {
         (world?.playerEscorts ?? []).map {
-            EscortInfo(id: $0.entityID, name: $0.name, shipType: $0.shipTypeID,
+            EscortInfo(id: $0.entityID, recordID: $0.escortRecordID, name: $0.name,
+                       shipType: $0.shipTypeID,
                        shieldFraction: $0.shieldFraction, armorFraction: $0.armorFraction)
         }
     }
@@ -1192,6 +1208,68 @@ final class GameScene: SKScene {
 
     /// Issue a standing order to the whole escort wing.
     func commandEscorts(_ order: EscortOrder) { world?.setPlayerEscortOrder(order) }
+
+    // MARK: Persistent escort roster ↔ live wing
+
+    /// entityID → persistent `EscortRecord.id`, so a destroyed escort can be
+    /// removed from the pilot save even after its `Ship` is gone from the world.
+    private var escortRecordByEntity: [Int: Int] = [:]
+
+    /// Fired when an escort tied to a persistent record leaves the live wing by
+    /// being destroyed — the container removes it from the pilot roster. Passes
+    /// the `EscortRecord.id`.
+    var onEscortLost: ((Int) -> Void)?
+
+    /// Tag an already-spawned live ship as the escort for persistent record
+    /// `recordID`, so per-escort commands and loss bookkeeping resolve to it.
+    func tagEscort(entityID: Int, recordID: Int) {
+        world?.ship(id: entityID)?.escortRecordID = recordID
+        escortRecordByEntity[entityID] = recordID
+    }
+
+    /// Spawn a ship of `shipType` next to the player, recruit it into the wing,
+    /// and tag it with persistent `recordID`. Used both for a fresh bar hire and
+    /// for respawning the saved wing on entering a system. Returns success.
+    @discardableResult
+    func spawnRosterEscort(shipType: Int, recordID: Int) -> Bool {
+        guard let galaxy, world != nil else { return false }
+        let player = world.player
+        let bearing = world.rng.double(in: 0...(2 * .pi))
+        let dist = world.rng.double(in: 300...600)
+        let pos = player.position + Vec2(sin(bearing), cos(bearing)) * dist
+        let ang = (player.position - pos).angle
+        guard let ship = galaxy.makeLoadedShip(shipType, government: player.government,
+                                               at: pos, angle: ang,
+                                               skillRoll: world.rng.double(in: 0...1)) else { return false }
+        world.addNPC(ship, arrival: .hyperspace)
+        world.recruitEscort(ship)
+        tagEscort(entityID: ship.entityID, recordID: recordID)
+        return true
+    }
+
+    /// Respawn the saved escort wing on entering a system — each `(recordID,
+    /// shipType)` becomes a live ship flying with the player, as EV Nova's
+    /// escorts follow their flagship between systems.
+    func respawnEscorts(_ records: [(recordID: Int, shipType: Int)]) {
+        for r in records { spawnRosterEscort(shipType: r.shipType, recordID: r.recordID) }
+    }
+
+    /// Remove the live ship for persistent escort `recordID` from the wing (a
+    /// release-from-servitude or an unaffordable-fee departure). No-op if it isn't
+    /// currently spawned (e.g. released while between systems).
+    func despawnEscort(recordID: Int) {
+        guard let world else { return }
+        for ship in world.playerEscorts where ship.escortRecordID == recordID {
+            ship.brain?.leaderID = nil
+            world.removeShip(entityID: ship.entityID)
+            escortRecordByEntity[ship.entityID] = nil
+        }
+    }
+
+    /// The live ship currently representing persistent escort `recordID`, if any.
+    func liveEscort(recordID: Int) -> Ship? {
+        world?.playerEscorts.first { $0.escortRecordID == recordID }
+    }
 
     // MARK: Boarding
 
@@ -1209,14 +1287,17 @@ final class GameScene: SKScene {
             s.isAlive && s.disabled && s !== w.player && (s.position - pos).length <= boardingRange
         }
         // Prefer the explicit target, else the nearest disabled hulk in range.
+        // Use `board` (not `boardingManifest`) so the actual dock emits
+        // `.shipBoarded` — and, for a `rescue`-goal mission derelict, the
+        // goal-reached event that completes the rescue.
         if let tid = w.player.currentTargetID, let s = w.ship(id: tid), boardable(s) {
-            return w.boardingManifest(for: tid)
+            return w.board(shipID: tid)
         }
         let nearest = w.npcs.filter(boardable)
             .min { ($0.position - pos).length < ($1.position - pos).length }
         guard let hulk = nearest else { return nil }
         world?.selectTarget(id: hulk.entityID)   // lock it so the plunder targets it
-        return w.boardingManifest(for: hulk.entityID)
+        return w.board(shipID: hulk.entityID)
     }
 
     /// The (possibly updated) manifest for a boarded ship, for refreshing the
@@ -1263,8 +1344,13 @@ final class GameScene: SKScene {
     func plunderOutfits(_ id: Int) -> [Int] { world?.takePlunderOutfits(from: id) ?? [] }
 
     /// Roll to capture a boarded hulk into the escort wing; returns success.
-    func attemptCapture(_ id: Int) -> Bool {
-        world?.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)) ?? false
+    /// Attempt to board-and-capture ship `id`. On success returns the captured
+    /// hull's live entityID / shïp type / name so the container can register it
+    /// as a persistent (free) escort record and tag the ship; nil on failure.
+    func attemptCapture(_ id: Int) -> (entityID: Int, shipType: Int, name: String)? {
+        guard let world, world.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)),
+              let ship = world.ship(id: id) else { return nil }
+        return (ship.entityID, ship.shipTypeID, ship.name)
     }
 
     /// Click/tap hit-test in scene space (== world space here): nearest ship

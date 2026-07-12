@@ -103,6 +103,13 @@ public enum StoryNotification: Sendable, Equatable {
     case cronEnded(cronID: Int)
     case stellarDominated(spobID: Int)
     case stellarReleased(spobID: Int)
+    /// The daily upkeep for the hired escort wing was just deducted (total credits
+    /// charged this day). The app surfaces it on the HUD.
+    case escortDailyFeeCharged(total: Int)
+    /// A hired escort left the wing because the player couldn't cover its daily
+    /// fee ("departs without ceremony"). The app despawns the live ship whose
+    /// `escortRecordID` matches `escortID`.
+    case escortDeparted(escortID: Int, name: String)
 }
 
 /// A ready-to-use `GameServices` that just logs. Lets the engine run headless

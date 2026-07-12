@@ -9,16 +9,34 @@ import NovaSwiftStory
 /// *durable* multi-pilot store; the live in-session pilot is `AppModel.pilot`
 /// (a `PilotStore`), which this loads into when the player starts or resumes.
 ///
-/// iCloud is ready but off: `PilotArchive.resolveDefault(preferICloud:)` will
-/// point at the ubiquity container once the entitlement is configured in Xcode.
+/// iCloud: the archive points at the ubiquity container when the player has
+/// iCloud saves enabled (`GameSettings.iCloudSaves`) *and* the container is
+/// reachable; otherwise it uses the local Application Support store. Toggling
+/// the setting calls `useICloud(_:)`, which migrates existing pilots across.
 @MainActor
 final class PilotRoster: ObservableObject {
-    let archive: PilotArchive
+    /// The on-disk store. `var` (not `let`) so `useICloud` can swap it between
+    /// the local and iCloud roots at runtime.
+    private(set) var archive: PilotArchive
     /// Every saved pilot, newest-first (mirrors `archive.list()`).
     @Published private(set) var pilots: [PilotSave] = []
+    /// Whether the roster is currently backed by iCloud (vs. local storage).
+    @Published private(set) var isCloudBacked: Bool
 
-    init(archive: PilotArchive? = nil) {
-        self.archive = archive ?? PilotArchive.resolveDefault(preferICloud: false)
+    /// The save the menu shows and "Enter Ship" resumes, chosen explicitly by
+    /// the player (via New Pilot / Open Pilot / playing a slot) and remembered
+    /// across launches. Kept as a save id — see `selected`.
+    @Published private(set) var selectedID: UUID?
+    private static let selectedIDKey = "com.novaswift.roster.selectedPilotID"
+
+    init(archive: PilotArchive? = nil, preferICloud: Bool = false) {
+        let resolved = archive ?? PilotArchive.resolveDefault(preferICloud: preferICloud)
+        self.archive = resolved
+        self.isCloudBacked = resolved.location.isCloud
+        // Restore the last explicit selection, if any.
+        if let raw = UserDefaults.standard.string(forKey: Self.selectedIDKey) {
+            self.selectedID = UUID(uuidString: raw)
+        }
         Log.pilot.debug("PilotRoster.init: archive at \(self.archive.root.path, privacy: .public) (iCloud=\(self.archive.location.isCloud))")
         refresh()
     }
@@ -26,11 +44,77 @@ final class PilotRoster: ObservableObject {
     /// Reload the roster from disk.
     func refresh() {
         pilots = archive.list()
+        // Drop a dangling selection whose file no longer exists (deleted pilot).
+        if let id = selectedID, !pilots.contains(where: { $0.id == id }) {
+            Log.pilot.debug("PilotRoster.refresh: clearing stale selection \(id, privacy: .public)")
+            setSelected(nil)
+        }
         Log.pilot.debug("PilotRoster.refresh: \(self.pilots.count) pilot(s) in roster")
     }
 
     var isEmpty: Bool { pilots.isEmpty }
     var mostRecent: PilotSave? { pilots.first }
+
+    // MARK: Selection (the "loaded pilot" Enter Ship resumes)
+
+    /// The pilot "Enter Ship" resumes and the main-menu readout shows. An
+    /// explicit selection wins; with none, we fall back to the sole pilot only
+    /// when there's exactly one group — never silently pick among several, so
+    /// "Enter Ship" prompts a choice instead of grabbing whatever's newest.
+    var selected: PilotSave? {
+        if let id = selectedID, let save = pilots.first(where: { $0.id == id }) { return save }
+        let gs = groups
+        return gs.count == 1 ? gs[0].mostRecent : nil
+    }
+
+    /// True when there is a pilot for "Enter Ship" to resume without prompting.
+    var hasSelection: Bool { selected != nil }
+
+    /// Remember `id` as the loaded pilot (persisted across launches). When the
+    /// caller passes any slot of a group, the whole group is "selected" — the
+    /// readout resolves the group's most-recent slot via `selected`.
+    func setSelected(_ id: UUID?) {
+        selectedID = id
+        if let id { UserDefaults.standard.set(id.uuidString, forKey: Self.selectedIDKey) }
+        else { UserDefaults.standard.removeObject(forKey: Self.selectedIDKey) }
+    }
+
+    // MARK: Storage location (local ⇄ iCloud)
+
+    /// Switch the roster between local and iCloud storage, migrating existing
+    /// pilots into the destination so none appear to vanish. Requesting iCloud
+    /// when it isn't reachable is a no-op that stays on local (the caller's
+    /// setting can stay on so it takes effect once the user signs in). The
+    /// ubiquity lookup can block, so it runs off the main thread.
+    func useICloud(_ prefer: Bool) {
+        // Already in the requested state? Nothing to do.
+        if prefer == isCloudBacked { return }
+        let currentLocal = !isCloudBacked
+        Task.detached(priority: .userInitiated) {
+            let destination: PilotArchive?
+            if prefer {
+                if let cloud = PilotArchive.iCloudRoot() {
+                    destination = PilotArchive(location: .iCloud(cloud))
+                } else {
+                    destination = nil   // iCloud not available; stay local
+                }
+            } else {
+                destination = PilotArchive(location: .local(PilotArchive.defaultLocalRoot()))
+            }
+            await MainActor.run {
+                guard let destination else {
+                    Log.pilot.notice("PilotRoster.useICloud: iCloud requested but unavailable; staying on local storage")
+                    return
+                }
+                // Bring the old store's pilots into the new one before switching.
+                destination.importPilots(from: self.archive, overwrite: false)
+                self.archive = destination
+                self.isCloudBacked = destination.location.isCloud
+                Log.pilot.notice("PilotRoster.useICloud: switched to \(self.isCloudBacked ? "iCloud" : "local", privacy: .public) storage at \(destination.root.path, privacy: .public) (was \(currentLocal ? "local" : "iCloud", privacy: .public))")
+                self.refresh()
+            }
+        }
+    }
 
     // MARK: Create / persist
 
@@ -80,15 +164,23 @@ final class PilotRoster: ObservableObject {
     /// landing / hyperjump / manual save / the autosave tick; backs up on the
     /// meaningful events so a stuck or corrupted pilot can be rolled back.
     func persist(id: UUID, state: PlayerState, game: NovaGame?, backup: Bool) {
-        guard var save = try? archive.load(id: id) else {
-            // NOTE: possible bug — this silently no-ops the entire autosave for
-            // this tick (e.g. after landing or a hyperjump) if the on-disk save
-            // can't be loaded (missing/corrupt file). The player's in-session
-            // progress since the last successful persist is not written anywhere.
-            Log.pilot.error("PilotRoster.persist: failed to load pilot \(id, privacy: .public) for autosave; this update was NOT persisted")
-            return
+        // Prefer to update the existing on-disk save so its metadata (name,
+        // createdAt, scenario, pilotGroupID) is preserved. If it can't be loaded
+        // — missing after a botched write, or corrupt — DON'T drop the autosave;
+        // reconstruct a fresh save from the live state under the same id so the
+        // player's progress is still written somewhere. Losing the metadata is
+        // strictly better than losing the whole session's play.
+        var save: PilotSave
+        if let existing = try? archive.load(id: id) {
+            save = existing
+            save.player = state
+        } else {
+            Log.pilot.error("PilotRoster.persist: pilot \(id, privacy: .public) not loadable; reconstructing from live state so progress isn't lost")
+            save = PilotSave(id: id,
+                             displayName: state.pilotName.isEmpty ? "Captain" : state.pilotName,
+                             scenarioName: "", player: state, game: game,
+                             dataFingerprint: game.map(Self.fingerprint(for:)) ?? "")
         }
-        save.player = state
         save.refreshSnapshot(game: game)
         do {
             _ = try archive.save(save, backup: backup)

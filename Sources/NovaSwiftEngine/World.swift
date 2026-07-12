@@ -111,6 +111,13 @@ public final class Ship {
     /// `shipTypeID`, which is the `shïp` resource id used for the sprite.
     public var entityID: Int = 0
     public var shipTypeID: Int = -1
+    /// For a player escort, the id of its persistent `EscortRecord` in the pilot
+    /// save (nil for ambient NPCs and the player). This is the stable link that
+    /// survives system jumps — a fresh scene ship respawned from the roster
+    /// carries the same `escortRecordID`, so per-escort commands (release, sell,
+    /// upgrade) and "escort departed / destroyed" bookkeeping map back to the
+    /// right record even though `entityID` is reassigned each spawn.
+    public var escortRecordID: Int?
     /// This hull's death-explosion `snd` id (from `shïp`'s breakup/final
     /// explosion → `bööm`), or nil if it has none.
     public var explosionSoundID: Int?
@@ -906,6 +913,19 @@ public final class World {
         refreshRoster()
         events.append(.missionShipsDespawned(missionID: missionID, entityIDs: removedIDs))
         return removedIDs
+    }
+
+    /// Remove a single NPC from the world by entity id, sending it off with a
+    /// warp-out (used when a player escort is released/departs — it flies off the
+    /// same way an escort peeling away would). No-op for the player (id 0) or an
+    /// unknown id.
+    public func removeShip(entityID: Int) {
+        guard entityID != Self.playerEntityID, let ship = shipByID[entityID] else { return }
+        events.append(.shipDeparted(entityID: entityID, at: ship.position, heading: ship.angle))
+        clearTarget(entityID)
+        stopAllBeamLoops(for: ship)
+        npcs.removeAll { $0.entityID == entityID }
+        refreshRoster()
     }
 
     /// Live mission ships currently in the system, optionally filtered to one
@@ -2138,6 +2158,15 @@ public final class World {
     public func board(shipID: Int) -> BoardingManifest? {
         guard let manifest = boardingManifest(for: shipID), let s = ship(id: shipID) else { return nil }
         events.append(.shipBoarded(entityID: s.entityID, at: s.position))
+        // A `rescue` mission ship starts pre-disabled and is completed by
+        // *boarding* it (tow/rescue the derelict) — not by the disable transition
+        // that fires the other goals (it never gets an `applyHit` disable, so that
+        // path never ran for it). Report the goal met now. (`board` goals already
+        // fired on disable, so they're intentionally not re-reported here.)
+        if let mid = s.missionID, s.missionShipGoal == .rescue {
+            events.append(.missionShipGoalReached(missionID: mid, entityID: s.entityID,
+                                                  goal: .rescue, byPlayer: true))
+        }
         return manifest
     }
 

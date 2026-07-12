@@ -60,18 +60,37 @@ public final class PilotArchive {
         return base.appendingPathComponent("NovaSwift/Pilots", isDirectory: true)
     }
 
+    /// The app's iCloud ubiquity container id. Must match the
+    /// `com.apple.developer.icloud-container-identifiers` /
+    /// `ubiquity-container-identifiers` entries in `NovaSwift.entitlements`
+    /// (bundle id `com.houseofkac.novaswift`). Passing this explicitly to
+    /// `url(forUbiquityContainerIdentifier:)` is more reliable than `nil`
+    /// (which only resolves the *first* entitled container).
+    public static let defaultICloudContainerID = "iCloud.com.houseofkac.novaswift"
+
     /// The iCloud ubiquity `Documents/Pilots` folder, if the app is entitled and
     /// signed in. Returns nil otherwise so the caller falls back to local.
-    public static func iCloudRoot(containerID: String? = nil) -> URL? {
+    ///
+    /// NOTE: `url(forUbiquityContainerIdentifier:)` can block while the system
+    /// sets up the container on first use, so callers resolve it off the main
+    /// thread (see `PilotRoster.useICloud`).
+    public static func iCloudRoot(containerID: String? = defaultICloudContainerID) -> URL? {
         guard let container = FileManager.default.url(forUbiquityContainerIdentifier: containerID) else {
             return nil
         }
         return container.appendingPathComponent("Documents/Pilots", isDirectory: true)
     }
 
+    /// Whether an iCloud pilots container is currently reachable (entitled +
+    /// signed in). Cheap-ish but may block on first use — call off-main.
+    public static func iCloudAvailable(containerID: String? = defaultICloudContainerID) -> Bool {
+        iCloudRoot(containerID: containerID) != nil
+    }
+
     /// The archive to use: iCloud when requested *and* available, else local.
-    /// iCloud stays off until the entitlement/container is configured in Xcode.
-    public static func resolveDefault(preferICloud: Bool, containerID: String? = nil,
+    /// Falls back transparently to local when iCloud is unreachable (not signed
+    /// in / entitlement missing) so saving always has somewhere to go.
+    public static func resolveDefault(preferICloud: Bool, containerID: String? = defaultICloudContainerID,
                                       maxBackupsPerPilot: Int = 8) -> PilotArchive {
         if preferICloud, let cloud = iCloudRoot(containerID: containerID) {
             return PilotArchive(location: .iCloud(cloud), maxBackupsPerPilot: maxBackupsPerPilot)
@@ -321,6 +340,62 @@ public final class PilotArchive {
         } catch {
             Log.pilot.error("PilotArchive.createSlot: failed to create slot from pilot \(id, privacy: .public): \(String(describing: error), privacy: .public)")
             throw error
+        }
+    }
+
+    // MARK: Migration (local ⇄ iCloud)
+
+    /// Copy every pilot save (and each pilot's backup folder) from `source` into
+    /// this archive. Used when the player turns iCloud sync on or off so their
+    /// existing pilots move with them instead of appearing to vanish.
+    ///
+    /// By default an id that already exists here is left untouched (`overwrite:
+    /// false`) — the destination is treated as authoritative for pilots it
+    /// already has, which is the safe merge when both stores hold data (e.g.
+    /// iCloud already synced this device once). Returns the number of pilot
+    /// files copied.
+    @discardableResult
+    public func importPilots(from source: PilotArchive, overwrite: Bool = false) -> Int {
+        guard source.root != root else { return 0 }
+        guard let items = try? fm.contentsOfDirectory(at: source.root, includingPropertiesForKeys: nil,
+                                                      options: [.skipsHiddenFiles]) else {
+            Log.pilot.error("PilotArchive.importPilots: cannot read source at \(source.root.path, privacy: .public)")
+            return 0
+        }
+        var copied = 0
+        for src in items where src.pathExtension == PilotSave.fileExtension {
+            let dest = root.appendingPathComponent(src.lastPathComponent)
+            do {
+                if fm.fileExists(atPath: dest.path) {
+                    guard overwrite else { continue }
+                    try fm.removeItem(at: dest)
+                }
+                try fm.createDirectory(at: root, withIntermediateDirectories: true)
+                try fm.copyItem(at: src, to: dest)
+                copied += 1
+                // Bring the pilot's backup history along too.
+                let id = src.deletingPathExtension().lastPathComponent
+                copyBackupFolder(id: id, from: source)
+            } catch {
+                Log.pilot.error("PilotArchive.importPilots: failed to copy \(src.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        Log.pilot.notice("PilotArchive.importPilots: copied \(copied) pilot(s) from \(source.location.isCloud ? "iCloud" : "local", privacy: .public) into \(self.location.isCloud ? "iCloud" : "local", privacy: .public)")
+        return copied
+    }
+
+    /// Copy a single pilot's `Backups/<id>/…` folder from `source`, skipping any
+    /// backup file already present in the destination (backups are immutable, so
+    /// same-named files are identical and need no overwrite).
+    private func copyBackupFolder(id: String, from source: PilotArchive) {
+        let srcDir = source.backupsRoot.appendingPathComponent(id, isDirectory: true)
+        guard let files = try? fm.contentsOfDirectory(at: srcDir, includingPropertiesForKeys: nil,
+                                                      options: [.skipsHiddenFiles]) else { return }
+        let dstDir = backupsRoot.appendingPathComponent(id, isDirectory: true)
+        try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
+        for f in files where f.pathExtension == PilotSave.fileExtension {
+            let dst = dstDir.appendingPathComponent(f.lastPathComponent)
+            if !fm.fileExists(atPath: dst.path) { try? fm.copyItem(at: f, to: dst) }
         }
     }
 

@@ -200,7 +200,12 @@ public struct ShipRes {
 
     // Economy / meta
     public let techLevel: Int       // @46
-    public let cost: Int            // @50
+    /// Purchase price, credits. A 4-byte `DLNG` at @48 — NOT the 2-byte @50 word
+    /// it was long mis-decoded as, which silently dropped the high 16 bits and
+    /// wrapped every hull over 32,767 cr (e.g. Fed Viper read −31,072 instead of
+    /// its true 100,000). Escort hire/daily fees key off this, so the full width
+    /// matters. Verified against raw bytes: Shuttle @48 = 0·65536+10000 = 10,000.
+    public let cost: Int            // @48 DLNG (4 bytes)
     public let deathDelay: Int      // @52
     public let length: Int          // @64
     public let crew: Int            // @68
@@ -300,6 +305,23 @@ public struct ShipRes {
     /// behavior-layer (PilotStore) consumer, not this decode.
     public let escortSellValue: Int
 
+    // MARK: Escort hire economics
+    //
+    // EV Nova charges a flat fee to hire an escort at a bar PLUS a recurring
+    // daily fee while you keep it (captured/mission escorts are free). Neither
+    // number is a resource field — both are engine-hardcoded and undocumented in
+    // the Bible. The one confirmed relationship is that the daily fee is ~10% of
+    // the hire price (community-documented). The hire↔Cost ratio is a chosen
+    // constant: 10% of Cost, which keeps hiring well below buying (so capturing
+    // stays the better play, per the wiki) and matches the lone community data
+    // point. See docs/reverse-engineering/ESCORTS.md.
+
+    /// Flat up-front price to hire this hull as an escort — 10% of `cost`.
+    public var escortHireFee: Int { max(1, cost / 10) }
+    /// Recurring daily upkeep for a **hired** escort of this hull — 10% of the
+    /// hire fee (= 1% of `cost`). Captured/mission escorts pay nothing.
+    public var escortDailyFee: Int { max(1, cost / 100) }
+
     public init(_ r: Resource) {
         id = r.id
         name = r.name.isEmpty ? "Ship \(r.id)" : r.name
@@ -316,7 +338,7 @@ public struct ShipRes {
         maxGuns = i16(d, 42)
         maxTurrets = i16(d, 44)
         techLevel = i16(d, 46)
-        cost = i16(d, 50)
+        cost = i32(d, 48)
         deathDelay = i16(d, 52)
         armorRecharge = i16(d, 54)
         breakupExplosionBoomID = boomID(raw: i16(d, 56))
@@ -625,6 +647,24 @@ public struct SpobRes {
     /// `OnRegen` (@837, 255-byte NCB set expression): control bits set when the
     /// stellar regenerates after being destroyed (a mission `U` op). Empty = none.
     public let onRegen: String
+    /// `DestroyedGraphic` (@576, `int16`): the graphic shown once this stellar is
+    /// destroyed — a wreck / debris field. `-1` (or ≤0) = invulnerable / no wreck
+    /// art. Same 0–63 → `spïn` mapping as `graphicSpinID`. Offset from the same
+    /// verified `spöb` TMPL chain that puts `OnDestroy`@582 (576 + DeadType 2 +
+    /// RegenTime 2 + Explosion 2 = 582).
+    public let destroyedGraphicRaw: Int
+    /// The `spïn` id of the destroyed/wreck graphic, or nil when the stellar has
+    /// none (`-1`/≤0 → invulnerable, shown as simply *gone* when destroyed).
+    public var destroyedGraphicSpinID: Int? {
+        guard destroyedGraphicRaw > 0 else { return nil }
+        var g = destroyedGraphicRaw + 2000
+        if g > 2058 { g -= 1 }
+        return g
+    }
+    /// `spöb.Flags` 0x0080 — the stellar can *only* be landed on once destroyed
+    /// (a hidden base revealed when its cover is blown). Hidden/unlandable until
+    /// then; visible + landable after.
+    public var landableOnlyWhenDestroyed: Bool { flags & 0x0080 != 0 }
 
     /// Total number of ships in this stellar's defense fleet (decoded from
     /// `defenseCountRaw`). 0 = no defenders.
@@ -732,6 +772,7 @@ public struct SpobRes {
         onRelease = cstr(d, 309, 255)
         onDestroy = cstr(d, 582, 255)
         onRegen = cstr(d, 837, 255)
+        destroyedGraphicRaw = i16(d, 576)
     }
 }
 
@@ -964,6 +1005,20 @@ public struct NovaGame {
             return try? RLED.decode(rle)
         }
         if let rle = resources.resource(NovaType.rleD, spob.graphicSpinID)?.data {
+            return try? RLED.decode(rle)
+        }
+        return nil
+    }
+
+    /// Resolve a stellar's **destroyed** (wreck) sprite: `spöb.DestroyedGraphic`
+    /// → `spïn` → `rlëD`. nil when the stellar is invulnerable / has no wreck art
+    /// (the renderer then just drops it from the system when destroyed).
+    public func spobDestroyedSprite(_ spobID: Int) -> SpriteSheet? {
+        guard let spob = spob(spobID), let spinID = spob.destroyedGraphicSpinID else { return nil }
+        if let spin = spin(spinID), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
+            return try? RLED.decode(rle)
+        }
+        if let rle = resources.resource(NovaType.rleD, spinID)?.data {
             return try? RLED.decode(rle)
         }
         return nil

@@ -197,6 +197,15 @@ struct GameSettings: Codable, Equatable {
     /// (or live with ⇧⌘D).
     var uiDebugOverlay: Bool = false
 
+    // MARK: Storage
+
+    /// Store pilot saves in iCloud so they sync across the player's devices.
+    /// When on but iCloud is unavailable (not signed in, or the entitlement
+    /// isn't provisioned), the game transparently falls back to local storage —
+    /// nothing is ever lost, it just doesn't sync. Default on so a signed-in
+    /// player's pilots follow them from Mac to iPad without any setup.
+    var iCloudSaves: Bool = true
+
     // MARK: Accessibility
 
     var largerHUD: Bool = false
@@ -272,6 +281,7 @@ struct GameSettings: Codable, Equatable {
         hudOpacity            = v(.hudOpacity, d.hudOpacity)
         debugModeEnabled      = v(.debugModeEnabled, d.debugModeEnabled)
         uiDebugOverlay        = v(.uiDebugOverlay, d.uiDebugOverlay)
+        iCloudSaves           = v(.iCloudSaves, d.iCloudSaves)
         largerHUD             = v(.largerHUD, d.largerHUD)
         highContrastHUD       = v(.highContrastHUD, d.highContrastHUD)
         colorblindMode        = v(.colorblindMode, d.colorblindMode)

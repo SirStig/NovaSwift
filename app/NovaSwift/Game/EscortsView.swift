@@ -1,5 +1,6 @@
 import SwiftUI
 import NovaSwiftEngine
+import NovaSwiftStory
 
 /// The in-flight **Escorts** command window — an authentic-geometry recreation
 /// of DLOG/DITL #1022 "Escorts" (`novaswift-extract dlog/ditl "data/EV Nova/

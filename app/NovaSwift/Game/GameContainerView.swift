@@ -86,20 +86,31 @@ final class GameHost {
             if let system = targetSystem {
                 systemName = system.name
                 aiSystemID = system.id
-                // A stellar the story has destroyed (mission `Y` op / spöb
-                // OnDestroy) drops out of the system until regenerated (`U`) —
-                // it can't be seen or landed on. Persisted in `destroyedStellars`.
+                // Story-destroyed stellars (mission `Y` op / spöb OnDestroy,
+                // persisted in `destroyedStellars`) show their **wreck** graphic
+                // (`spöb.DestroyedGraphic`) and can't be landed on; a stellar with
+                // no wreck art simply vanishes until regenerated (`U`). The
+                // inverse "land only when destroyed" (Flags 0x0080) is hidden
+                // until destroyed, then appears as a normal, landable base.
                 let destroyed = model.pilot.state.destroyedStellars ?? []
-                planets = game.stellarObjects(in: system.id)
-                    .filter { !destroyed.contains($0.spob.id) }
-                    .map { entry in
-                    let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
-                    let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
-                    return PlanetVisual(id: entry.spob.id, name: entry.spob.name,
-                                        position: CGPoint(x: entry.spob.x, y: entry.spob.y),
+                planets = game.stellarObjects(in: system.id).compactMap { entry in
+                    let spob = entry.spob
+                    let isDestroyed = destroyed.contains(spob.id)
+                    if spob.landableOnlyWhenDestroyed && !isDestroyed { return nil }   // hidden until revealed
+                    var sprite = entry.sprite
+                    var wreck = false
+                    if isDestroyed && !spob.landableOnlyWhenDestroyed {
+                        guard let ws = game.spobDestroyedSprite(spob.id) else { return nil } // no wreck art → vanish
+                        sprite = ws
+                        wreck = true
+                    }
+                    let tex = sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
+                    let radius = CGFloat(sprite?.frameWidth ?? 48) / 2
+                    return PlanetVisual(id: spob.id, name: spob.name,
+                                        position: CGPoint(x: spob.x, y: spob.y),
                                         texture: tex, radius: radius,
-                                        government: entry.spob.government,
-                                        isUninhabited: entry.spob.isUninhabited)
+                                        government: spob.government,
+                                        isUninhabited: spob.isUninhabited || wreck)
                 }
                 // Start the player a little "south" of the system's actual centre
                 // (the centroid of its stellar bodies, not necessarily world origin)
@@ -846,6 +857,14 @@ struct GameContainerView: View {
     /// Shared by the manual land key, the on-screen Land pill, and the
     /// auto-landing autopilot's arrival.
     private func requestLanding(_ id: Int) {
+        // A destroyed stellar is a drifting wreck — you can't dock with it (unless
+        // it's a "reveal only when destroyed" base, which becomes a real port once
+        // its cover is blown).
+        if model.pilot.state.destroyedStellars?.contains(id) == true,
+           host?.game?.spob(id)?.landableOnlyWhenDestroyed != true {
+            host?.hud.post("Nothing but wreckage remains.")
+            return
+        }
         // A gate isn't a spaceport — landing on it *uses* it. Route gates to gate
         // travel instead of opening the port (and skip the land confirmation).
         if let game = host?.game, let spob = game.spob(id), spob.isGate {
@@ -908,12 +927,11 @@ struct GameContainerView: View {
     /// as EV Nova does on takeoff — and resume flight. Fuel carries over as-is
     /// (landing already topped it off; taking off doesn't spend or grant any).
     private func depart() {
-        let departedSpob = landedSpobID     // capture before the line below clears it
-        landedSpobID = nil
-        // Deferred a tick: `landedSpobID = nil` above fires its own `onChange` in
-        // the same transaction as the SpaceportView's `.transition(.opacity)`
-        // removal; doing the reload as its own clean update avoids piling model
-        // mutations onto that in-flight one.
+        let departedSpob = landedSpobID     // capture; we clear it last, below
+        // Deferred a tick so this runs as its own clean update rather than
+        // piling model mutations onto whatever transaction triggered the
+        // departure (a Leave tap, or a story `Q` op firing from inside a
+        // landing's `onChange`).
         DispatchQueue.main.async {
             model.pilot.save()
             model.autosave(reason: .manual)   // catch any shopping done during this landing
@@ -927,6 +945,15 @@ struct GameContainerView: View {
             // keyboard input wired to the same `InputController`. Same pattern the
             // hyperjump uses. Falls back to a full rebuild only if something's
             // missing (no live host/galaxy/game, or an unknown spöb).
+            //
+            // Crucially, the reload runs *while the spaceport still covers the
+            // viewport* (we clear `landedSpobID` only afterwards): the paused
+            // scene has been frozen on the pre-landing frame since you docked, so
+            // if the port faded out first it would briefly reveal that stale
+            // frame (old ship position, old NPCs) before the reload snapped
+            // everything into place. Reloading behind the still-opaque port, then
+            // dropping it, makes its fade reveal the finished launch state
+            // directly — no split-second flash of the old system.
             if let host, let galaxy = host.galaxy, let game = host.game, let spob = departedSpob {
                 let session = GameHost.buildPlayerShip(model: model, galaxy: galaxy, game: game)
                 host.hud.shipName = session.shipName
@@ -936,6 +963,7 @@ struct GameContainerView: View {
                 host.scene.reloadForDeparture(spobID: spob, player: session.ship,
                                               textures: session.textures,
                                               engineTextures: session.engineTextures)
+                landedSpobID = nil            // now fade the port out over the ready scene
                 setScenePaused(false, reason: "depart (in place)")
                 syncNav(host)
                 grabSceneFocus(reason: "depart")
@@ -943,6 +971,7 @@ struct GameContainerView: View {
                 host = GameHost(model: model, systemID: nav.currentSystemID)
                 hostSystemID = nav.currentSystemID
                 debug.attach(host?.scene)
+                landedSpobID = nil
                 setScenePaused(false, reason: "depart (rebuild)")
                 syncNav(host)
                 grabSceneFocus(reason: "depart")
@@ -1001,9 +1030,31 @@ struct GameContainerView: View {
             let name = model.data.game?.spob(spobID)?.name ?? "A stellar object"
             host?.hud.post(destroyed ? "\(name) has been destroyed." : "\(name) has been restored.")
         }
+        // Daily escort upkeep (charged by StoryEngine.payDailyEscortFees as the
+        // calendar advances): surface the total, and when the player can't cover
+        // a hired escort's fee it "departs without ceremony" — despawn its ship.
+        flightMissionServices.onEscortFeeCharged = { total in
+            host?.hud.post("Escort upkeep — \(total)cr.")
+        }
+        flightMissionServices.onEscortDeparted = { escortID, name in
+            host?.scene.despawnEscort(recordID: escortID)
+            host?.hud.post("\(name) leaves your service — you can't cover its daily fee.")
+        }
+        // An escort that dies in combat is gone for good: drop it from the pilot
+        // roster so it won't respawn next system (and a hired one stops billing).
+        host?.scene.onEscortLost = { recordID in
+            if let lost = model.pilot.state.removeEscort(id: recordID) {
+                host?.hud.post("\(lost.name) was destroyed.")
+            }
+            model.pilot.save()
+        }
         // Now that this system's world exists, drop in any active mission's
         // special ships whose `ShipSyst` matches here (deduped by the scene).
         spawnActiveMissionShips()
+        // Respawn the player's persistent escort wing — EV Nova's escorts follow
+        // their flagship between systems. The fresh world has none yet, so this
+        // (re)creates a live ship for each saved record and re-tags it.
+        host?.scene.respawnEscorts(model.pilot.state.escortWing.map { (recordID: $0.id, shipType: $0.shipType) })
         nav.attachShip(host?.scene.playerShip)
         if let galaxy = host?.galaxy {
             nav.maxJumpHops = model.pilot.maxJumpHops(galaxy: galaxy)
@@ -1053,6 +1104,16 @@ struct GameContainerView: View {
         let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
         engine.playerLanded(onSpob: spobID)
         model.pilot.state = engine.player
+
+        // Spaceport news: active-crön news for this station's government (local),
+        // falling back to the independent pool only when there's no local news —
+        // the Bible's per-station precedence, resolved here where the govt is
+        // known (not popped when the cron fired). Shown after any mission text.
+        let stationGovt = game.spob(spobID)?.government
+        let news = engine.stationNews(forGovt: stationGovt.flatMap { $0 >= 128 ? $0 : nil })
+        if !news.isEmpty, flightMissionServices.storyText == nil {
+            flightMissionServices.storyText = ("Spaceport News", news.joined(separator: "\n\n"))
+        }
     }
 
     /// A mission special-ship reached its player-side goal in combat (destroyed /
@@ -1581,7 +1642,14 @@ struct GameContainerView: View {
     }
 
     private func plunderCapture(_ scene: GameScene, shipID: Int) {
-        if scene.attemptCapture(shipID) {
+        if let cap = scene.attemptCapture(shipID) {
+            // A captured escort is FREE (no daily fee) — register it in the
+            // persistent roster so it follows the player between systems and can
+            // later be sold/upgraded at a shipyard.
+            let name = cap.name.isEmpty ? (model.data.game?.ship(cap.shipType)?.name ?? "Escort") : cap.name
+            let record = model.pilot.state.registerEscort(shipType: cap.shipType, name: name, origin: .captured)
+            scene.tagEscort(entityID: cap.entityID, recordID: record.id)
+            model.pilot.save()
             host?.hud.post("Ship captured — it joins your escorts.")
             boardManifest = nil
         } else {

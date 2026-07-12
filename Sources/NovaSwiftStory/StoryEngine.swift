@@ -640,6 +640,7 @@ public final class StoryEngine {
             player.date = player.date.adding(days: 1)
             payDailySalaries()
             payDailyTribute()
+            payDailyEscortFees()
             evaluateCrons()
             checkDeadlines()
         }
@@ -678,6 +679,30 @@ public final class StoryEngine {
             payout += spob.dailyTributeAmount
         }
         if payout > 0 { player.credits += payout }
+    }
+
+    /// Deduct the daily upkeep for the player's **hired** escorts — EV Nova's
+    /// recurring escort fee (captured/mission escorts are free). Charged once per
+    /// in-game day, so a multi-day hyperspace leg bills each day automatically via
+    /// the `advanceDays` loop. An escort the player can no longer afford "departs
+    /// without ceremony" (Bible/community behavior): it's dropped from the roster
+    /// and the app despawns its live ship on the `.escortDeparted` notification.
+    /// Fees are processed cheapest-first so a partial balance keeps as many
+    /// escorts as it can rather than losing the whole wing to one unaffordable one.
+    private func payDailyEscortFees() {
+        let hired = player.hiredEscorts
+        guard !hired.isEmpty else { return }
+        var charged = 0
+        for escort in hired.sorted(by: { $0.dailyFee < $1.dailyFee }) {
+            if player.credits >= escort.dailyFee {
+                player.credits -= escort.dailyFee
+                charged += escort.dailyFee
+            } else {
+                player.removeEscort(id: escort.id)
+                services?.notify(.escortDeparted(escortID: escort.id, name: escort.name))
+            }
+        }
+        if charged > 0 { services?.notify(.escortDailyFeeCharged(total: charged)) }
     }
 
     private func payDailySalaries() {
@@ -800,6 +825,46 @@ public final class StoryEngine {
     private func randomStringListEntry(_ strListID: Int) -> String? {
         guard let strings = game.stringList(strListID)?.strings, !strings.isEmpty else { return nil }
         return strings[rng.int(strings.count)]
+    }
+
+    /// The news the player reads at a station owned by `govt` (`nil` = an
+    /// independent/no-government station), applying the Bible's precedence:
+    /// *"local news always takes precedence over independent news"*. If any
+    /// active crön carries **local** news tagged for this govt — or a government
+    /// allied with it — those strings are returned; only when there is no
+    /// applicable local news does the shared **independent** pool show instead.
+    /// Empty ⇒ nothing in the news today. Resolved fresh at the station (the one
+    /// place that knows which govt applies), not popped when the crön fires.
+    public func stationNews(forGovt govt: Int?) -> [String] {
+        var local: [String] = []
+        var independent: [String] = []
+        for (cronID, rt) in player.cronRuntime where rt.isActive {
+            guard let c = game.cron(cronID) else { continue }
+            if let govt {
+                for i in 0..<4 {
+                    let newsGovt = c.newsGovts[i]
+                    guard c.govtNewsStrs[i] > 0, newsGovt >= 0,
+                          newsGovt == govt || govtsAllied(govt, newsGovt) else { continue }
+                    if let s = randomStringListEntry(c.govtNewsStrs[i]) { local.append(s) }
+                }
+            }
+            if c.independentNewsStrID > 0, let s = randomStringListEntry(c.independentNewsStrID) {
+                independent.append(s)
+            }
+        }
+        return local.isEmpty ? independent : local
+    }
+
+    /// Whether governments `a` and `b` are allied (class-based, per `gövt`:
+    /// A is allied with B if A's `Allies` classes intersect B's `Classes`).
+    /// Checked both directions so the relation is symmetric for news purposes.
+    private func govtsAllied(_ a: Int, _ b: Int) -> Bool {
+        guard a != b, let ga = game.govt(a), let gb = game.govt(b) else { return false }
+        let aAllies = Set(ga.allies.filter { $0 != -1 })
+        let bAllies = Set(gb.allies.filter { $0 != -1 })
+        let aClasses = Set(ga.classes.filter { $0 != -1 })
+        let bClasses = Set(gb.classes.filter { $0 != -1 })
+        return !aAllies.isDisjoint(with: bClasses) || !bAllies.isDisjoint(with: aClasses)
     }
 
     private func dateInWindow(_ c: CronRes) -> Bool {

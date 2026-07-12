@@ -34,7 +34,9 @@ final class AppModel: ObservableObject {
     let pilot = PilotStore()
 
     /// The durable library of all saved pilots (many `.evpilot` files + backups).
-    let roster = PilotRoster()
+    /// Backed by iCloud or local storage per `settings.iCloudSaves` — built in
+    /// `init` (after `settings`) so it can honour that toggle from launch.
+    let roster: PilotRoster
 
     /// Why a save is being written — drives whether a rotating backup is taken.
     enum SaveReason { case manual, land, jump, timer
@@ -53,6 +55,11 @@ final class AppModel: ObservableObject {
     private var dataObserver: AnyCancellable?
 
     init() {
+        // Build the roster honouring the saved iCloud preference. `settings` is
+        // already initialized (stored-property initializer runs before this
+        // body), so its toggle is available here. Falls back to local storage
+        // transparently if iCloud isn't reachable.
+        roster = PilotRoster(preferICloud: settings.iCloudSaves)
         // Re-publish when the data controller changes so views observing AppModel refresh.
         dataObserver = data.objectWillChange.sink { [weak self] _ in
             guard let self else { return }
