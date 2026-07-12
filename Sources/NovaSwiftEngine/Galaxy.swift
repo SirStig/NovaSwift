@@ -73,6 +73,8 @@ public struct ShipSpec {
     public let skillVar: Int
     /// `shïp.Flags2` 0x0080 — flees/docks once every ammo-using weapon is dry.
     public let fleeWhenOutOfAmmo: Bool
+    /// `shïp.Flags2` 0x0040 — inertialess (no-drift) flight.
+    public let inertialess: Bool
     /// `shïp.IonizeMax` — charge at which this hull is "fully ionized."
     public let ionizeMax: Double
     /// `shïp.Deionize`, converted to charge points dissipated per second.
@@ -205,7 +207,7 @@ public final class Galaxy {
             armorRechargePerSec: Double(s.armorRecharge) * 0.03,
             radius: radius, government: s.inherentGovt, strength: s.strength,
             disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, skillVar: s.skillVar,
-            fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo,
+            fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo, inertialess: s.inertialess,
             ionizeMax: Double(max(0, s.ionizeMax)), deionizePerSec: Double(max(0, s.deionize)) * 0.3,
             mounts: mounts, explosionSoundID: game.deathExplosionSoundID(s),
             exitPoints: exitPoints(forShip: id))
@@ -237,6 +239,7 @@ public final class Galaxy {
         ship.combatStrength = Double(max(1, spec.strength))
         ship.disableArmorFraction = spec.disableArmorFraction
         ship.fleeWhenOutOfAmmo = spec.fleeWhenOutOfAmmo
+        ship.inertialess = spec.inertialess
         ship.ionizeMax = spec.ionizeMax
         ship.deionizePerSec = spec.deionizePerSec
         return ship

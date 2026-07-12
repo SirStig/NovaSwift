@@ -78,4 +78,34 @@ final class FlightTests: XCTestCase {
         XCTAssertEqual(s.acceleration, 500 * 1.0, accuracy: 1e-9)
         XCTAssertGreaterThan(s.turnRate, 0)
     }
+
+    /// Inertialess flight (shïp Flags2 0x40): velocity tracks the nose with no
+    /// drift — turning redirects motion instead of leaving a momentum tail.
+    func testInertialessShipRedirectsVelocityWithoutDrift() {
+        let ship = Ship(name: "I", stats: ShipStats(maxSpeed: 120, acceleration: 300, turnRate: .pi * 2))
+        ship.inertialess = true
+        let world = World(player: ship)
+        world.intent.thrust = true
+        for _ in 0..<30 { world.step(1.0 / 30.0) }          // build speed heading "up"
+        XCTAssertGreaterThan(ship.velocity.y, 50)           // moving north
+        // Command an east heading; velocity should swing east and the north drift decay.
+        world.intent.desiredHeading = .pi / 2
+        for _ in 0..<60 { world.step(1.0 / 30.0) }          // 2s
+        XCTAssertGreaterThan(ship.velocity.x, 80, "inertialess ship moves along its new heading")
+        XCTAssertEqual(ship.velocity.y, 0, accuracy: 5, "no leftover drift in the old direction")
+    }
+
+    /// Inertialess hulls have no momentum: release the throttle and they bleed to a
+    /// stop rather than coasting forever like an inertial ship.
+    func testInertialessShipCoastsToStopWhenIdle() {
+        let ship = Ship(name: "I", stats: ShipStats(maxSpeed: 120, acceleration: 100, turnRate: .pi))
+        ship.inertialess = true
+        let world = World(player: ship)
+        world.intent.thrust = true
+        for _ in 0..<40 { world.step(1.0 / 30.0) }
+        XCTAssertGreaterThan(ship.velocity.length, 50)
+        world.intent = ControlIntent()                      // release everything
+        for _ in 0..<120 { world.step(1.0 / 30.0) }         // 4s
+        XCTAssertLessThan(ship.velocity.length, 1, "inertialess ship should coast to a stop, not glide on")
+    }
 }

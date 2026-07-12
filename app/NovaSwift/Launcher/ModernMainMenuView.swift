@@ -40,7 +40,7 @@ struct ModernMainMenuView: View {
 
                 pilotStatus
 
-                VStack(spacing: 11) {
+                VStack(spacing: 8) {
                     if model.roster.mostRecent != nil {
                         menuButton("Enter Ship", icon: "airplane.departure", prominent: true) {
                             model.continueMostRecent()
@@ -51,8 +51,8 @@ struct ModernMainMenuView: View {
                     menuButton("Settings", icon: "gearshape") { sheet = .settings }
                     menuButton("About Nova Swift", icon: "info.circle") { sheet = .about }
                 }
-                .frame(maxWidth: 380)
-                .padding(.bottom, 16)
+                .frame(maxWidth: 288)
+                .padding(.bottom, 14)
 
                 HStack(spacing: 10) {
                     smallButton("Plug-ins", "puzzlepiece.extension.fill") { sheet = .plugins }
@@ -100,12 +100,12 @@ struct ModernMainMenuView: View {
         Button {
             model.audio.play(.uiSelect); action()
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon).font(.body.weight(.semibold)).frame(width: 22)
-                Text(title).novaFont(.body, weight: .semibold)
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.callout.weight(.semibold)).frame(width: 18)
+                Text(title).novaFont(.body, weight: .semibold, size: 14)
                 Spacer()
             }
-            .padding(.horizontal, 18).padding(.vertical, 13)
+            .padding(.horizontal, 15).padding(.vertical, 9)
             .foregroundStyle(prominent ? Color.white : Color.white.opacity(0.92))
             .background {
                 if prominent {

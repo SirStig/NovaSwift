@@ -18,6 +18,10 @@ public struct CombatTuning {
     /// EV Nova stores recharge as "points per 1/30 s"; convert to per-second and
     /// soften a little so fights aren't unkillable.
     public var rechargeToPerSec: Double = 1.2
+    /// Extra multiplier on damage the *player's* ship takes (difficulty). 1 =
+    /// normal, <1 more forgiving (Easy), >1 harsher (Hard). Applied per hit in
+    /// `World.applyHit`, so it never touches NPC-vs-NPC combat.
+    public var playerDamageScale: Double = 1.0
 
     public static let `default` = CombatTuning()
 }

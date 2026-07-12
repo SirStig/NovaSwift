@@ -234,6 +234,10 @@ public struct ShipRes {
     /// "AI ships of this type will run away/dock if out of ammo for all
     /// ammo-using weapons" (EV Nova Bible, `shïp.Flags2` 0x0080).
     public var fleeWhenOutOfAmmo: Bool { flags2 & 0x0080 != 0 }
+    /// `shïp` Flags2 0x0040 — "Ship is inertialess" (Nova Bible): no momentum, the
+    /// hull's velocity tracks its heading with no drift. An `oütf` inertial-dampener
+    /// (ModType 38) grants the same at runtime.
+    public var inertialess: Bool { flags2 & 0x0040 != 0 }
     /// "The rate at which this ship type dissipates ionization charge. A
     /// value of 100 equals 1 point of ion energy per 1/30th of a second"
     /// (Bible). Offset verified against novaparse `ShipResource.ts` (`deionize`).

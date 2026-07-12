@@ -299,8 +299,10 @@ final class GameScene: SKScene {
         // spawner + system geometry) so the system fills with NPC traders, patrols
         // and pirates. Without it we fall back to a lone-ship physics world.
         if let game, systemID != 0 {
+            var tuning = CombatTuning.default
+            tuning.playerDamageScale = settings.difficulty.playerDamageScale   // difficulty
             let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID,
-                                                player: ship, galaxy: galaxy)
+                                                player: ship, combatTuning: tuning, galaxy: galaxy)
             self.world = w
             self.galaxy = gx
         } else {
@@ -1667,7 +1669,8 @@ final class GameScene: SKScene {
         let player = world.player
         // Fresh, populated world for the destination, reusing the player ship
         // (its fuel/damage/cargo carry over) and the same galaxy catalog.
-        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy)
+        var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, combatTuning: tuning, galaxy: galaxy)
 
         // Enter from the edge on the side we *came from* — the origin system's
         // direction, which is opposite the outbound bearing we jumped along — then
@@ -1723,7 +1726,8 @@ final class GameScene: SKScene {
         let game = galaxy.game
         // Fresh, populated world for the current system, built around the newly
         // constructed player ship (its fuel/damage/cargo already seeded from the pilot).
-        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy)
+        var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, combatTuning: tuning, galaxy: galaxy)
 
         // Lift off from the departed body: sit just clear of its surface, nose
         // pointed away from the system centre, at rest — EV Nova doesn't give

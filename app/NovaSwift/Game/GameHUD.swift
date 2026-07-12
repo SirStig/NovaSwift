@@ -143,130 +143,206 @@ struct RadarPlayerArrow: Shape {
     }
 }
 
-/// An original, EV-style flight HUD (our own artwork — not EV Nova's interface):
-/// status bars on the left, a radar scope on the right, a heading/velocity strip.
+/// The Nova Swift modern flight HUD (our own artwork — not EV Nova's `ïntf`):
+/// a compact right-hand sidebar of stacked panels — system/credits, radar,
+/// ship status, nav/course, target — echoing the original's right-side status
+/// bar layout in a modern style.
 struct GameHUDView: View {
     @ObservedObject var model: GameHUDModel
     var showRadar: Bool = true
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
-    private let panel = Color.black.opacity(0.35)
+    private let panel = Color.black.opacity(0.42)
+    private let sidebarW: CGFloat = 196
 
     var body: some View {
-        ZStack {
-            VStack {
-                HStack(alignment: .top) {
-                    statusPanel
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 8) {
-                        if showRadar { radar }
-                        targetPanel
-                    }
-                }
-                Spacer()
-                velocityStrip
+        HStack(alignment: .top, spacing: 0) {
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 7) {
+                systemPanel
+                if showRadar { radarPanel }
+                statusPanel
+                navPanel
+                targetPanel
             }
-            .padding(16)
+            .frame(width: sidebarW)
+            .padding(.top, 12).padding(.trailing, 12)
         }
         .allowsHitTesting(false)
         .font(.system(.caption, design: .monospaced))
         .foregroundStyle(.white)
     }
 
-    private var statusPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(model.shipName.uppercased())
-                .font(.system(.subheadline, design: .monospaced).weight(.bold))
-                .foregroundStyle(amber)
-            if !model.systemName.isEmpty {
-                Text(model.systemName)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            bar("SHIELD", model.shield, Color.cyan)
-            bar("ARMOR", model.armor, amber)
-            bar(model.jumps > 0 ? "FUEL · \(model.jumps) JUMP\(model.jumps == 1 ? "" : "S")" : "FUEL",
-                model.fuel, Color.green)
-            if model.cargoCapacity > 0 {
-                Text("CARGO \(model.cargoUsed)/\(model.cargoCapacity)t")
-                    .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
-            }
-        }
-        .padding(12)
-        .background(panel, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.12)))
+    /// A rounded panel wrapper shared by every sidebar block.
+    private func box<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+        content()
+            .frame(width: sidebarW, alignment: .leading)
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .background(panel, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.12)))
     }
 
-    /// The selected ship (name/govt/shield/armor) or, if only a planet is
-    /// selected, the nav-destination readout. Empty when nothing is selected.
+    /// Ship name, current system, credits and cargo — the "you & where you are"
+    /// block missing from the old layout.
+    private var systemPanel: some View {
+        box {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.shipName.isEmpty ? "SHIP" : model.shipName.uppercased())
+                    .font(.system(.footnote, design: .monospaced).weight(.bold))
+                    .foregroundStyle(amber).lineLimit(1)
+                if !model.systemName.isEmpty {
+                    infoRow("location.fill", model.systemName)
+                }
+                infoRow("dollarsign.circle", creditString(model.credits))
+                if model.cargoCapacity > 0 {
+                    infoRow("shippingbox", "\(model.cargoUsed) / \(model.cargoCapacity) t")
+                }
+            }
+        }
+    }
+
+    private func infoRow(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 9)).foregroundStyle(.secondary).frame(width: 12)
+            Text(text).font(.system(size: 10, design: .monospaced)).foregroundStyle(.white.opacity(0.9))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var radarPanel: some View {
+        box { radar.frame(maxWidth: .infinity) }
+    }
+
+    /// Shield / armor / fuel bars plus a compact flight line (speed, heading,
+    /// weapon, thrust/burn).
+    private var statusPanel: some View {
+        box {
+            VStack(alignment: .leading, spacing: 6) {
+                bar("SHIELD", model.shield, Color.cyan)
+                bar("ARMOR", model.armor, amber)
+                bar(model.jumps > 0 ? "FUEL · \(model.jumps) JUMP\(model.jumps == 1 ? "" : "S")" : "FUEL",
+                    model.fuel, Color.green)
+                HStack(spacing: 8) {
+                    Label("\(model.speed)", systemImage: "gauge.with.dots.needle.67percent")
+                    Text("\(Int(model.headingDegrees))°")
+                    Spacer(minLength: 0)
+                    if model.afterburning {
+                        Image(systemName: "flame.circle.fill").foregroundStyle(.orange)
+                    } else if model.thrusting {
+                        Image(systemName: "flame.fill").foregroundStyle(amber)
+                    }
+                    if model.controllerConnected {
+                        Image(systemName: "gamecontroller.fill").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                if !model.weaponName.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "scope").font(.system(size: 9))
+                        Text(model.weaponAmmo >= 0 ? "\(model.weaponName) ×\(model.weaponAmmo)" : model.weaponName)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 9, design: .monospaced)).foregroundStyle(.cyan)
+                }
+            }
+        }
+    }
+
+    /// The plotted hyperspace course or the selected-planet landing readout.
+    @ViewBuilder
+    private var navPanel: some View {
+        if !model.navCourseSystemName.isEmpty {
+            box {
+                VStack(alignment: .leading, spacing: 2) {
+                    sectionLabel("COURSE")
+                    Text(model.navCourseSystemName.uppercased())
+                        .font(.system(size: 11, design: .monospaced).weight(.semibold)).lineLimit(1)
+                    Text("\(model.navCourseJumps) JUMP\(model.navCourseJumps == 1 ? "" : "S")")
+                        .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                }
+            }
+        } else if !model.navTargetName.isEmpty {
+            box {
+                VStack(alignment: .leading, spacing: 2) {
+                    sectionLabel("DESTINATION")
+                    Text(model.navTargetName.uppercased())
+                        .font(.system(size: 11, design: .monospaced).weight(.semibold)).lineLimit(1)
+                    Text(model.navTargetLandable ? "Landable" : "No clearance")
+                        .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// The locked ship target (name / govt / shield / armor).
     @ViewBuilder
     private var targetPanel: some View {
         if !model.targetName.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(model.targetName.uppercased())
-                    .font(.system(.caption, design: .monospaced).weight(.bold))
-                    .foregroundStyle(model.targetHostile ? Color(red: 0.95, green: 0.35, blue: 0.3) : .white)
-                if !model.targetGovtLabel.isEmpty {
-                    Text(model.targetGovtLabel)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
+            box {
+                VStack(alignment: .leading, spacing: 5) {
+                    sectionLabel("TARGET")
+                    Text(model.targetName.uppercased())
+                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                        .foregroundStyle(model.targetHostile ? Color(red: 0.95, green: 0.35, blue: 0.3) : .white)
+                        .lineLimit(1)
+                    if !model.targetGovtLabel.isEmpty {
+                        Text(model.targetGovtLabel)
+                            .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                    if !model.targetHidesShieldArmorLine {
+                        bar("SHIELD", model.targetShield, Color.cyan)
+                        bar("ARMOR", model.targetArmor, amber)
+                    }
                 }
-                bar("SHIELD", model.targetShield, Color.cyan)
-                bar("ARMOR", model.targetArmor, amber)
             }
-            .padding(10)
-            .background(panel, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.12)))
-        } else if !model.navTargetName.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.navTargetName.uppercased())
-                    .font(.system(.caption, design: .monospaced).weight(.bold))
-                Text(model.navTargetLandable ? "Landable" : "No landing clearance")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(10)
-            .frame(width: 140, alignment: .leading)
-            .background(panel, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.12)))
         }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text).font(.system(size: 8, design: .monospaced).weight(.bold))
+            .foregroundStyle(.secondary).tracking(1)
     }
 
     private func bar(_ label: String, _ value: Double, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+            Text(label).font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.12))
                     Capsule().fill(color)
-                        .frame(width: max(2, geo.size.width * value))
+                        .frame(width: max(2, geo.size.width * max(0, min(1, value))))
                 }
             }
-            .frame(width: 140, height: 8)
+            .frame(height: 7)
         }
+    }
+
+    /// Abbreviated credit balance, e.g. "6.08M", "12.4k", "840".
+    private func creditString(_ c: Int) -> String {
+        if c >= 1_000_000 { return String(format: "%.2fM cr", Double(c) / 1_000_000) }
+        if c >= 10_000 { return String(format: "%.1fk cr", Double(c) / 1000) }
+        return "\(c) cr"
     }
 
     private var radar: some View {
         ZStack {
-            Circle().fill(panel)
+            Circle().fill(Color.black.opacity(0.3))
             Circle().strokeBorder(amber.opacity(0.5), lineWidth: 1)
             Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1).scaleEffect(0.6)
-            // Contacts, drawn crisply in one pass.
             Canvas { ctx, size in
                 let c = CGPoint(x: size.width / 2, y: size.height / 2)
                 let r = min(size.width, size.height) / 2 - 5
                 for b in model.planetBlips {
-                    let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5,
-                                      width: 5, height: 5)
+                    let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5, width: 5, height: 5)
                     ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                 }
                 for b in model.blips {
-                    let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5,
-                                      width: 3, height: 3)
+                    let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5, width: 3, height: 3)
                     ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                 }
             }
-            // Player at center.
             ZStack {
                 RadarPlayerArrow().fill(.cyan)
                 RadarPlayerArrow().stroke(.white.opacity(0.8), lineWidth: 0.5)
@@ -274,33 +350,6 @@ struct GameHUDView: View {
             .frame(width: 9, height: 12)
             .rotationEffect(.degrees(model.headingDegrees))
         }
-        .frame(width: 108, height: 108)
-    }
-
-    private var velocityStrip: some View {
-        HStack(spacing: 14) {
-            Label("\(model.speed)", systemImage: "gauge.with.dots.needle.67percent")
-            Text("HDG \(Int(model.headingDegrees))°")
-            if !model.weaponName.isEmpty {
-                Label {
-                    Text(model.weaponAmmo >= 0 ? "\(model.weaponName) ×\(model.weaponAmmo)" : model.weaponName)
-                } icon: {
-                    Image(systemName: "scope")
-                }
-                .foregroundStyle(.cyan)
-            }
-            if model.afterburning {
-                Label("BURN", systemImage: "flame.circle.fill").foregroundStyle(.orange)
-            } else if model.thrusting {
-                Label("THRUST", systemImage: "flame.fill").foregroundStyle(amber)
-            }
-            if model.controllerConnected {
-                Image(systemName: "gamecontroller.fill").foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(panel, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
-        .frame(maxWidth: .infinity)
+        .frame(width: 120, height: 120)
     }
 }

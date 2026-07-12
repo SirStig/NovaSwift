@@ -695,30 +695,34 @@ public final class AIBrain {
         prevLeaderVel = leader.velocity
 
         // FAR from the slot (returning from a fight, freshly hired): fly in with the
-        // stopping-point steering so a heavy hull decelerates cleanly onto station
-        // instead of sailing through and wheeling around it.
+        // stopping-point steering so the hull decelerates cleanly onto station
+        // instead of sailing through and wheeling around it. A modest limit-lift
+        // keeps the return brisk and lets it catch a cruising leader, while still
+        // reading as real thruster flight.
         if d > 150 {
             let (intent, _) = moveTo(me, toward: station, matching: leader.velocity,
                                      arriveRadius: 16, arriveSpeed: max(6, me.stats.maxSpeed * 0.04))
-            var out = intent
-            if out.thrust { me.formationAssist = min(0.5, d / 900) }   // reel-in headroom
-            return out
+            me.formationBoost = 0.4
+            return intent
         }
 
-        // IN the slot: a predictive PD station-keeper. Command an acceleration that
-        // corrects position and velocity error *and* carries the leader's own
-        // acceleration forward, so the wing moves as one — anticipating the leader
-        // rather than reacting to it. Slightly over-damped (kd a touch high) so it
-        // eases onto station without the overshoot-and-recorrect wobble.
+        // IN the slot: lift the ship's limits (EV Nova escorts ignore their own
+        // speed/maneuverability to hold formation) and run a predictive PD
+        // station-keeper. The command corrects position and velocity error *and*
+        // carries the leader's own acceleration forward, so the wing moves as one —
+        // anticipating the leader rather than reacting to it. Slightly over-damped
+        // so it eases onto station without the overshoot-and-recorrect wobble; the
+        // lifted turn rate lets it hold heading with the leader through hard turns.
+        me.formationBoost = 1.0
         let posErr = toStation
         let velErr = leader.velocity - me.velocity
         let kp = 3.0, kd = 4.2
         let aCmd = posErr * kp + velErr * kd + leaderAccel
 
         var intent = ControlIntent()
-        // Deadzone: essentially on-station and matched. Under Newtonian flight,
-        // coasting holds station, so point along the flagship and don't thrust —
-        // this is what ends the perpetual micro-turning the reactive controller did.
+        // Deadzone: essentially on-station and matched. Coasting holds station, so
+        // point along the flagship and don't thrust — this is what ends the
+        // perpetual micro-turning the reactive controller did.
         if aCmd.length < me.stats.acceleration * 0.2 {
             if abs(angleDelta(from: me.angle, to: leader.angle)) > 0.03 {
                 intent.desiredHeading = leader.angle
@@ -733,7 +737,6 @@ public final class AIBrain {
             intent.desiredHeading = aimDir.angle
         }
         if aimDir.dot(Vec2.heading(me.angle)) > cosThrustCone { intent.thrust = true }
-        me.formationAssist = 0.3
         return intent
     }
 

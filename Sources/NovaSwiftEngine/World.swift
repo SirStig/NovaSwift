@@ -1463,6 +1463,13 @@ public final class World {
 
     private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
                           ionization: Double = 0) {
+        // Difficulty: scale only the damage the *player* takes (Easy softens,
+        // Hard sharpens); NPC-vs-NPC combat is untouched.
+        var shield = shield, armor = armor
+        if ship.isPlayer, combatTuning.playerDamageScale != 1.0 {
+            shield *= combatTuning.playerDamageScale
+            armor  *= combatTuning.playerDamageScale
+        }
         let hadShield = ship.shield > 0
         // Per-hit logging isn't gated like everything else in this file (no
         // "log on change/transition" here — every hit is its own event), and

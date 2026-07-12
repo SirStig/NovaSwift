@@ -128,6 +128,9 @@ public struct Loadout {
     /// `oütf` ModType 20 (auto-eject): automatically ejects the pilot on death
     /// (requires an escape pod to work, per the Bible).
     public var hasAutoEject: Bool = false
+    /// Inertialess flight — the hull's `shïp` Flags2 0x0040 or any fitted
+    /// inertial-dampener (`oütf` ModType 38). Drives the no-drift flight model.
+    public var inertialess: Bool = false
 
     /// The hull's `shïp.Crew` complement — the number the boarding/capture-odds
     /// math uses on both sides (attacker's own crew, defender's crew). See
@@ -253,6 +256,7 @@ extension Galaxy {
         var cloakFlags = 0, cloakScannerFlags = 0
         var interferenceReduction = 0, murkModifier = 0
         var hasEscapePod = s.podCount > 0, hasAutoEject = false
+        var inertialess = s.inertialess        // hull flag; an inertial-dampener outfit ORs in below
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
 
@@ -306,6 +310,7 @@ extension Galaxy {
                 case .murk:            murkModifier += v             // adjusts system Murk
                 case .escapePod:       hasEscapePod = true           // ModType 11
                 case .autoEject:       hasAutoEject = true           // ModType 20 (needs a pod)
+                case .inertialDamper:  inertialess = true            // ModType 38 → no-inertia flight
                 // ModType 27 (increaseMax) is not a ship-stat modifier: its only
                 // effect is raising another outfit's purchase cap, enforced at buy
                 // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
@@ -366,7 +371,7 @@ extension Galaxy {
             fighterBays: fighterBays,
             cloakFlags: cloakFlags, cloakScannerFlags: cloakScannerFlags,
             interferenceReduction: interferenceReduction, murkModifier: murkModifier,
-            hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject,
+            hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject, inertialess: inertialess,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus)
     }
 
@@ -419,6 +424,7 @@ extension Galaxy {
         ship.marineCrew = lo.marineCrew
         ship.captureOddsBonus = lo.captureOddsBonus
         ship.fighterBays = lo.fighterBays.map { Ship.FighterBay(spec: $0) }
+        ship.inertialess = lo.inertialess
         ship.cloakFlags = lo.cloakFlags
         ship.cloakScannerFlags = lo.cloakScannerFlags
         ship.interferenceReduction = lo.interferenceReduction
