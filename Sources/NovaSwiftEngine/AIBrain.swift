@@ -66,12 +66,6 @@ public final class AIBrain {
     public var leaderID: Int?
     /// This escort's slot in the leader's formation (0-based), for tidy wings.
     public var formationSlot = 0
-    /// How fully this escort is welded into its formation slot: 0 = flying in
-    /// under physics, 1 = rigidly locked (perfect tracking). Ramps up as the
-    /// escort closes on the slot so it slides in smoothly instead of snapping,
-    /// then holds at 1 for zero-lag station-keeping. Reset to 0 whenever the
-    /// escort leaves the escorting state (to fight, flee, or hold).
-    private var formationBlend: Double = 0
     /// Standing order for a player escort (`leaderID == 0`). Ignored by ordinary
     /// NPC-fleet escorts, which always behave as `.defensive`.
     public var escortOrder: EscortOrder = .defensive
@@ -435,10 +429,6 @@ public final class AIBrain {
         guard s != state else { return }
         let tag = shipTag, from = state
         Log.ai.debug("\(tag) AI state \(from.rawValue) -> \(s.rawValue)")
-        // Leaving formation: drop the weld so re-entering escorting later flies
-        // the ship back in from wherever the fight/flight left it, rather than
-        // snapping it to a slot it's no longer near.
-        if from == .escorting, s != .escorting { formationBlend = 0 }
         state = s
         stateClock = 0
         if s == .traveling || s == .patrolling || s == .orbiting { destination = nil }
@@ -674,8 +664,6 @@ public final class AIBrain {
             let tag = shipTag, leaderDesc = leaderID.map(String.init) ?? "nil"
             Log.ai.debug("\(tag) escort leader [\(leaderDesc)] gone — reverting to own disposition")
             leaderID = nil
-            formationBlend = 0
-            me.formationHold = nil
             enter(defaultIdleState(me, world))
             return ControlIntent()
         }
@@ -693,40 +681,42 @@ public final class AIBrain {
         let toStation = station - me.position
         let d = toStation.length
 
-        // Weld engagement. Ramp `formationBlend` up once we're within engage range
-        // of the slot, down when knocked well outside it. At blend 1 the escort is
-        // placed exactly on the (moving, turning) slot every frame — perfect,
-        // lag-free tracking; while ramping it eases in so joining the wing slides
-        // into place rather than snapping.
-        let engageRange = 220.0
-        let blendTime = 0.45           // seconds from first contact to fully rigid
-        if d < engageRange {
-            formationBlend = min(1, formationBlend + dt / blendTime)
+        // Physics station-keeping (the ship flies its slot with real thrusters and
+        // its own turn rate — it corrects, banks and reforms visibly, never snaps).
+        //
+        // Target a *velocity*, not a point: carry the leader's velocity forward so
+        // a formed-up wing simply cruises with the flagship, plus a spring pull onto
+        // the exact slot that grows with the gap. This is a moving-target arrive —
+        // stable because both terms change slowly (leader motion + our position),
+        // so a turn-rate-limited hull can actually track it instead of chasing a
+        // fast-swinging blended heading (the old spin trap).
+        let spring = 2.6                                   // 1/sec pull toward the slot
+        var desiredVel = leader.velocity + toStation * spring
+        // Formation speed headroom: allow up to +50% over hull max while a long way
+        // out so an escort that fell behind a cruising leader can reel back in, then
+        // fade it to 0 as we settle so the formed wing runs at true hull speed.
+        let margin = min(0.5, d / 700)
+        let capV = me.stats.maxSpeed * (1 + margin)
+        if desiredVel.length > capV { desiredVel = desiredVel.normalized * capV }
+
+        let dv = desiredVel - me.velocity                  // velocity change we want
+        var intent = ControlIntent()
+        if dv.length > me.stats.maxSpeed * 0.05 {
+            // Point where we need to push and burn — but only once the nose is
+            // genuinely lined up, so a heavy hull rotates to face first rather than
+            // thrusting sideways (the "pointed one way, sliding another" look).
+            intent.desiredHeading = dv.angle
+            let aim = abs(angleDelta(from: me.angle, to: dv.angle))
+            if aim < .pi / 4 { intent.thrust = true }
+            // Only spend the catch-up headroom while actually burning to close a
+            // real gap — never while settled, so steady formation shows no cheat.
+            if intent.thrust, d > 60 { me.formationAssist = margin }
         } else {
-            formationBlend = max(0, formationBlend - dt / blendTime)
+            // Matched to the slot: sit nose-forward with the flagship so a settled
+            // wing points the same way instead of jittering on a meaningless dv.
+            intent.desiredHeading = leader.angle
         }
-
-        // Kinematic follow, but only while genuinely near the slot — the `d` guard
-        // stops a large station jump (e.g. the leader lunging away) from dragging a
-        // still-blended escort across the screen; it falls back to flying in.
-        if formationBlend > 0.001, d < engageRange * 1.4 {
-            // Ease the fraction `formationBlend` of the remaining gap each frame:
-            // at blend 1 that lands exactly on the slot (rigid), and below 1 it
-            // converges within a few frames then holds, since on-station the gap is
-            // ~0 regardless. Heading and velocity blend to the leader's so the whole
-            // wing reads as one rigid body under way.
-            let pos = me.position + toStation * formationBlend
-            let ang = me.angle + angleDelta(from: me.angle, to: leader.angle) * formationBlend
-            let vel = me.velocity + (leader.velocity - me.velocity) * formationBlend
-            me.formationHold = Ship.FormationHold(position: pos, velocity: vel, angle: ang)
-            return ControlIntent()      // physics bypassed this frame (world applies the weld)
-        }
-
-        // Too far out to weld yet: fly in under real physics, feeding the leader's
-        // velocity forward so we settle onto a moving slot cleanly.
-        me.formationHold = nil
-        let aheadStation = station + leader.velocity * 0.4
-        return arrive(me, to: aheadStation, slowRadius: 120)
+        return intent
     }
 
     /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
@@ -831,7 +821,12 @@ public final class AIBrain {
         let heading = aim.length > 1 ? aim.angle : dir.angle
         intent.desiredHeading = heading
         let deadband = cruise * 0.03    // ignore trivial shortfalls so we don't jitter on course
-        if along < desiredSpeed - deadband, abs(angleDelta(from: me.angle, to: heading)) < .pi / 2 {
+        // Burn only once the nose is genuinely lined up with where we want to go.
+        // The old 90° gate let a slow-turning hull thrust while still slewed most of
+        // a right angle off heading — the "big ship pointed one way but sliding
+        // another" look. A 60° cone makes heavy ships rotate to face, then burn, so
+        // thrust pushes them along their nose instead of sideways.
+        if along < desiredSpeed - deadband, abs(angleDelta(from: me.angle, to: heading)) < .pi / 3 {
             intent.thrust = true
         }
         return intent

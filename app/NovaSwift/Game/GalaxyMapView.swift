@@ -231,7 +231,7 @@ struct GalaxyMapView: View {
         // Fog of war: what the player currently knows about each system.
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
-        let adjacent = nav.adjacentToExplored(explored)
+        let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
         var visibility: [Int: SystemVisibility] = [:]
         for s in systems {
             visibility[s.id] = nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted)
@@ -356,21 +356,25 @@ struct GalaxyMapView: View {
             let isKnownDetail = vis == .explored || vis == .chartered
             let hopAffordable = hopIndex.map { $0 < nav.availableJumps } ?? true
 
-            // The dot: current is amber, on-route hops are green/red by
-            // affordability, otherwise coloured by the player's *relationship* to
-            // the system's government (blue friendly / yellow neutral / red
-            // wanted / grey pirate·uninhabited), dim grey if only seen-as-adjacent
-            // (unconfirmed allegiance).
-            let r: CGFloat = isCurrent || isDestination ? 3.5 : (isKnownDetail ? 2.5 : 2.0)
-            let dot = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            // The system marker: a hollow ring (EV Nova draws systems as circle
+            // outlines, not solid discs), coloured by state — current is amber,
+            // on-route hops are green/red by affordability, otherwise the
+            // player's *relationship* to the system's government (blue friendly /
+            // yellow neutral / red wanted / grey pirate·uninhabited), dim grey if
+            // only seen-as-adjacent (unconfirmed allegiance). The current system
+            // also gets a solid centre pip so "you are here" still reads at a
+            // glance under the blinking crosshair.
+            let markColor: Color = isCurrent ? amber
+                : onRoute ? (hopAffordable ? routeGreen : routeWarn)
+                : isKnownDetail ? relationColor(for: s, game: game)
+                : adjacentGrey
+            let r: CGFloat = isCurrent || isDestination ? 5 : 4
+            let ring = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            ctx.stroke(ring, with: .color(markColor), lineWidth: 1.4)
             if isCurrent {
-                ctx.fill(dot, with: .color(amber))
-            } else if onRoute {
-                ctx.fill(dot, with: .color(hopAffordable ? routeGreen : routeWarn))
-            } else if isKnownDetail {
-                ctx.fill(dot, with: .color(relationColor(for: s, game: game)))
-            } else {
-                ctx.fill(dot, with: .color(adjacentGrey))
+                let pipR: CGFloat = 1.8
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - pipR, y: p.y - pipR, width: pipR * 2, height: pipR * 2)),
+                         with: .color(amber))
             }
 
             // Destination ring: green if the whole course is affordable right
@@ -464,7 +468,7 @@ struct GalaxyMapView: View {
         guard let cur = nav.current else { return }
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
-        let adjacent = nav.adjacentToExplored(explored)
+        let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
         let center = CGPoint(x: viewSize.width / 2 + pan.width,
                              y: viewSize.height / 2 + pan.height)
         var best: (id: Int, dist: CGFloat)?
@@ -511,7 +515,7 @@ struct GalaxyMapView: View {
         guard let cur = nav.current else { return }
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
-        let adjacent = nav.adjacentToExplored(explored)
+        let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
         let nearest = nav.systems()
             .filter { s in
                 s.id != cur.id
@@ -628,7 +632,8 @@ struct GalaxyMapView: View {
 
     private func legendRow(_ c: Color, _ label: String) -> some View {
         HStack(spacing: 5) {
-            Circle().fill(c).frame(width: 6, height: 6)
+            // A hollow ring, matching how systems are drawn on the map itself.
+            Circle().strokeBorder(c, lineWidth: 1.2).frame(width: 7, height: 7)
             NovaText(label, size: 9, color: .white.opacity(0.85))
         }
     }
@@ -650,8 +655,8 @@ struct GalaxyMapView: View {
             let infoID = nav.destinationID ?? nav.currentSystemID
             if let sys = nav.system(infoID) {
                 let explored = pilot.state.exploredSystems
-                let adjacent = nav.adjacentToExplored(explored)
                 let charted = pilot.chartedSystems
+                let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
                 let vis = nav.visibility(of: infoID, explored: explored, adjacent: adjacent, charted: charted)
                 let known = vis == .explored || vis == .chartered
                 ScrollView(showsIndicators: false) {
@@ -703,9 +708,10 @@ struct GalaxyMapView: View {
                 let hops = nav.nextJumpHopCount
                 let canGo = nav.canAfford(hops: hops)
                 let explored = pilot.state.exploredSystems
+                let charted = pilot.chartedSystems
                 let destKnown = nav.visibility(of: destID, explored: explored,
-                                               adjacent: nav.adjacentToExplored(explored),
-                                               charted: pilot.chartedSystems)
+                                               adjacent: nav.adjacentToKnown(explored: explored, charted: charted),
+                                               charted: charted)
                     != .adjacent
                 let destName = destKnown ? dest.name : "Unexplored"
                 // Frame-pixel Geneva (like all in-frame text), not `.novaFont`

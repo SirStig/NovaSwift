@@ -23,7 +23,7 @@ struct SystemFinderView: View {
         guard let game = nav.game else { return [] }
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
-        let adjacent = nav.adjacentToExplored(explored)
+        let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
         return nav.systems()
             .filter {
                 let vis = nav.visibility(of: $0.id, explored: explored, adjacent: adjacent, charted: charted)

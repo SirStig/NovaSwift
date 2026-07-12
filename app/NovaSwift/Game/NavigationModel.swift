@@ -121,6 +121,18 @@ final class NavigationModel: ObservableObject {
         Set(explored.flatMap { game?.system($0)?.links ?? [] })
     }
 
+    /// The visible frontier one hop beyond *all* known space — neighbours of
+    /// every system the player has either visited (`explored`) or revealed with
+    /// a purchased/granted map (`charted`). Charting a system therefore also
+    /// surfaces *its* neighbours as `.adjacent`, so a bought map doesn't dead-end
+    /// at its own edge: you can keep plotting a course onward through the
+    /// systems it connects to (previously only *visited* systems projected a
+    /// frontier, leaving charted-but-unvisited systems' links invisible and
+    /// unroutable).
+    func adjacentToKnown(explored: Set<Int>, charted: Set<Int>) -> Set<Int> {
+        adjacentToExplored(explored.union(charted))
+    }
+
     /// What the player currently knows about system `id`, for map fog-of-war.
     /// `explored` is the player's visited-systems set; `adjacent` is its
     /// precomputed `adjacentToExplored(_:)`; `charted` is the set of systems a

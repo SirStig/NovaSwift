@@ -704,19 +704,17 @@ final class GameScene: SKScene {
                 if entityID == 0 { audio?.play(.docking) }
             case let .shipDisabled(_, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
-            case let .shipScanned(scannerID, targetID, at):
+            case let .shipScanned(scannerID, targetID, _):
+                // Only the player's own scan matters to the player — post the
+                // message and wire the contraband-fine consequence. NPC-on-NPC
+                // scans happen silently (no on-screen sweep); the green ring read
+                // as clutter over every passing ship.
                 if targetID == 0 {
-                    // The player doesn't need a visual sweep over their own ship —
-                    // just the bottom-left message log, like other ambient messages.
                     hud?.post("You are being scanned.")
-                    // The scanning government checks the player's holds/equipment
-                    // for contraband and fines it (host wires the consequence,
-                    // which needs pilot state). -1 govt = independent (no scan law).
+                    // -1 govt = independent (no scan law).
                     if let govt = world.ship(id: scannerID)?.government, govt >= 0 {
                         onPlayerScanned?(govt)
                     }
-                } else {
-                    spawnScanSweep(at: CGPoint(x: at.x, y: at.y))
                 }
             case let .assistanceDelivered(entityID):
                 let name = world.ship(id: entityID)?.name ?? "Ally"
@@ -1879,27 +1877,6 @@ final class GameScene: SKScene {
         ring.run(.sequence([.group([.scale(to: 2.0, duration: 0.3),
                                     .fadeOut(withDuration: 0.3)]),
                             .removeFromParent()]))
-    }
-
-    /// A scan sweep over a ship: a soft expanding ring, evoking a sensor pass —
-    /// what the local authority does when it flies over to "check you out."
-    private func spawnScanSweep(at point: CGPoint) {
-        for i in 0..<2 {
-            let ring = SKShapeNode(circleOfRadius: 10)
-            ring.position = point
-            ring.strokeColor = SKColor(red: 0.4, green: 1.0, blue: 0.6, alpha: 0.85)
-            ring.fillColor = .clear
-            ring.lineWidth = 2
-            ring.blendMode = .add
-            ring.zPosition = 13
-            ring.alpha = 0
-            effectsLayer.addChild(ring)
-            ring.run(.sequence([.wait(forDuration: Double(i) * 0.25),
-                                .group([.fadeIn(withDuration: 0.05),
-                                        .sequence([.scale(to: 3.2, duration: 0.55),
-                                                   .fadeOut(withDuration: 0.2)])]),
-                                .removeFromParent()]))
-        }
     }
 
     /// Pull a live NPC's node out of the pool so subsequent syncs won't touch it,

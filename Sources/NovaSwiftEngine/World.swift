@@ -386,23 +386,13 @@ public final class Ship {
     /// normal gameplay ever sets it, so it's inert unless a developer flips it.
     public var invulnerable = false
 
-    /// A rigid formation weld requested by this ship's AI *this frame*. When set,
-    /// `World.step` places the ship at exactly this transform instead of stepping
-    /// it from a `ControlIntent` — the "welded triangle" that lets an escort track
-    /// its leader with zero lag (matching EV Nova's perfect formation flying).
-    /// The brain re-sets it every frame it wants the weld; `World.step` consumes
-    /// and clears it, so a ship that stops requesting it reverts to real physics
-    /// on the very next frame. Nil for every ship not currently holding station.
-    var formationHold: FormationHold?
-
-    /// The transform a `formationHold` welds a ship to: its leader-relative slot
-    /// position, the velocity to carry (cosmetic — drives thruster/radar), and the
-    /// heading to point (the whole wing shares the leader's heading).
-    struct FormationHold {
-        var position: Vec2
-        var velocity: Vec2
-        var angle: Double
-    }
+    /// Extra speed/acceleration headroom (as a fraction, e.g. 0.4 = +40%) an AI
+    /// grants itself *this frame* to close a gap — used by escorts catching back up
+    /// to a cruising leader so a same-speed hull that dropped behind can actually
+    /// reel in under its own thrust instead of trailing forever. It fades to 0 as
+    /// the escort settles into its slot, so a formed-up wing flies at true hull
+    /// speed. `Ship.step` reads and clears it each frame; 0 for everything else.
+    var formationAssist: Double = 0
 
     // Diagnostics: last known-good motion state (NaN/Infinity guard) and
     // one-shot flags so we log state *transitions*, never every frame.
@@ -548,6 +538,14 @@ public final class Ship {
         // speed cap, draining fuel. EV Nova's afterburner is a held control.
         var accel = stats.acceleration
         var topSpeed = stats.maxSpeed
+        // Formation catch-up headroom (escorts reeling back into their slot). Read
+        // once and cleared, so it only applies on frames the AI actually asked for
+        // it and never leaks into normal flight.
+        if formationAssist > 0 {
+            accel *= (1 + formationAssist)
+            topSpeed *= (1 + formationAssist)
+        }
+        formationAssist = 0
         afterburnerActive = false
         if controllable, intent.afterburner, let ab = afterburner, fuel > 0 {
             afterburnerActive = true
@@ -824,20 +822,6 @@ public final class World {
             } else {
                 npc.logNoBrainOnce()
                 npcIntent = ControlIntent()
-            }
-            // Rigid formation weld: an escort holding station is placed exactly at
-            // its leader-relative slot rather than flown there under physics, so
-            // the wing tracks the leader's every turn/accel/stop with zero lag —
-            // the "perfect triangle". The brain re-requests this each frame it
-            // wants it; we consume and clear it so dropping formation (to fight,
-            // flee, or a Hold order) hands control straight back to real physics.
-            if let hold = npc.formationHold {
-                npc.formationHold = nil
-                npc.angle = hold.angle
-                npc.velocity = hold.velocity
-                npc.position = hold.position
-                wrapIntoSystem(npc)
-                continue
             }
             fireWeapons(from: npc, intent: npcIntent)
             npc.step(dt, intent: npcIntent, tuning: tuning)
