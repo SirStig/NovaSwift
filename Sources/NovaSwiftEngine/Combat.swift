@@ -587,4 +587,44 @@ public enum WorldEvent {
     /// escorts that leave at a plot point, or a cancelled mission) via
     /// `World.despawnMissionShips`. Not a kill — they simply vanish/jump out.
     case missionShipsDespawned(missionID: Int, entityIDs: [Int])
+
+    /// The player demanded tribute from a stellar and was rebuffed — the renderer
+    /// shows the matching "the planet laughs at you / is unimpressed / can't be
+    /// dominated" message. See `TributeRefusal`.
+    case tributeRefused(spobID: Int, reason: TributeRefusal)
+    /// A stellar launched a wave of its defense fleet (`spöb.DefenseDude`) in
+    /// response to a tribute demand. `count` just launched, `remainingPool` still
+    /// to come after this wave.
+    case stellarDefendersLaunched(spobID: Int, count: Int, remainingPool: Int)
+    /// The player broke a stellar's defenses and it surrendered: it is now
+    /// dominated. The host persists it (`PlayerState.dominatedStellars`), applies
+    /// the stellar's `OnDominate` control bits, and starts paying its daily tribute.
+    case stellarDominated(spobID: Int)
+}
+
+/// Why a Demand-Tribute attempt was rebuffed (`WorldEvent.tributeRefused`).
+public enum TributeRefusal: Sendable, Equatable {
+    /// The player's combat rating is too low — the planet isn't intimidated.
+    case combatRatingTooLow(required: Int)
+    /// The stellar has no defense fleet, so it can't be forced to submit at all.
+    case noDefenseFleet
+    /// The stellar is already dominated by the player.
+    case alreadyDominated
+    /// Not an inhabited/governed stellar the player can dominate (no govt, a
+    /// gate, an uninhabited rock).
+    case notDominatable
+}
+
+/// The result of `World.demandTribute`.
+public enum TributeOutcome: Sendable, Equatable {
+    /// The demand was rebuffed (see reason). No fight started.
+    case refused(TributeRefusal)
+    /// The planet answered with force: `launched` defenders jumped in this
+    /// instant, and the fight is on (more waves may follow as they're destroyed).
+    case defending(launched: Int)
+    /// The planet is still defending from an earlier demand — its defenders
+    /// aren't beaten yet, so it has nothing new to say.
+    case stillDefending
+    /// The planet's defenses are broken; it surrendered and is now dominated.
+    case dominated
 }

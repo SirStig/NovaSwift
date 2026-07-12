@@ -128,6 +128,11 @@ public struct PlayerState: Codable, Sendable {
     public var combatRating: Int
     public var legalRecord: [Int: Int]    // govt id → standing (+ good, − wanted)
     public var activeRanks: Set<Int>      // ränk ids currently held
+    /// `spöb` ids the player has dominated via Demand Tribute. Each pays its
+    /// `spöb.Tribute` (credits/day) automatically as the galaxy clock advances
+    /// (see `StoryEngine.payDailyTribute`). Optional so pilots saved before this
+    /// feature still decode (treated as empty). See docs/reverse-engineering/DOMINATION.md.
+    public var dominatedStellars: Set<Int>?
 
     // Story
     public var setBits: Set<Int>          // the NCB control-bit vector
@@ -191,6 +196,13 @@ public struct PlayerState: Codable, Sendable {
         let remaining = (outfits[id] ?? 0) - count
         if remaining > 0 { outfits[id] = remaining } else { outfits[id] = nil }
     }
+
+    /// Whether the player has dominated stellar `id`.
+    public func hasDominated(_ id: Int) -> Bool { dominatedStellars?.contains(id) ?? false }
+    /// Record stellar `id` as dominated (idempotent).
+    public mutating func dominate(_ id: Int) { dominatedStellars = (dominatedStellars ?? []).union([id]) }
+    /// Release stellar `id` from domination (it stops paying tribute).
+    public mutating func releaseDomination(_ id: Int) { dominatedStellars?.remove(id) }
 
     /// Whether system `id` has been revealed by a map/chart outfit (but not
     /// necessarily visited). See `chartedSystems`.

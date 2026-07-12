@@ -321,6 +321,12 @@ public final class Ship {
     /// the world when the ship is destroyed/disabled to fire the matching
     /// `missionShipGoalReached` event. nil = not a mission ship, or no goal.
     public var missionShipGoal: MissionShipGoal?
+
+    /// Set on a ship launched as a stellar's defense fleet (`spöb.DefenseDude`)
+    /// during a Demand-Tribute fight — the `spöb` id it's defending. The
+    /// domination flow counts these to know when a planet's defenders are cleared.
+    /// nil for everything else.
+    public var spobDefenderOf: Int?
     /// Outfit ids this hulk still owes the player as `përs` boarding loot; nil =
     /// not yet rolled, empty = already taken. See `World.takePlunderOutfits`.
     public var plunderOutfits: [Int]?
@@ -650,6 +656,10 @@ public final class World {
     /// Transient render/audio events produced this step; drain after `step`.
     public private(set) var events: [WorldEvent] = []
 
+    /// Append a world event. Exists so code in sibling files (e.g.
+    /// `Domination.swift`) can emit without `events`' file-private setter.
+    func emit(_ event: WorldEvent) { events.append(event) }
+
     /// Diplomacy table (governments & player standing). Optional so a bare
     /// physics world still works; when nil, nobody is hostile.
     public var diplomacy: Diplomacy?
@@ -659,6 +669,29 @@ public final class World {
     public var galaxy: Galaxy?
     /// Populates and refreshes the NPC population.
     public var spawner: Spawner?
+
+    // MARK: Domination (Demand Tribute)
+
+    /// The player's combat rating (`PlayerState.combatRating`), synced by the
+    /// host. Gates whether a planet takes a tribute demand seriously or just
+    /// laughs it off — see `demandTribute`. 0 by default (a fresh pilot).
+    public var playerCombatRating: Int = 0
+    /// Stellars the player has already dominated, synced by the host from
+    /// persistent pilot state (`PlayerState.dominatedStellars`) plus any this
+    /// world dominates during play. Read so a demand on an already-owned planet
+    /// is a no-op, and so the host can persist a new conquest.
+    public var dominatedStellars: Set<Int> = []
+    /// How much combat rating a planet demands *per defending ship* before it
+    /// will take a tribute demand seriously (below the threshold it laughs the
+    /// player off). An engine tunable — stock EV Nova has no rating gate at all
+    /// (the only real gate is defeating the defense fleet), so this is a
+    /// deliberate addition; a tougher planet (more defenders) needs a higher
+    /// rating. Set to 0 to disable the rating gate entirely.
+    public var tributeRatingPerDefender: Int = 2
+    /// Live Demand-Tribute contests in this system, keyed by `spöb` id. Tracks
+    /// how many defenders a planet still has to launch and its wave size, so the
+    /// world can relaunch waves as they're destroyed until the pool is exhausted.
+    var stellarDefenses: [Int: StellarDefense] = [:]
 
     /// Live asteroids (real `röid` rocks, from the system's `sÿst.Asteroids`/
     /// `AstTypes` fields). Stationary — see `Asteroid`'s doc comment.
@@ -962,6 +995,7 @@ public final class World {
         playerScanCooldown = max(0, playerScanCooldown - dt)
 
         spawner?.update(dt, world: self)
+        updateStellarDefenses()   // relaunch tribute-defense waves as they're cleared
         refreshRoster()
 
         // Player: outside intent.

@@ -486,9 +486,45 @@ public final class StoryEngine {
         for _ in 0..<n {
             player.date = player.date.adding(days: 1)
             payDailySalaries()
+            payDailyTribute()
             evaluateCrons()
             checkDeadlines()
         }
+    }
+
+    /// Record a stellar as dominated by the player and fire its `OnDominate`
+    /// control bits. The seam the app calls when the engine reports a
+    /// `WorldEvent.stellarDominated`. Idempotent — re-dominating a planet already
+    /// owned doesn't re-run its `OnDominate`.
+    public func dominateStellar(_ spobID: Int) {
+        guard !player.hasDominated(spobID) else { return }
+        player.dominate(spobID)
+        if let spob = game.spob(spobID), !spob.onDominate.isEmpty { apply(set: spob.onDominate) }
+        services?.notify(.stellarDominated(spobID: spobID))
+    }
+
+    /// Release a stellar from the player's domination (it stops paying tribute)
+    /// and fire its `OnRelease` control bits.
+    public func releaseStellar(_ spobID: Int) {
+        guard player.hasDominated(spobID) else { return }
+        player.releaseDomination(spobID)
+        if let spob = game.spob(spobID), !spob.onRelease.isEmpty { apply(set: spob.onRelease) }
+        services?.notify(.stellarReleased(spobID: spobID))
+    }
+
+    /// Add each dominated stellar's daily tribute to the player's credits — the
+    /// authentic EV Nova behavior (tribute accrues automatically as the day clock
+    /// advances; it is *not* collected by landing). A stellar's `Tribute` field of
+    /// `-1`/`0` means the default payout, `1000 × TechLevel` (`dailyTributeAmount`).
+    /// See docs/reverse-engineering/DOMINATION.md.
+    private func payDailyTribute() {
+        guard let dominated = player.dominatedStellars, !dominated.isEmpty else { return }
+        var payout = 0
+        for spobID in dominated {
+            guard let spob = game.spob(spobID) else { continue }
+            payout += spob.dailyTributeAmount
+        }
+        if payout > 0 { player.credits += payout }
     }
 
     private func payDailySalaries() {

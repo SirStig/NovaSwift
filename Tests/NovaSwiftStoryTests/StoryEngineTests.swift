@@ -43,6 +43,48 @@ final class StoryEngineTests: XCTestCase {
         XCTAssertTrue(svc.log.contains { $0.contains("outfit") })
     }
 
+    // MARK: Domination / daily tribute
+
+    /// A spöb with tribute@10, techLevel@12, and an OnDominate NCB set expr@54.
+    private func tributeSpob(id: Int, tribute: Int, techLevel: Int, onDominate: String = "") -> Resource {
+        var b = [UInt8](repeating: 0, count: 600)
+        func i16(_ off: Int, _ v: Int) {
+            let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v)); b[off] = UInt8(u >> 8); b[off + 1] = UInt8(u & 0xff)
+        }
+        i16(10, tribute); i16(12, techLevel)
+        for (i, byte) in Array(onDominate.utf8).prefix(255).enumerated() { b[54 + i] = byte }
+        return Resource(type: NovaType.spob, id: id, name: "World\(id)", data: Data(b))
+    }
+
+    func testDominatingFiresOnDominateAndPaysDailyTribute() {
+        let (eng, _) = engine([tributeSpob(id: 400, tribute: 500, techLevel: 5, onDominate: "b777")])
+        eng.player.credits = 0
+        eng.dominateStellar(400)
+        XCTAssertTrue(eng.player.hasDominated(400))
+        XCTAssertTrue(eng.player.isBitSet(777), "OnDominate control bits fire on conquest")
+
+        eng.advanceDays(3)
+        XCTAssertEqual(eng.player.credits, 1500, "500 cr/day × 3 days auto-added, not collected by landing")
+    }
+
+    func testDefaultTributeIsThousandTimesTechLevel() {
+        let (eng, _) = engine([tributeSpob(id: 401, tribute: 0, techLevel: 6)])
+        eng.player.credits = 0
+        eng.dominateStellar(401)
+        eng.advanceOneDay()
+        XCTAssertEqual(eng.player.credits, 6000, "-1/0 tribute defaults to 1000 × techLevel")
+    }
+
+    func testReleasingStellarStopsTributeAndFiresOnRelease() {
+        let (eng, _) = engine([tributeSpob(id: 402, tribute: 1000, techLevel: 5)])
+        eng.dominateStellar(402)
+        eng.player.credits = 0
+        eng.releaseStellar(402)
+        XCTAssertFalse(eng.player.hasDominated(402))
+        eng.advanceDays(5)
+        XCTAssertEqual(eng.player.credits, 0, "a released stellar pays no tribute")
+    }
+
     // MARK: Availability
 
     func testEligibilityRespectsBitsAndState() {

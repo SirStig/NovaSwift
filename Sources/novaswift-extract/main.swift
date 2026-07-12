@@ -930,6 +930,96 @@ case "mission-spawn":
         print("    #\(s.entityID) \(s.name) [\(msGame.govt(s.government)?.name ?? "indep")] \(s.brain?.state.rawValue ?? "?")\(dis)\(tgt)\(lead)")
     }
 
+case "tribute":
+    // Headless proof for Demand Tribute / planetary domination: find a defended
+    // stellar, show its defense config, demand tribute at a low rating (laughed
+    // off), then at a sufficient rating — launching defense waves. Simulate the
+    // player defeating each wave until the pool is exhausted, then demand again
+    // to dominate. Reports the whole flow.
+    //   novaswift-extract tribute <baseDir> <systemID> [spobID] [rating]
+    guard args.count >= 3, let trSysID = Int(args[2]) else { usage() }
+    let trBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let trGame: NovaGame
+    do { trGame = NovaGame(try GameLibrary.merge(baseFiles: trBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    let trGalaxy = Galaxy(game: trGame)
+    guard let trSys = trGame.system(trSysID) else {
+        FileHandle.standardError.write(Data("error: no system \(trSysID)\n".utf8)); exit(1)
+    }
+    // Pick the target stellar: an explicit id, else the first in-system stellar
+    // that actually fields a defense fleet.
+    let trSpobID: Int
+    if args.count >= 4, let sid = Int(args[3]) { trSpobID = sid }
+    else if let s = trSys.spobs.compactMap({ trGame.spob($0) }).first(where: { $0.hasDefenseFleet }) {
+        trSpobID = s.id
+    } else {
+        FileHandle.standardError.write(Data("error: no defended stellar in system \(trSysID)\n".utf8)); exit(1)
+    }
+    guard let trSpob = trGame.spob(trSpobID) else {
+        FileHandle.standardError.write(Data("error: no stellar \(trSpobID)\n".utf8)); exit(1)
+    }
+    let ddName = trGame.dude(trSpob.defenseDude)?.name ?? "?"
+    print("Stellar #\(trSpob.id) \"\(trSpob.name)\"  govt \(trGame.govt(trSpob.government)?.name ?? "indep")")
+    print("  defense: dude #\(trSpob.defenseDude) \"\(ddName)\"  total \(trSpob.defenseTotal) ships, \(trSpob.defenseWaveSize)/wave  (DefCount raw \(trSpob.defenseCountRaw))")
+    print("  tribute: \(trSpob.dailyTributeAmount) cr/day  (Tribute field \(trSpob.tribute), techLevel \(trSpob.techLevel))")
+
+    // A god-mode player so it survives the waves for the full demo.
+    let trPlayer = trGalaxy.makeLoadedShip(trSpob.defenseDude >= 128 ? (trGame.dude(trSpob.defenseDude)?.ships.first?.shipID ?? 128) : 128,
+                                           government: independentGovt, at: Vec2()) ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
+    trPlayer.invulnerable = true
+    let trWorld = World(player: trPlayer)
+    trWorld.galaxy = trGalaxy
+    trWorld.diplomacy = trGalaxy.makeDiplomacy()
+    trWorld.systemContext = trGalaxy.systemContext(for: trSys.id)
+
+    let required = trWorld.tributeRatingRequired(for: trSpob)
+    print("  rating gate: need combat rating ≥ \(required)")
+    print(String(repeating: "-", count: 44))
+
+    // 1) Demand with too-low a rating → laughed off.
+    trWorld.playerCombatRating = max(0, required - 1)
+    let low = trWorld.demandTribute(spobID: trSpobID)
+    print("demand @ rating \(trWorld.playerCombatRating): \(low)")
+
+    // 2) Demand with a sufficient rating → the planet fights.
+    let rating = args.count >= 5 ? (Int(args[4]) ?? required) : required
+    trWorld.playerCombatRating = rating
+    let first = trWorld.demandTribute(spobID: trSpobID)
+    print("demand @ rating \(rating): \(first)")
+
+    // 3) Simulate the player defeating every wave. Each frame, destroy the
+    // living defenders (stand-in for the player winning the fight), step the
+    // world so the next wave scrambles, and count as we go.
+    var wavesLaunched = 0, defendersDefeated = 0, dominatedAt = -1
+    let trDt = 1.0 / 30.0
+    for i in 0..<20000 {
+        for e in trWorld.events {
+            if case .stellarDefendersLaunched(_, let c, _) = e { wavesLaunched += 1; defendersDefeated += 0; _ = c }
+        }
+        // Destroy any live defenders this frame.
+        for npc in trWorld.npcs where npc.spobDefenderOf == trSpobID && npc.isAlive {
+            npc.armor = 0; defendersDefeated += 1
+        }
+        trWorld.step(trDt)
+        // Once the field is clear, try to dominate; if defenders remain (a fresh
+        // wave), keep fighting.
+        if trWorld.npcs.allSatisfy({ $0.spobDefenderOf != trSpobID || !$0.isAlive }) {
+            let out = trWorld.demandTribute(spobID: trSpobID)
+            if case .dominated = out { dominatedAt = i; break }
+        }
+    }
+
+    print(String(repeating: "-", count: 44))
+    print("waves launched: \(wavesLaunched)   defenders defeated: \(defendersDefeated)")
+    if dominatedAt >= 0 {
+        print("RESULT: stellar #\(trSpobID) DOMINATED after \(String(format: "%.1f", Double(dominatedAt) * trDt))s of fighting")
+        print("  (host would now add #\(trSpobID) to PlayerState.dominatedStellars, fire OnDominate, and pay \(trSpob.dailyTributeAmount) cr/day)")
+    } else {
+        print("RESULT: not dominated within the step cap (defenders remaining: \(trWorld.liveDefenders(of: trSpobID)))")
+    }
+    let dominatedEvents = trWorld.events.contains { if case .stellarDominated = $0 { return true }; return false }
+    print("  final-frame stellarDominated event present: \(dominatedEvents)")
+
 case "mission":
     // Decode a single mission and print its resolved fields + text. Validates
     // the mïsn decoder against real data.

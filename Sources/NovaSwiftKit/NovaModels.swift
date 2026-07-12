@@ -579,6 +579,61 @@ public struct SpobRes {
     /// with all −1 connects randomly). Empty for a non-gate stellar.
     public let hyperLinks: [Int]
 
+    // MARK: Domination / Demand Tribute (Nova Bible; offsets verified against
+    // TMPL #520 + real data — see docs/reverse-engineering/DOMINATION.md).
+
+    /// `Tribute` (@10, `int16`): what a *dominated* stellar pays the player, in
+    /// credits **per day** (auto-added by the day clock, not collected on
+    /// landing). `-1`/`0` = the default payout, `1000 × TechLevel` (see
+    /// `dailyTributeAmount`); `≥1` = exactly that many credits/day.
+    public let tribute: Int
+    /// `DefenseDude` (@28, `RSID`): the `düde` class this stellar launches to
+    /// defend itself when the player demands tribute. `< 128` = no defense fleet
+    /// (the stellar can't be forced into submission by combat).
+    public let defenseDude: Int
+    /// `DefCount` (@30) raw value. EV Nova decimal-packs this: a value `> 1000`
+    /// launches defenders in *waves* — the last digit is the ships-per-wave, and
+    /// the leading digits with 1 subtracted from the first digit are the total
+    /// fleet size (Bible: `1082` → 4 waves of 2 = 8 total; `2005` → waves of 5,
+    /// 100 total). Verified: Earth `7006` → 600 total, 6/wave. Decoded into
+    /// `defenseTotal`/`defenseWaveSize` below.
+    public let defenseCountRaw: Int
+
+    /// `OnDominate` (@54, 255-byte NCB set expression): control bits set when the
+    /// player successfully dominates this stellar. Empty = none.
+    public let onDominate: String
+    /// `OnRelease` (@309, 255-byte NCB set expression): control bits set when the
+    /// stellar is released from the player's domination. Empty = none.
+    public let onRelease: String
+
+    /// Total number of ships in this stellar's defense fleet (decoded from
+    /// `defenseCountRaw`). 0 = no defenders.
+    public var defenseTotal: Int {
+        guard defenseCountRaw > 0 else { return 0 }
+        guard defenseCountRaw > 1000 else { return defenseCountRaw }  // small count = launched at once
+        // Waves: last digit = wave size; leading digits minus 1 from the first
+        // digit = total. e.g. 7006 → lead 700, first digit 7→6 → 600.
+        let lead = defenseCountRaw / 10
+        let places = Int(pow(10.0, Double(String(lead).count - 1)))
+        return lead - places
+    }
+    /// Ships launched per defense wave (decoded from `defenseCountRaw`). For a
+    /// small (`≤1000`) count the whole fleet launches at once, so the wave size
+    /// equals the total.
+    public var defenseWaveSize: Int {
+        guard defenseCountRaw > 1000 else { return max(1, defenseTotal) }
+        return max(1, defenseCountRaw % 10)
+    }
+    /// This stellar fields a defense fleet, so it can be forced to submit by
+    /// destroying its defenders (the Demand-Tribute flow).
+    public var hasDefenseFleet: Bool { defenseDude >= 128 && defenseTotal > 0 }
+    /// `Flags2 0x0020`: the stellar begins the game already dominated by the
+    /// player ("all your base are belong to us").
+    public var startsDominated: Bool { flags2 & 0x0020 != 0 }
+    /// The tribute this stellar pays per day once dominated, resolving the
+    /// `-1`/`0` "default" sentinel to the Bible's `1000 × TechLevel`.
+    public var dailyTributeAmount: Int { tribute >= 1 ? tribute : max(0, 1000 * techLevel) }
+
     /// `MinStatus` (@22, `int16`): the point on your legal record with this
     /// stellar's `government` at or below which you're denied landing clearance
     /// (Nova Bible): `-32767` = always land, `-1…-32766` = "you can be this evil
@@ -650,6 +705,11 @@ public struct SpobRes {
         ambientSoundID = (isGateStellar || rawCust == -1) ? nil : rawCust
         gateEmergeAngle = (isGateStellar && (0...359).contains(rawCust)) ? Double(rawCust) : nil
         hyperLinks = (0..<8).map { i16(d, 38 + $0 * 2) }.filter { $0 >= 128 }
+        tribute = i16(d, 10)
+        defenseDude = i16(d, 28)
+        defenseCountRaw = i16(d, 30)
+        onDominate = cstr(d, 54, 255)
+        onRelease = cstr(d, 309, 255)
     }
 }
 

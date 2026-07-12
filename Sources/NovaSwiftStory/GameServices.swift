@@ -101,6 +101,8 @@ public enum StoryNotification: Sendable, Equatable {
     case rankDeactivated(rankID: Int)
     case cronStarted(cronID: Int)
     case cronEnded(cronID: Int)
+    case stellarDominated(spobID: Int)
+    case stellarReleased(spobID: Int)
 }
 
 /// A ready-to-use `GameServices` that just logs. Lets the engine run headless
