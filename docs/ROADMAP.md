@@ -32,88 +32,69 @@ exist for the player.* So we prioritize **wiring what's already built** and
 
 ---
 
-## Now — the wiring pass (highest leverage)
+## Now — what's left after the big wiring pass
 
-These are the systems that make it *EV Nova the game*. Most of the code exists;
-the work is **connecting it to the live loop**.
+Since the earlier revisions of this roadmap, the whole "wiring pass" largely
+**landed**. Done and live now (see [STATUS.md](STATUS.md) for seams):
 
-### P0 — Wire the mission/story runtime 🟡→✅ *(narrower now — mission offer/accept/decline is done)*
-**Update:** `app/NovaSwift/Story/AppGameServices.swift` (a real `GameServices`
-conformer) and a real `StoryEngine` instance (instantiated per-landing in
-`MissionBoardView.swift`, embedded in both the Mission BBS and Bar screens)
-now make mission offer/accept/decline genuinely live, persisting to the pilot
-save. What's left:
-- **Wire the galaxy-day clock**: nothing in `app/` calls
-  `StoryEngine.advanceOneDay()`/`.advanceDays()`/`.evaluateCrons()`, so the
-  day never advances during play and `crön` events (news, dated story beats)
-  never fire regardless of how many missions get taken. Call these from the
-  live session on jumps/landings/time-passing events, same as the CLI already
-  does.
-- **Flesh out `AppGameServices`'s remaining stub methods** — `spawnMissionShips`,
-  `changePlayerShip`, `movePlayer`, `setStellarDestroyed`, and `leaveStellar`
-  currently only log and no-op; `showNews` logs instead of surfacing a news
-  dialog. `presentMissionOffer`/`showStoryText`/`playSound` are already wired.
-- Build a real in-game **Mission Log** (replace the "coming soon" alert in
-  `GameMenuView`).
+- ✅ **Mission/story runtime wired end-to-end** — galaxy-day clock advances on
+  landing/gate/hyperjump (`advanceGameDay`), crons/news fire, missions complete
+  and pay out (`playerLanded`), mission ships spawn and report
+  disable/board/destroy, and `AppGameServices` callbacks
+  (`spawnMissionShips`/`changePlayerShip`/`movePlayer`/`setStellarDestroyed`/
+  `leaveStellar`/`showNews`) are real, not stubs.
+- ✅ **Stakes** — player death + escape-pod/game-over, **paid repairs**, and
+  **paid fuel recharge** (landing no longer free-heals). Fuel-gated jumps and
+  target-lock were already done.
+- ✅ **Economy fidelity** — outfit mass-proportional pricing (`effectiveCost`),
+  gun/turret slot limits (`freeGunSlots`/`freeTurretSlots`), and government
+  legal-record penalties (`recordKill`/`recordDisable` in the combat loop).
+- ✅ **`përs` named captains** and an **in-game Story Map**.
 
-### P1 — Close the remaining stakes gaps ❌ *(narrower now — fuel and targeting are done)*
-- **Player death / game-over**: nothing checks the player's armor reaching
-  zero (the NPC disable path is explicitly gated `!ship.isPlayer`); add death,
-  consequences, and respawn/reload.
-- **Paid repairs**: landing/rebuild still resets shields/armor/fuel to full
-  for free; charge credits for repair in the spaceport instead. (Uncommitted,
-  separate WIP is adding an in-flight paid *ally-assistance* fuel/repair
-  transfer — a nice-to-have on top of, not a substitute for, spaceport repair
-  economics.)
-- ~~Fuel-gated travel~~ — done: `consumeJumpFuel()` is now called from
-  `NavigationModel.jumpAlongRoute()`, gated on the ship's real tank.
-- ~~Targeting~~ — done: real target-lock (`selectNearestTarget`/
-  `cycleTarget`) with HUD brackets is wired and live.
+The remaining work, in priority order:
 
-### P2 — Pilot management 🟡 *(save/restore now works; creation flow still doesn't)*
+### P0 — AI / spawning / flight fidelity ⚠️ *(the top gap now)*
+This is the biggest remaining delta between the port and the original, and it
+is **quality-of-reconstruction, not a missing feature**. EV Nova's AI/spawning
+was never open-sourced, so ours is rebuilt from data + observed behavior.
+- **Spawn cadence/density** (`Spawner.swift`) — the ambient trickle toward
+  `sÿst.AvgShips` is a heuristic; tune it toward the original's real arrival
+  rhythm and ship mix so traffic stops feeling too sparse/even.
+- **Flight smoothness** (`AIBrain.swift`) — kill the wobble/overshoot hiccups
+  in the hand-tuned turn/thrust steering; make NPC flight read as natural as
+  the original's.
+- **Behavior edge cases** — implement the mission `ShipBehav` case that falls
+  through to normal AI; tighten engagement/disengagement transitions.
+See [`AI.md`](AI.md)'s fidelity-status section for the full list.
+
+### P1 — Finish Demand Tribute / planetary domination 🟡→✅ *(engine done; app trigger in progress)*
+The engine is complete and tested (`World.demandTribute`, defense waves,
+`stellarDominated`, `PlayerState.dominatedStellars`, `payDailyTribute`). The
+one remaining piece: the in-game "Demand Tribute" hail button
+(`GameContainerView.demandPlanetTribute`) is a **cosmetic stub** — wire it to
+call `World.demandTribute`, add HUD text for the tribute events, and call
+`StoryEngine.dominateStellar` on conquest. See
+[reverse-engineering/DOMINATION.md](reverse-engineering/DOMINATION.md).
+
+### P2 — Wire the last built-not-wired backends 🟡
+- **Escort hire/upgrade/sell** — `PilotStore.hireEscort`/`upgradeEscort`/
+  `sellEscort` are built and tested, but the Bar's "Hire Escort" button is
+  `enabled: false` with a no-op action. Bind a real panel. (ESCORTS.md)
+- **Junk / `öops` trading** — `junk()`/`oops()` decode but have no caller and
+  no UI; both features are still undesigned. Scope, then wire. (ECONOMY.md)
+- **`FleetRes.appearOn` / `freightersHaveRandomCargo`** — gate ambient fleets
+  on `appearOn`'s NCB test and add a random-freighter-cargo boarding hook.
+  (FLEETS.md)
+- **In-game Mission Log** — a per-mission active-objective panel (the Story Map
+  covers campaign overview, but not a live objective list).
+
+### P3 — Pilot management 🟡 *(save/restore works; creation flow doesn't)*
 - Real **New Pilot**: wire `startNewPilot()` reset+reroll via `PilotFactory`,
-  which is built but still has zero call sites.
-- **Multi-pilot selection UI**: save-history restore (`PilotArchive` backups
-  via "Load Earlier Save") now works, but there's still no way to manage more
-  than one active pilot slot from the main menu.
+  which is built but has zero app call sites.
+- **Multi-pilot selection UI**: save-history restore works, but there's no way
+  to manage more than one active pilot slot from the main menu.
 - Decide save format: keep native JSON `PlayerState` or move to the built-but-
   unwired `PilotSave`/`CombatRating` classic-style encode path.
-
-### P3 — Finish wiring this pass's new decoder/behavior code 🟡→✅ *(new)*
-A same-day implementation pass added real, tested Swift for several
-`docs/reverse-engineering/*.md`-documented gaps (new `GovtRes`/`FleetRes`/
-`OutfRes`/`SystRes`/`ShipRes`/`CronRes`/`RankRes`/`MissionRes` fields, new
-`JunkRes`/`OopsRes` models), but per those docs' own "Implementation status"
-notes, most of it has no live caller yet. Concrete, scoped wiring tasks:
-- **Call `Diplomacy.recordKill`/`.recordDisable`/`.recordBoard`/
-  `.recordSmuggling`** from `World.swift`'s combat-resolution code (its
-  `.shipDisabled`/`.shipDestroyed` transitions and per-hit path), replacing
-  the current dead-field `gov.shootPenalty` docking. (GOVERNMENT.md)
-- **Fold `RankRes.contribute` into `ItemLocking.contributedBits`**
-  (`app/NovaSwift/Spaceport/ItemLocking.swift`) the same way
-  `StoryEngine.activeContributeBits()` already does, so a rank-gated
-  *purchase* — the Bible's own headline example for `Contribute`/`Require` —
-  works in the spaceport UI, not just mission/cron availability. (GOVERNMENT.md)
-- **Wire `PilotStore`'s escort hire/upgrade/sell functions
-  (`hireEscort`/`upgradeEscort`/`sellEscort`/`escortAvailableToday`) to a new
-  UI** — bind them into `EscortsView.swift`, which is currently a fully
-  authentic but fully static/disabled panel with zero data binding.
-  (ESCORTS.md)
-- **Have `PilotStore.buyOutfit`/`sellOutfit` call `OutfRes.effectiveCost`**
-  instead of the flat `Cost`, so `Flags 0x0200` (mass-proportional price)
-  outfits charge/refund correctly. (OUTFITTERS.md)
-- **Consult `Loadout`'s `freeGunSlots`/`freeTurretSlots` in
-  `PilotStore.canBuyOutfit`**, so the shop stops allowing more gun/turret
-  outfits than the hull has mounts for. (OUTFITTERS.md)
-- **Call `junk()`/`junks()`/`oops()`/`oopses()` from somewhere** — a junk-trade
-  UI (a `jünk`-driven sibling of the Trade Center) and an `öops` price-disaster
-  daily roll are both fully undesigned today, not just unwired; scope a
-  feature before wiring one. (ECONOMY.md)
-- **Read `FleetRes.appearOn`/`.hailQuote`/`.freightersHaveRandomCargo`
-  somewhere** — gate ambient fleet spawns on `appearOn`'s NCB test (mirroring
-  how `Spawner.isFleetEligible` already reads `LinkSyst`), surface
-  `hailQuote` as arrival flavor text, and hook `freightersHaveRandomCargo`
-  into a boarding mechanic once one exists. (FLEETS.md)
 
 ### P4 — Authentic UI fidelity pass
 - Full rebindable **keybindings** matching EV Nova; mouse used as the original
@@ -121,17 +102,17 @@ notes, most of it has no live caller yet. Concrete, scoped wiring tasks:
 - **Ionization HUD indicator** — the physics is live (`Ship.ionCharge`/
   `isIonized`) but nothing on screen shows the player their own charge state.
 - macOS title-bar/safe-area correctness; authentic landing/mission art from the
-  player's `PICT`s; remove the orphaned hardcoded-sample story guide UI.
+  player's `PICT`s.
 
 ---
 
 ## Later — depth & polish
 
-- **Combat/AI depth** (`docs/AI.md`, `docs/SHIP_SYSTEM.md`): hailing/bribing/
-  boarding, distress calls & reinforcements, plundering, `përs` named
-  captains (note: `PersRes` is currently parsed but has **zero consumers** —
-  wiring it is part of this), guided-weapon lock-tone/lock-loss nuance,
-  `bööm` explosion art, per-weapon `snd `.
+- **Combat/AI depth** (`docs/AI.md`, `docs/SHIP_SYSTEM.md`): deeper
+  hailing/bribing/boarding, distress calls & reinforcements, plundering,
+  guided-weapon lock-tone/lock-loss nuance, `bööm` explosion art, per-weapon
+  `snd `. (`përs` named captains — hail quotes, link-missions, grudges — are
+  now wired; remaining `përs` depth is the bribe/board nuance above.)
 - **Audio**: `snd ` SFX + music coverage; `STR#`/`dësc` text everywhere.
 - **Full options**: every EV Nova setting + difficulty; modern graphics/audio/
   accessibility layered on (opt-in, per charter).

@@ -34,11 +34,19 @@ public struct ActiveMission: Codable, Hashable, Sendable {
     public var resolvedCargoType: Int?
     public var resolvedCargoQty: Int?
 
+    /// The system the player was in when the mission was accepted — the concrete
+    /// meaning of `mïsn.ShipSyst == -1` ("initial") and the anchor for `-5`
+    /// ("adjacent to initial"). Frozen at accept so those special ships spawn in
+    /// the right place. `nil` = a legacy save from before this field. Optional
+    /// for save-compat (like `travelSpobID`).
+    public var acceptSystemID: Int?
+
     public init(missionID: Int, acceptedDate: GameDate, deadline: GameDate?,
                 cargoPickedUp: Bool, shipObjectivesRemaining: Int,
                 visitedTravelStellar: Bool = false,
                 travelSpobID: Int? = nil, returnSpobID: Int? = nil,
-                resolvedCargoType: Int? = nil, resolvedCargoQty: Int? = nil) {
+                resolvedCargoType: Int? = nil, resolvedCargoQty: Int? = nil,
+                acceptSystemID: Int? = nil) {
         self.missionID = missionID
         self.acceptedDate = acceptedDate
         self.deadline = deadline
@@ -49,6 +57,7 @@ public struct ActiveMission: Codable, Hashable, Sendable {
         self.returnSpobID = returnSpobID
         self.resolvedCargoType = resolvedCargoType
         self.resolvedCargoQty = resolvedCargoQty
+        self.acceptSystemID = acceptSystemID
     }
 }
 

@@ -239,6 +239,10 @@ final class GameScene: SKScene {
     /// `byPlayer` distinguishes a kill the player made from one an ally made.
     var onMissionShipGoalReached: ((_ missionID: Int, _ goal: MissionShipGoal, _ byPlayer: Bool) -> Void)?
 
+    /// A mission escort/rescue ship the player was meant to protect was destroyed
+    /// — the container fails the mission via `engine.missionShipLost`.
+    var onMissionShipLost: ((_ missionID: Int, _ goal: MissionShipGoal) -> Void)?
+
     /// Whether the live world already holds ships tagged with `missionID` — the
     /// container checks this before (re)spawning a mission's ships so entering a
     /// system doesn't stack duplicate sets.
@@ -252,9 +256,11 @@ final class GameScene: SKScene {
     @discardableResult
     func spawnMissionShips(missionID: Int, dudeID: Int, count: Int,
                            goal: MissionShipGoal, behavior: MissionShipBehavior,
-                           government: Int?) -> [Int] {
+                           government: Int?,
+                           arrival: World.ArrivalMode = .hyperspace) -> [Int] {
         world?.spawnMissionShips(missionID: missionID, dudeID: dudeID, count: count,
-                                 goal: goal, behavior: behavior, government: government) ?? []
+                                 goal: goal, behavior: behavior, government: government,
+                                 arrival: arrival) ?? []
     }
 
     /// Engage auto-landing toward the currently-selected planet, or the nearest
@@ -919,6 +925,8 @@ final class GameScene: SKScene {
                 onPlayerDestroyed?(hadEscapePod)
             case let .missionShipGoalReached(missionID, _, goal, byPlayer):
                 onMissionShipGoalReached?(missionID, goal, byPlayer)
+            case let .missionShipLost(missionID, goal):
+                onMissionShipLost?(missionID, goal)
             default:
                 break
             }

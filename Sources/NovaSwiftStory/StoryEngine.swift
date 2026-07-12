@@ -351,10 +351,14 @@ public final class StoryEngine {
             travelSpobID: concreteStellar(m.travelStellar, salt: 0x7 &* UInt64(bitPattern: Int64(m.id))),
             returnSpobID: concreteStellar(m.returnStellar, salt: 0x51 &* UInt64(bitPattern: Int64(m.id))),
             resolvedCargoType: resolvedCargoType,
-            resolvedCargoQty: resolvedCargoQty))
+            resolvedCargoQty: resolvedCargoQty,
+            acceptSystemID: player.currentSystem))
 
         if cargoAtStart, resolvedCargoQty != 0 {
             player.cargo[resolvedCargoType, default: 0] += resolvedCargoQty
+            // LoadCargoText fires the moment the cargo is picked up — for an
+            // "at start" pickup that is here, at accept.
+            showMissionText(m.loadCargoText, for: m)
         }
 
         // PayVal's up-front-fee range (-50000 and below) is charged now, at
@@ -429,6 +433,10 @@ public final class StoryEngine {
         Log.mission.notice("completeMission: mission \(missionID) (\"\(m.name, privacy: .public)\") completed, pay=\(m.pay)")
 
         let am = player.activeMissions[idx]
+        // DropCargoText fires as the cargo leaves the hold at its drop-off point.
+        // Shown only here, on the legitimate completion/delivery path — NOT on the
+        // abort/fail `releaseCargo`, which are jettisons, not deliveries.
+        showMissionText(m.dropCargoText, for: m)
         releaseCargo(for: m, active: am)
         player.activeMissions.remove(at: idx)
         player.completedMissions.insert(missionID)
@@ -493,6 +501,9 @@ public final class StoryEngine {
                 let qty = am.resolvedCargoQty ?? abs(m.cargoQty)
                 if !updated.cargoPickedUp, qty != 0 {
                     player.cargo[type, default: 0] += qty
+                    // LoadCargoText fires once, at the pickup — only on the
+                    // first visit (before `cargoPickedUp` flips true).
+                    showMissionText(m.loadCargoText, for: m)
                 }
                 updated.cargoPickedUp = true
                 updated.visitedTravelStellar = true
@@ -558,9 +569,22 @@ public final class StoryEngine {
 
     private func decrementShipObjective(_ missionID: Int) {
         guard var am = player.activeMission(missionID) else { return }
+        let wasRemaining = am.shipObjectivesRemaining
         am.shipObjectivesRemaining = max(0, am.shipObjectivesRemaining - 1)
         replace(am)
         guard let m = game.mission(missionID) else { return }
+
+        // OnShipDone (Bible: "control bits set when the mission's special-ship
+        // goal is completed") fires exactly ONCE, on the transition to 0 — the
+        // `wasRemaining > 0` guard means a stray decrement after the goal is
+        // already met can't re-fire the bits or re-show the text. This runs
+        // BEFORE the "no return leg → complete" logic so the bits/text land
+        // whether or not the mission also auto-completes here.
+        if wasRemaining > 0, am.shipObjectivesRemaining == 0 {
+            apply(set: m.onShipDone)
+            showMissionText(m.shipDoneText, for: m)
+        }
+
         // If there's no return leg required, finishing the ships completes it.
         if am.shipObjectivesRemaining == 0, m.returnStellar == -1 {
             completeMission(missionID)
@@ -1022,6 +1046,16 @@ public final class StoryEngine {
     public func acceptBriefing(for m: MissionRes) -> String {
         guard m.briefText >= 128 else { return "" }
         return resolveMissionText(game.descText(m.briefText, context: textContext), for: m)
+    }
+
+    /// Resolve and surface one of a mission's intermediate `dësc` texts
+    /// (`ShipDoneText`, `LoadCargoText`, `DropCargoText`, …) through the SAME
+    /// pipeline the completion/failure texts use: an id `< 128` (the -1/none
+    /// sentinel range) is skipped, and an empty resolved body is never shown.
+    private func showMissionText(_ descID: Int, for m: MissionRes) {
+        guard descID >= 128 else { return }
+        let text = resolveMissionText(game.descText(descID, context: textContext), for: m)
+        if !text.isEmpty { services?.showStoryText(text, title: m.displayName) }
     }
 
     /// Expand a mission-related `dësc` body's `<…>` wildcards (`<PN>`, `<CQ>`,

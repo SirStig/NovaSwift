@@ -1737,6 +1737,12 @@ public final class World {
                     events.append(.missionShipGoalReached(missionID: mid, entityID: npc.entityID,
                                                           goal: goal, byPlayer: npc.killedByPlayer))
                 }
+                // An escort/rescue ship the player was supposed to keep alive just
+                // died → a loss, so the story layer can fail the mission.
+                if let mid = npc.missionID, let goal = npc.missionShipGoal,
+                   goal == .escort || goal == .rescue {
+                    events.append(.missionShipLost(missionID: mid, goal: goal))
+                }
                 Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
                 // Clear any targeting of the dead ship.
                 clearTarget(npc.entityID)

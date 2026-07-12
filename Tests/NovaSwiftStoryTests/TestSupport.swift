@@ -50,6 +50,9 @@ struct MissionSpec {
     var flags2 = 0
     var datePostIncrement = 0
     var completionText = -1
+    var loadCargoText = -1
+    var dropCargoText = -1
+    var shipDoneText = -1
     var briefText = -1
     var availBits = ""
     var onAccept = ""
@@ -78,7 +81,10 @@ struct MissionSpec {
         Bytes.i16(&b, 46, compRewardGovt)
         Bytes.i16(&b, 48, compLegalReward)
         Bytes.i16(&b, 52, briefText)
+        Bytes.i16(&b, 56, loadCargoText)
+        Bytes.i16(&b, 58, dropCargoText)
         Bytes.i16(&b, 60, completionText)
+        Bytes.i16(&b, 68, shipDoneText)
         Bytes.i16(&b, 64, timeLimit)
         Bytes.i16(&b, 66, canAbort ? 1 : 0)
         Bytes.i16(&b, 78, flags1)
@@ -154,6 +160,14 @@ func govtResource(id: Int, name: String = "Test Govt", mapColor: (r: UInt8, g: U
     b[166] = mapColor.g
     b[167] = mapColor.b
     return Resource(type: NovaType.govt, id: id, name: name, data: Data(b))
+}
+
+/// A `dësc` resource whose narrative body is a plain string (stored as a C
+/// string from offset 0, matching `DescRes`). Used to give mission text ids
+/// (completion / ship-done / load-cargo / drop-cargo) real bodies in tests.
+func descResource(id: Int, text: String) -> Resource {
+    let bytes = Array((text.data(using: .macOSRoman) ?? Data())) + [0]
+    return Resource(type: NovaType.desc, id: id, name: "Desc \(id)", data: Data(bytes))
 }
 
 /// Build a NovaGame from a set of resources.

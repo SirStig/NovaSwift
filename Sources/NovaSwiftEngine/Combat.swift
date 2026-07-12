@@ -587,6 +587,10 @@ public enum WorldEvent {
     /// escorts that leave at a plot point, or a cancelled mission) via
     /// `World.despawnMissionShips`. Not a kill — they simply vanish/jump out.
     case missionShipsDespawned(missionID: Int, entityIDs: [Int])
+    /// A mission special ship the player was meant to keep alive (an escort, or a
+    /// not-yet-rescued derelict) was **destroyed** — a failure signal for
+    /// escort/rescue goals. Distinct from `missionShipGoalReached` (a goal met).
+    case missionShipLost(missionID: Int, goal: MissionShipGoal)
 
     /// The player demanded tribute from a stellar and was rebuffed — the renderer
     /// shows the matching "the planet laughs at you / is unimpressed / can't be

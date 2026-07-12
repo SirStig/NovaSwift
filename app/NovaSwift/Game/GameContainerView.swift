@@ -947,6 +947,9 @@ struct GameContainerView: View {
         host?.scene.onMissionShipGoalReached = { missionID, goal, _ in
             handleMissionShipGoalReached(missionID: missionID, goal: goal)
         }
+        host?.scene.onMissionShipLost = { missionID, _ in
+            handleMissionShipLost(missionID: missionID)
+        }
         // Live-world effect hooks for the flight-side story services (mission
         // OnSuccess / cron OnStart side effects that reach outside pilot state).
         flightMissionServices.onLeaveStellar = { message in
@@ -955,9 +958,14 @@ struct GameContainerView: View {
         }
         flightMissionServices.onSpawnMissionShips = { _, _ in spawnActiveMissionShips() }
         flightMissionServices.onChangePlayerShip = { shipID, _ in
-            // The hull swap is already in `PlayerState`; it rebuilds on takeoff.
+            // The hull swap is already in `PlayerState`. In flight, rebuild the
+            // world in place so the new hull/sprite/stats take effect immediately
+            // (a mission `C/E/H` op that fires mid-space); landed, the takeoff
+            // rebuild picks it up. Mission ships respawn via `syncNav` and their
+            // objective counts persist in state, so a mid-mission swap is safe.
             let name = model.data.game?.ship(shipID)?.name ?? "a new ship"
             host?.hud.post("Your ship is now \(name).")
+            if landedSpobID == nil { rebuildFlightHost(reason: "story ship swap") }
         }
         flightMissionServices.onMovePlayer = { systemID, keepPosition in
             movePlayerToSystem(systemID, keepPosition: keepPosition)
@@ -1040,40 +1048,85 @@ struct GameContainerView: View {
         model.autosave(reason: .timer)
     }
 
-    /// Drop any active mission's special ships (`mïsn.ShipCount`/`ShipDude`/
-    /// `ShipGoal`/`ShipBehav`) into the live world when the player is in the
-    /// mission's `ShipSyst`. Deduped by the scene, so re-entering a system (or a
-    /// per-frame `syncNav`) never stacks duplicate sets. The single-system engine
+    /// Drop any active mission's special **and** auxiliary ships into the live
+    /// world when the player is in the matching system. Goal ships
+    /// (`ShipCount`/`ShipDude`/`ShipGoal`/`ShipBehav`, arriving per `ShipStart`)
+    /// carry the player-side objective; aux ships (`AuxShipCount`/`AuxShipDude`,
+    /// in `AuxShipSyst`) are pure atmosphere with no goal. Deduped by the scene
+    /// (one `hasMissionShips` guard per mission), so re-entering a system or a
+    /// per-frame `syncNav` never stacks duplicate sets. The single-system engine
     /// can't resolve the galaxy map, so the system-match decision lives here.
     private func spawnActiveMissionShips() {
         guard let scene = host?.scene, let game = model.data.game else { return }
         let currentSys = nav.currentSystemID
         for am in model.pilot.state.activeMissions {
-            guard am.shipObjectivesRemaining > 0,
-                  let m = game.mission(am.missionID), m.hasShipObjective,
-                  missionShipSystemMatches(m, active: am, currentSystem: currentSys, game: game),
-                  !scene.hasMissionShips(m.id) else { continue }
-            scene.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
-                                    count: max(1, m.shipCount), goal: m.shipGoal,
-                                    behavior: m.shipBehaviorMode, government: nil)
+            guard let m = game.mission(am.missionID), !scene.hasMissionShips(m.id) else { continue }
+
+            // Goal ships. Escort/observe are passive (they complete by landing, so
+            // their objective count is 0) — those always (re)spawn while the
+            // mission is active; kill/disable/board objectives don't respawn once
+            // met (`shipObjectivesRemaining == 0`).
+            let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe
+            if m.hasShipObjective, (passiveGoal || am.shipObjectivesRemaining > 0),
+               missionSystemMatches(code: m.shipSystem, active: am, currentSystem: currentSys, game: game) {
+                scene.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
+                                        count: max(1, m.shipCount), goal: m.shipGoal,
+                                        behavior: m.shipBehaviorMode, government: nil,
+                                        arrival: arrivalMode(forShipStart: m.shipStart))
+            }
+
+            // Auxiliary (flavor) ships — no goal, standard AI.
+            if m.auxShipCount > 0, m.auxShipDude >= 128,
+               missionSystemMatches(code: m.auxShipSystem, active: am, currentSystem: currentSys, game: game) {
+                scene.spawnMissionShips(missionID: m.id, dudeID: m.auxShipDude,
+                                        count: m.auxShipCount, goal: .none,
+                                        behavior: .standard, government: nil, arrival: .populate)
+            }
         }
     }
 
-    /// Whether a mission's `ShipSyst` selector resolves to `currentSystem`.
-    /// Handles the common cases: −6 follow-player, −3/−4 the travel/return
-    /// stellar's system (from the concrete spob frozen at accept), and a specific
-    /// system id. −1 initial / −2 random / −5 adjacent aren't resolved yet
-    /// (those ships just won't appear — a known limitation, logged nowhere hot).
-    private func missionShipSystemMatches(_ m: MissionRes, active am: ActiveMission,
-                                          currentSystem: Int, game: NovaGame) -> Bool {
+    /// An escort/rescue ship the player was protecting was destroyed — fail the
+    /// mission (the engine's `missionShipLost` is a no-op if it already completed
+    /// or wasn't an escort/rescue goal).
+    private func handleMissionShipLost(missionID: Int) {
+        guard let game = model.data.game else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+        engine.missionShipLost(missionID: missionID)
+        model.pilot.state = engine.player
+        model.autosave(reason: .timer)
+    }
+
+    /// Map a `mïsn.ShipStart` code to a spawn arrival: `1` = jump in from
+    /// hyperspace; everything else (nav-defaults −4…−1, random 0, cloaked 2) just
+    /// appears in-system. The jump-in *delay* and cloak aren't modelled.
+    private func arrivalMode(forShipStart code: Int) -> World.ArrivalMode {
+        code == 1 ? .hyperspace : .populate
+    }
+
+    /// Whether a `ShipSyst`/`AuxShipSyst` selector `code` resolves to
+    /// `currentSystem`. Handles −6 follow-player, −3/−4 the travel/return
+    /// stellar's system, −1 the accept ("initial") system, −5 a system adjacent
+    /// to the initial, −2 a deterministic random system (stable per mission), and
+    /// a specific id.
+    private func missionSystemMatches(code: Int, active am: ActiveMission,
+                                      currentSystem: Int, game: NovaGame) -> Bool {
         func systemOf(_ spob: Int?) -> Int? {
             spob.flatMap { s in game.systems().first { $0.spobs.contains(s) }?.id }
         }
-        switch m.shipSystem {
-        case -6:                       return true
+        switch code {
+        case -6:                       return true                              // follow the player
         case -3:                       return systemOf(am.travelSpobID) == currentSystem
         case -4:                       return systemOf(am.returnSpobID) == currentSystem
-        case let sid where sid >= 128: return sid == currentSystem
+        case -1:                       return am.acceptSystemID == currentSystem // initial
+        case -5:                                                                 // adjacent to initial
+            guard let initial = am.acceptSystemID else { return false }
+            return game.system(initial)?.links.contains(currentSystem) ?? false
+        case -2:                                                                 // random, frozen per mission
+            let systems = game.systems().map(\.id).sorted()
+            guard !systems.isEmpty else { return false }
+            let h = UInt64(bitPattern: Int64(am.missionID)) &* 0x9E3779B97F4A7C15
+            return systems[Int(h % UInt64(systems.count))] == currentSystem
+        case let sid where sid >= 128: return sid == currentSystem              // specific
         default:                       return false
         }
     }
@@ -1096,6 +1149,22 @@ struct GameContainerView: View {
         syncNav(host)
         grabSceneFocus(reason: "story relocate")
         host?.hud.post("Relocated to \(game.system(systemID)?.name ?? "a new system").")
+    }
+
+    /// Rebuild the flight host in place for the *current* system — used when a
+    /// story effect changes the live ship mid-flight and we need the new hull to
+    /// appear immediately (the swap is already in `PlayerState`, so the rebuild
+    /// picks it up via `GameHost.buildPlayerShip`). No-op while landed (the
+    /// takeoff rebuild covers that path).
+    private func rebuildFlightHost(reason: String) {
+        guard landedSpobID == nil else { return }
+        let sys = nav.currentSystemID
+        hostSystemID = sys
+        host = GameHost(model: model, systemID: sys)
+        debug.attach(host?.scene)
+        setScenePaused(false, reason: reason)
+        syncNav(host)
+        grabSceneFocus(reason: reason)
     }
 
     /// Short calendar date for the message log, e.g. "23 Jun 1177".

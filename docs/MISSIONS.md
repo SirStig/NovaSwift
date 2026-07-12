@@ -1,26 +1,22 @@
 # Missions & Story (`NovaSwiftStory`)
 
-> ⚠️ **Status: BUILT, NOT WIRED.** This module is fully implemented and tested,
-> but the running app does **not** drive it — the only live consumer is the
-> `novaswift-extract` CLI and unit tests, plus a **read-only** `StorylineAnalyzer`
-> that computes a static guide. **No app type conforms to `GameServices`**, and
-> the app never instantiates `StoryEngine` for play, so the player cannot yet
-> accept or progress missions. Wiring this in is roadmap **P0**. See
-> [STATUS.md](STATUS.md) and [ROADMAP.md](ROADMAP.md). "Done" below means "the
-> library works," not "the player experiences it."
->
-> **Correction (mission half only):** this banner is now stale for bar/computer
-> missions specifically — `app/NovaSwift/Story/AppGameServices.swift` is a real
-> `GameServices` conformer, and `app/NovaSwift/Story/MissionBoardView.swift`
-> instantiates a live `StoryEngine` per mission-offer location; accepting or
-> declining a mission there genuinely mutates and saves the pilot's
-> `PlayerState`. What's still true: nothing in `app/` calls
-> `StoryEngine.advanceOneDay()`/`.advanceDays()`, so the galaxy clock never
-> advances during live play and background `crön` events (timed bit-flips,
-> news) still never fire for a real player. See
-> [reverse-engineering/EVENTS.md](reverse-engineering/EVENTS.md) §5 for the
-> detailed cron-specific status, including a fixed `CronRes` byte-layout bug
-> and new `Contribute`/`Require`/news-string handling.
+> ✅ **Status: WIRED (as of 2026-07-12).** This module is now driven by the
+> running app end-to-end, not just the CLI/tests. `app/NovaSwift/Story/AppGameServices.swift`
+> is a real `GameServices` conformer; `MissionBoardView.swift` runs a live
+> `StoryEngine`; accepting/declining a mission mutates and saves `PlayerState`;
+> **`GameContainerView.handleStoryLanding` calls `engine.playerLanded` on every
+> dock** so delivery/courier/passenger/cargo missions complete, pay out, and
+> show completion text; **`advanceGameDay` advances the galaxy-day clock** on
+> landing/gate/hyperjump so `crön` background events (timed bit-flips, news)
+> fire; and **mission ships spawn into the live world** and report
+> disable/board/destroy back to the engine (`spawnActiveMissionShips` →
+> `World.spawnMissionShips` → `.missionShipGoalReached`). Remaining follow-ups
+> are narrow: `ShipSyst` −1/−2/−5 selectors are partly unresolved, in-flight
+> hull-swap/relocate lean on the takeoff rebuild for full visuals, and news has
+> no per-station local/independent precedence yet. See [STATUS.md](STATUS.md),
+> [ROADMAP.md](ROADMAP.md), and
+> [reverse-engineering/EVENTS.md](reverse-engineering/EVENTS.md) §5. "Done"
+> below now means both "the library works" *and* "the player experiences it."
 
 The story layer — bar/computer missions, the control-bit ("NCB") scripting
 language, background `crön` events, ranks, and the campaign save-state. It is a
@@ -219,12 +215,22 @@ Button("Pilot Log") { showGuide = true }
 the running game owns one; until then it uses a starter pilot so the guide is
 browsable immediately.
 
-## Not yet wired (needs the other systems)
+## Now wired (was "not yet wired")
 
-- Special/auxiliary **ship spawning** and destruction reporting (needs combat/AI
-  to tag spawned ships with the mission id — the hook is `spawnMissionShips`).
-- **`përs`** captains offering their linked missions in space (needs AI to place
-  them; the decoder + `activeOn`/`linkMission` fields are ready).
+- ✅ Special/auxiliary **ship spawning** and destruction reporting —
+  `spawnMissionShips` → `World.spawnMissionShips`, with disable/board/destroy
+  reported back via `.missionShipGoalReached`.
+- ✅ **`përs`** captains offering their linked missions in space — the `përs`
+  system places named NPCs with hail quotes, link-missions, and grudges into
+  the live world.
+
+## Still not fully wired (low-value polish)
+
 - Govt **allies/enemies** stellar selectors resolve as plain govt matches until
-  the government-relations table (AI module) is queryable.
+  the government-relations table is fully queried at those call sites.
+- Background **news** has no per-station local/independent precedence yet.
+- A destroyed stellar renders as absent, not a wreck/asteroid variant.
 - Rendering of `dësc` **PICT**/movie art in offers (needs the UI + PICT decoder).
+
+(The `ShipSyst` −1/−2/−5 mission-ship selectors and in-place mid-flight ship
+swap, previously listed here, are now done — see the status banner above.)

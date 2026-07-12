@@ -94,13 +94,22 @@ infrastructure.
 - A contest resets when the player leaves the system (the `World` is rebuilt per
   visit), matching the transient nature of the defense fight.
 
-## Wiring status
+## Wiring status — BUILT, engine complete; app trigger IN PROGRESS
 
 Engine flow + events + `spöb` decode + `PlayerState` persistence + daily tribute
 are implemented and covered by unit tests (`DominationTests`,
 `StoryEngineTests`) and a headless proof (`novaswift-extract tribute <baseDir>
-<systemID> [spobID] [rating]`). What remains is **app-side**: a "Demand Tribute"
-input/command on a targeted planet that calls `World.demandTribute`, HUD text for
-the `tributeRefused`/`stellarDefendersLaunched`/`stellarDominated` events, and
-calling `StoryEngine.dominateStellar` on conquest — blocked on the same
-story-runtime-not-wired gap tracked elsewhere.
+<systemID> [spobID] [rating]`). The story runtime this used to be blocked on is
+**now wired** (`StoryEngine.advanceDays` runs in the live app, and
+`payDailyTribute` runs inside it), so daily tribute income and
+`OnDominate`/`OnRelease` NCB effects will flow the moment the trigger lands.
+
+**The one remaining piece is the app-side trigger.** Today the in-game "Demand
+Tribute" button in the planet hail dialog (`GameContainerView.demandPlanetTribute`)
+is a **cosmetic stub** — it flips the world hostile and posts a refusal line but
+**never calls `World.demandTribute`**, so no defenders spawn, nothing is
+dominated, and no tribute is paid. Finishing it means: call `World.demandTribute`
+from that button, surface HUD text for the
+`tributeRefused`/`stellarDefendersLaunched`/`stellarDominated` events, and call
+`StoryEngine.dominateStellar` on conquest. That is the last hookup between the
+finished engine and the player.

@@ -8,6 +8,33 @@ player's own game data** (`gövt`, `düde`, `flët`, `shïp`, `wëap`, `sÿst`).
 The whole thing lives in `NovaSwiftEngine` and is exercised headlessly by
 `novaswift-extract ai <baseDir> [systemID] [seconds]`.
 
+## ⚠️ Fidelity status — this is the port's biggest gap
+
+**EV Nova's AI and spawning logic were never open-sourced.** There is no
+original source to port — everything here is *reconstructed* from the game's
+data tables (`gövt`/`düde`/`flët`/`sÿst`) and observed behavior, cross-checked
+against the Nova Bible (see [`AI_GROUND_TRUTH.md`](AI_GROUND_TRUTH.md)). That
+reconstruction covers the documented behavior well, but it is honestly the area
+where the port still *feels* least like the original. The known weak points:
+
+- **Spawn cadence / density.** The ambient population is a trickle heuristic —
+  a spawn every `spawnInterval` toward the system's `sÿst.AvgShips` — built "in
+  the same spirit as" the original, not its exact algorithm. Traffic can read
+  as slightly too sparse or too evenly paced; it doesn't yet reproduce the
+  original's precise arrival rhythm and ship mix.
+- **Flight handling.** The steering is hand-tuned heuristics ("thrust when
+  roughly pointed the right way," turn-limit lifts through hard turns, escort
+  heading-hold hacks). These produce the occasional wobble/overshoot "hiccup"
+  that a from-source flight AI wouldn't.
+- **Behavior edge cases.** One mission `ShipBehav` case falls through to normal
+  AI; ships with no brain drift; some engagement/disengagement transitions
+  approximate timing the Bible never documented.
+
+**Most core gameplay is replicated well** — this AI is the standout exception,
+and tightening it (spawn cadence toward the real feel, smoother steering) is
+the top fidelity backlog item. Everything below is the current design and where
+it already matches the original; read it alongside the caveats above.
+
 ## The core idea: NPCs are ships with a brain
 
 Every ship — player or NPC — is a `Ship`. The simulation only ever reads a

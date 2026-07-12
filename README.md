@@ -75,8 +75,8 @@ Mobile build running on iPhone 17 Pro (iOS):
 
 ## Status — what actually works right now
 
-This is a real, playable vertical slice, not a tech demo. On your own game
-data you can today:
+This is a real, playable game now, not a tech demo. On your own game data you
+can today:
 
 - Fly with the original Newtonian flight model, fight AI ships spawned from
   the real fleet tables, and get hit with real ionization, combat-odds AI
@@ -84,20 +84,30 @@ data you can today:
 - Navigate the real galaxy map, plot a course, and jump between systems —
   jumps cost real fuel, gated by the ship's actual tank.
 - Land, and trade / outfit / buy ships in the spaceport against a persistent
-  pilot save, with mission-gated item availability (an outfit you haven't
-  unlocked yet is genuinely locked, not just hidden).
-- Accept missions from the bar and Mission Computer — offer/accept/decline
-  is real and persists to your save.
+  pilot save — with mission-gated item availability, mass-proportional outfit
+  pricing, gun/turret slot limits, and **paid repairs and fuel recharge** (no
+  more free heal on landing).
+- Take and **complete** missions from the bar and Mission Computer — the
+  galaxy-day clock advances as you play, so `crön` background events (news,
+  dated story beats) fire, mission ships spawn and fight, and delivery/courier
+  missions pay out and progress the campaign.
+- **Actually lose**: run your armor to zero and you eject in an escape pod
+  (rescued at the nearest port) or the game ends back at the main menu.
+- Dent your standing with governments in combat, meet `përs` named captains
+  with their own hail quotes and grudges, and open the in-game **Story Map** —
+  a pannable/zoomable graph of every reconstructed campaign, resolved live
+  against your pilot (something the original never had).
 - Browse and install community plug-ins from an in-app store.
 - Pop open an in-game **debug suite** (AI state/path visualization, a
   live game-state editor, a performance stress test) while developing.
 
-Still missing: the galaxy's day-clock never advances during play, so `crön`
-background events (news, dated story beats) never fire — only the slice of
-story reachable through a single landing's mission list runs. There's also
-no way to actually lose yet — no player death, no game over, no paid
-repairs. (The in-game menu does have a **Story Map** — a pannable/zoomable
-graph of every reconstructed campaign, resolved live against your pilot.)
+The biggest remaining gap is **fidelity, not features**: EV Nova's AI and
+ship-spawning logic were never open-sourced, so ours is reconstructed from the
+game's data and observed behavior. It covers the documented behavior well, but
+spawn cadence, flight smoothness, and some combat transitions don't yet *feel*
+exactly like the original — that naturalness is the top backlog item. A few
+built-and-tested systems are also still awaiting their final UI hookup (Demand
+Tribute / planetary domination, escort hiring, junk trading).
 
 See **[docs/STATUS.md](docs/STATUS.md)** for the full wired-vs-built-vs-
 missing breakdown — that document, not this README, is the source of truth.
@@ -130,7 +140,7 @@ docs/                   Charter, status, architecture, data-format reference, ro
 Sources/
   NovaSwiftKit/            Data layer — resource parsing, typed decoders, sprite/PICT decode
   NovaSwiftEngine/         Live simulation — flight, combat, AI, spawning, diplomacy
-  NovaSwiftStory/          Mission/story runtime — mïsn/crön/NCB engine (wiring in progress)
+  NovaSwiftStory/          Mission/story runtime — mïsn/crön/NCB engine (wired into the app)
   NovaSwiftPluginStore/    Plug-in catalog metadata + download/install pipeline
   novaswift-extract/       CLI inspector/harness (drives the libraries end-to-end)
 Tests/                  Unit tests for each library target
