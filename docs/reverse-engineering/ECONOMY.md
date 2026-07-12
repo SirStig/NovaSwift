@@ -222,6 +222,13 @@ source. Treat `öops` as standard-commodity-only.
 
 ## 5. What's implemented vs. what's missing
 
+> **Design note (2026-07-12):** the two "implemented but not wired" resources
+> below (`jünk`, `öops`) now have a concrete, design-first implementation plan —
+> [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md) — covering the data model, the
+> deterministic daily öops roll, the `PriceDelta` application point, junk
+> trading/capacity, contraband, and a suggested phasing. Still not implemented,
+> but no longer undesigned.
+
 | Bible spec | Swift status | Reference |
 |---|---|---|
 | `spöb` flag word → per-stellar Low/Med/High/not-traded tier per commodity | ✅ Implemented | `SpobRes.priceLevel(_:)`, `Sources/NovaSwiftKit/NovaEconomy.swift:127-130` |
