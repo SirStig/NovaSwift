@@ -8,6 +8,9 @@ import NovaSwiftEngine
 final class GameControllerInput {
     private weak var input: InputController?
     private(set) var isConnected = false
+    /// Analog dead zone (the player's "Stick dead zone" setting) — how far a
+    /// stick must move off centre before it registers. Pushed from the scene.
+    var deadzone: Float = 0.15
 
     init(input: InputController) {
         self.input = input
@@ -34,16 +37,16 @@ final class GameControllerInput {
         // Left stick: horizontal = turn, up = thrust.
         let lx = pad.leftThumbstick.xAxis.value
         let ly = pad.leftThumbstick.yAxis.value
-        let deadzone: Float = 0.25
-        if lx < -deadzone { c.turnLeft = true }
-        if lx > deadzone { c.turnRight = true }
-        if ly > deadzone { c.thrust = true }
-        if ly < -deadzone { c.reverse = true }
+        let dz = max(0.05, deadzone)
+        if lx < -dz { c.turnLeft = true }
+        if lx > dz { c.turnRight = true }
+        if ly > dz { c.thrust = true }
+        if ly < -dz { c.reverse = true }
 
         // Right stick: absolute aim (magnitude past deadzone).
         let rx = pad.rightThumbstick.xAxis.value
         let ry = pad.rightThumbstick.yAxis.value
-        if hypot(rx, ry) > 0.5 {
+        if hypot(rx, ry) > max(0.5, dz) {
             // Screen up is +y on the stick; heading 0 = up, clockwise.
             c.desiredHeading = Double(atan2(rx, ry))
         }

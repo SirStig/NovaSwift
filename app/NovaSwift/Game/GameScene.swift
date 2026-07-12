@@ -314,6 +314,7 @@ final class GameScene: SKScene {
         self.settings = settings
         self.input = input
         self.controllerInput = controller
+        controller?.deadzone = Float(settings.stickDeadzone)   // "Stick dead zone" setting
         self.hud = hud
         self.audio = audio
         self.planetVisuals = planets
@@ -621,6 +622,8 @@ final class GameScene: SKScene {
             var i = input?.intent ?? .init()
             // "Invert turn direction" swaps the discrete left/right steering.
             if settings.invertTurn { swap(&i.turnLeft, &i.turnRight) }
+            // "Turn sensitivity" scales the player's turn budget this frame.
+            i.turnScale = settings.controlSensitivity
             intent = i
         }
         world.intent = intent
@@ -694,6 +697,7 @@ final class GameScene: SKScene {
             case let .explosion(at, radius, soundID):
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
                 audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
             case .targetAcquired:
                 audio?.play(.targetLock)
             case let .shipArrived(entityID, _, fromHyperspace):
@@ -763,7 +767,7 @@ final class GameScene: SKScene {
         updateThruster(active: intent.thrust || p.afterburnerActive, angle: p.angle,
                        boosted: p.afterburnerActive)
 
-        cameraNode.position = scenePos
+        cameraNode.position = shakenCameraPosition(scenePos, dt: dt)
         updateStarfield(cameraAt: scenePos)
         updateMurkFog()
         updateLanding(player: p)
@@ -1121,6 +1125,36 @@ final class GameScene: SKScene {
         }
         hud.navTargetName = pv.name
         hud.navTargetLandable = world.systemContext.bodies.first { $0.id == id }?.canLand ?? false
+    }
+
+    // MARK: Screen shake
+
+    /// Remaining shake time and its peak magnitude (points). Refreshed by each
+    /// nearby explosion; decays to nothing over `shakeDuration`.
+    private var shakeTime: CGFloat = 0
+    private var shakeMag: CGFloat = 0
+    private let shakeDuration: CGFloat = 0.4
+
+    /// Register a camera-shake impulse from an explosion, scaled by how close it
+    /// went off and how big it was. Gated by the "Screen shake" setting and
+    /// suppressed entirely by "Reduce flashing & motion".
+    private func addShake(at world: CGPoint, radius: CGFloat) {
+        guard settings.screenShake, !settings.reduceFlashing, let player = playerShip else { return }
+        let d = hypot(world.x - CGFloat(player.position.x), world.y - CGFloat(player.position.y))
+        let falloff = max(0, 1 - d / 900)           // felt within ~900px
+        guard falloff > 0 else { return }
+        shakeMag = min(20, max(shakeMag, (6 + radius * 0.35) * falloff))
+        shakeTime = shakeDuration
+    }
+
+    /// The camera position with the current shake offset applied, decaying the
+    /// shake each frame. Returns `base` unchanged when nothing is shaking.
+    private func shakenCameraPosition(_ base: CGPoint, dt: Double) -> CGPoint {
+        guard shakeTime > 0 else { return base }
+        shakeTime -= CGFloat(dt)
+        guard shakeTime > 0 else { shakeMag = 0; return base }
+        let m = shakeMag * (shakeTime / shakeDuration)      // ease out
+        return CGPoint(x: base.x + .random(in: -m...m), y: base.y + .random(in: -m...m))
     }
 
     private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
@@ -1612,7 +1646,9 @@ final class GameScene: SKScene {
             // Ramp the white flash up fast; at its peak commit + swap the system.
             let t = min(1, jumpClock / 0.14)
             jumpFlash?.isHidden = false
-            jumpFlash?.alpha = CGFloat(t)
+            // "Reduce flashing & motion" caps the white-out so the jump doesn't
+            // fully blank the screen.
+            jumpFlash?.alpha = CGFloat(t) * (settings.reduceFlashing ? 0.45 : 1.0)
             showJumpStreaks(intensity: 1, stretch: 9)
             if !jumpCommitted, t >= 1 {
                 jumpCommitted = true
@@ -1625,7 +1661,7 @@ final class GameScene: SKScene {
             // New system is loaded and the ship is coasting in from the edge.
             // Fade the flash + streaks out to reveal it, then hand back control.
             let t = min(1, jumpClock / 0.35)
-            jumpFlash?.alpha = CGFloat(1 - t)
+            jumpFlash?.alpha = CGFloat(1 - t) * (settings.reduceFlashing ? 0.45 : 1.0)
             jumpStreaks?.alpha = CGFloat((1 - t) * 0.6)
             if jumpClock > 0.35 {
                 jumpFlash?.isHidden = true
@@ -1972,6 +2008,7 @@ final class GameScene: SKScene {
     func applyDisplaySettings(_ newSettings: GameSettings) {
         let filterChanged = newSettings.smoothSprites != settings.smoothSprites
         settings = newSettings
+        controllerInput?.deadzone = Float(settings.stickDeadzone)   // live "Stick dead zone"
         for node in planetNodes {
             node.childNode(withName: "planetLabel")?.isHidden = !settings.showPlanetLabels
         }

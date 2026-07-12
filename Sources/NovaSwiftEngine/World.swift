@@ -17,6 +17,10 @@ public struct ControlIntent: Equatable {
     /// analog-stick aiming, and the AI. When set, it drives turning unless a
     /// discrete turnLeft/turnRight is also active (discrete input wins).
     public var desiredHeading: Double?
+    /// Multiplier on this frame's turn budget — the player's "Turn sensitivity"
+    /// setting. 1 = the hull's native turn rate. Left at 1 for NPCs (the AI never
+    /// sets it), so it only ever affects the player's ship.
+    public var turnScale: Double = 1
     public init() {}
 
     /// OR-merge several input sources into one intent (keyboard + touch +
@@ -539,7 +543,7 @@ public final class Ship {
         formationBoost = 0
         let effectiveTurnRate = stats.turnRate * (1 + 5 * boost)
 
-        let maxTurn = effectiveTurnRate * dt
+        let maxTurn = effectiveTurnRate * dt * max(0.05, intent.turnScale)
         if controllable, intent.turnLeft || intent.turnRight {
             if intent.turnLeft { angle -= maxTurn }
             if intent.turnRight { angle += maxTurn }
