@@ -26,6 +26,11 @@ func usage() -> Never {
       \(name) char    <baseDir> [id]      List starting scenarios (chär), or preview a new pilot
       \(name) sounds  <baseDir>           List all snd resources (id, name, rate, length)
       \(name) sound   <baseDir> <id> [out] Decode one snd → WAV (default: <id>.wav)
+      \(name) ai      <baseDir> [sysID] [secs]   Headless AI sim: populate + run a system
+      \(name) mission-spawn <baseDir> <sysID> <dudeID> <count> [goal] [behav] [secs]
+                                          Spawn mission ships into a live system + run
+                                          goal: 0 destroy 1 disable 2 board 3 escort 4 observe 5 rescue 6 chaseOff
+                                          behav: -1 std  0 attackPlayer  1 protectPlayer  2 attackStellars
 
     <TYPE> is a four-char resource code, e.g. shïp  wëap  oütf  sÿst  spöb
     (paste the exact code including accents).
@@ -833,6 +838,96 @@ case "ai":
                      npc.entityID, npc.name as NSString, gov as NSString,
                      npc.brain?.state.rawValue ?? "?",
                      npc.maxShield, npc.maxArmor, fit as NSString, tgt as NSString, wing as NSString))
+    }
+
+case "mission-spawn":
+    // Headless proof for mission-driven spawning + ShipBehav overrides: build a
+    // live system, spawn `count` mission ships of a dude with a goal/behavior,
+    // run the sim, and report the objective events + how the ships behaved.
+    //   novaswift-extract mission-spawn <baseDir> <sysID> <dudeID> <count> [goal] [behav] [secs]
+    guard args.count >= 5,
+          let msSysID = Int(args[2]), let msDudeID = Int(args[3]), let msCount = Int(args[4])
+    else { usage() }
+    let msGoal = MissionShipGoal(rawValue: args.count >= 6 ? (Int(args[5]) ?? -1) : -1) ?? .none
+    let msBehav = MissionShipBehavior(raw: args.count >= 7 ? (Int(args[6]) ?? -1) : -1)
+    let msSeconds = args.count >= 8 ? (Double(args[7]) ?? 30) : 30
+
+    let msBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let msGame: NovaGame
+    do { msGame = NovaGame(try GameLibrary.merge(baseFiles: msBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    let msGalaxy = Galaxy(game: msGame)
+    guard let msSys = msGame.system(msSysID) else {
+        FileHandle.standardError.write(Data("error: no system \(msSysID)\n".utf8)); exit(1)
+    }
+    guard let msDude = msGame.dude(msDudeID) else {
+        FileHandle.standardError.write(Data("error: no dude \(msDudeID)\n".utf8)); exit(1)
+    }
+    print("System #\(msSys.id) \"\(msSys.name)\"  spawning \(msCount)× dude #\(msDudeID) \"\(msDude.name)\" (AI \(msDude.aiType))")
+    print("  goal: \(msGoal)   behavior: \(msBehav)")
+
+    // A player with a real hull + weapons so attack/protect behaviors have teeth.
+    let msPlayerHull = msDude.ships.first?.shipID ?? 128
+    let msPlayer = msGalaxy.makeLoadedShip(msPlayerHull, government: independentGovt, at: Vec2())
+        ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
+    // God-mode the harness player so it doesn't "die" mid-run (player death is
+    // app-owned and would just make attackers disengage); this keeps attack/
+    // protect behaviors observable for the full window.
+    msPlayer.invulnerable = true
+    let msWorld = World(player: msPlayer)
+    msWorld.diplomacy = msGalaxy.makeDiplomacy()
+    msWorld.galaxy = msGalaxy
+    msWorld.systemContext = msGalaxy.systemContext(for: msSys.id)
+    msWorld.spawner = Spawner(galaxy: msGalaxy, table: SpawnTable(system: msSys))
+    msWorld.spawner?.populate(msWorld)
+    let ambient = msWorld.npcs.count
+
+    let msIDs = msWorld.spawnMissionShips(missionID: 9999, dudeID: msDudeID, count: msCount,
+                                          goal: msGoal, behavior: msBehav)
+    // The spawn event is emitted now; the first `step` clears the event buffer,
+    // so read it before the loop.
+    var spawnedEvents = msWorld.events.reduce(0) { if case .missionShipsSpawned = $1 { return $0 + 1 }; return $0 }
+    print("  ambient NPCs \(ambient); placed mission ships \(msIDs) (entity ids)")
+
+    var goalEvents = 0, despawnedEvents = 0
+    var playerShots = 0
+    var didMidDespawn = false
+    let msDt = 1.0 / 30.0
+    let msSteps = Int(msSeconds / msDt)
+    for i in 0..<msSteps {
+        msWorld.step(msDt)
+        for e in msWorld.events {
+            switch e {
+            case .missionShipsSpawned: spawnedEvents += 1
+            case let .missionShipGoalReached(mid, eid, goal, byPlayer):
+                goalEvents += 1
+                print("  [t=\(String(format: "%.1f", Double(i) * msDt))s] GOAL REACHED mission #\(mid) ship #\(eid) goal=\(goal) byPlayer=\(byPlayer)")
+            case .missionShipsDespawned: despawnedEvents += 1
+            case let .weaponFired(shooter, _, _, _): if shooter != 0 { for s in msWorld.missionShips() where s.entityID == shooter { playerShots += 1 } }
+            default: break
+            }
+        }
+        // Demonstrate "escorts leave at a plot point": halfway through, an escort
+        // objective clears its ships via the despawn seam. Counted from the return
+        // value (the event it emits is cleared by the next `step` before the scan).
+        if !didMidDespawn, msGoal == .escort, i >= msSteps / 2 {
+            didMidDespawn = true
+            let gone = msWorld.despawnMissionShips(missionID: 9999)
+            if !gone.isEmpty { despawnedEvents += 1 }
+            print("  [t=\(String(format: "%.1f", Double(i) * msDt))s] despawnMissionShips → \(gone) left the system")
+        }
+    }
+
+    let liveMission = msWorld.missionShips(missionID: 9999)
+    print(String(repeating: "-", count: 44))
+    print("after \(Int(msSeconds))s:  mission ships still live \(liveMission.count) / placed \(msIDs.count)")
+    print("  spawn events \(spawnedEvents)  goal-reached events \(goalEvents)  despawn events \(despawnedEvents)")
+    print("  player armor \(Int(msPlayer.armor))/\(Int(msPlayer.maxArmor))  shield \(Int(msPlayer.shield))/\(Int(msPlayer.maxShield))  (mission-ship weapon-fire events \(playerShots))")
+    for s in liveMission.prefix(6) {
+        let tgt = s.currentTargetID.map { " → target #\($0)" } ?? ""
+        let lead = s.brain?.leaderID.map { " leader→#\($0)" } ?? ""
+        let dis = s.disabled ? " DISABLED" : ""
+        print("    #\(s.entityID) \(s.name) [\(msGame.govt(s.government)?.name ?? "indep")] \(s.brain?.state.rawValue ?? "?")\(dis)\(tgt)\(lead)")
     }
 
 case "mission":

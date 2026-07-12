@@ -821,6 +821,9 @@ struct GameContainerView: View {
         if spob.isWormhole {
             beginWormholeTransport(from: spob)
         } else if scene.playerMayUseGate(spob.id) {
+            guard !(host?.game?.gateDestinations(from: spob) ?? []).isEmpty else {
+                host?.hud.post("This hypergate leads nowhere."); return
+            }
             scene.activateGate(spob.id)     // light it even if the player never clicked it
             gateMapOrigin = spob.id
         } else {

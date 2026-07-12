@@ -572,4 +572,19 @@ public enum WorldEvent {
     /// true survives via rescue at the nearest inhabited port (ship/cargo/
     /// outfits lost); false is a real game-over. Fires once per `World`.
     case playerDestroyed(hadEscapePod: Bool)
+
+    /// A mission (`mïsn`) special/aux ship was spawned into the system. The story
+    /// layer correlates it by `missionID`; the renderer can flag it as an
+    /// objective ship. `count` is how many were placed in this batch.
+    case missionShipsSpawned(missionID: Int, entityIDs: [Int])
+    /// A combat objective on a mission ship was reached: the player (or the
+    /// world) destroyed/disabled/boarded a `missionID` ship whose `ShipGoal`
+    /// matches `goal`. The story layer decides whether that completes/fails the
+    /// mission — this event just reports the fact. `byPlayer` distinguishes a
+    /// kill the player earned from an incidental NPC-vs-NPC one.
+    case missionShipGoalReached(missionID: Int, entityID: Int, goal: MissionShipGoal, byPlayer: Bool)
+    /// A mission's ships were cleared from the system by the story layer (e.g.
+    /// escorts that leave at a plot point, or a cancelled mission) via
+    /// `World.despawnMissionShips`. Not a kill — they simply vanish/jump out.
+    case missionShipsDespawned(missionID: Int, entityIDs: [Int])
 }

@@ -26,6 +26,18 @@ struct GalaxyMapView: View {
     /// PICT dialog frame. Driven by `GameSettings.fullscreenGalaxyMap`.
     var fullscreen: Bool = false
 
+    /// Gate destination-picker mode. When set (landing on a hypergate opens the
+    /// map this way), solid bright-blue lines run from `originSystem` to every
+    /// gate this one connects to, and tapping a destination invokes
+    /// `onSelect(destGateSpobID, destSystemID)` — a gate jump — instead of
+    /// plotting an ordinary hyperspace course.
+    struct GateSelection {
+        let originSystem: Int
+        let destinations: [(gateSpobID: Int, systemID: Int)]
+        let onSelect: (Int, Int) -> Void
+    }
+    var gateSelection: GateSelection?
+
     // Zoom is points-per-map-unit. Median link length in the data is ~37 units,
     // so 2.4 puts directly-linked systems ~90pt apart — a comfortable local view.
     @State private var zoom: CGFloat = GalaxyMapView.defaultZoom
@@ -70,6 +82,8 @@ struct GalaxyMapView: View {
     private let adjacentGrey = Color(white: 0.42)
     private let gateHyper = Color(red: 0.3, green: 0.85, blue: 0.95).opacity(0.85)     // hypergate link
     private let gateWormhole = Color(red: 0.78, green: 0.45, blue: 1.0).opacity(0.85)  // wormhole link
+    /// Solid, bold blue for the gate destination picker's selectable jumps.
+    private let gateRouteBlue = Color(red: 0.25, green: 0.62, blue: 1.0)
 
     var body: some View {
         ZStack {
@@ -328,6 +342,21 @@ struct GalaxyMapView: View {
                        style: StrokeStyle(lineWidth: 1.3, dash: [2.5, 3]))
         }
 
+        // Gate destination picker: bold, solid blue lines from the origin gate's
+        // system to each gate it reaches, with a ring on each tappable target.
+        // Destinations are always shown (using a gate bypasses fog of war).
+        if let gs = gateSelection, let origin = byID[gs.originSystem] {
+            let pa = plot(origin.x, origin.y)
+            for dest in gs.destinations {
+                guard let d = byID[dest.systemID] else { continue }
+                let pb = plot(d.x, d.y)
+                var line = Path(); line.move(to: pa); line.addLine(to: pb)
+                ctx.stroke(line, with: .color(gateRouteBlue), lineWidth: 3)
+                let ring = Path(ellipseIn: CGRect(x: pb.x - 7, y: pb.y - 7, width: 14, height: 14))
+                ctx.stroke(ring, with: .color(gateRouteBlue), lineWidth: 2)
+            }
+        }
+
         // The plotted course: green while your current fuel can still reach that
         // hop, warning red past it — segment by segment, drawn on top of the web.
         if !nav.route.isEmpty {
@@ -474,11 +503,27 @@ struct GalaxyMapView: View {
 
     private func handleTap(at location: CGPoint, viewSize: CGSize) {
         guard let cur = nav.current else { return }
+        let center = CGPoint(x: viewSize.width / 2 + pan.width,
+                             y: viewSize.height / 2 + pan.height)
+
+        // Gate mode: a tap picks the nearest gate destination and jumps through
+        // it, rather than plotting a hyperspace course.
+        if let gs = gateSelection {
+            var pick: (gate: Int, sys: Int, dist: CGFloat)?
+            for dest in gs.destinations {
+                guard let s = nav.game?.system(dest.systemID) else { continue }
+                let p = CGPoint(x: center.x + CGFloat(s.x - cur.x) * zoom,
+                                y: center.y + CGFloat(s.y - cur.y) * zoom)
+                let d = hypot(p.x - location.x, p.y - location.y)
+                if d < (pick?.dist ?? 24) { pick = (dest.gateSpobID, dest.systemID, d) }
+            }
+            if let pick { gs.onSelect(pick.gate, pick.sys) }
+            return
+        }
+
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
-        let center = CGPoint(x: viewSize.width / 2 + pan.width,
-                             y: viewSize.height / 2 + pan.height)
         var best: (id: Int, dist: CGFloat)?
         for s in nav.systems() {
             // Fog of war: only known systems are selectable.

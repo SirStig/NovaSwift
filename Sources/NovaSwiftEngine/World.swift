@@ -309,6 +309,18 @@ public final class Ship {
     /// `përs` id when this ship is a named character (5% spawn chance). Drives the
     /// target-display name and the ItemClass boarding-loot grant. nil = ordinary.
     public var personID: Int?
+
+    /// Set when this ship was spawned *by a mission* (`mïsn` special/aux ship),
+    /// tagged with the mission's resource id. Lets the world report goal progress
+    /// (destroyed/disabled/…) back to the story layer and lets a mission clear
+    /// its own ships when it ends (e.g. escorts that leave at a plot point). nil
+    /// for all ambient `düde`/`flët` traffic.
+    public var missionID: Int?
+    /// This mission ship's objective from the player's side (`mïsn.ShipGoal`):
+    /// what the player must *do* to it (destroy/disable/board/escort/…). Read by
+    /// the world when the ship is destroyed/disabled to fire the matching
+    /// `missionShipGoalReached` event. nil = not a mission ship, or no goal.
+    public var missionShipGoal: MissionShipGoal?
     /// Outfit ids this hulk still owes the player as `përs` boarding loot; nil =
     /// not yet rolled, empty = already taken. See `World.takePlunderOutfits`.
     public var plunderOutfits: [Int]?
@@ -773,6 +785,119 @@ public final class World {
         }
         npcs.removeAll()
         refreshRoster()
+    }
+
+    // MARK: Mission ships (mïsn special/aux ships)
+
+    /// Spawn a mission's special or auxiliary ships into the *current* system.
+    /// This is the engine seam the story layer drives when a `mïsn` with a ship
+    /// objective becomes active and its `ShipSystem`/`AuxShipSystem` resolves to
+    /// the system the player is in: it places `count` ships of dude `dudeID`
+    /// (drawn from the dude's weighted ship table and given its real hull loadout,
+    /// exactly like ambient traffic), tags each with `missionID`/`goal`, and
+    /// applies the mission's `ShipBehav` AI override. The caller (story layer) is
+    /// responsible for only calling this when the mission's ship system matches
+    /// the live world — the engine is single-system and doesn't know the galaxy
+    /// map. Returns the placed entity ids.
+    ///
+    /// - `goal`: the player-side objective (`mïsn.ShipGoal`) — drives the
+    ///   `missionShipGoalReached` events. `.rescue` starts the ships disabled
+    ///   (the classic "protect this crippled freighter" setup).
+    /// - `behavior`: the `ShipBehav` AI override (attack/protect the player).
+    ///   `.protectPlayer` wires each ship as a player escort so the existing
+    ///   escort logic makes it defend the player.
+    @discardableResult
+    public func spawnMissionShips(missionID: Int, dudeID: Int, count: Int,
+                                  goal: MissionShipGoal = .none,
+                                  behavior: MissionShipBehavior = .standard,
+                                  government: Int? = nil,
+                                  arrival: ArrivalMode = .hyperspace) -> [Int] {
+        guard count > 0, let galaxy = galaxy, let dude = galaxy.game.dude(dudeID) else { return [] }
+        var placed: [Int] = []
+        for i in 0..<count {
+            let roll = rng.int(in: 0...9999)
+            guard let shipID = dude.pickShip(roll: roll) else { continue }
+            let govt = government ?? (dude.govt >= 128 ? dude.govt : nil)
+            let (pos, ang) = missionSpawnPose(arrival: arrival)
+            guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang,
+                                                   skillRoll: rng.double(in: -1...1)) else { continue }
+            let brain = AIBrain(aiType: dude.aiType, govt: ship.government)
+            brain.behaviorOverride = behavior
+            if behavior == .protectPlayer {
+                // Fly as one of the player's escorts — the escort logic then makes
+                // it hold formation and adopt the player's target.
+                brain.leaderID = World.playerEntityID
+                brain.escortOrder = .defensive
+                brain.formationSlot = i
+            }
+            ship.brain = brain
+            ship.missionID = missionID
+            ship.missionShipGoal = goal
+            // A rescue objective's ship starts as a helpless drifting hulk the
+            // player must protect/tow — same disabled state a crippled ship holds.
+            var mode = arrival
+            if goal == .rescue {
+                ship.disabled = true
+                ship.armor = max(1, ship.maxArmor * 0.02)
+                ship.shield = 0
+                ship.disableSpin = rng.double(in: -0.5...0.5)
+                mode = .populate   // it's adrift in-system, not warping in
+            }
+            placed.append(addNPC(ship, arrival: mode))
+        }
+        if !placed.isEmpty {
+            events.append(.missionShipsSpawned(missionID: missionID, entityIDs: placed))
+        }
+        return placed
+    }
+
+    /// Remove every ship tagged with `missionID` from the system — the seam for
+    /// "the mission's escorts leave at a plot point" or a cancelled/failed
+    /// mission clearing its ships. Not a kill: no wreck, no legal-record hit,
+    /// just a clean exit (emits `missionShipsDespawned`, and a per-ship
+    /// `shipDeparted` so the renderer can streak them out). Returns the ids
+    /// removed.
+    @discardableResult
+    public func despawnMissionShips(missionID: Int) -> [Int] {
+        let leaving = npcs.filter { $0.missionID == missionID }
+        guard !leaving.isEmpty else { return [] }
+        var removedIDs: [Int] = []
+        for npc in leaving {
+            events.append(.shipDeparted(entityID: npc.entityID, at: npc.position, heading: npc.angle))
+            clearTarget(npc.entityID)
+            stopAllBeamLoops(for: npc)
+            removedIDs.append(npc.entityID)
+        }
+        let removing = Set(removedIDs)
+        npcs.removeAll { removing.contains($0.entityID) }
+        refreshRoster()
+        events.append(.missionShipsDespawned(missionID: missionID, entityIDs: removedIDs))
+        return removedIDs
+    }
+
+    /// Live mission ships currently in the system, optionally filtered to one
+    /// mission. Lets the story layer poll objective ships (position, health,
+    /// disabled/alive) without holding its own entity-id bookkeeping.
+    public func missionShips(missionID: Int? = nil) -> [Ship] {
+        npcs.filter { $0.missionID != nil && (missionID == nil || $0.missionID == missionID) }
+    }
+
+    /// A spawn position + facing for a mission ship. Edge/hyperspace arrivals come
+    /// in at the jump ring pointed inward (same as ambient jump-ins); everything
+    /// else scatters just inside the system so an already-present ship (a rescue
+    /// hulk, an observed convoy) isn't stuck out at the rim.
+    private func missionSpawnPose(arrival: ArrivalMode) -> (Vec2, Double) {
+        let ctx = systemContext
+        let bearing = rng.double(in: 0...(2 * .pi))
+        switch arrival {
+        case .hyperspace, .gate:
+            let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * ctx.spawnRadius
+            return (pos, (ctx.center - pos).angle)
+        case .populate, .launch:
+            let r = rng.double(in: 300...(ctx.jumpRadius * 0.6))
+            let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * r
+            return (pos, (ctx.center - pos).angle)
+        }
     }
 
     // MARK: Asteroids
@@ -1527,6 +1652,15 @@ public final class World {
             clearTarget(ship.entityID)               // everyone stops shooting it
             stopAllBeamLoops(for: ship)               // a hulk doesn't fire — stop its beam loop
             events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
+            // A mission "disable this ship" objective is met the instant it's
+            // crippled (a later kill doesn't un-meet it). Board/rescue objectives
+            // also need the ship disabled first, so report those here too and let
+            // the story layer decide what the disable means for each.
+            if let mid = ship.missionID, let goal = ship.missionShipGoal,
+               goal == .disable || goal == .board || goal == .rescue {
+                events.append(.missionShipGoalReached(missionID: mid, entityID: ship.entityID,
+                                                       goal: goal, byPlayer: ownerID == 0))
+            }
             Log.combat.debug("\(ship.name) [\(ship.entityID)] disabled (armor at/below \(Int(ship.disableArmorFraction * 100))% threshold) — now a drifting hulk")
             if ownerID == 0, let dip = diplomacy {
                 dip.recordDisable(of: ship.government)
@@ -1561,6 +1695,14 @@ public final class World {
                                          soundID: npc.explosionSoundID))
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
                                              at: npc.position))
+                // A destroyed mission ship meets a "destroy" (or "chase off",
+                // which a kill satisfies) objective. `disable`/`board`/`rescue`
+                // already fired when it was crippled; don't double-report those.
+                if let mid = npc.missionID, let goal = npc.missionShipGoal,
+                   goal == .destroy || goal == .chaseOff {
+                    events.append(.missionShipGoalReached(missionID: mid, entityID: npc.entityID,
+                                                          goal: goal, byPlayer: npc.killedByPlayer))
+                }
                 Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
                 // Clear any targeting of the dead ship.
                 clearTarget(npc.entityID)

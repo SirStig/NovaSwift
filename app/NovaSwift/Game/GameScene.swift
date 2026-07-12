@@ -410,7 +410,7 @@ final class GameScene: SKScene {
             var tuning = CombatTuning.default
             tuning.playerDamageScale = settings.difficulty.playerDamageScale   // difficulty
             let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID,
-                                                player: ship, combatTuning: tuning, galaxy: galaxy)
+                                                player: ship, galaxy: galaxy, combatTuning: tuning)
             self.world = w
             self.galaxy = gx
         } else {
@@ -1974,7 +1974,7 @@ final class GameScene: SKScene {
         // Fresh, populated world for the destination, reusing the player ship
         // (its fuel/damage/cargo carry over) and the same galaxy catalog.
         var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
-        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, combatTuning: tuning, galaxy: galaxy)
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning)
 
         let ctx = w.systemContext
         var arrivalGate: StellarBody?
@@ -2077,7 +2077,7 @@ final class GameScene: SKScene {
         // Fresh, populated world for the current system, built around the newly
         // constructed player ship (its fuel/damage/cargo already seeded from the pilot).
         var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
-        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, combatTuning: tuning, galaxy: galaxy)
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning)
 
         // Lift off from the departed body: sit just clear of its surface, nose
         // pointed away from the system centre, at rest — EV Nova doesn't give
