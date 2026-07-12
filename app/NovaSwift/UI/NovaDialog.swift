@@ -66,7 +66,7 @@ struct NovaDialog<Content: View>: View {
             .frame(height: 40)
         }
         .frame(maxWidth: .infinity)
-        .background(NovaPanelBackground(graphics: graphics))
+        .background(NovaPanelBackground(graphics: graphics, modern: model.settings.modernUI))
     }
 
     private var dialogBody: some View {
@@ -81,7 +81,7 @@ struct NovaDialog<Content: View>: View {
     /// The game's real three-slice button art when graphics are loaded; a
     /// clean pill fallback (amber for the default action) before data import.
     @ViewBuilder private func footerButton(_ b: NovaDialogButton) -> some View {
-        if let graphics {
+        if let graphics, !model.settings.modernUI {
             NovaButton(graphics: graphics, title: b.title,
                        width: max(50, CGFloat(b.title.count) * 8), enabled: b.enabled) {
                 model.audio.play(.uiSelect)
@@ -148,7 +148,7 @@ struct DialogChrome<Content: View>: View {
 
                 card
                     .frame(width: designW, height: designH)
-                    .background(NovaPanelBackground(graphics: model.uiGraphics))
+                    .background(NovaPanelBackground(graphics: model.uiGraphics, modern: model.settings.modernUI))
                     .scaleEffect(scale)
                     .frame(width: geo.size.width, height: geo.size.height)
             }
@@ -189,7 +189,7 @@ struct DialogChrome<Content: View>: View {
     /// The game's real three-slice Done button when data is loaded (matching
     /// every other dialog); a plain amber pill only before any data import.
     @ViewBuilder private var doneButton: some View {
-        if let graphics = model.uiGraphics {
+        if let graphics = model.uiGraphics, !model.settings.modernUI {
             NovaButton(graphics: graphics, title: "Done", width: 60) { onClose() }
         } else {
             Button { onClose() } label: {
@@ -210,9 +210,14 @@ struct DialogChrome<Content: View>: View {
 /// border are imperceptible. Falls back to a plain dark card before data import.
 struct NovaPanelBackground: View {
     let graphics: SpaceportGraphics?
+    /// Nova Swift presentation: use the port's own modern chrome (metal border +
+    /// space-blue "screen" interior) instead of the authentic PICT frame.
+    var modern: Bool = false
 
     var body: some View {
-        if let g = graphics,
+        if modern {
+            ModernDialogPanel()
+        } else if let g = graphics,
            let top = g.pict(8521), let middle = g.pict(8522), let bottom = g.pict(8523) {
             VStack(spacing: 0) {
                 Image(decorative: top, scale: 1).resizable().frame(height: 9)
@@ -222,6 +227,62 @@ struct NovaPanelBackground: View {
         } else {
             RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.10))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.2)))
+        }
+    }
+}
+
+/// The Nova Swift modern dialog chrome: a brushed-steel border framing a deep
+/// space-blue "screen" interior with a faint wave/scanline sheen — the look the
+/// port aims for in modern mode (metal frame, blue screen). Fully vector so it
+/// stays crisp at any dialog size.
+struct ModernDialogPanel: View {
+    private let corner: CGFloat = 16
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        shape
+            .fill(
+                LinearGradient(colors: [Color(red: 0.03, green: 0.06, blue: 0.15),
+                                        Color(red: 0.05, green: 0.11, blue: 0.24)],
+                               startPoint: .top, endPoint: .bottom)
+            )
+            // Screen glow from the top, like a lit console.
+            .overlay(
+                RadialGradient(colors: [Color(red: 0.15, green: 0.35, blue: 0.6).opacity(0.35), .clear],
+                               center: .top, startRadius: 0, endRadius: 340)
+                    .clipShape(shape)
+            )
+            // Faint waves so the interior reads as a screen, not flat fill.
+            .overlay(waves.clipShape(shape).allowsHitTesting(false))
+            // Inner hairline + brushed-steel outer border.
+            .overlay(shape.inset(by: 3).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(colors: [Color(white: 0.82), Color(white: 0.34),
+                                            Color(white: 0.62), Color(white: 0.26)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    lineWidth: 3.5)
+            )
+            .shadow(color: .black.opacity(0.6), radius: 20, y: 10)
+    }
+
+    /// A few low-amplitude sine waves, drawn faintly across the interior.
+    private var waves: some View {
+        Canvas { ctx, size in
+            for (i, yFrac) in [0.34, 0.54, 0.74].enumerated() {
+                var path = Path()
+                let baseY = size.height * yFrac
+                let amp = 5.0 + Double(i) * 2.5
+                path.move(to: CGPoint(x: 0, y: baseY))
+                var x = 0.0
+                while x <= size.width {
+                    let y = baseY + sin(x / 40 + Double(i) * 1.3) * amp
+                    path.addLine(to: CGPoint(x: x, y: y))
+                    x += 6
+                }
+                ctx.stroke(path, with: .color(Color(red: 0.35, green: 0.7, blue: 1.0).opacity(0.06)),
+                           lineWidth: 1)
+            }
         }
     }
 }

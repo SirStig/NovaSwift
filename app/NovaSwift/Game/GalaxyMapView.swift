@@ -21,6 +21,10 @@ struct GalaxyMapView: View {
     @ObservedObject var pilot: PilotStore
     var onJump: () -> Void
     var onClose: () -> Void
+    /// Enhanced / Nova Swift presentation: render the map edge-to-edge with its
+    /// controls overlaid on gradient scrims, instead of inside the authentic
+    /// PICT dialog frame. Driven by `GameSettings.fullscreenGalaxyMap`.
+    var fullscreen: Bool = false
 
     // Zoom is points-per-map-unit. Median link length in the data is ~37 units,
     // so 2.4 puts directly-linked systems ~90pt apart — a comfortable local view.
@@ -71,7 +75,11 @@ struct GalaxyMapView: View {
         ZStack {
             Color.black.opacity(0.94).ignoresSafeArea()
 
-            if let graphics, let frame = graphics.pict(Self.frameID) {
+            if fullscreen {
+                // Enhanced / Nova Swift: the map fills the screen and its
+                // controls float on gradient scrims (see `fullscreenChrome`).
+                fullscreenChrome
+            } else if let graphics, let frame = graphics.pict(Self.frameID) {
                 authenticChrome(frame: frame)
             } else {
                 // No Map PICT in the loaded data (or `SpaceportGraphics` hasn't
@@ -808,6 +816,100 @@ struct GalaxyMapView: View {
         Button(action: action) {
             Image(systemName: icon).font(.subheadline)
                 .padding(8).background(.ultraThinMaterial, in: Circle())
+        }.buttonStyle(.plain)
+    }
+
+    // MARK: Chrome — full-screen (Enhanced / Nova Swift)
+
+    /// The map filling the whole screen, its controls floating over it on
+    /// top/bottom gradient scrims (and the side panel / legend on their own
+    /// translucent cards) so everything stays legible against the starfield.
+    /// Reuses the same `mapCanvas`, `routeBar`, `sidePanel` and `relationLegend`
+    /// the authentic chrome uses — only the container differs.
+    private var fullscreenChrome: some View {
+        ZStack {
+            mapCanvas.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Top bar: title, zoom / recenter, Done.
+                HStack(spacing: 12) {
+                    Text("GALAXY MAP").novaFont(.heading, weight: .bold).foregroundStyle(amber)
+                    Spacer()
+                    overlayIcon("minus.magnifyingglass") { setZoom(zoom / 1.4) }
+                    overlayIcon("plus.magnifyingglass") { setZoom(zoom * 1.4) }
+                    overlayIcon("scope") { pan = .zero; zoom = GalaxyMapView.defaultZoom }
+                    overlayButton("Done", tint: amber, action: onClose)
+                }
+                .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 26)
+                .background(scrim(top: true))
+
+                Spacer()
+
+                // Bottom: live course/fuel bar + route actions.
+                VStack(alignment: .leading, spacing: 12) {
+                    TimelineView(.periodic(from: .now, by: 0.5)) { _ in routeBar }
+                    HStack(spacing: 12) {
+                        overlayButton("Named System") { showingFinder = true }
+                        overlayButton("Nearest System", action: findNearestSystem)
+                        overlayButton("Clear Route") { nav.clearCourse() }
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, 22).padding(.top, 28).padding(.bottom, 18)
+                .background(scrim(top: false))
+            }
+            .ignoresSafeArea(edges: .horizontal)
+
+            // System-info panel, floating top-right on its own card.
+            HStack(alignment: .top) {
+                Spacer()
+                sidePanel
+                    .frame(width: 160, alignment: .top)
+                    .padding(10)
+                    .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(amber.opacity(0.25)))
+                    .padding(.top, 92).padding(.trailing, 20)
+            }
+
+            // Relation-colour key, floating bottom-left just above the route bar.
+            VStack {
+                Spacer()
+                HStack {
+                    relationLegend.padding(.leading, 22).padding(.bottom, 112)
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    /// A top- or bottom-anchored black gradient behind the overlaid controls, so
+    /// text/buttons stay readable over a bright nebula or dense starfield.
+    private func scrim(top: Bool) -> some View {
+        LinearGradient(colors: [.black.opacity(0.72), .black.opacity(0.0)],
+                       startPoint: top ? .top : .bottom,
+                       endPoint: top ? .bottom : .top)
+            .allowsHitTesting(false)
+    }
+
+    /// A pill text button for the overlaid map controls (Done / Named / Nearest /
+    /// Clear), in the map's amber theme with a translucent backing.
+    private func overlayButton(_ title: String, tint: Color? = nil, action: @escaping () -> Void) -> some View {
+        let c = tint ?? amber
+        return Button(action: action) {
+            Text(title).novaFont(.body, weight: .semibold).foregroundStyle(c)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(c.opacity(0.14), in: Capsule())
+                .overlay(Capsule().strokeBorder(c.opacity(0.5)))
+        }.buttonStyle(.plain)
+    }
+
+    /// A round icon button (zoom −/+, recenter) matching `overlayButton`'s look.
+    private func overlayIcon(_ systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName).font(.subheadline.weight(.semibold)).foregroundStyle(amber)
+                .frame(width: 34, height: 34)
+                .background(amber.opacity(0.14), in: Circle())
+                .overlay(Circle().strokeBorder(amber.opacity(0.5)))
         }.buttonStyle(.plain)
     }
 }

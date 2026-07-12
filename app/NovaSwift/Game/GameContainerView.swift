@@ -402,7 +402,7 @@ struct GameContainerView: View {
             if let host {
                 sceneLayer(host)
                     .focused($isSceneFocused)
-                if let style = host.hudStyle {
+                if let style = activeHUDStyle(host) {
                     // Constrained to the same capped sidebar width `sceneLayer`
                     // reserves for it (see `Self.sidebarWidth`), and clipped, so
                     // the two never disagree — without this the HUD's own
@@ -425,7 +425,9 @@ struct GameContainerView: View {
                 topLeftMenuButton
 
                 if nav.showingMap {
-                    GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() }) { nav.showingMap = false }
+                    GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() },
+                                  onClose: { nav.showingMap = false },
+                                  fullscreen: model.settings.fullscreenGalaxyMap)
                         .transition(.opacity)
                 }
 
@@ -444,7 +446,7 @@ struct GameContainerView: View {
                             input: host.input, hud: host.hud,
                             viewportSize: geo.size,
                             tapToFly: model.settings.controlScheme == .tapToTurn,
-                            rightInset: Self.sidebarWidth(in: geo.size, style: host.hudStyle),
+                            rightInset: Self.sidebarWidth(in: geo.size, style: activeHUDStyle(host)),
                             onDiscrete: handleDiscrete,
                             onOpenPanel: openMobilePanel)
                     }
@@ -457,7 +459,7 @@ struct GameContainerView: View {
                 // viewport, not the full window (see `Self.sidebarWidth`).
                 GeometryReader { geo in
                     LandPromptView(hud: host.hud, onLand: { handleDiscrete(.land) },
-                                    rightInset: Self.sidebarWidth(in: geo.size, style: host.hudStyle))
+                                    rightInset: Self.sidebarWidth(in: geo.size, style: activeHUDStyle(host)))
                 }
 
                 if let state = hailDialogState {
@@ -522,7 +524,7 @@ struct GameContainerView: View {
                 if let id = landedSpobID, let graphics = host.graphics,
                    let galaxy = host.galaxy, let spob = host.game?.spob(id) {
                     GeometryReader { geo in
-                        let sidebarWidth = Self.sidebarWidth(in: geo.size, style: host.hudStyle)
+                        let sidebarWidth = Self.sidebarWidth(in: geo.size, style: activeHUDStyle(host))
                         let playWidth = max(0, geo.size.width - sidebarWidth)
                         SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob,
                                       pilot: model.pilot, onDepart: depart)
@@ -571,6 +573,15 @@ struct GameContainerView: View {
             if phase != .active {
                 syncCombatStanding()
                 model.autosave(reason: .timer)
+                // "Pause when app loses focus": freeze the sim while backgrounded
+                // (unless a modal already owns the pause state).
+                if model.settings.pauseOnFocusLoss { setScenePaused(true, reason: "focus lost") }
+            } else if model.settings.pauseOnFocusLoss,
+                      landedSpobID == nil, !showMenu, !nav.showingMap,
+                      hailDialogState == nil, flightMissionServices.pendingOffer == nil {
+                // Back to the foreground with nothing else holding the pause —
+                // resume flight.
+                setScenePaused(false, reason: "focus regained")
             }
         }
         .onChange(of: landedSpobID) { _, id in
@@ -619,8 +630,10 @@ struct GameContainerView: View {
             }
         }
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
-        .onChange(of: model.settings.shipBarPosition) { _, _ in host?.scene.applyDisplaySettings(model.settings) }
-        .onChange(of: model.settings.showPlanetLabels) { _, _ in host?.scene.applyDisplaySettings(model.settings) }
+        // Push any settings change into the live scene's own copy so display
+        // options (ship bars, planet labels, smooth sprites, engine glow, screen
+        // shake, reduce-flashing) take effect without a system rebuild.
+        .onChange(of: model.settings) { _, s in host?.scene.applyDisplaySettings(s) }
         .onChange(of: nav.currentSystemID) { _, newID in
             // `navReady` alone doesn't catch the initial `nav.configure(...)`
             // notification racing this handler (see `hostSystemID`'s doc
@@ -920,6 +933,17 @@ struct GameContainerView: View {
         return min(natural, size.width * 0.35)
     }
 
+    /// The authentic status-bar style to actually render, or nil to fall back to
+    /// the port's own modern `GameHUDView`. Nil whenever the player is in the
+    /// Nova Swift / "Modern interface" mode — even when the data ships an `ïntf`
+    /// — so the modern HUD overlays the play area instead of the authentic
+    /// sidebar reserving screen width. `GameHost` always builds `hudStyle`; the
+    /// view decides per-frame whether to use it, so toggling the setting live
+    /// swaps HUDs without rebuilding the host.
+    private func activeHUDStyle(_ host: GameHost) -> AuthenticHUDStyle? {
+        model.settings.modernUI ? nil : host.hudStyle
+    }
+
     @ViewBuilder
     private func sceneLayer(_ host: GameHost) -> some View {
         // Flight is driven by keybindings (keyboard) + controller + touch.
@@ -930,13 +954,16 @@ struct GameContainerView: View {
             // sidebar. Shrink the play viewport to match instead of letting the
             // SpriteKit scene (and its ship-centred camera) fill the whole
             // window with the sidebar drawn over the top of it.
-            let sidebarWidth = Self.sidebarWidth(in: geo.size, style: host.hudStyle)
+            let sidebarWidth = Self.sidebarWidth(in: geo.size, style: activeHUDStyle(host))
             let playWidth = max(0, geo.size.width - sidebarWidth)
             // Click/tap a ship to target it, a planet to set it as the nav
             // destination, or empty space to clear both selections — handled
             // natively in `GameScene.mouseDown`/`touchesBegan`, not via a
             // SwiftUI gesture (unreliable layered on `SpriteView`'s native view).
-            SpriteView(scene: host.scene, options: [.ignoresSiblingOrder])
+            SpriteView(scene: host.scene,
+                       preferredFramesPerSecond: model.settings.frameRateCap.fps ?? 120,
+                       options: [.ignoresSiblingOrder],
+                       debugOptions: model.settings.showFPS ? [.showsFPS, .showsNodeCount] : [])
                 .frame(width: playWidth, height: geo.size.height)
                 .position(x: playWidth / 2, y: geo.size.height / 2)
                 // Tie this view's identity to the scene instance. `SpriteView`

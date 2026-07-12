@@ -60,6 +60,9 @@ final class GameScene: SKScene {
     private var steerViewOffset: CGVector?
     private var hud: GameHUDModel?
     private var settings = GameSettings()
+    /// Texture filtering for all sprites — crisp `.nearest` for the faithful
+    /// pixel-art look, `.linear` when the player turns on "Smooth sprite scaling".
+    private var spriteFilter: SKTextureFilteringMode { settings.smoothSprites ? .linear : .nearest }
     private var audio: GameAudio?
     private var wasFiring = false
     // Edge-triggered warning state: true once the klaxon/red-alert for that
@@ -413,7 +416,7 @@ final class GameScene: SKScene {
             let node: SKNode
             if let tex = p.texture {
                 let sprite = SKSpriteNode(texture: tex)
-                sprite.texture?.filteringMode = .nearest
+                sprite.texture?.filteringMode = spriteFilter
                 node = sprite
             } else {
                 // Fallback disc for stellars whose art we can't decode yet (e.g. PICT).
@@ -470,7 +473,7 @@ final class GameScene: SKScene {
                 let star: SKSpriteNode
                 if let frames = starFrames, !frames.isEmpty {
                     star = SKSpriteNode(texture: frames.randomElement())
-                    star.texture?.filteringMode = .nearest
+                    star.texture?.filteringMode = spriteFilter
                     star.alpha = spec.brightness
                     star.setScale(spec.size / 3.0)
                 } else {
@@ -505,7 +508,7 @@ final class GameScene: SKScene {
         // Real engine-glow art, added first so it renders behind the hull.
         if let first = engineGlowTextures.first {
             let glow = SKSpriteNode(texture: first)
-            glow.texture?.filteringMode = .nearest
+            glow.texture?.filteringMode = spriteFilter
             glow.blendMode = .add
             glow.isHidden = true
             node.addChild(glow)
@@ -514,7 +517,7 @@ final class GameScene: SKScene {
 
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
-            sprite.texture?.filteringMode = .nearest
+            sprite.texture?.filteringMode = spriteFilter
             node.addChild(sprite)
             shipSprite = sprite
             shipRadius = max(first.size().width, first.size().height) / 2
@@ -613,7 +616,10 @@ final class GameScene: SKScene {
         if jumpPhase != .none {
             intent = stepJump(dt)
         } else {
-            intent = input?.intent ?? .init()
+            var i = input?.intent ?? .init()
+            // "Invert turn direction" swaps the discrete left/right steering.
+            if settings.invertTurn { swap(&i.turnLeft, &i.turnRight) }
+            intent = i
         }
         world.intent = intent
         world.step(dt)
@@ -1116,12 +1122,21 @@ final class GameScene: SKScene {
     }
 
     private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
+        // The "Engine & weapon glow" option, off, suppresses the exhaust entirely.
+        guard settings.engineGlow else {
+            engineGlowSprite?.isHidden = true
+            thruster.isHidden = true
+            return
+        }
         // Real per-hull engine-glow art (when the data has one) replaces the
         // synthetic flame entirely rather than layering both.
         if let glow = engineGlowSprite {
             glow.isHidden = !active
             if active {
-                let targetAlpha: CGFloat = boosted ? .random(in: 0.85...1.0) : .random(in: 0.6...0.85)
+                // "Reduce flashing & motion" holds the exhaust at a steady level
+                // instead of the low-pass-filtered flicker.
+                let targetAlpha: CGFloat = settings.reduceFlashing ? (boosted ? 0.95 : 0.75)
+                    : (boosted ? .random(in: 0.85...1.0) : .random(in: 0.6...0.85))
                 thrusterAlpha = thrusterAlpha * 0.85 + targetAlpha * 0.15
                 glow.alpha = thrusterAlpha
             }
@@ -1327,7 +1342,7 @@ final class GameScene: SKScene {
         n.textures = textures
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
-            sprite.texture?.filteringMode = .nearest
+            sprite.texture?.filteringMode = spriteFilter
             n.container.addChild(sprite)
             n.sprite = sprite
         }
@@ -1383,7 +1398,7 @@ final class GameScene: SKScene {
         n.engineGlowTextures = glowTextures
         if let first = glowTextures.first {
             let glow = SKSpriteNode(texture: first)
-            glow.texture?.filteringMode = .nearest
+            glow.texture?.filteringMode = spriteFilter
             glow.blendMode = .add
             glow.isHidden = true
             n.container.addChild(glow)
@@ -1394,7 +1409,7 @@ final class GameScene: SKScene {
         n.textures = textures
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
-            sprite.texture?.filteringMode = .nearest
+            sprite.texture?.filteringMode = spriteFilter
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
@@ -1951,6 +1966,7 @@ final class GameScene: SKScene {
     /// labels and hull/shield bar position/visibility — so toggling them from
     /// Settings updates the live scene without waiting for a system rebuild.
     func applyDisplaySettings(_ newSettings: GameSettings) {
+        let filterChanged = newSettings.smoothSprites != settings.smoothSprites
         settings = newSettings
         for node in planetNodes {
             node.childNode(withName: "planetLabel")?.isHidden = !settings.showPlanetLabels
@@ -1964,6 +1980,16 @@ final class GameScene: SKScene {
                 n.lastArmor = -1   // force updateNPCHealth to re-evaluate visibility
             }
         }
+        // Smooth-scaling toggled: re-flip every live sprite's texture filtering so
+        // it applies without waiting for a system rebuild. (engineGlow / screenShake
+        // / reduceFlashing are read live each frame, so they need no node pass.)
+        if filterChanged { applySpriteFiltering(to: self) }
+    }
+
+    /// Recursively set every sprite's texture filtering to the current mode.
+    private func applySpriteFiltering(to node: SKNode) {
+        (node as? SKSpriteNode)?.texture?.filteringMode = spriteFilter
+        for child in node.children { applySpriteFiltering(to: child) }
     }
 
     // MARK: Hyperspace no-jump zone

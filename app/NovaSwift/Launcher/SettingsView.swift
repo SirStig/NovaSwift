@@ -14,6 +14,7 @@ struct SettingsView: View {
     var body: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
             Form {
+                uiModeSection
                 gameplaySection
                 controlsSection
                 graphicsSection
@@ -48,6 +49,20 @@ struct SettingsView: View {
     }
 
     // MARK: Sections
+
+    private var uiModeSection: some View {
+        Section {
+            Picker("Interface", selection: binding(\.uiMode)) {
+                ForEach(GameSettings.UIMode.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Label("Presentation", systemImage: "sparkles.tv")
+        } footer: {
+            Text(model.settings.uiMode.blurb
+                 + " This changes how the interface is presented; the individual options below still apply in every mode.")
+        }
+    }
 
     private var gameplaySection: some View {
         Section {
@@ -160,14 +175,13 @@ struct SettingsView: View {
 
     private var interfaceSection: some View {
         Section {
-            Toggle("Use authentic EV Nova menu", isOn: binding(\.useAuthenticMenu))
             Toggle("Show radar", isOn: binding(\.showRadar))
             Toggle("Show planet names", isOn: binding(\.showPlanetLabels))
             sliderRow("HUD opacity", binding(\.hudOpacity), 0.2...1.0)
         } header: {
             Label("Interface", systemImage: "rectangle.on.rectangle")
         } footer: {
-            Text("The authentic menu renders the original title screen from your imported data instead of the modern launcher. The original never labelled planets in flight — leave planet names off for the faithful look.")
+            Text("The Nova Swift presentation mode swaps the authentic status bar, menus and dialogs for the port's own modern UI. The original never labelled planets in flight — leave planet names off for the faithful look.")
         }
     }
 

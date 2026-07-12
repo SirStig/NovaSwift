@@ -14,8 +14,14 @@ struct RootView: View {
                 LauncherView()
                     .transition(.opacity)
             case .mainMenu:
-                // The authentic EV Nova main menu, from the player's own assets.
-                if let assets = menuAssets {
+                // Nova Swift (modern) menu replaces the authentic one when the
+                // player has chosen the modern presentation — it needs no decoded
+                // PICT assets, so it shows immediately.
+                if model.settings.modernUI {
+                    ModernMainMenuView()
+                        .transition(.opacity)
+                } else if let assets = menuAssets {
+                    // The authentic EV Nova main menu, from the player's own assets.
                     AuthenticMainMenuView(assets: assets)
                         .transition(.opacity)
                 } else {

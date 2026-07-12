@@ -746,4 +746,88 @@ final class AIBehaviorTests: XCTestCase {
                        "an aggressive escort engages even though its wimpy-trader disposition would otherwise flee, "
                        + "and even though its leader is an NPC with no target of its own")
     }
+
+    /// The core of the escort/AI-flight rework: a heavy, sluggish hull that starts
+    /// well out of position must decelerate onto its formation slot and *hold* it,
+    /// not sail through and wheel around it forever (the "circles its slot" bug).
+    func testHeavyEscortSettlesIntoFormationWithoutOrbiting() {
+        // Leader = player, sitting still at the origin (angle 0).
+        let player = Ship(name: "Lead", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        let world = World(player: player)
+        // A heavy escort: low acceleration and a slow turn rate — the profile that
+        // used to overshoot and orbit. It starts 600 units off to the side.
+        let escort = Ship(name: "Heavy", stats: ShipStats(maxSpeed: 300, acceleration: 60, turnRate: 0.8),
+                          position: Vec2(600, 0))
+        escort.radius = 20
+        world.addNPC(escort)
+        world.recruitEscort(escort)     // leaderID = player, defensive, slot 0
+
+        // Fly for 25 seconds — ample time to close 600 units and settle.
+        for _ in 0..<750 { world.step(1.0 / 30.0) }
+
+        // Slot 0 sits ~96 units from a leader facing "up"; it must be parked near
+        // there and nearly stopped relative to the (stationary) leader.
+        let slotDist = (escort.position - player.position).length
+        XCTAssertLessThan(slotDist, 200,
+                          "a heavy escort should hold a formation slot near its leader, not orbit at range (was \(slotDist))")
+        XCTAssertLessThan(escort.velocity.length, 40,
+                          "a settled escort should be nearly stopped, not circling at speed (was \(escort.velocity.length))")
+        XCTAssertEqual(escort.brain?.state, .escorting, "it should still be holding formation")
+    }
+
+    /// Formation must hold on the move too: an escort starting behind a leader that
+    /// cruises flat-out should reel in and then keep station, matching its velocity —
+    /// not trail off the back forever.
+    func testEscortKeepsUpWithACruisingLeader() {
+        let player = Ship(name: "Lead", stats: ShipStats(maxSpeed: 250, acceleration: 200, turnRate: 3))
+        let world = World(player: player)
+        let escort = Ship(name: "Wing", stats: ShipStats(maxSpeed: 250, acceleration: 120, turnRate: 1.5),
+                          position: Vec2(-100, -400))
+        escort.radius = 20
+        world.addNPC(escort)
+        world.recruitEscort(escort)
+        // Player holds full thrust "up" for the whole run (intent persists on world).
+        world.intent.thrust = true
+
+        for _ in 0..<900 { world.step(1.0 / 30.0) }     // 30 seconds
+
+        let gap = (escort.position - player.position).length
+        XCTAssertLessThan(gap, 280,
+                          "escort should keep station with a cruising leader, not trail off (gap \(gap))")
+        let relSpeed = (escort.velocity - player.velocity).length
+        XCTAssertLessThan(relSpeed, 70,
+                          "escort should roughly match the leader's velocity in formation (rel \(relSpeed))")
+    }
+
+    /// Anti-jitter: once settled behind a leader cruising in a straight line, an
+    /// escort should hold its heading, not twitch its nose every frame chasing a
+    /// near-zero error (the "constantly turns to make minor adjustments" report).
+    func testSettledEscortHoldsHeadingWithoutConstantTurning() {
+        let player = Ship(name: "Lead", stats: ShipStats(maxSpeed: 200, acceleration: 200, turnRate: 3))
+        let world = World(player: player)
+        let escort = Ship(name: "Wing", stats: ShipStats(maxSpeed: 200, acceleration: 150, turnRate: 2),
+                          position: Vec2(80, -70))     // already near its slot
+        escort.radius = 20
+        world.addNPC(escort)
+        world.recruitEscort(escort)
+        world.intent.thrust = true                     // leader cruises straight, no turning
+
+        for _ in 0..<600 { world.step(1.0 / 30.0) }    // let it settle
+
+        // Measure total nose rotation over the next second of holding station.
+        func shortestDelta(_ a: Double, _ b: Double) -> Double {
+            var d = (b - a).truncatingRemainder(dividingBy: 2 * .pi)
+            if d > .pi { d -= 2 * .pi }; if d < -.pi { d += 2 * .pi }
+            return d
+        }
+        var totalTurn = 0.0
+        var prev = escort.angle
+        for _ in 0..<30 {
+            world.step(1.0 / 30.0)
+            totalTurn += abs(shortestDelta(prev, escort.angle))
+            prev = escort.angle
+        }
+        XCTAssertLessThan(totalTurn, 0.2,
+                          "a settled escort should hold heading, not constantly correct (total turn \(totalTurn) rad over 1s)")
+    }
 }

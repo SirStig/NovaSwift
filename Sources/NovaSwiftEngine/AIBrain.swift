@@ -66,6 +66,11 @@ public final class AIBrain {
     public var leaderID: Int?
     /// This escort's slot in the leader's formation (0-based), for tidy wings.
     public var formationSlot = 0
+    /// Last frame's leader velocity, kept so an escort can feed the leader's own
+    /// *acceleration* forward into its station-keeping — moving with the leader the
+    /// instant it thrusts/turns rather than lagging and snatching a correction a
+    /// frame later. Nil until the first escorting frame / after the leader is lost.
+    private var prevLeaderVel: Vec2?
     /// Standing order for a player escort (`leaderID == 0`). Ignored by ordinary
     /// NPC-fleet escorts, which always behave as `.defensive`.
     public var escortOrder: EscortOrder = .defensive
@@ -664,6 +669,7 @@ public final class AIBrain {
             let tag = shipTag, leaderDesc = leaderID.map(String.init) ?? "nil"
             Log.ai.debug("\(tag) escort leader [\(leaderDesc)] gone — reverting to own disposition")
             leaderID = nil
+            prevLeaderVel = nil
             enter(defaultIdleState(me, world))
             return ControlIntent()
         }
@@ -681,41 +687,53 @@ public final class AIBrain {
         let toStation = station - me.position
         let d = toStation.length
 
-        // Physics station-keeping (the ship flies its slot with real thrusters and
-        // its own turn rate — it corrects, banks and reforms visibly, never snaps).
-        //
-        // Target a *velocity*, not a point: carry the leader's velocity forward so
-        // a formed-up wing simply cruises with the flagship, plus a spring pull onto
-        // the exact slot that grows with the gap. This is a moving-target arrive —
-        // stable because both terms change slowly (leader motion + our position),
-        // so a turn-rate-limited hull can actually track it instead of chasing a
-        // fast-swinging blended heading (the old spin trap).
-        let spring = 2.6                                   // 1/sec pull toward the slot
-        var desiredVel = leader.velocity + toStation * spring
-        // Formation speed headroom: allow up to +50% over hull max while a long way
-        // out so an escort that fell behind a cruising leader can reel back in, then
-        // fade it to 0 as we settle so the formed wing runs at true hull speed.
-        let margin = min(0.5, d / 700)
-        let capV = me.stats.maxSpeed * (1 + margin)
-        if desiredVel.length > capV { desiredVel = desiredVel.normalized * capV }
+        // Estimate the leader's own acceleration from its velocity change, to feed
+        // it forward below. This is the "sees the future" term: the instant the
+        // leader thrusts or turns, the escort applies the same acceleration rather
+        // than waiting to drift out of position and then chasing the gap.
+        let leaderAccel = prevLeaderVel.map { (leader.velocity - $0) * (1 / max(dt, 1e-4)) } ?? Vec2()
+        prevLeaderVel = leader.velocity
 
-        let dv = desiredVel - me.velocity                  // velocity change we want
-        var intent = ControlIntent()
-        if dv.length > me.stats.maxSpeed * 0.05 {
-            // Point where we need to push and burn — but only once the nose is
-            // genuinely lined up, so a heavy hull rotates to face first rather than
-            // thrusting sideways (the "pointed one way, sliding another" look).
-            intent.desiredHeading = dv.angle
-            let aim = abs(angleDelta(from: me.angle, to: dv.angle))
-            if aim < .pi / 4 { intent.thrust = true }
-            // Only spend the catch-up headroom while actually burning to close a
-            // real gap — never while settled, so steady formation shows no cheat.
-            if intent.thrust, d > 60 { me.formationAssist = margin }
-        } else {
-            // Matched to the slot: sit nose-forward with the flagship so a settled
-            // wing points the same way instead of jittering on a meaningless dv.
-            intent.desiredHeading = leader.angle
+        // FAR from the slot (returning from a fight, freshly hired): fly in with the
+        // stopping-point steering so a heavy hull decelerates cleanly onto station
+        // instead of sailing through and wheeling around it.
+        if d > 150 {
+            let (intent, _) = moveTo(me, toward: station, matching: leader.velocity,
+                                     arriveRadius: 16, arriveSpeed: max(6, me.stats.maxSpeed * 0.04))
+            var out = intent
+            if out.thrust { me.formationAssist = min(0.5, d / 900) }   // reel-in headroom
+            return out
         }
+
+        // IN the slot: a predictive PD station-keeper. Command an acceleration that
+        // corrects position and velocity error *and* carries the leader's own
+        // acceleration forward, so the wing moves as one — anticipating the leader
+        // rather than reacting to it. Slightly over-damped (kd a touch high) so it
+        // eases onto station without the overshoot-and-recorrect wobble.
+        let posErr = toStation
+        let velErr = leader.velocity - me.velocity
+        let kp = 3.0, kd = 4.2
+        let aCmd = posErr * kp + velErr * kd + leaderAccel
+
+        var intent = ControlIntent()
+        // Deadzone: essentially on-station and matched. Under Newtonian flight,
+        // coasting holds station, so point along the flagship and don't thrust —
+        // this is what ends the perpetual micro-turning the reactive controller did.
+        if aCmd.length < me.stats.acceleration * 0.2 {
+            if abs(angleDelta(from: me.angle, to: leader.angle)) > 0.03 {
+                intent.desiredHeading = leader.angle
+            }
+            return intent
+        }
+        // Otherwise steer to produce the commanded acceleration and burn when lined
+        // up. A little turn/accel headroom keeps corrections crisp — the "slightly
+        // inhuman" precision the wing needs to sit rock-steady.
+        let aimDir = aCmd.normalized
+        if abs(angleDelta(from: me.angle, to: aimDir.angle)) > 0.03 {
+            intent.desiredHeading = aimDir.angle
+        }
+        if aimDir.dot(Vec2.heading(me.angle)) > cosThrustCone { intent.thrust = true }
+        me.formationAssist = 0.3
         return intent
     }
 
@@ -772,64 +790,99 @@ public final class AIBrain {
     ///     — a heading that only drifts as fast as thrust itself changes it, so
     ///     the brake is a clean flip-and-burn instead of a chase.
     private func navigate(_ me: Ship, to point: Vec2, slowRadius: Double = 0) -> ControlIntent {
+        // Arrival (slowRadius > 0): decelerate onto the point and stop there via the
+        // stopping-point steering, so even a heavy hull brakes in time instead of
+        // sailing past and looping back. The caller's `slowRadius` becomes the
+        // "close enough to park" tolerance.
+        if slowRadius > 0 {
+            let tol = max(18, slowRadius * 0.22)
+            return moveTo(me, toward: point, matching: Vec2(),
+                          arriveRadius: tol, arriveSpeed: me.stats.maxSpeed * 0.05).intent
+        }
+        // Cruise (slowRadius == 0): run for the point at speed without braking —
+        // used to walk a patrol circuit or head for the jump edge. Aim at the point,
+        // leading out our own cross-track drift so we hold a straight line instead of
+        // arcing, and burn only when the nose is lined up.
         var intent = ControlIntent()
         let toTarget = point - me.position
         let dist = toTarget.length
         guard dist > 1 else { intent.desiredHeading = me.angle; return intent }
         let dir = toTarget * (1 / dist)
-        let cruise = me.stats.maxSpeed
-        let along = me.velocity.dot(dir)   // speed component closing on the point
-        let speed = me.velocity.length
-
-        // A sluggish turner can't just start braking at a fixed distance — the
-        // 180° flip to point retrograde itself eats runway (it coasts forward the
-        // whole time it's turning), so a slow-turning hull needs to start easing
-        // off much further out than a nimble one or it'll still be mid-turn when
-        // it reaches the point. Budget the flip's coast distance plus the actual
-        // braking distance, and widen the slow zone to whichever of that or the
-        // caller's `slowRadius` is bigger — so the desired-speed taper below
-        // actually gives it enough room to execute. Sized off `cruise`, the
-        // ship's fixed top speed, not the current (shrinking-as-we-brake) `along`
-        // — basing it on a live, decelerating value would shrink the zone as we
-        // slow down, which can flag us as "out of the zone" again mid-brake and
-        // flip straight back to full-cruise thrust: an oscillation that repeatedly
-        // re-triggers the flip, the actual cause of the endless-spin bug.
-        let flipTime = Double.pi / max(me.stats.turnRate, 0.05)
-        let stopDistance = cruise * flipTime + (cruise * cruise) / (2 * max(me.stats.acceleration, 1))
-        let effectiveSlowRadius = slowRadius > 0 ? max(slowRadius, stopDistance) : 0
-        let desiredSpeed = (effectiveSlowRadius > 0 && dist < effectiveSlowRadius)
-            ? cruise * (dist / effectiveSlowRadius) : cruise
-
-        if effectiveSlowRadius > 0, dist < effectiveSlowRadius, along > desiredSpeed + cruise * 0.15, speed > cruise * 0.1 {
-            let retro = (me.velocity * -1).angle
-            intent.desiredHeading = retro
-            if abs(angleDelta(from: me.angle, to: retro)) < .pi / 2 { intent.thrust = true }
-            return intent
-        }
-
-        // Cancel cross-track drift so the ship tracks a straight line to the point
-        // instead of arcing in and looping back to re-correct. The correction is a
-        // look-ahead time applied to our sideways velocity: correct firmly while
-        // there's room to run (a long cruise then reads dead-straight — the "flies
-        // perfectly" look), and taper it toward the point so the nose doesn't chase
-        // its own sideways velocity in a tight circle at arrival (the near-target
-        // spin the retro-brake above guards from the other side). Sized off the
-        // distance/cruise ratio so it's a smooth ramp, never a hard switch.
+        let along = me.velocity.dot(dir)
         let crossVel = me.velocity - dir * along
-        let correctionTime = min(0.9, 0.9 * dist / max(cruise, 1))
-        let aim = toTarget - crossVel * correctionTime
-        let heading = aim.length > 1 ? aim.angle : dir.angle
-        intent.desiredHeading = heading
-        let deadband = cruise * 0.03    // ignore trivial shortfalls so we don't jitter on course
-        // Burn only once the nose is genuinely lined up with where we want to go.
-        // The old 90° gate let a slow-turning hull thrust while still slewed most of
-        // a right angle off heading — the "big ship pointed one way but sliding
-        // another" look. A 60° cone makes heavy ships rotate to face, then burn, so
-        // thrust pushes them along their nose instead of sideways.
-        if along < desiredSpeed - deadband, abs(angleDelta(from: me.angle, to: heading)) < .pi / 3 {
+        let aim = toTarget - crossVel * min(0.8, dist / max(me.stats.maxSpeed, 1))
+        let aimDir = aim.length > 1 ? aim.normalized : dir
+        intent.desiredHeading = aimDir.angle
+        if along < me.stats.maxSpeed, Vec2.heading(me.angle).dot(aimDir) > cosThrustCone {
             intent.thrust = true
         }
         return intent
+    }
+
+    /// Cosine of the half-angle a ship must have its nose within before it fires the
+    /// main thruster while steering — it lines up with where it wants to go *first*,
+    /// so thrust pushes it along its heading rather than off to the side (EV Nova
+    /// ships rotate to face, then accelerate). ~35°.
+    private var cosThrustCone: Double { 0.819 }
+
+    /// Rotate-to-face + flip-and-burn steering — EV Nova's actual flight feel, and
+    /// the fix for heavy hulls that used to drift past a mark and orbit it. The core
+    /// is the **stopping point**: where this ship would coast to rest relative to a
+    /// (possibly moving) target if it began braking *now* — counting both the runway
+    /// eaten while it rotates around to face retrograde and the distance it then
+    /// needs to decelerate. Steering toward the target measured *from* that stopping
+    /// point makes one rule cover the whole trip: while the projected stop falls
+    /// short, the aim points ahead (burn toward the target); the instant it would
+    /// overshoot, the aim flips to point back (turn around and brake). Baking the
+    /// turn-around time into the distance is what makes a sluggish hull start braking
+    /// early enough to settle onto the mark. Returns the intent and whether the ship
+    /// has arrived (within `arriveRadius` and slower than `arriveSpeed` relative to
+    /// the target) so a caller can e.g. square up its heading once parked.
+    private func moveTo(_ me: Ship, toward targetPos: Vec2, matching targetVel: Vec2,
+                        arriveRadius: Double, arriveSpeed: Double) -> (intent: ControlIntent, arrived: Bool) {
+        var cmd = ControlIntent()
+        let relPos = targetPos - me.position
+        let relVel = me.velocity - targetVel
+        // Parked: close to the target and nearly matching its velocity. Under
+        // Newtonian flight, coasting now holds station — no thrust needed.
+        if relPos.length < arriveRadius, relVel.length < arriveSpeed {
+            return (cmd, true)
+        }
+        let stop = stoppingPoint(me, relativeVelocity: relVel)
+        let aim = targetPos - stop
+        let facing = Vec2.heading(me.angle)
+        // The aim direction is ill-defined when the aim vector is tiny (we're
+        // essentially on the mark) — chasing its noisy angle is exactly what makes
+        // a near-parked ship twitch its nose every frame. Below a floor, hold
+        // heading and don't thrust; treat it as arrived.
+        if aim.length < max(6, arriveRadius * 0.5) {
+            return (cmd, true)
+        }
+        let aimDir = aim.normalized
+        // Heading deadzone: only issue a turn when the nose is off by more than a
+        // hair, so micro-errors don't drive a constant stream of tiny corrections.
+        if abs(angleDelta(from: me.angle, to: aimDir.angle)) > 0.03 {
+            cmd.desiredHeading = aimDir.angle
+        }
+        if aimDir.dot(facing) > cosThrustCone { cmd.thrust = true }
+        return (cmd, false)
+    }
+
+    /// Where `me` coasts to rest *relative to a target* if it starts braking now:
+    /// its position, plus the forward runway eaten while it rotates around to face
+    /// straight retrograde, plus the deceleration distance once pointed there.
+    /// Folding in the *relative* velocity handles a moving target (formation,
+    /// intercept) for free. Zero offset when already stopped relative to the target.
+    private func stoppingPoint(_ me: Ship, relativeVelocity relVel: Vec2) -> Vec2 {
+        let v = relVel.length
+        guard v > 0.0001 else { return me.position }
+        let vHat = relVel * (1 / v)
+        let facing = Vec2.heading(me.angle)
+        let dot = max(-1, min(1, (vHat * -1).dot(facing)))
+        let turnAngle = acos(dot)                       // radians to swing round to retrograde
+        let turnTime = turnAngle / max(me.stats.turnRate, 0.05)
+        let brakeDist = 0.5 * v * v / max(me.stats.acceleration, 1)
+        return me.position + vHat * (v * turnTime + brakeDist)
     }
 
     /// Head for a point at cruise (no arrival slowdown), steering momentum so we

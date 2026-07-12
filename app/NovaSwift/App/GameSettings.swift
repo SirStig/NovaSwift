@@ -78,6 +78,40 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
+    /// The overall presentation mode. A selector that drives which UI *paths*
+    /// render — it does not touch the individual options below, which stay
+    /// independently adjustable in every mode.
+    ///
+    /// - `classic`   — the faithful EV Nova presentation: the authentic
+    ///                 (`ïntf`/PICT) HUD, main menu and dialogs, and the galaxy
+    ///                 map shown inside its authentic dialog frame.
+    /// - `enhanced`  — Classic, but the galaxy map goes full-screen (no dialog
+    ///                 chrome) with its controls overlaid on the map.
+    /// - `novaSwift` — Enhanced's full-screen map *plus* the port's own modern
+    ///                 interface: a modern main menu, modern dialog chrome and
+    ///                 the modern HUD, in place of the authentic PICT chrome.
+    ///                 Presentation only — ships, systems, missions and the
+    ///                 economy stay entirely data-driven.
+    enum UIMode: String, Codable, CaseIterable, Identifiable {
+        case classic, enhanced, novaSwift
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .classic:   return "Classic"
+            case .enhanced:  return "Enhanced"
+            case .novaSwift: return "Nova Swift"
+            }
+        }
+        /// Blurb under the selector.
+        var blurb: String {
+            switch self {
+            case .classic:   return "The faithful EV Nova look, rendered from your own game data."
+            case .enhanced:  return "Classic, with the galaxy map opened up to full screen."
+            case .novaSwift: return "The port's own modern interface — modern menu, dialogs and HUD."
+            }
+        }
+    }
+
     // MARK: Gameplay
 
     var difficulty: Difficulty = .normal
@@ -133,9 +167,17 @@ struct GameSettings: Codable, Equatable {
 
     // MARK: Interface
 
-    /// Show the authentic EV Nova main menu (rendered from the user's assets)
-    /// instead of the modern launcher. Requires imported game data.
-    var useAuthenticMenu: Bool = false
+    /// The presentation mode (see `UIMode`). The single stored source of truth;
+    /// the rendering flags below are derived from it.
+    var uiMode: UIMode = .classic
+
+    /// Render the galaxy map full-screen with overlaid controls (Enhanced &
+    /// Nova Swift) instead of inside the authentic dialog frame (Classic).
+    var fullscreenGalaxyMap: Bool { uiMode != .classic }
+    /// Use the port's own modern interface — modern HUD, main menu and dialog
+    /// chrome — in place of the authentic PICT chrome (Nova Swift only).
+    var modernUI: Bool { uiMode == .novaSwift }
+
     var showRadar: Bool = true
     /// HUD panel opacity (0.2…1).
     var hudOpacity: Double = 1.0
@@ -220,7 +262,7 @@ struct GameSettings: Codable, Equatable {
         uiVolume              = v(.uiVolume, d.uiVolume)
         musicEnabled          = v(.musicEnabled, d.musicEnabled)
         muteAll               = v(.muteAll, d.muteAll)
-        useAuthenticMenu      = v(.useAuthenticMenu, d.useAuthenticMenu)
+        uiMode                = v(.uiMode, d.uiMode)
         showRadar             = v(.showRadar, d.showRadar)
         hudOpacity            = v(.hudOpacity, d.hudOpacity)
         debugModeEnabled      = v(.debugModeEnabled, d.debugModeEnabled)

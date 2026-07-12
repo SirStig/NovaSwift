@@ -386,13 +386,22 @@ public final class Ship {
     /// normal gameplay ever sets it, so it's inert unless a developer flips it.
     public var invulnerable = false
 
-    /// Extra speed/acceleration headroom (as a fraction, e.g. 0.4 = +40%) an AI
-    /// grants itself *this frame* to close a gap — used by escorts catching back up
-    /// to a cruising leader so a same-speed hull that dropped behind can actually
-    /// reel in under its own thrust instead of trailing forever. It fades to 0 as
-    /// the escort settles into its slot, so a formed-up wing flies at true hull
-    /// speed. `Ship.step` reads and clears it each frame; 0 for everything else.
-    var formationAssist: Double = 0
+    /// Formation-flight limit lift (0…1), requested by an escort's AI *this frame*.
+    /// EV Nova escorts "ignore their own speed and maneuverability restraints to
+    /// stay in formation" — so while holding station this scales up the ship's turn
+    /// rate, acceleration, and top speed (see `Ship.step`) enough to pin the wing to
+    /// any leader, however sluggish the hull. It still turns and thrusts frame to
+    /// frame, so it reads as flying, not teleporting. `Ship.step` reads and clears
+    /// it each frame; 0 for everything not currently holding formation.
+    var formationBoost: Double = 0
+
+    /// EV Nova's inertialess flight (`shïp` Flags2 0x0040, or the inertial-dampener
+    /// outfit ModType 38): the ship has no momentum — its velocity tracks the nose
+    /// with no lateral drift. Set at build time from the hull/outfits.
+    public var inertialess = false
+    /// The throttle-driven target speed for an inertialess hull (its velocity chases
+    /// `heading × throttleSpeed`). Unused by inertial ships.
+    var throttleSpeed: Double = 0
 
     // Diagnostics: last known-good motion state (NaN/Infinity guard) and
     // one-shot flags so we log state *transitions*, never every frame.
@@ -521,7 +530,16 @@ public final class Ship {
         // thrust until the charge dissipates below `ionizeMax`. Existing
         // momentum still coasts (drag/speed-clamp/position below still run).
         let controllable = !isIonized
-        let maxTurn = stats.turnRate * dt
+
+        // Formation-flight limit lift: while an escort is holding station its AI
+        // asks to ignore its own turn/accel/speed caps (EV Nova's escort behavior),
+        // by a generous but finite factor so the wing pins to any leader yet still
+        // visibly rotates and thrusts. Consumed each frame.
+        let boost = formationBoost
+        formationBoost = 0
+        let effectiveTurnRate = stats.turnRate * (1 + 5 * boost)
+
+        let maxTurn = effectiveTurnRate * dt
         if controllable, intent.turnLeft || intent.turnRight {
             if intent.turnLeft { angle -= maxTurn }
             if intent.turnRight { angle += maxTurn }
@@ -534,18 +552,10 @@ public final class Ship {
             angle += max(-maxTurn, min(maxTurn, delta))
         }
 
-        // Afterburner: while lit and fuelled, boost acceleration and raise the
-        // speed cap, draining fuel. EV Nova's afterburner is a held control.
-        var accel = stats.acceleration
-        var topSpeed = stats.maxSpeed
-        // Formation catch-up headroom (escorts reeling back into their slot). Read
-        // once and cleared, so it only applies on frames the AI actually asked for
-        // it and never leaks into normal flight.
-        if formationAssist > 0 {
-            accel *= (1 + formationAssist)
-            topSpeed *= (1 + formationAssist)
-        }
-        formationAssist = 0
+        // Base accel / top speed, lifted by formation flight, then the afterburner
+        // on top. EV Nova's afterburner is a held control that drains fuel.
+        var accel = stats.acceleration * (1 + 4 * boost)
+        var topSpeed = stats.maxSpeed * (1 + 0.75 * boost)
         afterburnerActive = false
         if controllable, intent.afterburner, let ab = afterburner, fuel > 0 {
             afterburnerActive = true
@@ -554,25 +564,43 @@ public final class Ship {
             fuel = max(0, fuel - ab.fuelPerSecond * dt)
             logFuelTransitions()
         }
-
-        let heading = Vec2.heading(angle)
-        if controllable, intent.thrust { velocity += heading * (accel * dt) }
-        if controllable, intent.reverse { velocity += heading * (-stats.acceleration * 0.5 * dt) }
-
-        if tuning.dragPerSecond > 0 {
-            let k = max(0, 1 - tuning.dragPerSecond * dt)
-            velocity = velocity * k
-        }
-        // Hyperspace-entry over-speed: allow briefly exceeding cruise, decaying
-        // to zero, so a jump-in decelerates in rather than snapping to cruise.
+        // Hyperspace-entry over-speed: allow briefly exceeding cruise, decaying to
+        // zero, so a jump-in eases down to cruise rather than snapping.
         if entryOverspeed > 0 {
             topSpeed += entryOverspeed
             entryOverspeed = max(0, entryOverspeed - entryOverspeedDecayPerSec * dt)
         }
-        // Clamp to max speed (raised while the afterburner is lit / entering).
-        let speed = velocity.length
-        if speed > topSpeed, speed > 0 {
-            velocity = velocity.normalized * topSpeed
+
+        let heading = Vec2.heading(angle)
+        if inertialess {
+            // No inertia (shïp Flags2 0x40 / inertial-dampener outfit): the ship has
+            // no lateral momentum — its velocity tracks the nose. A throttle scalar
+            // ramps up under thrust, brakes under reverse, and bleeds off when idle;
+            // the real velocity then chases heading×throttle at up to 2×accel. The
+            // ship goes exactly where it points — the tight, driftless "perfect
+            // flying" EV Nova's inertialess hulls have. Drag/overspeed don't apply.
+            if controllable {
+                if intent.thrust { throttleSpeed += accel * dt }
+                else if intent.reverse { throttleSpeed -= accel * dt }
+                else { throttleSpeed -= accel * dt }          // coast to a stop when idle
+            }
+            throttleSpeed = min(max(throttleSpeed, 0), topSpeed)
+            let targetVel = heading * throttleSpeed
+            let dv = targetVel - velocity
+            let maxDv = accel * dt * 2
+            velocity = dv.length <= maxDv ? targetVel : velocity + dv * (maxDv / dv.length)
+        } else {
+            if controllable, intent.thrust { velocity += heading * (accel * dt) }
+            if controllable, intent.reverse { velocity += heading * (-stats.acceleration * 0.5 * dt) }
+            if tuning.dragPerSecond > 0 {
+                let k = max(0, 1 - tuning.dragPerSecond * dt)
+                velocity = velocity * k
+            }
+            // Clamp to max speed (raised while the afterburner is lit / entering).
+            let speed = velocity.length
+            if speed > topSpeed, speed > 0 {
+                velocity = velocity.normalized * topSpeed
+            }
         }
         position += velocity * dt
         guardFiniteMotion()
