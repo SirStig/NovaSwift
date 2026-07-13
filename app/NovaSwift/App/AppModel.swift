@@ -219,9 +219,13 @@ final class AppModel: ObservableObject {
 
     /// Back to the authentic EV Nova main menu (e.g. from the in-game pause menu).
     func returnToMainMenu() {
+        audio.stopAllLoops()   // no beam/ambient loop bleeds from the game into the menu
         screen = data.hasBaseData ? .mainMenu : .launcher
     }
 
     /// All the way out to the port's native launcher.
-    func exitToLauncher() { screen = .launcher }
+    func exitToLauncher() {
+        audio.stopAllLoops()
+        screen = .launcher
+    }
 }

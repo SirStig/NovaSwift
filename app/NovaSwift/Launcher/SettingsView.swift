@@ -70,6 +70,10 @@ struct SettingsView: View {
             Picker("Difficulty", selection: binding(\.difficulty)) {
                 ForEach(GameSettings.Difficulty.allCases) { Text($0.label).tag($0) }
             }
+            Picker("Game speed", selection: binding(\.gameSpeed)) {
+                ForEach(GameSettings.GameSpeed.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
             Toggle("Auto-target after firing", isOn: binding(\.autoTargetAfterFiring))
             Toggle("Auto-landing", isOn: binding(\.autoLanding))
             Toggle("Confirm before landing", isOn: binding(\.confirmLanding))
@@ -87,7 +91,7 @@ struct SettingsView: View {
         } header: {
             Label("Gameplay", systemImage: "gamecontroller")
         } footer: {
-            Text("Difficulty scales the damage you take. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
+            Text("Difficulty scales the damage you take. Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
         }
     }
 

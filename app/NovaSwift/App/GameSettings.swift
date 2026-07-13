@@ -50,6 +50,38 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
+    /// Overall simulation speed. The original EV Nova ran at a deliberately
+    /// leisurely cruising pace and let you toggle Caps-Lock for a ~2× "fast"
+    /// mode; this generalises that into a proper option. `x1` is the faithful,
+    /// unhurried default — ships accelerate and cross a system slowly; each step
+    /// up roughly doubles the pace, so `x8` is the modern "get me there" speed.
+    /// Applied as a multiplier on the physics timestep, so it uniformly scales
+    /// acceleration, top speed, turning and travel time without touching any
+    /// ship stats.
+    enum GameSpeed: String, Codable, CaseIterable, Identifiable {
+        case x1, x2, x4, x8
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .x1: return "1×"
+            case .x2: return "2×"
+            case .x4: return "4×"
+            case .x8: return "8×"
+            }
+        }
+        /// Physics-timestep multiplier. `x1` deliberately runs below real-time so
+        /// the base pace feels like the original's slow cruise; the labels double
+        /// cleanly from there (0.4 → 0.8 → 1.6 → 3.2).
+        var multiplier: Double {
+            switch self {
+            case .x1: return 0.4
+            case .x2: return 0.8
+            case .x4: return 1.6
+            case .x8: return 3.2
+            }
+        }
+    }
+
     /// Where the slim armor/shield bar sits relative to a ship (or off entirely).
     /// The original EV Nova didn't float bars over ships at all, so `off` is the
     /// faithful look — but `above`/`below` are offered for players who want them.
@@ -115,6 +147,9 @@ struct GameSettings: Codable, Equatable {
     // MARK: Gameplay
 
     var difficulty: Difficulty = .normal
+    /// Overall simulation speed (see `GameSpeed`). Default `x1` — the faithful,
+    /// deliberately slow cruising pace.
+    var gameSpeed: GameSpeed = .x1
     /// After firing, auto-select the nearest hostile if nothing is targeted.
     var autoTargetAfterFiring: Bool = false
     /// Ask for confirmation before landing / departing.
@@ -250,6 +285,7 @@ struct GameSettings: Codable, Equatable {
             (try? c.decodeIfPresent(T.self, forKey: key)) ?? nil ?? fallback
         }
         difficulty            = v(.difficulty, d.difficulty)
+        gameSpeed             = v(.gameSpeed, d.gameSpeed)
         autoTargetAfterFiring = v(.autoTargetAfterFiring, d.autoTargetAfterFiring)
         confirmLanding        = v(.confirmLanding, d.confirmLanding)
         autoLanding           = v(.autoLanding, d.autoLanding)

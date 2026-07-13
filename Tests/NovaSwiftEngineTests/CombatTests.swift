@@ -199,6 +199,7 @@ final class CombatTests: XCTestCase {
         attacker.government = 5
         let world = World(player: attacker)
         let ally = makeShip("B", govt: 5, at: Vec2(0, 200))         // same government
+        ally.government = 5   // makeShip ignores its govt arg; set it so this is genuinely same-govt
         let tid = world.addNPC(ally)
         attacker.weapons = [WeaponMount(spec: gun())]
         attacker.currentTargetID = tid
@@ -597,5 +598,28 @@ final class CombatTests: XCTestCase {
         XCTAssertTrue(destroyed)
         XCTAssertEqual(world.diplomacy?.playerRecord[2], -8, "KillPenalty applied on the actual kill")
         XCTAssertEqual(world.diplomacy?.combatRating, 55, "combat rating credited with the destroyed ship's strength")
+    }
+
+    func testDeadPlayerFreezesStopsAndReleasesBeamLoop() {
+        // On death the wreck must stop dead (not fly on under live input, looking
+        // alive) and its own continuous-fire beam loop must be released (else it
+        // keeps sounding into the menu).
+        let player = makeShip("P", govt: 5, at: Vec2())
+        player.velocity = Vec2(500, 0)          // was flying
+        player.activeBeamLoopMounts = [0]        // holding a beam trigger as it dies
+        player.armor = 0; player.shield = 0      // fatal hit landed
+        let world = World(player: player)
+        world.intent.thrust = true               // input still "held" — must be ignored
+
+        world.step(1.0 / 30.0)
+
+        XCTAssertEqual(player.velocity.length, 0, accuracy: 1e-6,
+                       "a dead player's wreck freezes in place, ignoring live input")
+        XCTAssertTrue(world.events.contains { if case .playerDestroyed = $0 { return true }; return false },
+                      "player death is reported")
+        XCTAssertTrue(world.events.contains {
+            if case let .beamLoopStop(shooterID, _) = $0 { return shooterID == World.playerEntityID }
+            return false
+        }, "the player's own beam loop is released on death")
     }
 }

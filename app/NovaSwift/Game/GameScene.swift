@@ -44,6 +44,28 @@ final class GameScene: SKScene {
     /// one, ship contacts are drawn in a single neutral color. Defaults to false
     /// (no IFF) so the faithful monochrome behavior is the safe fallback.
     var playerHasIFF = false
+    /// Host-supplied in-game day (`PlayerState.date.julianDay`), read live at each
+    /// world (re)build to vary the spawn RNG seed per visit — otherwise a system
+    /// spawns the identical ships every single time it's entered (the world is
+    /// rebuilt from a fixed seed on every arrival). The calendar advances at least a
+    /// day per jump, so re-entering a system gives a fresh cast; within one visit the
+    /// day doesn't change, so spawns stay deterministic frame-to-frame.
+    var worldSeedDayProvider: (() -> Int)?
+
+    /// Mixes the system id with the in-game day into a world RNG seed. Wrapping
+    /// arithmetic (SplitMix64-style constants) so it can never trap on overflow.
+    static func worldSeed(systemID: Int, day: Int) -> UInt64 {
+        var h = UInt64(bitPattern: Int64(systemID)) &* 0x9E37_79B9_7F4A_7C15
+        h = (h ^ UInt64(bitPattern: Int64(day))) &* 0xD1B5_4A32_D192_ED03
+        h ^= h >> 29
+        return h &+ 0x5EED_1234
+    }
+
+    /// The seed for the world currently being (re)built: `systemID` + live day.
+    private func currentWorldSeed(systemID: Int) -> UInt64 {
+        Self.worldSeed(systemID: systemID, day: worldSeedDayProvider?() ?? 0)
+    }
+
     /// pêrs ids the player has wronged (grudge) — host-supplied from pilot state.
     var persGrudges: Set<Int> = []
     /// Host gate: whether a pêrs may spawn now (ActiveOn NCB + not defeated).
@@ -88,6 +110,8 @@ final class GameScene: SKScene {
 
     private let cameraNode = SKCameraNode()
     private var shipNode: SKNode!
+    /// One-shot latch so the player's multi-burst death animation only runs once.
+    private var playerDeathSequenceStarted = false
     private var shipSprite: SKSpriteNode?
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
@@ -108,6 +132,21 @@ final class GameScene: SKScene {
     private var shieldSprite: SKSpriteNode?
     private var shieldFlare: CGFloat = 0
     private var lastPlayerShield: Double = -1
+    /// The hull's running-lights overlay (shän light layer) — blinking hull
+    /// lights, indexed by the same frame as the base hull and modulated by the
+    /// shän's blink mode. And the weapon-glow overlay (shän weapon layer), a
+    /// muzzle flash flared on firing and faded per `weapDecay`.
+    private var lightTextures: [SKTexture] = []
+    private var lightNode: SKSpriteNode?
+    private var weaponGlowTextures: [SKTexture] = []
+    private var weaponGlowNode: SKSpriteNode?
+    private var weaponGlowFlare: CGFloat = 0
+    /// Base-image multi-set animation config (banking / animation / frames-per-
+    /// rotation) for the player hull, plus the per-ship clocks that drive it.
+    private var hullAnim = HullAnim()
+    private var animClock: Double = 0
+    private var blinkClock: Double = 0
+    private var lastPlayerAngle: Double = .nan
     /// Clamped per-frame delta, cached so `syncNPCs()` (no dt param) can decay
     /// each NPC's shield flare at the same rate as the player's.
     private var frameDT: TimeInterval = 1.0 / 60.0
@@ -436,6 +475,8 @@ final class GameScene: SKScene {
     private var npcTextureCache: [Int: [SKTexture]] = [:]
     private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
     private var npcShieldCache: [Int: [SKTexture]] = [:]
+    private var npcLightCache: [Int: [SKTexture]] = [:]
+    private var npcWeaponGlowCache: [Int: [SKTexture]] = [:]
     // An arrival effect to play when a node is first built for a ship that just
     // jumped in from hyperspace (warp streak) or lifted off a planet (grow out).
     private enum EntranceFX { case warpIn, launch }
@@ -463,6 +504,15 @@ final class GameScene: SKScene {
         var shieldTextures: [SKTexture] = []
         var shieldFlare: CGFloat = 0
         var lastShield: Double = -1
+        var light: SKSpriteNode?
+        var lightTextures: [SKTexture] = []
+        var weaponGlow: SKSpriteNode?
+        var weaponGlowTextures: [SKTexture] = []
+        var weaponGlowFlare: CGFloat = 0
+        var hullAnim = HullAnim()
+        var animClock: Double = 0
+        var blinkClock: Double = 0
+        var lastAngle: Double = .nan
         var healthFill: SKSpriteNode?
         var healthBar: SKNode?
         var textures: [SKTexture] = []
@@ -486,6 +536,8 @@ final class GameScene: SKScene {
 
     func configure(player ship: Ship, textures: [SKTexture], engineTextures: [SKTexture] = [],
                    shieldTextures: [SKTexture] = [],
+                   lightTextures: [SKTexture] = [], weaponGlowTextures: [SKTexture] = [],
+                   hullAnim: HullAnim = HullAnim(),
                    settings: GameSettings,
                    input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
                    audio: GameAudio? = nil,
@@ -502,7 +554,8 @@ final class GameScene: SKScene {
             // tutorial passes 0 so a practice flight can never hurt the trainee.
             tuning.playerDamageScale = playerDamageScaleOverride ?? settings.difficulty.playerDamageScale
             let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID,
-                                                player: ship, galaxy: galaxy, combatTuning: tuning)
+                                                player: ship, galaxy: galaxy, combatTuning: tuning,
+                                                seed: currentWorldSeed(systemID: systemID))
             self.world = w
             self.galaxy = gx
         } else {
@@ -512,8 +565,15 @@ final class GameScene: SKScene {
         self.rotationTextures = textures
         self.engineGlowTextures = engineTextures
         self.shieldTextures = shieldTextures
+        self.lightTextures = lightTextures
+        self.weaponGlowTextures = weaponGlowTextures
+        self.hullAnim = hullAnim
         self.lastPlayerShield = -1
         self.shieldFlare = 0
+        self.weaponGlowFlare = 0
+        self.animClock = 0
+        self.blinkClock = 0
+        self.lastPlayerAngle = .nan
         self.settings = settings
         self.input = input
         self.controllerInput = controller
@@ -782,6 +842,27 @@ final class GameScene: SKScene {
             shipRadius = 16
         }
 
+        // Running-lights + weapon-glow overlays: real per-hull art on top of the
+        // hull, additively blended. Lights blink; weapon glow flashes on firing.
+        if let first = lightTextures.first {
+            let lights = SKSpriteNode(texture: first)
+            lights.texture?.filteringMode = spriteFilter
+            lights.blendMode = .add
+            lights.zPosition = 0.5
+            lights.isHidden = true
+            node.addChild(lights)
+            lightNode = lights
+        }
+        if let first = weaponGlowTextures.first {
+            let wg = SKSpriteNode(texture: first)
+            wg.texture?.filteringMode = spriteFilter
+            wg.blendMode = .add
+            wg.zPosition = 0.5
+            wg.isHidden = true
+            node.addChild(wg)
+            weaponGlowNode = wg
+        }
+
         // Engine exhaust plume (behind the hull). Hidden unless thrusting. Sized
         // relative to the hull (16 = the old fixed placeholder radius, kept as
         // the reference scale so default-sized ships look unchanged).
@@ -848,8 +929,16 @@ final class GameScene: SKScene {
         let rawFrame = lastUpdate == 0 ? 0 : currentTime - lastUpdate
         let dt = lastUpdate == 0 ? 1.0 / 60.0 : min(currentTime - lastUpdate, 1.0 / 20.0)
         lastUpdate = currentTime
-        frameDT = dt
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
+
+        // Game-speed option: scale the *simulation* timestep (not the real frame
+        // delta used for perf/diagnostics above). `x1` runs below real-time for
+        // the faithful slow cruise; higher settings speed the whole world up
+        // uniformly — accel, top speed, turning and travel all ride this one dt.
+        // The stability clamp is applied to the real delta first, so a high
+        // multiplier can't blow the physics up on a hitched frame.
+        let simDT = dt * settings.gameSpeed.multiplier
+        frameDT = simDT
 
         controllerInput?.poll()
         #if os(iOS)
@@ -874,14 +963,14 @@ final class GameScene: SKScene {
         // control); otherwise the player's own intent drives it.
         let intent: ControlIntent
         if jumpPhase != .none {
-            intent = stepJump(dt)
+            intent = stepJump(simDT)
         } else if autoLandTargetID != nil {
             intent = stepAutoLand()
         } else {
             intent = playerIntent(input?.intent ?? .init())
         }
         world.intent = intent
-        world.step(dt)
+        world.step(simDT)
 
         let p = world.player
 
@@ -922,12 +1011,19 @@ final class GameScene: SKScene {
         // spawned, so firing reflects the real weapon system, not the raw input.
         for event in world.drainEvents() {
             switch event {
-            case let .weaponFired(_, at, _, soundID):
+            case let .weaponFired(shooterID, at, _, soundID):
                 // Positional for every shooter — the player's own shots report
                 // right at the listener (near-zero distance = full volume), NPC
                 // fire attenuates/pans naturally by distance.
                 if let soundID {
                     audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                }
+                // Flash the shooter's weapon-glow overlay (shän weapon layer), if
+                // its hull has one. Player is entityID 0; NPCs match by entity.
+                if shooterID == 0 {
+                    if weaponGlowNode != nil { weaponGlowFlare = 1 }
+                } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
+                    node.weaponGlowFlare = 1
                 }
             case let .beam(_, _, from, _, _, soundID):
                 // Geometry is drawn from `world.activeBeams` in `syncBeams()`;
@@ -1000,6 +1096,12 @@ final class GameScene: SKScene {
             case let .personDefeated(pid):
                 onPersDefeated?(pid)
             case let .playerDestroyed(hadEscapePod):
+                // Kill any lingering fire/beam loop the moment the player dies (both
+                // paths), and — only for a real game-over, not an escape-pod ejection
+                // — play out the multi-burst wreck explosion while the host counts
+                // down to the menu.
+                audio?.stopAllLoops()
+                if !hadEscapePod { beginPlayerDeathSequence() }
                 onPlayerDestroyed?(hadEscapePod)
             case let .missionShipGoalReached(missionID, _, goal, byPlayer):
                 onMissionShipGoalReached?(missionID, goal, byPlayer)
@@ -1041,13 +1143,35 @@ final class GameScene: SKScene {
         updateAIDebug()
         shipNode.position = scenePos
 
+        // Base hull + its shän overlays all share one frame index: the live
+        // rotation set (banking → turn direction, animation → a clock) times
+        // framesPerSet, plus the heading. The engine-glow, running-light and
+        // weapon-glow sheets carry the same set/heading layout, so they reuse it.
+        let heading = hullAnim.heading(forAngle: p.angle)
+        let turn = turnSign(fromAngle: lastPlayerAngle, toAngle: p.angle, dt: dt)
+        lastPlayerAngle = p.angle
+        animClock += dt
+        blinkClock += dt
+        let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false)
         if let sprite = shipSprite, !rotationTextures.isEmpty {
-            sprite.texture = rotationTextures[min(p.spriteFrame, rotationTextures.count - 1)]
+            sprite.texture = rotationTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: rotationTextures.count)]
         } else if let tri = placeholder {
             tri.zRotation = -CGFloat(p.angle)
         }
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
-            glow.texture = engineGlowTextures[min(p.spriteFrame, engineGlowTextures.count - 1)]
+            glow.texture = engineGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: engineGlowTextures.count)]
+        }
+        if let lights = lightNode, !lightTextures.isEmpty {
+            lights.texture = lightTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: lightTextures.count)]
+            let intensity = hullAnim.lightIntensity(clock: blinkClock)
+            lights.isHidden = intensity <= 0.02
+            lights.alpha = intensity
+        }
+        if let wg = weaponGlowNode, !weaponGlowTextures.isEmpty {
+            weaponGlowFlare *= hullAnim.weaponGlowDecay(dt: dt)
+            wg.texture = weaponGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: weaponGlowTextures.count)]
+            wg.isHidden = weaponGlowFlare <= 0.02
+            wg.alpha = weaponGlowFlare
         }
         if let shield = shieldSprite {
             shieldFlare = Self.advanceShieldFlare(shieldFlare, shieldNow: p.shield,
@@ -1906,13 +2030,35 @@ final class GameScene: SKScene {
             let node = npcNodes[npc.entityID] ?? makeNPCNode(for: npc)
             node.container.position = CGPoint(x: npc.position.x, y: npc.position.y)
             node.container.alpha = screenRevealsCloaked ? 1.0 : CGFloat(1 - npc.effectiveCloakLevel)
+            node.animClock += frameDT
+            node.blinkClock += frameDT
+            let heading = node.hullAnim.heading(forAngle: npc.angle)
+            let turn = turnSign(fromAngle: node.lastAngle, toAngle: npc.angle, dt: frameDT)
+            node.lastAngle = npc.angle
+            let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock, disabled: npc.disabled)
             if let sprite = node.sprite, !node.textures.isEmpty {
-                sprite.texture = node.textures[min(npc.spriteFrame, node.textures.count - 1)]
+                sprite.texture = node.textures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.textures.count)]
             } else if let tri = node.placeholder {
                 tri.zRotation = -CGFloat(npc.angle)
             }
             if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {
-                glow.texture = node.engineGlowTextures[min(npc.spriteFrame, node.engineGlowTextures.count - 1)]
+                glow.texture = node.engineGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.engineGlowTextures.count)]
+            }
+            if let lights = node.light, !node.lightTextures.isEmpty {
+                if npc.disabled && node.hullAnim.hidesLightsWhenDisabled {
+                    lights.isHidden = true
+                } else {
+                    lights.texture = node.lightTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.lightTextures.count)]
+                    let intensity = node.hullAnim.lightIntensity(clock: node.blinkClock)
+                    lights.isHidden = intensity <= 0.02
+                    lights.alpha = intensity
+                }
+            }
+            if let wg = node.weaponGlow, !node.weaponGlowTextures.isEmpty {
+                node.weaponGlowFlare *= node.hullAnim.weaponGlowDecay(dt: frameDT)
+                wg.texture = node.weaponGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.weaponGlowTextures.count)]
+                wg.isHidden = node.weaponGlowFlare <= 0.02
+                wg.alpha = node.weaponGlowFlare
             }
             if let shield = node.shield {
                 if npc.disabled {
@@ -1991,6 +2137,34 @@ final class GameScene: SKScene {
         thruster.isHidden = true
         n.container.addChild(thruster)
         n.thruster = thruster
+
+        // Base-image animation config (banking / animation / frames-per-rotation)
+        // for this hull — drives the same multi-set frame selection as the player.
+        if let shan = galaxy?.game.shan(npc.shipTypeID) { n.hullAnim = HullAnim(shan) }
+
+        // Running-lights + weapon-glow overlays (real per-hull art), additive.
+        let lightTex = npcLightTextures(for: npc.shipTypeID)
+        n.lightTextures = lightTex
+        if let first = lightTex.first {
+            let lights = SKSpriteNode(texture: first)
+            lights.texture?.filteringMode = spriteFilter
+            lights.blendMode = .add
+            lights.zPosition = 0.5
+            lights.isHidden = true
+            n.container.addChild(lights)
+            n.light = lights
+        }
+        let wgTex = npcWeaponGlowTextures(for: npc.shipTypeID)
+        n.weaponGlowTextures = wgTex
+        if let first = wgTex.first {
+            let wg = SKSpriteNode(texture: first)
+            wg.texture?.filteringMode = spriteFilter
+            wg.blendMode = .add
+            wg.zPosition = 0.5
+            wg.isHidden = true
+            n.container.addChild(wg)
+            n.weaponGlow = wg
+        }
 
         // Shield bubble overlay (only when a "Shields" plug-in supplied the art),
         // drawn on top of the hull and flared when this NPC's shields take a hit.
@@ -2263,7 +2437,8 @@ final class GameScene: SKScene {
         // Fresh, populated world for the destination, reusing the player ship
         // (its fuel/damage/cargo carry over) and the same galaxy catalog.
         var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
-        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning)
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning,
+                                            seed: currentWorldSeed(systemID: systemID))
 
         let ctx = w.systemContext
         var arrivalGate: StellarBody?
@@ -2358,7 +2533,9 @@ final class GameScene: SKScene {
     /// **No scene/host teardown** → the `SpriteView` keeps its identity (no
     /// re-present flash) and keyboard focus/input stay wired to this same scene.
     func reloadForDeparture(spobID: Int, player: Ship, textures: [SKTexture], engineTextures: [SKTexture],
-                            shieldTextures: [SKTexture] = []) {
+                            shieldTextures: [SKTexture] = [],
+                            lightTextures: [SKTexture] = [], weaponGlowTextures: [SKTexture] = [],
+                            hullAnim: HullAnim = HullAnim()) {
         guard let galaxy else {
             Log.scene.error("reloadForDeparture(\(spobID)): no galaxy — cannot reload the system")
             return
@@ -2367,7 +2544,8 @@ final class GameScene: SKScene {
         // Fresh, populated world for the current system, built around the newly
         // constructed player ship (its fuel/damage/cargo already seeded from the pilot).
         var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
-        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning)
+        let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning,
+                                            seed: currentWorldSeed(systemID: systemID))
 
         // Lift off from the departed body: sit just clear of its surface, nose
         // pointed away from the system centre, at rest — EV Nova doesn't give
@@ -2396,8 +2574,15 @@ final class GameScene: SKScene {
         self.rotationTextures = textures
         self.engineGlowTextures = engineTextures
         self.shieldTextures = shieldTextures
+        self.lightTextures = lightTextures
+        self.weaponGlowTextures = weaponGlowTextures
+        self.hullAnim = hullAnim
         self.lastPlayerShield = -1
         self.shieldFlare = 0
+        self.weaponGlowFlare = 0
+        self.animClock = 0
+        self.blinkClock = 0
+        self.lastPlayerAngle = .nan
         shipNode?.removeFromParent()
         buildShip()
         self.planetVisuals = makePlanetVisuals(systemID: systemID, game: game)
@@ -2462,6 +2647,20 @@ final class GameScene: SKScene {
         selectedPlanetID = nil
         shipBracket.isHidden = true
         planetBracket.isHidden = true
+    }
+
+    /// Drop the decoded-texture caches that are deliberately *kept across systems*
+    /// (NPC hulls, engine glows, shields, asteroids, weapon shots) so the next
+    /// system builds fast. Ordinary jumps keep these warm on purpose — this is for
+    /// memory-pressure response only, driven from `GameHost`. Each rebuilds
+    /// lazily from the sprite pool / disk cache on next use, so the only cost is a
+    /// one-time re-decode after the flush.
+    func evictTextureCaches() {
+        npcTextureCache.removeAll()
+        npcEngineGlowCache.removeAll()
+        npcShieldCache.removeAll()
+        asteroidTextureCache.removeAll()
+        weaponGraphicCache.removeAll()
     }
 
     // MARK: Jump / landing effects
@@ -2707,6 +2906,12 @@ final class GameScene: SKScene {
     /// caller refuses the jump.
     func canEnterHyperspace() -> Bool {
         guard let w = world else { return true }
+        // The no-jump zone exists to stop you jumping while parked over a
+        // system's populated core (its planets/stations cluster at the centre).
+        // An empty system — or one with only uninhabited rocks — has nothing to
+        // fly clear of, so the restriction shouldn't apply there; you can jump
+        // from anywhere. `canLand` is true only for landable, inhabited bodies.
+        guard w.systemContext.bodies.contains(where: { $0.canLand }) else { return true }
         let dist = (w.player.position - w.systemContext.center).length
         if dist < hyperspaceNoJumpRadius {
             hud?.post("You are too close to the system's center to enter hyperspace.")
@@ -2732,8 +2937,10 @@ final class GameScene: SKScene {
     private func npcTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcTextureCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
+        // Full multi-set sheet (banking/animation sets, all headings), not just
+        // the first rotation set — the render selects the live set/heading.
         if shipTypeID >= 128, let sheet = galaxy?.game.shipSprite(shipTypeID) {
-            textures = SpriteTextures.rotationFrames(from: sheet)
+            textures = SpriteTextures.allFrames(from: sheet)
         }
         npcTextureCache[shipTypeID] = textures
         return textures
@@ -2745,9 +2952,31 @@ final class GameScene: SKScene {
         if let cached = npcEngineGlowCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
         if shipTypeID >= 128, let sheet = galaxy?.game.engineGlowSprite(shipTypeID) {
-            textures = SpriteTextures.rotationFrames(from: sheet)
+            textures = SpriteTextures.allFrames(from: sheet)
         }
         npcEngineGlowCache[shipTypeID] = textures
+        return textures
+    }
+
+    /// That hull's running-lights overlay, if any — full multi-set sheet, cached.
+    private func npcLightTextures(for shipTypeID: Int) -> [SKTexture] {
+        if let cached = npcLightCache[shipTypeID] { return cached }
+        var textures: [SKTexture] = []
+        if shipTypeID >= 128, let sheet = galaxy?.game.lightSprite(shipTypeID) {
+            textures = SpriteTextures.allFrames(from: sheet)
+        }
+        npcLightCache[shipTypeID] = textures
+        return textures
+    }
+
+    /// That hull's weapon-glow overlay, if any — full multi-set sheet, cached.
+    private func npcWeaponGlowTextures(for shipTypeID: Int) -> [SKTexture] {
+        if let cached = npcWeaponGlowCache[shipTypeID] { return cached }
+        var textures: [SKTexture] = []
+        if shipTypeID >= 128, let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
+            textures = SpriteTextures.allFrames(from: sheet)
+        }
+        npcWeaponGlowCache[shipTypeID] = textures
         return textures
     }
 
@@ -2909,6 +3138,48 @@ final class GameScene: SKScene {
     private func spawnExplosion(at point: CGPoint, radius: CGFloat) {
         spawnFlash(at: point, startRadius: max(10, radius * 0.6), endRadius: max(10, radius * 0.6) * 2.2,
                    color: SKColor(red: 1.0, green: 0.75, blue: 0.35, alpha: 1), duration: 0.35)
+    }
+
+    /// The player's death spectacle: a run of staggered explosion bursts scattered
+    /// across the (now frozen — the engine stops the dead player in place) wreck,
+    /// each with a bang and a shake, growing to a final big blast that hides the
+    /// hull — the classic "slowly explode a bunch, then it's gone" before the host
+    /// returns to the main menu. Runs on the scene's action clock so it plays out
+    /// during the pre-menu delay; latched so it only fires once.
+    func beginPlayerDeathSequence() {
+        guard !playerDeathSequenceStarted else { return }
+        playerDeathSequenceStarted = true
+        audio?.stopAllLoops()
+
+        let bursts = 9
+        let step = 0.2
+        for i in 0..<bursts {
+            run(.sequence([
+                .wait(forDuration: Double(i) * step),
+                .run { [weak self] in
+                    guard let self, let p = self.playerShip?.position else { return }
+                    let at = CGPoint(x: CGFloat(p.x) + .random(in: -22...22),
+                                     y: CGFloat(p.y) + .random(in: -22...22))
+                    self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4)
+                    self.audio?.play(303, at: at, listener: at)
+                    self.addShake(at: at, radius: 60)
+                }
+            ]))
+        }
+        // Final blast, then the wreck is gone.
+        run(.sequence([
+            .wait(forDuration: Double(bursts) * step),
+            .run { [weak self] in
+                guard let self else { return }
+                if let p = self.playerShip?.position {
+                    let at = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))
+                    self.spawnExplosion(at: at, radius: 96)
+                    self.audio?.play(303, at: at, listener: at)
+                    self.addShake(at: at, radius: 110)
+                }
+                self.shipNode?.isHidden = true
+            }
+        ]))
     }
 
     /// Spawn a pooled, additive expanding flash animated in `updateFlashes` — no

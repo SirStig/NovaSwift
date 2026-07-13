@@ -216,6 +216,15 @@ final class GameAudioEngine {
         loopPool.append(voice)
     }
 
+    /// Silence every looping SFX voice (beam weapons, spaceport ambient) without
+    /// tearing down the engine or music. Used when leaving the game (death / menu
+    /// return) so no loop bleeds into the main menu — nothing else clears looping
+    /// SFX on that transition. Idempotent; safe before the engine has started.
+    func stopAllLoops() {
+        for (_, voice) in loopVoices { voice.stop(); loopPool.append(voice) }
+        loopVoices.removeAll()
+    }
+
     // MARK: Music playback (streamed from a file, seamless loop)
 
     /// Begin looping a music file. Safe to call repeatedly with the same URL (no-op

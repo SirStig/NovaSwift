@@ -128,6 +128,43 @@ public struct ShanRes {
     public let shieldSpriteID: Int
     public let shieldWidth: Int
     public let shieldHeight: Int
+    /// Number of sprite frames in ONE full rotation (Bible "FramesPer", @52).
+    /// Usually 36 (10°/frame); big hulls use more (e.g. 64) for smoother turns.
+    /// The base sheet packs `baseSetCount` such sets back-to-back, so frame
+    /// `set*framesPerSet + heading` selects a given set's heading.
+    public let framesPerSet: Int
+    /// The base-image "extra frames" flags (@46). See `ExtraFrames`; the first
+    /// four uses (banking/folding/keyCarried/animation) are mutually exclusive.
+    public let extraFrameFlags: Int
+    /// Frame-advance delay for animated/folding parts, in 1/30 s (Bible AnimDelay, @48).
+    public let animDelay: Int
+    /// Weapon-glow fade-out rate (Bible WeapDecay, @50); lower = slower decay.
+    public let weapDecay: Int
+    /// Running-light blink behaviour (@54) and its four parameters (@56–@62).
+    /// Meaning of A–D depends on `blinkMode` (Bible BlinkMode 1=square,
+    /// 2=triangle, 3=random; 0/-1 = steady-on).
+    public let blinkMode: Int
+    public let blinkValues: (a: Int, b: Int, c: Int, d: Int)
+
+    /// How the base image's extra sprite sets are used. Decoded from
+    /// `extraFrameFlags`; the first matching flag wins (the uses are mutually
+    /// exclusive per the Bible, except banking+folding which we treat as banking).
+    public enum ExtraFrames {
+        case none
+        case banking       // set 0 level, 1 = bank left, 2 = bank right
+        case folding       // cycled on land/takeoff/hyperspace (deferred → level)
+        case keyCarried    // 2nd set shown when not carrying key ships (deferred → level)
+        case animation     // extra sets cycled in sequence at animDelay
+    }
+    public var extraFrames: ExtraFrames {
+        if extraFrameFlags & 0x0001 != 0 { return .banking }
+        if extraFrameFlags & 0x0002 != 0 { return .folding }
+        if extraFrameFlags & 0x0004 != 0 { return .keyCarried }
+        if extraFrameFlags & 0x0008 != 0 { return .animation }
+        return .none
+    }
+    /// "Hide running-light sprites while the ship is disabled" (flag 0x0040).
+    public var hidesLightsWhenDisabled: Bool { extraFrameFlags & 0x0040 != 0 }
     /// Real weapon mount points, up to 4 per kind (unused slots repeat a
     /// placeholder position — callers should cross-reference `ShipRes.maxGuns`/
     /// `maxTurrets`/weapon count to know how many are actually meaningful).
@@ -163,6 +200,13 @@ public struct ShanRes {
         shieldSpriteID = i16(d, 64)
         shieldWidth = i16(d, 68)
         shieldHeight = i16(d, 70)
+        let fps = i16(d, 52)
+        framesPerSet = fps > 0 ? fps : 36        // guard against 0 → avoids div-by-0 downstream
+        extraFrameFlags = i16(d, 46)
+        animDelay = i16(d, 48)
+        weapDecay = i16(d, 50)
+        blinkMode = i16(d, 54)
+        blinkValues = (a: i16(d, 56), b: i16(d, 58), c: i16(d, 60), d: i16(d, 62))
 
         func points(xBase: Int, yBase: Int, zBase: Int) -> [ShanExitPoint] {
             (0..<4).map { i in
@@ -868,6 +912,21 @@ public struct NovaGame {
         return sheet
     }
 
+    /// Release every decoded sprite sheet held in RAM (hulls, engine glows,
+    /// shields, planets, wrecks, shots, asteroids). The pool grows with the
+    /// unique art seen over a session and is the single largest RAM consumer —
+    /// full decoded RGBA surfaces — so this is the lever for memory-pressure
+    /// response. Cheap to undo: each sheet re-decodes on next access, and when a
+    /// disk cache is attached that's a fast mmap + decompress rather than a fresh
+    /// RLE decode. Returns the number of entries released (for logging).
+    @discardableResult
+    public func flushSpriteSheets() -> Int {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        let released = cache.rleSheets.count
+        cache.rleSheets.removeAll(keepingCapacity: false)
+        return released
+    }
+
     public func ship(_ id: Int) -> ShipRes? { resources.resource(NovaType.ship, id).map(ShipRes.init) }
     public func ships() -> [ShipRes] {
         cache.lock.lock(); defer { cache.lock.unlock() }
@@ -1060,6 +1119,26 @@ public struct NovaGame {
         guard let shan = shan(shipID), shan.shieldSpriteID > 0,
               resources.resource(NovaType.rleD, shan.shieldSpriteID) != nil else { return nil }
         return decodedRLE(shan.shieldSpriteID)
+    }
+
+    /// Decode a ship's running-lights overlay sprite (the `shän` light layer), if
+    /// present. Shares the base hull's frame layout (same set/heading count,
+    /// including banking sets, per the Bible), so index it with the same
+    /// `set*framesPerSet + heading`. Its opacity is then driven by the shän's
+    /// blink mode. <= 0 / missing → nil.
+    public func lightSprite(_ shipID: Int) -> SpriteSheet? {
+        guard let shan = shan(shipID), shan.lightSpriteID > 0,
+              resources.resource(NovaType.rleD, shan.lightSpriteID) != nil else { return nil }
+        return decodedRLE(shan.lightSpriteID)
+    }
+
+    /// Decode a ship's weapon-glow overlay sprite (the `shän` weapon layer), if
+    /// present — the muzzle flash flashed on firing and faded per `weapDecay`.
+    /// Shares the base frame layout like the engine/light layers. <= 0 → nil.
+    public func weaponGlowSprite(_ shipID: Int) -> SpriteSheet? {
+        guard let shan = shan(shipID), shan.weaponGlowSpriteID > 0,
+              resources.resource(NovaType.rleD, shan.weaponGlowSpriteID) != nil else { return nil }
+        return decodedRLE(shan.weaponGlowSpriteID)
     }
 
     // MARK: Stellar objects

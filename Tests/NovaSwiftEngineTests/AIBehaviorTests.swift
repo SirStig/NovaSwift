@@ -494,6 +494,95 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertTrue(destroyed, "a duel between two armed, hostile interceptors should resolve")
     }
 
+    func testAuthorityIgnoresPlayerMerelySelectingANeutral() {
+        // Regression: a police interceptor must NOT attack the player just because
+        // the player *selected* (targeted) a neutral ship in the UI. The player's
+        // `currentTargetID` reflects a bare selection, not combat, so piracy-police
+        // intervention must not read it as aggression (it used to, and jumped an
+        // idle, clean player — who then defended, killed the cop, and turned the
+        // whole faction hostile).
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        player.maxShield = 100; player.shield = 100; player.maxArmor = 100; player.armor = 100
+        let world = World(player: player)
+        // 500 (system authority) and 600 (a neutral trader govt) are not enemies.
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50]), govt(600, classes: [60])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 3000), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
+
+        let cop = warship("Cop", govt: 500, at: Vec2(300, 0))
+        cop.brain = AIBrain(aiType: .interceptor, govt: 500)
+        world.addNPC(cop)
+        let neutral = warship("Trader", govt: 600, at: Vec2(600, 0), armed: false)
+        neutral.brain = AIBrain(aiType: .wimpyTrader, govt: 600)
+        world.addNPC(neutral)
+
+        // The player merely selects the neutral — no shots, clean record.
+        _ = world.selectTarget(id: neutral.entityID)
+        for _ in 0..<150 { world.step(1.0 / 30.0) }     // 5 seconds
+
+        XCTAssertNotEqual(cop.brain?.targetID, World.playerEntityID,
+                          "a police interceptor must not attack the player for merely selecting a neutral")
+        XCTAssertNotEqual(cop.brain?.state, .attacking,
+                          "the cop should stay on its beat, not open fire on an idle clean player")
+    }
+
+    func testEscortFollowsLeaderDownWhenItLands() {
+        // A fleet escort should dive to land with its leader (fleets land together),
+        // not peel off to fly the system solo the instant the leader vanishes.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(90_000, 90_000))
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 900), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 4000, spawnRadius: 3000, systemGovt: 500)
+
+        let leader = warship("Leader", govt: 500, at: Vec2(0, 700), armed: false)
+        let lbrain = AIBrain(aiType: .wimpyTrader, govt: 500)
+        lbrain.state = .landing; lbrain.destSpob = 128      // leader on final approach
+        leader.brain = lbrain
+        world.addNPC(leader)
+
+        let escort = warship("Escort", govt: 500, at: Vec2(90, 640), armed: false)
+        let ebrain = AIBrain(aiType: .wimpyTrader, govt: 500)
+        ebrain.leaderID = leader.entityID; ebrain.state = .escorting
+        escort.brain = ebrain
+        world.addNPC(escort)
+
+        // One step is enough for the escort to notice its leader is landing.
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(escort.brain?.state, .landing, "the escort should follow its leader down to land")
+        XCTAssertEqual(escort.brain?.destSpob, 128, "the escort heads for the same pad as its leader")
+    }
+
+    func testEscortFollowsLeaderOutWhenItDeparts() {
+        // An escort whose leader jumps out should leave with it, not go solo.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(90_000, 90_000))
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 900), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 4000, spawnRadius: 3000, systemGovt: 500)
+
+        let leader = warship("Leader", govt: 500, at: Vec2(0, 0))
+        let lbrain = AIBrain(aiType: .warship, govt: 500)
+        lbrain.state = .departing
+        leader.brain = lbrain
+        world.addNPC(leader)
+
+        let escort = warship("Escort", govt: 500, at: Vec2(90, -64))
+        let ebrain = AIBrain(aiType: .warship, govt: 500)
+        ebrain.leaderID = leader.entityID; ebrain.state = .escorting
+        escort.brain = ebrain
+        world.addNPC(escort)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(escort.brain?.state, .departing, "the escort should leave the system with its departing leader")
+        XCTAssertTrue(escort.wantsToDepart, "the escort is flagged to jump out with its leader")
+    }
+
     // MARK: government-gated patrols + scanning
 
     func testOnlyLocalAuthorityPatrolsForeignersTravelThrough() {
@@ -520,6 +609,70 @@ final class AIBehaviorTests: XCTestCase {
         world.step(1.0 / 30.0)
         XCTAssertEqual(local.brain?.state, .patrolling, "the system's own government patrols")
         XCTAssertEqual(foreign.brain?.state, .traveling, "a foreign warship passes through, it doesn't patrol")
+    }
+
+    func testPatrolSweepsVariedPointsNotACircle() {
+        // A patrol beat should range over the whole system — checking in on planets
+        // AND striking out into open space — rather than tracing the planet ring in
+        // order (which read as "flying in circles"). Drive many repaths and confirm
+        // the waypoints are varied and cover both near-body and deep-space legs.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(90_000, 90_000))          // far — no threat/scan
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 2000), radius: 90, canLand: true),
+                     StellarBody(id: 129, position: Vec2(2000, 0), radius: 90, canLand: true),
+                     StellarBody(id: 130, position: Vec2(0, -2000), radius: 90, canLand: false)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
+
+        let local = warship("Patrol", govt: 500, at: Vec2())
+        local.brain = AIBrain(aiType: .warship, govt: 500)
+        world.addNPC(local)
+
+        // Snap the ship onto each chosen waypoint so the next step counts it as
+        // "arrived" and repaths — this walks the patrol through many legs quickly.
+        var waypoints: [Vec2] = []
+        for _ in 0..<40 {
+            world.step(1.0 / 30.0)
+            guard local.brain?.state == .patrolling, let d = local.brain?.destination else { break }
+            waypoints.append(d)
+            local.position = d
+        }
+
+        XCTAssertGreaterThanOrEqual(waypoints.count, 20, "patrol should keep picking fresh legs")
+        func minDistToBody(_ p: Vec2) -> Double {
+            world.systemContext.bodies.map { ($0.position - p).length }.min() ?? .infinity
+        }
+        let nearBody = waypoints.filter { minDistToBody($0) < 400 }.count
+        let deepSpace = waypoints.filter { minDistToBody($0) > 800 }.count
+        XCTAssertGreaterThan(nearBody, 0, "a patrol should check in on planets")
+        XCTAssertGreaterThan(deepSpace, 0, "a patrol should also sweep open space, not just hug the planet ring")
+        let distinct = Set(waypoints.map { "\(Int($0.x / 50)),\(Int($0.y / 50))" })
+        XCTAssertGreaterThanOrEqual(distinct.count, 6, "patrol waypoints should be varied, not one repeated point")
+    }
+
+    func testOutboundTraderLeavesInsteadOfLandingAgain() {
+        // A trader that lifted off a spaceport outbound (`spawnOutbound`) should head
+        // for the edge and jump out — the visible "leaving" half of planet traffic —
+        // rather than immediately picking another planet to land on.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(90_000, 90_000))
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 900), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 4000, spawnRadius: 3000, systemGovt: 500)
+
+        let trader = warship("Freighter", govt: 500, at: Vec2(0, 900), armed: false)
+        let brain = AIBrain(aiType: .wimpyTrader, govt: 500)
+        brain.spawnOutbound = true
+        trader.brain = brain
+        world.addNPC(trader)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(trader.brain?.state, .departing, "an outbound trader heads out, it doesn't re-land")
+        XCTAssertTrue(trader.wantsToDepart, "an outbound trader is flagged to leave the system")
     }
 
     func testLocalAuthorityScansThePlayer() {

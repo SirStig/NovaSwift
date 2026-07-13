@@ -137,9 +137,12 @@ public final class Spawner {
     /// eligible fleet, one is placed up front so the player often finds a
     /// formation already on station instead of only ever catching lone ships.
     public func populate(_ world: World) {
+        applyHabitation(world)
         // One fleet up front, as an accent — so the player often arrives to find
-        // a formation already on station — but just the one.
-        if let fid = pickFleet(world, excluding: []) {
+        // a formation already on station — but just the one. Skipped entirely in
+        // uninhabited systems (`maxConcurrentFleets == 0`), which have no base to
+        // station a formation at.
+        if maxConcurrentFleets > 0, let fid = pickFleet(world, excluding: []) {
             spawnFleet(fid, into: world, origin: .interior)
         }
         // Fill the lone-ship backbone to the ambient target, counting ONLY
@@ -155,8 +158,36 @@ public final class Spawner {
         }
     }
 
+    /// Whether `applyHabitation` has already scaled this spawner for its system.
+    private var habitationApplied = false
+
+    /// Thin out an empty or uninhabited system's traffic. A system with a real
+    /// port pulls in traders and bases an authority patrol, sustaining a full
+    /// ambient population plus the odd fleet. A system with nothing landable —
+    /// empty space, or only bare uninhabited rocks — has no such draw: the only
+    /// ships there are passing through between real destinations. So we cut the
+    /// ambient target right down and drop fleets to none, leaving a thin trickle
+    /// of jump-in/jump-out traffic rather than a patrolled, lived-in system.
+    ///
+    /// Runs once, lazily, the first time we have the `world` (its
+    /// `systemContext` is what tells us whether anything here is inhabited).
+    private func applyHabitation(_ world: World) {
+        guard !habitationApplied else { return }
+        habitationApplied = true
+        let inhabited = world.systemContext.bodies.contains { $0.canLand }
+        guard !inhabited else { return }
+        // No port to sustain a population — just a few ships passing through.
+        // Truly empty systems (no stellars at all) are the quietest.
+        targetPopulation = min(targetPopulation, world.systemContext.bodies.isEmpty ? 2 : 3)
+        // Nothing to patrol or base a formation at: no fleets. The concurrent-
+        // fleet gate in `update` reads `< maxConcurrentFleets`, so 0 disables
+        // both the up-front placement and the ongoing cadence.
+        maxConcurrentFleets = 0
+    }
+
     /// Called every step by the world.
     public func update(_ dt: Double, world: World) {
+        applyHabitation(world)
         simClock += dt
         updateReinforcements(world)
 

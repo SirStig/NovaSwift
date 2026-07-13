@@ -39,6 +39,40 @@ final class GameHost {
         return img
     }
 
+    /// The OS memory-pressure watcher (both platforms). Held so it stays alive and
+    /// can be cancelled in `deinit`.
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
+
+    /// Release every re-derivable sprite/texture cache in response to system
+    /// memory pressure: the decoded-sheet pool in `NovaGame`, the scene's
+    /// cross-system texture caches, and the target-silhouette cache. Everything
+    /// dropped re-decodes (cheaply, from the disk cache) on next use — the cost is
+    /// a brief rebuild, the payoff is not getting jettisoned by the OS.
+    func evictSpriteCaches(reason: String) {
+        let released = game?.flushSpriteSheets() ?? 0
+        scene.evictTextureCaches()
+        targetSpriteCache.removeAll()
+        Log.scene.notice("memory pressure (\(reason, privacy: .public)): flushed \(released, privacy: .public) sprite sheet(s) + scene texture caches")
+    }
+
+    /// Start watching for OS memory pressure and flush re-derivable caches when it
+    /// arrives. `DispatchSource` (rather than the iOS-only memory-warning
+    /// notification) so one seam covers iOS and macOS.
+    private func startMemoryPressureMonitoring() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let critical = self.memoryPressureSource?.data.contains(.critical) ?? false
+                self.evictSpriteCaches(reason: critical ? "critical" : "warning")
+            }
+        }
+        source.resume()
+        memoryPressureSource = source
+    }
+
+    deinit { memoryPressureSource?.cancel() }
+
     init(model: AppModel, systemID: Int? = nil, arrivedViaJump: Bool = false) {
         controller = GameControllerInput(input: input)
         hudStyle = GameHost.makeHUDStyle(model.data.game, shipType: model.pilot.state.shipType)
@@ -50,6 +84,9 @@ final class GameHost {
         var textures: [SKTexture] = []
         var engineTextures: [SKTexture] = []
         var shieldTextures: [SKTexture] = []
+        var lightTextures: [SKTexture] = []
+        var weaponGlowTextures: [SKTexture] = []
+        var hullAnim = HullAnim()
         var planets: [PlanetVisual] = []
         var systemName = ""
         var aiGame: NovaGame?
@@ -79,6 +116,9 @@ final class GameHost {
             textures = session.textures
             engineTextures = session.engineTextures
             shieldTextures = session.shieldTextures
+            lightTextures = session.lightTextures
+            weaponGlowTextures = session.weaponGlowTextures
+            hullAnim = session.hullAnim
             hud.shipName = session.shipName
             // Load the requested system (or the pilot's current one — every call
             // site passes an explicit systemID today, but this stays as a safe
@@ -131,8 +171,16 @@ final class GameHost {
         self.galaxy = aiGalaxy
         self.graphics = aiGame.map { SpaceportGraphics(game: $0) }
         hud.systemName = systemName
+        // Vary the spawn RNG seed by the in-game day so re-entering a system doesn't
+        // reproduce the identical ships. Set BEFORE configure (which builds the
+        // initial world) and read live on later in-scene rebuilds (jump/takeoff),
+        // which run after the calendar advances.
+        let seedPilot = model.pilot
+        scene.worldSeedDayProvider = { [weak seedPilot] in seedPilot?.state.date.julianDay ?? 0 }
         scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
                         shieldTextures: shieldTextures,
+                        lightTextures: lightTextures, weaponGlowTextures: weaponGlowTextures,
+                        hullAnim: hullAnim,
                         settings: model.settings,
                         input: input, controller: controller, hud: hud, audio: model.audio,
                         planets: planets, systemName: systemName,
@@ -224,6 +272,7 @@ final class GameHost {
             // existing grudges/eligibility onto it now.
             scene.syncPersStateToWorld()
         }
+        startMemoryPressureMonitoring()
     }
 
     // MARK: Flight-training sandbox
@@ -303,6 +352,7 @@ final class GameHost {
                         planets: planets, systemName: systemName,
                         game: game, systemID: systemID, galaxy: galaxy,
                         arrivedViaJump: false, playerDamageScaleOverride: 0)
+        startMemoryPressureMonitoring()
     }
 
     /// The player's live ship + its sprite textures, built from the current pilot
@@ -317,6 +367,9 @@ final class GameHost {
         let textures: [SKTexture]
         let engineTextures: [SKTexture]
         let shieldTextures: [SKTexture]
+        let lightTextures: [SKTexture]
+        let weaponGlowTextures: [SKTexture]
+        let hullAnim: HullAnim
         let shipName: String
     }
     static func buildPlayerShip(model: AppModel, galaxy: Galaxy, game: NovaGame) -> PlayerSession {
@@ -336,14 +389,22 @@ final class GameHost {
         var textures: [SKTexture] = []
         var engineTextures: [SKTexture] = []
         var shieldTextures: [SKTexture] = []
-        if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.rotationFrames(from: sheet) }
-        if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.rotationFrames(from: glow) }
+        var lightTextures: [SKTexture] = []
+        var weaponGlowTextures: [SKTexture] = []
+        // Full multi-set sheets (banking/animation sets + all headings) so the
+        // scene can select the live set/heading — not just the first 36 frames.
+        if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.allFrames(from: sheet) }
+        if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.allFrames(from: glow) }
+        if let lights = game.lightSprite(shipID) { lightTextures = SpriteTextures.allFrames(from: lights) }
+        if let wg = game.weaponGlowSprite(shipID) { weaponGlowTextures = SpriteTextures.allFrames(from: wg) }
         // The shän shield-bubble layer (single-frame overlay), only present when a
         // "Shields" graphics plug-in populated it — nil/empty for stock hulls.
         if let bubble = game.shieldSprite(shipID) { shieldTextures = SpriteTextures.rotationFrames(from: bubble) }
+        let hullAnim = game.shan(shipID).map(HullAnim.init) ?? HullAnim()
         let name = pilot.shipName.isEmpty ? (res?.displayName ?? "") : pilot.shipName
         return PlayerSession(ship: ship, textures: textures, engineTextures: engineTextures,
-                             shieldTextures: shieldTextures, shipName: name)
+                             shieldTextures: shieldTextures, lightTextures: lightTextures,
+                             weaponGlowTextures: weaponGlowTextures, hullAnim: hullAnim, shipName: name)
     }
 
     /// The nearest inhabited `spöb` to `position` within `systemID`, paired
@@ -1080,7 +1141,10 @@ struct GameContainerView: View {
                 host.scene.reloadForDeparture(spobID: spob, player: session.ship,
                                               textures: session.textures,
                                               engineTextures: session.engineTextures,
-                                              shieldTextures: session.shieldTextures)
+                                              shieldTextures: session.shieldTextures,
+                                              lightTextures: session.lightTextures,
+                                              weaponGlowTextures: session.weaponGlowTextures,
+                                              hullAnim: session.hullAnim)
                 landedSpobID = nil            // now fade the port out over the ready scene
                 setScenePaused(false, reason: "depart (in place)")
                 syncNav(host)

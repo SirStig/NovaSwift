@@ -169,14 +169,6 @@ case "info":
     print("total types:  \(collection.types.count)")
     print("total rez:    \(collection.totalCount)")
 
-case "shanprobe":
-    let (collection, _) = loadCollection(args[1])
-    func pi16(_ d: Data,_ o:Int)->Int{ guard d.count>=o+2 else {return -99999}; let b=d.startIndex+o; let v=(Int(d[b])<<8)|Int(d[b+1]); return v>=0x8000 ? v-0x10000 : v}
-    for r in collection.resources(of: NovaType.shan).sorted(by:{$0.id<$1.id}).prefix(14) {
-        let d = r.data
-        print("shän #\(r.id) \"\(r.name)\" setCount@4=\(pi16(d,4)) flags@46=0x\(String(pi16(d,46), radix:16)) framesPerSet@52=\(pi16(d,52)) light@30=\(pi16(d,30)) weapGlow@38=\(pi16(d,38)) shield@64=\(pi16(d,64))")
-    }
-
 case "types":
     guard args.count == 2 else { usage() }
     let (collection, format) = loadCollection(args[1])

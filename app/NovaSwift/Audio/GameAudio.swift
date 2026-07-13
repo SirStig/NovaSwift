@@ -102,6 +102,10 @@ final class GameAudio: ObservableObject {
 
     func stopMusic() { engine.stopMusic() }
 
+    /// Stop every looping SFX voice (beam weapons, ambient). Call when leaving the
+    /// game so a loop that was sounding at death/exit doesn't carry into the menu.
+    func stopAllLoops() { engine.stopAllLoops() }
+
     /// Freeze/thaw the sustained game audio (music + looping SFX) while an in-flight
     /// overlay menu is open (Escorts, Hail, Galaxy/Gate Map, the in-game menu and
     /// the Story map it opens). Resumes exactly where it left off; the menu's own UI

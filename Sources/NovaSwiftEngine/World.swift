@@ -1087,9 +1087,17 @@ public final class World {
         updateStellarDefenses()   // relaunch tribute-defense waves as they're cleared
         refreshRoster()
 
-        // Player: outside intent.
-        fireWeapons(from: player, intent: intent)
-        player.step(dt, intent: intent, tuning: tuning)
+        // Player: outside intent. Once dead, stop honouring the controls entirely —
+        // no firing, and freeze the wreck in place (zero velocity, empty intent) so
+        // it doesn't keep flying under live input (looking alive) while the death /
+        // explosion sequence plays out and the app returns to the menu.
+        if player.isAlive {
+            fireWeapons(from: player, intent: intent)
+            player.step(dt, intent: intent, tuning: tuning)
+        } else {
+            player.velocity = Vec2()
+            player.step(dt, intent: ControlIntent(), tuning: tuning)
+        }
         wrapIntoSystem(player)
 
         // NPCs: each brain decides an intent. Disabled hulks don't think — they
@@ -1147,6 +1155,10 @@ public final class World {
     private func reportPlayerDeathIfNeeded() {
         guard !playerDeathReported, !player.isAlive else { return }
         playerDeathReported = true
+        // Since the dead player is no longer stepped through `fireWeapons`, its own
+        // continuous-fire (beam) loop would never get its natural stop — emit it now
+        // so the player's weapon loop doesn't keep sounding into the menu.
+        stopAllBeamLoops(for: player)
         events.append(.explosion(at: player.position, radius: max(24, player.radius * 1.5),
                                  soundID: player.explosionSoundID))
         events.append(.playerDestroyed(hadEscapePod: player.hasEscapePod))
@@ -1600,6 +1612,11 @@ public final class World {
             } else {
                 p.facing = p.velocity.angle
             }
+            // Remember where the shot was so collision can sweep the whole path it
+            // covered this frame, not just its endpoint — a fast shot moves many
+            // times a small ship's radius per frame and would otherwise tunnel
+            // clean through it (the "shots pass through and never hit" bug).
+            let prevPos = p.position
             p.position += p.velocity * dt
 
             // Power decay: the shot loses damage the longer it flies.
@@ -1621,7 +1638,10 @@ public final class World {
             var struck: Ship?
             for other in allShips where other.isAlive {
                 guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) else { continue }
-                let dist = (other.position - p.position).length
+                // Swept distance: shortest gap between the ship and the segment the
+                // shot travelled this frame, so a high-velocity round still connects
+                // with a small hull it flew past between samples.
+                let dist = Self.segmentPointDistance(prevPos, p.position, other.position)
                 if dist <= other.radius {
                     struck = other; break
                 }
@@ -1640,7 +1660,7 @@ public final class World {
             }
 
             for rock in asteroids where rock.isAlive {
-                if (rock.position - p.position).length <= rock.radius + reach {
+                if Self.segmentPointDistance(prevPos, p.position, rock.position) <= rock.radius + reach {
                     applyAsteroidHit(rock, shield: p.shieldDamage, armor: p.armorDamage)
                     p.alive = false
                     detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
@@ -1651,6 +1671,18 @@ public final class World {
         projectiles.append(contentsOf: spawned)
         projectiles.removeAll { !$0.alive }
         asteroids.removeAll { !$0.isAlive }
+    }
+
+    /// Shortest distance from point `c` to the line segment `a`→`b`. Backs swept
+    /// projectile collision so a shot that jumps past a small ship between frames
+    /// is still caught (no tunnelling through fast-moving or small targets).
+    static func segmentPointDistance(_ a: Vec2, _ b: Vec2, _ c: Vec2) -> Double {
+        let ab = b - a
+        let len2 = ab.x * ab.x + ab.y * ab.y
+        guard len2 > 1e-9 else { return (c - a).length }
+        var t = ((c - a).x * ab.x + (c - a).y * ab.y) / len2
+        t = max(0, min(1, t))
+        return (c - (a + ab * t)).length
     }
 
     /// Resolve a shot ending: apply its direct/blast damage and knockback, emit

@@ -245,6 +245,15 @@ public final class AIBrain {
         var bestDist = scanRange
         for aggressor in world.allShips
         where aggressor.entityID != me.entityID && aggressor.isAlive && !aggressor.disabled {
+            // Never treat the PLAYER as an "aggressor" here: the player's
+            // `currentTargetID` is set the instant they *select* a ship in the UI —
+            // with no combat implied — whereas an NPC only sets it while actively
+            // attacking. Reading a bare player selection as an attack made police
+            // interceptors jump an idle, clean player merely for targeting a neutral
+            // (the "Federation ships attack me for no reason" bug). Genuine player
+            // aggression is handled properly elsewhere — the victim is `provokedByPlayer`
+            // and disabling/killing records a crime that flips standing hostile.
+            if aggressor.isPlayer { continue }
             guard let victimID = aggressor.currentTargetID, victimID != me.entityID,
                   let victim = world.ship(id: victimID), victim.isAlive, !victim.disabled,
                   victim.government != aggressor.government,
@@ -386,6 +395,28 @@ public final class AIBrain {
         // escort command window).
         if let lid = leaderID {
             if let leader = world.ship(id: lid), leader.isAlive {
+                // Follow the leader down or out. An NPC leader that is landing or
+                // leaving the system takes its whole wing with it (EV Nova fleets
+                // land / jump together) instead of the escorts peeling off to fly the
+                // system solo the instant the leader vanishes. Checked before the
+                // escort-order switch below (which would otherwise re-assert
+                // `.escorting` every frame). The escort keeps its own copy of the
+                // landing spob / depart intent, so it completes the manoeuvre even
+                // after the leader has despawned and `leaderID` is cleared. Only NPC
+                // leaders (those with a brain) trigger this — a player-led wing is
+                // handled by the host when the player lands.
+                if let lb = leader.brain {
+                    if (lb.state == .landing || leader.wantsToLand),
+                       let sid = lb.destSpob ?? leader.landingSpob {
+                        destSpob = sid
+                        if state != .landing { enter(.landing) }
+                        return land(me, world)
+                    }
+                    if lb.state == .departing || leader.wantsToDepart {
+                        if state != .departing { enter(.departing) }
+                        return depart(me, world)
+                    }
+                }
                 switch escortOrder {
                 case .hold:
                     // Hold position: don't follow or fight; coast to a stop.
@@ -751,65 +782,55 @@ public final class AIBrain {
         let station = leader.position + fwd * behind + right * lateral
         let toStation = station - me.position
         let d = toStation.length
+        let leaderSpeed = leader.velocity.length
 
-        // Estimate the leader's own acceleration from its velocity change, to feed
-        // it forward below. This is the "sees the future" term: the instant the
-        // leader thrusts or turns, the escort applies the same acceleration rather
-        // than waiting to drift out of position and then chasing the gap.
-        let leaderAccel = prevLeaderVel.map { (leader.velocity - $0) * (1 / max(dt, 1e-4)) } ?? Vec2()
-        prevLeaderVel = leader.velocity
-
-        // FAR from the slot (returning from a fight, freshly hired): fly in with the
-        // stopping-point steering so the hull decelerates cleanly onto station
-        // instead of sailing through and wheeling around it. A modest limit-lift
-        // keeps the return brisk and lets it catch a cruising leader, while still
-        // reading as real thruster flight.
-        if d > 150 {
+        // FAR from the slot (returning from a fight, freshly hired), OR the leader is
+        // essentially parked (no travel heading to lock onto): fly in / settle onto
+        // the fixed station point with the stopping-point steering, which decelerates
+        // cleanly onto the mark instead of sailing through and wheeling around it. A
+        // modest limit-lift keeps the approach brisk and lets it catch a cruising
+        // leader, while still reading as real thruster flight.
+        if d > 150 || leaderSpeed < 30 {
             let (intent, _) = moveTo(me, toward: station, matching: leader.velocity,
                                      arriveRadius: 16, arriveSpeed: max(6, me.stats.maxSpeed * 0.04))
-            me.formationBoost = 0.6
+            me.formationBoost = d > 150 ? 0.6 : 1.0
             return intent
         }
 
-        // IN the slot: lift the ship's limits (EV Nova escorts ignore their own
-        // speed/maneuverability to hold formation) and run a predictive PD
-        // station-keeper. The command corrects position and velocity error *and*
-        // carries the leader's own acceleration forward, so the wing moves as one —
-        // anticipating the leader rather than reacting to it. Slightly over-damped
-        // so it eases onto station without the overshoot-and-recorrect wobble; the
-        // lifted turn rate lets it hold heading with the leader through hard turns.
+        // IN the slot behind a MOVING leader: lift the ship's limits (EV Nova escorts
+        // ignore their own
+        // speed/maneuverability to hold formation) and fly *as the leader flies* —
+        // face its heading and match its speed — rather than chasing a blended PD
+        // acceleration command. A formation hull flies inertialess (its velocity is
+        // always along its nose), so a PD command with any braking/lateral component
+        // can only be realised by rotating the nose toward it; the limit-lifted
+        // escort overshoots the leader's speed, the controller then commands a
+        // retrograde brake, and the nose flips 180° — a violent spin that never
+        // settles (the "escort circles its slot forever" bug). Instead: hold the
+        // leader's heading with a small *bounded* nudge that eases lateral drift out
+        // (never enough to flip the nose), and gate thrust on a target speed derived
+        // from the along-track gap. Stable by construction — the nose stays within a
+        // narrow cone of the leader's heading, so a straight-cruising wing holds
+        // heading instead of twitching.
         me.formationBoost = 1.0
         let posErr = toStation
-        let velErr = leader.velocity - me.velocity
-        let kp = 3.0, kd = 4.2
-        let aCmd = posErr * kp + velErr * kd + leaderAccel
-
         var intent = ControlIntent()
-        // Deadzone: essentially on-station and matched. Hold the slot by flying
-        // exactly as the leader flies rather than coasting — face the leader's
-        // heading and keep just enough thrust to sustain its speed. Formation ships
-        // fly inertialess, so cutting thrust here bleeds the throttle off and drops
-        // the wing behind a cruising leader (the stutter that read as "escorts can't
-        // keep up"); matching the leader instead pins the wing to it. Only thrusting
-        // while below the leader's speed and roughly along its travel still ends the
-        // perpetual micro-turning the old reactive controller did.
-        if aCmd.length < me.stats.acceleration * 0.2 {
-            intent.desiredHeading = leader.angle
-            let leaderSpeed = leader.velocity.length
-            if leaderSpeed > 1, me.velocity.length < leaderSpeed,
-               Vec2.heading(me.angle).dot(leader.velocity.normalized) > cosThrustCone {
-                intent.thrust = true
-            }
-            return intent
+
+        // Decompose the station offset in the leader's frame: `along` (+ = station is
+        // ahead of us along the leader's travel) drives speed; `cross` (+ = station is
+        // to our right) drives a small heading nudge.
+        let along = fwd.dot(posErr)
+        let cross = right.dot(posErr)
+        let headingNudge = max(-0.3, min(0.3, cross / 220))
+        intent.desiredHeading = leader.angle + headingNudge
+
+        // Match the leader's speed, biased by the along-track gap so we close or drop
+        // back onto station without ever needing to reverse the nose.
+        let wantSpeed = max(0, leaderSpeed + max(-leaderSpeed, min(leaderSpeed, along * 0.6)))
+        if me.velocity.length < wantSpeed,
+           Vec2.heading(me.angle).dot(Vec2.heading(leader.angle)) > cosThrustCone {
+            intent.thrust = true
         }
-        // Otherwise steer to produce the commanded acceleration and burn when lined
-        // up. A little turn/accel headroom keeps corrections crisp — the "slightly
-        // inhuman" precision the wing needs to sit rock-steady.
-        let aimDir = aCmd.normalized
-        if abs(angleDelta(from: me.angle, to: aimDir.angle)) > 0.03 {
-            intent.desiredHeading = aimDir.angle
-        }
-        if aimDir.dot(Vec2.heading(me.angle)) > cosThrustCone { intent.thrust = true }
         return intent
     }
 
