@@ -10,6 +10,7 @@ struct SettingsView: View {
 
     @State private var previewSoundID: Int = 128
     @State private var showResetConfirm = false
+    @State private var showImportData = false
 
     var body: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
@@ -49,6 +50,16 @@ struct SettingsView: View {
                 model.commitSettings()
             }
             Button("Cancel", role: .cancel) {}
+        }
+        // Data import now lives here (moved off the main menu once data is present).
+        // Presented as a full-screen overlay over the settings card, matching how
+        // the menus present their own dialogs.
+        .overlay {
+            if showImportData {
+                ImportDataView(onClose: { showImportData = false })
+                    .transition(.opacity)
+                    .preferredColorScheme(.dark)
+            }
         }
     }
 
@@ -115,6 +126,18 @@ struct SettingsView: View {
                     // The first-flight controls card and the one-time
                     // spaceport/BBS/outfitter banners all clear together.
                     UserDefaults.standard.removeObject(forKey: "novaswift.seenFlightHints")
+                }
+            }
+            // Replayable flight-training run, moved here off the main menu. Needs
+            // decoded ship/outfit data to fly, so it's gated on base data; close
+            // Settings first so the tutorial hands back to a clean menu.
+            if model.data.hasBaseData {
+                Button {
+                    model.audio.play(.uiSelect)
+                    onClose()
+                    model.startTutorial(exit: .menu)
+                } label: {
+                    Label("Flight Training", systemImage: "graduationcap.fill")
                 }
             }
             Toggle("Pause when app loses focus", isOn: binding(\.pauseOnFocusLoss))
@@ -246,6 +269,16 @@ struct SettingsView: View {
                 Spacer()
                 Text(model.roster.isCloudBacked ? "iCloud" : "This device")
                     .foregroundStyle(.secondary)
+            }
+            // Re-import or update game data. Only offered once data is already
+            // present — the first-run import lives on the pre-data launcher.
+            if model.data.hasBaseData {
+                Button {
+                    model.audio.play(.uiSelect)
+                    showImportData = true
+                } label: {
+                    Label("Import Data", systemImage: "square.and.arrow.down.fill")
+                }
             }
         } header: {
             Label("Saved Games", systemImage: "externaldrive.badge.icloud")

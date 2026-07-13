@@ -36,6 +36,7 @@ final class GameScene: SKScene {
             // takeoff) so grudges/spawn-eligibility survive jumps.
             world?.playerPersGrudges = persGrudges
             if let e = persSpawnEligible { world?.persSpawnEligible = e }
+            if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
         }
     }
     /// Whether the player's ship carries an IFF outfit (oütf ModType 14,
@@ -70,6 +71,13 @@ final class GameScene: SKScene {
     var persGrudges: Set<Int> = []
     /// Host gate: whether a pêrs may spawn now (ActiveOn NCB + not defeated).
     var persSpawnEligible: ((Int) -> Bool)?
+    /// Host gate: whether a hull with a non-blank `shïp.AppearOn` may spawn now.
+    var shipSpawnEligible: ((Int) -> Bool)?
+    /// The player's mining scoop collected (cargoType, quantity) from a destroyed
+    /// asteroid; the host adds it to pilot cargo (clamped to free hold) and returns
+    /// the tonnage actually stowed plus the commodity's display name, or nil if the
+    /// hold was full and nothing could be taken.
+    var onAsteroidMined: ((Int, Int) -> (stowed: Int, name: String)?)?
     /// Fired when the player earns a grudge / defeats a named person; the host
     /// persists these to the pilot.
     var onPersGrudge: ((Int) -> Void)?
@@ -1051,6 +1059,14 @@ final class GameScene: SKScene {
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
                 audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
+            case let .asteroidMined(cargoType, quantity, _):
+                // Player mining scoop collected an asteroid's yield — the host adds
+                // it to pilot cargo (clamped to free hold) and reports what stowed.
+                if let result = onAsteroidMined?(cargoType, quantity) {
+                    hud?.post("Mined \(result.stowed)t of \(result.name).")
+                } else {
+                    hud?.post("Cargo hold full — mined ore lost.")
+                }
             case .targetAcquired:
                 audio?.play(.targetLock)
                 Haptics.play(.selection)
@@ -1558,6 +1574,7 @@ final class GameScene: SKScene {
     func syncPersStateToWorld() {
         world?.playerPersGrudges = persGrudges
         if let e = persSpawnEligible { world?.persSpawnEligible = e }
+        if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
     }
 
     /// Take the credits aboard a boarded hulk; returns the amount.
@@ -1880,6 +1897,8 @@ final class GameScene: SKScene {
                 node.blendMode = .add
                 node.zRotation = 0
             }
+            // wëap.Flags3 0x0002: translucent shots draw at reduced opacity.
+            node.alpha = s.translucentShots ? 0.45 : 1.0
         }
     }
 
@@ -3257,6 +3276,7 @@ final class GameScene: SKScene {
         hud.shield = p.maxShield > 0 ? p.shield / p.maxShield : 0
         hud.armor = p.maxArmor > 0 ? p.armor / p.maxArmor : 1
         hud.fuel = p.maxFuel > 0 ? p.fuel / p.maxFuel : 0
+        hud.maxFuel = p.maxFuel
         hud.jumps = Int((p.fuel / 100).rounded(.down))
         hud.ionization = p.ionizeMax > 0 ? min(1, p.ionCharge / p.ionizeMax) : 0
         hud.ionized = p.isIonized

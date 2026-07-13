@@ -14,6 +14,8 @@ let package = Package(
         .library(name: "NovaSwiftEngine", targets: ["NovaSwiftEngine"]),
         // Story/mission runtime: control bits, missions, crons, player state.
         .library(name: "NovaSwiftStory", targets: ["NovaSwiftStory"]),
+        // Multiplayer netcode: transport abstraction, presence, session sync.
+        .library(name: "NovaSwiftNet", targets: ["NovaSwiftNet"]),
         // Plug-in store: catalog metadata + download/install pipeline.
         .library(name: "NovaSwiftPluginStore", targets: ["NovaSwiftPluginStore"]),
         // Command-line extractor / inspector.
@@ -26,6 +28,7 @@ let package = Package(
         .target(name: "NovaSwiftKit", path: "Sources/NovaSwiftKit"),
         .target(name: "NovaSwiftEngine", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftEngine"),
         .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftStory"),
+        .target(name: "NovaSwiftNet", path: "Sources/NovaSwiftNet"),
         .target(
             name: "NovaSwiftPluginStore",
             dependencies: [
@@ -57,6 +60,11 @@ let package = Package(
             name: "NovaSwiftStoryTests",
             dependencies: ["NovaSwiftStory"],
             path: "Tests/NovaSwiftStoryTests"
+        ),
+        .testTarget(
+            name: "NovaSwiftNetTests",
+            dependencies: ["NovaSwiftNet"],
+            path: "Tests/NovaSwiftNetTests"
         ),
         .testTarget(
             name: "NovaSwiftPluginStoreTests",

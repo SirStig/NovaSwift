@@ -246,6 +246,18 @@ final class PilotStore: ObservableObject {
         if changed { save() }
     }
 
+    /// Add up to `tons` of cargo `id` for free (no credit cost), clamped to the
+    /// ship's remaining hold. Used for mined asteroid yield (`röid.YieldType`).
+    /// Returns the tonnage actually stowed.
+    @discardableResult
+    func collectCargo(id: Int, tons: Int, galaxy: Galaxy) -> Int {
+        let n = max(0, min(tons, cargoFree(galaxy: galaxy)))
+        guard n > 0 else { return 0 }
+        state.cargo[id, default: 0] += n
+        save()
+        return n
+    }
+
     @discardableResult
     func buyCommodity(_ c: Commodity, tons: Int, unitPrice: Int, cargoFree: Int) -> Int {
         buyCargo(id: c.cargoID, tons: tons, unitPrice: unitPrice, cargoFree: cargoFree)
@@ -355,6 +367,13 @@ final class PilotStore: ObservableObject {
     /// and any richer op a plugin encodes) so the effect matches how mission
     /// scripts run. No-op for the (overwhelmingly common) empty expression.
     private func runOutfitScript(_ expr: String, game: NovaGame) {
+        runControlBitSet(expr, game: game)
+    }
+
+    /// Run an NCB control-bit *set* expression against the live pilot via the
+    /// story engine's set-op executor. Shared by outfit `OnPurchase`/`OnSell` and
+    /// ship `OnPurchase`/`OnRetire` hooks. No-op for the (common) empty expression.
+    private func runControlBitSet(_ expr: String, game: NovaGame) {
         guard !expr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let engine = StoryEngine(game: game, player: state)
         engine.apply(set: expr)
@@ -391,9 +410,17 @@ final class PilotStore: ObservableObject {
     func buyShip(_ ship: ShipRes, game: NovaGame, priceMultiplier: Double = 1) -> Bool {
         let price = netPrice(of: ship, game: game, priceMultiplier: priceMultiplier)
         guard state.credits >= price, ship.id != state.shipType else { return false }
+        // Bible `shïp.OnRetire`: the old hull is sold/replaced — run its retire NCB
+        // set expression before it's gone. `OnPurchase`: run the new hull's on-buy
+        // set expression after the swap. Both are usually empty (base-game hulls
+        // rarely script story bits on trade-in), so this no-ops for most ships.
+        if let oldShip = game.ship(state.shipType) {
+            runControlBitSet(oldShip.onRetire, game: game)
+        }
         state.credits -= price
         state.shipType = ship.id
         state.shipName = ship.displayName
+        runControlBitSet(ship.onPurchase, game: game)
         // The old hull and everything installed on it are traded in together
         // (credited via `tradeInValue` above) — real EV Nova does NOT carry
         // outfits over to a new ship by default. The one exception is

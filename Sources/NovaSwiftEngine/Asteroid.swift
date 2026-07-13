@@ -27,6 +27,10 @@ public final class Asteroid {
     /// Average number of sub-asteroids on death, ±50% per the Bible.
     public let fragCount: Int
     public let explodeType: Int
+    /// `röid.YieldType` — cargo id this rock yields when mined (0-5 standard
+    /// commodity; -1 = nothing). `röid.YieldQty` is the average box count (±50%).
+    public let yieldType: Int
+    public let yieldQty: Int
     public var isAlive = true
 
     public init(id: Int, roidTypeID: Int, position: Vec2, angle: Double,
@@ -43,6 +47,8 @@ public final class Asteroid {
         self.fragType2 = roid.fragType2
         self.fragCount = roid.fragCount
         self.explodeType = roid.explodeType
+        self.yieldType = roid.yieldType
+        self.yieldQty = roid.yieldQty
     }
 
     /// The 0..<36 rotation-sheet frame for the current angle — same bucketing

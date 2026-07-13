@@ -261,6 +261,21 @@ final class GameHost {
                 guard let pers = scanGame.pers(id), !pers.activeOn.isEmpty else { return true }
                 return StoryEngine(game: scanGame, player: store.state).evaluate(test: pers.activeOn)
             }
+            // shïp.AppearOn: a hull with a non-blank AppearOn test only appears in
+            // düde spawns while its control-bit expression passes against live bits.
+            scene.shipSpawnEligible = { [weak pilotStore] id in
+                guard let store = pilotStore else { return true }
+                guard let ship = scanGame.ship(id), !ship.appearOn.isEmpty else { return true }
+                return StoryEngine(game: scanGame, player: store.state).evaluate(test: ship.appearOn)
+            }
+            // Mining: the player's scoop collected a destroyed asteroid's yield —
+            // add it to cargo (clamped to free hold) and report what was stowed.
+            scene.onAsteroidMined = { [weak pilotStore] cargoType, quantity in
+                guard let store = pilotStore, let commodity = Commodity.standard(cargoID: cargoType) else { return nil }
+                let stowed = store.collectCargo(id: cargoType, tons: quantity, galaxy: Galaxy(game: scanGame))
+                guard stowed > 0 else { return nil }
+                return (stowed, scanGame.commodityName(commodity))
+            }
             scene.onPersGrudge = { [weak pilotStore] pid in
                 pilotStore?.state.recordPersGrudge(pid); pilotStore?.save()
             }
@@ -1081,7 +1096,7 @@ struct GameContainerView: View {
         if model.pilot.state.dominatedStellars?.contains(spob.id) == true { return nil }
         // A rank that "can always land" for this govt (or an ally of it) overrides
         // every landing gate below — the QW5 `canAlwaysLand` privilege.
-        let diplomacy = galaxy?.makeDiplomacy()
+        let diplomacy = host?.galaxy?.makeDiplomacy()
         let alwaysLand = model.pilot.state.activeRanks.contains { rid in
             guard let r = game.rank(rid), r.canAlwaysLand else { return false }
             return r.govt == govtID || (diplomacy?.areAllied(r.govt, govtID) ?? false)
@@ -1924,6 +1939,15 @@ struct GameContainerView: View {
             let name = cap.name.isEmpty ? (model.data.game?.ship(cap.shipType)?.name ?? "Escort") : cap.name
             let record = model.pilot.state.registerEscort(shipType: cap.shipType, name: name, origin: .captured)
             scene.tagEscort(entityID: cap.entityID, recordID: record.id)
+            // Bible `shïp.OnCapture`: control-bit set expression run when the player
+            // captures a hull of this type (usually blank; some story hulls flip a
+            // bit on capture). Runs over the shared pilot state before the save.
+            if let game = model.data.game, let onCapture = game.ship(cap.shipType)?.onCapture,
+               !onCapture.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let engine = StoryEngine(game: game, player: model.pilot.state)
+                engine.apply(set: onCapture)
+                model.pilot.state = engine.player
+            }
             model.pilot.save()
             host?.hud.post("Ship captured — it joins your escorts.")
             boardManifest = nil

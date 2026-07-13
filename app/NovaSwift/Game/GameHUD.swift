@@ -10,6 +10,12 @@ final class GameHUDModel: ObservableObject {
     @Published var armor = 1.0      // 0…1
     @Published var fuel = 1.0       // 0…1
     @Published var jumps = 0        // whole hyperjumps of fuel remaining
+    /// The ship's total fuel capacity in raw units (EV Nova charges 100 per
+    /// hyperjump). Lets the fuel gauge segment itself into whole-jump units —
+    /// full jumps painted in `ïntf.fuelFull`, the leftover partial jump in
+    /// `ïntf.fuelPartial` — exactly as the original status bar draws it. 0 when
+    /// no ship state is pushed yet, which collapses the gauge to a single fill.
+    @Published var maxFuel = 0.0
     /// Ion charge as a fraction of the ship's `ionizeMax` (0…1). 0 for a ship
     /// that can't be ionized or is fully discharged — the HUD hides the bar then.
     @Published var ionization = 0.0

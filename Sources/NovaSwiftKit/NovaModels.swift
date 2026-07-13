@@ -336,6 +336,20 @@ public struct ShipRes {
     // mentions govt-scoped requirements, so `require` applies everywhere.
     public let contribute: UInt64   // @100 bits this hull contributes toward outfits'/ships' Require
     public let availBits: String    // @108 NCB control-bit test expression gating purchase
+    /// `AppearOn` (@363, n0FF 255B, NCB **Test**): "Ships of this type will not
+    /// show up in dude resources if this expression evaluates to false." Gates
+    /// AI/düde spawning of this hull (offset TMPL #518-confirmed, contiguous after
+    /// availBits@108: 108+255=363). Blank = always eligible.
+    public let appearOn: String
+    /// `OnPurchase` (@618, n100 256B, NCB **Set**): control-bit set expression run
+    /// when the player buys this ship in the shipyard. Blank = no effect.
+    public let onPurchase: String
+    /// `OnCapture` (@976, n0FF 255B, NCB **Set**): run when the player captures a
+    /// ship of this type (fires from the boarding/capture path). Blank = no effect.
+    public let onCapture: String
+    /// `OnRetire` (@1231, n0FF 255B, NCB **Set**): run when the player sells or
+    /// replaces (trades in) a ship of this type. Blank = no effect.
+    public let onRetire: String
     public let require: UInt64      // @896 bits that must be met (via owned outfits/current ship) to buy
     /// "The subtitle to show on the target display for this ship type" (Nova
     /// Bible). Offset verified against novaparse `ShipResource.ts` (`subtitle`)
@@ -428,6 +442,10 @@ public struct ShipRes {
         ionizeMax = i16(d, 876)
         contribute = u64(d, 100)
         availBits = cstr(d, 108, 255)
+        appearOn = cstr(d, 363, 255)
+        onPurchase = cstr(d, 618, 255)
+        onCapture = cstr(d, 976, 255)
+        onRetire = cstr(d, 1231, 255)
         require = u64(d, 896)
         subtitle = cstr(d, 1766, 64)
         flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))

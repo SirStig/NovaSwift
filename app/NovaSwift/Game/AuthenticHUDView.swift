@@ -32,10 +32,12 @@ struct AuthenticHUDView: View {
 
                 bar(layout, style.intf.shieldArea, model.shield, style.intf.shieldColor)
                 bar(layout, style.intf.armorArea, model.armor, style.intf.armorColor)
-                bar(layout, style.intf.fuelArea, model.fuel, style.intf.fuelFull)
+                fuelBar(layout)
 
                 if showRadar {
-                    RadarContactsView(model: model, playerMarker: color(style.intf.brightRadar))
+                    RadarContactsView(model: model,
+                                      brightRadar: style.intf.brightRadar,
+                                      dimRadar: style.intf.dimRadar)
                         .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
                 }
 
@@ -49,8 +51,53 @@ struct AuthenticHUDView: View {
                 cargoReadout
                     .novaPlace(layout, origin: origin(style.intf.cargoArea), size: size(style.intf.cargoArea))
             }
+            // Honor the plug-in's ïntf.statusFont for every HUD readout in this
+            // subtree; falls back to Geneva when the named family isn't a font
+            // the player has imported (see hudFontFamily).
+            .environment(\.novaHUDFontFamily, hudFontFamily)
         }
         .allowsHitTesting(false)
+    }
+
+    /// The plug-in-supplied HUD font (`ïntf.statusFont`), resolved to a family
+    /// that's actually registered — otherwise Geneva (the `.hud` role's own
+    /// fallback). `nil` when the resource names no font, leaving the HUD in
+    /// Geneva. Most stock `ïntf`s name "Geneva" here, so this is usually a
+    /// no-op; a total conversion that ships (and imports) a custom UI font is
+    /// what it exists for.
+    private var hudFontFamily: String? {
+        let f = style.intf.statusFont
+        guard !f.isEmpty else { return nil }
+        return NovaFontFallback.resolve(f, fallback: NovaFontRole.hud.family)
+    }
+
+    /// EV Nova's fuel gauge is a jump meter, not a smooth bar: it fills in
+    /// whole-hyperjump units painted in `ïntf.fuelFull`, and draws the leftover
+    /// fuel that hasn't yet accumulated a full jump in `ïntf.fuelPartial`. We
+    /// reproduce that by splitting the fill at the largest whole-jump boundary
+    /// the current fuel clears (`jumps × 100 / maxFuel` of the rect), painting
+    /// everything below it full and the remainder partial. With no ship state
+    /// (maxFuel == 0) it collapses to a single fuelFull fill.
+    @ViewBuilder
+    private func fuelBar(_ layout: NovaLayout) -> some View {
+        let r = style.intf.fuelArea
+        let frac = min(1, max(0, model.fuel))
+        let fullFrac: Double = model.maxFuel > 0
+            ? min(frac, Double(model.jumps) * 100 / model.maxFuel)
+            : frac
+        let partialFrac = max(0, frac - fullFrac)
+        // Whole-jump portion, left-anchored.
+        if fullFrac > 0 {
+            Rectangle().fill(color(style.intf.fuelFull))
+                .novaPlace(layout, x: CGFloat(r.left), y: CGFloat(r.top),
+                           w: CGFloat(r.width) * fullFrac, h: CGFloat(r.height))
+        }
+        // Partial (sub-jump) remainder, butted against the whole-jump portion.
+        if partialFrac > 0 {
+            Rectangle().fill(color(style.intf.fuelPartial))
+                .novaPlace(layout, x: CGFloat(r.left) + CGFloat(r.width) * fullFrac, y: CGFloat(r.top),
+                           w: CGFloat(r.width) * partialFrac, h: CGFloat(r.height))
+        }
     }
 
     /// A status bar drawn left-anchored inside its rect, filled to `value` (0…1).
@@ -80,7 +127,11 @@ struct AuthenticHUDView: View {
             VStack(spacing: 2) {
                 Text(model.targetName)
                     .novaFont(.hud, weight: .bold, size: statusSize)
-                    .foregroundStyle(model.targetHostile ? Color.red : color(style.intf.brightText))
+                    // Hostile locks take the theme's radar-alert hue (the same
+                    // brightRadar that paints a hostile blip), so a reskin's
+                    // "danger" color drives the name too; friendly/neutral use
+                    // the normal bright text color.
+                    .foregroundStyle(model.targetHostile ? color(style.intf.brightRadar) : color(style.intf.brightText))
                     .multilineTextAlignment(.center)
                 if !model.targetSubtitle.isEmpty {
                     Text(model.targetSubtitle).novaFont(.hud, size: subtitleSize)
@@ -249,18 +300,42 @@ struct AuthenticHUDView: View {
 
     private func origin(_ r: NovaRect) -> CGPoint { CGPoint(x: r.left, y: r.top) }
     private func size(_ r: NovaRect) -> CGSize { CGSize(width: r.width, height: r.height) }
-    private func color(_ c: NovaColor) -> Color {
-        Color(red: Double(c.r) / 255, green: Double(c.g) / 255, blue: Double(c.b) / 255)
-    }
+    private func color(_ c: NovaColor) -> Color { novaSwiftUIColor(c) }
+}
+
+/// A decoded `ïntf` colour as a SwiftUI `Color`, optionally scaled toward black
+/// by `brightness` (1 = as authored, 0.5 = half-intensity) — used both for the
+/// HUD readouts and to derive the radar's dimmed "disabled" contact tone from
+/// the theme's `dimRadar` without needing a third stored colour.
+fileprivate func novaSwiftUIColor(_ c: NovaColor, brightness: Double = 1) -> Color {
+    Color(red: Double(c.r) / 255 * brightness,
+          green: Double(c.g) / 255 * brightness,
+          blue: Double(c.b) / 255 * brightness)
 }
 
 /// Radar contacts + player heading, drawn in the placed radar rect's local space.
-/// Stellars are the larger dots, ships the small ones; both colored by relationship
-/// to the player — red hostile, yellow neutral, green friendly/owned, grey disabled
-/// or non-functional.
+/// Stellars are the larger dots, ships the small ones. Colours come straight
+/// from the theme's two `ïntf` radar colours so a plug-in reskin fully applies:
+/// hostiles take `brightRadar` (the same hue as the player marker), everything
+/// else `dimRadar`, and disabled/non-functional contacts a dimmed `dimRadar`.
 private struct RadarContactsView: View {
     @ObservedObject var model: GameHUDModel
-    let playerMarker: Color
+    let brightRadar: NovaColor
+    let dimRadar: NovaColor
+
+    private var playerMarker: Color { novaSwiftUIColor(brightRadar) }
+
+    /// Map a contact's relationship onto the theme's two radar colours. EV Nova's
+    /// scope is a two-tone display: the alert colour for hostiles, the base
+    /// colour for the rest — with disabled/dead contacts dimmed further so they
+    /// read as inert rather than as a live neutral.
+    private func radarColor(_ rel: RadarRelationship) -> Color {
+        switch rel {
+        case .hostile:                    return novaSwiftUIColor(brightRadar)
+        case .friendlyOrOwned, .neutral:  return novaSwiftUIColor(dimRadar)
+        case .disabled:                   return novaSwiftUIColor(dimRadar, brightness: 0.5)
+        }
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -284,12 +359,12 @@ private struct RadarContactsView: View {
                     // as circles, distinct from the small filled ship dots).
                     for b in model.planetBlips {
                         let r = CGRect(x: cx + b.x * radius - 3, y: cy + b.y * radius - 3, width: 6, height: 6)
-                        ctx.stroke(Path(ellipseIn: r), with: .color(b.relationship.color), lineWidth: 1)
+                        ctx.stroke(Path(ellipseIn: r), with: .color(radarColor(b.relationship)), lineWidth: 1)
                     }
                     // Ships: small filled dots.
                     for b in model.blips {
                         let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
-                        ctx.fill(Path(ellipseIn: r), with: .color(b.relationship.color))
+                        ctx.fill(Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
                     }
                 }
                 .clipShape(Circle())   // contacts scroll off the rim, never pile on it

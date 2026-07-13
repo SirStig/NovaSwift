@@ -132,6 +132,27 @@ state and drains events, never mutates the sim (`World.swift:707-708`).
    pilot chip beside the system, layered under mission markers, with its own
    color per player). Drawn from `PresenceUpdate.currentSystemID`.
 
+### Chat (session-wide text)
+
+In-game text chat between everyone in the session. Rides the **reliable** channel
+and is **independent of co-location** — you can message a friend before you've met
+up ("come help me at Sol"), which is the whole point. Not tied to Layer 2, so it
+works even when players are in different systems.
+
+- `ChatMessage { playerID, senderName, text }` — `senderName` is embedded so old
+  messages still render the author after they disconnect (presence is gone by
+  then).
+- `NetSession` keeps a `chatLog` (oldest-first history, sent + received) and fires
+  `onChat` per message; a UI binds to either. `sendChat(_:)` trims blank input,
+  appends locally, and broadcasts.
+- **UI (to build during app wiring):** a collapsible chat panel / message feed
+  overlay in-game + a compact unread indicator; a text field to send. Optional
+  later: proximity vs. session-wide channels, quick-canned messages for
+  controller/touch.
+
+*Status: net-layer complete and tested; in-game UI lands with the app-side
+session bootstrap (see Phasing P1).*
+
 ## Architecture
 
 ```

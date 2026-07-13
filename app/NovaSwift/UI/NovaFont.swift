@@ -110,6 +110,10 @@ private struct NovaUIScaleKey: EnvironmentKey {
     static let defaultValue: CGFloat = 1
 }
 
+private struct NovaHUDFontFamilyKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
 extension EnvironmentValues {
     /// The device-responsive scale ambient text should render at. Set once per
     /// screen (see `NovaCanvas`, `NovaMenu`, `.novaResponsive()`) — individual
@@ -125,6 +129,16 @@ extension EnvironmentValues {
     var novaUIScale: CGFloat {
         get { self[NovaUIScaleKey.self] }
         set { self[NovaUIScaleKey.self] = newValue }
+    }
+
+    /// A font family that overrides the `.hud` role's default (Geneva) for its
+    /// subtree — the mechanism by which the flight HUD honors a plug-in's
+    /// `ïntf.statusFont`. `nil` (the default everywhere else) leaves `.hud`
+    /// rendering in Geneva. Only `.hud` consults this; every other role keeps
+    /// its own family, so setting it can't bleed into unrelated chrome.
+    var novaHUDFontFamily: String? {
+        get { self[NovaHUDFontFamilyKey.self] }
+        set { self[NovaHUDFontFamilyKey.self] = newValue }
     }
 }
 
@@ -155,6 +169,7 @@ extension View {
 private struct NovaFontModifier: ViewModifier {
     @Environment(\.novaTextScale) private var scale
     @Environment(\.novaUIScale) private var uiScale
+    @Environment(\.novaHUDFontFamily) private var hudFamily
     let role: NovaFontRole
     let weight: Font.Weight
     let baseSize: CGFloat
@@ -166,7 +181,10 @@ private struct NovaFontModifier: ViewModifier {
         // size; the player's global UI-scale then multiplies on top so it can go
         // beyond those bounds intentionally.
         let size = (baseSize * scale).clamped(to: minimumSize...maximumSize) * uiScale
-        content.font(.custom(role.family, size: size).weight(weight))
+        // Only the HUD role defers to a plug-in-supplied family (ïntf.statusFont);
+        // every other role keeps its own so the override can't leak into chrome.
+        let family = (role == .hud ? hudFamily : nil) ?? role.family
+        content.font(.custom(family, size: size).weight(weight))
     }
 }
 

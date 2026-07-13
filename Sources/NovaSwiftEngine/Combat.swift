@@ -93,6 +93,10 @@ public struct WeaponSpec {
     public let turnRate: Double          // rad/sec, guided munitions
     public let blastRadius: Double       // px, 0 = direct hit only
     public let ammoPerShot: Int          // 0/1 typically; drains mount ammo
+    /// Raw `wëap.AmmoType`. Special values drive firing side-effects: -999 = the
+    /// firing ship self-destructs when it fires; ≤ -1000 = the weapon burns
+    /// `abs(AmmoType+1000)/10` fuel units per shot instead of drawing ammo.
+    public let ammoTypeRaw: Int
     /// `snd ` id played when this weapon fires, or nil if silent.
     public let fireSoundID: Int?
     /// `bööm` id detonated on impact/expiry, or nil if this weapon has no explosion.
@@ -153,6 +157,23 @@ public struct WeaponSpec {
     /// Multiple copies fire in one volley (flag 0x0040). When false — the default —
     /// copies stagger: one barrel at a time at `reload / count`.
     public let fireSimultaneously: Bool
+    /// `Flags3` 0x0020: while this weapon is firing or reloading, none of the ship's
+    /// other weapons may fire (Bible). Enforced in `World.fireWeapons`.
+    public let isExclusive: Bool
+    /// `Flags3` 0x0004: the firing ship can't loose another shot of this weapon
+    /// until its previous one expires or hits something (Bible).
+    public let cantRefireUntilShotEnds: Bool
+    /// `Flags3` 0x0010: fire from whichever hardpoint is closest to the target,
+    /// rather than cycling the weapon's exit points in order (Bible).
+    public let firesFromClosestExit: Bool
+    /// `wëap.Durability`: point-defense hits a *guided* shot from this weapon can
+    /// absorb before being destroyed. 0 = shot down by any PD hit (the default).
+    public let durability: Int
+    /// `Flags3` 0x0001: ammo is charged once at the end of a burst cycle, not per
+    /// shot inside the burst (a multi-shot round that costs a single unit).
+    public let oneAmmoPerBurst: Bool
+    /// `Flags3` 0x0002: this weapon's shots are drawn translucent (visual only).
+    public let translucentShots: Bool
 
     /// Whether shots from this weapon home on a target (fly inertialessly toward
     /// the intercept). True for guidance `.guided`; also honours the legacy
@@ -160,6 +181,15 @@ public struct WeaponSpec {
     public var homes: Bool { guidance == .guided || (guidance == .unguided && isGuided) }
     /// Whether shots accelerate forward from launch (rockets).
     public var accelerates: Bool { guidance == .rocket }
+    /// `AmmoType == -999`: the firing ship is destroyed the instant it fires this
+    /// weapon (a suicide/self-destruct weapon).
+    public var selfDestructsOnFire: Bool { ammoTypeRaw == -999 }
+    /// `AmmoType <= -1000`: fuel units consumed per shot (`abs(AmmoType+1000)/10`).
+    /// 0 for a normal ammo/unlimited weapon.
+    public var fuelPerShot: Double { ammoTypeRaw <= -1000 ? Double(abs(ammoTypeRaw + 1000)) / 10.0 : 0 }
+    /// A beam whose `Impact` is negative acts as a tractor beam, pulling the
+    /// target toward the firing ship instead of shoving it away (Bible).
+    public var isTractorBeam: Bool { isBeam && impact < 0 }
 
     public init(id: Int, name: String, shieldDamage: Double, armorDamage: Double,
                 reloadSeconds: Double, projectileSpeed: Double, range: Double,
@@ -179,7 +209,11 @@ public struct WeaponSpec {
                 burstCount: Int = 0, burstReloadSeconds: Double = 0,
                 submunition: Submunition? = nil,
                 isSecondary: Bool = false, fireSimultaneously: Bool = false,
-                penetratesShields: Bool = false) {
+                penetratesShields: Bool = false,
+                isExclusive: Bool = false, cantRefireUntilShotEnds: Bool = false,
+                firesFromClosestExit: Bool = false, durability: Int = 0,
+                oneAmmoPerBurst: Bool = false, translucentShots: Bool = false,
+                ammoTypeRaw: Int = -1) {
         self.id = id; self.name = name
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.penetratesShields = penetratesShields
@@ -203,6 +237,10 @@ public struct WeaponSpec {
         self.burstCount = burstCount; self.burstReloadSeconds = burstReloadSeconds
         self.submunition = submunition
         self.isSecondary = isSecondary; self.fireSimultaneously = fireSimultaneously
+        self.isExclusive = isExclusive; self.cantRefireUntilShotEnds = cantRefireUntilShotEnds
+        self.firesFromClosestExit = firesFromClosestExit; self.durability = durability
+        self.oneAmmoPerBurst = oneAmmoPerBurst; self.translucentShots = translucentShots
+        self.ammoTypeRaw = ammoTypeRaw
     }
 
     /// Convert a decoded weapon into simulation units.
@@ -228,7 +266,10 @@ public struct WeaponSpec {
         // points/sec = framesPerSecond / decay.
         decayPerSec = w.decay > 0 ? tuning.framesPerSecond / Double(w.decay) : 0
         detonateOnExpire = w.detonateOnExpire
-        impact = Double(max(0, w.impact))
+        // Impact may be negative — a negative Impact on a beam makes it a tractor
+        // beam (pull, not push). The projectile knockback path guards on `> 0`, so
+        // a negative value is simply inert there.
+        impact = Double(w.impact)
         recoil = Double(w.recoil)
         graphicSpinID = w.graphicSpinID
         spinShots = w.spinShots
@@ -261,6 +302,13 @@ public struct WeaponSpec {
         ammoPerShot = w.maxAmmo > 0 ? 1 : 0
         isSecondary = w.firedBySecondTrigger
         fireSimultaneously = w.fireSimultaneously
+        isExclusive = w.isExclusive
+        cantRefireUntilShotEnds = w.cantRefireUntilShotEnds
+        firesFromClosestExit = w.firesFromClosestExit
+        durability = max(0, w.durability)
+        oneAmmoPerBurst = w.oneAmmoPerBurst
+        translucentShots = w.translucentShots
+        ammoTypeRaw = w.ammoType
         fireSoundID = w.fireSoundID
         explosionBoomID = w.explosionBoomID
         loopSound = w.loopSound
@@ -319,15 +367,26 @@ public final class WeaponMount {
     /// the burst counter, and set the next cooldown (the long burst reload once
     /// the burst is spent).
     public func didFire(shots: Int) {
-        if ammo > 0 && spec.ammoPerShot > 0 { ammo = max(0, ammo - shots * spec.ammoPerShot) }
         if spec.burstCount > 0 {
             burstShots += shots
+            // Normally ammo is spent per shot. `Flags3` 0x0001 (oneAmmoPerBurst)
+            // instead charges a single round for the whole burst, spent only when
+            // the burst completes (a multi-shot missile that costs one missile).
+            if !spec.oneAmmoPerBurst, ammo > 0, spec.ammoPerShot > 0 {
+                ammo = max(0, ammo - shots * spec.ammoPerShot)
+            }
             if burstShots >= spec.burstCount * max(1, count) {
+                if spec.oneAmmoPerBurst, ammo > 0, spec.ammoPerShot > 0 {
+                    ammo = max(0, ammo - spec.ammoPerShot)
+                }
                 cooldown = spec.burstReloadSeconds > 0 ? spec.burstReloadSeconds : perShotReload
                 burstShots = 0
                 return
             }
+            cooldown = perShotReload
+            return
         }
+        if ammo > 0, spec.ammoPerShot > 0 { ammo = max(0, ammo - shots * spec.ammoPerShot) }
         cooldown = perShotReload
     }
 
@@ -358,6 +417,12 @@ public final class Projectile {
     public let blastRadius: Double
     public let ownerID: Int              // entity that fired it (no self-hit)
     public let ownerGovt: Int            // faction (no friendly fire)
+    /// The `wëap` id that fired this shot — lets `Flags3` 0x0004 ("can't refire
+    /// until the previous shot ends") test whether the owner still has one aloft.
+    public let weaponID: Int
+    /// `wëap.Durability`: remaining point-defense hits this (guided) shot survives
+    /// before it's destroyed. Decremented per PD hit; 0 ⇒ next hit kills it.
+    public var pdDurability: Int
     /// Homing (guided): steers toward the intercept point, flying inertialess
     /// (velocity = heading × speed).
     public let homing: Bool
@@ -392,6 +457,8 @@ public final class Projectile {
     /// Shot sprite (`spïn` id) and whether it spins, for the renderer.
     public let graphicSpinID: Int?
     public let spinShots: Bool
+    /// `wëap.Flags3` 0x0002: draw this shot translucent (renderer applies alpha).
+    public let translucentShots: Bool
     /// Seeker 0x0008: tracking degrades as system Interference rises.
     public let confusedByInterference: Bool
     /// Seeker 0x0010: can lose lock on a target whose government jams hard enough.
@@ -407,7 +474,10 @@ public final class Projectile {
                 submunition: Submunition? = nil, subDepth: Int = 0,
                 explosionBoomID: Int? = nil, graphicSpinID: Int? = nil, spinShots: Bool = false,
                 confusedByInterference: Bool = false, turnsAwayIfJammed: Bool = false,
-                penetratesShields: Bool = false) {
+                penetratesShields: Bool = false, weaponID: Int = -1, pdDurability: Int = 0,
+                translucentShots: Bool = false) {
+        self.weaponID = weaponID; self.pdDurability = pdDurability
+        self.translucentShots = translucentShots
         self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
         self.position = position; self.velocity = velocity; self.life = life
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
@@ -548,6 +618,10 @@ public enum WorldEvent {
     case shieldHit(at: Vec2)
     case armorHit(at: Vec2)
     case explosion(at: Vec2, radius: Double, soundID: Int?)
+    /// The player's mining scoop collected an asteroid's yield (`röid.YieldType`
+    /// cargo, `YieldQty` boxes ±50%). `cargoType` follows the cargo-id convention
+    /// (0-5 standard commodity). The host adds it to pilot cargo if there's room.
+    case asteroidMined(cargoType: Int, quantity: Int, at: Vec2)
     /// The player locked a new target (via targetNearest/targetNext/nearestHostile).
     case targetAcquired(entityID: Int)
     case shipDestroyed(entityID: Int, shipTypeID: Int, at: Vec2)

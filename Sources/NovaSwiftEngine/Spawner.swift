@@ -489,6 +489,13 @@ public final class Spawner {
         guard let dude = galaxy.game.dude(dudeID) else { return nil }
         let roll = world.rng.int(in: 0...9999)
         guard let shipID = dude.pickShip(roll: roll) else { return nil }
+        // `shïp.AppearOn`: a hull with a non-blank AppearOn control-bit test only
+        // shows up in düde spawns while that test passes (host-evaluated, since the
+        // engine can't run NCB). A gated hull the player hasn't unlocked is simply
+        // skipped this roll — AppearOn is blank on almost every base-game hull.
+        if let s = galaxy.game.ship(shipID), !s.appearOn.isEmpty, !world.shipSpawnEligible(shipID) {
+            return nil
+        }
         let govt = dude.govt >= 128 ? dude.govt : (galaxy.shipSpec(shipID)?.government ?? independentGovt)
 
         // A lone hyperspace arrival may instead emerge from one of the system's

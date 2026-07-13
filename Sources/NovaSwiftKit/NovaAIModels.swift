@@ -621,6 +621,15 @@ public struct WeapRes {
     public let recoil: Int
     /// Raw `Flags2` field (@72), for submunition/prox behaviour flags.
     public let flags2Raw: UInt16
+    /// Raw `Flags3` field (@102, novaparse `WeapResource.ts`). Firing-behavior
+    /// flags: 0x0001 one-ammo-per-burst, 0x0002 translucent shots, 0x0004 can't
+    /// refire until the previous shot ends, 0x0010 fire from the exit point closest
+    /// to the target, 0x0020 exclusive (blocks the ship's other weapons).
+    public let flags3Raw: UInt16
+    /// `Durability` (@104): for a *guided* weapon, how many point-defense hits one
+    /// of its shots survives before being shot down. 0 = destroyed by any PD hit
+    /// (the default). Ignored for non-guided projectiles and beams.
+    public let durability: Int
 
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
     /// `Guidance 99` — "Carried ship (AmmoType is the ID of the ship class)"
@@ -646,6 +655,20 @@ public struct WeapRes {
     public var penetratesShields: Bool { flagsRaw & 0x0020 != 0 }
     /// `Flags` 0x8000: "shot detonates at the end of its lifespan" (flak).
     public var detonateOnExpire: Bool { flagsRaw & 0x8000 != 0 }
+    /// `Flags3` 0x0020: exclusive — while this weapon is firing or reloading, no
+    /// other weapon on the ship may fire (Bible).
+    public var isExclusive: Bool { flags3Raw & 0x0020 != 0 }
+    /// `Flags3` 0x0004: the firing ship can't loose another shot of this weapon
+    /// until its previous shot expires or hits something (Bible).
+    public var cantRefireUntilShotEnds: Bool { flags3Raw & 0x0004 != 0 }
+    /// `Flags3` 0x0010: fire from whichever weapon exit point is closest to the
+    /// target, rather than cycling exit points in order (Bible).
+    public var firesFromClosestExit: Bool { flags3Raw & 0x0010 != 0 }
+    /// `Flags3` 0x0002: this weapon's shots are drawn translucent (visual only).
+    public var translucentShots: Bool { flags3Raw & 0x0002 != 0 }
+    /// `Flags3` 0x0001: ammo is consumed only at the end of a burst cycle, not per
+    /// shot within the burst (Bible).
+    public var oneAmmoPerBurst: Bool { flags3Raw & 0x0001 != 0 }
     /// `Flags` 0x0001: spin the shot graphic continuously.
     public var spinShots: Bool { flagsRaw & 0x0001 != 0 }
     /// `Flags2` 0x0020 (inverted): launch submunitions when the shot expires.
@@ -720,6 +743,8 @@ public struct WeapRes {
         subLimit = ai16(d, 68)
         proxSafety = ai16(d, 70)
         flags2Raw = au16(d, 72)
+        flags3Raw = au16(d, 102)
+        durability = ai16(d, 104)
         recoil = max(0, ai16(d, 86))
         exitType = ai16(d, 88)
         burstCount = ai16(d, 90)

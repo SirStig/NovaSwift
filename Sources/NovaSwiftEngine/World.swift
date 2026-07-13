@@ -222,6 +222,22 @@ public final class Ship {
         muzzle(exitType: mount.spec.exitType, index: mount.exitCursor)
     }
 
+    /// The exit-point index of `exitType` whose muzzle is closest to `target`
+    /// (`wëap.Flags3` 0x0010). Falls back to 0 when the hull has ≤1 point of that
+    /// type or declares none.
+    public func closestExitIndex(exitType: WeaponExitType, to target: Vec2) -> Int {
+        guard let ep = exitPoints else { return 0 }
+        let n = ep.points(for: exitType).count
+        guard n > 1 else { return 0 }
+        var best = 0
+        var bestD = Double.greatestFiniteMagnitude
+        for i in 0..<n {
+            let d = (muzzle(exitType: exitType, index: i) - target).length
+            if d < bestD { bestD = d; best = i }
+        }
+        return best
+    }
+
     /// EV Nova's `shïp.Strength` — relative combat power, used for the
     /// combat-odds check (`gövt.MaxOdds`) before an AI picks a fight.
     public var combatStrength: Double = 1
@@ -247,6 +263,10 @@ public final class Ship {
     /// ModTypes 33-36). Stacks with the pilot government's inherent `InhJam1-4`
     /// when an incoming "turns away if jammed" guided shot rolls to keep lock.
     public var jamming: Int = 0
+    /// Whether this ship auto-collects an asteroid's yield when it destroys the
+    /// rock (`oütf` ModType 31 mining scoop, or `shïp.Flags3` 0x0002). Only the
+    /// player's collection is surfaced (as a `.asteroidMined` event to the host).
+    public var hasMiningScoop: Bool = false
 
     // Fuel — EV Nova's blue gauge. Spent by hyperspace jumps (100 per jump) and
     // by the afterburner; regenerates only if the hull/outfits grant it.
@@ -1069,9 +1089,17 @@ public final class World {
     /// `FragCount` — spawn smaller sub-asteroids at the same position (±50%
     /// count, per the Bible). A "Huge" type naturally shrinks into whatever its
     /// own `FragType` points at (e.g. "Big"/"Medium"); no invented scale factor.
-    private func destroyAsteroid(_ rock: Asteroid) {
+    private func destroyAsteroid(_ rock: Asteroid, killerID: Int = -1) {
         rock.isAlive = false
         events.append(.explosion(at: rock.position, radius: max(20, rock.radius * 1.2), soundID: nil))
+        // Mining: if the player destroyed this rock with a mining scoop fitted, it
+        // scoops the röid's YieldType/YieldQty (±50%) yield. The host clamps the
+        // amount to the player's free cargo space (the engine doesn't track cargo).
+        if killerID == player.entityID, player.hasMiningScoop,
+           rock.yieldType >= 0, rock.yieldType <= 5, rock.yieldQty > 0 {
+            let q = rng.int(in: max(1, rock.yieldQty - rock.yieldQty / 2)...(rock.yieldQty + rock.yieldQty / 2))
+            events.append(.asteroidMined(cargoType: rock.yieldType, quantity: q, at: rock.position))
+        }
         let fragTypes = [rock.fragType1, rock.fragType2].filter { $0 >= 128 }
         guard !fragTypes.isEmpty, rock.fragCount > 0, let game = galaxy?.game else { return }
         let n = rng.int(in: max(0, rock.fragCount - rock.fragCount / 2)...(rock.fragCount + rock.fragCount / 2))
@@ -1210,13 +1238,20 @@ public final class World {
                 guard let target = incoming.min(by: {
                     ($0.position - ship.position).length < ($1.position - ship.position).length
                 }) else { continue }
-                target.alive = false
                 mount.didFire(shots: 1)
                 events.append(.weaponFired(shooterID: ship.entityID, at: ship.position,
                                            heading: (target.position - ship.position).angle,
                                            soundID: mount.spec.fireSoundID))
-                events.append(.explosion(at: target.position, radius: 10, soundID: nil))
-                Log.combat.debug("\(ship.name) [\(ship.entityID)] point defense shot down an incoming projectile")
+                // `wëap.Durability`: a tough guided shot soaks up N PD hits before
+                // it's destroyed. 0 (the default) ⇒ shot down by this single hit.
+                if target.pdDurability > 0 {
+                    target.pdDurability -= 1
+                    events.append(.explosion(at: target.position, radius: 6, soundID: nil))
+                } else {
+                    target.alive = false
+                    events.append(.explosion(at: target.position, radius: 10, soundID: nil))
+                    Log.combat.debug("\(ship.name) [\(ship.entityID)] point defense shot down an incoming projectile")
+                }
             }
         }
     }
@@ -1233,11 +1268,17 @@ public final class World {
         updateBeamLoops(for: ship, primary: primary, secondary: secondary, isAI: isAI)
         guard anyTrigger, ship.isAlive else { return }
         let target = ship.currentTargetID.flatMap { self.ship(id: $0) }
+        // `wëap.Flags3` 0x0020 (exclusive): while any exclusive weapon on this ship
+        // is firing or still reloading, none of its *other* weapons may fire.
+        let exclusiveBusy = ship.weapons.contains { $0.spec.isExclusive && $0.cooldown > 0 }
 
         for (mountIndex, mount) in ship.weapons.enumerated() {
             let spec = mount.spec
             // Point-defense mounts fire themselves via `runPointDefense`.
             if spec.isPointDefense { continue }
+            // Exclusive lock: a non-exclusive weapon holds while an exclusive one
+            // is mid-cycle (the exclusive weapon itself still fires when ready).
+            if exclusiveBusy && !spec.isExclusive { continue }
             // Fire-group gating: guns on the primary trigger, missiles/rockets on
             // the secondary. NPCs fire everything on whichever trigger their AI
             // held. The player fires only the *selected* secondary, not every
@@ -1260,6 +1301,14 @@ public final class World {
             // Seeker 0x0020: this guided weapon refuses to fire while its own
             // ship is fully ionized.
             if spec.cantFireWhileIonized && ship.isIonized { continue }
+            // Flags3 0x0004: hold fire while a previous shot of this same weapon
+            // is still aloft (owned by this ship).
+            if spec.cantRefireUntilShotEnds,
+               projectiles.contains(where: { $0.alive && $0.ownerID == ship.entityID && $0.weaponID == spec.id }) {
+                continue
+            }
+            // AmmoType ≤ -1000: a fuel-burning weapon can't fire without the fuel.
+            if spec.fuelPerShot > 0 && ship.fuel < spec.fuelPerShot { continue }
 
             // A group fires ONE barrel per event (cycling exit points) — unless
             // it has the "fire simultaneously" flag, which volleys all `count`.
@@ -1267,7 +1316,14 @@ public final class World {
             let shots = spec.fireSimultaneously ? barrels : 1
             var fired = 0
             for k in 0..<shots {
-                let exitIndex = spec.fireSimultaneously ? k : mount.exitCursor
+                // Flags3 0x0010: fire from the exit point closest to the target
+                // (when there is one), rather than cycling the exit cursor.
+                let exitIndex: Int
+                if spec.firesFromClosestExit, let target {
+                    exitIndex = ship.closestExitIndex(exitType: spec.exitType, to: target.position)
+                } else {
+                    exitIndex = spec.fireSimultaneously ? k : mount.exitCursor
+                }
                 let muzzle = ship.muzzle(exitType: spec.exitType, index: exitIndex)
                 // Nil = can't fire (turret/quadrant with no target in arc): hold fire.
                 guard var aim = fireAngle(for: spec, ship: ship, muzzle: muzzle, target: target) else { continue }
@@ -1295,7 +1351,20 @@ public final class World {
             }
             // Only spend the reload/ammo if a shot actually left (a turret with no
             // target produces `fired == 0` and stays ready).
-            if fired > 0 { mount.didFire(shots: fired) }
+            if fired > 0 {
+                mount.didFire(shots: fired)
+                // AmmoType ≤ -1000: burn fuel per shot instead of drawing ammo.
+                if spec.fuelPerShot > 0 {
+                    ship.fuel = max(0, ship.fuel - spec.fuelPerShot * Double(fired))
+                }
+                // AmmoType == -999: the firing ship self-destructs. Zeroing armor
+                // makes it not-alive; the despawn / player-death path finalizes it
+                // (explosion + shipDestroyed), same as any other kill.
+                if spec.selfDestructsOnFire {
+                    ship.shield = 0
+                    ship.armor = 0
+                }
+            }
         }
     }
 
@@ -1390,7 +1459,9 @@ public final class World {
                            graphicSpinID: spec.graphicSpinID, spinShots: spec.spinShots,
                            confusedByInterference: spec.confusedByInterference,
                            turnsAwayIfJammed: spec.turnsAwayIfJammed,
-                           penetratesShields: spec.penetratesShields)
+                           penetratesShields: spec.penetratesShields,
+                           weaponID: spec.id, pdDurability: spec.durability,
+                           translucentShots: spec.translucentShots)
         projectiles.append(p)
         return p
     }
@@ -1458,8 +1529,14 @@ public final class World {
         if let h = cast.hitShip {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization, piercing: spec.penetratesShields)
+            // Tractor beam (negative Impact): pull the target toward the firing
+            // ship each time the beam connects, more strongly on lighter hulls.
+            if spec.isTractorBeam {
+                let pull = (ship.position - h.position).normalized * (-spec.impact * 3.0 / max(4, h.radius))
+                h.velocity += pull
+            }
         } else if let rock = cast.hitAsteroid {
-            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage)
+            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage, shooterID: ship.entityID)
         }
         let hit = cast.hitShip != nil || cast.hitAsteroid != nil
         if !spec.loopSound {
@@ -1571,9 +1648,9 @@ public final class World {
     /// `combatTuning`). Not modeling the wëap "x10 mass damage to asteroids"
     /// flag — that bit isn't decoded on `WeaponSpec` anywhere in this engine
     /// yet, so every weapon currently does its normal damage to rock.
-    private func applyAsteroidHit(_ rock: Asteroid, shield: Double, armor: Double) {
+    private func applyAsteroidHit(_ rock: Asteroid, shield: Double, armor: Double, shooterID: Int) {
         rock.hp -= (shield + armor) * combatTuning.damageScale
-        if rock.hp <= 0 { destroyAsteroid(rock) }
+        if rock.hp <= 0 { destroyAsteroid(rock, killerID: shooterID) }
     }
 
     // MARK: Projectiles
@@ -1677,7 +1754,7 @@ public final class World {
 
             for rock in asteroids where rock.isAlive {
                 if Self.segmentPointDistance(prevPos, p.position, rock.position) <= rock.radius + reach {
-                    applyAsteroidHit(rock, shield: p.shieldDamage, armor: p.armorDamage)
+                    applyAsteroidHit(rock, shield: p.shieldDamage, armor: p.armorDamage, shooterID: p.ownerID)
                     p.alive = false
                     detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
                     break
@@ -2001,6 +2078,16 @@ public final class World {
     /// default, because a gated fleet appearing early is a visible spoiler while
     /// a gated `pêrs` merely appearing is harmless.
     public var fleetSpawnEligible: (Int) -> Bool = { _ in false }
+
+    /// Host gate for whether a ship class with a non-blank `shïp.AppearOn` may be
+    /// spawned by a düde now (Bible: "Ships of this type will not show up in dude
+    /// resources if this expression evaluates to false"). The `Spawner` only calls
+    /// this for hulls that *have* an `AppearOn` test; the engine can't evaluate
+    /// NCB, so it defers to the host. Default: eligible — unlike a whole gated
+    /// fleet, one gated hull in a düde's ship mix is a minor spoiler, and a false
+    /// default would thin out düde spawns before the story layer wires a real
+    /// evaluator (which replaces this with an `AppearOn`-against-pilot-bits check).
+    public var shipSpawnEligible: (Int) -> Bool = { _ in true }
 
     /// The current system's sensor static (`sÿst.Interference`, 0-100). Set when
     /// the world is built for a system; degrades effective sensor range.

@@ -360,17 +360,16 @@ struct AuthenticMainMenuView: View {
     }
 
     /// Modern, port-only affordances (features EV Nova never had): the plug-in
-    /// manager and data import. Kept visually distinct from the game's own buttons,
-    /// tucked in the bottom-left so they don't intrude on the authentic menu.
+    /// manager. Kept visually distinct from the game's own buttons, tucked in the
+    /// bottom-left so it doesn't intrude on the authentic menu. (Flight Training
+    /// and Import Data now live in Settings.)
     private var modernExtras: some View {
         VStack {
             Spacer()
             HStack(spacing: 12) {
-                if model.data.hasBaseData {
-                    extraButton("Flight Training", "graduationcap.fill") { model.startTutorial(exit: .menu) }
-                }
+                // Flight Training and Import Data moved into Settings (this menu
+                // only appears once base data is present).
                 extraButton("Plug-ins", "puzzlepiece.extension.fill") { sheet = .plugins }
-                extraButton("Import Data", "square.and.arrow.down.fill") { sheet = .importData }
                 Spacer()
             }
             .padding(.leading, 20)
