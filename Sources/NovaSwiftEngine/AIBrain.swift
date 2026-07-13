@@ -71,6 +71,11 @@ public final class AIBrain {
     /// whole formation (including the lead, which has no `leaderID`), not just
     /// the escorts holding station on it.
     public var isFleetMember = false
+    /// The `flët` resource id this ship spawned as part of, if any. Lets the
+    /// `Spawner` count distinct fleets in-system and avoid re-picking a fleet
+    /// type that's already present, so a system shows variety instead of the
+    /// same formation over and over.
+    public var fleetID: Int?
     /// Last frame's leader velocity, kept so an escort can feed the leader's own
     /// *acceleration* forward into its station-keeping — moving with the leader the
     /// instant it thrusts/turns rather than lagging and snatching a correction a

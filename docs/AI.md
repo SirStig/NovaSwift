@@ -235,10 +235,21 @@ count) and keeps the system inhabited:
   airport.
 - Dudes are picked by probability, then a ship class is picked from the dude's
   weighted table; a brain is attached matching the dude's disposition.
+- **Single ships are the backbone; fleets are an accent.** The lone-ship
+  trickle is maintained toward `targetPopulation` counting *only* single ships
+  (`singleShipCount`), so a fleet passing through never starves it. Fleets, by
+  contrast, are capped to `maxConcurrentFleets` (1 in most systems, 2 in a busy
+  hub) and each arrival prefers a `flët` type not already present, so a system
+  reads as mostly lone traffic with the occasional varied formation among it —
+  not the same couple of fleets sitting on top of the whole population. (An
+  earlier cut let fleets top the head-count up to `maxPopulation` on their own
+  timer while singles only filled to the smaller `targetPopulation`, so a fleet
+  or two crowded the singles out entirely — "all fleets, no lone ships." This
+  split is the fix.)
 - **Fleets** spawn a flagship plus its escorts, formed up and escorting. They run
   on their *own* cadence (`fleetInterval`), separate from the ambient single-ship
   trickle — otherwise a lone-trader coin-flip won them every time and the player
-  "never saw fleets." A fleet's `flët.LinkSyst` government bands are read against
+  "never saw fleets" (the opposite failure). A fleet's `flët.LinkSyst` government bands are read against
   the system's government correctly (the index is `+128` to a resource id — an
   earlier off-by-128 silently made every govt-banded fleet ineligible).
 - **Jump-in** isn't a standing start: an arrival tears in along its inbound
