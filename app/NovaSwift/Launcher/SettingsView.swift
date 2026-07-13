@@ -74,11 +74,20 @@ struct SettingsView: View {
             Toggle("Auto-landing", isOn: binding(\.autoLanding))
             Toggle("Confirm before landing", isOn: binding(\.confirmLanding))
             Toggle("Tutorial hints", isOn: binding(\.tutorialHints))
+            if model.settings.tutorialHints {
+                Button("Show all hints again") {
+                    model.audio.play(.uiSelect)
+                    HintTracker.resetAll()
+                    // The first-flight controls card and the one-time
+                    // spaceport/BBS/outfitter banners all clear together.
+                    UserDefaults.standard.removeObject(forKey: "novaswift.seenFlightHints")
+                }
+            }
             Toggle("Pause when app loses focus", isOn: binding(\.pauseOnFocusLoss))
         } header: {
             Label("Gameplay", systemImage: "gamecontroller")
         } footer: {
-            Text("Difficulty scales the damage you take. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically.")
+            Text("Difficulty scales the damage you take. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
         }
     }
 

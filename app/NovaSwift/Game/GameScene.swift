@@ -165,6 +165,10 @@ final class GameScene: SKScene {
     /// (`ContrabandScan.enforce`), which needs live pilot state the scene doesn't
     /// hold. nil = no consequence (e.g. the no-data demo path).
     var onPlayerScanned: ((Int) -> Void)?
+    /// Fired once each time the player opens fire with the primary weapon (the
+    /// rising edge of the fire trigger). Used by the flight-training tutorial to
+    /// detect the "shoot" step; nil in normal play.
+    var onPlayerFired: (() -> Void)?
     /// True while a jump wants manual input suppressed (the whole sequence).
     var isJumping: Bool { jumpPhase != .none }
     /// Full-viewport white flash + radial star streaks, parented to the camera.
@@ -465,13 +469,16 @@ final class GameScene: SKScene {
                    audio: GameAudio? = nil,
                    planets: [PlanetVisual] = [], systemName: String = "",
                    game: NovaGame? = nil, systemID: Int = 0, galaxy: Galaxy? = nil,
-                   arrivedViaJump: Bool = false) {
+                   arrivedViaJump: Bool = false,
+                   playerDamageScaleOverride: Double? = nil) {
         // With game data we build a fully-wired, *populated* world (diplomacy +
         // spawner + system geometry) so the system fills with NPC traders, patrols
         // and pirates. Without it we fall back to a lone-ship physics world.
         if let game, systemID != 0 {
             var tuning = CombatTuning.default
-            tuning.playerDamageScale = settings.difficulty.playerDamageScale   // difficulty
+            // Difficulty scales incoming player damage; the flight-training
+            // tutorial passes 0 so a practice flight can never hurt the trainee.
+            tuning.playerDamageScale = playerDamageScaleOverride ?? settings.difficulty.playerDamageScale
             let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID,
                                                 player: ship, galaxy: galaxy, combatTuning: tuning)
             self.world = w
@@ -984,6 +991,7 @@ final class GameScene: SKScene {
            world.player.currentTargetID == nil {
             selectNearestHostile()
         }
+        if intent.firePrimary, !wasFiring { onPlayerFired?() }
         wasFiring = intent.firePrimary
         effectClock += dt
         updateBeamLoopPositions(listener: scenePos)

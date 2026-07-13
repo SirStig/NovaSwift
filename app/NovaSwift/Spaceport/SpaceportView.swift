@@ -14,8 +14,12 @@ struct SpaceportView: View {
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
     var onDepart: () -> Void
+    /// Whether the "Tutorial hints" setting is on — gates the one-time contextual
+    /// hints (the welcome-to-the-spaceport banner, the Mission BBS how-to, …).
+    var showHints: Bool = false
 
     @State private var screen: Screen = .hub
+    @State private var landingHintDismissed = false
     enum Screen { case hub, trade, outfit, shipyard, bar, missions }
 
     // Story runtime for the location-triggered offers this view owns —
@@ -48,11 +52,12 @@ struct SpaceportView: View {
                     case .trade:    TradeCenterView(graphics: graphics, spob: spob, pilot: pilot,
                                                     galaxy: galaxy, onDone: { screen = .hub })
                     case .outfit:   OutfitterView(graphics: graphics, spob: spob, pilot: pilot,
-                                                  galaxy: galaxy, onDone: { screen = .hub })
+                                                  galaxy: galaxy, showHints: showHints, onDone: { screen = .hub })
                     case .shipyard: ShipyardView(graphics: graphics, spob: spob, pilot: pilot,
                                                  galaxy: galaxy, onDone: { screen = .hub })
                     case .bar:      BarView(graphics: graphics, spob: spob, pilot: pilot, onDone: { screen = .hub })
-                    case .missions: MissionBBSView(graphics: graphics, spob: spob, pilot: pilot, onDone: { screen = .hub })
+                    case .missions: MissionBBSView(graphics: graphics, spob: spob, pilot: pilot,
+                                                   showHints: showHints, onDone: { screen = .hub })
                     }
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
@@ -68,7 +73,14 @@ struct SpaceportView: View {
                     .transition(.opacity)
             }
         }
+        // First landing: a quiet banner pointing the player at the Mission BBS,
+        // Bar and shops. Only on the hub (hidden while a shop dialog is open) and
+        // only until dismissed once.
+        .gameHint(GameHints.spaceportServices,
+                  active: showHints && screen == .hub,
+                  dismissed: $landingHintDismissed)
         .animation(.spring(response: 0.3, dampingFraction: 0.86), value: screen)
+        .animation(.easeInOut(duration: 0.25), value: landingHintDismissed)
         .onAppear {
             Log.spaceport.info("Landed at spöb \(spob.id, privacy: .public) (\(spob.name, privacy: .public)) — shipyard=\(spob.hasShipyard, privacy: .public) outfitter=\(spob.hasOutfitter, privacy: .public) trade=\(spob.hasCommodityExchange, privacy: .public) bar=\(spob.hasBar, privacy: .public) uninhabited=\(spob.isUninhabited, privacy: .public)")
             rollLandingOffer()
@@ -340,11 +352,13 @@ struct MissionBBSView: View {
     let graphics: SpaceportGraphics
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
+    var showHints: Bool = false
     var onDone: () -> Void
 
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var offered: [MissionRes] = []
+    @State private var hintDismissed = false
     private var game: NovaGame { graphics.game }
 
     var body: some View {
@@ -388,6 +402,8 @@ struct MissionBBSView: View {
                 }.padding()
             }
         }
+        .gameHint(GameHints.missionBBS, active: showHints, dismissed: $hintDismissed)
+        .animation(.easeInOut(duration: 0.25), value: hintDismissed)
         .onAppear(perform: buildEngine)
     }
 
