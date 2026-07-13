@@ -66,7 +66,7 @@ struct MainMenuAssets {
         var rolloverFrames: [CGImage] = []
         var rolloverSize = CGSize(width: 136, height: 98)
         if let rolloverSpin = game.spin(607), let sheet = rle(rolloverSpin.spriteID) {
-            rolloverFrames = (0..<sheet.frameCount).compactMap { sheet.frameCGImage($0) }
+            rolloverFrames = sheet.frameCGImages(0..<sheet.frameCount).map(\.image)
             rolloverSize = CGSize(width: sheet.frameWidth, height: sheet.frameHeight)
         }
 
@@ -76,8 +76,11 @@ struct MainMenuAssets {
         ]
         var buttons: [ButtonArt] = []
         for (i, spec) in specs.enumerated() {
-            guard let sheet = rle(spec.1),
-                  let n = sheet.frameCGImage(0), let p = sheet.frameCGImage(1) else { continue }
+            guard let sheet = rle(spec.1) else { continue }
+            // Normal (frame 0) + pressed (frame 1) from one grid build, not two.
+            let pair = sheet.frameCGImages(0...1)
+            guard let n = pair.first(where: { $0.index == 0 })?.image,
+                  let p = pair.first(where: { $0.index == 1 })?.image else { continue }
             buttons.append(.init(action: spec.0, normal: n, pressed: p,
                                  size: CGSize(width: sheet.frameWidth, height: sheet.frameHeight),
                                  origin: positions[min(i, positions.count - 1)],

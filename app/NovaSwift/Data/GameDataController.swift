@@ -170,6 +170,12 @@ final class GameDataController: ObservableObject {
 
     func reloadIfNeeded() { if !loaded { reload() } }
 
+    /// Like `reloadIfNeeded`, but runs the container parse/merge off the main
+    /// actor so the loading screen stays live while ~60 MB of `.rez`/`.ndat`
+    /// is read and parsed. The launcher path awaits this instead of the blocking
+    /// `reloadIfNeeded`. No-op once loaded.
+    func reloadIfNeededAsync() async { if !loaded { await reloadAsync() } }
+
     /// Eagerly decodes the catalog (ships/outfits/governments) and every hull's
     /// sprites off the main thread, publishing progress through
     /// `prewarmProgress` — see `NovaGame.prewarm`. Meant to run once on the
@@ -199,6 +205,38 @@ final class GameDataController: ObservableObject {
     }
 
     func reload() {
+        guard let (baseDir, baseFiles) = prepareReload() else { return }
+        do {
+            applyMerged(try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins),
+                        baseDir: baseDir, baseFiles: baseFiles)
+        } catch {
+            applyMergeFailure(String(describing: error), baseDir: baseDir)
+        }
+    }
+
+    /// Off-main variant of `reload()`: the container parse/merge (the expensive,
+    /// blocking part) runs on a detached task; only the cheap discovery prologue
+    /// and the final published-state assignment touch the main actor.
+    func reloadAsync() async {
+        guard let (baseDir, baseFiles) = prepareReload() else { return }
+        let pluginsSnapshot = plugins
+        let (merged, errorText): (ResourceCollection?, String?) =
+            await Task.detached(priority: .userInitiated) {
+                do { return (try GameLibrary.merge(baseFiles: baseFiles, plugins: pluginsSnapshot), nil) }
+                catch { return (nil, String(describing: error)) }
+            }.value
+        if let merged {
+            applyMerged(merged, baseDir: baseDir, baseFiles: baseFiles)
+        } else {
+            applyMergeFailure(errorText ?? "unknown error", baseDir: baseDir)
+        }
+    }
+
+    /// Shared prologue for both reload paths: discover plug-ins, preserve their
+    /// enabled state, resolve the base dir and register its fonts. Returns the
+    /// base dir and its resource files, or nil if there's no base data (having
+    /// already published the "no data" state).
+    private func prepareReload() -> (baseDir: URL, baseFiles: [URL])? {
         loaded = true
         // Discover plug-ins (catalog is available even before base data).
         var discovered: [PluginBundle] = []
@@ -218,24 +256,30 @@ final class GameDataController: ObservableObject {
             game = nil
             status = "No EV Nova data found. Import your game data to play. \(plugins.count) plug-in(s) ready."
             Log.data.notice("reload: no base game data found (checked \(self.importedBaseDir.path, privacy: .public) and NOVASWIFT_DATA) — \(self.plugins.count, privacy: .public) plug-in(s) ready but nothing to play")
-            return
+            return nil
         }
         Log.data.info("reload: using base data at \(baseDir.path, privacy: .public)")
         Self.registerFonts(from: baseDir)
-        let baseFiles = GameLibrary.discoverResourceFiles(in: baseDir)
-        do {
-            let merged = try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins)
-            game = NovaGame(merged)
-            hasBaseData = true
-            status = "Loaded \(merged.totalCount) resources from base + \(plugins.filter(\.isEnabled).count) plug-in(s)."
-            let byType = merged.typeCounts.map { "\($0.type)=\($0.count)" }.joined(separator: ", ")
-            Log.data.info("reload: loaded \(merged.totalCount, privacy: .public) resource(s) from base (\(baseFiles.count, privacy: .public) file(s)) + \(self.plugins.filter(\.isEnabled).count, privacy: .public) plug-in(s) — by type: \(byType, privacy: .public)")
-        } catch {
-            hasBaseData = false
-            game = nil
-            status = "Failed to load data: \(error)"
-            Log.data.error("reload: failed to merge game data from \(baseDir.path, privacy: .public): \(String(describing: error), privacy: .public)")
-        }
+        return (baseDir, GameLibrary.discoverResourceFiles(in: baseDir))
+    }
+
+    /// Publish a successfully merged data set, attaching a cross-launch decoded-
+    /// sprite cache keyed by the data set's fingerprint (see `SpriteDiskCache`).
+    private func applyMerged(_ merged: ResourceCollection, baseDir: URL, baseFiles: [URL]) {
+        let fingerprint = GameLibrary.fingerprint(baseFiles: baseFiles, plugins: plugins)
+        let spriteCache = SpriteDiskCache(fingerprint: fingerprint)
+        game = NovaGame(merged, spriteCache: spriteCache)
+        hasBaseData = true
+        status = "Loaded \(merged.totalCount) resources from base + \(plugins.filter(\.isEnabled).count) plug-in(s)."
+        let byType = merged.typeCounts.map { "\($0.type)=\($0.count)" }.joined(separator: ", ")
+        Log.data.info("reload: loaded \(merged.totalCount, privacy: .public) resource(s) from base (\(baseFiles.count, privacy: .public) file(s)) + \(self.plugins.filter(\.isEnabled).count, privacy: .public) plug-in(s) — by type: \(byType, privacy: .public)")
+    }
+
+    private func applyMergeFailure(_ message: String, baseDir: URL) {
+        hasBaseData = false
+        game = nil
+        status = "Failed to load data: \(message)"
+        Log.data.error("reload: failed to merge game data from \(baseDir.path, privacy: .public): \(message, privacy: .public)")
     }
 
     func setPlugin(_ id: String, enabled: Bool) {

@@ -102,6 +102,12 @@ final class GameAudio: ObservableObject {
 
     func stopMusic() { engine.stopMusic() }
 
+    /// Freeze/thaw the sustained game audio (music + looping SFX) while an in-flight
+    /// overlay menu is open (Escorts, Hail, Galaxy/Gate Map, the in-game menu and
+    /// the Story map it opens). Resumes exactly where it left off; the menu's own UI
+    /// beeps keep sounding while paused.
+    func setPaused(_ paused: Bool) { engine.setSustainedAudioPaused(paused) }
+
     // MARK: SFX
 
     /// Play a fixed engine/UI event. Interface beeps use the interface-volume

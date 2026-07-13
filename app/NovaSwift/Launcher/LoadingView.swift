@@ -80,8 +80,10 @@ struct LoadingView: View {
         .novaResponsive()
         .task {
             withAnimation(.easeOut(duration: 0.5)) { openingProgress = prewarmShare }
-            // Load/merge the data set (base + enabled plug-ins).
-            model.data.reloadIfNeeded()
+            // Load/merge the data set (base + enabled plug-ins) off the main
+            // thread, so the loading screen keeps animating while the ~60 MB of
+            // containers is read and parsed.
+            await model.data.reloadIfNeededAsync()
             // Fully decode the catalog + hull sprites now, off the main thread,
             // so gameplay never pays that cost lazily mid-frame (first Shipyard/
             // Outfitter visit, first time a hull is seen after a jump).

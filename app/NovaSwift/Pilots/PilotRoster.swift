@@ -269,7 +269,7 @@ final class PilotRoster: ObservableObject {
     /// pilot (unlike a single obfuscated `.plt`) — this is separate from a
     /// slot's own backup history (`history(for:)`/`groupHistory(for:)`), which
     /// keeps happening underneath each slot regardless of how many slots exist.
-    static let maxSlotsPerPilot = 3
+    nonisolated static let maxSlotsPerPilot = 3
 
     /// A pilot identity: every save sharing a `pilotGroupID`, oldest first (so
     /// "Slot 1/2/3" is just position — no separate stored index needed).

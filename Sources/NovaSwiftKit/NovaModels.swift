@@ -111,6 +111,23 @@ public struct ShanRes {
     public let engineSpriteID: Int
     public let engineWidth: Int
     public let engineHeight: Int
+    /// Running-lights overlay (→ rlëD id), the blinking hull lights layer.
+    /// <= 0 means none. Fields @30/@34/@36 (spriteID/width/height).
+    public let lightSpriteID: Int
+    public let lightWidth: Int
+    public let lightHeight: Int
+    /// Weapon-glow overlay (→ rlëD id), flashed when the hull fires. <= 0 means
+    /// none. Fields @38/@42/@44.
+    public let weaponGlowSpriteID: Int
+    public let weaponGlowWidth: Int
+    public let weaponGlowHeight: Int
+    /// Shield-bubble overlay (→ rlëD id), drawn over the hull and flared when
+    /// the ship's shields absorb a hit — the layer the "Shields" graphics
+    /// plug-in populates (base-game hulls leave it at -1). <= 0 means none.
+    /// Fields @64/@68/@70 (spriteID/width/height); mask @66 is unused by us.
+    public let shieldSpriteID: Int
+    public let shieldWidth: Int
+    public let shieldHeight: Int
     /// Real weapon mount points, up to 4 per kind (unused slots repeat a
     /// placeholder position — callers should cross-reference `ShipRes.maxGuns`/
     /// `maxTurrets`/weapon count to know how many are actually meaningful).
@@ -137,6 +154,15 @@ public struct ShanRes {
         engineSpriteID = i16(d, 22)
         engineWidth = i16(d, 26)
         engineHeight = i16(d, 28)
+        lightSpriteID = i16(d, 30)
+        lightWidth = i16(d, 34)
+        lightHeight = i16(d, 36)
+        weaponGlowSpriteID = i16(d, 38)
+        weaponGlowWidth = i16(d, 42)
+        weaponGlowHeight = i16(d, 44)
+        shieldSpriteID = i16(d, 64)
+        shieldWidth = i16(d, 68)
+        shieldHeight = i16(d, 70)
 
         func points(xBase: Int, yBase: Int, zBase: Int) -> [ShanExitPoint] {
             (0..<4).map { i in
@@ -790,14 +816,19 @@ private final class NovaGameCache {
     var ships: [ShipRes]?
     var outfits: [OutfRes]?
     var govts: [GovtRes]?
-    var shipSprites: [Int: SpriteSheet?] = [:]
-    var engineGlowSprites: [Int: SpriteSheet?] = [:]
-    var asteroidSprites: [Int: SpriteSheet?] = [:]
-    var starfieldSprite: SpriteSheet??
+    /// Decoded sprite sheets keyed by the `rlëD` resource id they were decoded
+    /// from — so art shared by several ships/planets/weapons decodes at most once,
+    /// and hulls, engine glows, shields, planets, wrecks, shots and asteroids all
+    /// draw from one pool. A `nil` value is a negative cache (known missing or
+    /// undecodable), so a bad id is only ever chased down once.
+    var rleSheets: [Int: SpriteSheet?] = [:]
     /// `spöb` id → the id of the system that lists it in its `spobs`. Built once
     /// (walking every system) so gate transport can resolve a linked gate's
     /// destination system without re-scanning the galaxy each time.
     var spobSystemIndex: [Int: Int]?
+    /// Cross-launch cache of decoded sheets on disk; nil when no writable cache
+    /// location exists. Set once at `NovaGame` init.
+    var diskCache: SpriteDiskCache?
 }
 
 /// Typed, indexed view of a merged `ResourceCollection`. Decodes resource bodies
@@ -805,7 +836,37 @@ private final class NovaGameCache {
 public struct NovaGame {
     public let resources: ResourceCollection
     private let cache = NovaGameCache()
-    public init(_ resources: ResourceCollection) { self.resources = resources }
+    public init(_ resources: ResourceCollection, spriteCache: SpriteDiskCache? = nil) {
+        self.resources = resources
+        cache.diskCache = spriteCache
+    }
+
+    /// Decode the sprite sheet in `rlëD` resource `rleID`, memoised in RAM and —
+    /// when a disk cache is attached — persisted across launches so the RLE
+    /// decode is paid at most once, ever. The decode runs **outside** the cache
+    /// lock: it's the one genuinely expensive step, and holding the mutex across
+    /// it would serialise concurrent prewarm threads (and any scene build racing
+    /// prewarm) into single-file. The small window where two threads decode the
+    /// same id is harmless — the result is pure and identical.
+    private func decodedRLE(_ rleID: Int) -> SpriteSheet? {
+        cache.lock.lock()
+        if let hit = cache.rleSheets[rleID] { cache.lock.unlock(); return hit }
+        let disk = cache.diskCache
+        cache.lock.unlock()
+
+        var sheet: SpriteSheet?
+        if let cached = disk?.load(rleID) {
+            sheet = cached
+        } else if let data = resources.resource(NovaType.rleD, rleID)?.data {
+            sheet = try? RLED.decode(data)
+            if let sheet { disk?.store(rleID, sheet) }
+        }
+
+        cache.lock.lock()
+        cache.rleSheets[rleID] = .some(sheet)
+        cache.lock.unlock()
+        return sheet
+    }
 
     public func ship(_ id: Int) -> ShipRes? { resources.resource(NovaType.ship, id).map(ShipRes.init) }
     public func ships() -> [ShipRes] {
@@ -966,15 +1027,17 @@ public struct NovaGame {
     /// scratch, and the Shipyard's fallback thumbnail calls this per tile,
     /// per render).
     public func shipSprite(_ shipID: Int) -> SpriteSheet? {
-        cache.lock.lock(); defer { cache.lock.unlock() }
-        if let cached = cache.shipSprites[shipID] { return cached }
-        guard let (_, rle) = shipSpriteData(shipID) else {
-            cache.shipSprites[shipID] = .some(nil)
-            return nil
+        guard let shan = shan(shipID) else { return nil }
+        // Hulls reference the `rlëD` directly (spïn indirection is for
+        // planets/weapons/asteroids); fall back through spïn only if the data
+        // numbers it that way — matching `shipSpriteData`'s resolution order.
+        if resources.resource(NovaType.rleD, shan.baseSpriteID) != nil {
+            return decodedRLE(shan.baseSpriteID)
         }
-        let v = try? RLED.decode(rle)
-        cache.shipSprites[shipID] = .some(v)
-        return v
+        if let spin = spin(shan.baseSpriteID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return decodedRLE(spin.spriteID)
+        }
+        return nil
     }
 
     /// Decode a ship's real, per-hull-authored engine-glow overlay sprite (the
@@ -982,16 +1045,21 @@ public struct NovaGame {
     /// as the base hull sprite — index it with the same `spriteFrame`. Cached
     /// for the same reason as `shipSprite`.
     public func engineGlowSprite(_ shipID: Int) -> SpriteSheet? {
-        cache.lock.lock(); defer { cache.lock.unlock() }
-        if let cached = cache.engineGlowSprites[shipID] { return cached }
         guard let shan = shan(shipID), shan.engineSpriteID > 0,
-              let rle = resources.resource(NovaType.rleD, shan.engineSpriteID)?.data else {
-            cache.engineGlowSprites[shipID] = .some(nil)
-            return nil
-        }
-        let v = try? RLED.decode(rle)
-        cache.engineGlowSprites[shipID] = .some(v)
-        return v
+              resources.resource(NovaType.rleD, shan.engineSpriteID) != nil else { return nil }
+        return decodedRLE(shan.engineSpriteID)
+    }
+
+    /// Decode a ship's shield-bubble overlay sprite (the `shän` shield layer),
+    /// if this hull defines one. Base-game hulls leave `shieldSpriteID` at -1,
+    /// so this is nil for stock data; the "Shields" graphics plug-in populates
+    /// it for every hull. Unlike the hull/engine sheets this is an independent
+    /// animation (its own frame count) — drive it with its own flare clock,
+    /// not the hull's `spriteFrame`. Cached like the other layers.
+    public func shieldSprite(_ shipID: Int) -> SpriteSheet? {
+        guard let shan = shan(shipID), shan.shieldSpriteID > 0,
+              resources.resource(NovaType.rleD, shan.shieldSpriteID) != nil else { return nil }
+        return decodedRLE(shan.shieldSpriteID)
     }
 
     // MARK: Stellar objects
@@ -1001,11 +1069,11 @@ public struct NovaGame {
     public func spobSprite(_ spobID: Int) -> SpriteSheet? {
         guard let spob = spob(spobID) else { return nil }
         if let spin = spin(spob.graphicSpinID),
-           let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
-            return try? RLED.decode(rle)
+           resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return decodedRLE(spin.spriteID)
         }
-        if let rle = resources.resource(NovaType.rleD, spob.graphicSpinID)?.data {
-            return try? RLED.decode(rle)
+        if resources.resource(NovaType.rleD, spob.graphicSpinID) != nil {
+            return decodedRLE(spob.graphicSpinID)
         }
         return nil
     }
@@ -1015,25 +1083,26 @@ public struct NovaGame {
     /// (the renderer then just drops it from the system when destroyed).
     public func spobDestroyedSprite(_ spobID: Int) -> SpriteSheet? {
         guard let spob = spob(spobID), let spinID = spob.destroyedGraphicSpinID else { return nil }
-        if let spin = spin(spinID), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
-            return try? RLED.decode(rle)
+        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return decodedRLE(spin.spriteID)
         }
-        if let rle = resources.resource(NovaType.rleD, spinID)?.data {
-            return try? RLED.decode(rle)
+        if resources.resource(NovaType.rleD, spinID) != nil {
+            return decodedRLE(spinID)
         }
         return nil
     }
 
     /// Resolve a weapon's shot graphic (`wëap.graphicSpinID` → `spïn` → `rlëD`)
     /// into a sprite sheet — the real torpedo/rocket/bolt animation, so shots
-    /// draw their authored art instead of a generic dot. Uncached (the renderer
-    /// caches the decoded textures per graphic id).
+    /// draw their authored art instead of a generic dot. Decoded once and shared
+    /// through the common sheet cache (the renderer also caches the built
+    /// textures per graphic id).
     public func weaponSprite(spinID: Int) -> SpriteSheet? {
-        if let spin = spin(spinID), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
-            return try? RLED.decode(rle)
+        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return decodedRLE(spin.spriteID)
         }
-        if let rle = resources.resource(NovaType.rleD, spinID)?.data {
-            return try? RLED.decode(rle)
+        if resources.resource(NovaType.rleD, spinID) != nil {
+            return decodedRLE(spinID)
         }
         return nil
     }
@@ -1042,29 +1111,19 @@ public struct NovaGame {
     /// (fixed offset `röidID + 672`, the Bible's reserved 800-815 asteroid
     /// spïn range) → `rlëD`. Cached like `shipSprite`/`engineGlowSprite`.
     public func asteroidSprite(_ roidID: Int) -> SpriteSheet? {
-        cache.lock.lock(); defer { cache.lock.unlock() }
-        if let cached = cache.asteroidSprites[roidID] { return cached }
         let spinID = roidID + 672
-        var result: SpriteSheet?
-        if let spin = spin(spinID), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
-            result = try? RLED.decode(rle)
-        }
-        cache.asteroidSprites[roidID] = .some(result)
-        return result
+        guard let spin = spin(spinID),
+              resources.resource(NovaType.rleD, spin.spriteID) != nil else { return nil }
+        return decodedRLE(spin.spriteID)
     }
 
     /// The real background star sprite (`spïn` #700 "Stars" → `rlëD`), a small
     /// multi-frame tile Nova scatters across the parallax starfield. Cached
     /// once — there is only ever one.
     public func starfieldSprite() -> SpriteSheet? {
-        cache.lock.lock(); defer { cache.lock.unlock() }
-        if let cached = cache.starfieldSprite { return cached }
-        var result: SpriteSheet?
-        if let spin = spin(700), let rle = resources.resource(NovaType.rleD, spin.spriteID)?.data {
-            result = try? RLED.decode(rle)
-        }
-        cache.starfieldSprite = .some(result)
-        return result
+        guard let spin = spin(700),
+              resources.resource(NovaType.rleD, spin.spriteID) != nil else { return nil }
+        return decodedRLE(spin.spriteID)
     }
 
     /// A reasonable starting system when the pilot's start isn't known: the most
@@ -1109,28 +1168,49 @@ public struct NovaGame {
     /// off the main thread, while a loading screen is shown — safe to call
     /// from any thread. `onProgress` is called in order, periodically (not
     /// every iteration), and always ends at `completed == total`.
-    public func prewarm(onProgress: (PrewarmProgress) -> Void = { _ in }) {
+    public func prewarm(onProgress: @Sendable (PrewarmProgress) -> Void = { _ in }) {
         let allShips = ships()
         // Ship sprites dominate (two decodes per hull); outfits and governments
         // are one bulk decode apiece. Counting all three against a single total
         // is what lets `fraction` rise monotonically across the whole run
         // instead of restarting per phase.
         let total = allShips.count + 2
-        func report(_ phase: String, _ completed: Int) {
-            onProgress(PrewarmProgress(phase: phase, completed: completed, total: total))
+
+        onProgress(PrewarmProgress(phase: "Decoding ship sprites", completed: 0, total: total))
+
+        // Hull + engine-glow decodes are independent and CPU-bound — exactly what
+        // `concurrentPerform` is for. The decode runs off the cache lock (see
+        // `decodedRLE`), so this scales across cores instead of queueing on a
+        // mutex. A tiny lock guards only the shared progress counter.
+        //
+        // We deliberately do NOT prewarm planet/weapon/asteroid art here: that's
+        // galaxy-wide and would balloon resident memory on mobile (see the OOM
+        // notes). Those stay lazy — decoded once on first sight, then served warm
+        // from RAM and, across launches, from the disk cache.
+        if !allShips.isEmpty {
+            let progressLock = NSLock()
+            var completed = 0
+            DispatchQueue.concurrentPerform(iterations: allShips.count) { i in
+                let id = allShips[i].id
+                _ = shipSprite(id)
+                _ = engineGlowSprite(id)
+                progressLock.lock()
+                completed += 1
+                let done = completed
+                progressLock.unlock()
+                // Report every 8 hulls (and on the last) — enough to keep the bar
+                // moving without flooding the main actor with hops.
+                if done % 8 == 0 || done == allShips.count {
+                    onProgress(PrewarmProgress(phase: "Decoding ship sprites", completed: done, total: total))
+                }
+            }
         }
 
-        report("Decoding ship sprites", 0)
-        for (i, ship) in allShips.enumerated() {
-            _ = shipSprite(ship.id)
-            _ = engineGlowSprite(ship.id)
-            if i % 8 == 0 { report("Decoding ship sprites", i) }
-        }
-        report("Decoding outfits", allShips.count)
+        onProgress(PrewarmProgress(phase: "Decoding outfits", completed: allShips.count, total: total))
         _ = outfits()
-        report("Decoding governments", allShips.count + 1)
+        onProgress(PrewarmProgress(phase: "Decoding governments", completed: allShips.count + 1, total: total))
         _ = govts()
-        report("Ready", total)
+        onProgress(PrewarmProgress(phase: "Ready", completed: total, total: total))
     }
 }
 

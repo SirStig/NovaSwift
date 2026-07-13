@@ -49,6 +49,7 @@ final class GameHost {
         let ship: Ship
         var textures: [SKTexture] = []
         var engineTextures: [SKTexture] = []
+        var shieldTextures: [SKTexture] = []
         var planets: [PlanetVisual] = []
         var systemName = ""
         var aiGame: NovaGame?
@@ -77,6 +78,7 @@ final class GameHost {
             ship = session.ship
             textures = session.textures
             engineTextures = session.engineTextures
+            shieldTextures = session.shieldTextures
             hud.shipName = session.shipName
             // Load the requested system (or the pilot's current one — every call
             // site passes an explicit systemID today, but this stays as a safe
@@ -130,6 +132,7 @@ final class GameHost {
         self.graphics = aiGame.map { SpaceportGraphics(game: $0) }
         hud.systemName = systemName
         scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
+                        shieldTextures: shieldTextures,
                         settings: model.settings,
                         input: input, controller: controller, hud: hud, audio: model.audio,
                         planets: planets, systemName: systemName,
@@ -174,6 +177,14 @@ final class GameHost {
                 }
                 pilotStore.save()
             }
+
+            // IFF (oütf ModType 14, "colorized radar"): EV Nova only tints radar
+            // blips by allegiance when the player's ship carries an IFF outfit;
+            // without one, contacts are a single neutral color. Resolve the player's
+            // full loadout (hull preinstalled + owned outfits) and check for it.
+            scene.playerHasIFF = aiGalaxy?
+                .loadout(shipID: model.pilot.state.shipType, extraOutfits: model.pilot.state.outfits)?
+                .outfits.keys.contains { scanGame.outfit($0)?.has(.iff) == true } ?? false
 
             // pêrs (named characters): seed grudges, gate appearances on their
             // ActiveOn NCB + not-yet-defeated, and persist grudge/defeat outcomes.
@@ -305,6 +316,7 @@ final class GameHost {
         let ship: Ship
         let textures: [SKTexture]
         let engineTextures: [SKTexture]
+        let shieldTextures: [SKTexture]
         let shipName: String
     }
     static func buildPlayerShip(model: AppModel, galaxy: Galaxy, game: NovaGame) -> PlayerSession {
@@ -323,10 +335,15 @@ final class GameHost {
         ship.shield = pilot.shield.map { min($0, ship.maxShield) } ?? ship.maxShield
         var textures: [SKTexture] = []
         var engineTextures: [SKTexture] = []
+        var shieldTextures: [SKTexture] = []
         if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.rotationFrames(from: sheet) }
         if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.rotationFrames(from: glow) }
+        // The shän shield-bubble layer (single-frame overlay), only present when a
+        // "Shields" graphics plug-in populated it — nil/empty for stock hulls.
+        if let bubble = game.shieldSprite(shipID) { shieldTextures = SpriteTextures.rotationFrames(from: bubble) }
         let name = pilot.shipName.isEmpty ? (res?.displayName ?? "") : pilot.shipName
-        return PlayerSession(ship: ship, textures: textures, engineTextures: engineTextures, shipName: name)
+        return PlayerSession(ship: ship, textures: textures, engineTextures: engineTextures,
+                             shieldTextures: shieldTextures, shipName: name)
     }
 
     /// The nearest inhabited `spöb` to `position` within `systemID`, paired
@@ -710,33 +727,39 @@ struct GameContainerView: View {
             Log.input.debug("isSceneFocused -> \(focused, privacy: .public)")
         }
         .onChange(of: showMenu) { _, open in
-            setScenePaused(open, reason: "showMenu=\(open)")
+            setMenuPaused(open, reason: "showMenu=\(open)")
             // Deferred a tick: setting `@FocusState` in the same transaction that
             // dismisses the overlay stealing focus can silently lose the race on
             // macOS — the scene view has to actually reclaim key status first.
             if !open { grabSceneFocus(reason: "menu closed") }
         }
         .onChange(of: nav.showingMap) { _, open in
-            if !open { grabSceneFocus(reason: "map closed") }   // map closed: same
+            // The Galaxy Map is a full-screen planning overlay — freeze the sim and
+            // its audio behind it (like every other in-flight menu), then hand focus
+            // back to flight on close.
+            setMenuPaused(open, reason: "showingMap=\(open)")
+            if !open { grabSceneFocus(reason: "map closed") }
         }
         .onChange(of: gateMapOrigin) { _, id in
+            setMenuPaused(id != nil, reason: "gateMap=\(id != nil)")
             if id == nil { grabSceneFocus(reason: "gate map closed") }
         }
         .onChange(of: nav.route) { _, _ in
             syncNavCourseToHUD(host)
         }
         .onChange(of: hailDialogState != nil) { _, open in
-            setScenePaused(open, reason: "hailDialogState=\(open)")
+            setMenuPaused(open, reason: "hailDialogState=\(open)")
             if !open { grabSceneFocus(reason: "hail dialog closed") }
         }
         .onChange(of: showEscortsPanel) { _, open in
-            // The Escorts window is an escort's hail — pause the sim behind it and
-            // return focus to flight when it closes, exactly like the comm dialog.
-            setScenePaused(open, reason: "showEscortsPanel=\(open)")
+            // The Escorts window is an escort's hail — pause the sim and its audio
+            // behind it and return focus to flight when it closes, exactly like the
+            // comm dialog.
+            setMenuPaused(open, reason: "showEscortsPanel=\(open)")
             if !open { grabSceneFocus(reason: "escorts window closed") }
         }
         .onChange(of: flightMissionServices.pendingOffer != nil) { _, open in
-            setScenePaused(open, reason: "flightMissionOffer=\(open)")
+            setMenuPaused(open, reason: "flightMissionOffer=\(open)")
             if !open { grabSceneFocus(reason: "flight mission offer closed") }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -866,6 +889,15 @@ struct GameContainerView: View {
     private func setScenePaused(_ paused: Bool, reason: String) {
         host?.scene.isPaused = paused
         Log.scene.debug("isPaused -> \(paused, privacy: .public) (\(reason, privacy: .public))")
+    }
+
+    /// Pause both the simulation *and* the sustained game audio behind an in-flight
+    /// overlay menu (Escorts, Hail, Galaxy/Gate Map, the in-game menu / Story map,
+    /// mission offers). Landing at a spaceport deliberately doesn't route through
+    /// here — the port keeps its own ambience playing over the frozen sim.
+    private func setMenuPaused(_ paused: Bool, reason: String) {
+        setScenePaused(paused, reason: reason)
+        model.audio.setPaused(paused)
     }
 
     /// Requests keyboard focus for the flight scene, confirming a beat later
@@ -1047,7 +1079,8 @@ struct GameContainerView: View {
                 host.refreshHUDStyle(model: model)
                 host.scene.reloadForDeparture(spobID: spob, player: session.ship,
                                               textures: session.textures,
-                                              engineTextures: session.engineTextures)
+                                              engineTextures: session.engineTextures,
+                                              shieldTextures: session.shieldTextures)
                 landedSpobID = nil            // now fade the port out over the ready scene
                 setScenePaused(false, reason: "depart (in place)")
                 syncNav(host)

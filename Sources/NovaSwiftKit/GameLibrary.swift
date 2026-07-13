@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// How a plug-in relates to the base scenario. Drives load order and mutual
 /// exclusivity in the launcher (you play at most one total conversion at a time;
@@ -37,7 +38,7 @@ public enum PluginKind: String, Codable, Sendable {
 
 /// One installable unit of content: the base game, a total conversion, or a
 /// gameplay plug-in. `fileURLs` are the resource containers it contributes.
-public struct PluginBundle: Identifiable, Codable, Hashable {
+public struct PluginBundle: Identifiable, Codable, Hashable, Sendable {
     public let id: String        // stable identity (folder / file name)
     public var name: String      // display name
     public var kind: PluginKind
@@ -145,26 +146,69 @@ public enum GameLibrary {
     /// in the given order; `isEnabled == false` bundles are skipped.
     public static func merge(baseFiles: [URL], plugins: [PluginBundle] = []) throws -> ResourceCollection {
         var collection = ResourceCollection()
-        for url in baseFiles.sorted(by: { $0.path < $1.path }) {
-            do {
-                collection.overlay(try ResourceFile.read(contentsOf: url))
-            } catch {
-                Log.data.error("merge: failed to load base file \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
-                throw error
-            }
+        // Reading + parsing a container is independent per file and CPU/IO-bound,
+        // so parse them concurrently and then overlay in load order (the overlay
+        // itself must stay ordered — later layers override earlier ones).
+        for col in try parseConcurrently(baseFiles.sorted(by: { $0.path < $1.path }), context: "base file") {
+            collection.overlay(col)
         }
         Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(baseFiles.count, privacy: .public) file(s)")
         for plugin in plugins where plugin.isEnabled {
-            for url in plugin.fileURLs {
-                do {
-                    collection.overlay(try ResourceFile.read(contentsOf: url), tag: plugin.id)
-                } catch {
-                    Log.data.error("merge: failed to load plug-in \(plugin.name, privacy: .public) file \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
-                    throw error
-                }
+            for col in try parseConcurrently(plugin.fileURLs, context: "plug-in \(plugin.name)") {
+                collection.overlay(col, tag: plugin.id)
             }
             Log.data.debug("merge: applied plug-in \(plugin.name, privacy: .public) (\(plugin.id, privacy: .public)) — collection now \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
         }
         return collection
+    }
+
+    /// Parse `urls` in parallel, preserving input order in the result (so the
+    /// caller's override chain is unaffected). Throws the first parse error
+    /// encountered — matching the serial version's fail-fast behaviour.
+    private static func parseConcurrently(_ urls: [URL], context: String) throws -> [ResourceCollection] {
+        guard !urls.isEmpty else { return [] }
+        var results = [ResourceCollection?](repeating: nil, count: urls.count)
+        var firstError: Error?
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: urls.count) { i in
+            do {
+                let col = try ResourceFile.read(contentsOf: urls[i])
+                lock.lock(); results[i] = col; lock.unlock()
+            } catch {
+                Log.data.error("merge: failed to load \(context, privacy: .public) \(urls[i].path, privacy: .public): \(String(describing: error), privacy: .public)")
+                lock.lock(); if firstError == nil { firstError = error }; lock.unlock()
+            }
+        }
+        if let firstError { throw firstError }
+        return results.compactMap { $0 }
+    }
+
+    // MARK: Data-set fingerprint
+
+    /// A stable hash of the exact set of container files (base + enabled plug-ins)
+    /// and their size/mtime. Two launches over the same data set produce the same
+    /// fingerprint; importing new data, toggling a plug-in, or a file changing on
+    /// disk produces a different one. Used to name the decoded-sprite disk cache
+    /// so a stale cache is never read (see `SpriteDiskCache`).
+    ///
+    /// `SHA256` (not `Hasher`) because `Hasher` is seeded randomly per process —
+    /// its output would differ every launch, defeating a cross-launch cache.
+    public static func fingerprint(baseFiles: [URL], plugins: [PluginBundle]) -> String {
+        let fm = FileManager.default
+        func stamp(_ url: URL) -> String {
+            let attrs = try? fm.attributesOfItem(atPath: url.path)
+            let size = (attrs?[.size] as? NSNumber)?.intValue ?? -1
+            let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
+            return "\(url.lastPathComponent)|\(size)|\(Int(mtime))"
+        }
+        var parts: [String] = []
+        for url in baseFiles.sorted(by: { $0.path < $1.path }) { parts.append("B|" + stamp(url)) }
+        for plugin in plugins.filter(\.isEnabled).sorted(by: { $0.id < $1.id }) {
+            for url in plugin.fileURLs.sorted(by: { $0.path < $1.path }) {
+                parts.append("P|\(plugin.id)|" + stamp(url))
+            }
+        }
+        let digest = SHA256.hash(data: Data(parts.joined(separator: "\n").utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -614,7 +614,7 @@ public final class Ship {
         // visibly rotates and thrusts. Consumed each frame.
         let boost = formationBoost
         formationBoost = 0
-        let effectiveTurnRate = stats.turnRate * (1 + 5 * boost)
+        let effectiveTurnRate = stats.turnRate * (1 + 6 * boost)
 
         let maxTurn = effectiveTurnRate * dt * max(0.05, intent.turnScale)
         if controllable, intent.turnLeft || intent.turnRight {
@@ -631,8 +631,8 @@ public final class Ship {
 
         // Base accel / top speed, lifted by formation flight, then the afterburner
         // on top. EV Nova's afterburner is a held control that drains fuel.
-        var accel = stats.acceleration * (1 + 4 * boost)
-        var topSpeed = stats.maxSpeed * (1 + 0.75 * boost)
+        var accel = stats.acceleration * (1 + 5 * boost)
+        var topSpeed = stats.maxSpeed * (1 + 1.0 * boost)
         afterburnerActive = false
         if controllable, intent.afterburner, let ab = afterburner, fuel > 0 {
             afterburnerActive = true
@@ -650,23 +650,38 @@ public final class Ship {
 
         let heading = Vec2.heading(angle)
         if fliesInertialess(tuning) {
-            // No inertia (shïp Flags2 0x40 / inertial-dampener outfit, or an
-            // AI ship flying the `FlightTuning.aiInertialess` model): the ship has
-            // no lateral momentum — its velocity tracks the nose. A throttle scalar
-            // ramps up under thrust, brakes under reverse, and bleeds off when idle;
-            // the real velocity then chases heading×throttle at up to 2×accel. The
-            // ship goes exactly where it points — the tight, driftless "perfect
-            // flying" EV Nova's inertialess hulls have. Drag/overspeed don't apply.
+            // No inertia (shïp Flags2 0x40 / inertial-dampener outfit, or an AI ship
+            // flying the `FlightTuning.aiInertialess` model): the ship has no lateral
+            // momentum — its motion tracks the nose. A throttle scalar ramps up under
+            // thrust, brakes under reverse, and bleeds off when idle.
             if controllable {
                 if intent.thrust { throttleSpeed += accel * dt }
                 else if intent.reverse { throttleSpeed -= accel * dt }
                 else { throttleSpeed -= accel * dt }          // coast to a stop when idle
             }
             throttleSpeed = min(max(throttleSpeed, 0), topSpeed)
-            let targetVel = heading * throttleSpeed
-            let dv = targetVel - velocity
+            // Rebuild velocity each frame from two independent parts, so the ship
+            // never visibly slews (pointing one way while drifting another): its
+            // *direction* rotates to follow the heading at this frame's own turn
+            // budget — the same rate the nose just turned — so facing and motion stay
+            // locked even through a hard turn; its *magnitude* ramps toward the
+            // throttle target at up to 2×accel. Any momentum that isn't along the nose
+            // (a hyperspace tear-in seeds velocity along the nose already, but a
+            // knockback or fighter-launch inheriting a carrier's drift won't) is
+            // steered onto the heading over a few frames rather than snapped. This is
+            // the tight, driftless "goes exactly where it points" flying EV Nova's
+            // inertialess hulls have. Drag/overspeed don't apply.
+            let speed = velocity.length
+            let velDir = speed > 1e-6 ? velocity * (1 / speed) : heading
+            let twoPi = 2 * Double.pi
+            var toNose = (angle - velDir.angle).truncatingRemainder(dividingBy: twoPi)
+            if toNose > .pi { toNose -= twoPi }
+            if toNose < -.pi { toNose += twoPi }
+            let steered = Vec2.heading(velDir.angle + max(-maxTurn, min(maxTurn, toNose)))
+            let dSpeed = throttleSpeed - speed
             let maxDv = accel * dt * 2
-            velocity = dv.length <= maxDv ? targetVel : velocity + dv * (maxDv / dv.length)
+            let newSpeed = abs(dSpeed) <= maxDv ? throttleSpeed : speed + (dSpeed > 0 ? maxDv : -maxDv)
+            velocity = steered * max(0, newSpeed)
         } else {
             if controllable, intent.thrust { velocity += heading * (accel * dt) }
             if controllable, intent.reverse { velocity += heading * (-stats.acceleration * 0.5 * dt) }

@@ -39,6 +39,9 @@ final class GameAudioEngine {
 
     private var started = false
     private var musicURL: URL?
+    /// Whether the music track was playing when the last menu pause froze it, so
+    /// resume only restarts music that was actually going.
+    private var musicWasPlayingBeforePause = false
 
     init(voiceCount: Int = 16) {
         engine.attach(sfxBus)
@@ -99,6 +102,28 @@ final class GameAudioEngine {
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false)
         #endif
+    }
+
+    /// Freeze the sustained game audio in place — the music track and every active
+    /// looping SFX voice (beam weapons, etc.) — while an in-flight menu is open, then
+    /// resume it exactly where it left off. One-shot voices are deliberately left
+    /// running so the menu's own UI beeps still sound while paused. Idempotent, and a
+    /// no-op before the engine has started.
+    func setSustainedAudioPaused(_ paused: Bool) {
+        guard started else { return }
+        if paused {
+            if musicPlayer.isPlaying {
+                musicPlayer.pause()
+                musicWasPlayingBeforePause = true
+            }
+            for (_, voice) in loopVoices where voice.isPlaying { voice.pause() }
+        } else {
+            if musicWasPlayingBeforePause {
+                musicPlayer.play()
+                musicWasPlayingBeforePause = false
+            }
+            for (_, voice) in loopVoices { voice.play() }
+        }
     }
 
     // MARK: Volume (0…1)

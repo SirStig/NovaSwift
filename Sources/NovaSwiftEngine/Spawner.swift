@@ -188,10 +188,12 @@ public final class Spawner {
         guard singleShipCount(world) < targetPopulation,
               world.npcs.count < maxPopulation, timer <= 0 else { return }
         timer = spawnInterval
-        // Most arrivals jump in from hyperspace; some lift off from a spaceport so
-        // the player also sees traffic *leaving* planets, not only inbound.
+        // Split arrivals between hyperspace jump-ins and spaceport lift-offs so the
+        // player sees a believable two-way flow — ships coming in from the edge AND
+        // traders lifting off planets and heading out (see `spawnOutbound`). ~40%
+        // launches when the system has pads; the rest jump in.
         let hasPads = world.systemContext.bodies.contains { $0.canLand }
-        let origin: SpawnOrigin = (hasPads && world.rng.double(in: 0...1) < 0.25) ? .planet : .edge
+        let origin: SpawnOrigin = (hasPads && world.rng.double(in: 0...1) < 0.4) ? .planet : .edge
         spawnOne(into: world, origin: origin)
     }
 
@@ -464,6 +466,14 @@ public final class Spawner {
                                                skillRoll: world.rng.double(in: -1...1)) else { return nil }
         let brain = AIBrain(aiType: dude.aiType, govt: govt)
         brain.leaderID = leaderID
+        // A trader that lifts off a spaceport is usually done here — most head
+        // straight back out to hyperspace (a visible departure), the rest hop to
+        // another port. Only solo dudes (not fleet escorts, who stay with their
+        // leader) and only trader dispositions.
+        if case .planet = effectiveOrigin, leaderID == nil, dude.aiType.isTrader,
+           world.rng.double(in: 0...1) < 0.65 {
+            brain.spawnOutbound = true
+        }
         ship.brain = brain
         rollDudeCargo(dude, into: ship, world: world)
         // Bible: "When ships are created, there is a 5% chance that a specific

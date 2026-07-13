@@ -13,6 +13,29 @@ public extension SpriteSheet {
     /// A single frame cropped from the grid.
     func frameCGImage(_ index: Int) -> CGImage? {
         guard index >= 0, index < frameCount, let full = makeCGImage() else { return nil }
+        return Self.crop(full, frame: index, frameWidth: frameWidth, frameHeight: frameHeight)
+    }
+
+    /// Several frames cropped from the grid, building the backing grid `CGImage`
+    /// **once** and cropping each frame out of it. Callers that want more than one
+    /// frame (rotation sheets — up to 36 headings — button normal/pressed pairs)
+    /// must use this instead of calling `frameCGImage(_:)` in a loop: that rebuilt
+    /// the entire surface `CGImage` *and copied the whole RGBA buffer* on every
+    /// frame, turning an N-frame sheet into O(N) full-surface allocations. Skips
+    /// out-of-range indices; result order follows `indices`.
+    func frameCGImages<S: Sequence>(_ indices: S) -> [(index: Int, image: CGImage)]
+        where S.Element == Int {
+        guard let full = makeCGImage() else { return [] }
+        var out: [(index: Int, image: CGImage)] = []
+        for index in indices where index >= 0 && index < frameCount {
+            if let cg = Self.crop(full, frame: index, frameWidth: frameWidth, frameHeight: frameHeight) {
+                out.append((index, cg))
+            }
+        }
+        return out
+    }
+
+    private static func crop(_ full: CGImage, frame index: Int, frameWidth: Int, frameHeight: Int) -> CGImage? {
         let x = (index % SpriteSheet.framesPerRow) * frameWidth
         let y = (index / SpriteSheet.framesPerRow) * frameHeight
         return full.cropping(to: CGRect(x: x, y: y, width: frameWidth, height: frameHeight))

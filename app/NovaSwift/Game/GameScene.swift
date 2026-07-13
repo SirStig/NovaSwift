@@ -38,6 +38,12 @@ final class GameScene: SKScene {
             if let e = persSpawnEligible { world?.persSpawnEligible = e }
         }
     }
+    /// Whether the player's ship carries an IFF outfit (oütf ModType 14,
+    /// "colorized radar"). Host-supplied from the pilot's loadout. EV Nova only
+    /// colorizes radar blips by allegiance when an IFF outfit is installed; without
+    /// one, ship contacts are drawn in a single neutral color. Defaults to false
+    /// (no IFF) so the faithful monochrome behavior is the safe fallback.
+    var playerHasIFF = false
     /// pêrs ids the player has wronged (grudge) — host-supplied from pilot state.
     var persGrudges: Set<Int> = []
     /// Host gate: whether a pêrs may spawn now (ActiveOn NCB + not defeated).
@@ -95,6 +101,16 @@ final class GameScene: SKScene {
     /// hull. Falls back to the synthetic `thruster` flame when absent.
     private var engineGlowTextures: [SKTexture] = []
     private var engineGlowSprite: SKSpriteNode?
+    /// The hull's shield-bubble overlay (shän shield layer), present only when a
+    /// "Shields" graphics plug-in populated it. Single-frame; its opacity is
+    /// driven by a decaying flare that spikes whenever the shields absorb a hit.
+    private var shieldTextures: [SKTexture] = []
+    private var shieldSprite: SKSpriteNode?
+    private var shieldFlare: CGFloat = 0
+    private var lastPlayerShield: Double = -1
+    /// Clamped per-frame delta, cached so `syncNPCs()` (no dt param) can decay
+    /// each NPC's shield flare at the same rate as the player's.
+    private var frameDT: TimeInterval = 1.0 / 60.0
     private var shipRadius: CGFloat = 16
 
     private var starLayers: [StarLayer] = []
@@ -419,6 +435,7 @@ final class GameScene: SKScene {
     private var activeBeamLoops: [String: (shooterID: Int, soundID: Int)] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
     private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
+    private var npcShieldCache: [Int: [SKTexture]] = [:]
     // An arrival effect to play when a node is first built for a ship that just
     // jumped in from hyperspace (warp streak) or lifted off a planet (grow out).
     private enum EntranceFX { case warpIn, launch }
@@ -442,6 +459,10 @@ final class GameScene: SKScene {
         var thruster: SKNode?
         var engineGlow: SKSpriteNode?
         var engineGlowTextures: [SKTexture] = []
+        var shield: SKSpriteNode?
+        var shieldTextures: [SKTexture] = []
+        var shieldFlare: CGFloat = 0
+        var lastShield: Double = -1
         var healthFill: SKSpriteNode?
         var healthBar: SKNode?
         var textures: [SKTexture] = []
@@ -464,6 +485,7 @@ final class GameScene: SKScene {
     // MARK: Setup
 
     func configure(player ship: Ship, textures: [SKTexture], engineTextures: [SKTexture] = [],
+                   shieldTextures: [SKTexture] = [],
                    settings: GameSettings,
                    input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
                    audio: GameAudio? = nil,
@@ -489,6 +511,9 @@ final class GameScene: SKScene {
         self.systemID = systemID
         self.rotationTextures = textures
         self.engineGlowTextures = engineTextures
+        self.shieldTextures = shieldTextures
+        self.lastPlayerShield = -1
+        self.shieldFlare = 0
         self.settings = settings
         self.input = input
         self.controllerInput = controller
@@ -764,6 +789,17 @@ final class GameScene: SKScene {
         thruster.isHidden = true
         node.addChild(thruster)
 
+        // Shield bubble on top of everything (zPosition above the hull sibling).
+        // Pre-sized art, so drawn at native size; hidden until a hit flares it.
+        if let first = shieldTextures.first {
+            let shield = SKSpriteNode(texture: first)
+            shield.texture?.filteringMode = spriteFilter
+            shield.zPosition = 1
+            shield.isHidden = true
+            node.addChild(shield)
+            shieldSprite = shield
+        }
+
         addChild(node)
         shipNode = node
     }
@@ -812,6 +848,7 @@ final class GameScene: SKScene {
         let rawFrame = lastUpdate == 0 ? 0 : currentTime - lastUpdate
         let dt = lastUpdate == 0 ? 1.0 / 60.0 : min(currentTime - lastUpdate, 1.0 / 20.0)
         lastUpdate = currentTime
+        frameDT = dt
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
 
         controllerInput?.poll()
@@ -1012,6 +1049,13 @@ final class GameScene: SKScene {
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
             glow.texture = engineGlowTextures[min(p.spriteFrame, engineGlowTextures.count - 1)]
         }
+        if let shield = shieldSprite {
+            shieldFlare = Self.advanceShieldFlare(shieldFlare, shieldNow: p.shield,
+                                                  shieldWas: lastPlayerShield,
+                                                  maxShield: p.maxShield, dt: dt)
+            applyShieldFlare(shieldFlare, to: shield)
+        }
+        lastPlayerShield = p.shield
 
         updateThruster(active: intent.thrust || p.afterburnerActive, angle: p.angle,
                        boosted: p.afterburnerActive)
@@ -1538,7 +1582,7 @@ final class GameScene: SKScene {
         hud.targetShipTypeID = target.shipTypeID >= 128 ? target.shipTypeID : nil
         hud.targetShield = target.maxShield > 0 ? target.shield / target.maxShield : 0
         hud.targetArmor = target.maxArmor > 0 ? target.armor / target.maxArmor : 1
-        hud.targetHostile = world.diplomacy?.isHostileToPlayer(target.government) == true
+        hud.targetHostile = isEffectivelyHostileToPlayer(target)
         hud.targetGovtLabel = galaxy?.game.govt(target.government)?.targetCode ?? ""
     }
 
@@ -1585,6 +1629,39 @@ final class GameScene: SKScene {
         guard shakeTime > 0 else { shakeMag = 0; return base }
         let m = shakeMag * (shakeTime / shakeDuration)      // ease out
         return CGPoint(x: base.x + .random(in: -m...m), y: base.y + .random(in: -m...m))
+    }
+
+    /// Seconds a shield flare takes to fade from a full hit back to invisible.
+    private static let shieldFlareDecay: CGFloat = 0.45
+    /// Peak opacity of the shield bubble at full flare (translucent, not opaque).
+    private static let shieldFlareMaxAlpha: CGFloat = 0.85
+
+    /// Advance a decaying shield-hit flare (0…1). It decays every frame and
+    /// spikes whenever the ship's shield dropped since the last frame — i.e. the
+    /// shields just absorbed a hit. Regeneration (shield rising) never flares,
+    /// and once shields hit 0 armour damage produces no further drop, so the
+    /// bubble stops — matching EV Nova's "shields only" flash. `shieldWas < 0`
+    /// (the first frame after a (re)build) is treated as "no prior sample".
+    private static func advanceShieldFlare(_ current: CGFloat, shieldNow: Double,
+                                           shieldWas: Double, maxShield: Double,
+                                           dt: TimeInterval) -> CGFloat {
+        var flare = max(0, current - CGFloat(dt) / shieldFlareDecay)
+        if shieldWas >= 0, maxShield > 0 {
+            let dropFrac = (shieldWas - shieldNow) / maxShield
+            if dropFrac > 0.0001 {
+                // Even a glancing hit reads (floor 0.4); a big bite maxes out.
+                flare = max(flare, min(1, 0.4 + CGFloat(dropFrac) * 6))
+            }
+        }
+        return flare
+    }
+
+    /// Apply a flare value to a shield-bubble node: hide it when spent, else
+    /// scale its opacity by the flare.
+    private func applyShieldFlare(_ flare: CGFloat, to node: SKSpriteNode) {
+        if flare <= 0.02 { node.isHidden = true; return }
+        node.isHidden = false
+        node.alpha = flare * Self.shieldFlareMaxAlpha
     }
 
     private func updateThruster(active: Bool, angle: Double, boosted: Bool = false) {
@@ -1837,6 +1914,18 @@ final class GameScene: SKScene {
             if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {
                 glow.texture = node.engineGlowTextures[min(npc.spriteFrame, node.engineGlowTextures.count - 1)]
             }
+            if let shield = node.shield {
+                if npc.disabled {
+                    shield.isHidden = true
+                    node.shieldFlare = 0
+                } else {
+                    node.shieldFlare = Self.advanceShieldFlare(node.shieldFlare, shieldNow: npc.shield,
+                                                               shieldWas: node.lastShield,
+                                                               maxShield: npc.maxShield, dt: frameDT)
+                    applyShieldFlare(node.shieldFlare, to: shield)
+                }
+            }
+            node.lastShield = npc.shield
             if npc.disabled {
                 // A drifting hulk: dimmed, engines dead, no health readout.
                 setDisabledLook(node, on: true)
@@ -1902,6 +1991,19 @@ final class GameScene: SKScene {
         thruster.isHidden = true
         n.container.addChild(thruster)
         n.thruster = thruster
+
+        // Shield bubble overlay (only when a "Shields" plug-in supplied the art),
+        // drawn on top of the hull and flared when this NPC's shields take a hit.
+        let shieldTex = npcShieldTextures(for: npc.shipTypeID)
+        n.shieldTextures = shieldTex
+        if let first = shieldTex.first {
+            let shield = SKSpriteNode(texture: first)
+            shield.texture?.filteringMode = spriteFilter
+            shield.zPosition = 1
+            shield.isHidden = true
+            n.container.addChild(shield)
+            n.shield = shield
+        }
 
         // A slim armor/shield bar that only appears once the ship is hurt. Solid
         // `SKSpriteNode`s (shared white texture → they batch) instead of the two
@@ -2255,7 +2357,8 @@ final class GameScene: SKScene {
     /// (airlock) cue + grow-out-of-planet effect — NOT the hyperspace arrival cue.
     /// **No scene/host teardown** → the `SpriteView` keeps its identity (no
     /// re-present flash) and keyboard focus/input stay wired to this same scene.
-    func reloadForDeparture(spobID: Int, player: Ship, textures: [SKTexture], engineTextures: [SKTexture]) {
+    func reloadForDeparture(spobID: Int, player: Ship, textures: [SKTexture], engineTextures: [SKTexture],
+                            shieldTextures: [SKTexture] = []) {
         guard let galaxy else {
             Log.scene.error("reloadForDeparture(\(spobID)): no galaxy — cannot reload the system")
             return
@@ -2292,6 +2395,9 @@ final class GameScene: SKScene {
         // swap the stellar geometry + drop every transient node from the old view.
         self.rotationTextures = textures
         self.engineGlowTextures = engineTextures
+        self.shieldTextures = shieldTextures
+        self.lastPlayerShield = -1
+        self.shieldFlare = 0
         shipNode?.removeFromParent()
         buildShip()
         self.planetVisuals = makePlanetVisuals(systemID: systemID, game: game)
@@ -2645,9 +2751,34 @@ final class GameScene: SKScene {
         return textures
     }
 
+    /// That hull's shield-bubble overlay, if a "Shields" plug-in supplied one —
+    /// same per-hull-art principle as `npcTextures`, cached the same way. Empty
+    /// for stock data (base hulls leave the shän shield layer unset).
+    private func npcShieldTextures(for shipTypeID: Int) -> [SKTexture] {
+        if let cached = npcShieldCache[shipTypeID] { return cached }
+        var textures: [SKTexture] = []
+        if shipTypeID >= 128, let sheet = galaxy?.game.shieldSprite(shipTypeID) {
+            textures = SpriteTextures.rotationFrames(from: sheet)
+        }
+        npcShieldCache[shipTypeID] = textures
+        return textures
+    }
+
     /// This ship's relationship to the player: hostile / neutral / friendly-or-
     /// owned / disabled. Drives both the minimap dot color and the placeholder
     /// hull tint, so the two stay consistent.
+    /// Whether an NPC should read as an *enemy* to the player right now. This is
+    /// broader than formal government disposition (`isHostileToPlayer`): a ship
+    /// that is actively fighting the player, or has been provoked into hostility,
+    /// counts as an enemy even when the player's legal standing with its
+    /// government is still neutral — so anything shooting at you reads red rather
+    /// than staying a confusing neutral blip.
+    private func isEffectivelyHostileToPlayer(_ npc: Ship) -> Bool {
+        if isEntityAttackingPlayer(npc.entityID) { return true }
+        if npc.brain?.provokedByPlayer == true { return true }
+        return world.diplomacy?.isHostileToPlayer(npc.government) == true
+    }
+
     private func relationship(for npc: Ship) -> RadarRelationship {
         if npc.disabled { return .disabled }
         // Your own escorts always read as friendly (green), whatever their base
@@ -2655,7 +2786,7 @@ final class GameScene: SKScene {
         // yours. Checked before hostility so a mercenary of an otherwise-hostile
         // government still shows green while it's escorting you.
         if npc.brain?.leaderID == World.playerEntityID { return .friendlyOrOwned }
-        if world.diplomacy?.isHostileToPlayer(npc.government) == true { return .hostile }
+        if isEffectivelyHostileToPlayer(npc) { return .hostile }
         if npc.government == world.player.government
             || world.diplomacy?.areAllied(npc.government, world.player.government) == true {
             return .friendlyOrOwned
@@ -2910,7 +3041,12 @@ final class GameScene: SKScene {
             let dx = (npc.position.x - shipPos.x) / shipRadarRange
             let dy = -(npc.position.y - shipPos.y) / shipRadarRange
             guard dx * dx + dy * dy <= 1 else { return nil }
-            return RadarContact(x: dx, y: dy, relationship: relationship(for: npc))
+            // IFF gates allegiance coloring (EV Nova oütf ModType 14): with an IFF
+            // outfit, blips tint red/green/grey by relationship; without one, every
+            // ship contact is drawn in the single neutral radar color, so friend and
+            // foe are indistinguishable — you have to lock a target to identify it.
+            let rel = playerHasIFF ? relationship(for: npc) : .neutral
+            return RadarContact(x: dx, y: dy, relationship: rel)
         }
     }
 

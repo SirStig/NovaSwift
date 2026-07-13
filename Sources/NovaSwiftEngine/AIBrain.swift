@@ -112,8 +112,17 @@ public final class AIBrain {
     /// The stellar object id a trader is travelling to / landing on. Exposed
     /// read-only for the same AI debug overlay.
     public internal(set) var destSpob: Int?
-    /// Which stop on the patrol beat we're heading to next.
-    var patrolIndex = 0
+    /// Set at spawn for a trader that lifted off a planet and is *leaving* the
+    /// system (cargo delivered, heading out) rather than hopping to another port.
+    /// Consumed the first time the brain resolves its post-spawn goal, so the ship
+    /// heads for the edge and jumps out — the visible outbound half of planet
+    /// traffic. Only meaningful for trader dispositions.
+    var spawnOutbound = false
+    /// The body index the last patrol standoff waypoint was taken off, so the
+    /// beat never picks the same planet twice in a row (that consecutive repeat
+    /// is what read as "circling one spot"). `nil` = no body leg yet / last leg
+    /// was a deep-space sweep.
+    var lastPatrolBodyIndex: Int?
     var stateClock: Double = 0
     var repathClock: Double = 0
     /// "name [id]" tag for logging, refreshed at the top of every `think()` so
@@ -408,9 +417,16 @@ public final class AIBrain {
             }
         }
 
-        // First goal after spawning.
+        // First goal after spawning. A trader that lifted off a planet outbound
+        // heads straight for the edge and jumps out (the visible "leaving" half of
+        // planet traffic); everyone else falls to their disposition's idle goal.
         if state == .spawning {
-            enter(defaultIdleState(me, world))
+            if spawnOutbound && aiType.isTrader {
+                enter(.departing)
+            } else {
+                enter(defaultIdleState(me, world))
+            }
+            spawnOutbound = false
         }
 
         // Drop out of combat if the target is gone. Re-resolves `targetID`
@@ -591,7 +607,7 @@ public final class AIBrain {
     /// landing approach. With nowhere to land, just cross the system and leave.
     private func travel(_ me: Ship, _ world: World) -> ControlIntent {
         if destination == nil {
-            if let body = pickPlanetBody(world) {
+            if let body = pickPlanetBody(me, world) {
                 destSpob = body.id
                 destination = body.position
             } else {
@@ -751,7 +767,7 @@ public final class AIBrain {
         if d > 150 {
             let (intent, _) = moveTo(me, toward: station, matching: leader.velocity,
                                      arriveRadius: 16, arriveSpeed: max(6, me.stats.maxSpeed * 0.04))
-            me.formationBoost = 0.4
+            me.formationBoost = 0.6
             return intent
         }
 
@@ -769,12 +785,20 @@ public final class AIBrain {
         let aCmd = posErr * kp + velErr * kd + leaderAccel
 
         var intent = ControlIntent()
-        // Deadzone: essentially on-station and matched. Coasting holds station, so
-        // point along the flagship and don't thrust — this is what ends the
-        // perpetual micro-turning the reactive controller did.
+        // Deadzone: essentially on-station and matched. Hold the slot by flying
+        // exactly as the leader flies rather than coasting — face the leader's
+        // heading and keep just enough thrust to sustain its speed. Formation ships
+        // fly inertialess, so cutting thrust here bleeds the throttle off and drops
+        // the wing behind a cruising leader (the stutter that read as "escorts can't
+        // keep up"); matching the leader instead pins the wing to it. Only thrusting
+        // while below the leader's speed and roughly along its travel still ends the
+        // perpetual micro-turning the old reactive controller did.
         if aCmd.length < me.stats.acceleration * 0.2 {
-            if abs(angleDelta(from: me.angle, to: leader.angle)) > 0.03 {
-                intent.desiredHeading = leader.angle
+            intent.desiredHeading = leader.angle
+            let leaderSpeed = leader.velocity.length
+            if leaderSpeed > 1, me.velocity.length < leaderSpeed,
+               Vec2.heading(me.angle).dot(leader.velocity.normalized) > cosThrustCone {
+                intent.thrust = true
             }
             return intent
         }
@@ -974,33 +998,73 @@ public final class AIBrain {
     /// picking an uninhabited rock/deep-space stellar to "land" on (AI should
     /// only ever land on inhabited planets/stations; `canLand` already encodes
     /// both — see `StellarBody`'s doc comment).
-    private func pickPlanetBody(_ world: World) -> StellarBody? {
+    private func pickPlanetBody(_ me: Ship, _ world: World) -> StellarBody? {
         let landable = world.systemContext.bodies.filter { $0.canLand }
         guard !landable.isEmpty else { return nil }
-        return landable[world.rng.int(in: 0...(landable.count - 1))]
+        guard landable.count > 1 else { return landable[0] }
+        // Bias toward a *nearer* landable body so the trader's run from its jump-in
+        // point reads as a purposeful line to the closest port rather than a random
+        // cross-system drift — but keep it a weighted roll, not strict nearest, so
+        // traffic still spreads across a system's planets. Weight ∝ 1/(distance),
+        // softened by a floor so the far ones aren't impossible.
+        let weights = landable.map { body -> Double in
+            let d = (body.position - me.position).length
+            return 1.0 / max(1.0, d / 1000.0)
+        }
+        let total = weights.reduce(0, +)
+        guard total > 0 else { return landable[world.rng.int(in: 0...(landable.count - 1))] }
+        var roll = world.rng.double(in: 0...total)
+        for (i, w) in weights.enumerated() {
+            roll -= w
+            if roll <= 0 { return landable[i] }
+        }
+        return landable[landable.count - 1]
     }
 
-    /// The next stop on a patrol beat: the following stellar object in the
-    /// system, walked in order so a patrol traces a believable circuit of the
-    /// system's planets rather than picking random points (which read as aimless
-    /// circling). Scanning traffic is a separate deliberate state now.
+    /// The next stop on a patrol beat. Rather than walking the bodies in strict
+    /// index order — which, for planets arranged in a ring around the star, just
+    /// traced that ring and read as "flying in circles" — a patrol now sweeps the
+    /// *whole system volume* with varied, non-sequential legs:
+    ///   • ~half the time it flies a standoff pass off a **randomly chosen** body
+    ///     (never the same one twice running), checking in on a planet/station;
+    ///   • ~half the time it strikes out to a **deep-space** point at a random
+    ///     bearing and distance, covering the empty quadrants, outskirts and jump
+    ///     lanes a planet circuit never touches.
+    /// Leg length varies naturally with the random distance, so the ship isn't
+    /// forever making the same short hop. Flown at cruise (`seek`), so it reads as
+    /// a ship on a beat, not one orbiting a mark. Scanning traffic is a separate
+    /// deliberate state.
     private func pickPatrolPoint(_ me: Ship, _ world: World) -> Vec2 {
         let ctx = world.systemContext
         let stops = ctx.bodies
-        if !stops.isEmpty {
-            patrolIndex = (patrolIndex + 1) % stops.count
-            let b = stops[patrolIndex]
-            // A stable standoff on the *outer* face of each body (away from system
-            // centre), no random jitter: visiting each planet's outer point in turn
-            // sweeps a wide, believable circuit of the whole system rather than
-            // orbiting one spot. Deterministic, so the beat doesn't twitch.
-            let outward = b.position - ctx.center
-            let dir = outward.length < 1 ? Vec2(0, 1) : outward.normalized
-            return b.position + dir * (b.radius + 200)
+
+        // A deep-space sweep point: random bearing, distance a good fraction of the
+        // system out from centre so the patrol ranges wide instead of hugging one
+        // radius. Also the fallback for empty / single-body systems, where a body
+        // leg would just re-pick the same spot.
+        func deepSpacePoint() -> Vec2 {
+            lastPatrolBodyIndex = nil
+            let angle = world.rng.double(in: 0...(2 * .pi))
+            let reach = max(ctx.jumpRadius, 2000)
+            let dist = world.rng.double(in: (reach * 0.35)...(reach * 0.95))
+            return ctx.center + Vec2.heading(angle) * dist
         }
-        // Empty system: loiter somewhere inside the jump radius.
-        let r = ctx.jumpRadius * 0.5
-        return ctx.center + Vec2(world.rng.double(in: -r...r), world.rng.double(in: -r...r))
+
+        // Prefer a body standoff on ~half of legs, but only when there's a body
+        // *other than* the one we just visited to head to (so a lone-planet system
+        // never circles that planet).
+        let wantsBody = world.rng.int(in: 0...1) == 0
+        let candidates = stops.indices.filter { $0 != lastPatrolBodyIndex }
+        guard wantsBody, !candidates.isEmpty else { return deepSpacePoint() }
+
+        let idx = candidates[world.rng.int(in: 0...(candidates.count - 1))]
+        lastPatrolBodyIndex = idx
+        let b = stops[idx]
+        // Stand off the body's *outer* face (away from system centre) so the pass
+        // sweeps past it rather than diving at it.
+        let outward = b.position - ctx.center
+        let dir = outward.length < 1 ? Vec2(0, 1) : outward.normalized
+        return b.position + dir * (b.radius + 200)
     }
 
     /// Who this authority ship should fly over and scan, if anyone. The player

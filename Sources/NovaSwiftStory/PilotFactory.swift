@@ -78,6 +78,22 @@ public enum PilotFactory {
             engine.apply(set: scenario.onStart)
             player = engine.player
         }
+
+        // Ensure a fresh pilot sees colorized radar from the start: EV Nova gates
+        // allegiance-tinted radar blips on an IFF outfit (oütf ModType 14). If
+        // neither the starting hull nor the scenario's OnStart grant already
+        // provides one, grant the data's standard IFF outfit so the radar isn't a
+        // confusing monochrome field for a brand-new player. Faithful otherwise:
+        // any ship/plugin loadout that lacks IFF still reads monochrome.
+        func providesIFF(_ outfitID: Int) -> Bool { game.outfit(outfitID)?.has(.iff) == true }
+        let hullOutfitIDs = (game.ship(shipID)?.outfits ?? []).map(\.id)
+        let alreadyHasIFF = player.outfits.keys.contains(where: providesIFF)
+            || hullOutfitIDs.contains(where: providesIFF)
+        if !alreadyHasIFF, let iff = game.outfits().first(where: { $0.has(.iff) }) {
+            player.grantOutfit(iff.id)
+            Log.pilot.debug("PilotFactory.make: granted starting IFF outfit \(iff.id) (colorized radar)")
+        }
+
         Log.pilot.debug("PilotFactory.make: pilot \"\(name, privacy: .public)\" started at system \(system) with ship \(shipID), credits=\(player.credits)")
         return player
     }

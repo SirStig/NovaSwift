@@ -1,7 +1,7 @@
 import Foundation
 
 /// A single resource: a typed, numbered, optionally-named blob of bytes.
-public struct Resource: Hashable {
+public struct Resource: Hashable, Sendable {
     public let type: FourCharCode
     public let id: Int
     public let name: String
@@ -26,7 +26,7 @@ public struct Resource: Hashable {
 /// Plug-ins layer over the base game: applying a plug-in's resources with the
 /// same (type, id) as a base resource replaces it — which is exactly how EV Nova
 /// plug-ins override content. Use `overlay(_:)` to build that chain.
-public struct ResourceCollection {
+public struct ResourceCollection: Sendable {
     public private(set) var byType: [FourCharCode: [Int: Resource]] = [:]
 
     public init() {}

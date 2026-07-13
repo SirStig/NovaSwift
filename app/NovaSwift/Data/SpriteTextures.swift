@@ -13,15 +13,13 @@ enum SpriteTextures {
     static func rotationFrames(from sheet: SpriteSheet, rotationCount: Int = 36) -> [SKTexture] {
         let count = min(rotationCount, sheet.frameCount)
         guard count > 0 else { return [] }
-        var textures: [SKTexture] = []
-        textures.reserveCapacity(count)
-        for i in 0..<count {
-            if let cg = sheet.frameCGImage(i) {
-                let tex = SKTexture(cgImage: cg)
-                tex.filteringMode = .nearest
-                textures.append(tex)
-            }
+        // Build the backing grid CGImage once and crop every heading out of it.
+        // (Calling `frameCGImage(_:)` per frame rebuilt the full surface + copied
+        // the whole RGBA buffer 36× for a single hull — see `frameCGImages`.)
+        return sheet.frameCGImages(0..<count).map { frame in
+            let tex = SKTexture(cgImage: frame.image)
+            tex.filteringMode = .nearest
+            return tex
         }
-        return textures
     }
 }

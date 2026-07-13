@@ -7,7 +7,7 @@ import Foundation
 /// `shïp`, `wëap`, `oütf`, `mïsn`, `spöb`, `sÿst`, … We therefore key on the raw
 /// four bytes and decode to a display string via Mac Roman — never by normalizing
 /// to ASCII.
-public struct FourCharCode: Hashable, Comparable, CustomStringConvertible {
+public struct FourCharCode: Hashable, Comparable, CustomStringConvertible, Sendable {
     /// The four bytes packed big-endian into a UInt32.
     public let rawValue: UInt32
 

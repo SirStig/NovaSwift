@@ -20,7 +20,7 @@ struct SystemFinderView: View {
     @State private var query = ""
 
     private var known: [SystRes] {
-        guard let game = nav.game else { return [] }
+        guard nav.game != nil else { return [] }
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
