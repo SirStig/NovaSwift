@@ -54,7 +54,7 @@ covers what the Bible documents (see [`AI.md`](AI.md) and
 | Area | What's off | Where |
 |---|---|---|
 | **Spawn cadence / density** | Ambient population is a trickle heuristic (`spawnInterval` toward `sÿst.AvgShips`) "in the same spirit as" the original, not its exact algorithm. Traffic can feel slightly too sparse or too even — it doesn't reproduce the original's exact arrival rhythm and mix. | `Spawner.swift` ambient/fleet cadence |
-| **Flight handling** | Hand-tuned turn/thrust heuristics ("thrust when roughly pointed the right way", turn-limit lifts through hard turns, escort heading-hold hacks) produce occasional wobble/overshoot "hiccups" a from-source AI wouldn't. | `AIBrain.swift` steering primitives |
+| **Flight handling** | AI ships now fly the **driftless (inertialess) model** by default (`FlightTuning.aiInertialess = .all`), reproducing EV Nova's precise NPC flight and removing the momentum overshoot, wrong-direction turn drift, and constant escort micro-correction. Residual hand-tuned heuristics remain but the biggest wobble source is gone. | `AIBrain.swift` steering, `Ship.fliesInertialess`, `FlightTuning` |
 | **Combat/behavior edge cases** | One mission `ShipBehav` case falls through to normal AI; brainless ships drift; some engagement transitions approximate undocumented timing. | `AIBrain.swift`, `World.swift` |
 
 This is the honest soft spot. **Most of the game plays close to the original;

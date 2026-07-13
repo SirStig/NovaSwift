@@ -529,7 +529,9 @@ public final class Spawner {
         // The flagship acts on its own hull's disposition (a freighter convoy leader
         // trades; a warfleet's leader fights) rather than always being a warship.
         let leadAI = galaxy.game.ship(fleet.leadShip).map { AIType(raw: $0.inherentAI) } ?? .warship
-        lead.brain = AIBrain(aiType: leadAI == .unknown ? .warship : leadAI, govt: govt)
+        let leadBrain = AIBrain(aiType: leadAI == .unknown ? .warship : leadAI, govt: govt)
+        leadBrain.isFleetMember = true
+        lead.brain = leadBrain
         // flët `Flags` 0x0001: freighters (InherentAI <= 2) in this fleet carry
         // random cargo, so boarding a convoy hauler actually yields loot.
         if fleet.freightersHaveRandomCargo, let ai = galaxy.game.ship(fleet.leadShip)?.inherentAI, ai <= 2 {
@@ -554,6 +556,7 @@ public final class Spawner {
                 let brain = AIBrain(aiType: escortAI == .unknown ? .interceptor : escortAI, govt: govt)
                 brain.leaderID = leadID
                 brain.formationSlot = slot
+                brain.isFleetMember = true
                 e.brain = brain
                 if fleet.freightersHaveRandomCargo, let ai = galaxy.game.ship(escort.shipID)?.inherentAI, ai <= 2 {
                     rollRandomFreighterCargo(into: e, world: world)

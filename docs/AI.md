@@ -24,8 +24,12 @@ where the port still *feels* least like the original. The known weak points:
   original's precise arrival rhythm and ship mix.
 - **Flight handling.** The steering is hand-tuned heuristics ("thrust when
   roughly pointed the right way," turn-limit lifts through hard turns, escort
-  heading-hold hacks). These produce the occasional wobble/overshoot "hiccup"
-  that a from-source flight AI wouldn't.
+  heading-hold hacks). To match the original's *precise* AI flight — and to kill
+  the momentum overshoot, wrong-direction turn drift, and constant escort
+  micro-correction — AI-controlled ships now fly the engine's **driftless
+  (inertialess) model** by default (`FlightTuning.aiInertialess`, see below),
+  the way EV Nova's own AI flew tighter than the player on the same hull. That
+  removes the biggest wobble source; the residual heuristics are what's left.
 - **Behavior edge cases.** One mission `ShipBehav` case falls through to normal
   AI; ships with no brain drift; some engagement/disengagement transitions
   approximate timing the Bible never documented.
@@ -40,8 +44,25 @@ it already matches the original; read it alongside the caveats above.
 Every ship — player or NPC — is a `Ship`. The simulation only ever reads a
 `ControlIntent` (turn / thrust / fire / desiredHeading). The player's fingers
 produce one; an NPC's `AIBrain` produces the *same struct*. That symmetry means
-one flight model, one combat model, one collision model drives everything — an
-NPC obeys exactly the physics the player does.
+one flight model, one combat model, one collision model drives everything.
+
+**One deliberate asymmetry — inertialess AI flight.** EV Nova's NPC AI doesn't
+wrestle the same Newtonian momentum the player does: its ships turn and their
+velocity tracks the nose far more tightly than a human flying the identical
+hull, which is exactly why AI traffic reads as *precise* rather than drifty.
+We reproduce that by flying AI-controlled ships on the engine's driftless
+(inertialess) flight model — the same `Ship.step` path a hull with the real
+`shïp` Flags2 0x0040 flag uses — regardless of whether their hull carries the
+flag. The player still flies authentic Newtonian flight (with inertia) unless
+*their own* hull/outfits set the flag. This is controlled by
+`FlightTuning.aiInertialess` (`AIInertialessScope`): `.all` (the default —
+every NPC), `.formations` (only fleet members and escorts, to steady a wing's
+station-keeping), or `.off` (strict "identical physics for player and AI,"
+only the real hull flag counts). `Ship.fliesInertialess(_:)` is the single
+predicate both `Ship.step` and the `AIBrain` steering primitives read. Driving
+NPCs driftless is what removes the momentum overshoot, wrong-direction drift on
+turns, and the constant escort micro-correction a from-source flight AI wouldn't
+have.
 
 ```
 perceive world ─▶ AIBrain.think() ─▶ ControlIntent ─▶ Ship.step() ─▶ physics
