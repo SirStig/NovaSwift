@@ -73,6 +73,9 @@ final class MissionAndFleetSpawnTests: XCTestCase {
         let spawner = Spawner(galaxy: galaxy, table: table)
         let world = World(player: Ship(name: "P", stats: stats()))
         world.galaxy = galaxy
+        // An inhabited system (a landable port) so the spawner keeps its fleet slots:
+        // `applyHabitation` zeroes fleets in uninhabited/empty systems.
+        world.systemContext.bodies = [StellarBody(id: 1, position: Vec2(0, 800), radius: 90, canLand: true)]
         spawner.populate(world)
 
         XCTAssertTrue(world.npcs.contains { $0.shipTypeID == 128 },
@@ -153,6 +156,8 @@ final class MissionAndFleetSpawnTests: XCTestCase {
         let spawner2 = Spawner(galaxy: galaxy, table: table)
         let world2 = World(player: Ship(name: "P", stats: stats()))
         world2.galaxy = galaxy
+        // Inhabited system so fleet slots aren't zeroed by `applyHabitation`.
+        world2.systemContext.bodies = [StellarBody(id: 1, position: Vec2(0, 800), radius: 90, canLand: true)]
         world2.fleetSpawnEligible = { _ in true }
         spawner2.populate(world2)
         XCTAssertTrue(world2.npcs.contains { $0.shipTypeID == 128 },
