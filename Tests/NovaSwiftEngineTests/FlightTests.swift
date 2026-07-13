@@ -95,6 +95,51 @@ final class FlightTests: XCTestCase {
         XCTAssertEqual(ship.velocity.y, 0, accuracy: 5, "no leftover drift in the old direction")
     }
 
+    /// EV Nova's NPC AI flies driftless: every AI-brained ship flies the
+    /// inertialess model by default (`FlightTuning.aiInertialess == .all`), while
+    /// the player keeps authentic Newtonian flight unless their own hull sets the
+    /// flag — the player/AI asymmetry the original had.
+    func testAIShipsFlyInertialessByDefaultAndPlayerDoesNot() {
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        let npc = Ship(name: "NPC", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        npc.brain = AIBrain(aiType: .warship, govt: 500)
+        XCTAssertTrue(npc.fliesInertialess(world.tuning), "an AI ship flies driftless by default")
+        XCTAssertFalse(world.player.fliesInertialess(world.tuning), "the player keeps Newtonian flight")
+    }
+
+    /// `.formations` scope: only ships flying in formation (a leader-following
+    /// escort, or a flagged fleet member such as the flagship) fly driftless — a
+    /// lone AI ship still flies Newtonian.
+    func testFormationsScopeOnlyCoversFormationFlyers() {
+        var tuning = FlightTuning.default
+        tuning.aiInertialess = .formations
+        let lone = Ship(name: "Lone", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        lone.brain = AIBrain(aiType: .warship, govt: 1)
+        XCTAssertFalse(lone.fliesInertialess(tuning), "a lone AI ship stays Newtonian under .formations")
+
+        let escort = Ship(name: "Escort", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        let eb = AIBrain(aiType: .interceptor, govt: 1); eb.leaderID = 0
+        escort.brain = eb
+        XCTAssertTrue(escort.fliesInertialess(tuning), "a ship holding formation on a leader flies driftless")
+
+        let flagship = Ship(name: "Flag", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        let fb = AIBrain(aiType: .warship, govt: 1); fb.isFleetMember = true
+        flagship.brain = fb
+        XCTAssertTrue(flagship.fliesInertialess(tuning), "a flagged fleet member (the lead) flies driftless too")
+    }
+
+    /// `.off` scope restores strict "identical physics for player and AI": only a
+    /// hull/outfit with the real flag is driftless, brain or no brain.
+    func testOffScopeLeavesOnlyHullFlaggedShipsInertialess() {
+        var tuning = FlightTuning.default
+        tuning.aiInertialess = .off
+        let npc = Ship(name: "NPC", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        npc.brain = AIBrain(aiType: .warship, govt: 1)
+        XCTAssertFalse(npc.fliesInertialess(tuning), "under .off an AI ship without the hull flag is Newtonian")
+        npc.inertialess = true   // the real shïp Flags2 0x0040 flag
+        XCTAssertTrue(npc.fliesInertialess(tuning), "the hull flag always wins, whatever the AI scope")
+    }
+
     /// Inertialess hulls have no momentum: release the throttle and they bleed to a
     /// stop rather than coasting forever like an inertial ship.
     func testInertialessShipCoastsToStopWhenIdle() {

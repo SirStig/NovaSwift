@@ -57,6 +57,34 @@ public struct ControlIntent: Equatable {
     private static var loggedTurnConflict = false
 }
 
+/// How widely the AI-inertialess flight model is applied on top of each hull's
+/// own `shïp` Flags2 0x0040 / inertial-dampener flag.
+///
+/// EV Nova's NPC AI doesn't wrestle the same Newtonian momentum the player does —
+/// its ships turn and their velocity tracks the nose far more tightly than a
+/// human flying the identical hull, which is why AI traffic reads as *precise*
+/// rather than drifty. Reproducing that here means letting AI-controlled ships
+/// fly the engine's driftless (inertialess) model regardless of whether their
+/// hull carries the real flag. The player keeps authentic Newtonian flight
+/// (unless *their* hull/outfits set the flag), so the asymmetry the original had
+/// is preserved.
+public enum AIInertialessScope: Sendable {
+    /// Off — only hulls/outfits with the real `shïp` Flags2 0x0040 flag (or an
+    /// inertial-dampener outfit) fly driftless. Pure "everyone obeys identical
+    /// physics" mode.
+    case off
+    /// Only ships flying in formation — fleet members and escorts (anything with
+    /// a leader, plus the fleet flagship) — fly driftless. Kills the constant
+    /// micro-correction wobble of a wing holding station without changing how
+    /// lone traders/patrols fly.
+    case formations
+    /// Every AI-brained ship flies driftless — the classic EV Nova AI-flight
+    /// feel, and the default. Turning points the ship *and* its motion together,
+    /// so NPCs go where they aim without the momentum overshoot/wrong-direction
+    /// drift a from-source flight AI wouldn't have.
+    case all
+}
+
 /// Tuning that maps EV Nova's integer stat units into simulation units. Kept in
 /// one place so flight feel can be adjusted without touching data decoding.
 public struct FlightTuning {
@@ -64,6 +92,10 @@ public struct FlightTuning {
     public var accelScale: Double      // stat → px/sec²
     public var turnScale: Double       // stat → deg/sec
     public var dragPerSecond: Double   // gentle space drag so ships settle (0 = pure Newtonian)
+    /// How broadly AI ships fly the engine's driftless (inertialess) model
+    /// beyond their own hull flag — see `AIInertialessScope`. Defaults to `.all`
+    /// (every NPC), matching EV Nova's precise AI flight.
+    public var aiInertialess: AIInertialessScope = .all
 
     public static let `default` = FlightTuning(speedScale: 1.0, accelScale: 1.0,
                                                turnScale: 3.0, dragPerSecond: 0.0)
@@ -554,6 +586,22 @@ public final class Ship {
         Log.ai.debug("NPC \(shipName) [\(shipID)] has no AIBrain attached — will drift with zero control input")
     }
 
+    /// Whether this ship flies the engine's driftless (inertialess) model right
+    /// now. Its own hull/outfit flag (`inertialess`) always wins; on top of that,
+    /// an AI-controlled ship (one with a `brain`) may fly driftless per the
+    /// `FlightTuning.aiInertialess` scope, reproducing EV Nova's precise NPC
+    /// flight. A player ship (no brain) without the hull flag always flies
+    /// Newtonian, so the player/AI asymmetry the original had is preserved.
+    func fliesInertialess(_ tuning: FlightTuning) -> Bool {
+        if inertialess { return true }
+        guard let brain = brain else { return false }
+        switch tuning.aiInertialess {
+        case .off:        return false
+        case .formations: return brain.leaderID != nil || brain.isFleetMember
+        case .all:        return true
+        }
+    }
+
     func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning) {
         // Fully ionized: "nearly immobilized" (Bible) — no active turning or
         // thrust until the charge dissipates below `ionizeMax`. Existing
@@ -601,8 +649,9 @@ public final class Ship {
         }
 
         let heading = Vec2.heading(angle)
-        if inertialess {
-            // No inertia (shïp Flags2 0x40 / inertial-dampener outfit): the ship has
+        if fliesInertialess(tuning) {
+            // No inertia (shïp Flags2 0x40 / inertial-dampener outfit, or an
+            // AI ship flying the `FlightTuning.aiInertialess` model): the ship has
             // no lateral momentum — its velocity tracks the nose. A throttle scalar
             // ramps up under thrust, brakes under reverse, and bleeds off when idle;
             // the real velocity then chases heading×throttle at up to 2×accel. The
@@ -777,6 +826,11 @@ public final class World {
             let inbound = Vec2(sin(ship.angle), cos(ship.angle))
             let entrySpeed = min(ship.stats.maxSpeed * 2.4, 3200)
             ship.velocity = inbound * entrySpeed
+            // Seed the inertialess throttle to match, so a driftless AI arrival
+            // rides its inbound momentum in and eases down rather than snapping
+            // to cruise on the first frame (harmless for Newtonian hulls, which
+            // ignore `throttleSpeed`).
+            ship.throttleSpeed = entrySpeed
             // Let the speed cap start at the entry speed and bleed back to cruise
             // over ~1.3s, so the ship visibly rushes in and slows down.
             ship.entryOverspeed = max(0, entrySpeed - ship.stats.maxSpeed)

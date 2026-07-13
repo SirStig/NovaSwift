@@ -66,6 +66,16 @@ public final class AIBrain {
     public var leaderID: Int?
     /// This escort's slot in the leader's formation (0-based), for tidy wings.
     public var formationSlot = 0
+    /// True for ships that belong to a spawned `flët` — the flagship as well as
+    /// its escorts. Lets `FlightTuning.aiInertialess == .formations` cover a
+    /// whole formation (including the lead, which has no `leaderID`), not just
+    /// the escorts holding station on it.
+    public var isFleetMember = false
+    /// The `flët` resource id this ship spawned as part of, if any. Lets the
+    /// `Spawner` count distinct fleets in-system and avoid re-picking a fleet
+    /// type that's already present, so a system shows variety instead of the
+    /// same formation over and over.
+    public var fleetID: Int?
     /// Last frame's leader velocity, kept so an escort can feed the leader's own
     /// *acceleration* forward into its station-keeping — moving with the leader the
     /// instant it thrusts/turns rather than lagging and snatching a correction a
@@ -113,6 +123,12 @@ public final class AIBrain {
     /// our target (in range + aimed) — flips are exactly the "why didn't my
     /// weapon fire" moments for AI-controlled ships.
     private var hadFiringSolution: Bool?
+    /// Whether this ship is flying the engine's driftless (inertialess) model
+    /// this frame (`Ship.fliesInertialess`), cached at the top of `think` so the
+    /// steering primitives — which only take `me`, not the world/tuning — can
+    /// exploit the no-drift model (a driftless hull brakes by cutting throttle,
+    /// with no need to rotate to retrograde first). Refreshed every frame.
+    private var inertialessNow = false
     /// Slow rotation used to walk an interceptor's holding-pattern orbit.
     var orbitAngle: Double = 0
     /// The ship this authority vessel is currently flying over to scan.
@@ -289,6 +305,7 @@ public final class AIBrain {
         stateClock += dt
         repathClock -= dt
         scanCooldown -= dt
+        inertialessNow = me.fliesInertialess(world.tuning)
 
         // Validate / refresh combat target.
         if let tid = targetID, let t = world.ship(id: tid), t.isAlive,
@@ -882,6 +899,24 @@ public final class AIBrain {
         // Newtonian flight, coasting now holds station — no thrust needed.
         if relPos.length < arriveRadius, relVel.length < arriveSpeed {
             return (cmd, true)
+        }
+        // Driftless (inertialess) hull: don't do a flip-and-burn. Its velocity
+        // tracks the nose, so rotating to retrograde to brake would just swing
+        // its motion around — instead keep the nose on the target and cut the
+        // throttle inside braking distance, letting it coast cleanly onto the
+        // mark. Braking is measured against the *relative* velocity so a moving
+        // target (a formation slot on a cruising leader) is handled too; the
+        // ship only stops thrusting when it's actually closing on the target.
+        if inertialessNow {
+            let dist = relPos.length
+            guard dist > 0.0001 else { return (cmd, true) }
+            let dir = relPos * (1 / dist)
+            cmd.desiredHeading = dir.angle
+            let closingSpeed = relVel.dot(dir)          // >0 when moving toward the target
+            let brakeDist = 0.5 * closingSpeed * closingSpeed / max(me.stats.acceleration, 1)
+            let needToClose = closingSpeed <= 0 || dist > brakeDist + arriveRadius
+            if needToClose, dir.dot(Vec2.heading(me.angle)) > cosThrustCone { cmd.thrust = true }
+            return (cmd, false)
         }
         let stop = stoppingPoint(me, relativeVelocity: relVel)
         let aim = targetPos - stop

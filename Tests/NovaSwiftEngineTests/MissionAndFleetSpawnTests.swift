@@ -95,6 +95,42 @@ final class MissionAndFleetSpawnTests: XCTestCase {
                        "a fleet pinned to Federation systems must not spawn in another govt's system")
     }
 
+    func testSingleShipsAreTheBackboneAndFleetsStayCapped() {
+        // Regression for "I only ever see the same couple of fleets and barely any
+        // lone ships": fleets used to top the head-count up to maxPopulation on
+        // their own timer while the single-ship trickle only filled to the smaller
+        // ambient target, so a fleet or two crowded lone ships out. Single ships
+        // must now be the maintained backbone, with fleets a capped accent.
+        var col = ResourceCollection()
+        col.add(ship(128, name: "Hull"))
+        col.add(govt(128))
+        col.add(dude(200, aiType: AIType.wimpyTrader.rawValue, govt: 128, ships: [(128, 100)]))
+        col.add(fleet(128, lead: 128, escorts: [(128, 3, 3)], govt: 128, linkSyst: 10000)) // 4-ship fleet
+        let galaxy = Galaxy(game: NovaGame(col))
+
+        let table = SpawnTable(dudes: [(200, 100)], fleets: [], averageShips: 8,
+                               systemGovt: 128, systemID: 500)
+        let spawner = Spawner(galaxy: galaxy, table: table)
+        let world = World(player: Ship(name: "P", stats: stats()))
+        world.galaxy = galaxy
+        world.diplomacy = galaxy.makeDiplomacy()
+        spawner.populate(world)
+        // A stretch of ambient updates (no world.step, so nothing departs) — the
+        // population settles at its fill targets and the fleet cadence keeps firing.
+        for _ in 0..<2000 { spawner.update(1.0 / 30.0, world: world) }
+
+        let fleetShips = world.npcs.filter { $0.brain?.isFleetMember == true }.count
+        let singles = world.npcs.count - fleetShips
+        let distinctFleets = Set(world.npcs.compactMap { $0.brain?.fleetID }).count
+
+        XCTAssertLessThanOrEqual(distinctFleets, spawner.maxConcurrentFleets,
+                                 "fleets must stay capped, not accumulate every timer tick (had \(distinctFleets))")
+        XCTAssertGreaterThanOrEqual(singles, spawner.targetPopulation - 1,
+                                    "lone ships fill to the ambient backbone target (had \(singles))")
+        XCTAssertGreaterThan(singles, fleetShips,
+                             "single ships should be the bulk of traffic, not fleets (singles \(singles) vs fleet ships \(fleetShips))")
+    }
+
     // MARK: Phase 2 — AppearOn NCB gate
 
     func testAppearOnGatedFleetSuppressedByDefaultAndEnabledByHost() {

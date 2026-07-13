@@ -54,8 +54,18 @@ public final class Spawner {
     public let galaxy: Galaxy
     public var table: SpawnTable
     /// How many NPCs to keep around; derived from the system's average count.
+    /// This is specifically the *single-ship* backbone target — the ambient
+    /// lone-trader/lone-patrol traffic that should make up most of a system's
+    /// population. Fleets arrive on top of this as an occasional accent.
     public var targetPopulation: Int
     public var maxPopulation = 18
+    /// How many spawned fleets may share a system at once. Fleets are an accent
+    /// on top of the single-ship backbone, not the backbone itself, so this
+    /// stays low; a busy system (high `AvgShips`) tolerates a second. Keeping it
+    /// small is the main lever that stops formations from dominating the
+    /// population — the "I only ever see the same couple of fleets and barely any
+    /// lone ships" symptom.
+    public var maxConcurrentFleets: Int
     /// Seconds between ambient single-ship arrival attempts once below target.
     /// Deliberately unhurried — a fresh ship warping in every couple of seconds
     /// made systems feel like a churning airport; real traffic trickles in.
@@ -113,6 +123,9 @@ public final class Spawner {
         // group events allowed to push a bit past it, up to `maxPopulation`.
         let avg = max(3, table.averageShips)
         self.targetPopulation = min(maxPopulation, avg)
+        // Small systems get one fleet at most; a busy system (target ~16+)
+        // tolerates two so a large hub doesn't feel starved of formations.
+        self.maxConcurrentFleets = max(1, self.targetPopulation / 8)
     }
 
     /// Where a spawn comes from: mid-system (initial fill), the hyperspace edge
@@ -124,14 +137,19 @@ public final class Spawner {
     /// eligible fleet, one is placed up front so the player often finds a
     /// formation already on station instead of only ever catching lone ships.
     public func populate(_ world: World) {
-        let pool = fleetPool(world: world)
-        if !pool.isEmpty,
-           let fid = weightedPick(pool.map { ($0.fleetID, $0.weight) },
-                                  roll: world.rng.int(in: 0...9999), world: world) {
+        // One fleet up front, as an accent — so the player often arrives to find
+        // a formation already on station — but just the one.
+        if let fid = pickFleet(world, excluding: []) {
             spawnFleet(fid, into: world, origin: .interior)
         }
+        // Fill the lone-ship backbone to the ambient target, counting ONLY
+        // single ships so the up-front fleet doesn't eat into that budget — the
+        // player should arrive to mostly lone traffic with a fleet among it, not
+        // a system that's all formation.
         var guardCount = 0
-        while world.npcs.count < targetPopulation && guardCount < maxPopulation * 2 {
+        while singleShipCount(world) < targetPopulation,
+              world.npcs.count < maxPopulation,
+              guardCount < maxPopulation * 2 {
             spawnOne(into: world, origin: .interior)
             guardCount += 1
         }
@@ -143,32 +161,77 @@ public final class Spawner {
         updateReinforcements(world)
 
         // Deliberate fleet cadence, independent of the ambient trickle so fleets
-        // reliably appear. A fleet is a group, so it may push a little past the
-        // ambient target population (capped by `maxPopulation` inside spawnFleet).
+        // reliably appear — but gated so they stay an *accent*, not the bulk of
+        // the population. Two gates fix the "same couple of fleets, barely any
+        // lone ships" symptom: a hard cap on concurrent fleets, and picking a
+        // fleet type that isn't already in-system so what does arrive varies.
         fleetTimer -= dt
         if fleetTimer <= 0 {
             // Jitter the next fleet arrival ±40% so convoys don't march in on a
             // metronome; a fleet is a group event, spaced well apart from the
             // ambient single-ship trickle.
             fleetTimer = fleetInterval * world.rng.double(in: 0.6...1.4)
-            if world.npcs.count < maxPopulation {
-                let pool = fleetPool(world: world)
-                if !pool.isEmpty,
-                   let fid = weightedPick(pool.map { ($0.fleetID, $0.weight) },
-                                          roll: world.rng.int(in: 0...9999), world: world) {
-                    spawnFleet(fid, into: world, origin: .edge)
-                }
+            if world.npcs.count < maxPopulation,
+               currentFleetCount(world) < maxConcurrentFleets,
+               let fid = pickFleet(world, excluding: presentFleetIDs(world)) {
+                spawnFleet(fid, into: world, origin: .edge)
             }
         }
 
+        // Ambient single-ship trickle — the backbone of a system's traffic. It's
+        // maintained toward `targetPopulation` counting ONLY lone ships, so a
+        // fleet passing through never starves it. (The old code gated on total
+        // head-count, so as soon as a fleet's ships pushed the count past the
+        // target the trickle stopped — which is exactly what made systems read
+        // as "all fleets, no singles.")
         timer -= dt
-        guard world.npcs.count < targetPopulation, timer <= 0 else { return }
+        guard singleShipCount(world) < targetPopulation,
+              world.npcs.count < maxPopulation, timer <= 0 else { return }
         timer = spawnInterval
         // Most arrivals jump in from hyperspace; some lift off from a spaceport so
         // the player also sees traffic *leaving* planets, not only inbound.
         let hasPads = world.systemContext.bodies.contains { $0.canLand }
         let origin: SpawnOrigin = (hasPads && world.rng.double(in: 0...1) < 0.25) ? .planet : .edge
         spawnOne(into: world, origin: origin)
+    }
+
+    // MARK: Population accounting (single-ship backbone vs. fleet accent)
+
+    /// Ships in-system that belong to a spawned `flët` (flagship + escorts).
+    private func fleetShipCount(_ world: World) -> Int {
+        world.npcs.reduce(0) { $0 + (($1.brain?.isFleetMember ?? false) ? 1 : 0) }
+    }
+
+    /// Lone ships in-system — the ambient single-ship traffic the trickle
+    /// maintains, i.e. everything that isn't part of a fleet.
+    private func singleShipCount(_ world: World) -> Int {
+        world.npcs.count - fleetShipCount(world)
+    }
+
+    /// Distinct fleets currently in-system, counted by their flagships (a fleet
+    /// whose lead has died leaves reverting escorts that each read as their own
+    /// remnant — an acceptable over-count that only makes the spawner slightly
+    /// more conservative about adding another fleet).
+    private func currentFleetCount(_ world: World) -> Int {
+        world.npcs.reduce(0) {
+            guard let b = $1.brain, b.isFleetMember, b.leaderID == nil else { return $0 }
+            return $0 + 1
+        }
+    }
+
+    /// The `flët` ids of every fleet currently represented in-system.
+    private func presentFleetIDs(_ world: World) -> Set<Int> {
+        Set(world.npcs.compactMap { $0.brain?.fleetID })
+    }
+
+    /// Pick an eligible fleet to spawn, optionally excluding ids already present
+    /// so repeats vary. Applies the same `LinkSyst`/`AppearOn` eligibility the
+    /// pool always has; returns nil when nothing eligible remains.
+    private func pickFleet(_ world: World, excluding present: Set<Int>) -> Int? {
+        let pool = fleetPool(world: world).filter { !present.contains($0.fleetID) }
+        guard !pool.isEmpty else { return nil }
+        return weightedPick(pool.map { ($0.fleetID, $0.weight) },
+                            roll: world.rng.int(in: 0...9999), world: world)
     }
 
     // MARK: Spawning
@@ -529,7 +592,10 @@ public final class Spawner {
         // The flagship acts on its own hull's disposition (a freighter convoy leader
         // trades; a warfleet's leader fights) rather than always being a warship.
         let leadAI = galaxy.game.ship(fleet.leadShip).map { AIType(raw: $0.inherentAI) } ?? .warship
-        lead.brain = AIBrain(aiType: leadAI == .unknown ? .warship : leadAI, govt: govt)
+        let leadBrain = AIBrain(aiType: leadAI == .unknown ? .warship : leadAI, govt: govt)
+        leadBrain.isFleetMember = true
+        leadBrain.fleetID = fleetID
+        lead.brain = leadBrain
         // flët `Flags` 0x0001: freighters (InherentAI <= 2) in this fleet carry
         // random cargo, so boarding a convoy hauler actually yields loot.
         if fleet.freightersHaveRandomCargo, let ai = galaxy.game.ship(fleet.leadShip)?.inherentAI, ai <= 2 {
@@ -554,6 +620,8 @@ public final class Spawner {
                 let brain = AIBrain(aiType: escortAI == .unknown ? .interceptor : escortAI, govt: govt)
                 brain.leaderID = leadID
                 brain.formationSlot = slot
+                brain.isFleetMember = true
+                brain.fleetID = fleetID
                 e.brain = brain
                 if fleet.freightersHaveRandomCargo, let ai = galaxy.game.ship(escort.shipID)?.inherentAI, ai <= 2 {
                     rollRandomFreighterCargo(into: e, world: world)
