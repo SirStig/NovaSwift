@@ -28,11 +28,18 @@ struct LoadingView: View {
     private let prewarmShare = 0.12
 
     private static let tips = [
-        "Trade high-tech goods to frontier worlds for profit.",
-        "Disable a ship, then board it to plunder its cargo.",
-        "Your reputation with each government shapes who shoots first.",
-        "Outfit expansions and afterburners change everything.",
-        "Some missions only appear at the right time and place.",
+        "Land on a planet or station to trade, refuel, repair, and take on missions.",
+        "Check the Mission BBS and the Bar at each port — that's where jobs and storylines begin.",
+        "Every hyperspace jump burns fuel. Refuel when you land before heading back out.",
+        "Disable a ship with weapons fire, then board it to plunder its cargo and credits.",
+        "Your standing with each government decides who greets you and who opens fire.",
+        "Spend credits at the Outfitter — afterburners, shields and weapons change how you fight.",
+        "Open the galaxy map to plot a course; your ship jumps through it one system at a time.",
+        "Buy goods cheap on industrial worlds and sell them dear out on the frontier.",
+        "Hire escorts at the Bar to fight at your side — they draw a daily wage.",
+        "Cargo and courier missions pay on delivery, and some run against a deadline.",
+        "Some missions only appear at the right place and time, or once a government trusts you.",
+        "New to the cockpit? Replay Flight Training any time from the main menu.",
     ]
 
     /// Monotonic by construction: the opening tease is capped at `prewarmShare`,
@@ -140,11 +147,16 @@ struct LoadingView: View {
                 .italic()
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                // Let the tip wrap to as many lines as it needs and report its
+                // full height, so a longer line is never clipped by the block.
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: 360)
-        // Reserve the taller two-line case so a wrapping tip can't shove the
-        // progress bar upward mid-load.
-        .frame(height: 52, alignment: .top)
+        // Wider so most tips fit in two lines, and centred on the art.
+        .frame(maxWidth: 420)
+        // Reserve the two-line case (so a short tip doesn't jump the bar up) but
+        // allow growth — the block is bottom-anchored, so a taller tip expands
+        // upward rather than spilling past the art's clipped bottom edge.
+        .frame(minHeight: 52, alignment: .top)
     }
 }
 

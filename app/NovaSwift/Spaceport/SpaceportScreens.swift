@@ -209,10 +209,12 @@ struct OutfitterView: View {
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
     let galaxy: Galaxy
+    var showHints: Bool = false
     var onDone: () -> Void
 
     @State private var selectedID: Int?
     @State private var topRow = 0
+    @State private var hintDismissed = false
     private var game: NovaGame { graphics.game }
     private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
@@ -230,6 +232,12 @@ struct OutfitterView: View {
     }
 
     var body: some View {
+        outfitterBody
+            .gameHint(GameHints.outfitter, active: showHints, dismissed: $hintDismissed)
+            .animation(.easeInOut(duration: 0.25), value: hintDismissed)
+    }
+
+    @ViewBuilder private var outfitterBody: some View {
         if let frame = graphics.frame(.outfit) {
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)

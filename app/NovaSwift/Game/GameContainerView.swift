@@ -670,7 +670,8 @@ struct GameContainerView: View {
                         let sidebarWidth = Self.sidebarWidth(in: geo.size, style: activeHUDStyle(host))
                         let playWidth = max(0, geo.size.width - sidebarWidth)
                         SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob,
-                                      pilot: model.pilot, onDepart: depart)
+                                      pilot: model.pilot, onDepart: depart,
+                                      showHints: model.settings.tutorialHints)
                             .frame(width: playWidth, height: geo.size.height)
                             .position(x: playWidth / 2, y: geo.size.height / 2)
                     }
