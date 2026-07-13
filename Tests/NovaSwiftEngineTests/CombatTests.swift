@@ -2,8 +2,8 @@ import XCTest
 @testable import NovaSwiftEngine
 import NovaSwiftKit
 
-/// Weapons, projectiles, damage bleed-through, beams, and death — the substance
-/// behind an NPC's "attack".
+/// Weapons, projectiles, shields-then-hull damage, beams, and death — the
+/// substance behind an NPC's "attack".
 final class CombatTests: XCTestCase {
 
     private func gun(shield: Double = 50, armor: Double = 50, range: Double = 4000,
@@ -23,17 +23,30 @@ final class CombatTests: XCTestCase {
         return s
     }
 
-    func testShieldSoaksThenArmorBleeds() {
+    func testShieldsAbsorbFullyThenHullTakesDamage() {
         let s = makeShip("x", govt: 1, at: Vec2())
-        // First hit: shields fully absorb the shield-damage, so armor is spared.
+        // First hit: shields absorb it, so armor is spared.
         XCTAssertFalse(s.applyDamage(shield: 60, armor: 40))
         XCTAssertEqual(s.shield, 40, accuracy: 1e-9)
         XCTAssertEqual(s.armor, 100, accuracy: 1e-9)
-        // Second hit: shields drop to 0 having soaked 40/60, so 1/3 of the armor
-        // damage bleeds through.
+        // Second hit empties the shields — but the hull stays pristine: there is
+        // no bleed-through on the shield-depleting shot.
         XCTAssertFalse(s.applyDamage(shield: 60, armor: 30))
         XCTAssertEqual(s.shield, 0, accuracy: 1e-9)
-        XCTAssertEqual(s.armor, 100 - 10, accuracy: 1e-6)
+        XCTAssertEqual(s.armor, 100, accuracy: 1e-9)
+        // Only now, with shields already at zero, does armor take damage.
+        XCTAssertFalse(s.applyDamage(shield: 60, armor: 30))
+        XCTAssertEqual(s.shield, 0, accuracy: 1e-9)
+        XCTAssertEqual(s.armor, 70, accuracy: 1e-9)
+    }
+
+    /// `wëap` Flags 0x0020 — a shield-penetrating weapon damages the hull even
+    /// while shields are still up (its energy still chips the shields too).
+    func testShieldPenetratingWeaponReachesHullThroughShields() {
+        let s = makeShip("x", govt: 1, at: Vec2())
+        XCTAssertFalse(s.applyDamage(shield: 20, armor: 30, piercing: true))
+        XCTAssertEqual(s.shield, 80, accuracy: 1e-9)   // energy still hits shields
+        XCTAssertEqual(s.armor, 70, accuracy: 1e-9)    // mass reaches the hull anyway
     }
 
     func testProjectileTravelsHitsAndKills() {

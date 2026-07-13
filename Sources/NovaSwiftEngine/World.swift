@@ -502,24 +502,26 @@ public final class Ship {
 
     // MARK: Combat helpers
 
-    /// Apply damage: shields first, then armor bleed-through. Returns true if the
-    /// hit destroyed the ship.
+    /// Apply damage the authentic EV Nova way: energy damage hits shields only,
+    /// mass damage hits armor only, and **the hull can't be touched until the
+    /// shields are knocked down** (Nova Bible, `wëap` MassDmg/EnergyDmg). The one
+    /// exception is a shield-penetrating weapon (`wëap` Flags 0x0020, `piercing`),
+    /// whose mass damage reaches armor even through live shields. Returns true if
+    /// the hit destroyed the ship.
     @discardableResult
-    public func applyDamage(shield dmgShield: Double, armor dmgArmor: Double) -> Bool {
+    public func applyDamage(shield dmgShield: Double, armor dmgArmor: Double,
+                            piercing: Bool = false) -> Bool {
         // God mode (debug suite): swallow every hit whole — no shield/armor loss,
         // never reports a kill. Kept as the very first check so no damage math or
         // side effect runs for an invulnerable ship.
         if invulnerable { return false }
-        // A shot's shield and armor damage are separate figures in EV Nova; when
-        // shields are up they soak the shield-damage, and leftover proportion
-        // carries into armor.
-        if shield > 0 {
-            let before = shield
-            shield = max(0, shield - dmgShield)
-            let soakedFraction = dmgShield > 0 ? (before - shield) / dmgShield : 1
-            let leftover = dmgArmor * (1 - soakedFraction)
-            if leftover > 0 { armor = max(0, armor - leftover) }
-        } else {
+        // Whether shields were up *before* this shot lands decides hull exposure:
+        // the very shot that empties the shields does NOT also bleed into armor —
+        // only a later hit, arriving with shields already at zero, damages the
+        // hull. A shield-penetrating weapon ignores that gate for its armor damage.
+        let shieldsWereUp = shield > 0
+        if dmgShield > 0 { shield = max(0, shield - dmgShield) }
+        if dmgArmor > 0, piercing || !shieldsWereUp {
             armor = max(0, armor - dmgArmor)
         }
         return armor <= 0
@@ -1277,6 +1279,12 @@ public final class World {
                                     targetID: spec.homes ? ship.currentTargetID : nil,
                                     subDepth: 0)
                     events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID))
+                    // Recoil kicks the firing ship backward, opposite the shot,
+                    // scaled down by its own mass (radius proxy) — same knockback
+                    // model as projectile impact on a target.
+                    if spec.recoil > 0 {
+                        ship.velocity += Vec2(-cos(aim), -sin(aim)) * (spec.recoil * 6.0 / max(4, ship.radius))
+                    }
                 }
                 fired += 1
                 if !spec.fireSimultaneously { mount.exitCursor = (mount.exitCursor + 1) % barrels }
@@ -1377,7 +1385,8 @@ public final class World {
                            explosionBoomID: spec.explosionBoomID,
                            graphicSpinID: spec.graphicSpinID, spinShots: spec.spinShots,
                            confusedByInterference: spec.confusedByInterference,
-                           turnsAwayIfJammed: spec.turnsAwayIfJammed)
+                           turnsAwayIfJammed: spec.turnsAwayIfJammed,
+                           penetratesShields: spec.penetratesShields)
         projectiles.append(p)
         return p
     }
@@ -1444,7 +1453,7 @@ public final class World {
         let cast = beamCast(from: origin, dir: dir, range: spec.range, owner: ship)
         if let h = cast.hitShip {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
-                     ionization: spec.ionization)
+                     ionization: spec.ionization, piercing: spec.penetratesShields)
         } else if let rock = cast.hitAsteroid {
             applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage)
         }
@@ -1693,7 +1702,7 @@ public final class World {
                           spawned: inout [Projectile]) {
         if let h = directHit {
             applyHit(to: h, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
-                     ionization: p.ionization)
+                     ionization: p.ionization, piercing: p.penetratesShields)
             if p.impact > 0 {
                 // Knockback along the shot's travel, inversely ∝ target size
                 // (a proxy for mass — heavier hulls barely budge).
@@ -1706,7 +1715,8 @@ public final class World {
                 guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: splash) else { continue }
                 if (splash.position - pos).length <= p.blastRadius {
                     applyHit(to: splash, shield: p.shieldDamage * 0.5, armor: p.armorDamage * 0.5,
-                             ownerID: p.ownerID, ionization: p.ionization * 0.5)
+                             ownerID: p.ownerID, ionization: p.ionization * 0.5,
+                             piercing: p.penetratesShields)
                 }
             }
         }
@@ -1753,7 +1763,7 @@ public final class World {
     }
 
     private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
-                          ionization: Double = 0) {
+                          ionization: Double = 0, piercing: Bool = false) {
         // Difficulty: scale only the damage the *player* takes (Easy softens,
         // Hard sharpens); NPC-vs-NPC combat is untouched.
         var shield = shield, armor = armor
@@ -1769,7 +1779,7 @@ public final class World {
         // log lines below/at despawn, so a routine chip-damage hit doesn't
         // need one too — this was real, uncapped log volume that scaled
         // directly with how many ships were fighting.
-        _ = ship.applyDamage(shield: shield, armor: armor)
+        _ = ship.applyDamage(shield: shield, armor: armor, piercing: piercing)
         // Cloak flag 0x0008: taking damage forces the cloak off.
         if ship.cloakEngaged, ship.cloakDropsOnDamage { ship.cloakEngaged = false }
         if ionization > 0, ship.ionizeMax > 0 {

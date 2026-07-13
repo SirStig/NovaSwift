@@ -1516,12 +1516,12 @@ struct GameContainerView: View {
     }
 
     /// Free hull repair / refuel when the port's govt or your rank comps it — the
-    /// Bible's "Roadside Assistance" (gövt flags1 0x0010) or an allied rank (rank
+    /// Bible's "Roadside Assistance" (gövt `Flags2` 0x0010) or an allied rank (rank
     /// flags 0x0800), i.e. an allied/owned world. Mirrors `SpaceportView`'s
     /// `rechargeIsFree` so paid refuel and paid repair agree on who's "allied".
     private func repairIsFree(spob: SpobRes, game: NovaGame) -> Bool {
         let govtID = spob.government
-        if govtID >= 128, let g = game.govt(govtID), g.flags1 & 0x0010 != 0 { return true }
+        if govtID >= 128, let g = game.govt(govtID), g.roadsideAssistance { return true }
         return model.pilot.state.activeRanks.contains {
             game.rank($0)?.govt == govtID && (game.rank($0)?.flags ?? 0) & 0x0800 != 0
         }

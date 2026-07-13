@@ -357,12 +357,21 @@ public final class Spawner {
     /// `Diplomacy.areAllied`/`.areEnemies` — no new relational logic, per
     /// FLEETS.md §3's own analysis.
     func isFleetEligible(_ fleet: FleetRes, world: World) -> Bool {
-        let link = fleet.linkSystem
-        // The banded government ranges below encode a government by its 0-based
-        // *index*; the system/diplomacy layer speaks resource ids (128+), so add
-        // `govtResourceBase` before comparing. (Getting this wrong silently made
-        // every govt-banded fleet ineligible — Federation is govt id 128, so
-        // `LinkSyst 10000` meant "index 0" i.e. id 128, but was compared to 0.)
+        systemMatchesLink(fleet.linkSystem, world: world)
+    }
+
+    /// Whether the current system satisfies an EV Nova banded `LinkSyst` value —
+    /// shared by `flët.LinkSyst` (fleet spawn gating) and `përs.LinkSyst` (person
+    /// spawn-location gating). Bands: -1 anywhere · 128-2175 a specific system ·
+    /// 10000-10255 any system of a govt · 15000-15255 an ally's · 20000-20255 any
+    /// but that govt · 25000-25255 an enemy's.
+    ///
+    /// The banded government ranges encode a government by its 0-based *index*;
+    /// the system/diplomacy layer speaks resource ids (128+), so add
+    /// `govtResourceBase` before comparing. (Getting this wrong silently made
+    /// every govt-banded fleet ineligible — Federation is govt id 128, so
+    /// `LinkSyst 10000` meant "index 0" i.e. id 128, but was compared to 0.)
+    func systemMatchesLink(_ link: Int, world: World) -> Bool {
         switch link {
         case -1:
             return true
@@ -555,6 +564,7 @@ public final class Spawner {
         guard world.rng.int(in: 0...99) < 5 else { return }
         let candidates = galaxy.game.perses().filter { candidate in
             candidate.shipType == shipID && (candidate.govt == govt || candidate.govt == -1)
+                && systemMatchesLink(candidate.linkSyst, world: world)   // LinkSyst spawn-location band
                 && !world.npcs.contains { npc in npc.personID == candidate.id }
                 && world.persSpawnEligible(candidate.id)   // ActiveOn NCB + not-yet-defeated
         }

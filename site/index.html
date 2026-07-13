@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NOVA Swift — EV Nova, reborn in Swift</title>
+  <meta name="description" content="A from-scratch Swift/Metal rebuild of the 2002 space classic EV Nova — running natively on Mac, iPad and iPhone. Bring-your-own-data, open source, fidelity first." />
+
+  <link rel="icon" type="image/png" href="assets/favicon-256.png" />
+  <link rel="apple-touch-icon" href="assets/app-icon.png" />
+
+  <!-- Social preview -->
+  <meta property="og:title" content="NOVA Swift — EV Nova, reborn in Swift" />
+  <meta property="og:description" content="A from-scratch Swift/Metal rebuild of the 2002 space classic — native on Mac, iPad and iPhone. Bring-your-own-data, open source, fidelity first." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="assets/launch-banner.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+
+  <!-- ============ NAV ============ -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top" aria-label="NOVA Swift home">
+        <img src="assets/app-icon.png" alt="NOVA Swift logo" />
+        <b>NOVA<span>·</span>SWIFT</b>
+      </a>
+      <div class="nav-links">
+        <a href="#playable">Playable now</a>
+        <a href="#firsts">Beyond 2002</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="#data">Your data</a>
+        <a href="#start">Get started</a>
+      </div>
+      <div class="nav-links git" style="margin-left:auto">
+        <a class="btn btn-ghost" href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <span id="top"></span>
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow" style="justify-content:center">Unofficial · Bring-your-own-data · Open source</p>
+      <div class="hero-banner reveal in">
+        <img src="assets/launch-banner.png"
+             alt="NOVA — a complete rewrite in Swift: original artwork of a warship over a red nebula, flanked by space stations and star charts" />
+      </div>
+      <h1>The 2002 classic, <span class="grad">rebuilt natively</span> for Apple Silicon.</h1>
+      <p class="lead">
+        EV Nova is one of the deepest space trading-and-combat games ever made — and it's stranded on
+        PowerPC. <b style="color:var(--bone)">NOVA Swift</b> rebuilds the whole game from scratch in
+        Swift on Metal: resource parser, flight and combat sim, AI, missions, economy and UI.
+        Not a wrapper, not an emulator — it reads <em>your own</em> data and plays in your pocket.
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+          View on GitHub
+        </a>
+        <a class="btn btn-ghost" href="#playable">See what works &rarr;</a>
+      </div>
+      <div class="badges">
+        <span>macOS · iPadOS · iOS</span>
+        <span>Swift + Metal / SpriteKit</span>
+        <span>Fidelity-first, Classic-safe</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="divider"></div>
+
+  <!-- ============ PLAYABLE NOW ============ -->
+  <section class="section" id="playable">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">A real, playable game</p>
+        <h2>Not a tech demo — a game you can lose.</h2>
+        <p>On your own data, you can already fly the campaign end to end. The galaxy-day clock ticks
+           as you fly, so the world lives around you.</p>
+      </div>
+      <div class="grid cols-3">
+        <div class="card reveal">
+          <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 2 4 22l8-5 8 5-8-20Z"/></svg></span>Fly &amp; fight</h3>
+          <p>The original Newtonian flight model, AI ships spawned from the real fleet tables,
+             ionization, target-lock, and combat-odds decision making.</p>
+        </div>
+        <div class="card reveal">
+          <h3><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>Explore &amp; trade</h3>
+          <p>Plot courses across the real galaxy map and burn real fuel on jumps, then land to trade,
+             outfit and buy ships against a persistent pilot — mass-based pricing, slot limits, paid repairs.</p>
+        </div>
+        <div class="card reveal">
+          <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16v12H4z"/><path d="M4 9h16M8 17v3M16 17v3"/></svg></span>Play the campaign</h3>
+          <p>Take and <em>complete</em> missions. Background events and news fire, mission ships spawn
+             and fight, and storylines actually progress as days pass.</p>
+        </div>
+        <div class="card reveal">
+          <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z"/><path d="M8 15s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></span>Lose for real</h3>
+          <p>Run your armor to zero and you eject in an escape pod — or it's game over. Wreck the wrong
+             government's ships and your record follows you.</p>
+        </div>
+        <div class="card reveal">
+          <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/></svg></span>Live in the world</h3>
+          <p>Meet named <code style="font-family:var(--font-mono);color:var(--ember)">përs</code> captains
+             with their own quotes and grudges, hire escorts on a daily wage, and gamble on the holovid races.</p>
+        </div>
+        <div class="card reveal">
+          <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg></span>Honest about the gap</h3>
+          <p>The gap is <b style="color:var(--bone)">fidelity, not features.</b> AI and spawning were never
+             open-sourced, so ours is reconstructed — flight smoothness is the top of the backlog.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BEYOND 2002 (band) ============ -->
+  <section class="band" id="firsts">
+    <div class="band-bg" aria-hidden="true"></div>
+    <div class="wrap reveal">
+      <p class="eyebrow" style="justify-content:center">Things the original never had</p>
+      <h2>Because it's our code now.</h2>
+      <p>Fidelity comes first — a pure <b style="color:var(--bone)">Classic</b> run behaves exactly like
+         the original. Everything modern is an opt-in layer on top, never a replacement.</p>
+      <div class="grid cols-2" style="text-align:left;margin-top:38px">
+        <div class="card reveal">
+          <h3>A live Story Map</h3>
+          <p>A pannable, zoomable graph of every campaign in your data, resolved against your pilot's actual progress.</p>
+        </div>
+        <div class="card reveal">
+          <h3>Multiple pilots, side by side</h3>
+          <p>Roll up pilots from any starting scenario and switch between them — every save is backed up automatically.</p>
+        </div>
+        <div class="card reveal">
+          <h3>An in-app plug-in store</h3>
+          <p>Browse and install community plug-ins and total conversions without ever leaving the game.</p>
+        </div>
+        <div class="card reveal">
+          <h3>Native &amp; touch-first</h3>
+          <p>Real iPhone and iPad builds, plus keyboard/mouse — and a planned controller layer — on macOS.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ROADMAP ============ -->
+  <section class="section" id="roadmap">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Where it's headed</p>
+        <h2>The seams already exist — nothing modern has shipped yet.</h2>
+        <p>Enhancements sit behind the same engine seams the base game uses, so Classic stays reproducible.</p>
+      </div>
+      <div class="roadmap">
+        <div class="rm-item reveal">
+          <div>
+            <p class="rm-t">Enhanced AI</p>
+            <p>Smarter evasion, coordinated fleets and ammo conservation — behind the same <code style="font-family:var(--font-mono)">AIBrain.think</code> seam the base AI runs on.</p>
+          </div>
+          <span class="tag">Planned</span>
+        </div>
+        <div class="rm-item reveal">
+          <div>
+            <p class="rm-t">HD art &amp; richer audio</p>
+            <p>Higher-resolution sprites and sound packs, layered over the originals — never replacing them.</p>
+          </div>
+          <span class="tag">Planned</span>
+        </div>
+        <div class="rm-item reveal">
+          <div>
+            <p class="rm-t">Controllers &amp; QoL</p>
+            <p>Full gamepad support, remappable controls and presentation modes (Classic / Enhanced / Nova Swift).</p>
+          </div>
+          <span class="tag">Planned</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ YOUR DATA (bronze frame) ============ -->
+  <section class="section" id="data">
+    <div class="wrap">
+      <div class="frame-panel reveal">
+        <div class="inner" style="text-align:center;max-width:64ch;margin:0 auto">
+          <p class="eyebrow" style="justify-content:center">The one rule</p>
+          <h2 style="font-size:clamp(1.6rem,3.5vw,2.3rem);margin:0 0 16px">You bring the game.</h2>
+          <p class="lead" style="margin:0 auto">
+            We ship code; you supply the data. EV Nova's content is still owned by ATMOS, so this project
+            contains <b style="color:#fff">zero copyrighted game data and never will</b>. NOVA Swift reads
+            your own legally-owned copy at runtime — classic resource forks, <code style="font-family:var(--font-mono);color:var(--bronze-light)">.ndat</code>,
+            or the modern <code style="font-family:var(--font-mono);color:var(--bronze-light)">BRGR .rez</code> container — the same model as OpenMW and OpenRA.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GET STARTED ============ -->
+  <section class="section" id="start">
+    <div class="wrap">
+      <div class="grid cols-2" style="align-items:center;gap:44px">
+        <div class="section-head reveal" style="margin-bottom:0">
+          <p class="eyebrow">Getting started</p>
+          <h2>Build it in a few commands.</h2>
+          <p style="margin-bottom:26px">Requires macOS with the Xcode command-line tools. Your EV Nova
+             data stays git-ignored and never leaves your machine.</p>
+          <div class="steps">
+            <div class="step reveal"><span class="n"></span><div><p class="st-t">Clone &amp; fetch dependencies</p><p>Run <code>scripts/setup.sh</code> to pull the open-source dependencies.</p></div></div>
+            <div class="step reveal"><span class="n"></span><div><p class="st-t">Drop in your data</p><p>Place your legally-owned EV Nova files into <code>data/base/</code>.</p></div></div>
+            <div class="step reveal"><span class="n"></span><div><p class="st-t">Build &amp; run</p><p>Open <code>app/NovaSwift.xcodeproj</code> in Xcode, then build for Mac, iPad or iPhone.</p></div></div>
+          </div>
+        </div>
+        <div class="reveal">
+          <div class="code">
+<span class="c"># fetch open-source dependencies</span>
+<span class="k">scripts/setup.sh</span>
+
+<span class="c"># place your EV Nova data into data/base/</span>
+<span class="c"># (see docs/GET_THE_DATA.md)</span>
+
+<span class="c"># optional: free community plug-ins</span>
+<span class="k">scripts/fetch-plugins.sh</span>
+
+<span class="c"># build &amp; test</span>
+<span class="k">swift build</span> &amp;&amp; <span class="k">swift test</span>
+          </div>
+          <div style="margin-top:20px;text-align:center">
+            <a class="btn btn-primary" href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova" target="_blank" rel="noopener">Read the full README on GitHub</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-top">
+        <a class="brand" href="#top">
+          <img src="assets/app-icon.png" alt="" style="width:34px;height:34px" />
+          <b>NOVA<span>·</span>SWIFT</b>
+        </a>
+        <div class="footer-links">
+          <a href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+          <a href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/blob/main/docs/STATUS.md" target="_blank" rel="noopener">Status</a>
+          <a href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/blob/main/docs/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+        </div>
+      </div>
+      <p class="legal">
+        <strong>EV Nova and its data are copyrighted</strong>, and this project never redistributes them —
+        you supply your own legally-obtained copy. This project's code is open source. An interoperability
+        and preservation effort in the spirit of OpenRA, OpenTTD and devilutionX.
+        <strong>Unaffiliated with and unendorsed by Ambrosia Software, ATMOS, or the original authors.</strong>
+        All artwork on this page is original to the NOVA Swift project.
+      </p>
+    </div>
+  </footer>
+
+  <script src="starfield.js"></script>
+</body>
+</html>

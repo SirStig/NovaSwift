@@ -194,8 +194,11 @@ Steering primitives turn a goal into a `ControlIntent`:
 
 `Combat.swift` + the `World` loop:
 
-- Ships have **shield / armor** with regen; damage hits shields first and bleeds
-  the leftover proportion into armor.
+- Ships have **shield / armor** with regen; damage hits shields first and the
+  hull is untouched until shields are gone (no bleed-through — the shot that
+  empties the shields does not also damage armor). The one exception is a
+  shield-penetrating weapon (`wëap` Flags 0x0020), whose armor damage reaches
+  the hull through live shields.
 - Weapons become `WeaponSpec`s (damage, reload, projectile speed, range, beam vs.
   guided vs. fixed). A mount tracks cooldown and ammo.
 - Firing spawns a **`Projectile`** (guided rounds steer toward the target) or, for
@@ -273,7 +276,7 @@ The simulation uses a seeded `SplitMix64` PRNG, so a given seed replays
 identically. Coverage:
 
 - `DiplomacyTests` — class relations, xenophobes, player standing.
-- `CombatTests` — shield/armor bleed-through, projectile travel & kills, no
+- `CombatTests` — shields-absorb-then-hull, projectile travel & kills, no
   friendly fire, instant beams, disable-threshold determinism, point defense
   (shoots down/ignores-immune guided shots), ionization (charge/dissipation/
   immobilization/blocked-firing).

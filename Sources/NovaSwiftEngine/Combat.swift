@@ -69,6 +69,10 @@ public struct WeaponSpec {
     public let name: String
     public let shieldDamage: Double
     public let armorDamage: Double
+    /// `wëap` Flags 0x0020 — "passes through shields": this weapon's armor damage
+    /// reaches the hull even while the target's shields are up. Off for the vast
+    /// majority of weapons, which can't touch armor until shields are gone.
+    public let penetratesShields: Bool
     public let reloadSeconds: Double
     public let projectileSpeed: Double   // px/sec
     public let range: Double             // px
@@ -128,6 +132,9 @@ public struct WeaponSpec {
     public let detonateOnExpire: Bool
     /// Knockback impulse on hit (inversely ∝ target mass).
     public let impact: Double
+    /// Recoil "kick" pushed onto the *firing* ship opposite the shot direction
+    /// (`wëap.Recoil`), inversely ∝ the shooter's mass. 0 = none.
+    public let recoil: Double
     /// `spïn` id of this weapon's own shot graphic, or nil (falls back to a dot).
     public let graphicSpinID: Int?
     /// Spin the shot graphic continuously.
@@ -167,13 +174,15 @@ public struct WeaponSpec {
                 guidance: WeaponGuidance = .unguided, isTurret: Bool = false,
                 proxRadius: Double = 0, proxHitAll: Bool = true,
                 proxSafetySeconds: Double = 0, decayPerSec: Double = 0,
-                detonateOnExpire: Bool = false, impact: Double = 0,
+                detonateOnExpire: Bool = false, impact: Double = 0, recoil: Double = 0,
                 graphicSpinID: Int? = nil, spinShots: Bool = false, firesAtFixedAngle: Bool = false,
                 burstCount: Int = 0, burstReloadSeconds: Double = 0,
                 submunition: Submunition? = nil,
-                isSecondary: Bool = false, fireSimultaneously: Bool = false) {
+                isSecondary: Bool = false, fireSimultaneously: Bool = false,
+                penetratesShields: Bool = false) {
         self.id = id; self.name = name
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
+        self.penetratesShields = penetratesShields
         self.reloadSeconds = reloadSeconds; self.projectileSpeed = projectileSpeed
         self.range = range; self.accuracyRadians = accuracyRadians
         self.isBeam = isBeam; self.isGuided = isGuided; self.turnRate = turnRate
@@ -188,7 +197,8 @@ public struct WeaponSpec {
         self.proxRadius = proxRadius; self.proxHitAll = proxHitAll
         self.proxSafetySeconds = proxSafetySeconds
         self.decayPerSec = decayPerSec; self.detonateOnExpire = detonateOnExpire
-        self.impact = impact; self.graphicSpinID = graphicSpinID; self.spinShots = spinShots
+        self.impact = impact; self.recoil = recoil
+        self.graphicSpinID = graphicSpinID; self.spinShots = spinShots
         self.firesAtFixedAngle = firesAtFixedAngle
         self.burstCount = burstCount; self.burstReloadSeconds = burstReloadSeconds
         self.submunition = submunition
@@ -201,6 +211,7 @@ public struct WeaponSpec {
         name = w.name
         shieldDamage = Double(w.shieldDamage) * tuning.damageScale
         armorDamage = Double(w.armorDamage) * tuning.damageScale
+        penetratesShields = w.penetratesShields
         reloadSeconds = max(0.1, Double(w.reload) / tuning.framesPerSecond)
         projectileSpeed = Double(w.speed) * tuning.unitToPxPerSec
         // WeapRes.range is speed(unit/frame)×duration(frames); scale to px.
@@ -218,6 +229,7 @@ public struct WeaponSpec {
         decayPerSec = w.decay > 0 ? tuning.framesPerSecond / Double(w.decay) : 0
         detonateOnExpire = w.detonateOnExpire
         impact = Double(max(0, w.impact))
+        recoil = Double(w.recoil)
         graphicSpinID = w.graphicSpinID
         spinShots = w.spinShots
         firesAtFixedAngle = w.firesAtFixedAngle
@@ -341,6 +353,8 @@ public final class Projectile {
     public var life: Double              // seconds remaining
     public var shieldDamage: Double      // var: decays over the shot's life
     public var armorDamage: Double
+    /// `wëap` Flags 0x0020: armor damage reaches the hull through live shields.
+    public let penetratesShields: Bool
     public let blastRadius: Double
     public let ownerID: Int              // entity that fired it (no self-hit)
     public let ownerGovt: Int            // faction (no friendly fire)
@@ -392,10 +406,12 @@ public final class Projectile {
                 proxHitAll: Bool = true, detonateOnExpire: Bool = false, impact: Double = 0,
                 submunition: Submunition? = nil, subDepth: Int = 0,
                 explosionBoomID: Int? = nil, graphicSpinID: Int? = nil, spinShots: Bool = false,
-                confusedByInterference: Bool = false, turnsAwayIfJammed: Bool = false) {
+                confusedByInterference: Bool = false, turnsAwayIfJammed: Bool = false,
+                penetratesShields: Bool = false) {
         self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
         self.position = position; self.velocity = velocity; self.life = life
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
+        self.penetratesShields = penetratesShields
         self.blastRadius = blastRadius; self.ownerID = ownerID; self.ownerGovt = ownerGovt
         self.homing = homing; self.turnRate = turnRate; self.speed = speed
         self.targetID = targetID

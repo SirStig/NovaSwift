@@ -107,15 +107,19 @@ enum DebugLiveTests {
     static func run() -> [DiagnosticSection] {
         [
             DiagnosticSection(title: "Damage Model", results: [
-                check("Shields soak, then armor bleeds") {
+                check("Shields absorb fully; hull only after shields gone") {
                     let s = makeShip()
                     _ = s.applyDamage(shield: 60, armor: 40)          // shields absorb fully
                     guard close(s.shield, 40), close(s.armor, 100) else {
                         return (false, "After 60/40 hit: shield \(r(s.shield)), armor \(r(s.armor)) (want 40 / 100).")
                     }
-                    _ = s.applyDamage(shield: 60, armor: 30)          // shields drop, 1/3 bleeds
-                    let ok = close(s.shield, 0) && close(s.armor, 90)
-                    return (ok, "Final shield \(r(s.shield)), armor \(r(s.armor)) (want 0 / 90).")
+                    _ = s.applyDamage(shield: 60, armor: 30)          // shields empty — no bleed into hull
+                    guard close(s.shield, 0), close(s.armor, 100) else {
+                        return (false, "After depleting hit: shield \(r(s.shield)), armor \(r(s.armor)) (want 0 / 100 — no bleed).")
+                    }
+                    _ = s.applyDamage(shield: 60, armor: 30)          // shields already 0 — hull takes full
+                    let ok = close(s.shield, 0) && close(s.armor, 70)
+                    return (ok, "Final shield \(r(s.shield)), armor \(r(s.armor)) (want 0 / 70).")
                 },
                 check("God mode negates all damage") {
                     let s = makeShip(); s.invulnerable = true

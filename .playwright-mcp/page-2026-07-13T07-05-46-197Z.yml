@@ -1,0 +1,165 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e3]:
+    - generic [ref=e4]:
+      - link "NOVA Swift home" [ref=e5] [cursor=pointer]:
+        - /url: "#top"
+        - img "NOVA Swift logo" [ref=e6]
+        - generic [ref=e7]: NOVA·SWIFT
+      - generic [ref=e8]:
+        - link "Playable now" [ref=e9] [cursor=pointer]:
+          - /url: "#playable"
+        - link "Beyond 2002" [ref=e10] [cursor=pointer]:
+          - /url: "#firsts"
+        - link "Roadmap" [ref=e11] [cursor=pointer]:
+          - /url: "#roadmap"
+        - link "Your data" [ref=e12] [cursor=pointer]:
+          - /url: "#data"
+        - link "Get started" [ref=e13] [cursor=pointer]:
+          - /url: "#start"
+      - link "GitHub" [ref=e15] [cursor=pointer]:
+        - /url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova
+  - banner [ref=e18]:
+    - generic [ref=e19]:
+      - paragraph [ref=e20]: Unofficial · Bring-your-own-data · Open source
+      - 'img "NOVA — a complete rewrite in Swift: original artwork of a warship over a red nebula, flanked by space stations and star charts" [ref=e22]'
+      - heading "The 2002 classic, rebuilt natively for Apple Silicon." [level=1] [ref=e23]
+      - paragraph [ref=e24]:
+        - text: "EV Nova is one of the deepest space trading-and-combat games ever made — and it's stranded on PowerPC. NOVA Swift rebuilds the whole game from scratch in Swift on Metal: resource parser, flight and combat sim, AI, missions, economy and UI. Not a wrapper, not an emulator — it reads"
+        - emphasis [ref=e25]: your own
+        - text: data and plays in your pocket.
+      - generic [ref=e26]:
+        - link "View on GitHub" [ref=e27] [cursor=pointer]:
+          - /url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova
+        - link "See what works →" [ref=e30] [cursor=pointer]:
+          - /url: "#playable"
+      - generic [ref=e31]:
+        - generic [ref=e32]: macOS · iPadOS · iOS
+        - generic [ref=e33]: Swift + Metal / SpriteKit
+        - generic [ref=e34]: Fidelity-first, Classic-safe
+  - generic [ref=e37]:
+    - generic [ref=e38]:
+      - paragraph [ref=e39]: A real, playable game
+      - heading "Not a tech demo — a game you can lose." [level=2] [ref=e40]
+      - paragraph [ref=e41]: On your own data, you can already fly the campaign end to end. The galaxy-day clock ticks as you fly, so the world lives around you.
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - heading [level=3] [ref=e44]
+        - paragraph [ref=e48]: The original Newtonian flight model, AI ships spawned from the real fleet tables, ionization, target-lock, and combat-odds decision making.
+      - generic [ref=e49]:
+        - heading [level=3] [ref=e50]
+        - paragraph [ref=e55]: Plot courses across the real galaxy map and burn real fuel on jumps, then land to trade, outfit and buy ships against a persistent pilot — mass-based pricing, slot limits, paid repairs.
+      - generic [ref=e56]:
+        - heading [level=3] [ref=e57]
+        - paragraph [ref=e62]:
+          - text: Take and
+          - emphasis [ref=e63]: complete
+          - text: missions. Background events and news fire, mission ships spawn and fight, and storylines actually progress as days pass.
+      - generic [ref=e64]:
+        - heading [level=3] [ref=e65]
+        - paragraph [ref=e70]: Run your armor to zero and you eject in an escape pod — or it's game over. Wreck the wrong government's ships and your record follows you.
+      - generic [ref=e71]:
+        - heading [level=3] [ref=e72]
+        - paragraph [ref=e78]:
+          - text: Meet named
+          - code [ref=e79]: përs
+          - text: captains with their own quotes and grudges, hire escorts on a daily wage, and gamble on the holovid races.
+      - generic [ref=e80]:
+        - heading [level=3] [ref=e81]
+        - paragraph [ref=e86]: The gap is fidelity, not features. AI and spawning were never open-sourced, so ours is reconstructed — flight smoothness is the top of the backlog.
+  - generic [ref=e89]:
+    - paragraph [ref=e90]: Things the original never had
+    - heading "Because it's our code now." [level=2] [ref=e91]
+    - paragraph [ref=e92]: Fidelity comes first — a pure Classic run behaves exactly like the original. Everything modern is an opt-in layer on top, never a replacement.
+    - generic [ref=e93]:
+      - generic [ref=e94]:
+        - heading "A live Story Map" [level=3] [ref=e95]
+        - paragraph [ref=e96]: A pannable, zoomable graph of every campaign in your data, resolved against your pilot's actual progress.
+      - generic [ref=e97]:
+        - heading "Multiple pilots, side by side" [level=3] [ref=e98]
+        - paragraph [ref=e99]: Roll up pilots from any starting scenario and switch between them — every save is backed up automatically.
+      - generic [ref=e100]:
+        - heading "An in-app plug-in store" [level=3] [ref=e101]
+        - paragraph [ref=e102]: Browse and install community plug-ins and total conversions without ever leaving the game.
+      - generic [ref=e103]:
+        - heading "Native & touch-first" [level=3] [ref=e104]
+        - paragraph [ref=e105]: Real iPhone and iPad builds, plus keyboard/mouse — and a planned controller layer — on macOS.
+  - generic [ref=e107]:
+    - generic [ref=e108]:
+      - paragraph [ref=e109]: Where it's headed
+      - heading "The seams already exist — nothing modern has shipped yet." [level=2] [ref=e110]
+      - paragraph [ref=e111]: Enhancements sit behind the same engine seams the base game uses, so Classic stays reproducible.
+    - generic [ref=e112]:
+      - generic [ref=e113]:
+        - generic [ref=e114]:
+          - paragraph [ref=e115]: Enhanced AI
+          - paragraph [ref=e116]:
+            - text: Smarter evasion, coordinated fleets and ammo conservation — behind the same
+            - code [ref=e117]: AIBrain.think
+            - text: seam the base AI runs on.
+        - generic [ref=e118]: Planned
+      - generic [ref=e119]:
+        - generic [ref=e120]:
+          - paragraph [ref=e121]: HD art & richer audio
+          - paragraph [ref=e122]: Higher-resolution sprites and sound packs, layered over the originals — never replacing them.
+        - generic [ref=e123]: Planned
+      - generic [ref=e124]:
+        - generic [ref=e125]:
+          - paragraph [ref=e126]: Controllers & QoL
+          - paragraph [ref=e127]: Full gamepad support, remappable controls and presentation modes (Classic / Enhanced / Nova Swift).
+        - generic [ref=e128]: Planned
+  - generic [ref=e132]:
+    - paragraph [ref=e133]: The one rule
+    - heading "You bring the game." [level=2] [ref=e134]
+    - paragraph [ref=e135]:
+      - text: We ship code; you supply the data. EV Nova's content is still owned by ATMOS, so this project contains zero copyrighted game data and never will. NOVA Swift reads your own legally-owned copy at runtime — classic resource forks,
+      - code [ref=e136]: .ndat
+      - text: ", or the modern"
+      - code [ref=e137]: BRGR .rez
+      - text: container — the same model as OpenMW and OpenRA.
+  - generic [ref=e140]:
+    - generic [ref=e141]:
+      - paragraph [ref=e142]: Getting started
+      - heading "Build it in a few commands." [level=2] [ref=e143]
+      - paragraph [ref=e144]: Requires macOS with the Xcode command-line tools. Your EV Nova data stays git-ignored and never leaves your machine.
+      - generic [ref=e145]:
+        - generic [ref=e148]:
+          - paragraph [ref=e149]: Clone & fetch dependencies
+          - paragraph [ref=e150]:
+            - text: Run
+            - code [ref=e151]: scripts/setup.sh
+            - text: to pull the open-source dependencies.
+        - generic [ref=e154]:
+          - paragraph [ref=e155]: Drop in your data
+          - paragraph [ref=e156]:
+            - text: Place your legally-owned EV Nova files into
+            - code [ref=e157]: data/base/
+            - text: .
+        - generic [ref=e160]:
+          - paragraph [ref=e161]: Build & run
+          - paragraph [ref=e162]:
+            - text: Open
+            - code [ref=e163]: app/NovaSwift.xcodeproj
+            - text: in Xcode, then build for Mac, iPad or iPhone.
+    - generic [ref=e164]:
+      - generic [ref=e165]: "# fetch open-source dependencies scripts/setup.sh # place your EV Nova data into data/base/ # (see docs/GET_THE_DATA.md) # optional: free community plug-ins scripts/fetch-plugins.sh # build & test swift build && swift test"
+      - link "Read the full README on GitHub" [ref=e167] [cursor=pointer]:
+        - /url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova
+  - contentinfo [ref=e168]:
+    - generic [ref=e169]:
+      - generic [ref=e170]:
+        - link "NOVA·SWIFT" [ref=e171] [cursor=pointer]:
+          - /url: "#top"
+        - generic [ref=e173]:
+          - link "GitHub" [ref=e174] [cursor=pointer]:
+            - /url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova
+          - link "Charter" [ref=e175] [cursor=pointer]:
+            - /url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/blob/main/docs/CHARTER.md
+          - link "Status" [ref=e176] [cursor=pointer]:
+            - /url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/blob/main/docs/STATUS.md
+          - link "Roadmap" [ref=e177] [cursor=pointer]:
+            - /url: https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/blob/main/docs/ROADMAP.md
+      - paragraph [ref=e178]:
+        - strong [ref=e179]: EV Nova and its data are copyrighted
+        - text: ", and this project never redistributes them — you supply your own legally-obtained copy. This project's code is open source. An interoperability and preservation effort in the spirit of OpenRA, OpenTTD and devilutionX."
+        - strong [ref=e180]: Unaffiliated with and unendorsed by Ambrosia Software, ATMOS, or the original authors.
+        - text: All artwork on this page is original to the NOVA Swift project.

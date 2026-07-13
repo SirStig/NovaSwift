@@ -741,6 +741,17 @@ public final class StoryEngine {
             }
             guard !rt.isActive else { player.cronRuntime[c.id] = rt; continue }
 
+            // Already activated and holding for PreHoldoff days: start once the
+            // pending date arrives (the gates are re-checked before activation,
+            // not during the hold-off — once committed it will start).
+            if let pending = rt.pendingStart {
+                if player.date >= pending {
+                    rt.pendingStart = nil
+                    startCron(c, rt: &rt)
+                }
+                player.cronRuntime[c.id] = rt; continue
+            }
+
             // Consider starting: hold-off passed, inside the date window, enable
             // test passes, and the daily random roll succeeds.
             if let earliest = rt.earliestStart, player.date < earliest {
@@ -759,14 +770,28 @@ public final class StoryEngine {
             }
             if c.random > 0, !rng.chance(percent: c.random) { player.cronRuntime[c.id] = rt; continue }
 
-            runCronHook(c.onStart, loop: c.loopStartUntilFalse, cron: c)
-            Log.mission.debug("cron \(c.id) started on \(String(describing: self.player.date), privacy: .public)")
-            services?.notify(.cronStarted(cronID: c.id))
-            announceNews(for: c)
-            rt.startedDate = player.date
-            rt.endDate = player.date.adding(days: max(0, c.duration))
+            // Activated. PreHoldoff (Bible): hold in a waiting state for N days
+            // before OnStart runs; without it, delayed-consequence crons fire
+            // N days early. PreHoldoff 0 (the common case) starts immediately.
+            if c.preHoldoff > 0 {
+                rt.pendingStart = player.date.adding(days: c.preHoldoff)
+                Log.mission.debug("cron \(c.id) activated, holding \(c.preHoldoff, privacy: .public)d before start")
+            } else {
+                startCron(c, rt: &rt)
+            }
             player.cronRuntime[c.id] = rt
         }
+    }
+
+    /// Run a cron's OnStart, announce it, and schedule its end from `Duration`.
+    /// Shared by the immediate-start and post-PreHoldoff paths.
+    private func startCron(_ c: CronRes, rt: inout CronRuntime) {
+        runCronHook(c.onStart, loop: c.loopStartUntilFalse, cron: c)
+        Log.mission.debug("cron \(c.id) started on \(String(describing: self.player.date), privacy: .public)")
+        services?.notify(.cronStarted(cronID: c.id))
+        announceNews(for: c)
+        rt.startedDate = player.date
+        rt.endDate = player.date.adding(days: max(0, c.duration))
     }
 
     /// Hard cap on iterative-cron re-evaluation, so a `Flags 0x0001`/`0x0002`

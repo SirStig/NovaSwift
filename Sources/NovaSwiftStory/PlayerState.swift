@@ -68,15 +68,19 @@ public struct CronRuntime: Codable, Hashable, Sendable {
     public var startedDate: GameDate?
     /// Date the event is scheduled to end (start + duration).
     public var endDate: GameDate?
-    /// Earliest date the event may (re)start, enforcing pre/post hold-off.
+    /// Earliest date the event may (re)start, enforcing post-holdoff after it ends.
     public var earliestStart: GameDate?
+    /// Date OnStart fires once the event has been *activated* (all gates passed)
+    /// but is holding for `PreHoldoff` days before starting. nil = not pending.
+    public var pendingStart: GameDate?
 
     public init(cronID: Int, startedDate: GameDate? = nil, endDate: GameDate? = nil,
-                earliestStart: GameDate? = nil) {
+                earliestStart: GameDate? = nil, pendingStart: GameDate? = nil) {
         self.cronID = cronID
         self.startedDate = startedDate
         self.endDate = endDate
         self.earliestStart = earliestStart
+        self.pendingStart = pendingStart
     }
 
     public var isActive: Bool { startedDate != nil }

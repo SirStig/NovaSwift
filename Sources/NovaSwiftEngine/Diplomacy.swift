@@ -134,12 +134,22 @@ public final class Diplomacy {
         return evilness >= gov.crimeTolerance
     }
 
+    /// Governments whose ships won't automatically attack the player because the
+    /// player holds an active `ränk` from them with the "won't attack" flag
+    /// (`ränk.Flags` 0x0100). Seeded from the pilot's active ranks alongside
+    /// `legalRecord`; empty otherwise.
+    public var rankProtectedGovts: Set<Int> = []
+
     /// Does government `g` want to attack the player right now?
     public func isHostileToPlayer(_ g: Int) -> Bool {
         guard let gov = govts[g] else {
             warnMissingGovt(g)
             return false
         }
+        // An active rank that grants "govt won't attack" overrides the govt's
+        // own default aggression (short of it being a criminal-provoked case
+        // the player themselves triggered — `neverAttacksPlayer` is stronger).
+        if rankProtectedGovts.contains(g) { return false }
         if gov.neverAttacksPlayer { return false }
         if gov.alwaysAttacksPlayer { return true }
         if gov.xenophobic { return true }

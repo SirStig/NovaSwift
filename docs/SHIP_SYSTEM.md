@@ -15,7 +15,7 @@ Built 2026-07-07. Verified against the real EV Nova data (`novaswift-extract shi
 | Data | `NovaSwiftKit/NovaAIModels.swift` (`OutfRes`, `OutfitModType`) | Outfit decode: mass, cost, tech, max, and the up-to-four **modifier functions** (the 50 EV Nova ModTypes: shield, armor, speed, fuel, afterburner, weapon-grant, ammo, maxGuns…). |
 | Aggregation | `NovaSwiftEngine/ShipLoadout.swift` (`Loadout`, `Galaxy.loadout`) | Folds a hull + all its outfits into one **effective** ship: summed stats, resolved weapons, fuel/cargo/mass, afterburner. The heart of the system. |
 | Runtime | `NovaSwiftEngine/World.swift` (`Ship`) | Live pools: `shield`/`armor` (+recharge, in `Combat.swift`), **`fuel`** (+regen), **cargo hold**, **afterburner** state; jump-fuel and cargo APIs; afterburner physics in `step`. |
-| Runtime | `NovaSwiftEngine/Combat.swift` | Weapons: `WeaponSpec`/`WeaponMount` (reload, ammo), projectiles/beams, damage → shields then armor. |
+| Runtime | `NovaSwiftEngine/Combat.swift` | Weapons: `WeaponSpec`/`WeaponMount` (reload, ammo), projectiles/beams, damage → shields fully first, then armor (no bleed-through; shield-penetrating weapons `wëap` Flags 0x0020 excepted). |
 | App | `app/NovaSwift/…` | Player ship built via `Galaxy.makeLoadedShip`; HUD shows shield/armor/fuel(+jumps)/cargo/active-weapon; afterburner bound to its `GameAction`; projectiles rendered. |
 
 ## Fuel (important nuance)

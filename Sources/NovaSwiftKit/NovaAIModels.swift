@@ -345,6 +345,10 @@ public struct GovtRes {
     /// "Can't Request Assist/Mercy, non-talkative" — never has anything to say
     /// when hailed even though `cantBeHailed` is false.
     public var nonTalkative: Bool     { flags2 & 0x0001 != 0 }
+    /// "Roadside Assistance" (Bible `Flags2` 0x0010): this govt refuels and
+    /// repairs the player for free at its ports. NOT `flags1` 0x0010 — that bit
+    /// is `warshipsRetreat`. (Historically the spaceport read the wrong word.)
+    public var roadsideAssistance: Bool { flags2 & 0x0010 != 0 }
     /// `gövt.Flags2` gate-travel dispositions (Bible): whether this govt's ships
     /// avoid hypergates, prefer them over jumping out, or prefer wormholes.
     /// Drives which govts' ships emerge from / depart via a system's gates.
@@ -636,6 +640,10 @@ public struct WeapRes {
     /// off (the default), several copies of the weapon stagger — one barrel at a
     /// time at `reload / count` — instead of volleying every reload.
     public var fireSimultaneously: Bool { flagsRaw & 0x0040 != 0 }
+    /// `Flags` 0x0020: "Weapon passes through shields" (Bible, "use sparingly!").
+    /// Its mass/armor damage reaches the hull even while the target's shields are
+    /// still up — the one authentic exception to shields-protect-armor.
+    public var penetratesShields: Bool { flagsRaw & 0x0020 != 0 }
     /// `Flags` 0x8000: "shot detonates at the end of its lifespan" (flak).
     public var detonateOnExpire: Bool { flagsRaw & 0x8000 != 0 }
     /// `Flags` 0x0001: spin the shot graphic continuously.

@@ -261,12 +261,12 @@ struct SpaceportView: View {
         return currentFuel < maxFuel - 0.5
     }
     /// Free refuel if the port's government runs "Roadside Assistance" (govt
-    /// flag 0x0010) or the player holds a rank from that govt with the
+    /// `Flags2` 0x0010) or the player holds a rank from that govt with the
     /// free-repair/refuel flag (0x0800) — both the Bible's routes to free
     /// service. Otherwise it's paid.
     private var rechargeIsFree: Bool {
         let govtID = spob.government
-        if govtID >= 128, let g = game.govt(govtID), g.flags1 & 0x0010 != 0 { return true }
+        if govtID >= 128, let g = game.govt(govtID), g.roadsideAssistance { return true }
         return pilot.state.activeRanks.contains { game.rank($0)?.govt == govtID && (game.rank($0)?.flags ?? 0) & 0x0800 != 0 }
     }
     /// Cost to top off: ~1cr per missing fuel unit (a ~jump's worth ≈ 100cr),
