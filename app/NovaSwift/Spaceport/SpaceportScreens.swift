@@ -63,6 +63,7 @@ struct TradeCenterView: View {
     @ObservedObject var pilot: PilotStore
     let galaxy: Galaxy
     var onDone: () -> Void
+    @Environment(\.novaTheme) private var theme
 
     @State private var selected = 0
     /// Tons the next Buy/Sell tap transacts — editable via `qtyControl`'s
@@ -165,13 +166,13 @@ struct TradeCenterView: View {
             ForEach(Array(market.enumerated()), id: \.offset) { i, row in
                 let held = pilot.held(cargo: row.cargoID)
                 HStack(spacing: 0) {
-                    NovaText(row.name, size: 10, width: 160)
+                    NovaText(row.name, size: 10, color: theme.listText, width: 160)
                     NovaText(rowLabel(row), size: 10, color: rowLabelColor(row), width: 62, align: .center)
-                    NovaText("\(row.price)", size: 10, width: 70, align: .center)
-                    NovaText(held > 0 ? "\(held)" : "—", size: 10, color: held > 0 ? .white : .gray, width: 60, align: .trailing)
+                    NovaText("\(row.price)", size: 10, color: theme.listText, width: 70, align: .center)
+                    NovaText(held > 0 ? "\(held)" : "—", size: 10, color: held > 0 ? theme.listText : .gray, width: 60, align: .trailing)
                 }
                 .frame(height: 13)
-                .background(i == selected ? Color.white.opacity(0.14) : .clear)
+                .background(i == selected ? theme.listHilite : theme.listBkgnd)
                 .contentShape(Rectangle())
                 .onTapGesture { selected = i }
             }
@@ -933,11 +934,12 @@ struct ItemTile: View {
     /// Mission/story-gated: still shown (Bible default), but can't be bought
     /// right now. Dimmed the way the Bible's `cölr.GridDim` describes.
     var locked: Bool = false
+    @Environment(\.novaTheme) private var theme
 
     // Tile chrome matches the vendored NovaJS reference (`item_grid.ts`
-    // `ItemTile.draw()`): a black-filled 83×54 cell with a thin border — dim
-    // gray (0x404040) unselected, bright red (0xFF0000) selected — not a
-    // translucent white overlay.
+    // `ItemTile.draw()`): a black-filled 83×54 cell with a thin border — the
+    // theme's grid colours (cölr.gridDim unselected / gridBright selected;
+    // 0x404040 / 0xFF0000 in the base game) — not a translucent white overlay.
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Color.black
@@ -959,7 +961,7 @@ struct ItemTile: View {
             }
         }
         .frame(width: gridTileSize.width, height: gridTileSize.height)
-        .overlay(Rectangle().strokeBorder(selected ? Color(red: 1, green: 0, blue: 0) : Color(white: 0.25), lineWidth: 1))
+        .overlay(Rectangle().strokeBorder(selected ? theme.gridBright : theme.gridDim, lineWidth: 1))
         .opacity(locked ? 0.45 : 1)
         .saturation(locked ? 0 : 1)
         .contentShape(Rectangle())

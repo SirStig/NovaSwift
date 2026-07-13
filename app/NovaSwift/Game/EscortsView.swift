@@ -41,6 +41,7 @@ struct EscortsView: View {
     var game: NovaGame? = nil
     var currentOrder: EscortOrder? = nil
     var onCommand: (EscortOrder) -> Void = { _ in }
+    @Environment(\.novaTheme) private var theme
     /// Release / dismiss the escort with this `EscortRecord.id` — EV Nova's
     /// "Release from Servitude" hail action.
     var onRelease: (Int) -> Void = { _ in }
@@ -170,9 +171,11 @@ struct EscortsView: View {
         .padding(.vertical, 3).padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Squared, inverted selection box — the classic Mac list-selection look,
-        // not a rounded native pill.
-        .background(selected ? novaAmber.opacity(0.16) : Color.clear)
-        .overlay(Rectangle().strokeBorder(novaAmber.opacity(selected ? 0.55 : 0), lineWidth: 1))
+        // not a rounded native pill. cölr.escortHilite drives the selection tint
+        // (a solid fill for an opaque theme colour, a subtle wash for the
+        // translucent amber fallback); the border uses the same colour.
+        .background(selected ? theme.escortHilite : Color.clear)
+        .overlay(Rectangle().strokeBorder(selected ? theme.escortHilite : Color.clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture {
             // "Hail" the escort — select it to reveal its lifecycle action. Only

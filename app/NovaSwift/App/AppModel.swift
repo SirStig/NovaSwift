@@ -43,6 +43,10 @@ final class AppModel: ObservableObject {
     /// in-session pilot.
     let pilot = PilotStore()
 
+    /// Live multiplayer session (presence + chat now; simulation sync later).
+    /// Inactive until a session is started; reached everywhere via `model.session`.
+    let session = MultiplayerSession()
+
     /// The durable library of all saved pilots (many `.evpilot` files + backups).
     /// Backed by iCloud or local storage per `settings.iCloudSaves` — built in
     /// `init` (after `settings`) so it can honour that toggle from launch.
@@ -62,8 +66,19 @@ final class AppModel: ObservableObject {
         return _uiGraphics
     }
 
+    /// The game-wide `cölr` interface theme (button/list/grid/progress colours +
+    /// fonts), resolved once from the loaded data and reused by all native
+    /// chrome via `\.novaTheme`. Rebuilt when the data changes (plug-in toggle,
+    /// import), same as `uiGraphics`.
+    private var _uiTheme: NovaUITheme?
+    var uiTheme: NovaUITheme {
+        if _uiTheme == nil { _uiTheme = NovaUITheme(colr: data.game?.colr()) }
+        return _uiTheme ?? .fallback
+    }
+
     private var dataObserver: AnyCancellable?
     private var rosterObserver: AnyCancellable?
+    private var sessionObserver: AnyCancellable?
 
     init() {
         // Build the roster honouring the saved iCloud preference. Read the
@@ -76,6 +91,7 @@ final class AppModel: ObservableObject {
         dataObserver = data.objectWillChange.sink { [weak self] _ in
             guard let self else { return }
             _uiGraphics = nil                // rebuild authentic-UI art against new data
+            _uiTheme = nil                   // and the cölr interface theme
             store.refresh(data: data)
             objectWillChange.send()
         }
@@ -84,6 +100,11 @@ final class AppModel: ObservableObject {
         // its changes (pilot list, selection, iCloud/local state) up to AppModel
         // so the menus and Settings status update live.
         rosterObserver = roster.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        // Forward the multiplayer session's changes (presence/chat/unread) up so
+        // views observing AppModel refresh, same as `roster`/`data`.
+        sessionObserver = session.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         audio.apply(settings: settings)

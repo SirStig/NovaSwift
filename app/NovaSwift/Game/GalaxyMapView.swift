@@ -26,6 +26,18 @@ struct GalaxyMapView: View {
     /// PICT dialog frame. Driven by `GameSettings.fullscreenGalaxyMap`.
     var fullscreen: Bool = false
 
+    /// Other players' locations (multiplayer presence), keyed by system id → the
+    /// players in it (excluding the local player). Empty in single-player. Drawn
+    /// as a coloured pip + name offset to the right of the system so it never
+    /// occludes the mission arrow (above the dot) or the label (below it).
+    var playerMarkers: [Int: [PlayerMapMarker]] = [:]
+
+    /// One other player to mark on the map.
+    struct PlayerMapMarker: Equatable {
+        let id: String
+        let name: String
+    }
+
     /// Gate destination-picker mode. When set (landing on a hypergate opens the
     /// map this way), solid bright-blue lines run from `originSystem` to every
     /// gate this one connects to, and tapping a destination invokes
@@ -78,6 +90,7 @@ struct GalaxyMapView: View {
     private let minZoom: CGFloat = 0.5    // whole galaxy (~945 units wide) in view
     private let maxZoom: CGFloat = 16     // a linked neighbor fills most of the screen
 
+    @Environment(\.novaTheme) private var theme
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
     /// EV Nova's mission-destination marker colour — a saturated orange arrow.
     private let missionOrange = Color(red: 1.0, green: 0.52, blue: 0.0)
@@ -463,6 +476,18 @@ struct GalaxyMapView: View {
             let p = plot(s.x, s.y)
             guard visibleRect.contains(p) else { continue }
             drawMissionArrow(ctx: &ctx, at: p, bob: bob)
+        }
+
+        // Multiplayer presence markers — drawn last (over the dots/labels/arrows),
+        // like a mission destination. A friend's system is always marked, even
+        // through fog of war, so you can see where they are (same rationale as the
+        // mission arrow). Offset to the right so the mission arrow (above) and the
+        // system label (below) stay clear.
+        for (sysID, players) in playerMarkers {
+            guard let s = byID[sysID] else { continue }
+            let p = plot(s.x, s.y)
+            guard visibleRect.contains(p) else { continue }
+            drawPlayerMarkers(ctx: &ctx, at: p, players: players)
         }
     }
 
@@ -921,7 +946,8 @@ struct GalaxyMapView: View {
                     .frame(width: 160, alignment: .top)
                     .padding(10)
                     .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(amber.opacity(0.25)))
+                    // The floating hyperspace-map border (cölr.floatingMap).
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(theme.floatingMap))
                     .padding(.top, 92).padding(.trailing, 20)
             }
 

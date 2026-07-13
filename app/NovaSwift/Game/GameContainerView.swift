@@ -703,6 +703,12 @@ struct GameContainerView: View {
 
                 MessageLogView(hud: host.hud)
 
+                // Multiplayer: start-local-co-op launcher + session chat. Passive
+                // bottom-leading cluster; empty regions don't block fly-to-tap.
+                MultiplayerChatCluster(session: model.session,
+                                       pilotName: model.pilot.state.pilotName,
+                                       currentSystemID: nav.currentSystemID)
+
                 if showFlightHints && landedSpobID == nil && !showMenu && !nav.showingMap {
                     flightHintsOverlay
                 }
@@ -977,6 +983,8 @@ struct GameContainerView: View {
                 model.pilot.state.fuel = host?.scene.playerShip?.fuel
                 model.pilot.state.currentSystem = newID       // follow the pilot to the new system
                 model.pilot.state.exploredSystems.insert(newID)
+                // Announce the jump to any multiplayer peers (no-op if no session).
+                model.session.updatePresence(systemID: newID, name: model.pilot.state.pilotName)
                 syncCombatStanding()   // the about-to-be-discarded Diplomacy is the source of truth
                 model.pilot.save()
                 model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump

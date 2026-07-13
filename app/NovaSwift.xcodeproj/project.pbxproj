@@ -11,6 +11,7 @@
 		AA000000000000000000F4 /* NovaSwiftEngine in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F2 /* NovaSwiftEngine */; };
 		AA000000000000000000F6 /* NovaSwiftStory in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F5 /* NovaSwiftStory */; };
 		AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F7 /* NovaSwiftPluginStore */; };
+		AA000000000000000000F9 /* NovaSwiftNet in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000FA /* NovaSwiftNet */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +31,7 @@
 				AA000000000000000000F4 /* NovaSwiftEngine in Frameworks */,
 				AA000000000000000000F6 /* NovaSwiftStory in Frameworks */,
 				AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */,
+				AA000000000000000000F9 /* NovaSwiftNet in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,6 +78,7 @@
 				AA000000000000000000F2 /* NovaSwiftEngine */,
 				AA000000000000000000F5 /* NovaSwiftStory */,
 				AA000000000000000000F7 /* NovaSwiftPluginStore */,
+				AA000000000000000000FA /* NovaSwiftNet */,
 			);
 			productName = NovaSwift;
 			productReference = AA000000000000000000E5 /* NovaSwift.app */;
@@ -249,6 +252,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSBonjourServices = "_novaswift-mp._tcp _novaswift-mp._udp";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -287,6 +292,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSBonjourServices = "_novaswift-mp._tcp _novaswift-mp._udp";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -356,6 +363,10 @@
 		AA000000000000000000F7 /* NovaSwiftPluginStore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NovaSwiftPluginStore;
+		};
+		AA000000000000000000FA /* NovaSwiftNet */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NovaSwiftNet;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

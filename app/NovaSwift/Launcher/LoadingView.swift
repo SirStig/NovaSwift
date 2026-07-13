@@ -166,19 +166,20 @@ struct LoadingView: View {
 /// with a specular highlight along its top edge.
 private struct NovaProgressBar: View {
     var value: Double
+    @Environment(\.novaTheme) private var theme
 
     var body: some View {
         GeometryReader { geo in
             let filled = geo.size.width * min(max(value, 0), 1)
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color(white: 0.05))
+                    .fill(theme.progDim)
                     .overlay(
-                        Capsule().strokeBorder(Color(white: 0.30), lineWidth: 1)
+                        Capsule().strokeBorder(theme.progOutline, lineWidth: 1)
                     )
 
                 Capsule()
-                    .fill(LinearGradient(colors: [novaAmber, novaAmber.opacity(0.72)],
+                    .fill(LinearGradient(colors: [theme.progBright, theme.progBright.opacity(0.72)],
                                          startPoint: .top, endPoint: .bottom))
                     .overlay(alignment: .top) {
                         Capsule()
@@ -188,7 +189,7 @@ private struct NovaProgressBar: View {
                             .padding(.top, 1.5)
                     }
                     .frame(width: filled)
-                    .shadow(color: novaAmber.opacity(0.45), radius: 7)
+                    .shadow(color: theme.progBright.opacity(0.45), radius: 7)
                     // Zero-width capsules still paint a sliver of glow; hide the
                     // fill entirely until there's something to show.
                     .opacity(filled > 0.5 ? 1 : 0)

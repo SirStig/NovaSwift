@@ -834,6 +834,7 @@ final class GameScene: SKScene {
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = spriteFilter
+            applyGovernmentShipColor(to: sprite, government: world.player.government)
             node.addChild(sprite)
             shipSprite = sprite
             shipRadius = max(first.size().width, first.size().height) / 2
@@ -2133,6 +2134,7 @@ final class GameScene: SKScene {
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = spriteFilter
+            applyGovernmentShipColor(to: sprite, government: npc.government)
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
@@ -3050,6 +3052,22 @@ final class GameScene: SKScene {
             return .friendlyOrOwned
         }
         return .neutral
+    }
+
+    /// Shift a hull sprite toward its government's paint colour (`gövt.ShipColor`,
+    /// Nova Bible "the color to shift this government's ships toward"). EV Nova
+    /// leaves the field -1 when a government has no colour — `acolor` reads that
+    /// as white (255,255,255); a zeroed field reads black — so both sentinels are
+    /// skipped and only governments that actually specify a colour recolour their
+    /// fleet. A partial `colorBlendFactor` tints the hull while keeping its
+    /// shading, rather than flattening it to a silhouette.
+    private func applyGovernmentShipColor(to sprite: SKSpriteNode, government: Int) {
+        guard let sc = galaxy?.game.govt(government)?.shipColor,
+              !(sc.r == 255 && sc.g == 255 && sc.b == 255),
+              !(sc.r == 0 && sc.g == 0 && sc.b == 0) else { return }
+        sprite.color = SKColor(red: CGFloat(sc.r) / 255, green: CGFloat(sc.g) / 255,
+                               blue: CGFloat(sc.b) / 255, alpha: 1)
+        sprite.colorBlendFactor = 0.3
     }
 
     private func factionColor(for npc: Ship) -> SKColor {

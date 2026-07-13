@@ -79,6 +79,8 @@ struct RootView: View {
         }
         .environment(\.novaDebugEnabled, model.settings.uiDebugOverlay)
         .environment(\.novaUIScale, model.settings.uiScale)   // "Overall UI scale"
+        .environment(\.novaTheme, model.uiTheme)              // cölr interface theme
+
         .animation(.easeInOut(duration: 0.25), value: model.screen)
         .animation(.easeInOut(duration: 0.3), value: model.pendingIntro != nil)
         .animation(.easeInOut(duration: 0.3), value: model.pendingTutorialOffer)

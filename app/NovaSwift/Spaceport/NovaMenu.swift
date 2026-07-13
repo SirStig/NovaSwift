@@ -133,10 +133,12 @@ struct NovaButton: View {
     var width: CGFloat = 120
     var enabled: Bool = true
     let action: () -> Void
+    @Environment(\.novaTheme) private var theme
 
     var body: some View {
         Button(action: { if enabled { action() } }) { Color.clear }
-            .buttonStyle(NovaButtonStyle(graphics: graphics, title: title, width: width, enabled: enabled))
+            .buttonStyle(NovaButtonStyle(graphics: graphics, title: title, width: width,
+                                         enabled: enabled, theme: theme))
             .disabled(!enabled)
     }
 }
@@ -152,10 +154,12 @@ struct NovaIconButton: View {
     let systemName: String
     var enabled: Bool = true
     let action: () -> Void
+    @Environment(\.novaTheme) private var theme
 
     var body: some View {
         Button(action: { if enabled { action() } }) { Color.clear }
-            .buttonStyle(NovaIconButtonStyle(graphics: graphics, systemName: systemName, enabled: enabled))
+            .buttonStyle(NovaIconButtonStyle(graphics: graphics, systemName: systemName,
+                                             enabled: enabled, theme: theme))
             .disabled(!enabled)
     }
 }
@@ -164,6 +168,7 @@ struct NovaIconButtonStyle: ButtonStyle {
     let graphics: SpaceportGraphics
     let systemName: String
     let enabled: Bool
+    var theme: NovaUITheme = .fallback
 
     func makeBody(configuration: Configuration) -> some View {
         let state: SpaceportGraphics.ButtonState =
@@ -177,7 +182,7 @@ struct NovaIconButtonStyle: ButtonStyle {
         .overlay(
             Image(systemName: systemName)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(enabled ? .white : Color(white: 0.15))
+                .foregroundStyle(enabled ? theme.buttonUp : theme.buttonGrey)
         )
         .contentShape(Rectangle())
     }
@@ -197,6 +202,9 @@ struct NovaButtonStyle: ButtonStyle {
     let title: String
     let width: CGFloat
     let enabled: Bool
+    /// The cölr interface theme (label colours + button font). `.fallback` keeps
+    /// the pre-data-driven look for any direct instantiation without one.
+    var theme: NovaUITheme = .fallback
 
     func makeBody(configuration: Configuration) -> some View {
         let state: SpaceportGraphics.ButtonState =
@@ -212,9 +220,10 @@ struct NovaButtonStyle: ButtonStyle {
             // Geneva 12, fixed in frame pixels like all authentic-screen text
             // (verified against the vendored NovaJS `button.ts` text style).
             // `.novaFont(.button)` is for native chrome — its 15pt base and
-            // 13pt floor overflow a 25px-tall authentic button.
+            // 13pt floor overflow a 25px-tall authentic button. cölr.buttonFont
+            // overrides the family when the data supplies (and registers) one.
             Text(title)
-                .font(.custom(NovaFontRole.button.family, size: 12))
+                .font(.custom(theme.buttonFont ?? NovaFontRole.button.family, size: 12))
                 .foregroundStyle(labelColor(state))
         )
         .contentShape(Rectangle())
@@ -231,9 +240,9 @@ struct NovaButtonStyle: ButtonStyle {
 
     private func labelColor(_ state: SpaceportGraphics.ButtonState) -> Color {
         switch state {
-        case .normal:  return .white
-        case .clicked: return Color(white: 0.5)
-        case .grey:    return Color(white: 0.15)
+        case .normal:  return theme.buttonUp
+        case .clicked: return theme.buttonDown
+        case .grey:    return theme.buttonGrey
         }
     }
 }
