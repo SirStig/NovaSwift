@@ -117,7 +117,8 @@ struct NewPilotView: View {
         _ = model.createPilot(name: name, isMale: isMale, scenario: scenario)
         onClose()
         if scenario.introSlides.isEmpty && scenario.introTextID == nil {
-            model.beginPlay()
+            // No intro to play — go straight to the flight-training offer.
+            model.offerTutorialAfterNewPilot()
         } else {
             // Presented full-screen at the RootView level, outside this dialog's
             // sheet frame — see AppModel.pendingIntro.

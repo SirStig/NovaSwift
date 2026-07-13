@@ -215,6 +215,85 @@ final class GameHost {
         }
     }
 
+    // MARK: Flight-training sandbox
+
+    /// Build a throwaway host for the flight-training tutorial: the scenario's
+    /// starting hull, fully outfitted, dropped into the starting system with the
+    /// player made invulnerable and **none** of the pilot-save callbacks wired.
+    /// Nothing here reads or writes the live pilot — the tutorial is a sandbox
+    /// that must never touch a real save. Returns nil when no data is loaded.
+    static func makeTrainingHost(model: AppModel) -> GameHost? {
+        guard let game = model.data.game else { return nil }
+        let galaxy = Galaxy(game: game)
+
+        // Fly the hull the scenario starts you in, so the training flight matches
+        // the ship the pilot will actually take off in. Fall back to the first
+        // ship type in the data if the scenario's is unusable.
+        let scenario = game.startingChar()
+        let shipID = scenario.flatMap { $0.shipID >= 128 ? $0.shipID : nil }
+            ?? game.ships().first?.id ?? 128
+        guard let ship = galaxy.makeLoadedShip(shipID) else { return nil }
+        ship.armor = ship.maxArmor
+        ship.shield = ship.maxShield
+
+        var textures: [SKTexture] = []
+        var engineTextures: [SKTexture] = []
+        if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.rotationFrames(from: sheet) }
+        if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.rotationFrames(from: glow) }
+        let shipName = game.ship(shipID)?.displayName ?? "Trainer"
+
+        // The starting system is always inhabited (a planet to practice landing
+        // on) and calm — ideal for training. No destroyed-stellar handling here:
+        // the sandbox never persists, so there's nothing to have destroyed.
+        var planets: [PlanetVisual] = []
+        var systemName = ""
+        var systemID = 0
+        if let system = game.startingSystem() {
+            systemName = system.name
+            systemID = system.id
+            planets = game.stellarObjects(in: system.id).compactMap { entry in
+                let spob = entry.spob
+                let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
+                let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
+                return PlanetVisual(id: spob.id, name: spob.name,
+                                    position: CGPoint(x: spob.x, y: spob.y),
+                                    texture: tex, radius: radius,
+                                    government: spob.government,
+                                    isUninhabited: spob.isUninhabited)
+            }
+            let sysCenter = galaxy.systemContext(for: system.id).center
+            ship.position = sysCenter + Vec2(0, -700)
+        }
+
+        return GameHost(training: model, ship: ship, textures: textures,
+                        engineTextures: engineTextures, shipName: shipName,
+                        systemID: systemID, planets: planets, systemName: systemName,
+                        game: game, galaxy: galaxy)
+    }
+
+    /// Designated initializer for the training sandbox (see `makeTrainingHost`).
+    /// Sets up the scene from a pre-built ship/system and wires nothing that could
+    /// mutate the live pilot — deliberately far leaner than the play-session init.
+    init(training model: AppModel, ship: Ship, textures: [SKTexture],
+         engineTextures: [SKTexture], shipName: String, systemID: Int,
+         planets: [PlanetVisual], systemName: String, game: NovaGame?, galaxy: Galaxy?) {
+        controller = GameControllerInput(input: input)
+        self.game = game
+        self.galaxy = galaxy
+        self.graphics = game.map { SpaceportGraphics(game: $0) }
+        hudStyle = GameHost.makeHUDStyle(game, shipType: ship.shipTypeID)
+        hud.credits = 0
+        hud.shipName = shipName
+        hud.systemName = systemName
+        scene.scaleMode = .resizeFill
+        scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
+                        settings: model.settings,
+                        input: input, controller: controller, hud: hud, audio: model.audio,
+                        planets: planets, systemName: systemName,
+                        game: game, systemID: systemID, galaxy: galaxy,
+                        arrivedViaJump: false, playerDamageScaleOverride: 0)
+    }
+
     /// The player's live ship + its sprite textures, built from the current pilot
     /// loadout (hull + installed outfits → shields/armor/fuel/afterburner/cargo +
     /// resolved weapons). Shared by the initial `GameHost` build and the in-place
@@ -2058,7 +2137,7 @@ struct GameContainerView: View {
 /// visible moment on mobile hardware. Matches `LoadingView`'s starfield/
 /// wordmark treatment so this brief gap reads as an intentional loading
 /// screen rather than a stalled black one.
-private struct GameLoadingView: View {
+struct GameLoadingView: View {
     @State private var pulse = false
 
     var body: some View {
@@ -2104,7 +2183,7 @@ private struct GameLoadingView: View {
 /// keyboard hint is meaningless, so when you're cleared to set down it becomes a
 /// **tappable amber "Land" pill** — the actual control, not a description of one
 /// — falling back to a plain "Slow down…" hint when you're too fast.
-private struct LandPromptView: View {
+struct LandPromptView: View {
     @ObservedObject var hud: GameHUDModel
     var onLand: () -> Void = {}
     /// Width of the HUD sidebar this screen is reserving on the right (see
@@ -2181,7 +2260,7 @@ private struct LandPromptView: View {
 /// hail replies, mission notices and any other transient game message, as plain
 /// stacked text that fades out on its own timer (`GameHUDModel.post`). No panel
 /// or border — just the log, like the original.
-private struct MessageLogView: View {
+struct MessageLogView: View {
     @ObservedObject var hud: GameHUDModel
 
     /// Mirrors `LandPromptView.bottomPadding` — sits just above the safe area
@@ -2246,7 +2325,7 @@ struct HailDialogState {
 /// Routes hardware-keyboard presses into flight intents using the user's
 /// keybindings. Continuous actions (turn/thrust/fire) are held; discrete actions
 /// (target/jump/map/…) will dispatch once their systems exist.
-private struct KeyboardControls: ViewModifier {
+struct KeyboardControls: ViewModifier {
     let input: InputController
     let bindings: KeyBindings
     var onDiscrete: (GameAction) -> Void = { _ in }

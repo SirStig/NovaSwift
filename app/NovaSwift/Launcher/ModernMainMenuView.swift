@@ -57,6 +57,9 @@ struct ModernMainMenuView: View {
                 .padding(.bottom, 14)
 
                 HStack(spacing: 10) {
+                    if model.data.hasBaseData {
+                        smallButton("Flight Training", "graduationcap.fill") { model.startTutorial(exit: .menu) }
+                    }
                     smallButton("Plug-ins", "puzzlepiece.extension.fill") { sheet = .plugins }
                     smallButton("Import Data", "square.and.arrow.down.fill") { sheet = .importData }
                     #if os(macOS)

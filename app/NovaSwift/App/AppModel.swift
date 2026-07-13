@@ -17,6 +17,16 @@ final class AppModel: ObservableObject {
     /// full-screen at the `RootView` level (not nested in any dialog sheet) so
     /// the intro slideshow always covers the whole window.
     @Published var pendingIntro: CharRes?
+
+    /// Where a flight-training session should hand off when it ends.
+    enum TutorialExit: Equatable { case play, menu }
+    /// A running flight-training session (nil = none). Presented full-screen at
+    /// the `RootView` level, like `pendingIntro`.
+    @Published var tutorial: TutorialExit?
+    /// A new pilot has finished their intro and is being offered flight training
+    /// before the game begins.
+    @Published var pendingTutorialOffer = false
+
     @Published var settings: GameSettings = .load()
     @Published var bindings: KeyBindings = .load()
     @Published var data = GameDataController()
@@ -115,6 +125,41 @@ final class AppModel: ObservableObject {
         prepareAudioAndData()
         if let game = data.game { pilot.ensureStarted(game: game) }
         screen = .game
+    }
+
+    // MARK: Flight training
+
+    /// After a new pilot's intro, offer flight training — but only the first time
+    /// (until completed/skipped once) and only when the tutorial-hints preference
+    /// is on. Otherwise go straight into the game. Replayable any time from the
+    /// main menu regardless of this gate.
+    func offerTutorialAfterNewPilot() {
+        if settings.tutorialHints, !TutorialProgress.hasCompleted, data.game != nil {
+            pendingTutorialOffer = true
+        } else {
+            beginPlay()
+        }
+    }
+
+    /// Begin a flight-training session. `exit` decides what happens when it ends.
+    func startTutorial(exit: TutorialExit) {
+        pendingTutorialOffer = false
+        tutorial = exit
+    }
+
+    /// The player declined training from the new-pilot offer — go straight to play.
+    func skipTutorialOffer() {
+        pendingTutorialOffer = false
+        beginPlay()
+    }
+
+    /// End the current training session (finished or skipped). Records that it's
+    /// been seen so it isn't auto-offered again, then hands off per its `exit`.
+    func finishTutorial() {
+        let exit = tutorial
+        tutorial = nil
+        TutorialProgress.hasCompleted = true
+        if exit == .play { beginPlay() }
     }
 
     // MARK: Multi-pilot flow (roster + scenarios)

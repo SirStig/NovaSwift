@@ -44,10 +44,31 @@ struct RootView: View {
             if let scenario = model.pendingIntro {
                 IntroSequenceView(scenario: scenario) {
                     model.pendingIntro = nil
-                    model.beginPlay()
+                    // Offer flight training before the game begins (first pilot only).
+                    model.offerTutorialAfterNewPilot()
                 }
                 .transition(.opacity)
                 .zIndex(10)
+            }
+
+            // After the intro (or immediately, when the scenario has none), offer
+            // the new pilot a skippable flight-training run.
+            if model.pendingTutorialOffer {
+                TutorialOfferView(
+                    onStart: { model.startTutorial(exit: .play) },
+                    onSkip: { model.skipTutorialOffer() })
+                    .transition(.opacity)
+                    .zIndex(11)
+            }
+
+            // The flight-training sandbox itself — full-screen, over everything. On
+            // finish it hands back per its exit (begin play, or return to menu).
+            if let exit = model.tutorial {
+                TutorialContainerView(
+                    finishLabel: exit == .play ? "Begin Your Journey" : "Return to Menu",
+                    onFinish: { model.finishTutorial() })
+                    .transition(.opacity)
+                    .zIndex(12)
             }
 
             // UI debug (measurement) overlay controls: an on-screen badge to
@@ -60,6 +81,8 @@ struct RootView: View {
         .environment(\.novaUIScale, model.settings.uiScale)   // "Overall UI scale"
         .animation(.easeInOut(duration: 0.25), value: model.screen)
         .animation(.easeInOut(duration: 0.3), value: model.pendingIntro != nil)
+        .animation(.easeInOut(duration: 0.3), value: model.pendingTutorialOffer)
+        .animation(.easeInOut(duration: 0.3), value: model.tutorial != nil)
         .task(id: model.data.hasBaseData) {
             // Decode the authentic main-menu assets from the player's data (once).
             if menuAssets == nil, model.data.game != nil {

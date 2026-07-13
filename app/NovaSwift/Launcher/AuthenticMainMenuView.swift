@@ -363,6 +363,9 @@ struct AuthenticMainMenuView: View {
         VStack {
             Spacer()
             HStack(spacing: 12) {
+                if model.data.hasBaseData {
+                    extraButton("Flight Training", "graduationcap.fill") { model.startTutorial(exit: .menu) }
+                }
                 extraButton("Plug-ins", "puzzlepiece.extension.fill") { sheet = .plugins }
                 extraButton("Import Data", "square.and.arrow.down.fill") { sheet = .importData }
                 Spacer()
