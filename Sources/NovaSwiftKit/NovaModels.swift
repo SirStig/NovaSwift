@@ -517,6 +517,15 @@ public struct SystRes {
     public let government: Int
     /// How many asteroids to place in this system, 0-16 (`sÿst.Asteroids`).
     public let asteroidCount: Int
+    /// `Message` (@104): index into `STR#` 1000 of the message-buoy text shown to
+    /// the player on entering this system; -1 = no buoy. Verified against real
+    /// data (Kania -1, Tichel 1, …).
+    public let message: Int
+    /// `Person1-8` (@110, 8×int16): përs ids that are *guaranteed* to appear in
+    /// this system (designers pin story/bounty characters to fixed locations).
+    /// Filtered to valid ids (>=128). Verified: Sol pins #128/#227/#156/#299
+    /// (Terrapin, Valkyrie, Drifting Derelict, Galadriel).
+    public let pinnedPersons: [Int]
     /// `sÿst.Interference` (Bible): "How thick the static in the system should
     /// be. 0 is no static, 100 is complete sensor blackout." Degrades radar /
     /// sensor range (see `World` detection). @108, confirmed against real data
@@ -584,8 +593,10 @@ public struct SystRes {
         spawns = sp
         averageShips = i16(d, 100)
         government = i16(d, 102)
+        message = i16(d, 104)
         asteroidCount = max(0, min(16, i16(d, 106)))
         interference = i16(d, 108)
+        pinnedPersons = (0..<8).map { i16(d, 110 + $0 * 2) }.filter { $0 >= 128 }
         murk = i16(d, 146)
         // AstTypes: two bitmask bytes. @148 ("roidTypes1") bits 0-7 select röid
         // 136-143 (dust/crystal); @149 ("roidTypes2") bits 0-7 select röid

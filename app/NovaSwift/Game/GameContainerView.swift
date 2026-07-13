@@ -89,6 +89,7 @@ final class GameHost {
         var hullAnim = HullAnim()
         var planets: [PlanetVisual] = []
         var systemName = ""
+        var buoyMessage: String?
         var aiGame: NovaGame?
         var aiGalaxy: Galaxy?
         var aiSystemID = 0
@@ -135,6 +136,13 @@ final class GameHost {
             if let system = targetSystem {
                 systemName = system.name
                 aiSystemID = system.id
+                // Message buoy (sÿst.Message → STR# 1000): shown on arriving in a
+                // system that has one — light narrative/flavor delivery on entry.
+                if arrivedViaJump, system.message >= 0,
+                   let list = game.stringList(1000), system.message < list.strings.count {
+                    let text = list.strings[system.message]
+                    if !text.isEmpty { buoyMessage = text }
+                }
                 // Story-destroyed stellars (mission `Y` op / spöb OnDestroy,
                 // persisted in `destroyedStellars`) show their **wreck** graphic
                 // (`spöb.DestroyedGraphic`) and can't be landed on; a stellar with
@@ -193,6 +201,9 @@ final class GameHost {
                         planets: planets, systemName: systemName,
                         game: aiGame, systemID: aiSystemID, galaxy: aiGalaxy,
                         arrivedViaJump: arrivedViaJump)
+
+        // Surface the system's message-buoy text (if any) once the scene is up.
+        if let buoyMessage { hud.post(buoyMessage) }
 
         // Contraband scanning: when a government ship finishes scanning the
         // player, its government checks the player's holds/equipment against its
@@ -550,6 +561,18 @@ struct GameContainerView: View {
     /// rebuild idempotent regardless of that delivery-order race.
     @State private var hostSystemID: Int?
     @State private var showMenu = false
+
+    /// Whether pausing opens the port's sidebar menu. Follows the setting on desktop;
+    /// always on for mobile, which has no keyboard and reaches the sidebar only via
+    /// the ☰ button. When false (Classic desktop), pause exits to the authentic menu.
+    private var sidebarEnabled: Bool {
+        #if os(iOS)
+        return true
+        #else
+        return model.settings.sidebarPauseMenu
+        #endif
+    }
+
     /// The in-game debug suite panel (developer tools), gated by debug mode.
     @State private var showDebugSuite = false
     /// Live debug/performance state for this play session, handed to each
@@ -631,7 +654,12 @@ struct GameContainerView: View {
                         .opacity(model.settings.hudOpacity)
                 }
 
+                #if os(iOS)
+                // Mobile has no keyboard, so the ☰ button is its only route to the
+                // sidebar. Desktop opens the sidebar (when enabled) via the Esc/menu
+                // keybinding, so it doesn't need — or show — the button.
                 topLeftMenuButton
+                #endif
 
                 if nav.showingMap && gateMapOrigin == nil {
                     GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() },
@@ -1624,7 +1652,7 @@ struct GameContainerView: View {
     /// view decides per-frame whether to use it, so toggling the setting live
     /// swaps HUDs without rebuilding the host.
     private func activeHUDStyle(_ host: GameHost) -> AuthenticHUDStyle? {
-        model.settings.modernUI ? nil : host.hudStyle
+        model.settings.modernHUD ? nil : host.hudStyle
     }
 
     @ViewBuilder
@@ -1937,7 +1965,14 @@ struct GameContainerView: View {
         case .openMenu, .pauseGame:
             if landedSpobID != nil { return }
             if gateMapOrigin != nil { gateMapOrigin = nil; return }
-            if nav.showingMap { nav.showingMap = false } else { showMenu.toggle() }
+            if nav.showingMap { nav.showingMap = false }
+            else if sidebarEnabled { showMenu.toggle() }
+            else {
+                // Classic (sidebar off): mimic the original — save and drop straight
+                // to the authentic main menu, with no port-original overlay.
+                model.autosave(reason: .manual)
+                model.returnToMainMenu()
+            }
         case .galaxyMap:
             nav.showingMap.toggle()
         case .hyperjump:

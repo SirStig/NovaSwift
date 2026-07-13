@@ -17,7 +17,7 @@ struct RootView: View {
                 // Nova Swift (modern) menu replaces the authentic one when the
                 // player has chosen the modern presentation — it needs no decoded
                 // PICT assets, so it shows immediately.
-                if model.settings.modernUI {
+                if model.settings.modernMainMenu {
                     ModernMainMenuView()
                         .transition(.opacity)
                 } else if let assets = menuAssets {

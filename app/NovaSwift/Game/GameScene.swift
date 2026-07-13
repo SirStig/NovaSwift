@@ -760,10 +760,13 @@ final class GameScene: SKScene {
 
     private func buildStarfield() {
         let density = max(0.2, settings.starfieldDensity)
+        // Parallax = each layer's scroll speed as a fraction of ship motion. EV Nova's
+        // field barely parallaxes and scrolls close to 1:1, so we push these up (near
+        // layer now matches ship speed) — the old 0.25/0.5/0.9 read as too slow/streaky.
         let specs: [(parallax: CGFloat, count: Int, size: CGFloat, brightness: CGFloat)] = [
-            (0.25, Int(90 * density), 1.5, 0.35),
-            (0.5,  Int(70 * density), 2.0, 0.55),
-            (0.9,  Int(40 * density), 2.5, 0.85),
+            (0.5,  Int(90 * density), 1.5, 0.35),
+            (0.75, Int(70 * density), 2.0, 0.55),
+            (1.0,  Int(40 * density), 2.5, 0.85),
         ]
         // Real EV Nova star sprite (spïn #700 "Stars"): a 4×4 grid of 5×5px
         // frames. When it's resolvable, real frames replace the synthetic dot;
@@ -2341,18 +2344,13 @@ final class GameScene: SKScene {
             break
 
         case .align:
-            // Turn to the outbound heading and bleed off speed. This is the
-            // deliberate "swing around to point at the destination" maneuver.
+            // Rotate to the outbound heading first — nothing else. No braking or
+            // swinging around to face our velocity's reverse: the ship simply turns
+            // to point at the destination, then holds while `.accelerate` does the
+            // slow tear-away. (Any residual cruise velocity just carries along.)
             intent.desiredHeading = jumpOutboundHeading
             let aimErr = abs(angleDelta(from: p.angle, to: jumpOutboundHeading))
-            // Brake by facing our velocity's reverse once roughly aligned, so we
-            // launch from near a standstill.
-            if p.velocity.length > p.stats.maxSpeed * 0.15, aimErr < 0.6 {
-                intent.desiredHeading = (p.velocity * -1).angle
-                if abs(angleDelta(from: p.angle, to: intent.desiredHeading!)) < .pi / 3 { intent.thrust = true }
-            }
-            let aligned = aimErr < 0.1 && p.velocity.length < p.stats.maxSpeed * 0.2
-            if aligned || jumpClock > 3.0 {         // 3s safety cap so a slow turner can't stall
+            if aimErr < 0.1 || jumpClock > 3.0 {    // 3s safety cap so a slow turner can't stall
                 enterJumpPhase(.accelerate)
             }
 

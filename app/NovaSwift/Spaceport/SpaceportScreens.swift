@@ -47,13 +47,29 @@ struct TradeCenterView: View {
     @State private var showQtyPrompt = false
     private var game: NovaGame { graphics.game }
     private var market: [(commodity: Commodity, level: PriceLevel, price: Int)] {
-        // Apply any active öops disaster price deltas for this port on top of the
-        // base market (a food surplus drops food, a shortage spikes it, etc.).
-        let activeOops = pilot.state.activeDisasters.map { Array($0.keys) } ?? []
+        // Apply active öops disaster price deltas, then any rank PriceMod discount
+        // for this port's government, on top of the base market (a food surplus
+        // drops food; an affiliated rank shaves a percentage off every good).
+        let activeOops: [Int] = pilot.state.activeDisasters.map { Array($0.keys) } ?? []
+        let rankMult: Double = portPriceMultiplier(govt: spob.government)
         return game.commodityMarket(at: spob).map { row in
             let delta = game.disasterPriceDelta(spobID: spob.id, commodity: row.commodity, activeOops: activeOops)
-            return delta == 0 ? row : (row.commodity, row.level, max(1, row.price + delta))
+            let adjusted = Int((Double(row.price + delta) * rankMult).rounded())
+            let price = max(1, adjusted)
+            return price == row.price ? row : (row.commodity, row.level, price)
         }
+    }
+
+    /// Best (lowest) rank `PriceMod` multiplier at this port's government — 90 →
+    /// 0.9 (a 10% discount); 1.0 when no active rank affects it. See `ränk.PriceMod`.
+    private func portPriceMultiplier(govt: Int) -> Double {
+        guard govt >= 128 else { return 1 }
+        var best = 1.0
+        for rankID in pilot.state.activeRanks {
+            guard let r = game.rank(rankID), r.govt == govt, r.priceModifier > 0 else { continue }
+            best = min(best, Double(r.priceModifier) / 100.0)
+        }
+        return best
     }
 
     // Layout straight from DLOG/DITL #1001 "Trade" against the real 426×252

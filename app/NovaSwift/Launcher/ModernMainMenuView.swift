@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Nova Swift (modern) main menu, shown in place of `AuthenticMainMenuView`
-/// when `GameSettings.modernUI` is on. Same actions and dialogs as the authentic
+/// when `GameSettings.modernMainMenu` is on. Same actions and dialogs as the authentic
 /// menu — New Pilot / Open Pilot / Enter Ship / Settings / About / Plug-ins /
 /// Import Data / Quit — but presented over the port's own hero artwork with
 /// modern buttons instead of the game's `rlëD` sprite buttons. Presentation

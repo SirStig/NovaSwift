@@ -127,7 +127,7 @@ struct TutorialContainerView: View {
     }
 
     private var hudStyle: AuthenticHUDStyle? {
-        model.settings.modernUI ? nil : host?.hudStyle
+        model.settings.modernHUD ? nil : host?.hudStyle
     }
 
     /// The width the authentic status bar reserves on the right, matching

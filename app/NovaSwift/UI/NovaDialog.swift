@@ -66,7 +66,7 @@ struct NovaDialog<Content: View>: View {
             .frame(height: 40)
         }
         .frame(maxWidth: .infinity)
-        .background(NovaPanelBackground(graphics: graphics, modern: model.settings.modernUI))
+        .background(NovaPanelBackground(graphics: graphics, modern: model.settings.modernDialogs))
     }
 
     private var dialogBody: some View {
@@ -81,7 +81,7 @@ struct NovaDialog<Content: View>: View {
     /// The game's real three-slice button art when graphics are loaded; a
     /// clean pill fallback (amber for the default action) before data import.
     @ViewBuilder private func footerButton(_ b: NovaDialogButton) -> some View {
-        if let graphics, !model.settings.modernUI {
+        if let graphics, !model.settings.modernDialogs {
             NovaButton(graphics: graphics, title: b.title,
                        width: max(50, CGFloat(b.title.count) * 8), enabled: b.enabled) {
                 model.audio.play(.uiSelect)
@@ -148,7 +148,7 @@ struct DialogChrome<Content: View>: View {
 
                 card
                     .frame(width: designW, height: designH)
-                    .background(NovaPanelBackground(graphics: model.uiGraphics, modern: model.settings.modernUI))
+                    .background(NovaPanelBackground(graphics: model.uiGraphics, modern: model.settings.modernDialogs))
                     .scaleEffect(scale)
                     .frame(width: geo.size.width, height: geo.size.height)
             }
@@ -189,7 +189,7 @@ struct DialogChrome<Content: View>: View {
     /// The game's real three-slice Done button when data is loaded (matching
     /// every other dialog); a plain amber pill only before any data import.
     @ViewBuilder private var doneButton: some View {
-        if let graphics = model.uiGraphics, !model.settings.modernUI {
+        if let graphics = model.uiGraphics, !model.settings.modernDialogs {
             NovaButton(graphics: graphics, title: "Done", width: 60) { onClose() }
         } else {
             Button { onClose() } label: {

@@ -35,6 +35,10 @@ struct GridPagingModifier: ViewModifier {
                     }
             )
             .focusable()
+            // Suppress the macOS default focus ring — it draws a yellow border around
+            // the grid that lingers past the panel during the dismiss transition. Same
+            // pattern as GameContainerView / TutorialContainerView. Paging still works.
+            .focusEffectDisabled()
             .onKeyPress(.upArrow) { step(-1); return .handled }
             .onKeyPress(.downArrow) { step(1); return .handled }
             .task(id: "grid-controller-poll") { await pollController() }

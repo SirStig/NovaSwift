@@ -145,6 +145,8 @@ public final class Spawner {
         if maxConcurrentFleets > 0, let fid = pickFleet(world, excluding: []) {
             spawnFleet(fid, into: world, origin: .interior)
         }
+        // Guaranteed named characters pinned to this system (sÿst.Person1-8).
+        spawnPinnedPersons(into: world)
         // Fill the lone-ship backbone to the ambient target, counting ONLY
         // single ships so the up-front fleet doesn't eat into that budget — the
         // player should arrive to mostly lone traffic with a fleet among it, not
@@ -555,6 +557,27 @@ public final class Spawner {
         for _ in 0..<typeCount {
             let commodity = world.rng.int(in: 0...5)
             ship.cargo[commodity, default: 0] += perType
+        }
+    }
+
+    /// Force-spawn a system's guaranteed named characters (`sÿst.Person1-8`) —
+    /// përs the designers pinned to this fixed location. Skips any gated off by
+    /// `ActiveOn`, already defeated, or already present in-system.
+    private func spawnPinnedPersons(into world: World) {
+        guard let sys = galaxy.game.system(table.systemID) else { return }
+        for persID in sys.pinnedPersons {
+            guard world.npcs.count < maxPopulation else { break }
+            guard let pers = galaxy.game.pers(persID), pers.shipType >= 128 else { continue }
+            guard world.persSpawnEligible(persID) else { continue }
+            guard !world.npcs.contains(where: { $0.personID == persID }) else { continue }
+            let govt = pers.govt >= 128 ? pers.govt : table.systemGovt
+            let (pos, ang, arrival) = spawnPose(world, origin: .interior)
+            guard let ship = galaxy.makeLoadedShip(pers.shipType, government: govt, at: pos, angle: ang,
+                                                   skillRoll: world.rng.double(in: -1...1)) else { continue }
+            ship.brain = AIBrain(aiType: AIType(raw: pers.aiType), govt: govt)
+            ship.personID = pers.id
+            applyPersonCustomization(pers, to: ship, world: world)
+            world.addNPC(ship, arrival: arrival)
         }
     }
 

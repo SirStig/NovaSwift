@@ -124,14 +124,20 @@ struct GameSettings: Codable, Equatable {
     ///                 the modern HUD, in place of the authentic PICT chrome.
     ///                 Presentation only — ships, systems, missions and the
     ///                 economy stay entirely data-driven.
+    /// Presentation presets. `classic`/`enhanced`/`novaSwift` are one-tap templates
+    /// that stamp the individual interface toggles below; `custom` is a display-only
+    /// state shown when the current toggles don't match any preset.
     enum UIMode: String, Codable, CaseIterable, Identifiable {
-        case classic, enhanced, novaSwift
+        case classic, enhanced, novaSwift, custom
         var id: String { rawValue }
+        /// The three stampable presets (excludes `custom`).
+        static var presets: [UIMode] { [.classic, .enhanced, .novaSwift] }
         var label: String {
             switch self {
             case .classic:   return "Classic"
             case .enhanced:  return "Enhanced"
             case .novaSwift: return "Nova Swift"
+            case .custom:    return "Custom"
             }
         }
         /// Blurb under the selector.
@@ -140,6 +146,7 @@ struct GameSettings: Codable, Equatable {
             case .classic:   return "The faithful EV Nova look, rendered from your own game data."
             case .enhanced:  return "Classic, with the galaxy map opened up to full screen."
             case .novaSwift: return "The port's own modern interface — modern menu, dialogs and HUD."
+            case .custom:    return "Your own mix of interface options."
             }
         }
     }
@@ -206,16 +213,59 @@ struct GameSettings: Codable, Equatable {
 
     // MARK: Interface
 
-    /// The presentation mode (see `UIMode`). The single stored source of truth;
-    /// the rendering flags below are derived from it.
-    var uiMode: UIMode = .classic
+    /// Individual interface toggles. Independently adjustable; the `UIMode` presets
+    /// are just one-tap templates that stamp these (see `applyPreset`). Each was
+    /// previously derived from the single stored `uiMode`; they're now the source
+    /// of truth so any combination can be mixed.
+    ///
+    /// Render the galaxy map full-screen with overlaid controls instead of inside
+    /// the authentic dialog frame.
+    var fullscreenGalaxyMap: Bool = false
+    /// Use the port's own modern main menu instead of the authentic PICT menu.
+    var modernMainMenu: Bool = false
+    /// Use the port's own modern dialog chrome instead of the authentic PICT chrome.
+    var modernDialogs: Bool = false
+    /// Use the port's own modern HUD instead of the authentic status bar.
+    var modernHUD: Bool = false
+    /// Open the port's sidebar pause menu on pause instead of exiting straight to
+    /// the authentic main menu. On by default; independent of the presentation
+    /// presets. Always available on mobile via the ☰ button regardless of this.
+    var sidebarPauseMenu: Bool = true
 
-    /// Render the galaxy map full-screen with overlaid controls (Enhanced &
-    /// Nova Swift) instead of inside the authentic dialog frame (Classic).
-    var fullscreenGalaxyMap: Bool { uiMode != .classic }
-    /// Use the port's own modern interface — modern HUD, main menu and dialog
-    /// chrome — in place of the authentic PICT chrome (Nova Swift only).
-    var modernUI: Bool { uiMode == .novaSwift }
+    /// Stamp the four presentation toggles from a preset. `.custom` is a no-op (a
+    /// display-only state, not a stampable template). `sidebarPauseMenu` is *not*
+    /// touched — it's an independent behavior toggle, not part of any preset.
+    mutating func applyPreset(_ preset: UIMode) {
+        switch preset {
+        case .classic:
+            fullscreenGalaxyMap = false; modernMainMenu = false
+            modernDialogs = false; modernHUD = false
+        case .enhanced:
+            fullscreenGalaxyMap = true; modernMainMenu = false
+            modernDialogs = false; modernHUD = false
+        case .novaSwift:
+            fullscreenGalaxyMap = true; modernMainMenu = true
+            modernDialogs = true; modernHUD = true
+        case .custom:
+            break
+        }
+    }
+
+    /// The preset whose stamp matches the current presentation toggles, or `.custom`
+    /// if none do. `sidebarPauseMenu` is intentionally excluded (independent toggle).
+    var matchedPreset: UIMode {
+        for preset in UIMode.presets {
+            var probe = self
+            probe.applyPreset(preset)
+            if probe.fullscreenGalaxyMap == fullscreenGalaxyMap,
+               probe.modernMainMenu == modernMainMenu,
+               probe.modernDialogs == modernDialogs,
+               probe.modernHUD == modernHUD {
+                return preset
+            }
+        }
+        return .custom
+    }
 
     var showRadar: Bool = true
     /// HUD panel opacity (0.2…1).
@@ -278,6 +328,16 @@ struct GameSettings: Codable, Equatable {
 
     init() {}
 
+    /// String-only coding key used to read the legacy `uiMode` value during
+    /// migration (the property no longer exists, so it isn't in `CodingKeys`).
+    private struct RawKey: CodingKey {
+        var stringValue: String
+        init(_ s: String) { stringValue = s }
+        init?(stringValue s: String) { stringValue = s }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = GameSettings()
@@ -312,7 +372,20 @@ struct GameSettings: Codable, Equatable {
         uiVolume              = v(.uiVolume, d.uiVolume)
         musicEnabled          = v(.musicEnabled, d.musicEnabled)
         muteAll               = v(.muteAll, d.muteAll)
-        uiMode                = v(.uiMode, d.uiMode)
+        fullscreenGalaxyMap   = v(.fullscreenGalaxyMap, d.fullscreenGalaxyMap)
+        modernMainMenu        = v(.modernMainMenu, d.modernMainMenu)
+        modernDialogs         = v(.modernDialogs, d.modernDialogs)
+        modernHUD             = v(.modernHUD, d.modernHUD)
+        sidebarPauseMenu      = v(.sidebarPauseMenu, d.sidebarPauseMenu)
+        // Migration: a pre-split blob has no `modernHUD` key but may carry the old
+        // single `uiMode` preset. Stamp the toggles from it so existing pilots keep
+        // their exact look (Classic→Classic, Nova Swift→modern menu/dialogs/HUD).
+        if !c.contains(.modernHUD),
+           let legacy = try? decoder.container(keyedBy: RawKey.self),
+           let raw = try? legacy.decodeIfPresent(String.self, forKey: RawKey("uiMode")),
+           let preset = UIMode(rawValue: raw) {
+            applyPreset(preset)
+        }
         showRadar             = v(.showRadar, d.showRadar)
         hudOpacity            = v(.hudOpacity, d.hudOpacity)
         debugModeEnabled      = v(.debugModeEnabled, d.debugModeEnabled)

@@ -14,14 +14,17 @@ struct SettingsView: View {
     var body: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
             Form {
-                uiModeSection
+                // Interface / UI grouped up top: the presentation presets, their
+                // individual toggles, then the on-screen HUD readouts.
+                presentationSection
+                hudInterfaceSection
+                // Then everything else: how the game plays, sounds and renders.
                 gameplaySection
                 controlsSection
                 graphicsSection
                 audioSection
-                interfaceSection
-                storageSection
                 accessibilitySection
+                storageSection
                 developerSection
 
                 Section {
@@ -51,17 +54,44 @@ struct SettingsView: View {
 
     // MARK: Sections
 
-    private var uiModeSection: some View {
+    /// A one-tap preset stamps the interface toggles below; editing any of them
+    /// flips the selector to "Custom". `.custom` isn't user-selectable — it only
+    /// reflects a hand-mixed state.
+    private var presetBinding: Binding<GameSettings.UIMode> {
+        Binding(
+            get: { model.settings.matchedPreset },
+            set: { newValue in
+                guard newValue != .custom else { return }
+                model.settings.applyPreset(newValue)
+                model.commitSettings()
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var presentationSection: some View {
         Section {
-            Picker("Interface", selection: binding(\.uiMode)) {
+            Picker("Preset", selection: presetBinding) {
                 ForEach(GameSettings.UIMode.allCases) { Text($0.label).tag($0) }
             }
             .pickerStyle(.segmented)
         } header: {
             Label("Presentation", systemImage: "sparkles.tv")
         } footer: {
-            Text(model.settings.uiMode.blurb
-                 + " This changes how the interface is presented; the individual options below still apply in every mode.")
+            Text(model.settings.matchedPreset.blurb
+                 + " Presets are templates — pick one to set the interface options below, then fine-tune any of them individually.")
+        }
+
+        Section {
+            Toggle("Full-screen galaxy map", isOn: binding(\.fullscreenGalaxyMap))
+            Toggle("Modern main menu", isOn: binding(\.modernMainMenu))
+            Toggle("Modern dialog chrome", isOn: binding(\.modernDialogs))
+            Toggle("Modern HUD", isOn: binding(\.modernHUD))
+            Toggle("Sidebar pause menu", isOn: binding(\.sidebarPauseMenu))
+        } header: {
+            Label("Interface Options", systemImage: "slider.horizontal.3")
+        } footer: {
+            Text("Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. With the sidebar pause menu off (the Classic default), pausing saves and drops straight to the main menu; on it opens the port's own menu. On mobile the sidebar is always available via the ☰ button.")
         }
     }
 
@@ -131,14 +161,10 @@ struct SettingsView: View {
             Toggle("Smooth sprite scaling", isOn: binding(\.smoothSprites))
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Screen shake", isOn: binding(\.screenShake))
-            Picker("Hull / shield bars", selection: binding(\.shipBarPosition)) {
-                ForEach(GameSettings.ShipBarPosition.allCases) { Text($0.label).tag($0) }
-            }
-            Toggle("Show FPS counter", isOn: binding(\.showFPS))
         } header: {
             Label("Graphics", systemImage: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Hull/shield bars over ships weren't in the original — set them to Hidden for the authentic look. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. A lower frame-rate limit saves battery on mobile.")
         }
     }
 
@@ -188,15 +214,24 @@ struct SettingsView: View {
         }
     }
 
-    private var interfaceSection: some View {
+    /// On-screen HUD readouts and their look — grouped with the presentation
+    /// section above so all the interface/UI controls sit together.
+    private var hudInterfaceSection: some View {
         Section {
             Toggle("Show radar", isOn: binding(\.showRadar))
             Toggle("Show planet names", isOn: binding(\.showPlanetLabels))
+            Picker("Hull / shield bars", selection: binding(\.shipBarPosition)) {
+                ForEach(GameSettings.ShipBarPosition.allCases) { Text($0.label).tag($0) }
+            }
             sliderRow("HUD opacity", binding(\.hudOpacity), 0.2...1.0)
+            Toggle("Larger HUD", isOn: binding(\.largerHUD))
+            Toggle("High-contrast HUD", isOn: binding(\.highContrastHUD))
+            sliderRow("Overall UI scale", binding(\.uiScale), 0.8...1.4)
+            Toggle("Show FPS counter", isOn: binding(\.showFPS))
         } header: {
-            Label("Interface", systemImage: "rectangle.on.rectangle")
+            Label("HUD & Interface", systemImage: "rectangle.on.rectangle")
         } footer: {
-            Text("The Nova Swift presentation mode swaps the authentic status bar, menus and dialogs for the port's own modern UI. The original never labelled planets in flight — leave planet names off for the faithful look.")
+            Text("On-screen readouts and their look, in every presentation. Hull/shield bars over ships weren't in the original — set them to Hidden for the authentic look, and the original never labelled planets in flight either. Larger and high-contrast HUD affect the modern HUD; UI scale resizes menus and dialogs everywhere.")
         }
     }
 
@@ -223,17 +258,14 @@ struct SettingsView: View {
 
     private var accessibilitySection: some View {
         Section {
-            Toggle("Larger HUD", isOn: binding(\.largerHUD))
-            Toggle("High-contrast HUD", isOn: binding(\.highContrastHUD))
             Toggle("Reduce flashing & motion", isOn: binding(\.reduceFlashing))
             Picker("Colorblind mode", selection: binding(\.colorblindMode)) {
                 ForEach(GameSettings.ColorblindMode.allCases) { Text($0.label).tag($0) }
             }
-            sliderRow("Overall UI scale", binding(\.uiScale), 0.8...1.4)
         } header: {
             Label("Accessibility", systemImage: "accessibility")
         } footer: {
-            Text("Reduce flashing calms the exhaust flicker, screen shake and jump flash. UI scale resizes menus and dialogs everywhere.")
+            Text("Reduce flashing calms the exhaust flicker, screen shake and jump flash. (Larger HUD, high-contrast HUD and UI scale are under HUD & Interface.)")
         }
     }
 
