@@ -190,35 +190,94 @@ final class PilotStore: ObservableObject {
 
     // MARK: Transactions (return the number actually transacted)
 
+    /// Buy `tons` of the cargo stored under `id` (a standard `Commodity.cargoID`
+    /// 0-5, or a `jünk` resource id 128+). Junk cargo shares `state.cargo` keyed
+    /// by its raw junk id so contraband scanning (`Contraband.isContraband`) and
+    /// cargo-space accounting work uniformly across both trade systems.
     @discardableResult
-    func buyCommodity(_ c: Commodity, tons: Int, unitPrice: Int, cargoFree: Int) -> Int {
+    func buyCargo(id: Int, tons: Int, unitPrice: Int, cargoFree: Int) -> Int {
         guard unitPrice > 0 else { return 0 }
         let affordable = state.credits / unitPrice
         let n = max(0, min(tons, cargoFree, affordable))
         guard n > 0 else { return 0 }
         state.credits -= n * unitPrice
-        state.cargo[c.cargoID, default: 0] += n
+        state.cargo[id, default: 0] += n
         save()
         return n
     }
 
     @discardableResult
-    func sellCommodity(_ c: Commodity, tons: Int, unitPrice: Int) -> Int {
-        let held = state.cargo[c.cargoID] ?? 0
+    func sellCargo(id: Int, tons: Int, unitPrice: Int) -> Int {
+        let held = state.cargo[id] ?? 0
         let n = max(0, min(tons, held))
         guard n > 0 else { return 0 }
         state.credits += n * unitPrice
         let left = held - n
-        if left > 0 { state.cargo[c.cargoID] = left } else { state.cargo[c.cargoID] = nil }
+        if left > 0 { state.cargo[id] = left } else { state.cargo[id] = nil }
         save()
         return n
+    }
+
+    /// Apply the two `jünk.Flags` cargo-bay side effects for one game-day of
+    /// elapsed time (called once per calendar day, i.e. per jump/landing):
+    /// Tribbles (0x0001) self-multiply to fill the remaining hold, and Perishable
+    /// (0x0002) cargo decays away. The Bible documents the behaviors but not their
+    /// rates, so this uses a modest, self-documenting model: tribbles grow ~50%/day
+    /// (at least +1) capped at free cargo space; perishables lose ~25%/day (at
+    /// least -1) until gone. Standard commodities (cargoID 0-5) are untouched.
+    func tickJunkCargo(galaxy: Galaxy) {
+        guard !state.cargo.isEmpty else { return }
+        var changed = false
+        for (id, qty) in state.cargo where qty > 0 {
+            guard let j = galaxy.game.junk(id) else { continue }   // nil ⇒ standard commodity
+            if j.multipliesInCargoHold {
+                let room = cargoFree(galaxy: galaxy)
+                guard room > 0 else { continue }
+                let grown = min(room, max(1, qty / 2))
+                state.cargo[id] = qty + grown
+                changed = true
+            } else if j.decaysInCargoHold {
+                let lost = max(1, qty / 4)
+                let left = qty - lost
+                state.cargo[id] = left > 0 ? left : nil
+                changed = true
+            }
+        }
+        if changed { save() }
+    }
+
+    @discardableResult
+    func buyCommodity(_ c: Commodity, tons: Int, unitPrice: Int, cargoFree: Int) -> Int {
+        buyCargo(id: c.cargoID, tons: tons, unitPrice: unitPrice, cargoFree: cargoFree)
+    }
+
+    @discardableResult
+    func sellCommodity(_ c: Commodity, tons: Int, unitPrice: Int) -> Int {
+        sellCargo(id: c.cargoID, tons: tons, unitPrice: unitPrice)
     }
 
     /// The price actually charged/refunded for `o` on the player's current hull.
     /// Applies Bible `Flags 0x0200` (mass-proportional price = shipMass × Cost)
     /// via `Galaxy.effectiveCost`; a flat-priced outfit returns its plain `cost`.
-    func effectiveCost(_ o: OutfRes, galaxy: Galaxy) -> Int {
-        galaxy.effectiveCost(of: o, forShip: state.shipType)
+    /// `priceMultiplier` folds in the port's rank `PriceMod` discount (1.0 = none).
+    func effectiveCost(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
+        let base = galaxy.effectiveCost(of: o, forShip: state.shipType)
+        return priceMultiplier == 1 ? base : max(1, Int((Double(base) * priceMultiplier).rounded()))
+    }
+
+    /// Best (lowest) rank `PriceMod` multiplier for `govt` from the player's
+    /// active ranks — 90 → 0.9 (a 10% discount); 1.0 when no active rank modifies
+    /// this govt. Per the Bible, `ränk.PriceMod` is a "percentage modifier to the
+    /// prices of goods, outfits and ships at spaceports owned by this govt", so a
+    /// single helper feeds the commodity market, outfitter, and shipyard alike.
+    func rankPriceMultiplier(govt: Int, game: NovaGame) -> Double {
+        guard govt >= 128 else { return 1 }
+        var best = 1.0
+        for rankID in state.activeRanks {
+            guard let r = game.rank(rankID), r.govt == govt, r.priceModifier > 0 else { continue }
+            best = min(best, Double(r.priceModifier) / 100.0)
+        }
+        return best
     }
 
     /// The effective per-player cap on `o`, folding in any owned `ModType 27`
@@ -230,8 +289,8 @@ final class PilotStore: ObservableObject {
     /// Can the player buy `outfit` here — affordable at its effective price, fits
     /// in free mass, under its (expander-adjusted) max, and with a free gun/turret
     /// mount if it's a fixed-gun/turret item (Bible `Flags 0x0001/0x0002`)?
-    func canBuyOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
-        guard state.credits >= effectiveCost(o, galaxy: galaxy) else { return false }
+    func canBuyOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
+        guard state.credits >= effectiveCost(o, galaxy: galaxy, priceMultiplier: priceMultiplier) else { return false }
         // Free-mass check uses the outfit's *effective* mass (Flags 0x0400
         // scales mass with the hull), matching how `freeMass` accounts for
         // already-installed outfits.
@@ -251,9 +310,9 @@ final class PilotStore: ObservableObject {
     }
 
     @discardableResult
-    func buyOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
-        guard canBuyOutfit(o, galaxy: galaxy) else { return false }
-        state.credits -= effectiveCost(o, galaxy: galaxy)
+    func buyOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
+        guard canBuyOutfit(o, galaxy: galaxy, priceMultiplier: priceMultiplier) else { return false }
+        state.credits -= effectiveCost(o, galaxy: galaxy, priceMultiplier: priceMultiplier)
         state.grantOutfit(o.id)
         // Acquisition-time modifier effects that mutate campaign state: a map
         // (ModType 16) charts its scoped systems from *here*; an amnesty
@@ -279,11 +338,11 @@ final class PilotStore: ObservableObject {
     /// EV Nova refunds outfits at full purchase price (the same effective,
     /// mass-proportional price they were bought at on this hull).
     @discardableResult
-    func sellOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
+    func sellOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
         guard owned(outfit: o.id) > 0 else { return false }
         // Bible `Flags 0x0008`: "This item can't be sold" (OUTFITTERS.md §6).
         guard o.flags & 0x0008 == 0 else { return false }
-        state.credits += effectiveCost(o, galaxy: galaxy)
+        state.credits += effectiveCost(o, galaxy: galaxy, priceMultiplier: priceMultiplier)
         state.removeOutfit(o.id)
         // Bible `OnSell`: the sibling NCB set expression, run when the item is sold.
         runOutfitScript(o.onSell, game: galaxy.game)
@@ -320,14 +379,17 @@ final class PilotStore: ObservableObject {
         return Int(Double(hullCost + outfitsCost) * 0.25)
     }
 
-    /// Net price to switch to `ship` (its cost minus the current hull+outfits trade-in).
-    func netPrice(of ship: ShipRes, game: NovaGame) -> Int {
-        max(0, ship.cost - tradeInValue(game: game))
+    /// Net price to switch to `ship` (its cost minus the current hull+outfits
+    /// trade-in). `priceMultiplier` discounts the *new ship's* cost via the port's
+    /// rank `PriceMod`; the trade-in credit reflects original value and is unscaled.
+    func netPrice(of ship: ShipRes, game: NovaGame, priceMultiplier: Double = 1) -> Int {
+        let hullCost = priceMultiplier == 1 ? ship.cost : Int((Double(ship.cost) * priceMultiplier).rounded())
+        return max(0, hullCost - tradeInValue(game: game))
     }
 
     @discardableResult
-    func buyShip(_ ship: ShipRes, game: NovaGame) -> Bool {
-        let price = netPrice(of: ship, game: game)
+    func buyShip(_ ship: ShipRes, game: NovaGame, priceMultiplier: Double = 1) -> Bool {
+        let price = netPrice(of: ship, game: game, priceMultiplier: priceMultiplier)
         guard state.credits >= price, ship.id != state.shipType else { return false }
         state.credits -= price
         state.shipType = ship.id

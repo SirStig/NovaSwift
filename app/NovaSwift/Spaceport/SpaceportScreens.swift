@@ -32,6 +32,31 @@ private let gridHeight = gridTileSize.height * CGFloat(gridRows)
 
 // MARK: - Trade Center (commodity exchange)
 
+/// One row in the Trade dialog — a standard `Commodity` (which trades in both
+/// directions wherever there's an exchange, at a Low/Med/High price) or a `jünk`
+/// specialty good (which trades only at specific stellars, one flat BasePrice,
+/// gated by `BuyOn`/`SellOn` and the SoldAt/BoughtAt stellar lists). Both are
+/// stored in `state.cargo` keyed by `cargoID` (0-5 standard, 128+ junk).
+private struct TradeRow: Identifiable {
+    enum Origin {
+        case commodity(PriceLevel)
+        case junk(buy: Bool, sell: Bool)
+    }
+    let cargoID: Int
+    let name: String
+    let origin: Origin
+    let price: Int
+    var id: Int { cargoID }
+    /// Whether Buy is allowed here at all (junk only trades where its stellar
+    /// list + control bits permit; commodities always do at an exchange).
+    var canBuyHere: Bool {
+        switch origin { case .commodity: return true; case .junk(let b, _): return b }
+    }
+    var canSellHere: Bool {
+        switch origin { case .commodity: return true; case .junk(_, let s): return s }
+    }
+}
+
 struct TradeCenterView: View {
     let graphics: SpaceportGraphics
     let spob: SpobRes
@@ -46,30 +71,32 @@ struct TradeCenterView: View {
     @State private var pendingQty = tradeStep
     @State private var showQtyPrompt = false
     private var game: NovaGame { graphics.game }
-    private var market: [(commodity: Commodity, level: PriceLevel, price: Int)] {
+    private var market: [TradeRow] {
         // Apply active öops disaster price deltas, then any rank PriceMod discount
         // for this port's government, on top of the base market (a food surplus
         // drops food; an affiliated rank shaves a percentage off every good).
         let activeOops: [Int] = pilot.state.activeDisasters.map { Array($0.keys) } ?? []
-        let rankMult: Double = portPriceMultiplier(govt: spob.government)
-        return game.commodityMarket(at: spob).map { row in
+        let rankMult: Double = pilot.rankPriceMultiplier(govt: spob.government, game: game)
+        var rows: [TradeRow] = game.commodityMarket(at: spob).map { row in
             let delta = game.disasterPriceDelta(spobID: spob.id, commodity: row.commodity, activeOops: activeOops)
-            let adjusted = Int((Double(row.price + delta) * rankMult).rounded())
-            let price = max(1, adjusted)
-            return price == row.price ? row : (row.commodity, row.level, price)
+            let price = max(1, Int((Double(row.price + delta) * rankMult).rounded()))
+            return TradeRow(cargoID: row.commodity.cargoID, name: game.commodityName(row.commodity),
+                            origin: .commodity(row.level), price: price)
         }
-    }
-
-    /// Best (lowest) rank `PriceMod` multiplier at this port's government — 90 →
-    /// 0.9 (a 10% discount); 1.0 when no active rank affects it. See `ränk.PriceMod`.
-    private func portPriceMultiplier(govt: Int) -> Double {
-        guard govt >= 128 else { return 1 }
-        var best = 1.0
-        for rankID in pilot.state.activeRanks {
-            guard let r = game.rank(rankID), r.govt == govt, r.priceModifier > 0 else { continue }
-            best = min(best, Double(r.priceModifier) / 100.0)
+        // jünk specialty goods for *this* stellar: buyable where spob.id is in its
+        // SoldAt list (and BuyOn passes), sellable where it's in BoughtAt (and
+        // SellOn passes). A junk type the player is *carrying* is always listed so
+        // they can see and unload it, even where it can't be traded. Junk has one
+        // flat BasePrice (no Low/Med/High tier) — only the rank discount applies.
+        for j in game.junks() {
+            let buyHere = j.lows.contains(spob.id) && NCBTest(j.buyOn).evaluate(pilot.state)
+            let sellHere = j.highs.contains(spob.id) && NCBTest(j.sellOn).evaluate(pilot.state)
+            guard buyHere || sellHere || pilot.held(cargo: j.id) > 0 else { continue }
+            let price = max(1, Int((Double(j.basePrice) * rankMult).rounded()))
+            rows.append(TradeRow(cargoID: j.id, name: j.name,
+                                 origin: .junk(buy: buyHere, sell: sellHere), price: price))
         }
-        return best
+        return rows
     }
 
     // Layout straight from DLOG/DITL #1001 "Trade" against the real 426×252
@@ -111,15 +138,15 @@ struct TradeCenterView: View {
     }
 
     private var qtyPromptTitle: String {
-        current.map { "How many tons of \(game.commodityName($0.commodity))?" } ?? "How many tons?"
+        current.map { "How many tons of \($0.name)?" } ?? "How many tons?"
     }
     /// Advisory max for the prompt's field — the greater of what's affordable/
     /// holdable to buy and what's held to sell, so either action stays in
-    /// range; `buyCommodity`/`sellCommodity` clamp again for real.
+    /// range; `buyCargo`/`sellCargo` clamp again for real.
     private var qtyUpperBound: Int {
         guard let c = current else { return max(1, pendingQty) }
         let buyLimit = c.price > 0 ? min(pilot.cargoFree(galaxy: galaxy), pilot.state.credits / c.price) : pilot.cargoFree(galaxy: galaxy)
-        let sellLimit = pilot.held(cargo: c.commodity.cargoID)
+        let sellLimit = pilot.held(cargo: c.cargoID)
         return max(1, buyLimit, sellLimit)
     }
 
@@ -136,10 +163,10 @@ struct TradeCenterView: View {
             }
             .frame(height: 17, alignment: .top)
             ForEach(Array(market.enumerated()), id: \.offset) { i, row in
-                let held = pilot.held(cargo: row.commodity.cargoID)
+                let held = pilot.held(cargo: row.cargoID)
                 HStack(spacing: 0) {
-                    NovaText(game.commodityName(row.commodity), size: 10, width: 160)
-                    NovaText(row.level.label, size: 10, color: levelColor(row.level), width: 62, align: .center)
+                    NovaText(row.name, size: 10, width: 160)
+                    NovaText(rowLabel(row), size: 10, color: rowLabelColor(row), width: 62, align: .center)
                     NovaText("\(row.price)", size: 10, width: 70, align: .center)
                     NovaText(held > 0 ? "\(held)" : "—", size: 10, color: held > 0 ? .white : .gray, width: 60, align: .trailing)
                 }
@@ -168,16 +195,16 @@ struct TradeCenterView: View {
         .frame(width: 346, height: 24)
     }
 
-    private var current: (commodity: Commodity, level: PriceLevel, price: Int)? {
+    private var current: TradeRow? {
         market.indices.contains(selected) ? market[selected] : nil
     }
     private var canBuy: Bool {
-        guard let c = current else { return false }
+        guard let c = current, c.canBuyHere else { return false }
         return pilot.state.credits >= c.price && pilot.cargoFree(galaxy: galaxy) > 0
     }
     private var canSell: Bool {
-        guard let c = current else { return false }
-        return pilot.held(cargo: c.commodity.cargoID) > 0
+        guard let c = current, c.canSellHere else { return false }
+        return pilot.held(cargo: c.cargoID) > 0
     }
     private func buy() {
         guard let c = current else {
@@ -185,11 +212,11 @@ struct TradeCenterView: View {
             return
         }
         let free = pilot.cargoFree(galaxy: galaxy)
-        let bought = pilot.buyCommodity(c.commodity, tons: pendingQty, unitPrice: c.price, cargoFree: free)
+        let bought = pilot.buyCargo(id: c.cargoID, tons: pendingQty, unitPrice: c.price, cargoFree: free)
         if bought == 0 {
-            Log.spaceport.notice("Trade buy no-op at spöb \(spob.id, privacy: .public): commodity=\(c.commodity.cargoID, privacy: .public) price=\(c.price, privacy: .public)cr/ton credits=\(pilot.state.credits, privacy: .public) cargoFree=\(free, privacy: .public)")
+            Log.spaceport.notice("Trade buy no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) price=\(c.price, privacy: .public)cr/ton credits=\(pilot.state.credits, privacy: .public) cargoFree=\(free, privacy: .public)")
         } else {
-            Log.spaceport.debug("Trade bought \(bought, privacy: .public)t of commodity \(c.commodity.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
+            Log.spaceport.debug("Trade bought \(bought, privacy: .public)t of cargo \(c.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
         }
     }
     private func sell() {
@@ -197,12 +224,34 @@ struct TradeCenterView: View {
             Log.spaceport.error("Trade sell tapped with no commodity row selected at spöb \(spob.id, privacy: .public) — no-op")
             return
         }
-        let held = pilot.held(cargo: c.commodity.cargoID)
-        let sold = pilot.sellCommodity(c.commodity, tons: pendingQty, unitPrice: c.price)
+        let held = pilot.held(cargo: c.cargoID)
+        let sold = pilot.sellCargo(id: c.cargoID, tons: pendingQty, unitPrice: c.price)
         if sold == 0 {
-            Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): commodity=\(c.commodity.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
+            Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
         } else {
-            Log.spaceport.debug("Trade sold \(sold, privacy: .public)t of commodity \(c.commodity.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
+            Log.spaceport.debug("Trade sold \(sold, privacy: .public)t of cargo \(c.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
+        }
+    }
+    /// Middle "level" column text for a row: a standard commodity shows its
+    /// Low/Med/High tier; a junk good shows the direction it trades here (Buy at
+    /// a SoldAt stellar, Sell at a BoughtAt stellar, "—" when only carried).
+    private func rowLabel(_ row: TradeRow) -> String {
+        switch row.origin {
+        case .commodity(let level): return level.label
+        case .junk(let buy, let sell):
+            if buy && sell { return "Trade" }
+            if buy { return "Buy" }
+            if sell { return "Sell" }
+            return "—"
+        }
+    }
+    private func rowLabelColor(_ row: TradeRow) -> Color {
+        switch row.origin {
+        case .commodity(let level): return levelColor(level)
+        case .junk(let buy, let sell):
+            if buy { return Color(red: 0.5, green: 0.9, blue: 0.5) }
+            if sell { return Color(red: 1, green: 0.5, blue: 0.5) }
+            return .gray
         }
     }
     private func levelColor(_ l: PriceLevel) -> Color {
@@ -216,7 +265,7 @@ struct TradeCenterView: View {
     private var fallback: some View {
         VStack {
             ForEach(Array(market.enumerated()), id: \.offset) { _, r in
-                Text("\(game.commodityName(r.commodity))  \(r.level.label)  \(r.price)cr")
+                Text("\(r.name)  \(rowLabel(r))  \(r.price)cr")
                     .foregroundStyle(.white)
             }
             Button("Done", action: onDone)
@@ -239,6 +288,9 @@ struct OutfitterView: View {
     @State private var hintDismissed = false
     private var game: NovaGame { graphics.game }
     private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
+    /// Port rank `PriceMod` discount for this spöb's govt (1.0 = none) — folded
+    /// into the displayed price and every buy/sell transaction here.
+    private var rankMult: Double { pilot.rankPriceMultiplier(govt: spob.government, game: game) }
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
     /// items that opt into full hiding (Bible `oütf.Flags` 0x0100/0x4000)
     /// dropped when the player doesn't meet their Availability/Require and
@@ -342,7 +394,7 @@ struct OutfitterView: View {
         // owned-quantity of the selected item, which is instead shown as the
         // small badge on the item's grid tile.
         return VStack(alignment: .leading, spacing: 10) {
-            infoRow("Item Price:", o.map { creditString($0.cost) } ?? "—")
+            infoRow("Item Price:", o.map { creditString(pilot.effectiveCost($0, galaxy: galaxy, priceMultiplier: rankMult)) } ?? "—")
             infoRow("You Have:", creditString(pilot.state.credits))
             infoRow("Item Mass:", o.map { "\($0.mass) tons" } ?? "—")
             infoRow("Available:", "\(pilot.freeMass(galaxy: galaxy)) tons")
@@ -373,12 +425,12 @@ struct OutfitterView: View {
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                   width: 73, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy) && lockState(for: $0) == .available } ?? false) {
+                   width: 73, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy, priceMultiplier: rankMult) && lockState(for: $0) == .available } ?? false) {
             guard let o else {
                 Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            if pilot.buyOutfit(o, galaxy: galaxy) {
+            if pilot.buyOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) {
                 Log.spaceport.debug("Bought outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
             } else {
                 Log.spaceport.notice("Outfitter buy no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) cost=\(o.cost, privacy: .public) credits=\(pilot.state.credits, privacy: .public) freeMass=\(pilot.freeMass(galaxy: galaxy), privacy: .public) — insufficient credits, mass, or max-installed reached")
@@ -391,7 +443,7 @@ struct OutfitterView: View {
                 Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            if pilot.sellOutfit(o, galaxy: galaxy) {
+            if pilot.sellOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) {
                 Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
             } else {
                 Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")
@@ -420,6 +472,9 @@ struct ShipyardView: View {
     @State private var selectedID: Int?
     @State private var topRow = 0
     private var game: NovaGame { graphics.game }
+    /// Port rank `PriceMod` discount for this spöb's govt (1.0 = none) — applied
+    /// to the new-hull cost in the displayed net price and the buy transaction.
+    private var rankMult: Double { pilot.rankPriceMultiplier(govt: spob.government, game: game) }
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
     /// hulls that opt into full hiding (Bible `shïp.Flags3` 0x0100/0x0200)
     /// dropped when the player doesn't meet their Availability/Require and
@@ -544,7 +599,7 @@ struct ShipyardView: View {
     private func info(_ space: NovaSpace) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 10) {
-            infoRow("Price:", s.map { creditString(pilot.netPrice(of: $0, game: game)) } ?? "—")
+            infoRow("Price:", s.map { creditString(pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult)) } ?? "—")
             infoRow("Trade-in:", creditString(pilot.tradeInValue(game: game)))
             infoRow("You Have:", creditString(pilot.state.credits))
         }
@@ -572,7 +627,7 @@ struct ShipyardView: View {
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
         let canBuy = s.map {
-            $0.id != pilot.state.shipType && pilot.state.credits >= pilot.netPrice(of: $0, game: game)
+            $0.id != pilot.state.shipType && pilot.state.credits >= pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult)
                 && lockState(for: $0) == .available
         } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
@@ -581,10 +636,10 @@ struct ShipyardView: View {
                 Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            if pilot.buyShip(s, game: game) {
-                Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(pilot.netPrice(of: s, game: game), privacy: .public)cr")
+            if pilot.buyShip(s, game: game, priceMultiplier: rankMult) {
+                Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(pilot.netPrice(of: s, game: game, priceMultiplier: rankMult), privacy: .public)cr")
             } else {
-                Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
+                Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game, priceMultiplier: rankMult), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
             }
         }
         .novaPlace(space, -18, 128)

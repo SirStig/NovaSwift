@@ -144,6 +144,18 @@ public struct Loadout {
     /// **negative** ModVal (Bible: "-1 to -100 Increase the player's capture
     /// odds by this amount"). Stored as a positive number of percentage points.
     public var captureOddsBonus: Int = 0
+    /// Extra max-ionization capacity from fitted `oütf` ModType 40 (`ionCapacity`)
+    /// items — added onto the hull's `IonizeMax` so the ship can soak more ion
+    /// charge before being immobilized.
+    public var ionCapacityBonus: Int = 0
+    /// Extra ion-dissipation rate from fitted `oütf` ModType 39 (`deionize`)
+    /// items — added onto the hull's `Deionize` so ion charge bleeds off faster.
+    public var deionizeBonus: Int = 0
+    /// Combined jamming strength from fitted `oütf` ModTypes 33-36 (`jam1-4`).
+    /// A ship-level defense that stacks with the pilot's government's inherent
+    /// `InhJam1-4`, giving incoming "turns away if jammed" guided shots a per-second
+    /// chance to lose their lock on this ship. See `World`'s guided-steering loop.
+    public var jamming: Int = 0
 }
 
 /// A fighter bay fitted to a ship (`wëap` Guidance 99). Immutable spec resolved
@@ -255,6 +267,7 @@ extension Galaxy {
         var captureOddsBonus = 0
         var cloakFlags = 0, cloakScannerFlags = 0
         var interferenceReduction = 0, murkModifier = 0
+        var ionCapBonus = 0, deionizeBonus = 0, jammingBonus = 0
         var hasEscapePod = s.podCount > 0, hasAutoEject = false
         var inertialess = s.inertialess        // hull flag; an inertial-dampener outfit ORs in below
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
@@ -311,6 +324,10 @@ extension Galaxy {
                 case .escapePod:       hasEscapePod = true           // ModType 11
                 case .autoEject:       hasAutoEject = true           // ModType 20 (needs a pod)
                 case .inertialDamper:  inertialess = true            // ModType 38 → no-inertia flight
+                case .ionCapacity:     ionCapBonus += v              // ModType 40 → +max ion charge
+                case .deionize:        deionizeBonus += v            // ModType 39 → +ion dissipation
+                case .jam1, .jam2, .jam3, .jam4:
+                    jammingBonus += v                                // ModTypes 33-36 → jamming defense
                 // ModType 27 (increaseMax) is not a ship-stat modifier: its only
                 // effect is raising another outfit's purchase cap, enforced at buy
                 // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
@@ -372,7 +389,9 @@ extension Galaxy {
             cloakFlags: cloakFlags, cloakScannerFlags: cloakScannerFlags,
             interferenceReduction: interferenceReduction, murkModifier: murkModifier,
             hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject, inertialess: inertialess,
-            crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus)
+            crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus,
+            ionCapacityBonus: max(0, ionCapBonus), deionizeBonus: max(0, deionizeBonus),
+            jamming: max(0, jammingBonus))
     }
 
     /// Build a live ship with its **full loadout** applied: outfit-modified flight
@@ -410,8 +429,9 @@ extension Galaxy {
         ship.combatStrength = Double(max(1, shipRes?.strength ?? 1))
         ship.disableArmorFraction = (shipRes.map { $0.flags & 0x0010 != 0 } ?? false) ? 0.10 : 0.33
         ship.fleeWhenOutOfAmmo = shipRes?.fleeWhenOutOfAmmo ?? false
-        ship.ionizeMax = Double(max(0, shipRes?.ionizeMax ?? 0))
-        ship.deionizePerSec = Double(max(0, shipRes?.deionize ?? 0)) * 0.3
+        ship.ionizeMax = Double(max(0, shipRes?.ionizeMax ?? 0) + lo.ionCapacityBonus)
+        ship.deionizePerSec = Double(max(0, shipRes?.deionize ?? 0) + lo.deionizeBonus) * 0.3
+        ship.jamming = lo.jamming
         ship.maxShield = lo.maxShield; ship.shield = lo.maxShield
         ship.maxArmor = lo.maxArmor; ship.armor = lo.maxArmor
         ship.shieldRechargePerSec = lo.shieldRechargePerSec

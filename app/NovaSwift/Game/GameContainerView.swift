@@ -654,12 +654,14 @@ struct GameContainerView: View {
                         .opacity(model.settings.hudOpacity)
                 }
 
-                #if os(iOS)
-                // Mobile has no keyboard, so the ☰ button is its only route to the
-                // sidebar. Desktop opens the sidebar (when enabled) via the Esc/menu
-                // keybinding, so it doesn't need — or show — the button.
-                topLeftMenuButton
-                #endif
+                // Show the ☰ button whenever the sidebar is available: always on
+                // mobile (no keyboard), and on desktop when the sidebar pause menu is
+                // enabled (Enhanced / Nova Swift / Custom). Desktop can also open it
+                // via the Esc/menu keybinding. When the sidebar is off (Classic
+                // desktop), pause exits to the main menu, so there's nothing to open.
+                if sidebarEnabled {
+                    topLeftMenuButton
+                }
 
                 if nav.showingMap && gateMapOrigin == nil {
                     GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() },
@@ -1065,6 +1067,41 @@ struct GameContainerView: View {
         .transition(.opacity)
     }
 
+    /// Why the player may not land on `spob` right now, or nil when landing is
+    /// allowed. Two gates, each overridable: the stellar government's travel-permit
+    /// `Require` bits (Bible: "unmet ⇒ can't land on any planet/station of this
+    /// government at all"), and a deeply-wanted legal standing. A held rank with
+    /// `canAlwaysLand` (ränk Flags 0x0200) for that government — or having already
+    /// dominated the stellar — bypasses both. Independent worlds (govt < 128) have
+    /// no permit/standing gate at all.
+    private func landingRefusalReason(spob: SpobRes) -> String? {
+        guard let game = host?.game else { return nil }
+        let govtID = spob.government
+        // A stellar you've conquered is yours — always landable.
+        if model.pilot.state.dominatedStellars?.contains(spob.id) == true { return nil }
+        // A rank that "can always land" for this govt (or an ally of it) overrides
+        // every landing gate below — the QW5 `canAlwaysLand` privilege.
+        let diplomacy = galaxy?.makeDiplomacy()
+        let alwaysLand = model.pilot.state.activeRanks.contains { rid in
+            guard let r = game.rank(rid), r.canAlwaysLand else { return false }
+            return r.govt == govtID || (diplomacy?.areAllied(r.govt, govtID) ?? false)
+        }
+        if alwaysLand { return nil }
+        guard govtID >= 128, let govt = game.govt(govtID) else { return nil }
+        // Travel permit: the govt's Require bits must be met by the player's
+        // ship+outfit+rank Contribute. Only govts that set Require (rare) gate here.
+        if govt.require != 0,
+           (govt.require & game.contributedBits(pilot: model.pilot.state)) != govt.require {
+            return "Landing denied. You lack a travel permit for \(govt.commName) space."
+        }
+        // Legal standing: a deeply-wanted pilot is turned away (same threshold the
+        // stellar hail uses). Dominate it or earn a rank to land anyway.
+        if (model.pilot.state.legalRecord[govtID] ?? 0) <= -150 {
+            return "Landing denied. You are a wanted criminal here."
+        }
+        return nil
+    }
+
     /// Commit a landing, honoring the "Confirm before landing" setting: with it
     /// on, stash the spöb and show a confirmation; otherwise land immediately.
     /// Shared by the manual land key, the on-screen Land pill, and the
@@ -1082,6 +1119,11 @@ struct GameContainerView: View {
         // travel instead of opening the port (and skip the land confirmation).
         if let game = host?.game, let spob = game.spob(id), spob.isGate {
             handleGateLanding(spob)
+            return
+        }
+        // Travel-permit / legal-standing landing clearance (see landingRefusalReason).
+        if let spob = host?.game?.spob(id), let reason = landingRefusalReason(spob: spob) {
+            host?.hud.post(reason)
             return
         }
         if model.settings.confirmLanding { landConfirmID = id }
@@ -1316,6 +1358,9 @@ struct GameContainerView: View {
         let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
         engine.advanceOneDay()
         model.pilot.state = engine.player
+        // jünk cargo-bay effects for the day just elapsed: tribbles multiply,
+        // perishables decay (see `PilotStore.tickJunkCargo`).
+        model.pilot.tickJunkCargo(galaxy: Galaxy(game: game))
         host?.hud.post(Self.logDate(model.pilot.state.date))
     }
 
@@ -2026,13 +2071,33 @@ struct GameContainerView: View {
                 showEscortsPanel = true
                 return
             }
+            let personID = host?.scene.personID(forEntity: entityID)
+            // `gövt.cantBeHailed` (Flags1 0x0400): ships of this government give no
+            // response to a generic hail. A named pêrs aboard is still reachable —
+            // they carry their own comm quotes — so only gate the anonymous case.
+            if personID == nil, govt.cantBeHailed {
+                model.audio.play(.uiSelect)
+                host?.hud.post("No response to your hail.")
+                return
+            }
             model.audio.playHailVoice(govt: govt, hostile: hostile)
-            var displayName = name
-            var response = hostile ? "They aren't interested in talking." : "This is \(name). Go ahead."
+            // The comm identifies a generic ship by its government's `CommName`
+            // (Bible: "the short string to show for ships of this government when
+            // they are hailed"), not its internal ship name. `nonTalkative`
+            // (Flags2 0x0001) govts answer but have nothing to say.
+            var displayName = govt.commName
+            var response: String
+            if hostile {
+                response = "They aren't interested in talking."
+            } else if govt.nonTalkative {
+                response = "This is \(govt.commName). They have nothing further to say."
+            } else {
+                response = "This is \(govt.commName). Go ahead."
+            }
             var customPictID: Int?
             // Named person (pêrs): replace the generic response with their comm
             // quote and note any mission they offer.
-            if let pid = host?.scene.personID(forEntity: entityID),
+            if let pid = personID,
                let game = host?.game, let pers = game.pers(pid) {
                 let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
                 let disabled = host?.scene.isEntityDisabled(entityID) ?? false
@@ -2057,12 +2122,17 @@ struct GameContainerView: View {
             // the pilot's own legal record so it needs no scene internals.
             let record = govt.flatMap { model.pilot.state.legalRecord[$0.id] } ?? 0
             let hostile = record <= -150
+            // Clearance folds the geometry-landable flag together with the
+            // travel-permit / standing gate — a physically landable world can
+            // still withhold clearance (see landingRefusalReason).
+            let refusal = host?.game?.spob(spobID).flatMap { landingRefusalReason(spob: $0) }
+            let cleared = landable && refusal == nil
             hailDialogState = HailDialogState(
                 kind: .planet(spobID: spobID), name: name, govtLabel: govt?.targetCode ?? "", hostile: hostile,
-                landable: landable,
+                landable: cleared,
                 // "Channel open to X" is the manual's own wording for a stellar hail.
-                responseText: landable ? "Channel open to \(name)."
-                                       : "Channel open to \(name). Landing clearance is not currently granted.")
+                responseText: cleared ? "Channel open to \(name)."
+                                      : "Channel open to \(name). \(refusal ?? "Landing clearance is not currently granted.")")
         }
     }
 
@@ -2107,9 +2177,11 @@ struct GameContainerView: View {
     /// dialog switches to "cleared to land"); a hostile one refuses — you'd have
     /// to bribe or dominate it. Updates the open dialog in place.
     private func requestPlanetLanding() {
-        guard var state = hailDialogState, case .planet = state.kind else { return }
-        if state.hostile {
-            state.responseText = "Request denied. You are not welcome here."
+        guard var state = hailDialogState, case let .planet(spobID) = state.kind else { return }
+        let refusal = host?.game?.spob(spobID).flatMap { landingRefusalReason(spob: $0) }
+        if let refusal {
+            state.landable = false
+            state.responseText = refusal
         } else {
             state.landable = true
             state.responseText = "Landing clearance granted. You are cleared to land."

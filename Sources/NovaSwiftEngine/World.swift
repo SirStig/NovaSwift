@@ -243,6 +243,10 @@ public final class Ship {
     public var ionizeMax: Double = 0
     public var deionizePerSec: Double = 0
     public var isIonized: Bool { ionizeMax > 0 && ionCharge >= ionizeMax }
+    /// Ship-level jamming strength summed from fitted jammer outfits (`oütf`
+    /// ModTypes 33-36). Stacks with the pilot government's inherent `InhJam1-4`
+    /// when an incoming "turns away if jammed" guided shot rolls to keep lock.
+    public var jamming: Int = 0
 
     // Fuel — EV Nova's blue gauge. Spent by hyperspace jumps (100 per jump) and
     // by the afterburner; regenerates only if the hull/outfits grant it.
@@ -1590,7 +1594,10 @@ public final class World {
                 // combined jam strength, since the Bible doesn't specify how
                 // a weapon picks among them.
                 if p.turnsAwayIfJammed, let tid = p.targetID, let t = ship(id: tid) {
-                    let jam = max(0, min(100, diplomacy?.govt(t.government)?.jamming.reduce(0, +) ?? 0))
+                    // Combined jam = target government's inherent InhJam1-4 plus the
+                    // target ship's own fitted jammer outfits (ModTypes 33-36).
+                    let govtJam = diplomacy?.govt(t.government)?.jamming.reduce(0, +) ?? 0
+                    let jam = max(0, min(100, govtJam + t.jamming))
                     if jam > 0, rng.double(in: 0...1) < (Double(jam) / 100) * dt {
                         p.targetID = nil
                     }
