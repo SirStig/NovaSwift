@@ -642,8 +642,35 @@ public final class StoryEngine {
             payDailyTribute()
             payDailyEscortFees()
             evaluateCrons()
+            evaluateDisasters()
             checkDeadlines()
         }
+    }
+
+    /// Roll each `öops` disaster: expire any whose duration has elapsed, then for
+    /// each inactive one whose `ActivateOn` passes, run its daily `Freq`% chance
+    /// to trigger — activating a timed price effect on one commodity at a stellar
+    /// (Bible: "these occurrences simply affect the price of a single commodity").
+    /// `Stellar == -2` records are news-flavor only (no price effect) and are
+    /// skipped here.
+    public func evaluateDisasters() {
+        var active = player.activeDisasters ?? [:]
+        // Expire finished disasters.
+        for (oopsID, expiry) in active where player.date >= expiry {
+            active[oopsID] = nil
+        }
+        // Roll inactive ones.
+        for o in game.oopses() where o.stellar != -2 {
+            guard active[o.id] == nil else { continue }
+            guard o.freq > 0, o.duration > 0 else { continue }
+            if !o.activateOn.isEmpty, !NCBTest(o.activateOn).evaluate(player) { continue }
+            if rng.chance(percent: o.freq) {
+                active[o.id] = player.date.adding(days: max(1, o.duration))
+                Log.mission.debug("disaster \(o.id) '\(o.name, privacy: .public)' triggered until \(String(describing: active[o.id]), privacy: .public)")
+                services?.notify(.disasterTriggered(oopsID: o.id))
+            }
+        }
+        player.activeDisasters = active
     }
 
     /// Record a stellar as dominated by the player and fire its `OnDominate`

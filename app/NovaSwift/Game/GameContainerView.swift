@@ -106,7 +106,14 @@ final class GameHost {
             // Combat rating isn't seeded here; it's a per-session delta folded
             // into `PlayerState.combatRating` at sync points instead (see
             // `GameContainerView.syncCombatStanding()`).
-            galaxy.makeDiplomacy().seed(legalRecord: pilot.legalRecord)
+            let dip = galaxy.makeDiplomacy()
+            dip.seed(legalRecord: pilot.legalRecord)
+            // Ranks with "govt won't attack" (Flags 0x0100) shield the player
+            // from that government's ships for as long as the rank is held.
+            dip.rankProtectedGovts = Set(pilot.activeRanks
+                .compactMap { game.rank($0) }
+                .filter { $0.govtWontAttack && $0.govt >= 128 }
+                .map { $0.govt })
             // Player ship + sprite textures from the current pilot loadout (see
             // `buildPlayerShip`) — the exact same construction the in-place
             // takeoff reload (`GameScene.reloadForDeparture`) uses, so a newly

@@ -290,7 +290,37 @@ h1, h2, h3 { font-family: var(--font-display); color: var(--bone); line-height: 
   border: 1px solid rgba(242,104,63,0.35);
   border-radius: 100px;
   padding: 3px 10px;
+  white-space: nowrap;
 }
+.tag.scope { color: var(--bronze-light); border-color: rgba(217,165,111,0.4); }
+.tag.wip   { color: #7fd0c4; border-color: rgba(127,208,196,0.35); }
+
+/* gap cards */
+.gap-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.gap-glyph {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.05rem;
+  color: var(--crimson-bright);
+  width: 34px; height: 34px; flex: 0 0 34px;
+  display: grid; place-items: center;
+  border-radius: 9px;
+  background: rgba(224,35,60,0.12);
+  border: 1px solid var(--line);
+}
+.gap-cat {
+  font-family: var(--font-hud); font-size: 0.68rem; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--muted);
+}
+.gap-top .tag { margin-left: auto; }
+.note {
+  margin-top: 26px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 0.98rem;
+}
+.note b { color: var(--text); }
 
 /* ---------- Bronze framed showcase (dialog-frame art) -------- */
 .frame-panel {

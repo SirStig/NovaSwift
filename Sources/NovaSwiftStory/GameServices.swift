@@ -101,6 +101,9 @@ public enum StoryNotification: Sendable, Equatable {
     case rankDeactivated(rankID: Int)
     case cronStarted(cronID: Int)
     case cronEnded(cronID: Int)
+    /// An `öops` disaster just triggered — a timed price effect on one commodity
+    /// at a stellar. The app can surface it as news/flavor.
+    case disasterTriggered(oopsID: Int)
     case stellarDominated(spobID: Int)
     case stellarReleased(spobID: Int)
     /// The daily upkeep for the hired escort wing was just deducted (total credits

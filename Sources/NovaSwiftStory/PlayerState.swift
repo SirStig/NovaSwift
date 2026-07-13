@@ -297,6 +297,10 @@ public struct PlayerState: Codable, Sendable {
     public var completedMissions: Set<Int>
     public var failedMissions: Set<Int>
     public var cronRuntime: [Int: CronRuntime]  // cron id → its runtime state
+    /// Active `öops` disasters: öops id → the date its price effect expires.
+    /// Optional for save-compatibility with pilots written before disasters
+    /// existed (decodes to nil → treated as no active disasters).
+    public var activeDisasters: [Int: GameDate]?
 
     public init(pilotName: String = "Captain",
                 isMale: Bool = true,
@@ -325,6 +329,7 @@ public struct PlayerState: Codable, Sendable {
         self.completedMissions = []
         self.failedMissions = []
         self.cronRuntime = [:]
+        self.activeDisasters = [:]
     }
 
     // MARK: Convenience queries

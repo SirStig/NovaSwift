@@ -102,4 +102,24 @@ extension NovaGame {
     public func oopses() -> [OopsRes] {
         resources.resources(of: NovaType.oops).map(OopsRes.init)
     }
+
+    /// Additive price adjustment for `commodity` at `spobID` from the currently
+    /// active `öops` disasters (`activeOops` = the ids the pilot has active). Sums
+    /// every matching disaster — one pinned to this stellar or galaxy-wide (-1).
+    public func disasterPriceDelta(spobID: Int, commodity: Commodity, activeOops: [Int]) -> Int {
+        var delta = 0
+        for id in activeOops {
+            guard let o = oops(id), o.commodityEnum == commodity else { continue }
+            if o.stellar == spobID || o.appliesToAnyStellar { delta += o.priceDelta }
+        }
+        return delta
+    }
+
+    /// Names of active disasters affecting `spobID`, for display in the commodity
+    /// exchange dialog (the öops `name` doubles as its in-UI label, per the Bible).
+    public func activeDisasterNames(spobID: Int, activeOops: [Int]) -> [String] {
+        activeOops.compactMap { oops($0) }
+            .filter { $0.stellar == spobID || $0.appliesToAnyStellar }
+            .map(\.name)
+    }
 }

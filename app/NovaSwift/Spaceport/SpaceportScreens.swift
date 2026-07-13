@@ -47,7 +47,13 @@ struct TradeCenterView: View {
     @State private var showQtyPrompt = false
     private var game: NovaGame { graphics.game }
     private var market: [(commodity: Commodity, level: PriceLevel, price: Int)] {
-        game.commodityMarket(at: spob)
+        // Apply any active öops disaster price deltas for this port on top of the
+        // base market (a food surplus drops food, a shortage spikes it, etc.).
+        let activeOops = pilot.state.activeDisasters.map { Array($0.keys) } ?? []
+        return game.commodityMarket(at: spob).map { row in
+            let delta = game.disasterPriceDelta(spobID: spob.id, commodity: row.commodity, activeOops: activeOops)
+            return delta == 0 ? row : (row.commodity, row.level, max(1, row.price + delta))
+        }
     }
 
     // Layout straight from DLOG/DITL #1001 "Trade" against the real 426×252
