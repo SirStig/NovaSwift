@@ -29,7 +29,9 @@ final class PilotStore: ObservableObject {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
                                                  in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent("NovaSwift", isDirectory: true)
+        // Per-instance so a second local-MP test instance keeps its own live
+        // autosave (see `AppInstance`); plain `NovaSwift` normally.
+        let dir = base.appendingPathComponent(AppInstance.saveFolderName, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("pilot.json")
     }

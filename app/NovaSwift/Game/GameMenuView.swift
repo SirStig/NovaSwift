@@ -137,10 +137,16 @@ struct GameMenuView: View {
                         }
                     } else {
                         row("Host Local Co-op", "antenna.radiowaves.left.and.right") {
-                            let name = model.pilot.state.pilotName
+                            var name = model.pilot.state.pilotName
+                            if name.isEmpty { name = "Captain" }
+                            // Two copies on one machine (local-MP testing) share a
+                            // pilot name; tag the secondary so presence/chat tell
+                            // them apart. No-op in a normal single instance.
+                            if AppInstance.isSecondary { name += " #\(AppInstance.tag)" }
                             model.session.startLocal(
-                                displayName: name.isEmpty ? "Captain" : name,
-                                systemID: model.pilot.state.currentSystem)
+                                displayName: name,
+                                systemID: model.pilot.state.currentSystem,
+                                shipTypeID: model.pilot.state.shipType)
                             onResume()   // drop back to flight with chat now live
                         }
                     }

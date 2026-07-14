@@ -139,6 +139,11 @@ struct RadarContact {
     var x: CGFloat
     var y: CGFloat
     var relationship: RadarRelationship
+    /// Co-op: when set, this contact is another player — drawn in their assigned
+    /// colour (overriding `relationship`) with their name beside the dot, so a
+    /// friend stands out on the scope. Nil for ordinary ships/stellars.
+    var playerColor: Color? = nil
+    var playerName: String? = nil
 }
 
 /// The player marker at the centre of the radar: a slim needle arrow pointing
@@ -367,6 +372,17 @@ struct GameHUDView: View {
                     ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                 }
                 for b in model.blips {
+                    // A co-op player: their colour, a slightly larger dot, and their
+                    // name — so a friend reads at a glance among ordinary contacts.
+                    if let pc = b.playerColor {
+                        let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5, width: 5, height: 5)
+                        ctx.fill(Path(ellipseIn: rect), with: .color(pc))
+                        if let name = b.playerName {
+                            ctx.draw(Text(name).font(.system(size: 7, weight: .bold)).foregroundColor(pc),
+                                     at: CGPoint(x: c.x + b.x * r, y: c.y + b.y * r - 7))
+                        }
+                        continue
+                    }
                     let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5, width: 3, height: 3)
                     ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                 }

@@ -373,14 +373,44 @@ simply won't fire for that player, rather than corrupting state.
   in-game **chat** (launcher + panel + unread badge) live over local Wi-Fi;
   presence announced on every hyperjump; **galaxy-map presence markers** (coloured
   pip + name, offset from mission arrows).
-- **Not yet wired into the app game loop:** link `NovaSwiftSync` into the app target
-  and drive `SystemSyncCoordinator` from `GameHost`'s step (authority selection from
-  presence, tick/seq counters, build a properly-sprited mirror hull from
-  `shipTypeHint`). Once running, **minimap player blips + in-world nameplates** wire
-  off `World.remotePlayerShips` (GameHUD/AuthenticHUDView ~365-369 + a nameplate pass).
-- **Remaining:** app game-loop integration (above); `GameKitTransport` (internet;
-  needs Game Center entitlement + App Store Connect); NPC/projectile sync; authority
-  handoff on departure.
+- **App game-loop integration (Xcode target, compiles — `xcodebuild` BUILD SUCCEEDED):**
+  `NovaSwiftSync` linked into the app; `MultiplayerSession` owns a `SystemSyncCoordinator`,
+  computes the per-system authority (smallest co-located player id — deterministic, no
+  negotiation), and exposes `syncPreStep`/`syncPostStep`. `GameScene` calls those around
+  `world.step` (no-op unless ≥2 players share the system). Mirror ships are built from the
+  friend's real hull via `Galaxy.makeShip(shipTypeHint…)`, so the existing `npcNodes`
+  render path draws them **and** the minimap-blip pass (`world.npcs`) shows them for free.
+  Presence now carries `shipTypeHint` (announced on jump + co-op start). Not runtime-verified
+  (no-launch policy) — the sync *logic* it drives is end-to-end tested in-package.
+- **Co-op ship identity DONE (Xcode target, compiles):** another player's ship now wears
+  an **in-world nameplate** (name label under the hull, `NPCNode.nameplate`, created in
+  `makeNPCNode` for `remotePlayer` ships) and a **named + colour-coded radar blip** on
+  both HUDs (`RadarContact.playerColor`/`playerName`; the co-op blip bypasses the IFF gate
+  so a friend never disappears). Nameplate, radar blip, and galaxy-map marker all share one
+  palette (`GalaxyMapView.playerColor(for:)`) so a given friend is the same colour
+  everywhere. Not runtime-verified (no-launch).
+- **Remaining:** `GameKitTransport` (internet; needs Game Center entitlement + App Store
+  Connect); NPC/projectile/mission sync (rides the same snapshot channel); authority
+  handoff polish on departure.
+
+## Testing on one machine
+
+Two copies of NovaSwift on one Mac, so you can test co-op against yourself:
+
+    scripts/run-two.sh
+
+Builds once, launches **instance 1** (normal) and **instance 2** (`NOVASWIFT_INSTANCE=2`).
+The env var (see `AppInstance.swift`) gives instance 2 its **own pilot roster/saves**
+(`…/Application Support/NovaSwift-2`) and its own selected-pilot default, while both
+**share the game data you already imported** — so no re-import, no save corruption. The
+secondary tags its co-op name (`Captain #2`) so you can tell them apart in presence/chat.
+
+In each window: start/resume a pilot → in-game menu ▸ **Host Local Co-op**. They
+auto-discover over local Wi-Fi/Bonjour (`MultipeerTransport`) — no Game Center/internet.
+Put both pilots in the **same star system** to see each other's ship + fly together;
+chat works session-wide from the bubble button regardless of location. Ctrl-C the script
+to quit both. (For a true two-device test, run one copy on a second Mac/iPad on the same
+Wi-Fi instead — same flow, no env var needed.)
 
 ## Phasing
 

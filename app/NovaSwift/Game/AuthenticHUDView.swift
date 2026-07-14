@@ -361,8 +361,18 @@ private struct RadarContactsView: View {
                         let r = CGRect(x: cx + b.x * radius - 3, y: cy + b.y * radius - 3, width: 6, height: 6)
                         ctx.stroke(Path(ellipseIn: r), with: .color(radarColor(b.relationship)), lineWidth: 1)
                     }
-                    // Ships: small filled dots.
+                    // Ships: small filled dots. A co-op player keeps their own
+                    // colour + name so they stand out from the two-tone scope.
                     for b in model.blips {
+                        if let pc = b.playerColor {
+                            let r = CGRect(x: cx + b.x * radius - 2, y: cy + b.y * radius - 2, width: 4, height: 4)
+                            ctx.fill(Path(ellipseIn: r), with: .color(pc))
+                            if let name = b.playerName {
+                                ctx.draw(Text(name).font(.system(size: 6, weight: .bold)).foregroundColor(pc),
+                                         at: CGPoint(x: cx + b.x * radius, y: cy + b.y * radius - 6))
+                            }
+                            continue
+                        }
                         let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
                         ctx.fill(Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
                     }

@@ -85,6 +85,14 @@ final class GameScene: SKScene {
     /// Fired once when the player's own ship is destroyed. `hadEscapePod`
     /// picks the host's reaction: rescue-at-nearest-port vs. game over.
     var onPlayerDestroyed: ((_ hadEscapePod: Bool) -> Void)?
+    /// Layer-2 co-op hooks (nil in single-player), driven by the container from the
+    /// live `MultiplayerSession`. `syncPreStep` runs just before the sim step (the
+    /// authority injects/feeds co-located friends' ships; a client applies the
+    /// latest snapshot); `syncPostStep` runs just after (authority broadcasts a
+    /// snapshot, a client sends its input). Both are no-ops unless ≥2 players share
+    /// this system, so single-player pays nothing.
+    var syncPreStep: ((World) -> Void)?
+    var syncPostStep: ((World) -> Void)?
     private var input: InputController!
     private var controllerInput: GameControllerInput?
     #if os(iOS)
@@ -589,6 +597,8 @@ final class GameScene: SKScene {
         var lastAngle: Double = .nan
         var healthFill: SKSpriteNode?
         var healthBar: SKNode?
+        /// Co-op: a name label under another player's ship (nil for NPCs).
+        var nameplate: SKLabelNode?
         var textures: [SKTexture] = []
         var radius: CGFloat = 16
         var lastArmor: Double = -1
@@ -1073,7 +1083,9 @@ final class GameScene: SKScene {
             pmark = profiler.lap(name, since: pmark)
         }
 
-        world.step(simDT)   // sim sub-phases recorded via `world.profiler`
+        syncPreStep?(world)   // co-op: inject/feed friends' ships (authority) or apply snapshot (client)
+        world.step(simDT)     // sim sub-phases recorded via `world.profiler`
+        syncPostStep?(world)  // co-op: broadcast snapshot (authority) or send input (client)
 
         let p = world.player
 
@@ -2471,6 +2483,23 @@ final class GameScene: SKScene {
         n.healthBar = barHolder
         n.healthFill = fill
 
+        // Co-op: another player's ship wears their name under the hull, in their
+        // assigned colour (matching their radar blip + galaxy-map marker). Static —
+        // the label just rides the container, which tracks the ship but never
+        // rotates, so it stays upright.
+        if let info = npc.remotePlayer {
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.text = info.name
+            label.fontSize = 9
+            label.fontColor = SKColor(GalaxyMapView.playerColor(for: info.peerID))
+            label.horizontalAlignmentMode = .center
+            label.verticalAlignmentMode = .center
+            label.position = CGPoint(x: 0, y: -(n.radius + 9))
+            label.zPosition = 3
+            n.container.addChild(label)
+            n.nameplate = label
+        }
+
         npcLayer.addChild(n.container)
         npcNodes[npc.entityID] = n
         if let fx = pendingEntrance.removeValue(forKey: npc.entityID) {
@@ -3780,6 +3809,13 @@ final class GameScene: SKScene {
             let dx = (npc.position.x - shipPos.x) / shipRadarRange
             let dy = -(npc.position.y - shipPos.y) / shipRadarRange
             guard dx * dx + dy * dy <= 1 else { return nil }
+            // A co-op partner always shows on the scope in their own colour + name,
+            // bypassing the IFF gate below — you should never lose your friend.
+            if let info = npc.remotePlayer {
+                return RadarContact(x: dx, y: dy, relationship: .friendlyOrOwned,
+                                    playerColor: GalaxyMapView.playerColor(for: info.peerID),
+                                    playerName: info.name)
+            }
             // IFF gates allegiance coloring (EV Nova oütf ModType 14): with an IFF
             // outfit, blips tint red/green/grey by relationship; without one, every
             // ship contact is drawn in the single neutral radar color, so friend and

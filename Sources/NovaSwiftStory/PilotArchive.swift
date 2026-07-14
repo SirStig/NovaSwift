@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftKit
 
 /// The on-disk pilot store: a directory of `<uuid>.evpilot` files (one per pilot,
 /// unlimited count) plus rotating auto-backups. Pure `Foundation` and
@@ -53,11 +54,14 @@ public final class PilotArchive {
     // MARK: Default roots
 
     /// `…/Application Support/NovaSwift/Pilots` — the local, always-available store.
+    /// Per-instance (`NovaSwift-<tag>/Pilots`) for a secondary local-MP test
+    /// instance so two copies on one machine keep separate rosters; see
+    /// `AppInstance`.
     public static func defaultLocalRoot() -> URL {
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
                                                  in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("NovaSwift/Pilots", isDirectory: true)
+        return base.appendingPathComponent("\(AppInstance.saveFolderName)/Pilots", isDirectory: true)
     }
 
     /// The app's iCloud ubiquity container id. Must match the

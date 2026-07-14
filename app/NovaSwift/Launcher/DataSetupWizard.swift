@@ -17,8 +17,9 @@ import UIKit
 /// Legal footing (mirrors `docs/GET_THE_DATA.md`): NovaSwift never bundles,
 /// hosts, or generates EV Nova data or registration codes — it only *reads*
 /// data the user already legally owns. The "I don't have it yet" branch points
-/// out to legitimate community tools (Decoder Ring for owner registration, the
-/// modern-macOS "EV Nova mod 4" build) and never to game data.
+/// out to legitimate community tools (the Windows build's .zip — no install or
+/// registration needed, just unzip — Decoder Ring for owner registration, and
+/// the modern-macOS "EV Nova mod 4" build) and never to game data.
 struct DataSetupWizard: View {
     @EnvironmentObject private var model: AppModel
 
@@ -214,18 +215,20 @@ struct DataSetupWizard: View {
             } text: {
                 Text("**Decoder Ring**, released in 2023 by Ambrosia's former president Andrew Welch, creates a valid registration code for a copy you own. It's the community-blessed way to register on a modern Mac.")
                     .novaFont(.body)
+                Text("Only needed if you want to actually run the classic app. Just want the data for NovaSwift? Skip ahead — the Windows download on the next step needs no registration.")
+                    .novaFont(.caption).foregroundStyle(.secondary)
                 externalLink("Find Decoder Ring", url: NovaLinks.evstuff)
             }
 
         case .acquireRun:
             scaffold {
-                WizardIcon(systemName: "desktopcomputer")
+                WizardIcon(systemName: "square.and.arrow.down.on.square.fill")
             } text: {
-                Text("To play on a modern Mac, the community **“EV Nova mod 4”** build runs on current macOS, including Apple Silicon. Install it and launch it once.")
+                Text("**Easiest:** download the **Windows** build's .zip and unzip it. No installing, no launching — the unzipped folder already holds the game's data, ready to import next.")
                     .novaFont(.body)
-                Text("After that you'll have the game's **Nova Files** folder ready to import — that's the next step.")
+                Text("Want to also play the original app on your Mac? Install the community **“EV Nova mod 4”** build instead and launch it once — its **Nova Files** folder will be ready to import too.")
                     .novaFont(.body).foregroundStyle(.secondary)
-                externalLink("EV Nova community build", url: NovaLinks.evstuff)
+                externalLink("Get EV Nova", url: NovaLinks.evstuff)
             }
 
         case .locate:
@@ -280,7 +283,7 @@ struct DataSetupWizard: View {
     private var locateText: Text {
         switch device {
         case .mac:
-            return Text("On your Mac, find your EV Nova app. Right-click it → **Show Package Contents** if needed. Inside is a folder called **Nova Files** — that folder, or any file ending in **.ndat**, is your data.")
+            return Text("If you unzipped the **Windows** build, that folder is already your data — nothing more to find. If you're running the classic Mac app, right-click it → **Show Package Contents**; inside is a folder called **Nova Files** — that folder, or any file ending in **.ndat** or **.rez**, is your data.")
         case .iPhone, .iPad:
             return Text("On a Mac or PC, open EV Nova and find its **Nova Files** folder — or the **.ndat** (Mac) / **.rez** (Windows) files inside it. You'll move those to your \(device.label) next.")
         }
@@ -289,7 +292,7 @@ struct DataSetupWizard: View {
     private var importText: Text {
         switch device {
         case .mac:
-            return Text("Tap **Choose Data…** below and pick your EV Nova **application folder** (or its Nova Files folder, or a single .ndat file). Picking the whole folder also grabs the original soundtrack and Charcoal/Geneva fonts.")
+            return Text("Tap **Choose Data…** below and pick the unzipped Windows folder, your EV Nova **application folder** (or its Nova Files folder), or a single .ndat/.rez file. Picking the whole folder also grabs the original soundtrack and Charcoal/Geneva fonts.")
         case .iPhone, .iPad:
             return Text("Tap **Choose Data…** below and pick the folder — or .ndat/.rez file — you just moved over. Picking the whole game folder also grabs the soundtrack and fonts.")
         }

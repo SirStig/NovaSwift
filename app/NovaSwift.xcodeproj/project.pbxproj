@@ -12,6 +12,7 @@
 		AA000000000000000000F6 /* NovaSwiftStory in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F5 /* NovaSwiftStory */; };
 		AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F7 /* NovaSwiftPluginStore */; };
 		AA000000000000000000F9 /* NovaSwiftNet in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000FA /* NovaSwiftNet */; };
+		AA000000000000000000FB /* NovaSwiftSync in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000FC /* NovaSwiftSync */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 				AA000000000000000000F6 /* NovaSwiftStory in Frameworks */,
 				AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */,
 				AA000000000000000000F9 /* NovaSwiftNet in Frameworks */,
+				AA000000000000000000FB /* NovaSwiftSync in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,6 +81,7 @@
 				AA000000000000000000F5 /* NovaSwiftStory */,
 				AA000000000000000000F7 /* NovaSwiftPluginStore */,
 				AA000000000000000000FA /* NovaSwiftNet */,
+				AA000000000000000000FC /* NovaSwiftSync */,
 			);
 			productName = NovaSwift;
 			productReference = AA000000000000000000E5 /* NovaSwift.app */;
@@ -367,6 +370,10 @@
 		AA000000000000000000FA /* NovaSwiftNet */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NovaSwiftNet;
+		};
+		AA000000000000000000FC /* NovaSwiftSync */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NovaSwiftSync;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

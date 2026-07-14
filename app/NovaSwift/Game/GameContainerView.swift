@@ -316,6 +316,10 @@ final class GameHost {
                     }
                 }
             }
+            // Co-op (Layer 2): let the live multiplayer session drive per-system
+            // sim sync around each step. No-ops unless ≥2 players share the system.
+            scene.syncPreStep = { world in model.session.syncPreStep(world: world) }
+            scene.syncPostStep = { world in model.session.syncPostStep(world: world) }
             // The world was already built by `configure` above — push the pilot's
             // existing grudges/eligibility onto it now.
             scene.syncPersStateToWorld()
@@ -1064,7 +1068,8 @@ struct GameContainerView: View {
                 model.pilot.state.currentSystem = newID       // follow the pilot to the new system
                 model.pilot.state.exploredSystems.insert(newID)
                 // Announce the jump to any multiplayer peers (no-op if no session).
-                model.session.updatePresence(systemID: newID, name: model.pilot.state.pilotName)
+                model.session.updatePresence(systemID: newID, name: model.pilot.state.pilotName,
+                                             shipTypeID: model.pilot.state.shipType)
                 syncCombatStanding()   // the about-to-be-discarded Diplomacy is the source of truth
                 model.pilot.save()
                 model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump

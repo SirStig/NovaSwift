@@ -34,7 +34,9 @@ final class PilotRoster: ObservableObject {
         self.archive = resolved
         self.isCloudBacked = resolved.location.isCloud
         // Restore the last explicit selection, if any.
-        if let raw = UserDefaults.standard.string(forKey: Self.selectedIDKey) {
+        // Instance-scoped so a second local-MP test instance remembers its own
+        // loaded pilot rather than fighting the primary over one key (`AppInstance`).
+        if let raw = AppInstance.defaults.string(forKey: Self.selectedIDKey) {
             self.selectedID = UUID(uuidString: raw)
         }
         Log.pilot.debug("PilotRoster.init: archive at \(self.archive.root.path, privacy: .public) (iCloud=\(self.archive.location.isCloud))")
@@ -75,8 +77,8 @@ final class PilotRoster: ObservableObject {
     /// readout resolves the group's most-recent slot via `selected`.
     func setSelected(_ id: UUID?) {
         selectedID = id
-        if let id { UserDefaults.standard.set(id.uuidString, forKey: Self.selectedIDKey) }
-        else { UserDefaults.standard.removeObject(forKey: Self.selectedIDKey) }
+        if let id { AppInstance.defaults.set(id.uuidString, forKey: Self.selectedIDKey) }
+        else { AppInstance.defaults.removeObject(forKey: Self.selectedIDKey) }
     }
 
     // MARK: Storage location (local ⇄ iCloud)

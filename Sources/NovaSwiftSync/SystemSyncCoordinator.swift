@@ -32,6 +32,9 @@ public final class SystemSyncCoordinator {
     /// `seq` seen from it so stale/out-of-order unreliable frames are dropped.
     private var latestInput: [String: NetIntent] = [:]
     private var highestSeq: [String: UInt32] = [:]
+    /// Authority side: client playerID → local entity id of the mirror ship we
+    /// inject for that co-located client and simulate from its inputs.
+    private var clientShipID: [String: Int] = [:]
 
     public init(localPlayerID: String) {
         self.localPlayerID = localPlayerID
@@ -43,9 +46,48 @@ public final class SystemSyncCoordinator {
         mirrorIDByAuthorityID.removeAll()
         latestInput.removeAll()
         highestSeq.removeAll()
+        clientShipID.removeAll()
     }
 
     // MARK: - Authority side
+
+    /// Ensure the authority's `World` holds a driven mirror ship for every
+    /// co-located client, and remove mirrors for clients who left. The population
+    /// comes from **presence** (not a snapshot) — these ships are what
+    /// `applyInputs` then steers from each client's streamed input, and what the
+    /// broadcast snapshot reports back so everyone sees them. Call when the
+    /// co-located set changes (and it's cheap to call every frame).
+    ///
+    /// `makeShip(clientID, name)` builds the hull — the app sizes/sprites it and
+    /// positions it near the authority's player; the default is a headless combat
+    /// hull at the origin.
+    @discardableResult
+    public func syncClients(_ clients: [(id: String, name: String)], into world: World,
+                            makeShip: (String, String) -> Ship = SystemSyncCoordinator.defaultClientShip)
+        -> (injected: [Int], removed: [Int])
+    {
+        var present = Set<String>()
+        var injected: [Int] = []
+        for client in clients {
+            present.insert(client.id)
+            if let localID = clientShipID[client.id], world.ship(id: localID) != nil { continue }
+            let ship = makeShip(client.id, client.name)
+            let localID = world.spawnRemotePlayer(
+                ship, info: RemotePlayerInfo(peerID: client.id, name: client.name),
+                arrival: .populate)
+            clientShipID[client.id] = localID
+            injected.append(localID)
+        }
+        var removed: [Int] = []
+        for (clientID, localID) in clientShipID where !present.contains(clientID) {
+            world.removeShip(entityID: localID)
+            clientShipID[clientID] = nil
+            latestInput[clientID] = nil
+            highestSeq[clientID] = nil
+            removed.append(localID)
+        }
+        return (injected, removed)
+    }
 
     /// Record a client's input (wire `NetSession.onInput` to this). Keeps only the
     /// freshest frame per client by `seq`, so a late/duplicate unreliable packet
@@ -148,5 +190,13 @@ public final class SystemSyncCoordinator {
         ship.shield = state.shield
         ship.armor = state.armor
         return ship
+    }
+
+    /// Default authority-side hull for a co-located client (headless use): a real
+    /// combat hull so it responds to the client's inputs under the authority's
+    /// simulation. The app overrides this to build the friend's actual hull from
+    /// their `shipTypeHint` and place it beside the authority's player.
+    public static func defaultClientShip(_ id: String, _ name: String) -> Ship {
+        Ship(name: name, stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: .pi))
     }
 }

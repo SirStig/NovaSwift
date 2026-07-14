@@ -130,6 +130,33 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         XCTAssertTrue(world.remotePlayerShips.isEmpty, "neither our own ship nor an NPC should mirror as a remote player")
     }
 
+    func testAuthorityInjectsAndRemovesClientMirrorsFromPresence() {
+        // The authority mirrors co-located clients (from presence), simulates them
+        // from their inputs, then removes a client's mirror when it leaves.
+        let coord = SystemSyncCoordinator(localPlayerID: "A")
+        let world = World(player: Ship(name: "A", stats: combatStats()))
+
+        let r1 = coord.syncClients([(id: "B", name: "Bo"), (id: "C", name: "Cy")], into: world)
+        XCTAssertEqual(r1.injected.count, 2)
+        XCTAssertEqual(Set(world.remotePlayerShips.map { $0.remotePlayer!.peerID }), ["B", "C"])
+
+        // Idempotent — calling again with the same set injects nothing new.
+        let r2 = coord.syncClients([(id: "B", name: "Bo"), (id: "C", name: "Cy")], into: world)
+        XCTAssertTrue(r2.injected.isEmpty && r2.removed.isEmpty)
+
+        // A client's input drives its mirror under the authority's step.
+        var thrust = NetIntent(); thrust.thrust = true
+        coord.receiveInput(InputFrame(tick: 1, seq: 1, intent: thrust), from: "B")
+        coord.applyInputs(to: world)
+        let boShip = world.remotePlayerShips.first { $0.remotePlayer?.peerID == "B" }!
+        XCTAssertEqual(world.remoteIntents[boShip.entityID]?.thrust, true)
+
+        // C leaves — its mirror is removed, B stays.
+        let r3 = coord.syncClients([(id: "B", name: "Bo")], into: world)
+        XCTAssertEqual(r3.removed.count, 1)
+        XCTAssertEqual(world.remotePlayerShips.map { $0.remotePlayer!.peerID }, ["B"])
+    }
+
     func testStaleInputIsDropped() {
         // Authority keeps only the freshest input per client by seq.
         let coord = SystemSyncCoordinator(localPlayerID: "A")

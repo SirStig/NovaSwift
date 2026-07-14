@@ -12,17 +12,26 @@ legally-obtained copy. The port's job is to *read and run* your data.
 
 - EV Nova is no longer sold on any storefront (Ambrosia is defunct; not on
   Steam/GOG/App Store).
-- If you own it, **Decoder Ring** — released 2023 by Ambrosia's former president
-  Andrew Welch — generates valid registration codes on modern macOS. This is
-  community-sanctioned for *registration* (not redistribution).
-- To run the classic app on Apple Silicon, the community **"EV Nova mod 4"**
-  macOS build works on current macOS. See <https://andrews05.github.io/evstuff/>.
+- **Easiest path — just want the data:** download the **Windows** build's
+  `.zip` from <https://andrews05.github.io/evstuff/> and unzip it. No
+  installing, no launching, no registration needed — the unzipped folder
+  already contains the game's `.rez` data files, ready to import as-is.
+- **If you also want to run the classic app** (e.g. on a Mac): the community
+  **"EV Nova mod 4"** build runs on current macOS, including Apple Silicon —
+  install it and launch it once to get its `Nova Files` folder. If you own
+  the game, **Decoder Ring** — released 2023 by Ambrosia's former president
+  Andrew Welch — generates a valid registration code for it on modern macOS
+  (community-sanctioned for *registration*, not redistribution). Registration
+  is only needed to actually play the classic app; it's not required for the
+  Windows-zip data-only path above.
 
 ## 2. Locate your data files
 
 EV Nova data lives in the game's `Nova Files` folder as classic-Mac
 **resource-fork** files, or as cross-platform **`.ndat`** files (same bytes, in
-the data fork). Windows uses **`.rez`**.
+the data fork). Windows uses **`.rez`** — and the unzipped Windows folder
+needs no extraction step at all; it's plain files on disk, ready to copy in
+as-is.
 
 Copy your data into:
 
@@ -34,6 +43,9 @@ data/plugins/       ← plug-ins / total conversions
 Both folders are git-ignored — nothing here is ever committed.
 
 ## 3. Extracting a resource fork on modern macOS
+
+*Skip this section if you took the Windows-zip path above — `.rez` files need
+no extraction, they're already plain files.*
 
 Modern macOS can't use the old resource-fork APIs directly, but you have options:
 
