@@ -151,7 +151,7 @@ struct ModernMainMenuView: View {
                 case .settings:   SettingsView(onClose: { sheet = nil })
                 case .about:      AboutView(onClose: { sheet = nil })
                 case .plugins:    PluginsView(onClose: { sheet = nil })
-                case .importData: ImportDataView(onClose: { sheet = nil })
+                case .importData: DataSetupWizard(onClose: { sheet = nil }, startAtImport: true)
                 }
             }
             .transition(.opacity)

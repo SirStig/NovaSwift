@@ -345,23 +345,42 @@ simply won't fire for that player, rather than corrupting state.
 - Seam lives in NovaSwiftStory (NCB engine) + the spaceport/interaction layer +
   the `GameServices` bridge. Exact functions confirmed in "Key files & seams."
 
-## Implementation status (2026-07-13)
+## Implementation status (2026-07-14)
 
-- **Netcode layer (`Sources/NovaSwiftNet`, in SwiftPM):** DONE & tested (26 tests).
+- **Netcode layer (`Sources/NovaSwiftNet`, in SwiftPM):** DONE & tested (30 tests).
   `Transport` protocol; `LoopbackTransport` (tests) + `MultipeerTransport` (LAN);
   `NetSession` with presence table, co-location queries, session-wide chat
-  (history + sender names), and `SessionRules` propagation.
+  (history + sender names), `SessionRules` propagation, and **Layer-2 send/receive**
+  (`sendInput`/`sendSnapshot`/`broadcastSnapshot` on the unreliable channel +
+  `onInput`/`onSnapshot` callbacks tagged with the sending peer).
+- **Engine N-ship generalization (`Sources/NovaSwiftEngine/World.swift`):** DONE &
+  tested (6 tests), additive/non-breaking. `Ship.remotePlayer: RemotePlayerInfo?`
+  marks another player's ship; `World.remoteIntents: [EntityID: ControlIntent]`
+  drives them; `spawnRemotePlayer`/`remotePlayerShips`; `removeShip` clears intents.
+  Single-player path unchanged.
+- **Layer-2 sync bridge (`Sources/NovaSwiftSync`, new SwiftPM target dep engine+net):**
+  DONE & tested (4 tests). `NetIntent ⇄ ControlIntent` mapping; `WorldSnapshot.build(from:)`
+  (recipient-agnostic tagging via `ShipNetState.playerID`); `SystemSyncCoordinator`
+  (authority: `receiveInput`/`applyInputs`/`snapshot`; client: `input`/`apply` with
+  mirror inject/update/remove + dead-reckon between snapshots; stale-input drop).
+  **The end-to-end co-op loop is proven headlessly**: an integration test runs two
+  real `World`s + two `NetSession`s over `LoopbackNetwork` and verifies a friend's
+  ship appears and moves in the other player's world, and each client's inputs drive
+  its ship authoritatively on the authority. Player-ship scope; NPC/projectile sync
+  is the next layer on the same channel.
 - **App wiring (Xcode target, compiles — `xcodebuild` BUILD SUCCEEDED):**
   `NovaSwiftNet` linked in; `MultiplayerSession` observable on `AppModel`;
   in-game **chat** (launcher + panel + unread badge) live over local Wi-Fi;
   presence announced on every hyperjump; **galaxy-map presence markers** (coloured
   pip + name, offset from mission arrows).
-- **Remaining P0/P1:** `GameKitTransport` (internet; needs Game Center entitlement
-  + App Store Connect). **Minimap player blips + in-world nameplates are blocked on
-  P2** — they need the remote ship's in-system position, which only exists once
-  Layer-2 snapshot sync runs.
-- **Not started:** P2 engine one→N externally-driven-ship generalization and the
-  Layer-2 sync loop — the next major (engine) step.
+- **Not yet wired into the app game loop:** link `NovaSwiftSync` into the app target
+  and drive `SystemSyncCoordinator` from `GameHost`'s step (authority selection from
+  presence, tick/seq counters, build a properly-sprited mirror hull from
+  `shipTypeHint`). Once running, **minimap player blips + in-world nameplates** wire
+  off `World.remotePlayerShips` (GameHUD/AuthenticHUDView ~365-369 + a nameplate pass).
+- **Remaining:** app game-loop integration (above); `GameKitTransport` (internet;
+  needs Game Center entitlement + App Store Connect); NPC/projectile sync; authority
+  handoff on departure.
 
 ## Phasing
 

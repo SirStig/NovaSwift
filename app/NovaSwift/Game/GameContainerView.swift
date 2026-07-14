@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import SpriteKit
 import NovaSwiftKit
 import NovaSwiftEngine
@@ -170,13 +171,26 @@ final class GameHost {
                                         government: spob.government,
                                         isUninhabited: spob.isUninhabited || wreck)
                 }
-                // Start the player a little "south" of the system's actual centre
-                // (the centroid of its stellar bodies, not necessarily world origin)
-                // so planets are in view. (Takeoff positions the ship at the
-                // departed body instead — that's handled in the in-place
-                // `GameScene.reloadForDeparture`, not this fresh-build path.)
-                let sysCenter = galaxy.systemContext(for: system.id).center
-                ship.position = sysCenter + Vec2(0, -700)
+                // Placement. Loading a pilot that was saved while docked lifts off
+                // from that pad — EV Nova only saves on landing, so "where I saved"
+                // is a planet, and the player expects to resume *there*, not dumped
+                // at the system centre. Mirror the takeoff math in
+                // `GameScene.reloadForDeparture`: sit just clear of the body's
+                // surface, nosed outward, at rest. Otherwise (saved in flight, or a
+                // jump/other rebuild where `landedSpob` is nil) fall back to the
+                // generic "a little south of centre so planets are in view."
+                let sysCtx = galaxy.systemContext(for: system.id)
+                if let sid = pilot.landedSpob,
+                   let body = sysCtx.bodies.first(where: { $0.id == sid }) {
+                    var outward = body.position - sysCtx.center
+                    if outward.length < 1 { outward = Vec2(0, -1) }
+                    let dir = outward.normalized
+                    ship.position = body.position + dir * (body.radius + 60)
+                    ship.angle = dir.angle
+                    ship.velocity = Vec2()
+                } else {
+                    ship.position = sysCtx.center + Vec2(0, -700)
+                }
             }
         } else {
             ship = Ship(name: "Test Craft",
@@ -640,6 +654,14 @@ struct GameContainerView: View {
     /// distance/danger scaling beyond this tier — a deliberate scope cut.
     private let assistanceCostNeutral = 300
     private let assistanceCostWary = 900
+    /// Heartbeat for rotating in-flight backups. EV Nova only *saves* on landing,
+    /// and we keep that as the canonical save — but between landings a long haul
+    /// (exploring, dogfighting, trading run) could lose a lot of progress to a
+    /// crash. This fires a backup-taking autosave every few minutes while actually
+    /// flying, so there's always a recent restore point without disturbing the
+    /// land-is-the-save model. Backups rotate (newest 8 + first), so this can't
+    /// grow unbounded.
+    private let backupHeartbeat = Timer.publish(every: 180, on: .main, in: .common).autoconnect()
     /// Chance a "wary" (dislikes-you-but-not-hostile) crew agrees at all.
     private let assistanceWaryAcceptChance = 0.5
 
@@ -656,7 +678,12 @@ struct GameContainerView: View {
         return result
     }
 
-    var body: some View {
+    /// The scene + HUD + overlays stack, split out from `body`. Kept separate so
+    /// this content and the long lifecycle-modifier chain in `body` aren't one
+    /// giant expression: SwiftUI's type-checker times out compiling them together
+    /// (it tipped over once the in-flight backup heartbeat modifier was added).
+    /// Two smaller expressions type-check quickly; the runtime view is identical.
+    @ViewBuilder private var gameStack: some View {
         ZStack {
             if let host {
                 sceneLayer(host)
@@ -851,6 +878,14 @@ struct GameContainerView: View {
                 GameLoadingView()
             }
         }
+    }
+
+    /// First half of the lifecycle-modifier chain (animations + the early
+    /// `.onChange` handlers), split from `body` so the full chain isn't one
+    /// expression the SwiftUI type-checker can't solve in reasonable time. The
+    /// remaining handlers hang off this in `body`; the composed view is identical.
+    private var gameStackWithEarlyLifecycle: some View {
+        gameStack
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
         .animation(.easeInOut(duration: 0.2), value: gateMapOrigin)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMenu)
@@ -914,8 +949,30 @@ struct GameContainerView: View {
                 setScenePaused(false, reason: "focus regained")
             }
         }
+    }
+
+    /// Second slice of the lifecycle-modifier chain (the in-flight backup,
+    /// landing, and initial-host `.task`), split from `body` for the same
+    /// type-checker reason as `gameStackWithEarlyLifecycle`. `body` applies the
+    /// last few `.onChange` handlers on top of this.
+    private var gameStackWithMidLifecycle: some View {
+        gameStackWithEarlyLifecycle
+        .onReceive(backupHeartbeat) { _ in
+            // Rotating in-flight backup. Only while actively flying a live session:
+            // skip if there's no host yet, if we're docked (landing already saves +
+            // backs up), or while a menu/map/dialog holds the sim paused — no point
+            // snapshotting a frozen, already-checkpointed state.
+            guard host != nil, landedSpobID == nil, !showMenu, !nav.showingMap,
+                  hailDialogState == nil, flightMissionServices.pendingOffer == nil else { return }
+            syncCombatStanding()
+            model.autosave(reason: .periodic)
+        }
         .onChange(of: landedSpobID) { _, id in
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
+            // Mirror the docked state into the persisted pilot so the on-land save
+            // records *where* we landed — that's what lets a reload lift off from
+            // this pad instead of the system centre. Cleared on departure below.
+            model.pilot.state.landedSpob = id
             if let id {
                 handleStoryLanding(spobID: id)                  // finish deliveries / pick up cargo BEFORE the day tick
                 advanceGameDay()                                // landing→depart is one calendar day
@@ -945,6 +1002,11 @@ struct GameContainerView: View {
                 nav.configure(game: model.data.game, startSystemID: startSystem)
                 host = GameHost(model: model, systemID: nav.currentSystemID)
                 hostSystemID = nav.currentSystemID
+                // `GameHost` has now consumed `landedSpob` to place the ship on its
+                // pad; we're airborne, so clear the docked marker. This keeps it
+                // from re-placing us at that planet if we later jump back into this
+                // system without having landed again in the meantime.
+                model.pilot.state.landedSpob = nil
                 debug.attach(host?.scene)                              // point the debug suite at the live scene
                 setScenePaused(false, reason: "initial host build")   // never start frozen (nothing should set this true yet, but be sure)
                 syncNav(host)
@@ -972,6 +1034,10 @@ struct GameContainerView: View {
             Button("Land") { if let id = landConfirmID { landConfirmID = nil; landedSpobID = id } }
             Button("Cancel", role: .cancel) { landConfirmID = nil }
         }
+    }
+
+    var body: some View {
+        gameStackWithMidLifecycle
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
         // Push any settings change into the live scene's own copy so display
         // options (ship bars, planet labels, smooth sprites, engine glow, screen

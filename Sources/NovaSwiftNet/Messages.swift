@@ -62,7 +62,15 @@ public enum NetControlSource: String, Codable, Sendable {
 /// One ship in a `WorldSnapshot`. Minimal now; grows (ionization, cloak, target,
 /// flags) in P2/P3.
 public struct ShipNetState: Codable, Equatable, Sendable {
+    /// The authority's entity id for this ship. Stable within one authority's
+    /// world; a receiver keys its local mirror of this ship off `(authorityPeer,
+    /// id)`. NOT the same across different authorities.
     public var id: Int
+    /// The owning player's id for a player ship, or nil for an NPC. This is what
+    /// lets a receiver pick out **its own** ship in a broadcast snapshot (match to
+    /// its `localPlayerID`) regardless of the authority's local entity ids — so the
+    /// `control` tag can be recipient-agnostic. See `WorldSnapshot` docs.
+    public var playerID: String?
     public var name: String
     public var x: Double
     public var y: Double
@@ -73,9 +81,10 @@ public struct ShipNetState: Codable, Equatable, Sendable {
     public var armor: Double
     public var control: NetControlSource
 
-    public init(id: Int, name: String, x: Double, y: Double, vx: Double, vy: Double,
-                angle: Double, shield: Double, armor: Double, control: NetControlSource) {
-        self.id = id; self.name = name
+    public init(id: Int, playerID: String? = nil, name: String, x: Double, y: Double,
+                vx: Double, vy: Double, angle: Double, shield: Double, armor: Double,
+                control: NetControlSource) {
+        self.id = id; self.playerID = playerID; self.name = name
         self.x = x; self.y = y; self.vx = vx; self.vy = vy
         self.angle = angle; self.shield = shield; self.armor = armor
         self.control = control

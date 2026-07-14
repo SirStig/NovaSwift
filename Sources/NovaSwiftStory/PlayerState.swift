@@ -182,6 +182,14 @@ public struct PlayerState: Codable, Sendable {
 
     // Position & exploration
     public var currentSystem: Int
+    /// The stellar object (`spöb`) id the player was docked at when the game was
+    /// last saved, or `nil` if saved while in flight. EV Nova only ever saves
+    /// while landed, so on load this is where the ship lifts off from — the
+    /// fresh-build placement restores the ship just clear of that pad instead of
+    /// dumping it at the system centre. Consumed (cleared) the moment the loaded
+    /// session takes off, so it never lingers to mis-place a later system entry.
+    /// Optional for save-compat (like `fuel`/`armor`).
+    public var landedSpob: Int?
     public var exploredSystems: Set<Int>
     /// Systems revealed by a purchased/granted map or chart outfit (`oütf`
     /// ModType 16) but not physically visited — shown named on the galaxy map

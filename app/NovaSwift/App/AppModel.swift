@@ -53,8 +53,8 @@ final class AppModel: ObservableObject {
     let roster: PilotRoster
 
     /// Why a save is being written — drives whether a rotating backup is taken.
-    enum SaveReason { case manual, land, jump, timer
-        var wantsBackup: Bool { self == .land || self == .manual }
+    enum SaveReason { case manual, land, jump, timer, periodic
+        var wantsBackup: Bool { self == .land || self == .manual || self == .periodic }
     }
 
     /// Authentic-UI graphics (real button / frame / backdrop PICTs) for menus and

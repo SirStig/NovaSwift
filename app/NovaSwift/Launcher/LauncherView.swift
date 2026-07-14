@@ -9,7 +9,6 @@ import SwiftUI
 struct LauncherView: View {
     @EnvironmentObject private var model: AppModel
     @State private var sheet: Sheet?
-    @State private var platform: GuidePlatform = .defaultForDevice
 
     private enum Sheet: String, Identifiable {
         case importData, about
@@ -45,7 +44,7 @@ struct LauncherView: View {
         if let which = sheet {
             Group {
                 switch which {
-                case .importData: ImportDataView(onClose: { sheet = nil })
+                case .importData: DataSetupWizard(onClose: { sheet = nil })
                 case .about:      AboutView(onClose: { sheet = nil })
                 }
             }
@@ -71,32 +70,21 @@ struct LauncherView: View {
         }
     }
 
-    // MARK: No data yet — the setup guide
+    // MARK: No data yet — a slim invite into the setup wizard
 
+    /// The launcher's only job without data is to invite the player into the
+    /// full setup assistant (`DataSetupWizard`), which does the real teaching.
     private var guideCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Bring your own game data", systemImage: "externaldrive.badge.person.crop")
                 .novaFont(.body, weight: .bold)
                 .foregroundStyle(novaAmber)
 
-            Text("NovaSwift never bundles EV Nova's copyrighted data. Import your own legally-obtained copy to unlock the real game.")
+            Text("NovaSwift runs your own legally-obtained EV Nova — nothing copyrighted is bundled in. The setup guide walks you through it step by step, whatever device you're on.")
                 .novaFont(.caption)
                 .foregroundStyle(.secondary)
 
-            Picker("Platform", selection: $platform) {
-                ForEach(GuidePlatform.allCases) { p in
-                    Label(p.rawValue, systemImage: p.icon).tag(p)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(platform.steps.enumerated()), id: \.offset) { i, step in
-                    stepRow(number: i + 1, text: step)
-                }
-            }
-
-            importButton
+            setUpButton
 
             Text(model.data.status)
                 .novaFont(.caption)
@@ -109,28 +97,14 @@ struct LauncherView: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.1)))
     }
 
-    private func stepRow(number: Int, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text("\(number)")
-                .novaFont(.caption, weight: .bold)
-                .foregroundStyle(.black)
-                .frame(width: 17, height: 17)
-                .background(Circle().fill(novaAmber))
-            Text(text)
-                .novaFont(.caption)
-                .foregroundStyle(.white.opacity(0.9))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var importButton: some View {
+    private var setUpButton: some View {
         Button {
             model.audio.play(.uiSelect)
             sheet = .importData
         } label: {
             HStack {
-                Image(systemName: "square.and.arrow.down.fill")
-                Text("Import Game Data")
+                Image(systemName: "sparkles")
+                Text("Set Up EV Nova")
             }
             .novaFont(.body, weight: .bold)
             .frame(maxWidth: .infinity)
@@ -200,45 +174,6 @@ struct LauncherView: View {
             .padding(.horizontal, 14).padding(.vertical, 8)
             .background(.white.opacity(0.05), in: Capsule())
             .overlay(Capsule().strokeBorder(.white.opacity(0.1)))
-    }
-}
-
-/// Which platform's setup steps the guide card shows.
-private enum GuidePlatform: String, CaseIterable, Identifiable {
-    case mac = "Mac"
-    case mobile = "iPhone & iPad"
-    var id: String { rawValue }
-
-    var icon: String {
-        switch self {
-        case .mac: return "desktopcomputer"
-        case .mobile: return "ipad.and.iphone"
-        }
-    }
-
-    var steps: [String] {
-        switch self {
-        case .mac:
-            return [
-                "Locate your legally-owned EV Nova install (or an extracted “Nova Files” folder).",
-                "Tap Import Game Data below and choose that folder, or a single .rez/.ndat file.",
-                "NovaSwift copies what it needs into its own app data folder — your original files are never modified.",
-            ]
-        case .mobile:
-            return [
-                "Get your EV Nova data onto this device — AirDrop, the Files app, or “Open in NovaSwift” from another app.",
-                "Tap Import Game Data and pick the folder or file from the file browser.",
-                "Everything is decoded on-device — nothing is uploaded anywhere.",
-            ]
-        }
-    }
-
-    static var defaultForDevice: GuidePlatform {
-        #if os(macOS)
-        return .mac
-        #else
-        return .mobile
-        #endif
     }
 }
 

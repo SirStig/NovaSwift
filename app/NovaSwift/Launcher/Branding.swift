@@ -154,6 +154,11 @@ struct AppMark: View {
 /// External links shown in the port's own (non-authentic) UI.
 enum NovaLinks {
     static let repo = URL(string: "https://github.com/SirStig/NovaSwift")!
+    /// andrews05's "evstuff" hub — the community's canonical index of legitimate
+    /// EV Nova tools: Decoder Ring (owner registration) and the modern-macOS
+    /// "EV Nova mod 4" build. Linked from the data-setup wizard; NovaSwift never
+    /// hosts game data or registration codes itself.
+    static let evstuff = URL(string: "https://andrews05.github.io/evstuff/")!
 }
 
 /// The About box, in the game's own dialog chrome (`NovaDialog` — mission-panel

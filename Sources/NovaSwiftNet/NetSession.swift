@@ -32,6 +32,15 @@ public final class NetSession: TransportDelegate {
     public var onChat: ((ChatMessage) -> Void)?
     /// Fired when the session rules change (host pushed new rules).
     public var onRulesChanged: ((SessionRules) -> Void)?
+    /// Layer 2 — fired on the authority when a co-located client's `InputFrame`
+    /// arrives (peer == that client's player id). The authority maps it to the
+    /// right remote-player ship and publishes it into `World.remoteIntents`.
+    public var onInput: ((InputFrame, PeerID) -> Void)?
+    /// Layer 2 — fired on a client when the system authority's `WorldSnapshot`
+    /// arrives (peer == the authority's player id). The client reconciles the
+    /// snapshot's ships into its local `World` (inject/update remote players,
+    /// interpolate). See `docs/MULTIPLAYER.md` → "Layer 2".
+    public var onSnapshot: ((WorldSnapshot, PeerID) -> Void)?
 
     public init(transport: Transport, rules: SessionRules = .fullStakes) {
         self.localPlayerID = transport.localPeerID
@@ -98,6 +107,31 @@ public final class NetSession: TransportDelegate {
         onChat?(message)
     }
 
+    // MARK: - Layer 2 (per-system sim sync)
+
+    /// Client → authority: this frame's control input. Sent on the **unreliable**
+    /// channel — inputs are a high-rate stream where the freshest frame wins, so a
+    /// dropped one is simply superseded by the next (`seq`/`tick` let the authority
+    /// discard stale/out-of-order arrivals). `authority` is the peer id of the
+    /// system's current authority (from presence / authority selection).
+    public func sendInput(_ frame: InputFrame, to authority: PeerID) {
+        send(.input(frame), to: authority, channel: .unreliable)
+    }
+
+    /// Authority → one client: the current world snapshot for the shared system,
+    /// on the **unreliable** channel (latest-state-wins, same rationale as input).
+    /// Send per co-located client so each can be delta'd against its own ack later.
+    public func sendSnapshot(_ snapshot: WorldSnapshot, to client: PeerID) {
+        send(.snapshot(snapshot), to: client, channel: .unreliable)
+    }
+
+    /// Authority → all co-located clients: broadcast one snapshot to everyone. A
+    /// convenience over per-client `sendSnapshot` while snapshots aren't yet
+    /// per-client delta-compressed.
+    public func broadcastSnapshot(_ snapshot: WorldSnapshot) {
+        broadcast(.snapshot(snapshot), channel: .unreliable)
+    }
+
     // MARK: - Send helpers
 
     private func broadcast(_ message: NetMessage, channel: NetChannel = .reliable) {
@@ -135,8 +169,11 @@ public final class NetSession: TransportDelegate {
         case .chat(let chat):
             appendChat(chat)
 
-        case .input, .snapshot:
-            break  // Layer 2 — handled starting in P1/P2.
+        case .input(let frame):
+            onInput?(frame, peer)
+
+        case .snapshot(let snapshot):
+            onSnapshot?(snapshot, peer)
         }
     }
 

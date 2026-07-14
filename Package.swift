@@ -16,6 +16,9 @@ let package = Package(
         .library(name: "NovaSwiftStory", targets: ["NovaSwiftStory"]),
         // Multiplayer netcode: transport abstraction, presence, session sync.
         .library(name: "NovaSwiftNet", targets: ["NovaSwiftNet"]),
+        // Multiplayer bridge: maps the engine's World/ControlIntent to/from the
+        // net wire types and drives per-system Layer-2 sync. Depends on both.
+        .library(name: "NovaSwiftSync", targets: ["NovaSwiftSync"]),
         // Plug-in store: catalog metadata + download/install pipeline.
         .library(name: "NovaSwiftPluginStore", targets: ["NovaSwiftPluginStore"]),
         // Command-line extractor / inspector.
@@ -29,6 +32,11 @@ let package = Package(
         .target(name: "NovaSwiftEngine", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftEngine"),
         .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftStory"),
         .target(name: "NovaSwiftNet", path: "Sources/NovaSwiftNet"),
+        .target(
+            name: "NovaSwiftSync",
+            dependencies: ["NovaSwiftEngine", "NovaSwiftNet"],
+            path: "Sources/NovaSwiftSync"
+        ),
         .target(
             name: "NovaSwiftPluginStore",
             dependencies: [
@@ -65,6 +73,11 @@ let package = Package(
             name: "NovaSwiftNetTests",
             dependencies: ["NovaSwiftNet"],
             path: "Tests/NovaSwiftNetTests"
+        ),
+        .testTarget(
+            name: "NovaSwiftSyncTests",
+            dependencies: ["NovaSwiftSync"],
+            path: "Tests/NovaSwiftSyncTests"
         ),
         .testTarget(
             name: "NovaSwiftPluginStoreTests",

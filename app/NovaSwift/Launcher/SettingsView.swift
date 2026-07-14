@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var previewSoundID: Int = 128
     @State private var showResetConfirm = false
     @State private var showImportData = false
+    /// Debug: preview the full first-run setup wizard from the top, regardless of
+    /// whether data is already imported.
+    @State private var showWizardDebug = false
 
     var body: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
@@ -56,7 +59,16 @@ struct SettingsView: View {
         // the menus present their own dialogs.
         .overlay {
             if showImportData {
-                ImportDataView(onClose: { showImportData = false })
+                DataSetupWizard(onClose: { showImportData = false }, startAtImport: true)
+                    .transition(.opacity)
+                    .preferredColorScheme(.dark)
+            }
+        }
+        // Debug: the full first-run wizard from the welcome step (no `startAtImport`),
+        // so the whole guide can be reviewed even after data is imported.
+        .overlay {
+            if showWizardDebug {
+                DataSetupWizard(onClose: { showWizardDebug = false })
                     .transition(.opacity)
                     .preferredColorScheme(.dark)
             }
@@ -305,10 +317,18 @@ struct SettingsView: View {
     private var developerSection: some View {
         Section {
             Toggle("Debug mode", isOn: binding(\.debugModeEnabled))
+            if model.settings.debugModeEnabled {
+                Button {
+                    model.audio.play(.uiSelect)
+                    showWizardDebug = true
+                } label: {
+                    Label("Preview Setup Wizard", systemImage: "sparkles.rectangle.stack")
+                }
+            }
         } header: {
             Label("Developer", systemImage: "hammer")
         } footer: {
-            Text("Shows an in-game debug button that opens the debug suite: the UI measurement overlay, a performance stress test, and more developer tools as we build them.")
+            Text("Shows an in-game debug button that opens the debug suite: the UI measurement overlay, a performance stress test, and more developer tools as we build them. Preview Setup Wizard replays the full first-run data guide from the top, even with data already imported.")
         }
     }
 

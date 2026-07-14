@@ -125,13 +125,27 @@ public struct ShipStats {
     }
 }
 
+/// Identifies a ship in the world as belonging to another player in a co-op
+/// session. `peerID` is the net transport's peer/player id (the same convention
+/// as `NovaSwiftNet`'s `PeerID == playerID`); `name` is the pilot's display name
+/// for nameplates and minimap blips. See `Ship.remotePlayer`.
+public struct RemotePlayerInfo: Equatable {
+    public var peerID: String
+    public var name: String
+    public init(peerID: String, name: String) {
+        self.peerID = peerID
+        self.name = name
+    }
+}
+
 /// A moving ship in world space. `angle` is a compass heading in radians
 /// (0 = up/north, increasing clockwise), matching EV Nova sprite frame 0.
 ///
 /// Every ship — player or NPC — is a `Ship`. Combat state (shields/armor), a
 /// faction (`government`), a weapon loadout, and an optional `brain` turn the
 /// same body into an AI-controlled combatant. A `nil` brain means "driven from
-/// the outside" (the player).
+/// the outside" — either the local player (`entityID == 0`) or, in co-op,
+/// another player (`remotePlayer != nil`, fed from `World.remoteIntents`).
 public final class Ship {
     public var position: Vec2
     public var velocity: Vec2
@@ -428,6 +442,15 @@ public final class Ship {
 
     // AI state.
     public var brain: AIBrain?
+
+    /// Non-nil marks this ship as **another player's ship** in a co-op session —
+    /// not AI, not the local player. Such a ship carries `brain == nil` (it isn't
+    /// AI-driven) and is stepped from an externally-supplied `ControlIntent` the
+    /// net layer publishes into `World.remoteIntents[entityID]` each frame (see
+    /// `World.step`). The stored value carries the owning peer + display name so
+    /// the renderer can draw a nameplate and the HUD a minimap blip. Nil for the
+    /// local player and every AI/ambient NPC, so single-player is untouched.
+    public var remotePlayer: RemotePlayerInfo?
     /// The entity this ship is currently aiming at (for turrets / guided shots
     /// and HUD). Set by the brain each think().
     public var currentTargetID: Int?
@@ -740,6 +763,17 @@ public final class World {
 
     public var player: Ship
     public var intent = ControlIntent()
+
+    /// Per-frame control input for **remote-player ships** (co-op), keyed by the
+    /// ship's `entityID`. The net layer publishes each co-located friend's latest
+    /// `ControlIntent` here before `step`; the sim drives their `brain == nil`,
+    /// `remotePlayer != nil` ship from it exactly as it drives the local player
+    /// from `intent`. An entity with no entry this frame coasts on an empty intent
+    /// (a dropped/late packet reads as "no input", not a stall). Empty in
+    /// single-player, so the AI/NPC path is completely unaffected. Prune entries
+    /// for departed remote ships via `removeShip`, which clears them.
+    public var remoteIntents: [Int: ControlIntent] = [:]
+
     public var tuning: FlightTuning
     public var combatTuning: CombatTuning
     /// Set once the player's death has been reported via `.playerDestroyed`,
@@ -919,6 +953,27 @@ public final class World {
         return ship.entityID
     }
 
+    /// Inject another player's ship into this system for co-op. It's an ordinary
+    /// world `Ship` with **no brain** (so the AI never drives it) tagged with
+    /// `remotePlayer`, added through the same `addNPC` seam as any arrival — so it
+    /// gets an entity id, shows up in `allShips`/`ship(id:)`, takes and deals
+    /// damage, and renders like any other ship, but is steered each frame from
+    /// `remoteIntents[id]` (published by the net layer) instead of a brain. Returns
+    /// the assigned entity id; keep it to route that peer's `InputFrame`s and to
+    /// `removeShip` them when they leave the system. Build `ship` from the friend's
+    /// real loadout (hull + outfits) exactly as you build the local player.
+    @discardableResult
+    public func spawnRemotePlayer(_ ship: Ship, info: RemotePlayerInfo,
+                                  arrival: ArrivalMode = .hyperspace) -> Int {
+        ship.brain = nil
+        ship.remotePlayer = info
+        return addNPC(ship, arrival: arrival)
+    }
+
+    /// Every remote-player ship currently in the system (co-op). Drives nameplates
+    /// and minimap blips; empty in single-player.
+    public var remotePlayerShips: [Ship] { npcs.filter { $0.remotePlayer != nil } }
+
     /// A government patrol/interceptor completed a scan pass on another ship.
     /// Called from `AIBrain.scan` when it closes to scan range; the renderer
     /// turns it into a visible scan sweep. Purely cosmetic in this engine —
@@ -1047,6 +1102,7 @@ public final class World {
         events.append(.shipDeparted(entityID: entityID, at: ship.position, heading: ship.angle))
         clearTarget(entityID)
         stopAllBeamLoops(for: ship)
+        remoteIntents[entityID] = nil   // no orphaned input for a departed remote player
         npcs.removeAll { $0.entityID == entityID }
         refreshRoster()
     }
@@ -1194,6 +1250,12 @@ public final class World {
                 let npcIntent: ControlIntent
                 if let brain = npc.brain {
                     npcIntent = brain.think(ship: npc, world: self, dt: dt)
+                } else if npc.remotePlayer != nil {
+                    // Another player's ship: driven from the outside, just like the
+                    // local player, from the intent the net layer published this
+                    // frame. A missing entry = no input this frame (coast), never a
+                    // warning — remote input is expected to have gaps.
+                    npcIntent = remoteIntents[npc.entityID] ?? ControlIntent()
                 } else {
                     npc.logNoBrainOnce()
                     npcIntent = ControlIntent()
