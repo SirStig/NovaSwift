@@ -771,6 +771,30 @@ public final class World {
     /// Populates and refreshes the NPC population.
     public var spawner: Spawner?
 
+    /// Optional profiling sink for the game loop's stress/perf instrumentation.
+    /// When set (only while the debug suite is attached), `step` reports how long
+    /// each of its sub-phases took, in seconds, keyed by phase name (`"sim.ai"`,
+    /// `"sim.projectiles"`, …). Nil in normal play, and every timing call is
+    /// gated on it, so this costs nothing when the suite is off. See
+    /// `FrameProfiler` on the app side, which is the sink this feeds.
+    public var profiler: ((_ phase: String, _ seconds: Double) -> Void)?
+    /// Running total of sub-phase time measured in the current `step`, so the
+    /// unattributed remainder can be reported as `"sim.other"`.
+    private var profMeasuredNs: UInt64 = 0
+
+    /// Time a sub-phase of `step` and forward it to `profiler`, accumulating its
+    /// cost so `step` can also report the un-timed remainder. A straight passthrough
+    /// (no timing, no allocation) when no profiler is attached.
+    @inline(__always)
+    private func prof(_ name: String, _ body: () -> Void) {
+        guard let profiler else { body(); return }
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        body()
+        let dtn = DispatchTime.now().uptimeNanoseconds &- t0
+        profMeasuredNs &+= dtn
+        profiler(name, Double(dtn) / 1_000_000_000)
+    }
+
     // MARK: Domination (Demand Tribute)
 
     /// The player's combat rating (`PlayerState.combatRating`), synced by the
@@ -1123,72 +1147,98 @@ public final class World {
     // MARK: Step
 
     public func step(_ dt: Double) {
+        // Frame-profiler bookkeeping: capture the whole-step span up front so the
+        // time not covered by a named sub-phase below can be reported as
+        // `"sim.other"`. Both are no-ops when no profiler is attached.
+        profMeasuredNs = 0
+        let profStepT0 = profiler != nil ? DispatchTime.now().uptimeNanoseconds : 0
+
         events.removeAll(keepingCapacity: true)
         playerScanCooldown = max(0, playerScanCooldown - dt)
 
-        spawner?.update(dt, world: self)
-        updateStellarDefenses()   // relaunch tribute-defense waves as they're cleared
-        refreshRoster()
+        prof("sim.spawn") {
+            spawner?.update(dt, world: self)
+            updateStellarDefenses()   // relaunch tribute-defense waves as they're cleared
+            refreshRoster()
+        }
 
         // Player: outside intent. Once dead, stop honouring the controls entirely —
         // no firing, and freeze the wreck in place (zero velocity, empty intent) so
         // it doesn't keep flying under live input (looking alive) while the death /
         // explosion sequence plays out and the app returns to the menu.
-        if player.isAlive {
-            fireWeapons(from: player, intent: intent)
-            player.step(dt, intent: intent, tuning: tuning)
-        } else {
-            player.velocity = Vec2()
-            player.step(dt, intent: ControlIntent(), tuning: tuning)
+        prof("sim.player") {
+            if player.isAlive {
+                fireWeapons(from: player, intent: intent)
+                player.step(dt, intent: intent, tuning: tuning)
+            } else {
+                player.velocity = Vec2()
+                player.step(dt, intent: ControlIntent(), tuning: tuning)
+            }
+            wrapIntoSystem(player)
         }
-        wrapIntoSystem(player)
 
         // NPCs: each brain decides an intent. Disabled hulks don't think — they
-        // just tumble and bleed off speed until they cool and drift away.
-        for npc in npcs where npc.isAlive {
-            if npc.disabled {
-                npc.disabledClock += dt
-                npc.velocity = npc.velocity * max(0, 1 - 0.35 * dt)
-                npc.angle += npc.disableSpin * dt
-                npc.position += npc.velocity * dt
+        // just tumble and bleed off speed until they cool and drift away. This
+        // loop (AI think + fire + physics for every NPC) is the sim's dominant
+        // cost under a crowded fight, so it gets its own profiler phase.
+        prof("sim.ai") {
+            for npc in npcs where npc.isAlive {
+                if npc.disabled {
+                    npc.disabledClock += dt
+                    npc.velocity = npc.velocity * max(0, 1 - 0.35 * dt)
+                    npc.angle += npc.disableSpin * dt
+                    npc.position += npc.velocity * dt
+                    wrapIntoSystem(npc)
+                    continue
+                }
+                let npcIntent: ControlIntent
+                if let brain = npc.brain {
+                    npcIntent = brain.think(ship: npc, world: self, dt: dt)
+                } else {
+                    npc.logNoBrainOnce()
+                    npcIntent = ControlIntent()
+                }
+                fireWeapons(from: npc, intent: npcIntent)
+                npc.step(dt, intent: npcIntent, tuning: tuning)
                 wrapIntoSystem(npc)
-                continue
             }
-            let npcIntent: ControlIntent
-            if let brain = npc.brain {
-                npcIntent = brain.think(ship: npc, world: self, dt: dt)
-            } else {
-                npc.logNoBrainOnce()
-                npcIntent = ControlIntent()
-            }
-            fireWeapons(from: npc, intent: npcIntent)
-            npc.step(dt, intent: npcIntent, tuning: tuning)
-            wrapIntoSystem(npc)
         }
 
         // Cooldowns & regen (hulks recover nothing).
-        for s in allShips {
-            for w in s.weapons { w.tick(dt) }
-            if !s.disabled { s.regen(dt) }
+        prof("sim.regen") {
+            for s in allShips {
+                for w in s.weapons { w.tick(dt) }
+                if !s.disabled { s.regen(dt) }
+            }
         }
 
         // Fighter bays: carriers deploy fighters in combat; fighters dock back.
-        updateFighterBays(dt)
+        prof("sim.bays") { updateFighterBays(dt) }
         // Cloaking devices: fade in/out and drain fuel/shield.
-        stepCloak(dt)
+        prof("sim.cloak") { stepCloak(dt) }
 
         // Asteroids don't move (see `Asteroid`'s doc comment) — they only spin.
-        for rock in asteroids where rock.isAlive {
-            rock.angle += rock.angularVelocityDegPerSec * .pi / 180.0 * dt
+        prof("sim.asteroids") {
+            for rock in asteroids where rock.isAlive {
+                rock.angle += rock.angularVelocityDegPerSec * .pi / 180.0 * dt
+            }
         }
 
-        runPointDefense()
-        stepProjectiles(dt)
-        despawnDepartedAndDead()
+        prof("sim.pointDefense") { runPointDefense() }
+        prof("sim.projectiles") { stepProjectiles(dt) }
+        prof("sim.despawn") { despawnDepartedAndDead() }
         // Ships have moved this step; weld continuous beams to their new
         // positions/headings and expire pulse-beam flashes.
-        refreshActiveBeams(dt)
+        prof("sim.beams") { refreshActiveBeams(dt) }
         reportPlayerDeathIfNeeded()
+
+        // Whatever time in `step` wasn't inside a named phase above (event reset,
+        // roster bookkeeping, death report) — so the sim phases sum to the real
+        // `step` cost with no silent gap.
+        if let profiler {
+            let totalNs = DispatchTime.now().uptimeNanoseconds &- profStepT0
+            profiler("sim.other", Double(totalNs &- min(totalNs, profMeasuredNs)) / 1_000_000_000)
+        }
     }
 
     /// The player's own death is otherwise invisible to `despawnDepartedAndDead`

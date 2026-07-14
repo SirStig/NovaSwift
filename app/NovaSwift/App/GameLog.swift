@@ -17,4 +17,8 @@ enum Log {
     static let data = Logger(subsystem: subsystem, category: "Data")
     static let audio = Logger(subsystem: subsystem, category: "Audio")
     static let story = Logger(subsystem: subsystem, category: "Story")
+    /// Frame-timing / stress-test instrumentation: the per-phase breakdown flushed
+    /// twice a second while the debug suite is attached, plus one-off frame-spike
+    /// reports. Isolate with `category == "Perf"` while chasing a frame drop.
+    static let perf = Logger(subsystem: subsystem, category: "Perf")
 }

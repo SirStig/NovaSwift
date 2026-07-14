@@ -243,12 +243,106 @@ struct DebugSuiteView: View {
                 metric("WORST", String(format: "%.1fms", debug.frameMsMax), color: worstColor)
             }
             HStack(spacing: 10) {
+                // The CPU-vs-render split is the first cut: a high CPU number means
+                // the simulation is the bottleneck (dig into the breakdown below); a
+                // high render number with low CPU means it's draw calls / fill rate.
+                metric("CPU", String(format: "%.1fms", debug.cpuMsAvg), color: cpuColor)
+                metric("RENDER", String(format: "%.1fms", debug.renderMsAvg), color: .white)
+                metric("MEM", String(format: "%.0fMB", debug.memoryMB), color: .white)
+            }
+            HStack(spacing: 10) {
                 metric("SHIPS", "\(debug.shipCount)", color: .white)
                 metric("SHOTS", "\(debug.projectileCount)", color: .white)
                 metric("ROIDS", "\(debug.asteroidCount)", color: .white)
                 metric("NODES", "\(debug.nodeCount)", color: .white)
             }
+            frameBreakdown
+            spikeCallout
         }
+    }
+
+    /// Per-phase frame-time breakdown: one bar per subsystem, longest-first, plus
+    /// a synthetic "render/other" bar for the frame time SpriteKit's own pass ate.
+    /// This is the "where is the frame going" readout — read it top-down and the
+    /// first row is what to go fix.
+    @ViewBuilder
+    private var frameBreakdown: some View {
+        if !debug.phaseBreakdown.isEmpty {
+            let renderRow = PerfPhase(name: "render/other", avgMs: debug.renderMsAvg,
+                                      worstMs: debug.renderMsAvg)
+            let rows = (debug.phaseBreakdown + [renderRow]).sorted { $0.avgMs > $1.avgMs }
+            let scale = max(debug.frameMsAvg, rows.first?.avgMs ?? 1, 0.001)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("FRAME BREAKDOWN")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, phase in
+                    phaseRow(phase, scale: scale, highlight: index == 0)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    /// One phase's bar: name, a fill proportional to its share of the frame, and
+    /// its average / worst ms. The single biggest consumer is tinted so it reads
+    /// at a glance.
+    private func phaseRow(_ phase: PerfPhase, scale: Double, highlight: Bool) -> some View {
+        let frac = min(1, max(0, phase.avgMs / scale))
+        let tint = highlight ? Color(red: 1.0, green: 0.75, blue: 0.3) : green
+        return VStack(spacing: 2) {
+            HStack(spacing: 6) {
+                Text(phase.name)
+                    .font(.system(size: 10, weight: highlight ? .bold : .regular, design: .monospaced))
+                    .foregroundStyle(highlight ? tint : .primary)
+                Spacer()
+                Text(String(format: "%.1f", phase.avgMs))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(highlight ? tint : .primary)
+                    .monospacedDigit()
+                Text(String(format: "· %.1f", phase.worstMs))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.07))
+                    Capsule().fill(tint.opacity(0.55))
+                        .frame(width: max(2, geo.size.width * frac))
+                }
+            }
+            .frame(height: 4)
+        }
+    }
+
+    /// The worst single-frame spike from the last window and which phase blew it.
+    /// A spike is a stutter the smoothed average hides, so it gets its own line.
+    @ViewBuilder
+    private var spikeCallout: some View {
+        if debug.lastSpikeMs > 0 {
+            let culprit = debug.lastSpikePhases.first
+            let detail = culprit.map { " · \($0.name) \(String(format: "%.1f", $0.avgMs))ms" } ?? ""
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                Text("Spike \(String(format: "%.1f", debug.lastSpikeMs))ms\(detail)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                Spacer()
+            }
+            .foregroundStyle(Color(red: 0.95, green: 0.55, blue: 0.35))
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8)
+                .fill(Color(red: 0.95, green: 0.35, blue: 0.3).opacity(0.12)))
+            .padding(.top, 2)
+        }
+    }
+
+    private var cpuColor: Color {
+        // Over ~13ms of CPU alone risks missing a 60fps frame before render even runs.
+        debug.cpuMsAvg > 13 ? Color(red: 1.0, green: 0.75, blue: 0.3) : .white
     }
 
     private var fpsColor: Color {

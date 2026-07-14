@@ -234,6 +234,18 @@ final class GameScene: SKScene {
     private var boomFrameCache: [Int: (frames: [SKTexture], frameDuration: Double)] = [:]
     /// Pooled jagged shape nodes for lightning beams (`wëap.LiDensity` > 0).
     private var lightningNodes: [SKShapeNode] = []
+    /// A shot's in-flight trail, derived from its `wëap` (`Trail` particles and/or
+    /// the 0x0200/0x0400 smoke flags), cached per weapon id so `syncProjectiles`
+    /// never re-decodes a weapon per shot per frame. `nil` entry = no trail.
+    private struct TrailInfo {
+        let color: SKColor
+        let smoke: Bool   // soft grey smoke (Flags 0x0200/0x0400) vs. a spark trail
+        let big: Bool     // big smoke (0x0400): larger, slower, longer-lived puffs
+    }
+    private var weaponTrailCache: [Int: TrailInfo?] = [:]
+    /// Per-weapon lightning-beam params (`LiDensity`/`LiAmplitude`), cached; nil =
+    /// a normal straight beam. Keyed by weapon id like the trail cache.
+    private var weaponLightningCache: [Int: (density: Int, amplitude: Int)?] = [:]
     private var systemName = ""
     /// True when this scene was just built because the player jumped in from
     /// hyperspace (not a fresh game start, a landing depart, or a load) — the
@@ -495,6 +507,17 @@ final class GameScene: SKScene {
     private var perfRawAccum: TimeInterval = 0
     private var perfWorstFrame: TimeInterval = 0
     private var perfFrames = 0
+    // Per-phase frame profiler: partitions each frame into named sim + scene
+    // phases so a frame drop can be traced to the subsystem eating it. Inert
+    // (never driven) unless `debug != nil`. See `FrameProfiler`.
+    private let profiler = FrameProfiler()
+    // Worst single-frame spike seen since the last report flush, held so the
+    // spike detail is pushed to the suite at the throttled ~2 Hz rate rather
+    // than churning `@Published` state on every hitched frame.
+    private var windowWorstSpike: (frameMs: Double, phases: [PerfPhase])?
+    // A frame whose CPU cost crosses this many milliseconds (~below 30 fps) is
+    // captured as a spike with its full per-phase breakdown.
+    private let perfSpikeThresholdMs: Double = 33
 
     // AI debug overlay (draws each NPC's state, target, nav goal, and formation
     // link when `debug?.aiDebugEnabled`). Three combined-path line nodes — one
@@ -1025,7 +1048,32 @@ final class GameScene: SKScene {
             intent = playerIntent(input?.intent ?? .init())
         }
         world.intent = intent
-        world.step(simDT)
+
+        // Frame profiler: while the debug suite is attached, partition this frame
+        // into named phases. The engine reports its sim sub-phases through
+        // `world.profiler` (wired once); the scene laps its own sync/render
+        // phases below via `lap(_:)`. All of it is skipped when `debug == nil`.
+        let profiling = debug != nil
+        if profiling {
+            if world.profiler == nil {
+                // Fresh attach — start from a clean window, never inheriting the
+                // previous session's timings.
+                profiler.reset()
+                windowWorstSpike = nil
+                world.profiler = { [weak self] name, seconds in
+                    self?.profiler.record(name, seconds: seconds)
+                }
+            }
+        } else if world.profiler != nil {
+            world.profiler = nil
+        }
+        var pmark = profiling ? profiler.now() : 0
+        func lap(_ name: String) {
+            guard profiling else { return }
+            pmark = profiler.lap(name, since: pmark)
+        }
+
+        world.step(simDT)   // sim sub-phases recorded via `world.profiler`
 
         let p = world.player
 
@@ -1060,6 +1108,10 @@ final class GameScene: SKScene {
                 """)
         }
         let scenePos = CGPoint(x: p.position.x, y: p.position.y)
+
+        // Start the scene-side phase timing here, so the cheats/heartbeat
+        // diagnostics above aren't charged to a render phase.
+        if profiling { pmark = profiler.now() }
 
         // The world fires each ready weapon mount itself (respecting reload and
         // ammo). We drain its events for SFX and render the live projectiles it
@@ -1196,6 +1248,7 @@ final class GameScene: SKScene {
                 break
             }
         }
+        lap("events")
         // "Auto-target after firing": on the shot that opens fire with nothing
         // locked, lock onto the nearest hostile.
         if settings.autoTargetAfterFiring, intent.firePrimary, !wasFiring,
@@ -1207,13 +1260,21 @@ final class GameScene: SKScene {
         effectClock += dt
         updateBeamLoopPositions(listener: scenePos)
         updateFlashes(dt)
+        updateParticles(dt)
+        updateSpriteAnims(dt)
+        lap("effects")
         syncProjectiles()
+        lap("sync.projectiles")
         syncBeams()
+        lap("sync.beams")
         syncNPCs()
+        lap("sync.npcs")
         syncAsteroids()
+        lap("sync.asteroids")
         updateSelectionBrackets()
         updateAIDebug()
         shipNode.position = scenePos
+        lap("overlays")
 
         // Base hull + its shän overlays all share one frame index: the live
         // rotation set (banking → turn direction, animation → a clock) times
@@ -1255,12 +1316,25 @@ final class GameScene: SKScene {
 
         updateThruster(active: intent.thrust || p.afterburnerActive, angle: p.angle,
                        boosted: p.afterburnerActive)
+        lap("player.sprite")
 
         cameraNode.position = shakenCameraPosition(scenePos, dt: dt)
         updateStarfield(cameraAt: scenePos)
         updateMurkFog()
+        lap("camera+bg")
         updateLanding(player: p)
         updateHUD(dt: dt)
+        lap("hud")
+
+        // Close the profiler frame: if this frame's measured CPU cost crossed the
+        // hitch threshold, keep the worst such spike (with its per-phase
+        // breakdown) for the throttled report tick to surface — don't churn
+        // `@Published` state on every hitched frame.
+        if profiling, let spike = profiler.endFrame(spikeThresholdMs: perfSpikeThresholdMs) {
+            if windowWorstSpike == nil || spike.frameMs > windowWorstSpike!.frameMs {
+                windowWorstSpike = spike
+            }
+        }
     }
 
     /// Find the nearest landable stellar body and decide whether the player is in
@@ -1961,7 +2035,43 @@ final class GameScene: SKScene {
             }
             // wëap.Flags3 0x0002: translucent shots draw at reduced opacity.
             node.alpha = s.translucentShots ? 0.45 : 1.0
+
+            // Smoke / spark trail: drop a puff at the shot's tail each frame for
+            // weapons that carry a Trail or the smoke flags. Cached per weapon so
+            // this stays a dictionary lookup, not a re-decode.
+            if s.weaponID >= 128, let trail = trailInfo(for: s.weaponID) {
+                let tail = CGPoint(x: node.position.x - CGFloat(cos(s.facing)) * 4,
+                                   y: node.position.y - CGFloat(sin(s.facing)) * 4)
+                if trail.smoke {
+                    spawnParticles(at: tail, count: 1, color: trail.color,
+                                   speed: trail.big ? 12 : 8, life: trail.big ? 0.9 : 0.55,
+                                   size: trail.big ? 10 : 6, additive: false, grow: true, drag: 2.5)
+                } else {
+                    spawnParticles(at: tail, count: 1, color: trail.color,
+                                   speed: 10, life: 0.4, size: 4, additive: true, grow: false, drag: 2.5)
+                }
+            }
         }
+    }
+
+    /// The trail a weapon's shots leave (or nil), cached per weapon id. Smoke flags
+    /// (`Flags` 0x0200/0x0400) render soft grey puffs; otherwise an active `Trail`
+    /// particle set renders a spark trail in its authored color.
+    private func trailInfo(for weaponID: Int) -> TrailInfo? {
+        if let cached = weaponTrailCache[weaponID] { return cached }
+        var info: TrailInfo?
+        if let w = galaxy?.game.weapon(weaponID) {
+            let smoke = w.generatesSmallSmoke || w.generatesBigSmoke
+            if smoke {
+                info = TrailInfo(color: SKColor(white: 0.7, alpha: 1), smoke: true, big: w.generatesBigSmoke)
+            } else if w.trailParticles.isActive {
+                let c = w.trailParticles.color
+                info = TrailInfo(color: SKColor(red: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
+                                                blue: CGFloat(c.b) / 255, alpha: 1), smoke: false, big: false)
+            }
+        }
+        weaponTrailCache[weaponID] = info
+        return info
     }
 
     /// Decoded, cached shot-graphic frames for a weapon's spïn id.
@@ -1992,26 +2102,102 @@ final class GameScene: SKScene {
             beamNodes.append(node)
         }
         for (i, node) in beamNodes.enumerated() {
-            guard i < beams.count else { node.isHidden = true; continue }
+            guard i < beams.count else {
+                node.isHidden = true
+                if i < lightningNodes.count { lightningNodes[i].isHidden = true }
+                continue
+            }
             let b = beams[i]
             let from = CGPoint(x: b.from.x, y: b.from.y)
+            let to = CGPoint(x: b.to.x, y: b.to.y)
             let dx = b.to.x - b.from.x, dy = b.to.y - b.from.y
             let length = max(1, CGFloat((dx * dx + dy * dy).squareRoot()))
             let width = CGFloat(b.width > 0 ? b.width : 3)
-            node.position = from
-            node.zRotation = atan2(CGFloat(dy), CGFloat(dx))
-            node.size = CGSize(width: length, height: max(2, width))
+            let color: SKColor
             if let c = b.color {
-                node.color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)
+                color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)
             } else {
-                node.color = b.hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 1)
-                                   : SKColor(white: 0.85, alpha: 1)
+                color = b.hit ? SKColor(red: 1, green: 0.6, blue: 0.3, alpha: 1)
+                              : SKColor(white: 0.85, alpha: 1)
             }
             // A continuous beam holds full brightness while its trigger is down;
             // a pulse beam fades out over its short life instead of blinking off.
-            node.alpha = b.continuous ? 0.95 : max(0.1, CGFloat(b.life / 0.08))
-            node.isHidden = false
+            let alpha = b.continuous ? 0.95 : max(0.1, CGFloat(b.life / 0.08))
+
+            if let li = lightningParams(for: b.weaponID) {
+                // Lightning beam: a jagged, per-frame re-seeded bolt (LiDensity
+                // zig-zags per 100 px, LiAmplitude px each) instead of a straight
+                // sprite. Hide the sprite; draw/refresh this beam's shape node.
+                node.isHidden = true
+                let shape = lightningShape(at: i)
+                shape.path = lightningPath(from: from, to: to, length: length,
+                                           density: li.density, amplitude: CGFloat(max(1, li.amplitude)))
+                shape.strokeColor = color
+                shape.lineWidth = max(1, width)
+                shape.glowWidth = max(1, width) * 1.5
+                shape.alpha = alpha
+                shape.isHidden = false
+            } else {
+                if i < lightningNodes.count { lightningNodes[i].isHidden = true }
+                node.position = from
+                node.zRotation = atan2(CGFloat(dy), CGFloat(dx))
+                node.size = CGSize(width: length, height: max(2, width))
+                node.color = color
+                node.alpha = alpha
+                node.isHidden = false
+            }
         }
+        // Hide surplus lightning nodes left over from a busier frame.
+        if lightningNodes.count > beams.count {
+            for j in beams.count..<lightningNodes.count { lightningNodes[j].isHidden = true }
+        }
+    }
+
+    /// A pooled shape node for lightning beam `index`, created on demand.
+    private func lightningShape(at index: Int) -> SKShapeNode {
+        while lightningNodes.count <= index {
+            let s = SKShapeNode()
+            s.fillColor = .clear
+            s.lineCap = .round
+            s.blendMode = .add
+            s.zPosition = 12
+            s.isAntialiased = true
+            effectsLayer.addChild(s)
+            lightningNodes.append(s)
+        }
+        return lightningNodes[index]
+    }
+
+    /// A jagged path from `from` to `to`: `density` zig-zags per 100 px, each
+    /// kicked up to `amplitude` px perpendicular to the beam. Re-seeded every call
+    /// so a held lightning beam shimmers. Endpoints stay pinned to the muzzle/hit.
+    private func lightningPath(from: CGPoint, to: CGPoint, length: CGFloat,
+                              density: Int, amplitude: CGFloat) -> CGPath {
+        let segments = max(2, Int((length / 100) * CGFloat(density)))
+        let path = CGMutablePath()
+        path.move(to: from)
+        let ux = (to.x - from.x) / length, uy = (to.y - from.y) / length
+        let px = -uy, py = ux   // unit perpendicular
+        for s in 1..<segments {
+            let t = CGFloat(s) / CGFloat(segments)
+            let bx = from.x + (to.x - from.x) * t, by = from.y + (to.y - from.y) * t
+            let off = CGFloat.random(in: -amplitude...amplitude)
+            path.addLine(to: CGPoint(x: bx + px * off, y: by + py * off))
+        }
+        path.addLine(to: to)
+        return path
+    }
+
+    /// Lightning params for a beam weapon (or nil for a straight beam), cached.
+    private func lightningParams(for weaponID: Int) -> (density: Int, amplitude: Int)? {
+        if weaponID < 128 { return nil }
+        if let cached = weaponLightningCache[weaponID] { return cached }
+        var params: (density: Int, amplitude: Int)?
+        if let w = galaxy?.game.weapon(weaponID), w.isLightningBeam {
+            params = (w.lightningDensity, w.lightningAmplitude)
+        }
+        weaponLightningCache[weaponID] = params
+        return params
     }
 
     /// A soft round dot used for every projectile (radial white→transparent).
@@ -2719,8 +2905,13 @@ final class GameScene: SKScene {
         // handles so the pools rebuild for the new system.
         effectsLayer.removeAllChildren()
         beamNodes.removeAll()
+        lightningNodes.removeAll()
         activeFlashes.removeAll()
         flashPool.removeAll()
+        activeParticles.removeAll()
+        particlePool.removeAll()
+        activeAnims.removeAll()
+        animPool.removeAll()
         for (_, n) in aiLabelNodes { n.removeFromParent() }
         aiLabelNodes.removeAll()
         pendingEntrance.removeAll()
@@ -3389,7 +3580,6 @@ final class GameScene: SKScene {
     private func updateParticles(_ dt: Double) {
         guard !activeParticles.isEmpty else { return }
         let fdt = CGFloat(dt)
-        let damp = max(0, 1 - fdt)   // base per-step damping; scaled by each drag
         var i = 0
         while i < activeParticles.count {
             activeParticles[i].age += dt
@@ -3401,7 +3591,8 @@ final class GameScene: SKScene {
                 activeParticles.remove(at: i)
                 continue
             }
-            let d = pow(damp, p.drag)
+            // Linear velocity damping (no pow overload ambiguity), clamped to 0.
+            let d = max(0, 1 - p.drag * fdt)
             activeParticles[i].vx *= d
             activeParticles[i].vy *= d
             p.node.position.x += activeParticles[i].vx * fdt
@@ -3423,6 +3614,9 @@ final class GameScene: SKScene {
         guard !playerDeathSequenceStarted else { return }
         playerDeathSequenceStarted = true
         audio?.stopAllLoops()
+        // The hull's real death bööm, so the wreck breaks up with its own authored
+        // explosion sprite instead of the generic flash.
+        let deathBoom = playerShip?.explosionBoomID
 
         let bursts = 9
         let step = 0.2
@@ -3433,7 +3627,7 @@ final class GameScene: SKScene {
                     guard let self, let p = self.playerShip?.position else { return }
                     let at = CGPoint(x: CGFloat(p.x) + .random(in: -22...22),
                                      y: CGFloat(p.y) + .random(in: -22...22))
-                    self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4)
+                    self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4, boomID: deathBoom)
                     self.audio?.play(303, at: at, listener: at)
                     self.addShake(at: at, radius: 60)
                 }
@@ -3446,7 +3640,7 @@ final class GameScene: SKScene {
                 guard let self else { return }
                 if let p = self.playerShip?.position {
                     let at = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))
-                    self.spawnExplosion(at: at, radius: 96)
+                    self.spawnExplosion(at: at, radius: 96, boomID: deathBoom)
                     self.audio?.play(303, at: at, listener: at)
                     self.addShake(at: at, radius: 110)
                 }
@@ -3598,11 +3792,14 @@ final class GameScene: SKScene {
     // MARK: - Debug suite: performance instrumentation
 
     /// Accumulate this frame's timing and, roughly twice a second, flush a
-    /// windowed sample (fps, average and worst frame ms, live entity/node
-    /// counts) up to the `DebugController`. Deliberately throttled: pushing
-    /// `@Published` metrics at the full frame rate would have SwiftUI re-lay-out
-    /// the debug overlay 60×/sec, itself a measurable cost that would pollute
-    /// the very numbers we're trying to read.
+    /// windowed sample up to the `DebugController` — fps, average/worst frame ms,
+    /// the CPU-vs-render split, resident memory, live entity/node counts, and the
+    /// full per-phase frame breakdown (sim sub-steps + scene sync/render phases,
+    /// sorted by cost). The same sample is mirrored to `Log.perf` so a stress run
+    /// leaves a complete, greppable timeline in Console even without the overlay
+    /// open. Deliberately throttled: pushing `@Published` metrics at the full
+    /// frame rate would have SwiftUI re-lay-out the debug overlay 60×/sec, itself
+    /// a measurable cost that would pollute the very numbers we're trying to read.
     private func samplePerformance(rawFrame: TimeInterval, dt: TimeInterval) {
         if rawFrame > 0 {
             perfRawAccum += rawFrame
@@ -3614,10 +3811,58 @@ final class GameScene: SKScene {
 
         let avg = perfRawAccum / Double(perfFrames)
         let fps = avg > 0 ? 1.0 / avg : 0
+        let frameMsAvg = avg * 1000
         let nodes = totalNodeCount()
-        debug?.report(fps: fps, frameMsAvg: avg * 1000, frameMsMax: perfWorstFrame * 1000,
+
+        // Per-phase breakdown for the window (resets the profiler's window). CPU
+        // time is the sum of every measured phase; whatever's left of the real
+        // frame is SpriteKit's render/present pass and anything unmeasured.
+        let phases = profiler.snapshot()
+        let cpuMs = phases.reduce(0) { $0 + $1.avgMs }
+        let renderMs = max(0, frameMsAvg - cpuMs)
+        let memMB = residentMemoryMB()
+
+        debug?.report(fps: fps, frameMsAvg: frameMsAvg, frameMsMax: perfWorstFrame * 1000,
+                      cpuMsAvg: cpuMs, renderMsAvg: renderMs, memoryMB: memMB,
                       ships: world.npcs.count, projectiles: world.projectiles.count,
-                      asteroids: world.asteroids.count, nodes: nodes)
+                      asteroids: world.asteroids.count, nodes: nodes, phases: phases)
+
+        // Flush the window's worst spike (if any) at this throttled rate, and
+        // clear it so a clean window shows no false alarm.
+        if let spike = windowWorstSpike {
+            debug?.reportSpike(frameMs: spike.frameMs, phases: spike.phases)
+            let top = spike.phases.prefix(4)
+                .map { "\($0.name) \(String(format: "%.1f", $0.avgMs))ms" }
+                .joined(separator: ", ")
+            Log.perf.error("""
+                FRAME SPIKE \(String(format: "%.1f", spike.frameMs), privacy: .public)ms \
+                ships=\(self.world.npcs.count, privacy: .public) \
+                shots=\(self.world.projectiles.count, privacy: .public) \
+                nodes=\(nodes, privacy: .public) — top: \(top, privacy: .public)
+                """)
+            windowWorstSpike = nil
+        } else {
+            debug?.reportSpike(frameMs: 0, phases: [])
+        }
+
+        // Full breakdown to Console: one line per flush with the frame budget and
+        // the four costliest phases, so a captured `log` stream reconstructs where
+        // every window's time went without the overlay.
+        let breakdown = phases.prefix(4)
+            .map { "\($0.name)=\(String(format: "%.1f", $0.avgMs))/\(String(format: "%.1f", $0.worstMs))" }
+            .joined(separator: " ")
+        Log.perf.debug("""
+            perf fps=\(String(format: "%.0f", fps), privacy: .public) \
+            frame=\(String(format: "%.1f", frameMsAvg), privacy: .public)ms \
+            worst=\(String(format: "%.1f", self.perfWorstFrame * 1000), privacy: .public)ms \
+            cpu=\(String(format: "%.1f", cpuMs), privacy: .public)ms \
+            render=\(String(format: "%.1f", renderMs), privacy: .public)ms \
+            mem=\(String(format: "%.0f", memMB), privacy: .public)MB \
+            ships=\(self.world.npcs.count, privacy: .public) \
+            shots=\(self.world.projectiles.count, privacy: .public) \
+            roids=\(self.world.asteroids.count, privacy: .public) \
+            nodes=\(nodes, privacy: .public) | \(breakdown, privacy: .public)
+            """)
 
         perfReportClock = 0
         perfRawAccum = 0

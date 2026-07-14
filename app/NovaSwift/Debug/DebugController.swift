@@ -39,6 +39,31 @@ final class DebugController: ObservableObject {
     /// grows with population, effects, and projectiles.
     @Published var nodeCount: Int = 0
 
+    /// CPU time spent in our own game-loop code per frame this window, in ms —
+    /// the sum of every measured phase (sim + scene sync/render prep).
+    @Published var cpuMsAvg: Double = 0
+    /// The frame time *not* accounted for by our CPU phases — SpriteKit's own
+    /// render/present pass plus anything unmeasured. `frameMsAvg - cpuMsAvg`,
+    /// clamped at 0. A high render share with low CPU means the bottleneck is
+    /// draw calls / fill rate, not the simulation.
+    @Published var renderMsAvg: Double = 0
+    /// Resident memory of the process, in MB — sampled on the report tick.
+    @Published var memoryMB: Double = 0
+
+    /// Per-phase frame-time breakdown for the last window, sorted most-expensive
+    /// first. The heart of the "where is the frame going" readout — each entry is
+    /// a subsystem's average and worst cost per frame. Empty until the first
+    /// sample lands. See `FrameProfiler`.
+    @Published var phaseBreakdown: [PerfPhase] = []
+
+    /// The worst single-frame spike seen since the last report tick, in ms, or 0
+    /// if none crossed the hitch threshold. Spikes are what read as stutter; the
+    /// average hides them.
+    @Published var lastSpikeMs: Double = 0
+    /// That spike frame's own phase breakdown (worst-first) — which subsystem
+    /// blew the frame budget on the bad frame specifically.
+    @Published var lastSpikePhases: [PerfPhase] = []
+
     // MARK: Performance stress test
 
     /// Whether a stress test is currently flooding the live world with a
@@ -104,15 +129,29 @@ final class DebugController: ObservableObject {
     }
 
     /// Push a fresh metrics sample up from the scene. Called on the main thread
-    /// from the scene's throttled update tick.
+    /// from the scene's throttled update tick (never per-frame).
     func report(fps: Double, frameMsAvg: Double, frameMsMax: Double,
-                ships: Int, projectiles: Int, asteroids: Int, nodes: Int) {
+                cpuMsAvg: Double, renderMsAvg: Double, memoryMB: Double,
+                ships: Int, projectiles: Int, asteroids: Int, nodes: Int,
+                phases: [PerfPhase]) {
         self.fps = fps
         self.frameMsAvg = frameMsAvg
         self.frameMsMax = frameMsMax
+        self.cpuMsAvg = cpuMsAvg
+        self.renderMsAvg = renderMsAvg
+        self.memoryMB = memoryMB
         self.shipCount = ships
         self.projectileCount = projectiles
         self.asteroidCount = asteroids
         self.nodeCount = nodes
+        self.phaseBreakdown = phases
+    }
+
+    /// Surface the worst frame spike from the last window (or clear it when the
+    /// window was clean). Kept separate from `report` so an ordinary window
+    /// leaves the last spike's detail on screen to read, rather than blanking it.
+    func reportSpike(frameMs: Double, phases: [PerfPhase]) {
+        self.lastSpikeMs = frameMs
+        self.lastSpikePhases = phases
     }
 }

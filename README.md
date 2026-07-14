@@ -33,20 +33,23 @@ Running on iPhone (iOS):
 
 ## What you can do today
 
-Point it at your own data and jump in. The in-game clock keeps ticking whether
-you're paying attention or not, so the galaxy carries on around you.
+This is EV Nova — the whole game, ported. Point it at your own data and jump in;
+the in-game clock keeps ticking whether you're paying attention or not, so the
+galaxy carries on around you.
 
 - **Fly and fight** — the original drifting, momentum-based flight; enemies that
-  spawn from the real fleet tables; target locks, ion damage, and ships that
-  weigh their odds before committing.
+  spawn from the real fleet tables; target locks, ion damage, real explosion
+  sprites and particle effects, and ships that weigh their odds before committing.
 - **Explore and trade** — chart a course across the galaxy and burn real fuel to
   get there, then land to trade goods, refit your ship, and buy new hulls.
   Prices, cargo limits, and repairs all cost you.
 - **Play the story** — pick up missions and see them through. News and events
-  fire as days pass, mission ships turn up and fight, and the campaigns in your
-  data actually move forward.
-- **Lose for real** — take your armor to zero and you punch out in an escape pod,
-  or it's game over. Attack the wrong government and the grudge sticks.
+  fire as days pass, mission ships turn up and fight, and the branching campaigns
+  in your data actually move forward.
+- **Fight dirty, and lose for real** — disable a ship and board it to plunder its
+  cargo or capture the hull, demand tribute from a planet and conquer it — or take
+  your own armor to zero and punch out in an escape pod (if you have one). Attack
+  the wrong government and the grudge sticks.
 - **Meet the locals** — run into named captains with their own lines and history,
   hire escorts who draw a daily wage, and throw some credits at the holovid races.
 - **Keep your progress** — your pilot is saved and backed up as you go; roll up
@@ -74,21 +77,25 @@ them.
 
 ## Where it's at — honestly
 
-It runs and plays well on macOS, iPadOS, and iOS. What's left is mostly fidelity
-and polish rather than missing gameplay. The two biggest open pieces:
+**NOVA Swift is a near-complete, faithful port of EV Nova — you can play the
+whole game today, start to finish, on macOS, iPadOS, and iOS.** Flight and
+combat, the economy, the missions and their branching campaigns, boarding and
+capture, planetary domination, named captains, hired escorts, real explosion
+sprites and particle effects — the systems that make EV Nova *EV Nova* are all in
+and playable. Call it a ~90%-complete full port.
 
-- **A · Real explosions & particle effects** *(renderer)* — explosions are a
-  single orange flash right now, and there's no particle or smoke system yet. One
-  piece of work unlocks proper explosion sprites, weapon smoke and hit-spray,
-  asteroid debris, and beam shapes all at once.
-- **B · Boarding, plunder & capture** *(mechanic)* — disabling a ship and boarding
-  it to loot cargo or capture the hull isn't wired up yet. The data behind it
-  (bribes, booty, capture outcomes) is already there; the mechanic that uses it is
-  the missing piece.
+What's left is the last stretch that turns "complete" into "hard to tell apart
+from the original":
 
-Beyond those two, it's smaller bugs, some performance and crash fixes, and AI
-that's much closer to the original's feel than it used to be — but not quite
-dialed in yet. If you find something off, the
+- **Polish & fidelity** — fine-tuning the AI, flight feel, spawn cadence, and the
+  hundred small behaviors so a pure *Classic* run feels exactly like 2002.
+- **Bugs, crashes & performance** — the usual hardening as more people play on
+  more devices.
+- **Enhancements & new features** — things the 2002 original never had, like
+  multiplayer, controller support, and optional HD art (see
+  [What's coming](#whats-coming)).
+
+If you find something off, the
 [issue tracker](https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/issues) is
 the best place to tell us.
 
@@ -114,10 +121,13 @@ The plans live in **[docs/MODERNIZATION.md](docs/MODERNIZATION.md)** and
 
 ## Beta / TestFlight
 
-Native builds for macOS, iPad, and iPhone are already on **TestFlight**. We're
-waiting on approval to invite external testers — once that clears, you'll be able
-to try it without building it yourself. Want in? Watch the repo and we'll post
-when the door opens.
+Native builds for **macOS, iPad, and iPhone** are live on **TestFlight** — no
+build step required. Join the public beta here:
+
+**→ [testflight.apple.com/join/3FBzwwq1](https://testflight.apple.com/join/3FBzwwq1)**
+
+The same link works for macOS and iOS/iPadOS. You'll still need to supply your own
+legally-owned EV Nova data (see [The one rule](#the-one-rule-you-bring-the-game)).
 
 ## The one rule: you bring the game
 

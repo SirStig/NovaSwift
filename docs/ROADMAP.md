@@ -34,6 +34,12 @@ exist for the player.* So we prioritize **wiring what's already built** and
 
 ## Where we are now
 
+**NOVA Swift is now a near-complete (~90%), faithful full port of EV Nova — the
+whole game is playable start to finish on macOS / iPadOS / iOS.** What's left is
+polish & fidelity fine-tuning, bug/crash/performance hardening, and enhancements
+the 2002 original never had (multiplayer, controller support, optional HD art) —
+not missing core systems.
+
 A lot has come together since the last time this roadmap was written — most of
 the "it's built, we just need to hook it up" work is done and playable. Here's
 what's live today (see [STATUS.md](STATUS.md) for the wiring details):

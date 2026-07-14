@@ -89,16 +89,17 @@
     <div class="wrap">
       <div class="section-head reveal">
         <p class="eyebrow">What you can do today</p>
-        <h2>A whole game you can play — and lose.</h2>
-        <p>Point it at your own data and jump in. Fly, trade, take missions, pick fights and get into
-           trouble. The in-game clock keeps ticking whether you're paying attention or not, so the galaxy
-           carries on around you.</p>
+        <h2>The whole game — ported.</h2>
+        <p>This is EV Nova, start to finish. Point it at your own data and jump in: fly, trade, take
+           missions, board ships, conquer planets, pick fights and get into trouble. The in-game clock
+           keeps ticking whether you're paying attention or not, so the galaxy carries on around you.</p>
       </div>
       <div class="grid cols-3">
         <div class="card reveal">
           <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 2 4 22l8-5 8 5-8-20Z"/></svg></span>Fly &amp; fight</h3>
           <p>The original drifting, momentum-based flight, enemies that spawn from the real fleet tables,
-             target locks, ion damage and ships that weigh their odds before they commit.</p>
+             target locks, ion damage, real explosion sprites and particle effects, and ships that weigh
+             their odds before they commit.</p>
         </div>
         <div class="card reveal">
           <h3><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>Explore &amp; trade</h3>
@@ -111,9 +112,10 @@
              up and fight, and the campaigns in your data actually move forward.</p>
         </div>
         <div class="card reveal">
-          <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z"/><path d="M8 15s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></span>Lose for real</h3>
-          <p>Take your armor to zero and you punch out in an escape pod — or it's game over. Attack the wrong
-             government and the grudge sticks with you.</p>
+          <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z"/><path d="M8 15s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></span>Fight dirty — and lose for real</h3>
+          <p>Disable a ship and board it to plunder cargo or capture the hull; demand tribute from a planet
+             and conquer it. Take your own armor to zero and you punch out in an escape pod — or it's game
+             over. Attack the wrong government and the grudge sticks.</p>
         </div>
         <div class="card reveal">
           <h3><span class="ic"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/></svg></span>Meet the locals</h3>
@@ -168,38 +170,33 @@
     <div class="wrap">
       <div class="section-head reveal">
         <p class="eyebrow">Where we're at — honestly</p>
-        <h2>Really close. Here's what's still open.</h2>
-        <p>It runs and plays well on macOS, iPadOS and iOS — all tested on real devices. What's left is
-           mostly fidelity and polish rather than missing gameplay. These are the two biggest pieces:</p>
+        <h2>The game is here. Now we're sharpening it.</h2>
+        <p>NOVA Swift is a near-complete, faithful port — you can play the whole of EV Nova today, start to
+           finish, on macOS, iPadOS and iOS. Flight and combat, the economy, the branching campaigns,
+           boarding and capture, planetary domination, real explosion sprites and particle effects — the
+           systems that make EV Nova <em>EV Nova</em> are all in and playable. Call it ~90% of a full port.
+           What's left is the last stretch:</p>
       </div>
-      <div class="grid cols-2">
+      <div class="grid cols-3">
         <div class="card reveal">
-          <div class="gap-top">
-            <span class="gap-glyph">A</span>
-            <span class="gap-cat">Renderer</span>
-            <span class="tag scope">Scope · L</span>
-          </div>
-          <h3 style="margin-top:0">Real explosions &amp; particle effects</h3>
-          <p>Explosions are a single orange flash right now, and there's no particle or smoke system yet.
-             One piece of work unlocks proper explosion sprites, weapon smoke and hit-spray, asteroid
-             debris and beam shapes — all at once.</p>
+          <h3 style="margin-top:0">Polish &amp; fidelity</h3>
+          <p>Fine-tuning the AI, flight feel, spawn cadence and the hundred small behaviors so a pure
+             <em>Classic</em> run feels exactly like 2002.</p>
         </div>
         <div class="card reveal">
-          <div class="gap-top">
-            <span class="gap-glyph">B</span>
-            <span class="gap-cat">Mechanic</span>
-            <span class="tag scope">Scope · L</span>
-          </div>
-          <h3 style="margin-top:0">Boarding, plunder &amp; capture</h3>
-          <p>Disabling a ship and boarding it to loot its cargo or capture the hull isn't wired up yet.
-             The data behind it — bribes, booty, capture outcomes — is already there; the mechanic that
-             uses it is the missing piece.</p>
+          <h3 style="margin-top:0">Bugs, crashes &amp; performance</h3>
+          <p>The usual hardening as more people play on more devices — squashing edge cases and keeping
+             frame rates smooth from iPhone to Mac.</p>
+        </div>
+        <div class="card reveal">
+          <h3 style="margin-top:0">Enhancements &amp; new features</h3>
+          <p>Things the 2002 original never had — multiplayer, controller support, optional HD art — layered
+             on top without ever replacing the classic experience.</p>
         </div>
       </div>
       <div class="note reveal">
-        <b>Beyond those two:</b> smaller bugs, some performance and crash fixes, and AI that's much closer
-        to the original's feel than it used to be — but not quite dialled in yet. If you find something off,
-        the <a href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/issues" target="_blank" rel="noopener">issue tracker</a>
+        Found something off, or missing a detail from the original? The
+        <a href="https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/issues" target="_blank" rel="noopener">issue tracker</a>
         is the best place to tell us.
       </div>
     </div>
