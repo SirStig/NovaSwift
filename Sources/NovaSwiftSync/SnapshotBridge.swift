@@ -32,12 +32,24 @@ extension WorldSnapshot {
                 control = .ai
             }
             ships.append(ShipNetState(
-                id: ship.entityID, playerID: playerID, name: ship.name,
+                id: ship.entityID, playerID: playerID, shipTypeID: ship.shipTypeID,
+                government: ship.government, name: ship.name,
                 x: ship.position.x, y: ship.position.y,
                 vx: ship.velocity.x, vy: ship.velocity.y,
                 angle: ship.angle, shield: ship.shield, armor: ship.armor,
                 control: control))
         }
-        return WorldSnapshot(tick: tick, ackInputSeq: ackInputSeq, ships: ships)
+        // Live shots, so co-located clients see fire (visual only — damage already
+        // rides ship health). Skip any visual echoes we might be holding ourselves.
+        var shots: [ProjectileNetState] = []
+        shots.reserveCapacity(world.projectiles.count)
+        for p in world.projectiles where p.alive && !p.visualOnly {
+            shots.append(ProjectileNetState(
+                ownerID: p.ownerID, x: p.position.x, y: p.position.y,
+                vx: p.velocity.x, vy: p.velocity.y, facing: p.facing, life: p.life,
+                weaponID: p.weaponID, graphicSpinID: p.graphicSpinID,
+                spinShots: p.spinShots, translucentShots: p.translucentShots))
+        }
+        return WorldSnapshot(tick: tick, ackInputSeq: ackInputSeq, ships: ships, shots: shots)
     }
 }

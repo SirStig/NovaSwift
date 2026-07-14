@@ -378,7 +378,7 @@ extension Galaxy {
             speed: max(0, speedStat), acceleration: max(0, accelStat), turnRate: max(0, turnStat),
             maxShield: Double(max(0, shieldStat)) * combatTuning.hpScale,
             maxArmor: Double(max(1, armorStat)) * combatTuning.hpScale,
-            shieldRechargePerSec: max(2, Double(shieldRechStat) * 0.05),
+            shieldRechargePerSec: max(0, Double(shieldRechStat) * 0.03),
             armorRechargePerSec: max(0, Double(armorRechStat) * 0.03),
             maxFuel: Double(max(0, fuelCap)),
             fuelRegenPerSec: Double(max(0, fuelRegenStat)) * 0.03,

@@ -93,6 +93,54 @@ final class RemotePlayerTests: XCTestCase {
         XCTAssertTrue(world.remotePlayerShips.isEmpty)
     }
 
+    // MARK: Network-mirror NPCs (co-op shared world)
+
+    func testNetworkMirrorShipCoastsWithoutBrainOrWarning() {
+        let world = makeWorld()
+        let mirror = Ship(name: "Pirate", stats: makeRemoteShip().stats, position: Vec2(100, 0))
+        let id = world.spawnNetworkMirror(mirror, arrival: .populate)
+        mirror.velocity = Vec2(0, 30)
+
+        XCTAssertTrue(mirror.networkMirror)
+        XCTAssertNil(mirror.brain)
+        XCTAssertNil(mirror.remotePlayer)               // not a player — no nameplate/blip
+        XCTAssertTrue(world.remotePlayerShips.isEmpty)  // mirror NPC isn't a "remote player"
+        XCTAssertNotEqual(id, World.playerEntityID)
+
+        world.step(1.0)
+        // Coasts on its velocity (no intent, no thrust), like dead reckoning.
+        XCTAssertEqual(mirror.position.y, 30, accuracy: 1e-9)
+        XCTAssertEqual(mirror.velocity.y, 30, accuracy: 1e-9)
+    }
+
+    func testSpawningPausedHoldsTheSpawner() {
+        // With no spawner attached this just proves the gate is wired; a real
+        // Spawner is exercised elsewhere. Here we assert the flag exists and the
+        // step doesn't crash / populate.
+        let world = makeWorld()
+        world.spawningPaused = true
+        world.step(1.0)
+        XCTAssertTrue(world.npcs.isEmpty)
+    }
+
+    func testRemoveAINPCsKeepsMirrorsDropsRealNPCs() {
+        let world = makeWorld()
+        // A real ambient NPC (has a stats-only ship, no mirror flags).
+        let realNPC = Ship(name: "Trader", stats: makeRemoteShip().stats, position: Vec2(300, 0))
+        world.addNPC(realNPC, arrival: .populate)
+        // A co-op player mirror and an NPC mirror.
+        world.spawnRemotePlayer(makeRemoteShip(), info: RemotePlayerInfo(peerID: "p", name: "P"))
+        world.spawnNetworkMirror(Ship(name: "Ghost", stats: makeRemoteShip().stats))
+
+        XCTAssertEqual(world.npcs.count, 3)
+        world.removeAINPCs()
+        // Only the two mirrors survive; the real NPC is gone.
+        XCTAssertEqual(world.npcs.count, 2)
+        XCTAssertFalse(world.npcs.contains { $0.name == "Trader" })
+        XCTAssertTrue(world.npcs.contains { $0.remotePlayer?.peerID == "p" })
+        XCTAssertTrue(world.npcs.contains { $0.networkMirror })
+    }
+
     // MARK: Single-player is unchanged
 
     func testNoRemoteShipsMeansEmptyRemoteState() {

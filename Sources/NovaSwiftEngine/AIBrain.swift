@@ -225,6 +225,15 @@ public final class AIBrain {
         me.weapons.map { $0.spec.range }.max() ?? 0
     }
 
+    /// This ship's shortest weapon reach — used to decide how close to actually
+    /// close, so a ship carrying a long-range missile *and* a short-range beam
+    /// doesn't sit at missile range and leave its beam permanently out of
+    /// reach. Falls back to `weaponRange` when every mount shares one range.
+    func minWeaponRange(_ me: Ship) -> Double {
+        let ranges = me.weapons.map { $0.spec.range }.filter { $0 > 0 }
+        return ranges.min() ?? weaponRange(me)
+    }
+
     /// True once every ammo-*using* weapon mount is dry (`ammo == 0`). Ships
     /// that carry only unlimited-ammo weapons (`ammo == -1`, e.g. most guns
     /// and beams) never trigger this — there's nothing to run dry on.
@@ -365,13 +374,18 @@ public final class AIBrain {
             } else if warshipRetreat { enter(.fleeing) }
             else if let th = threat, armed, state == .attacking || favorableOdds(me, world) {
                 targetID = th.entityID; enter(.attacking)
-            } else if aiType == .interceptor, armed, isSystemAuthority(me, world),
+            } else if armed, isSystemAuthority(me, world),
                       favorableOdds(me, world), let culprit = pickPirateInterventionTarget(me, world) {
                 // No direct threat of our own — but someone's picking on a
                 // non-enemy while we're watching. Only the local authority
                 // steps in (it's *their* space to police), and only when the
                 // odds favor it — so interventions stay occasional, not a
-                // system-wide brawl every time two ships tangle.
+                // system-wide brawl every time two ships tangle. The Bible
+                // scopes unprovoked "piracy police" watching to interceptors,
+                // but any government warship defends its own territory once
+                // it notices a hostile actively attacking someone there —
+                // pirates are everyone's enemy, and a system's patrols
+                // shouldn't stand by while they maul a visitor.
                 targetID = culprit.entityID; enter(.attacking)
             }
         case .unknown:
@@ -559,6 +573,11 @@ public final class AIBrain {
         let toTarget = target.position - me.position
         let dist = toTarget.length
         let range = max(120, weaponRange(me))
+        // Closing distance is driven by the *shortest*-range mount, not the
+        // longest: a ship should close enough to bring every weapon it carries
+        // (including a short-range beam) into play, rather than parking at its
+        // longest weapon's reach and leaving shorter mounts unusable.
+        let closeRange = max(120, minWeaponRange(me))
 
         // Lead the target so shots and nose end up where it will be.
         let projSpeed = me.weapons.first?.spec.projectileSpeed ?? 600
@@ -573,9 +592,9 @@ public final class AIBrain {
         let standoff: Double
         if let aggress = personAggression {
             let factor = aggress <= 1 ? 0.4 : (aggress == 2 ? 0.7 : 1.0)
-            standoff = range * factor
+            standoff = closeRange * factor
         } else {
-            standoff = aiType == .interceptor ? range * 0.5 : range * 0.7
+            standoff = aiType == .interceptor ? closeRange * 0.5 : closeRange * 0.7
         }
         if dist > standoff {
             // Thrust when roughly pointed the right way, so we actually close.

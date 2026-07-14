@@ -389,9 +389,25 @@ simply won't fire for that player, rather than corrupting state.
   so a friend never disappears). Nameplate, radar blip, and galaxy-map marker all share one
   palette (`GalaxyMapView.playerColor(for:)`) so a given friend is the same colour
   everywhere. Not runtime-verified (no-launch).
-- **Remaining:** `GameKitTransport` (internet; needs Game Center entitlement + App Store
-  Connect); NPC/projectile/mission sync (rides the same snapshot channel); authority
-  handoff polish on departure.
+- **Shared world / co-op combat (NPC sync) DONE (compiles; package logic tested):** when
+  co-located, both players now share **one cast of NPCs** — the authority's. A **client**
+  pauses its own spawner (`World.spawningPaused`) and clears its AI (`removeAINPCs()`), then
+  mirrors the authority's NPCs from the snapshot as `networkMirror` ships
+  (`spawnNetworkMirror`) — real hull/sprite via `Galaxy.makeShip(shipTypeID…)`, real
+  government so hostiles read hostile. The client's **own ship health is authoritative**
+  (adopted from the snapshot) so the authority's combat actually damages it, while its
+  position stays locally predicted. Snapshot now carries `ShipNetState.shipTypeID` +
+  `government`. Not runtime-verified.
+- **Projectile sync DONE (compiles; package logic tested):** a client now sees enemy/ally
+  **fire**. The snapshot carries live shots (`ProjectileNetState` in `WorldSnapshot.shots`);
+  the client re-seeds them each snapshot as `Projectile.visualOnly` echoes (fly straight +
+  expire, no collision/damage — `stepProjectiles` skips them) and dead-reckons between. It
+  **skips its own** shots (matched by `ownerID` = its ship's authority entity id) since it
+  already fired those locally. The scene draws them for free (`world.projectiles`).
+- **Remaining:** **beam sync** (continuous/pulse beams — `activeBeams` — not echoed yet, so
+  a client won't see enemy *beam* weapons); mission/NCB-in-combat sync; `GameKitTransport`
+  (internet; Game Center entitlement + App Store Connect); authority handoff polish on
+  departure; PvP damage honoring `SessionRules`.
 
 ## Testing on one machine
 

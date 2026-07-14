@@ -443,6 +443,16 @@ public final class Ship {
     // AI state.
     public var brain: AIBrain?
 
+    /// Co-op **client-side mirror of an NPC** the authority owns: a `brain == nil`
+    /// ship whose entire state (position/velocity/health) is set from the
+    /// authority's `WorldSnapshot` each update and coasts on its last velocity
+    /// between them. Unlike `remotePlayer` it's not a player, so it gets no
+    /// nameplate/player-blip and never warns about a missing brain — it's a passive
+    /// visual/collision proxy for the shared world. Only ever set on a client whose
+    /// own spawner is paused (`spawningPaused`); false for the authority's real
+    /// AI/ambient NPCs and everything in single-player.
+    public var networkMirror = false
+
     /// Non-nil marks this ship as **another player's ship** in a co-op session —
     /// not AI, not the local player. Such a ship carries `brain == nil` (it isn't
     /// AI-driven) and is stepped from an externally-supplied `ControlIntent` the
@@ -774,6 +784,14 @@ public final class World {
     /// for departed remote ships via `removeShip`, which clears them.
     public var remoteIntents: [Int: ControlIntent] = [:]
 
+    /// Co-op: when true, the system's own `spawner` is held (no new ambient/AI
+    /// ships are populated). Set on a **client** while it mirrors a co-located
+    /// authority's world — the client shows the authority's NPCs (injected as
+    /// `networkMirror` ships from snapshots) instead of populating its own, so the
+    /// two players share one cast. False everywhere else, so single-player and the
+    /// authority populate normally.
+    public var spawningPaused = false
+
     public var tuning: FlightTuning
     public var combatTuning: CombatTuning
     /// Set once the player's death has been reported via `.playerDestroyed`,
@@ -973,6 +991,61 @@ public final class World {
     /// Every remote-player ship currently in the system (co-op). Drives nameplates
     /// and minimap blips; empty in single-player.
     public var remotePlayerShips: [Ship] { npcs.filter { $0.remotePlayer != nil } }
+
+    /// Inject a **client-side mirror of the authority's NPC** (co-op). A `brain ==
+    /// nil`, `networkMirror` ship added through the same `addNPC` seam as any other
+    /// — it renders, collides, and can be targeted like a real ship, but its state
+    /// is driven entirely by the authority's snapshots (see `networkMirror`).
+    /// Returns the assigned entity id; keep it to update/remove the mirror as
+    /// snapshots arrive. Build `ship` from the reported hull so it sprites right.
+    @discardableResult
+    public func spawnNetworkMirror(_ ship: Ship, arrival: ArrivalMode = .populate) -> Int {
+        ship.brain = nil
+        ship.networkMirror = true
+        return addNPC(ship, arrival: arrival)
+    }
+
+    /// Remove the system's real AI/ambient NPCs — everything that isn't a co-op
+    /// mirror (`remotePlayer`/`networkMirror`). Called when a **client** starts
+    /// mirroring a co-located authority's world, so its own populated cast gives
+    /// way to the authority's (which then streams in as `networkMirror` ships).
+    /// Silent: no departure events/effects, since these ships aren't leaving the
+    /// fiction, they're being replaced by the shared world.
+    public func removeAINPCs() {
+        let survivors = npcs.filter { $0.remotePlayer != nil || $0.networkMirror }
+        guard survivors.count != npcs.count else { return }
+        for gone in npcs where gone.remotePlayer == nil && !gone.networkMirror {
+            clearTarget(gone.entityID)
+            stopAllBeamLoops(for: gone)
+            remoteIntents[gone.entityID] = nil
+        }
+        npcs = survivors
+        refreshRoster()
+    }
+
+    /// Co-op: spawn a **visual-only** echo of an authority's in-flight shot so a
+    /// client sees enemy/ally fire, without simulating its damage (that's
+    /// authoritative — see `Projectile.visualOnly`). Renders exactly like a real
+    /// shot (`world.projectiles` is what the scene draws). `ownerID` is carried so a
+    /// client can skip echoing its *own* shots (which it already fired locally).
+    public func spawnVisualProjectile(position: Vec2, velocity: Vec2, facing: Double, life: Double,
+                                      ownerID: Int, weaponID: Int, graphicSpinID: Int?,
+                                      spinShots: Bool, translucentShots: Bool) {
+        let p = Projectile(position: position, velocity: velocity, life: life,
+                           shieldDamage: 0, armorDamage: 0, blastRadius: 0,
+                           ownerID: ownerID, ownerGovt: independentGovt, homing: false,
+                           turnRate: 0, speed: velocity.length, targetID: nil,
+                           facing: facing, graphicSpinID: graphicSpinID, spinShots: spinShots,
+                           weaponID: weaponID, translucentShots: translucentShots)
+        p.visualOnly = true
+        projectiles.append(p)
+    }
+
+    /// Remove all visual-only echoes (co-op client) — called before re-seeding them
+    /// from a fresh snapshot. Leaves real, simulated shots untouched.
+    public func clearVisualProjectiles() {
+        projectiles.removeAll { $0.visualOnly }
+    }
 
     /// A government patrol/interceptor completed a scan pass on another ship.
     /// Called from `AIBrain.scan` when it closes to scan range; the renderer
@@ -1213,7 +1286,7 @@ public final class World {
         playerScanCooldown = max(0, playerScanCooldown - dt)
 
         prof("sim.spawn") {
-            spawner?.update(dt, world: self)
+            if !spawningPaused { spawner?.update(dt, world: self) }   // paused on a co-op client (mirrors the authority)
             updateStellarDefenses()   // relaunch tribute-defense waves as they're cleared
             refreshRoster()
         }
@@ -1256,6 +1329,11 @@ public final class World {
                     // frame. A missing entry = no input this frame (coast), never a
                     // warning — remote input is expected to have gaps.
                     npcIntent = remoteIntents[npc.entityID] ?? ControlIntent()
+                } else if npc.networkMirror {
+                    // Client-side mirror of the authority's NPC: its state is set
+                    // from snapshots; here it just coasts on its last velocity
+                    // between them. No intent, no missing-brain warning.
+                    npcIntent = ControlIntent()
                 } else {
                     npc.logNoBrainOnce()
                     npcIntent = ControlIntent()
@@ -1418,6 +1496,16 @@ public final class World {
             guard mount.ready else {
                 mount.logBlockedIfNeeded(for: ship)
                 continue
+            }
+            // An AI's firing intent is a single blended trigger built from its
+            // *longest*-range weapon (see `AIBrain.attack`), so a ship carrying
+            // e.g. a long-range missile alongside a short-range beam would hold
+            // at missile range and still fire the beam — which visibly falls
+            // short of the target every time. Gate each mount by its own real
+            // range so only weapons that can actually reach fire.
+            if isAI, let target, spec.range > 0 {
+                let engageDist = (target.position - ship.position).length
+                guard engageDist <= spec.range * 1.05 else { continue }
             }
             // Seeker 0x0020: this guided weapon refuses to fire while its own
             // ship is fully ionized.
@@ -1781,6 +1869,16 @@ public final class World {
         // loop so we don't mutate `projectiles` while iterating it.
         var spawned: [Projectile] = []
         for p in projectiles where p.alive {
+            // Co-op visual echo (client): fly straight on its velocity and expire,
+            // no collision/damage/submunitions — the real shot lives on the
+            // authority and its damage rides ship-health sync.
+            if p.visualOnly {
+                p.facing = p.velocity.angle
+                p.position += p.velocity * dt
+                p.life -= dt
+                if p.life <= 0 { p.alive = false }
+                continue
+            }
             p.proxSafetyRemaining = max(0, p.proxSafetyRemaining - dt)
 
             // Movement by guidance.

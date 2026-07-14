@@ -15,9 +15,6 @@ public struct CombatTuning {
     public var damageScale: Double = 1.0
     /// Shield/armor stat → HP scale.
     public var hpScale: Double = 1.0
-    /// EV Nova stores recharge as "points per 1/30 s"; convert to per-second and
-    /// soften a little so fights aren't unkillable.
-    public var rechargeToPerSec: Double = 1.2
     /// Extra multiplier on damage the *player's* ship takes (difficulty). 1 =
     /// normal, <1 more forgiving (Easy), >1 harsher (Hard). Applied per hit in
     /// `World.applyHit`, so it never touches NPC-vs-NPC combat.
@@ -433,6 +430,11 @@ public final class Projectile {
     public var facing: Double             // heading, for rendering the shot sprite
     public var targetID: Int?            // for guided/homing munitions
     public var alive = true
+    /// Co-op client-side echo of an authority's shot: it flies straight and
+    /// expires purely for show — no collision, no damage, no submunitions (damage
+    /// is authoritative via ship-health sync). Set by `World.spawnVisualProjectile`;
+    /// false for every real, simulated shot. See `stepProjectiles`.
+    public var visualOnly = false
     /// Whether point defense can shoot this shot down (`wëap.Flags` 0x0080
     /// inverted) — only meaningful for guided shots; see `World.runPointDefense`.
     public let vulnerableToPD: Bool

@@ -303,8 +303,22 @@ public final class Spawner {
     /// it's re-checked per draw in `fleetSpawnAllowed`.
     private func fleetPool(world: World) -> [(fleetID: Int, weight: Int)] {
         if let cached = linkFleetPool { return applyAppearOnGate(cached, world: world) }
+        // A government's own territory isn't fair game for every enemy fleet
+        // the galaxy-wide sweep turns up — a system's *own* `DudeTypes` table
+        // is what a designer uses to hand-tune "this border system sees
+        // frequent raids" (that data is respected untouched below and in the
+        // ambient trickle), so the generic sweep only adds fleets hostile to
+        // the local government when the system is unowned/contested. Owned
+        // systems still see hostile incursions the designer explicitly placed
+        // (the pinned loop below), or that a live fight escalates in
+        // (`updateReinforcements`) — just not an unrelated pirate fleet from
+        // anywhere in the galaxy showing up in, say, Sol at the same odds as
+        // in open space.
+        let systemIsOwned = table.systemGovt != independentGovt
         var weights: [Int: Int] = [:]
         for fleet in galaxy.fleetCatalog() where isFleetEligible(fleet, world: world) {
+            if systemIsOwned, fleet.govt >= 128,
+               world.diplomacy?.areEnemies(fleet.govt, table.systemGovt) ?? false { continue }
             weights[fleet.id] = 1
         }
         // The system's own explicitly-pinned fleets (negative-id `DudeTypes`
@@ -456,7 +470,21 @@ public final class Spawner {
         let living = world.allShips.filter { $0.isAlive && !$0.disabled }
         let friends = living.filter(isFriend)
         let foes = living.filter(isFoe)
-        guard !friends.isEmpty, !foes.isEmpty else { return false }
+        guard !foes.isEmpty else { return false }
+
+        // A non-hostile player being ganged up on in this government's own
+        // system always calls in backup, odds check (and even the presence of
+        // a friendly NPC patrol) skipped entirely — a government doesn't need
+        // a patrol already on the scene, or a fair fight, to bother defending
+        // a legitimate visitor from pirates in its own territory. NPC-vs-NPC
+        // skirmishes still use the strength ratio below, so routine patrol
+        // clashes don't summon a fleet every time.
+        if !dip.isHostileToPlayer(govt),
+           let player = living.first(where: { $0.isPlayer }),
+           foes.contains(where: { $0.currentTargetID == player.entityID }) {
+            return true
+        }
+        guard !friends.isEmpty else { return false }
 
         // "Under attack": at least one friendly ship is a foe's current
         // target — not just diplomatically hostile-capable presence.

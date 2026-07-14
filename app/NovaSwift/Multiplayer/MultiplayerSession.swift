@@ -183,7 +183,14 @@ final class MultiplayerSession: ObservableObject {
         // Role or authority changed (someone arrived/left, or handoff) — start clean.
         if authority != lastAuthorityID { needsResync = true; lastAuthorityID = authority }
         if needsResync {
-            for ship in world.remotePlayerShips { world.removeShip(entityID: ship.entityID) }
+            // Drop every co-op mirror (players + NPCs) and let this world populate
+            // itself again — a fresh role/system starts from our own galaxy.
+            let mirrorIDs = world.npcs
+                .filter { $0.remotePlayer != nil || $0.networkMirror }
+                .map { $0.entityID }
+            for id in mirrorIDs { world.removeShip(entityID: id) }
+            world.clearVisualProjectiles()
+            world.spawningPaused = false
             coordinator.reset()
             latestSnapshot = nil
             needsResync = false
@@ -192,21 +199,38 @@ final class MultiplayerSession: ObservableObject {
 
         if authority == localPlayerID {
             // AUTHORITY: mirror co-located clients and drive them from their input.
+            // We keep simulating our own world (spawner runs) — it's the canonical one.
             let clients = coLocatedIDs().map { (id: $0, name: presence[$0]?.name ?? $0) }
             coordinator.syncClients(clients, into: world) { [weak self] id, name in
-                self?.buildMirror(shipTypeHint: self?.presence[id]?.shipTypeHint, name: name,
+                self?.buildMirror(shipTypeID: self?.presence[id]?.shipTypeHint ?? -1,
+                                  government: world.player.government, name: name,
                                   world: world, at: world.player.position + Vec2(220, 0))
                     ?? SystemSyncCoordinator.defaultClientShip(id, name)
             }
             coordinator.applyInputs(to: world)
         } else if let (snapshot, from) = latestSnapshot, from == authority {
-            // CLIENT: reconcile the authority's latest snapshot into our world.
-            coordinator.apply(snapshot, to: world, authorityPeer: from) { [weak self] state in
-                self?.buildMirror(shipTypeHint: self?.presence[state.playerID ?? ""]?.shipTypeHint,
-                                  name: state.name, world: world,
-                                  at: Vec2(state.x, state.y), angle: state.angle)
-                    ?? SystemSyncCoordinator.defaultMirror(state)
+            // CLIENT: adopt the authority's world. Hand our own populated cast over
+            // to theirs (pause our spawner + clear our AI once), then mirror theirs.
+            if !world.spawningPaused {
+                world.spawningPaused = true
+                world.removeAINPCs()
             }
+            coordinator.apply(
+                snapshot, to: world, authorityPeer: from,
+                makeMirror: { [weak self] state in
+                    // A co-op partner — tint to our government so we read as allies.
+                    self?.buildMirror(shipTypeID: state.shipTypeID, government: world.player.government,
+                                      name: state.name, world: world,
+                                      at: Vec2(state.x, state.y), angle: state.angle)
+                        ?? SystemSyncCoordinator.defaultMirror(state)
+                },
+                makeNPCMirror: { [weak self] state in
+                    // An NPC — keep its real government so hostiles still read hostile.
+                    self?.buildMirror(shipTypeID: state.shipTypeID, government: state.government,
+                                      name: state.name, world: world,
+                                      at: Vec2(state.x, state.y), angle: state.angle)
+                        ?? SystemSyncCoordinator.defaultMirror(state)
+                })
             latestSnapshot = nil
         }
     }
@@ -224,14 +248,14 @@ final class MultiplayerSession: ObservableObject {
         }
     }
 
-    /// Build a co-op mirror hull. Prefers the friend's real hull from the loaded
-    /// galaxy (correct sprite/size/weapons), tinted to the local player's
-    /// government so co-op partners aren't auto-hostile; falls back to nil so the
-    /// coordinator's default hull is used when the catalog can't resolve the type.
-    private func buildMirror(shipTypeHint: Int?, name: String, world: World,
+    /// Build a co-op mirror hull from the loaded galaxy (correct sprite/size/
+    /// weapons) at `government` — the local player's govt for a partner (reads as
+    /// ally), the reported govt for an NPC (stays hostile if it was). Returns nil
+    /// when the type can't be resolved so the coordinator's default hull is used.
+    private func buildMirror(shipTypeID: Int, government: Int, name: String, world: World,
                              at position: Vec2, angle: Double = 0) -> Ship? {
-        guard let hint = shipTypeHint,
-              let ship = world.galaxy?.makeShip(hint, government: world.player.government,
+        guard shipTypeID >= 0,
+              let ship = world.galaxy?.makeShip(shipTypeID, government: government,
                                                 at: position, angle: angle)
         else { return nil }
         return ship

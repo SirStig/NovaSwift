@@ -157,6 +157,97 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(world.remotePlayerShips.map { $0.remotePlayer!.peerID }, ["B"])
     }
 
+    func testClientMirrorsNPCsAndAdoptsAuthoritativeOwnHealth() {
+        // A client applies a snapshot carrying its own ship, a friend, and an NPC.
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+        world.player.shield = 100; world.player.armor = 100
+
+        let snap = WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [
+            // Our own ship, as the authority sees it — health is authoritative.
+            ShipNetState(id: 0, playerID: "me", shipTypeID: 128, name: "Me",
+                         x: 999, y: 999, vx: 0, vy: 0, angle: 0, shield: 40, armor: 55, control: .remote),
+            // A friend.
+            ShipNetState(id: 5, playerID: "friend", shipTypeID: 129, name: "Bo",
+                         x: 10, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+            // An NPC the authority owns — both players should see it.
+            ShipNetState(id: 9, playerID: nil, shipTypeID: 130, name: "Pirate",
+                         x: 20, y: 5, vx: 1, vy: 2, angle: 0.5, shield: 80, armor: 90, control: .ai),
+        ])
+        coord.apply(snap, to: world, authorityPeer: "auth")
+
+        // Own health adopted from the authority; position NOT teleported (predicted).
+        XCTAssertEqual(world.player.shield, 40, accuracy: 1e-9)
+        XCTAssertEqual(world.player.armor, 55, accuracy: 1e-9)
+        XCTAssertNotEqual(world.player.position.x, 999)
+
+        // Friend mirrored as a remote player (nameplate/blip); NPC as a plain mirror.
+        XCTAssertEqual(world.remotePlayerShips.map { $0.remotePlayer!.peerID }, ["friend"])
+        let npcMirror = world.npcs.first { $0.networkMirror }
+        XCTAssertNotNil(npcMirror)
+        XCTAssertEqual(npcMirror?.name, "Pirate")
+        XCTAssertEqual(npcMirror?.position.x, 20)
+        XCTAssertEqual(npcMirror?.armor, 90)
+        XCTAssertNil(npcMirror?.remotePlayer)   // an NPC, not a player
+
+        // Next snapshot drops the NPC (destroyed/left) — its mirror is removed.
+        let snap2 = WorldSnapshot(tick: 2, ackInputSeq: 0, ships: [
+            ShipNetState(id: 5, playerID: "friend", shipTypeID: 129, name: "Bo",
+                         x: 12, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+        ])
+        coord.apply(snap2, to: world, authorityPeer: "auth")
+        XCTAssertFalse(world.npcs.contains { $0.networkMirror })
+        XCTAssertEqual(world.remotePlayerShips.count, 1)
+    }
+
+    func testClientEchoesAuthorityShotsSkippingItsOwn() {
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+
+        // Our own ship is entity 0 on the authority; an enemy NPC is entity 9.
+        let snap = WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [
+            ShipNetState(id: 0, playerID: "me", shipTypeID: 128, name: "Me",
+                         x: 0, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+        ], shots: [
+            // Our own shot — must NOT be echoed (we fired it locally already).
+            ProjectileNetState(ownerID: 0, x: 1, y: 1, vx: 10, vy: 0, facing: 0, life: 2,
+                               weaponID: 128, graphicSpinID: nil, spinShots: false, translucentShots: false),
+            // An enemy shot — echoed as a visual-only projectile.
+            ProjectileNetState(ownerID: 9, x: 5, y: 5, vx: -8, vy: 0, facing: .pi, life: 3,
+                               weaponID: 130, graphicSpinID: 500, spinShots: true, translucentShots: false),
+        ])
+        coord.apply(snap, to: world, authorityPeer: "auth")
+
+        let visual = world.projectiles.filter { $0.visualOnly }
+        XCTAssertEqual(visual.count, 1, "only the enemy shot echoes; our own is skipped")
+        XCTAssertEqual(visual.first?.ownerID, 9)
+        XCTAssertEqual(visual.first?.position.x, 5)
+        XCTAssertEqual(visual.first?.weaponID, 130)
+
+        // Next snapshot with no shots clears the echoes.
+        let snap2 = WorldSnapshot(tick: 2, ackInputSeq: 0, ships: snap.ships, shots: [])
+        coord.apply(snap2, to: world, authorityPeer: "auth")
+        XCTAssertTrue(world.projectiles.filter { $0.visualOnly }.isEmpty)
+    }
+
+    func testVisualProjectileFliesAndExpiresWithoutDamage() {
+        // A visual-only shot moves on its velocity and expires, harming nothing.
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+        let target = Ship(name: "T", stats: combatStats(), position: Vec2(10, 0))
+        world.addNPC(target, arrival: .populate)
+        let armorBefore = target.armor
+
+        world.spawnVisualProjectile(position: Vec2(0, 0), velocity: Vec2(100, 0), facing: 0,
+                                    life: 0.05, ownerID: 999, weaponID: 128,
+                                    graphicSpinID: nil, spinShots: false, translucentShots: false)
+        XCTAssertEqual(world.projectiles.count, 1)
+
+        world.step(0.02)                       // flies through the target's position…
+        XCTAssertEqual(target.armor, armorBefore, "a visual shot deals no damage")
+        world.step(0.1)                        // …then its life runs out
+        XCTAssertTrue(world.projectiles.isEmpty, "expired visual shot is removed")
+    }
+
     func testStaleInputIsDropped() {
         // Authority keeps only the freshest input per client by seq.
         let coord = SystemSyncCoordinator(localPlayerID: "A")

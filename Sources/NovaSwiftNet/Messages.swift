@@ -71,6 +71,15 @@ public struct ShipNetState: Codable, Equatable, Sendable {
     /// its `localPlayerID`) regardless of the authority's local entity ids — so the
     /// `control` tag can be recipient-agnostic. See `WorldSnapshot` docs.
     public var playerID: String?
+    /// The ship's hull type (`shïp` id), so a receiver builds a correctly-sprited
+    /// mirror straight from the snapshot — needed for NPC mirrors (which have no
+    /// presence entry to carry a hull hint) and handy for player ships too. -1 when
+    /// unknown.
+    public var shipTypeID: Int
+    /// The ship's government/faction id, so a mirrored NPC keeps its real
+    /// allegiance on the receiver (hostiles read hostile on the IFF radar, not as a
+    /// co-op ally). `independentGovt`-equivalent default when unknown.
+    public var government: Int
     public var name: String
     public var x: Double
     public var y: Double
@@ -81,13 +90,41 @@ public struct ShipNetState: Codable, Equatable, Sendable {
     public var armor: Double
     public var control: NetControlSource
 
-    public init(id: Int, playerID: String? = nil, name: String, x: Double, y: Double,
-                vx: Double, vy: Double, angle: Double, shield: Double, armor: Double,
-                control: NetControlSource) {
-        self.id = id; self.playerID = playerID; self.name = name
+    public init(id: Int, playerID: String? = nil, shipTypeID: Int = -1, government: Int = 0,
+                name: String, x: Double, y: Double, vx: Double, vy: Double, angle: Double,
+                shield: Double, armor: Double, control: NetControlSource) {
+        self.id = id; self.playerID = playerID; self.shipTypeID = shipTypeID
+        self.government = government; self.name = name
         self.x = x; self.y = y; self.vx = vx; self.vy = vy
         self.angle = angle; self.shield = shield; self.armor = armor
         self.control = control
+    }
+}
+
+/// One in-flight shot in a `WorldSnapshot` — just enough to draw it on a client
+/// as a visual-only echo (no damage; that rides ship-health sync). The client
+/// re-seeds these each snapshot and dead-reckons them on `velocity` between.
+public struct ProjectileNetState: Codable, Equatable, Sendable {
+    public var ownerID: Int          // authority entity that fired it (client skips its own)
+    public var x: Double
+    public var y: Double
+    public var vx: Double
+    public var vy: Double
+    public var facing: Double
+    public var life: Double
+    public var weaponID: Int
+    public var graphicSpinID: Int?
+    public var spinShots: Bool
+    public var translucentShots: Bool
+
+    public init(ownerID: Int, x: Double, y: Double, vx: Double, vy: Double, facing: Double,
+                life: Double, weaponID: Int, graphicSpinID: Int?, spinShots: Bool,
+                translucentShots: Bool) {
+        self.ownerID = ownerID
+        self.x = x; self.y = y; self.vx = vx; self.vy = vy
+        self.facing = facing; self.life = life; self.weaponID = weaponID
+        self.graphicSpinID = graphicSpinID; self.spinShots = spinShots
+        self.translucentShots = translucentShots
     }
 }
 
@@ -97,11 +134,16 @@ public struct WorldSnapshot: Codable, Equatable, Sendable {
     public var tick: UInt32
     public var ackInputSeq: UInt32
     public var ships: [ShipNetState]
+    /// Live shots to echo on clients (visual only). Defaulted empty so older call
+    /// sites / ship-only snapshots stay valid.
+    public var shots: [ProjectileNetState]
 
-    public init(tick: UInt32, ackInputSeq: UInt32, ships: [ShipNetState]) {
+    public init(tick: UInt32, ackInputSeq: UInt32, ships: [ShipNetState],
+                shots: [ProjectileNetState] = []) {
         self.tick = tick
         self.ackInputSeq = ackInputSeq
         self.ships = ships
+        self.shots = shots
     }
 }
 

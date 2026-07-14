@@ -24,9 +24,12 @@ public final class SystemSyncCoordinator {
     public let localPlayerID: String
 
     /// Client side: authority entity id → our local mirror ship's entity id, for
-    /// every remote player we've injected into the local `World`. Reset when the
+    /// every remote **player** we've injected into the local `World`. Reset when the
     /// local player changes system (a fresh `World` invalidates all mirrors).
     private var mirrorIDByAuthorityID: [Int: Int] = [:]
+    /// Client side: authority entity id → our local mirror id, for every **NPC**
+    /// mirrored from the authority's snapshot (shared world / co-op combat).
+    private var npcMirrorIDByAuthorityID: [Int: Int] = [:]
 
     /// Authority side: the freshest input each client has sent, plus the highest
     /// `seq` seen from it so stale/out-of-order unreliable frames are dropped.
@@ -44,6 +47,7 @@ public final class SystemSyncCoordinator {
     /// the old `World`'s entity ids and the old authority's ids no longer apply.
     public func reset() {
         mirrorIDByAuthorityID.removeAll()
+        npcMirrorIDByAuthorityID.removeAll()
         latestInput.removeAll()
         highestSeq.removeAll()
         clientShipID.removeAll()
@@ -124,46 +128,87 @@ public final class SystemSyncCoordinator {
         InputFrame(tick: tick, seq: seq, intent: NetIntent(intent))
     }
 
-    /// Reconcile a received snapshot into the local `World`: inject a mirror ship
-    /// for every remote player we haven't seen, update the ones we have, and remove
-    /// mirrors for players who left the authority's system. Our **own** ship
-    /// (`playerID == localPlayerID`) is skipped — we predict it locally. NPCs are
-    /// not mirrored in this slice.
+    /// Reconcile a received snapshot into the local `World` — the shared co-op
+    /// world. For each ship the authority reports:
+    /// - **our own ship** (`playerID == localPlayerID`): we keep predicting its
+    ///   position locally but adopt the authority's **health** (shield/armor), so
+    ///   damage the authority's sim deals to us actually lands;
+    /// - **another player**: inject/update a `remotePlayer` mirror (nameplate/blip);
+    /// - **an NPC** (`playerID == nil`): inject/update a `networkMirror` mirror, so
+    ///   both players see and fight the same ambient/AI ships.
+    /// Mirrors for ships that dropped out of the snapshot are removed.
     ///
-    /// `makeMirror` builds the local `Ship` for a newly-appeared remote player from
-    /// its wire state — the app supplies it so it can size the hull/sprite from the
-    /// player's `shipTypeHint`; a default is provided for headless use/tests.
+    /// `makeMirror` builds a player-mirror hull, `makeNPCMirror` an NPC-mirror hull,
+    /// both from the wire state (the app sprites them from `state.shipTypeID`);
+    /// defaults are provided for headless use/tests. The client's own spawner must
+    /// be paused (`World.spawningPaused`) so it doesn't fight these injected NPCs.
     @discardableResult
     public func apply(_ snapshot: WorldSnapshot, to world: World, authorityPeer: String,
-                      makeMirror: (ShipNetState) -> Ship = SystemSyncCoordinator.defaultMirror)
+                      makeMirror: (ShipNetState) -> Ship = SystemSyncCoordinator.defaultMirror,
+                      makeNPCMirror: (ShipNetState) -> Ship = SystemSyncCoordinator.defaultMirror)
         -> (injected: [Int], removed: [Int])
     {
-        var seenAuthorityIDs = Set<Int>()
+        var seenPlayerIDs = Set<Int>()
+        var seenNPCIDs = Set<Int>()
         var injected: [Int] = []
+        var ownAuthorityID: Int?   // our ship's entity id in the authority's world
 
         for state in snapshot.ships {
-            guard let owner = state.playerID else { continue }   // NPC — deferred
-            guard owner != localPlayerID else { continue }       // my own ship — predicted locally
-            seenAuthorityIDs.insert(state.id)
-
-            if let localID = mirrorIDByAuthorityID[state.id], let ship = world.ship(id: localID) {
-                updateMirror(ship, from: state)
+            if state.playerID == localPlayerID {
+                // Our own ship: predicted locally, but health is authoritative.
+                ownAuthorityID = state.id
+                world.player.shield = state.shield
+                world.player.armor = state.armor
+                continue
+            }
+            if let owner = state.playerID {
+                // Another player.
+                seenPlayerIDs.insert(state.id)
+                if let localID = mirrorIDByAuthorityID[state.id], let ship = world.ship(id: localID) {
+                    updateMirror(ship, from: state)
+                } else {
+                    let localID = world.spawnRemotePlayer(
+                        makeMirror(state), info: RemotePlayerInfo(peerID: owner, name: state.name),
+                        arrival: .populate)
+                    mirrorIDByAuthorityID[state.id] = localID
+                    injected.append(localID)
+                }
             } else {
-                let ship = makeMirror(state)
-                let localID = world.spawnRemotePlayer(
-                    ship, info: RemotePlayerInfo(peerID: owner, name: state.name),
-                    arrival: .populate)
-                mirrorIDByAuthorityID[state.id] = localID
-                injected.append(localID)
+                // An NPC in the authority's world.
+                seenNPCIDs.insert(state.id)
+                if let localID = npcMirrorIDByAuthorityID[state.id], let ship = world.ship(id: localID) {
+                    updateMirror(ship, from: state)
+                } else {
+                    let localID = world.spawnNetworkMirror(makeNPCMirror(state), arrival: .populate)
+                    npcMirrorIDByAuthorityID[state.id] = localID
+                    injected.append(localID)
+                }
             }
         }
 
-        // Players who dropped out of the authority's system: remove their mirrors.
+        // Anyone/anything that dropped out of the snapshot: remove its mirror.
         var removed: [Int] = []
-        for (authorityID, localID) in mirrorIDByAuthorityID where !seenAuthorityIDs.contains(authorityID) {
+        for (authorityID, localID) in mirrorIDByAuthorityID where !seenPlayerIDs.contains(authorityID) {
             world.removeShip(entityID: localID)
             mirrorIDByAuthorityID[authorityID] = nil
             removed.append(localID)
+        }
+        for (authorityID, localID) in npcMirrorIDByAuthorityID where !seenNPCIDs.contains(authorityID) {
+            world.removeShip(entityID: localID)
+            npcMirrorIDByAuthorityID[authorityID] = nil
+            removed.append(localID)
+        }
+
+        // Re-seed the authority's in-flight shots as visual echoes (skip our own —
+        // we already fired those locally). Replaced wholesale each snapshot; they
+        // dead-reckon on their velocity in between.
+        world.clearVisualProjectiles()
+        for shot in snapshot.shots where shot.ownerID != ownAuthorityID {
+            world.spawnVisualProjectile(
+                position: Vec2(shot.x, shot.y), velocity: Vec2(shot.vx, shot.vy),
+                facing: shot.facing, life: shot.life, ownerID: shot.ownerID,
+                weaponID: shot.weaponID, graphicSpinID: shot.graphicSpinID,
+                spinShots: shot.spinShots, translucentShots: shot.translucentShots)
         }
         return (injected, removed)
     }

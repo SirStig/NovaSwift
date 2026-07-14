@@ -235,7 +235,7 @@ public final class Galaxy {
             id: s.id, name: s.displayName, stats: stats,
             maxShield: Double(s.shield) * combatTuning.hpScale,
             maxArmor: Double(max(1, s.armor)) * combatTuning.hpScale,
-            shieldRechargePerSec: max(2, Double(s.shieldRecharge) * 0.05),
+            shieldRechargePerSec: max(0, Double(s.shieldRecharge) * 0.03),
             armorRechargePerSec: Double(s.armorRecharge) * 0.03,
             radius: radius, government: s.inherentGovt, strength: s.strength,
             disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, skillVar: s.skillVar,
