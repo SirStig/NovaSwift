@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var previewSoundID: Int = 128
     @State private var showResetConfirm = false
     @State private var showImportData = false
+    @State private var showControls = false
     /// Debug: preview the full first-run setup wizard from the top, regardless of
     /// whether data is already imported.
     @State private var showWizardDebug = false
@@ -63,6 +64,18 @@ struct SettingsView: View {
                     .transition(.opacity)
                     .preferredColorScheme(.dark)
             }
+        }
+        // `ControlsView` relies on `.navigationTitle`/`.toolbar` for its title and
+        // Done button, which need an actual navigation host to render at all —
+        // `DialogChrome` is a plain card, not a `NavigationStack`, so this can't
+        // be a `NavigationLink` pushed from the Form above (that's what left the
+        // row permanently inert). A sheet supplies its own dismissible container;
+        // wrapping it in a `NavigationStack` here is what makes the title/Done
+        // button actually appear.
+        .sheet(isPresented: $showControls) {
+            NavigationStack { ControlsView() }
+                .frame(minWidth: 480, minHeight: 560)
+                .preferredColorScheme(.dark)
         }
         // Debug: the full first-run wizard from the welcome step (no `startAtImport`),
         // so the whole guide can be reviewed even after data is imported.
@@ -162,8 +175,8 @@ struct SettingsView: View {
 
     private var controlsSection: some View {
         Section {
-            NavigationLink {
-                ControlsView()
+            Button {
+                showControls = true
             } label: {
                 Label("Keyboard & Controller Bindings", systemImage: "keyboard")
             }

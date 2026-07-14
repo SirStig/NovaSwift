@@ -323,8 +323,10 @@ final class PilotStore: ObservableObject {
         return true
     }
 
-    @discardableResult
-    func buyOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
+    /// One unit of `buyOutfit`'s effect, without persisting — `buyOutfit` and
+    /// its bulk sibling below both build on this so a "buy 1000" from the
+    /// quantity prompt hits disk once, not a thousand times.
+    private func buyOutfitUnit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double) -> Bool {
         guard canBuyOutfit(o, galaxy: galaxy, priceMultiplier: priceMultiplier) else { return false }
         state.credits -= effectiveCost(o, galaxy: galaxy, priceMultiplier: priceMultiplier)
         state.grantOutfit(o.id)
@@ -345,14 +347,33 @@ final class PilotStore: ObservableObject {
         if o.flags & 0x0010 != 0 {
             state.removeOutfit(o.id)
         }
+        return true
+    }
+
+    @discardableResult
+    func buyOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
+        guard buyOutfitUnit(o, galaxy: galaxy, priceMultiplier: priceMultiplier) else { return false }
         save()
         return true
     }
 
-    /// EV Nova refunds outfits at full purchase price (the same effective,
-    /// mass-proportional price they were bought at on this hull).
+    /// Buy up to `count` of `o` in one transaction — the real game's Alt-click
+    /// "how many?" quantity dialog — stopping as soon as a further unit would
+    /// fail (insufficient credits, free mass, or an installed-count/mount cap;
+    /// the same constraints a single purchase enforces, just repeated). Returns
+    /// how many were actually bought.
     @discardableResult
-    func sellOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
+    func buyOutfit(_ o: OutfRes, count: Int, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
+        var bought = 0
+        while bought < count, buyOutfitUnit(o, galaxy: galaxy, priceMultiplier: priceMultiplier) {
+            bought += 1
+        }
+        if bought > 0 { save() }
+        return bought
+    }
+
+    /// One unit of `sellOutfit`'s effect, without persisting — see `buyOutfitUnit`.
+    private func sellOutfitUnit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double) -> Bool {
         guard owned(outfit: o.id) > 0 else { return false }
         // Bible `Flags 0x0008`: "This item can't be sold" (OUTFITTERS.md §6).
         guard o.flags & 0x0008 == 0 else { return false }
@@ -360,8 +381,27 @@ final class PilotStore: ObservableObject {
         state.removeOutfit(o.id)
         // Bible `OnSell`: the sibling NCB set expression, run when the item is sold.
         runOutfitScript(o.onSell, game: galaxy.game)
+        return true
+    }
+
+    /// EV Nova refunds outfits at full purchase price (the same effective,
+    /// mass-proportional price they were bought at on this hull).
+    @discardableResult
+    func sellOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
+        guard sellOutfitUnit(o, galaxy: galaxy, priceMultiplier: priceMultiplier) else { return false }
         save()
         return true
+    }
+
+    /// The sell-side counterpart of the bulk `buyOutfit(_:count:...)` above.
+    @discardableResult
+    func sellOutfit(_ o: OutfRes, count: Int, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
+        var sold = 0
+        while sold < count, sellOutfitUnit(o, galaxy: galaxy, priceMultiplier: priceMultiplier) {
+            sold += 1
+        }
+        if sold > 0 { save() }
+        return sold
     }
 
     /// Run an outfit's `OnPurchase`/`OnSell` NCB set expression against the live

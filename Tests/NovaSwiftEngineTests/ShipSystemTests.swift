@@ -120,6 +120,200 @@ final class ShipSystemTests: XCTestCase {
         XCTAssertEqual(ship.weapons.count, 2, "two resolved weapon mounts")
     }
 
+    /// Regression: a weapon that tracks ammo (`wëap.MaxAmmo` > 0) but is only
+    /// ever granted via an outfit — never baked into the hull's own `s.weapons`
+    /// — with no ammo-granting outfit installed, computes `Loadout.weapons`'
+    /// ammo as 0 (nothing bought yet). `makeLoadedShip` used to coerce that 0
+    /// to -1 ("unlimited"), which let the weapon fire forever with no ammo at
+    /// all and never decremented. It must come up empty and unable to fire
+    /// instead.
+    func testAmmoWeaponWithNothingBoughtStartsEmptyNotUnlimited() throws {
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 6, 300); put16(&ship, 10, 400); put16(&ship, 12, 40)
+        put16(&ship, 78, 300); put16(&ship, 86, 1)   // preinstalled launcher outfit 300 ×1
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+
+        var out = [UInt8](repeating: 0, count: 40)
+        put16(&out, 26, 1); put16(&out, 28, 400)     // grants weapon 400
+        col.add(Resource(type: NovaType.outfit, id: 300, name: "Missile Launcher", data: Data(out)))
+
+        var wep = [UInt8](repeating: 0, count: 130)
+        put16(&wep, 0, 30); put16(&wep, 4, 10); put16(&wep, 6, 10); put16(&wep, 8, -1); put16(&wep, 10, 100)
+        put16(&wep, 108, 8)   // MaxAmmo 8 — this weapon tracks ammo
+        col.add(Resource(type: NovaType.weapon, id: 400, name: "Missile", data: Data(wep)))
+
+        let ship2 = try XCTUnwrap(Galaxy(game: NovaGame(col)).makeLoadedShip(128))
+        let mount = try XCTUnwrap(ship2.weapons.first { $0.spec.id == 400 })
+        XCTAssertEqual(mount.ammo, 0, "no ammo outfit bought — should be empty, not unlimited")
+        XCTAssertFalse(mount.ready, "an ammo weapon with zero ammo can't fire")
+    }
+
+    /// The positive counterpart: with an ammo-granting outfit (`ModType 3`,
+    /// value = the weapon id) installed too, the mount starts with that many
+    /// rounds — confirming the fix above didn't break the normal path.
+    func testAmmoWeaponWithAmmoBoughtStartsLoaded() throws {
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 6, 300); put16(&ship, 10, 400); put16(&ship, 12, 40)
+        put16(&ship, 78, 300); put16(&ship, 86, 1)   // launcher outfit 300 ×1
+        put16(&ship, 80, 301); put16(&ship, 88, 5)   // ammo outfit 301 ×5
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+
+        var launcher = [UInt8](repeating: 0, count: 40)
+        put16(&launcher, 26, 1); put16(&launcher, 28, 400)   // grants weapon 400
+        col.add(Resource(type: NovaType.outfit, id: 300, name: "Missile Launcher", data: Data(launcher)))
+
+        var ammo = [UInt8](repeating: 0, count: 40)
+        put16(&ammo, 26, 3); put16(&ammo, 28, 400)   // ammunition for weapon 400
+        col.add(Resource(type: NovaType.outfit, id: 301, name: "Missile", data: Data(ammo)))
+
+        var wep = [UInt8](repeating: 0, count: 130)
+        put16(&wep, 0, 30); put16(&wep, 4, 10); put16(&wep, 6, 10); put16(&wep, 8, -1); put16(&wep, 10, 100)
+        put16(&wep, 12, 272)  // AmmoType 272 → 128+272 = 400 (its own id — self-pooled)
+        put16(&wep, 108, 8)   // MaxAmmo 8
+        col.add(Resource(type: NovaType.weapon, id: 400, name: "Missile", data: Data(wep)))
+
+        let ship2 = try XCTUnwrap(Galaxy(game: NovaGame(col)).makeLoadedShip(128))
+        let mount = try XCTUnwrap(ship2.weapons.first { $0.spec.id == 400 })
+        XCTAssertEqual(mount.ammo, 5, "5 ammo outfits owned, 1 each")
+        XCTAssertTrue(mount.ready)
+    }
+
+    /// Regression: buying only an ammunition outfit (`ModType 3`) for a weapon
+    /// id the ship has no launcher for at all — no hull-baked `s.weapons` entry,
+    /// no owned `.weapon`-granting outfit — must not fabricate a firing weapon
+    /// mount for that id. Nothing in `canBuyOutfit`/`ItemLocking` stops a player
+    /// from buying ammo without the launcher (verified against real game data:
+    /// launcher/ammo pairs share identical `Require` bits with no ownership
+    /// dependency between them), so this is an ordinary reachable purchase, not
+    /// a contrived edge case — ammo alone must stay inert cargo, not a weapon.
+    func testAmmoWithNoLauncherDoesNotMaterializeAPhantomWeapon() throws {
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 6, 300); put16(&ship, 10, 400); put16(&ship, 12, 40)
+        put16(&ship, 78, 301); put16(&ship, 86, 5)   // ammo outfit 301 ×5 — no launcher owned
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+
+        var ammo = [UInt8](repeating: 0, count: 40)
+        put16(&ammo, 26, 3); put16(&ammo, 28, 400)   // ammunition for weapon 400
+        col.add(Resource(type: NovaType.outfit, id: 301, name: "Missile", data: Data(ammo)))
+
+        var wep = [UInt8](repeating: 0, count: 130)
+        put16(&wep, 0, 30); put16(&wep, 4, 10); put16(&wep, 6, 10); put16(&wep, 8, -1); put16(&wep, 10, 100)
+        put16(&wep, 108, 8)   // MaxAmmo 8
+        col.add(Resource(type: NovaType.weapon, id: 400, name: "Missile", data: Data(wep)))
+
+        let ship2 = try XCTUnwrap(Galaxy(game: NovaGame(col)).makeLoadedShip(128))
+        XCTAssertNil(ship2.weapons.first { $0.spec.id == 400 },
+                     "ammo with no launcher must not create a weapon mount")
+        XCTAssertTrue(ship2.weapons.isEmpty)
+    }
+
+    /// Regression: `MaxAmmo == 0` is a documented, common real-data setting
+    /// ("Set to 0 or -1 if you want the ammo quantity to be constrained by
+    /// the oütf resource's Max field instead" — Nova Bible) — it must NOT be
+    /// read as "this weapon carries no ammo." The Bible's actual signal for
+    /// that is `AmmoType` (-1 = "ignored, unlimited ammo"; 0-255 = draws from
+    /// that ammo pool). A weapon with `AmmoType >= 0` must track finite ammo
+    /// even with `MaxAmmo == 0` — exactly the shape of the real "IR Missile"
+    /// (wëap #134: MaxAmmo 0, AmmoType 6), which this regressed from.
+    func testAmmoTypeNotMaxAmmoDeterminesAmmoTracking() throws {
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 6, 300); put16(&ship, 10, 400); put16(&ship, 12, 40)
+        put16(&ship, 78, 300); put16(&ship, 86, 1)   // launcher outfit 300 ×1
+        put16(&ship, 80, 301); put16(&ship, 88, 3)   // ammo outfit 301 ×3
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+
+        var launcher = [UInt8](repeating: 0, count: 40)
+        put16(&launcher, 26, 1); put16(&launcher, 28, 400)   // grants weapon 400
+        col.add(Resource(type: NovaType.outfit, id: 300, name: "Missile Launcher", data: Data(launcher)))
+
+        var ammo = [UInt8](repeating: 0, count: 40)
+        put16(&ammo, 26, 3); put16(&ammo, 28, 400)   // ammunition for weapon 400
+        col.add(Resource(type: NovaType.outfit, id: 301, name: "Missile", data: Data(ammo)))
+
+        var wep = [UInt8](repeating: 0, count: 130)
+        put16(&wep, 0, 30); put16(&wep, 4, 10); put16(&wep, 6, 10); put16(&wep, 8, -1); put16(&wep, 10, 100)
+        put16(&wep, 12, 272)   // AmmoType 272 → 128+272 = 400 (its own id — self-pooled)
+        put16(&wep, 108, 0)    // MaxAmmo 0 — deliberately "unset" per the Bible's documented meaning
+        col.add(Resource(type: NovaType.weapon, id: 400, name: "Missile", data: Data(wep)))
+
+        let ship2 = try XCTUnwrap(Galaxy(game: NovaGame(col)).makeLoadedShip(128))
+        let mount = try XCTUnwrap(ship2.weapons.first { $0.spec.id == 400 })
+        XCTAssertEqual(mount.ammo, 3, "MaxAmmo == 0 must not force unlimited ammo when AmmoType tracks a pool")
+        XCTAssertTrue(mount.ready)
+    }
+
+    /// The counterpart: `AmmoType == -1` (the Bible's explicit "unlimited")
+    /// always yields unlimited ammo, regardless of `MaxAmmo`.
+    func testAmmoTypeMinusOneIsAlwaysUnlimited() throws {
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 6, 300); put16(&ship, 10, 400); put16(&ship, 12, 40)
+        put16(&ship, 18, 128); put16(&ship, 26, 1)   // stock weapon 128 ×1
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+
+        var wep = [UInt8](repeating: 0, count: 130)
+        put16(&wep, 0, 30); put16(&wep, 4, 10); put16(&wep, 6, 10); put16(&wep, 8, -1); put16(&wep, 10, 100)
+        put16(&wep, 12, -1)     // AmmoType -1 — unlimited
+        put16(&wep, 108, 50)    // MaxAmmo set anyway — must still be ignored
+        col.add(Resource(type: NovaType.weapon, id: 128, name: "Blaster", data: Data(wep)))
+
+        let ship2 = try XCTUnwrap(Galaxy(game: NovaGame(col)).makeLoadedShip(128))
+        let mount = try XCTUnwrap(ship2.weapons.first { $0.spec.id == 128 })
+        XCTAssertEqual(mount.ammo, -1, "AmmoType -1 is unlimited regardless of MaxAmmo")
+        XCTAssertTrue(mount.ready)
+    }
+
+    /// Regression: two *different* wëap mounts (e.g. a fixed-mount "Raven
+    /// Rocket" and a turreted "Raven Turret") can share one ammo pool by
+    /// declaring the same `AmmoType`, per the Bible: AmmoType "draws ammo
+    /// from this type of weapon" — a 0-based index needing +128 to become
+    /// the real wëap id it names. Real data: wëap #138 "Raven Rocket" and
+    /// #139 "Raven Turret" both have `AmmoType 10` (→ 128+10 = 138), while
+    /// the "Raven Rocket" ammo outfit's `.ammunition` modifier names #138
+    /// directly. A player who owns only the *turret* variant (#139) and the
+    /// ammo must still see that ammo attached — matching only `byID[wid]`
+    /// (as if a weapon's pool were always its own id) missed this and left
+    /// the turret showing 0 ammo forever.
+    func testSharedAmmoPoolAcrossMountVariants() throws {
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 6, 300); put16(&ship, 10, 400); put16(&ship, 12, 40)
+        put16(&ship, 78, 300); put16(&ship, 86, 2)   // turret outfit 300 ×2 — no pod owned
+        put16(&ship, 80, 301); put16(&ship, 88, 15)  // ammo outfit 301 ×15
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+
+        var turretOutfit = [UInt8](repeating: 0, count: 40)
+        put16(&turretOutfit, 26, 1); put16(&turretOutfit, 28, 401)   // grants weapon 401 (turret variant)
+        col.add(Resource(type: NovaType.outfit, id: 300, name: "Raven Rocket Turret", data: Data(turretOutfit)))
+
+        var ammoOutfit = [UInt8](repeating: 0, count: 40)
+        put16(&ammoOutfit, 26, 3); put16(&ammoOutfit, 28, 400)   // .ammunition names weapon 400 (the pod variant, unowned)
+        col.add(Resource(type: NovaType.outfit, id: 301, name: "Raven Rocket", data: Data(ammoOutfit)))
+
+        // Pod variant (400) — never owned/mounted, just the ammo's nominal target.
+        var pod = [UInt8](repeating: 0, count: 130)
+        put16(&pod, 0, 15); put16(&pod, 4, 12); put16(&pod, 6, 8); put16(&pod, 8, -1); put16(&pod, 10, 1500)
+        put16(&pod, 12, 272)   // AmmoType 272 → 128+272 = 400 (its own id)
+        col.add(Resource(type: NovaType.weapon, id: 400, name: "Raven Rocket", data: Data(pod)))
+
+        // Turret variant (401) — owned/mounted, shares the pod's ammo pool.
+        var turretWeapon = [UInt8](repeating: 0, count: 130)
+        put16(&turretWeapon, 0, 20); put16(&turretWeapon, 4, 12); put16(&turretWeapon, 6, 6); put16(&turretWeapon, 8, -1); put16(&turretWeapon, 10, 1300)
+        put16(&turretWeapon, 12, 272)   // AmmoType 272 → 128+272 = 400 (the pod's id, NOT its own 401)
+        col.add(Resource(type: NovaType.weapon, id: 401, name: "Raven Turret", data: Data(turretWeapon)))
+
+        let ship2 = try XCTUnwrap(Galaxy(game: NovaGame(col)).makeLoadedShip(128))
+        let mount = try XCTUnwrap(ship2.weapons.first { $0.spec.id == 401 })
+        XCTAssertEqual(mount.count, 2)
+        XCTAssertEqual(mount.ammo, 15, "the turret must draw from the pod's ammo pool despite the id mismatch")
+        XCTAssertTrue(mount.ready)
+        XCTAssertNil(ship2.weapons.first { $0.spec.id == 400 }, "the pod variant itself was never owned")
+    }
+
     func testSkillVarJittersAccelAndTurnByRoll() throws {
         // shïp.SkillVar (Bible): "up to X% slower or faster than stock" —
         // applied to acceleration and turn rate together via one per-instance

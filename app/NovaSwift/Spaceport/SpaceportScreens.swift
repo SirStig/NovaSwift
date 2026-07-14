@@ -112,11 +112,17 @@ struct TradeCenterView: View {
                 NovaMenu(frame: frame, overlay: true) { space in
                     list.frame(width: 352, alignment: .top).novaPlace(space, -175, -117)
                     statusLine.novaPlace(space, -172, 64)
+                    // Option-click (real EV Nova's Alt-click) / long-press is an
+                    // alternate route to the same quantity prompt the "×N per
+                    // tap" label above already opens — the game's own documented
+                    // shortcut, alongside the tap-to-edit affordance this port added.
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                               width: 73, enabled: canBuy) { buy() }
+                               width: 73, enabled: canBuy,
+                               onQuantity: canBuy ? { showQtyPrompt = true } : nil) { buy() }
                         .novaPlace(space, -153, 95)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
-                               width: 73, enabled: canSell) { sell() }
+                               width: 73, enabled: canSell,
+                               onQuantity: canSell ? { showQtyPrompt = true } : nil) { sell() }
                         .novaPlace(space, -47, 95)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                                width: 73, action: onDone)
@@ -282,6 +288,10 @@ struct OutfitterView: View {
     @State private var selectedID: Int?
     @State private var topRow = 0
     @State private var hintDismissed = false
+    /// Non-nil while the quantity prompt is open — which of Buy/Sell opened it
+    /// decides which transaction `transact(_:_:_:)` runs on confirm.
+    @State private var qtyPromptMode: QtyPromptMode?
+    private enum QtyPromptMode { case buy, sell }
     private var game: NovaGame { graphics.game }
     private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
     /// Port rank `PriceMod` discount for this spöb's govt (1.0 = none) — folded
@@ -305,6 +315,41 @@ struct OutfitterView: View {
         outfitterBody
             .gameHint(GameHints.outfitter, active: showHints, dismissed: $hintDismissed)
             .animation(.easeInOut(duration: 0.25), value: hintDismissed)
+            .sheet(isPresented: Binding(get: { qtyPromptMode != nil }, set: { if !$0 { qtyPromptMode = nil } })) {
+                if let mode = qtyPromptMode, let o = selected {
+                    TradeQuantityPrompt(title: "How many \(o.displayName)?",
+                                         range: 1...max(1, qtyUpperBound(mode, o)), initial: 1, unitLabel: "items",
+                                         onConfirm: { qty in transact(mode, o, qty); qtyPromptMode = nil },
+                                         onCancel: { qtyPromptMode = nil })
+                }
+            }
+    }
+
+    /// Advisory max for the quantity prompt's field — buy is capped by
+    /// afford/mass/installed-cap headroom (checked properly, one unit at a
+    /// time, by `buyOutfit(_:count:...)` itself); sell by how many are owned.
+    private func qtyUpperBound(_ mode: QtyPromptMode, _ o: OutfRes) -> Int {
+        switch mode {
+        case .buy:
+            guard pilot.canBuyOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) else { return 1 }
+            let cost = pilot.effectiveCost(o, galaxy: galaxy, priceMultiplier: rankMult)
+            let affordable = cost > 0 ? pilot.state.credits / cost : Int.max
+            let cap = pilot.maxInstallable(o, galaxy: galaxy)
+            return cap > 0 ? min(affordable, max(0, cap - pilot.owned(outfit: o.id))) : affordable
+        case .sell:
+            return pilot.owned(outfit: o.id)
+        }
+    }
+
+    private func transact(_ mode: QtyPromptMode, _ o: OutfRes, _ qty: Int) {
+        switch mode {
+        case .buy:
+            let bought = pilot.buyOutfit(o, count: qty, galaxy: galaxy, priceMultiplier: rankMult)
+            Log.spaceport.debug("Outfitter bought \(bought, privacy: .public)× outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public)")
+        case .sell:
+            let sold = pilot.sellOutfit(o, count: qty, galaxy: galaxy, priceMultiplier: rankMult)
+            Log.spaceport.debug("Outfitter sold \(sold, privacy: .public)× outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public)")
+        }
     }
 
     @ViewBuilder private var outfitterBody: some View {
@@ -420,8 +465,10 @@ struct OutfitterView: View {
     // this just anchors it to the game's own real dialog layout instead.)
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
+        let canBuy = o.map { pilot.canBuyOutfit($0, galaxy: galaxy, priceMultiplier: rankMult) && lockState(for: $0) == .available } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                   width: 73, enabled: o.map { pilot.canBuyOutfit($0, galaxy: galaxy, priceMultiplier: rankMult) && lockState(for: $0) == .available } ?? false) {
+                   width: 73, enabled: canBuy,
+                   onQuantity: canBuy ? { qtyPromptMode = .buy } : nil) {
             guard let o else {
                 Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
@@ -433,8 +480,10 @@ struct OutfitterView: View {
             }
         }
         .novaPlace(space, -94, 128)
+        let canSell = o.map { pilot.owned(outfit: $0.id) > 0 } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
-                   width: 73, enabled: o.map { pilot.owned(outfit: $0.id) > 0 } ?? false) {
+                   width: 73, enabled: canSell,
+                   onQuantity: canSell ? { qtyPromptMode = .sell } : nil) {
             guard let o else {
                 Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return

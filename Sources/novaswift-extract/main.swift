@@ -365,7 +365,7 @@ case "weapon":
         return game.weapons()
     }()
     for w in weps {
-        var tags: [String] = ["guidance=\(w.guidance)"]
+        var tags: [String] = ["guidance=\(w.guidance)", "ammoType=\(w.ammoType)", "maxAmmo=\(w.maxAmmo)"]
         if w.firedBySecondTrigger { tags.append("SECONDARY") }
         if w.fireSimultaneously { tags.append("SIMUL") }
         if w.isBeam { tags.append("beam(len \(w.beamLength) w \(w.beamWidth))") }

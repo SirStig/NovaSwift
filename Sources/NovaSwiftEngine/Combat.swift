@@ -296,7 +296,18 @@ public struct WeaponSpec {
                                 Double(w.beamColor.b) / 255.0) : nil
         turnRate = Double(w.turnRate) * 3.0 * .pi / 180.0
         blastRadius = Double(w.blastRadius)
-        ammoPerShot = w.maxAmmo > 0 ? 1 : 0
+        // Bible: `AmmoType` -1 = "ignored (unlimited ammo)"; 0-255 = draws from
+        // that ammo pool; -999 = self-destructs on fire; ≤-1000 = burns ship
+        // fuel per shot (see `selfDestructsOnFire`/`fuelPerShot` below) — none
+        // of those last two draw from an ammo pool either. `MaxAmmo` is NOT
+        // the right signal here despite the name: the Bible documents 0 (or
+        // -1) as a deliberate, common setting meaning "let the ammo oütf's own
+        // Max field constrain the total instead of a per-launcher cap" — it
+        // does not mean "this weapon carries no ammo." Keying ammo-tracking
+        // off `MaxAmmo` instead of `AmmoType` silently turned every such
+        // weapon (most real missiles/rockets) into unlimited ammo that never
+        // displayed a count and never depleted.
+        ammoPerShot = w.ammoType >= 0 ? 1 : 0
         isSecondary = w.firedBySecondTrigger
         fireSimultaneously = w.fireSimultaneously
         isExclusive = w.isExclusive

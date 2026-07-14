@@ -510,7 +510,7 @@ final class MultiplayerSession: ObservableObject {
     }
 
     func syncPreStep(world: World) {
-        guard isActive, let coordinator, let net else { return }
+        guard isActive, let coordinator, net != nil else { return }
 
         // Honor the session's stakes (host-set). Applied every frame so a
         // mid-session rules change takes effect immediately.

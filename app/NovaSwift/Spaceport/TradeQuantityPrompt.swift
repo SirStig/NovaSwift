@@ -13,15 +13,18 @@ struct TradeQuantityPrompt: View {
     /// buy, held-amount on sell) — advisory for the field; the actual
     /// transaction still clamps again against live affordability/hold.
     let range: ClosedRange<Int>
+    /// What's being counted — "tons" for cargo, "items" for outfits/ammo.
+    var unitLabel: String = "tons"
     var onConfirm: (Int) -> Void
     var onCancel: () -> Void
 
     @State private var text: String
 
-    init(title: String, range: ClosedRange<Int>, initial: Int,
+    init(title: String, range: ClosedRange<Int>, initial: Int, unitLabel: String = "tons",
          onConfirm: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
         self.title = title
         self.range = range
+        self.unitLabel = unitLabel
         self._text = State(initialValue: "\(min(max(initial, range.lowerBound), range.upperBound))")
         self.onConfirm = onConfirm
         self.onCancel = onCancel
@@ -41,7 +44,7 @@ struct TradeQuantityPrompt: View {
                     #if os(iOS)
                     .keyboardType(.numberPad)
                     #endif
-                Text("of \(range.upperBound) tons max")
+                Text("of \(range.upperBound) \(unitLabel) max")
                     .novaFont(.body).foregroundStyle(.gray)
             }
             HStack(spacing: 10) {

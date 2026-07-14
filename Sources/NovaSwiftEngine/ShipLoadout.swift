@@ -354,7 +354,31 @@ extension Galaxy {
             let e = byID[wid] ?? (0, 0); byID[wid] = (e.count + c, e.ammo)
         }
         for (wid, a) in ammoAdds {
-            let e = byID[wid] ?? (0, 0); byID[wid] = (e.count, e.ammo + a)
+            // `wid` is the real wëap id an ammo outfit's `.ammunition` modifier
+            // names (e.g. buying "Raven Rocket" ammo names wëap #138, the
+            // fixed-mount "Raven Rocket" weapon). But the weapon that actually
+            // *draws* from that pool when it fires is identified by its own
+            // `AmmoType` field, which the Bible documents as "draws ammo from
+            // this type of weapon" — a 0-based index needing +128 to become a
+            // real wëap id (this codebase's usual resource-id-base offset).
+            // Multiple mount variants of the same round deliberately share one
+            // AmmoType so they pool ammo — e.g. "Raven Rocket" (wëap #138,
+            // AmmoType 10 → 128+10 = 138, itself) and "Raven Turret" (wëap
+            // #139, ALSO AmmoType 10 → 138) both draw from the pool named by
+            // #138, even though only #138 matches the ammo outfit's id
+            // directly. Matching only `byID[wid]` (as if every weapon's pool
+            // were always its own raw id) missed every such turret/pod pair —
+            // the turret showed "- 0" and could never fire despite the pod's
+            // ammo genuinely being owned. So: route this ammo to every
+            // currently-mounted weapon whose own AmmoType resolves to `wid`,
+            // not just to a mount that happens to share its literal id.
+            for (mountID, entry) in byID {
+                guard let mountSpec = game.weapon(mountID), mountSpec.ammoType >= 0,
+                      128 + mountSpec.ammoType == wid else { continue }
+                var e = entry
+                e.ammo += a
+                byID[mountID] = e
+            }
         }
         // Fighter bays (`wëap` Guidance 99) don't fire projectiles — they launch
         // carried fighters. Pull them out of the firing-weapon list into a
@@ -465,7 +489,16 @@ extension Galaxy {
             guard let spec = weaponSpec(w.id) else { continue }
             // One grouped mount per weapon type; `count` copies stagger their fire.
             let n = max(1, min(w.count, 12))
-            mounts.append(WeaponMount(spec: spec, ammo: w.ammo > 0 ? w.ammo : -1, count: n))
+            // -1 means "unlimited" (`WeaponMount.ready`/`didFire` both special-case
+            // it to never run dry or decrement) — that must depend on whether the
+            // *weapon* tracks ammo at all (`ammoPerShot > 0`, i.e. `wëap.MaxAmmo`
+            // is set), not on whether the currently-computed `w.ammo` happens to be
+            // positive. A missile launcher that's been fully fired dry, or one
+            // that's freshly installed with no ammo bought yet, legitimately has
+            // `w.ammo == 0` — coercing that to -1 silently made it unlimited
+            // instead of correctly unable to fire.
+            let ammo = spec.ammoPerShot > 0 ? max(0, w.ammo) : -1
+            mounts.append(WeaponMount(spec: spec, ammo: ammo, count: n))
         }
         ship.weapons = mounts
         return ship

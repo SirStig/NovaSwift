@@ -1,5 +1,8 @@
 import SwiftUI
 import NovaSwiftKit
+#if os(macOS)
+import AppKit
+#endif
 
 /// EV Nova's menu coordinate space: the origin is the **centre** of the frame
 /// PICT, matching the game's layout (children are positioned as offsets from the
@@ -142,14 +145,38 @@ struct NovaButton: View {
     let title: String
     var width: CGFloat = 120
     var enabled: Bool = true
+    /// Real EV Nova's "how many?" quantity dialog: Option-click (the game's own
+    /// manual calls it Alt-click) on Buy/Sell brings up a prompt to type an
+    /// exact amount instead of transacting one at a time. On macOS this checks
+    /// the live modifier state at click time; on touch (no Option key) a
+    /// long-press is the equivalent gesture. `nil` (the default, e.g. Done,
+    /// scroll arrows) means this button has no quantity to ask about.
+    /// Declared before `action` so the trailing-closure call sites (`NovaButton(...) { ... }`)
+    /// keep binding that closure to `action`, not this one.
+    var onQuantity: (() -> Void)? = nil
     let action: () -> Void
     @Environment(\.novaTheme) private var theme
+    @State private var longPressFired = false
 
     var body: some View {
-        Button(action: { if enabled { action() } }) { Color.clear }
+        Button(action: {
+            guard enabled else { return }
+            #if os(macOS)
+            if let onQuantity, NSEvent.modifierFlags.contains(.option) { onQuantity(); return }
+            #endif
+            if longPressFired { longPressFired = false; return }
+            action()
+        }) { Color.clear }
             .buttonStyle(NovaButtonStyle(graphics: graphics, title: title, width: width,
                                          enabled: enabled, theme: theme))
             .disabled(!enabled)
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                    guard enabled, let onQuantity else { return }
+                    longPressFired = true
+                    onQuantity()
+                }
+            )
     }
 }
 
