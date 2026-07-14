@@ -259,7 +259,7 @@ struct AuthenticHUDView: View {
             VStack(spacing: 1) {
                 Text("Credits:").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
-                Text(creditsLabel)
+                Text(model.credits.creditsAbbreviated)
                     .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
                     .foregroundStyle(color(style.intf.brightText))
             }
@@ -267,15 +267,6 @@ struct AuthenticHUDView: View {
         }
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    /// The credit balance in EV Nova's compact status-bar form: millions as
-    /// "6.08M", large thousands as "45.0K", smaller balances in full.
-    private var creditsLabel: String {
-        let n = model.credits, a = abs(n)
-        if a >= 1_000_000 { return String(format: "%.2fM", Double(n) / 1_000_000) }
-        if a >= 100_000 { return String(format: "%.1fK", Double(n) / 1_000) }
-        return "\(n)"
     }
 
     /// The `ïntf` resource's own font sizes (`StatusFontSize`/`SubtitleFontSize`)

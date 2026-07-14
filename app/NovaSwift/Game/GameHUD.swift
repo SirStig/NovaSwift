@@ -220,7 +220,7 @@ struct GameHUDView: View {
                 if !model.systemName.isEmpty {
                     infoRow("location.fill", model.systemName)
                 }
-                infoRow("dollarsign.circle", creditString(model.credits))
+                infoRow("dollarsign.circle", model.credits.creditsAbbreviated)
                 if model.cargoCapacity > 0 {
                     infoRow("shippingbox", "\(model.cargoUsed) / \(model.cargoCapacity) t")
                 }
@@ -350,13 +350,6 @@ struct GameHUDView: View {
             }
             .frame(height: 7)
         }
-    }
-
-    /// Abbreviated credit balance, e.g. "6.08M", "12.4k", "840".
-    private func creditString(_ c: Int) -> String {
-        if c >= 1_000_000 { return String(format: "%.2fM cr", Double(c) / 1_000_000) }
-        if c >= 10_000 { return String(format: "%.1fk cr", Double(c) / 1000) }
-        return "\(c) cr"
     }
 
     private var radar: some View {

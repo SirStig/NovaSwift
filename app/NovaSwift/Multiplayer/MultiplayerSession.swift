@@ -27,6 +27,15 @@ final class MultiplayerSession: ObservableObject {
     @Published private(set) var unreadCount = 0
     /// The agreed session rules.
     @Published private(set) var rules: SessionRules = .fullStakes
+    /// The current lobby's display name (empty when not in a session).
+    @Published private(set) var lobbyName = ""
+    /// Whether this player hosts the current lobby (can set rules, kick/ban).
+    @Published private(set) var isHost = false
+    /// Local lobbies discovered while browsing (the "join" list). Empty unless
+    /// `startBrowsingLocalLobbies` is active.
+    @Published private(set) var localLobbies: [LobbyDescriptor] = []
+    /// Set true briefly when the host kicked us, so the UI can explain the exit.
+    @Published var wasKicked = false
 
     /// This player's id in the live session — always equal to the transport's peer
     /// id (`NetSession.localPlayerID`). Seeded with a per-launch id used for the
@@ -65,30 +74,93 @@ final class MultiplayerSession: ObservableObject {
     /// The authority id used on the previous frame, to detect role/authority change.
     private var lastAuthorityID: String?
 
-    // MARK: - Lifecycle
+    // MARK: - Co-op story (NCB) sync
 
-    /// Start a local same-network session and announce presence. Tears down any
-    /// existing session first. No-op on platforms without MultipeerConnectivity.
-    func startLocal(displayName: String, systemID: Int, shipTypeID: Int? = nil,
-                    rules: SessionRules = .fullStakes) {
+    /// The app supplies the local pilot's current NCB vector; the authority diffs it
+    /// each frame to find bits its storyline just set and shares them with
+    /// co-located participants. Set by `AppModel`.
+    var playerBitsProvider: (() -> Set<Int>)?
+    /// The app unions bits earned in a partner's shared storyline into the local
+    /// pilot (non-destructive). Set by `AppModel`.
+    var onRemoteBitsEarned: ((Set<Int>) -> Void)?
+    /// The authority's last-seen bit vector, to compute the "newly set" delta.
+    /// Seeded from the pilot at session start so pre-existing bits never propagate
+    /// (no passive inheritance).
+    private var lastKnownBits: Set<Int> = []
+    private var bitsInitialized = false
+
+    #if canImport(MultipeerConnectivity)
+    private var lobbyBrowser: MultipeerLobbyBrowser?
+    #endif
+    /// The host's id when we joined someone else's lobby (nil when we host).
+    private var joinedHostID: String?
+
+    // MARK: - Lobby lifecycle (local)
+
+    /// **Host** a named local lobby others can discover + join. Tears down any
+    /// existing session/browse. No-op without MultipeerConnectivity.
+    func hostLocalLobby(lobbyName: String, displayName: String, systemID: Int,
+                        shipTypeID: Int? = nil, rules: SessionRules = .fullStakes) {
         stop()
         #if canImport(MultipeerConnectivity)
-        let mp = MultipeerTransport(playerID: localPlayerID)
+        let name = lobbyName.isEmpty ? "\(displayName)'s Lobby" : lobbyName
+        let mp = MultipeerTransport(playerID: localPlayerID,
+                                    mode: .host(lobbyName: name, hostName: displayName))
+        self.lobbyName = name
+        isHost = true
         activate(transport: mp, displayName: displayName, systemID: systemID,
                  shipTypeID: shipTypeID, rules: rules)
-        mp.start()   // begin advertising/browsing (Multipeer-specific)
+        mp.start()
+        #endif
+    }
+
+    /// **Join** a discovered local lobby. No-op without MultipeerConnectivity.
+    func joinLocalLobby(_ lobby: LobbyDescriptor, displayName: String, systemID: Int,
+                        shipTypeID: Int? = nil) {
+        stop()
+        #if canImport(MultipeerConnectivity)
+        let mp = MultipeerTransport(playerID: localPlayerID, mode: .join(hostID: lobby.id))
+        lobbyName = lobby.name
+        isHost = false
+        joinedHostID = lobby.id
+        // Joiners adopt the host's rules on receipt (`onRulesChanged`); seed safe.
+        activate(transport: mp, displayName: displayName, systemID: systemID,
+                 shipTypeID: shipTypeID, rules: .safe, broadcastRules: false)
+        mp.start()
+        #endif
+    }
+
+    /// Start listing local lobbies to join. Updates `localLobbies`.
+    func startBrowsingLocalLobbies() {
+        #if canImport(MultipeerConnectivity)
+        stopBrowsingLocalLobbies()
+        let browser = MultipeerLobbyBrowser(playerID: localPlayerID)
+        browser.onLobbiesChanged = { [weak self] lobbies in self?.localLobbies = lobbies }
+        lobbyBrowser = browser
+        browser.start()
+        #endif
+    }
+
+    /// Stop listing local lobbies.
+    func stopBrowsingLocalLobbies() {
+        #if canImport(MultipeerConnectivity)
+        lobbyBrowser?.stop()
+        lobbyBrowser = nil
+        localLobbies = []
         #endif
     }
 
     #if canImport(GameKit)
     /// Start an **internet** session over Game Center, wrapping an already-created
-    /// `GKMatch` (the app runs authentication + matchmaking UI and hands the match
-    /// here). Same session/sync machinery as `startLocal`; only the transport
-    /// differs. Requires the Game Center entitlement + App Store Connect record.
+    /// `GKMatch`. Same session/sync machinery; only the transport differs. The
+    /// Game Center match host isn't distinguished, so authority is by id (see
+    /// `currentAuthorityID`).
     func startGameCenter(match: GKMatch, displayName: String, systemID: Int,
                          shipTypeID: Int? = nil, rules: SessionRules = .fullStakes) {
         stop()
         let gk = GameKitTransport(match: match)
+        lobbyName = "Game Center"
+        isHost = true
         activate(transport: gk, displayName: displayName, systemID: systemID,
                  shipTypeID: shipTypeID, rules: rules)
     }
@@ -96,10 +168,9 @@ final class MultiplayerSession: ObservableObject {
 
     /// Shared session bring-up: wrap a transport in a `NetSession`, adopt the
     /// transport's peer id as our player id, wire callbacks + the sync coordinator,
-    /// announce presence and rules. Transport-specific kick-off (e.g. Multipeer's
-    /// `start()`) stays with the caller.
+    /// announce presence and (optionally, host-only) rules.
     private func activate(transport: Transport, displayName: String, systemID: Int,
-                          shipTypeID: Int?, rules: SessionRules) {
+                          shipTypeID: Int?, rules: SessionRules, broadcastRules: Bool = true) {
         if let shipTypeID { localShipTypeID = shipTypeID }
         let session = NetSession(transport: transport, rules: rules)
         localPlayerID = session.localPlayerID     // the transport owns the peer id
@@ -112,7 +183,7 @@ final class MultiplayerSession: ObservableObject {
         self.rules = rules
         session.updateLocalPresence(name: displayName, systemID: systemID,
                                     shipTypeHint: localShipTypeID >= 0 ? localShipTypeID : nil)
-        session.broadcastRules(rules)
+        if broadcastRules { session.broadcastRules(rules) }
         isActive = true
         syncPresence()
     }
@@ -128,10 +199,50 @@ final class MultiplayerSession: ObservableObject {
         needsResync = false
         netTick = 0
         inputSeq = 0
+        lastKnownBits = []
+        bitsInitialized = false
         isActive = false
+        isHost = false
+        joinedHostID = nil
+        lobbyName = ""
         chatLog = []
         presence = [:]
         unreadCount = 0
+    }
+
+    // MARK: - Moderation (host) + roster
+
+    /// Players in the session, sorted (host first, then by name) — the lobby roster.
+    var players: [PlayerPresence] {
+        presence.values.sorted {
+            if $0.playerID == hostPlayerID { return true }
+            if $1.playerID == hostPlayerID { return false }
+            return $0.name < $1.name
+        }
+    }
+
+    /// The host's player id: us when hosting, otherwise the lobby we joined.
+    var hostPlayerID: String? { isHost ? localPlayerID : joinedHostID }
+
+    /// Remove a player from the lobby (host only).
+    func kick(_ playerID: String) {
+        guard isHost else { return }
+        net?.kick(playerID)
+        syncPresence()
+    }
+
+    /// Ban a player from the lobby for the rest of the session (host only).
+    func ban(_ playerID: String) {
+        guard isHost else { return }
+        net?.ban(playerID)
+        syncPresence()
+    }
+
+    /// Host-only: push updated session rules to everyone mid-lobby.
+    func updateRules(_ newRules: SessionRules) {
+        guard isHost else { return }
+        rules = newRules
+        net?.broadcastRules(newRules)
     }
 
     // MARK: - Presence / chat API (used by the app)
@@ -178,6 +289,13 @@ final class MultiplayerSession: ObservableObject {
         // snapshot for the next frame.
         session.onInput = { [weak self] frame, peer in self?.coordinator?.receiveInput(frame, from: peer) }
         session.onSnapshot = { [weak self] snapshot, peer in self?.latestSnapshot = (snapshot, peer) }
+        // Co-op story: a partner's shared storyline earned bits — union them locally.
+        session.onNCB = { [weak self] bits, _ in self?.onRemoteBitsEarned?(Set(bits)) }
+        // The host kicked us: leave the session and let the UI explain.
+        session.onKicked = { [weak self] in
+            self?.stop()
+            self?.wasKicked = true
+        }
     }
 
     private func syncPresence() { presence = net?.presence ?? [:] }
@@ -217,6 +335,10 @@ final class MultiplayerSession: ObservableObject {
         let authority = currentAuthorityID
         // Role or authority changed (someone arrived/left, or handoff) — start clean.
         if authority != lastAuthorityID { needsResync = true; lastAuthorityID = authority }
+        // Whenever we're not the story authority (solo or a client), re-seed the NCB
+        // baseline so bits we earn *outside* a shared moment don't propagate when we
+        // next become the authority — only bits earned while co-hosting are shared.
+        if authority != localPlayerID { bitsInitialized = false }
         if needsResync {
             // Drop every co-op mirror (players + NPCs) and let this world populate
             // itself again — a fresh role/system starts from our own galaxy.
@@ -278,6 +400,7 @@ final class MultiplayerSession: ObservableObject {
         netTick &+= 1
         if authority == localPlayerID {
             net.broadcastSnapshot(coordinator.snapshot(of: world, tick: netTick))
+            propagateEarnedBits(net: net, to: coLocatedIDs())
         } else {
             inputSeq &+= 1
             net.sendInput(coordinator.input(from: world.intent, tick: netTick, seq: inputSeq), to: authority)
@@ -285,6 +408,22 @@ final class MultiplayerSession: ObservableObject {
             // step cleared this frame's events, before the scene drains them.
             coordinator.flushEffects(into: world)
         }
+    }
+
+    /// Authority: share control bits its storyline set since last frame with the
+    /// co-located participants (the shared world's story is the authority's, so its
+    /// newly-set bits are what everyone earned together). Additions only — the merge
+    /// on the receiving side is strictly non-destructive. The first call after a
+    /// session starts just seeds the baseline, so a player's *pre-existing* bits
+    /// never leak to a partner.
+    private func propagateEarnedBits(net: NetSession, to peers: [String]) {
+        guard let bits = playerBitsProvider?() else { return }
+        if !bitsInitialized { lastKnownBits = bits; bitsInitialized = true; return }
+        let added = bits.subtracting(lastKnownBits)
+        lastKnownBits = bits
+        guard !added.isEmpty, !peers.isEmpty else { return }
+        let list = Array(added)
+        for peer in peers { net.sendNCB(list, to: peer) }
     }
 
     /// Build a co-op mirror hull from the loaded galaxy (correct sprite/size/

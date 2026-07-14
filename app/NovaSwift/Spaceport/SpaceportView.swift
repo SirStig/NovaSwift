@@ -14,6 +14,10 @@ struct SpaceportView: View {
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
     var onDepart: () -> Void
+    /// Push a spaceport transaction (refuel here, or a ship purchase in
+    /// `ShipyardView`) into the live HUD immediately, instead of leaving it
+    /// stale until takeoff rebuilds it from the pilot state.
+    var onLiveSync: () -> Void = {}
     /// Whether the "Tutorial hints" setting is on — gates the one-time contextual
     /// hints (the welcome-to-the-spaceport banner, the Mission BBS how-to, …).
     var showHints: Bool = false
@@ -54,7 +58,7 @@ struct SpaceportView: View {
                     case .outfit:   OutfitterView(graphics: graphics, spob: spob, pilot: pilot,
                                                   galaxy: galaxy, showHints: showHints, onDone: { screen = .hub })
                     case .shipyard: ShipyardView(graphics: graphics, spob: spob, pilot: pilot,
-                                                 galaxy: galaxy, onDone: { screen = .hub })
+                                                 galaxy: galaxy, onLiveSync: onLiveSync, onDone: { screen = .hub })
                     case .bar:      BarView(graphics: graphics, spob: spob, pilot: pilot, onDone: { screen = .hub })
                     case .missions: MissionBBSView(graphics: graphics, spob: spob, pilot: pilot,
                                                    showHints: showHints, onDone: { screen = .hub })
@@ -307,6 +311,7 @@ struct SpaceportView: View {
         pilot.state.credits -= cost
         pilot.state.fuel = maxFuel
         pilot.save()
+        onLiveSync()
         Log.spaceport.debug("Recharged fuel to \(maxFuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(cost, privacy: .public)cr")
     }
 
@@ -375,7 +380,7 @@ struct MissionBBSView: View {
                         HStack(spacing: 4) {
                             NovaText(offer.title, size: 10, width: 185, weight: .bold)
                             Spacer(minLength: 0)
-                            NovaText(creditsLabel(offer.mission.pay), size: 10,
+                            NovaText(offer.mission.pay.creditsAbbreviated, size: 10,
                                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 80, align: .trailing)
                         }
                         .frame(width: 269, height: 21)
@@ -447,8 +452,4 @@ struct MissionBBSView: View {
         if let first = offered.first { engine.present(first) }
     }
 
-    private func creditsLabel(_ n: Int) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal
-        return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
-    }
 }

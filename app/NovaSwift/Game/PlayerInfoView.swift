@@ -115,7 +115,7 @@ struct PlayerInfoView: View {
         let shipName = p.shipName.isEmpty ? shipClass : p.shipName
         lines.append("You are Captain \(p.pilotName), of the \(shipClass) \(shipName).")
         lines.append("")
-        lines.append("You have \(p.credits.formatted()) credits.")
+        lines.append("You have \(p.credits.creditsAbbreviated).")
         lines.append("Your combat rating is \(CombatRating.title(forRating: p.combatRating)).")
         if let govt = game.system(p.currentSystem)?.government,
            let name = game.govt(govt)?.name {

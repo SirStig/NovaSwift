@@ -862,6 +862,7 @@ struct GameContainerView: View {
                         let playWidth = max(0, geo.size.width - sidebarWidth)
                         SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob,
                                       pilot: model.pilot, onDepart: depart,
+                                      onLiveSync: { syncHUDFromPilotState() },
                                       showHints: model.settings.tutorialHints)
                             .frame(width: playWidth, height: geo.size.height)
                             .position(x: playWidth / 2, y: geo.size.height / 2)
@@ -1962,6 +1963,28 @@ struct GameContainerView: View {
     private func refreshBoard(_ scene: GameScene, shipID: Int) {
         boardManifest = scene.boardManifest(shipID)
         boardRefresh += 1
+    }
+
+    /// Immediately reflect a spaceport transaction (new ship, refuel, repair)
+    /// in the on-screen HUD instead of waiting for the takeoff rebuild to pick
+    /// it up. `hud.*` are manually-synced caches of `PlayerState`, not live-
+    /// bound (see `GameScene.debugSyncCredits`) — recomputes fresh from the
+    /// current pilot state and that ship's real loadout, the same source
+    /// `depart()`'s own rebuild (`GameHost.buildPlayerShip`) uses, so this is
+    /// safe to call after any purchase regardless of what changed.
+    private func syncHUDFromPilotState() {
+        guard let host, let galaxy = host.galaxy, let game = host.game else { return }
+        let state = model.pilot.state
+        host.hud.credits = state.credits
+        let res = game.ship(state.shipType)
+        host.hud.shipName = state.shipName.isEmpty ? (res?.displayName ?? "") : state.shipName
+        guard let lo = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits) else { return }
+        let fuel = state.fuel.map { min($0, lo.maxFuel) } ?? lo.maxFuel
+        let shield = state.shield.map { min($0, lo.maxShield) } ?? lo.maxShield
+        let armor = state.armor.map { min($0, lo.maxArmor) } ?? lo.maxArmor
+        host.scene.syncLiveHUDStats(fuel: fuel, maxFuel: lo.maxFuel,
+                                    shield: shield, maxShield: lo.maxShield,
+                                    armor: armor, maxArmor: lo.maxArmor)
     }
 
     private func plunderTakeCredits(_ scene: GameScene, shipID: Int) {

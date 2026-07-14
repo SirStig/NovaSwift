@@ -207,6 +207,17 @@ public struct ChatMessage: Codable, Equatable, Sendable {
     }
 }
 
+/// Co-op story sync: control bits the authority's storyline just **set** during
+/// shared play, to union into each co-located participant's own NCB vector. Only
+/// additions travel (the merge is strictly non-destructive — never clears a bit,
+/// never passively copies a whole set), so players progress missions *together*
+/// without ever overwriting what they've each done apart. See
+/// `docs/MULTIPLAYER.md` → "Story / NCB split".
+public struct NCBUpdate: Codable, Equatable, Sendable {
+    public var setBits: [Int]
+    public init(setBits: [Int]) { self.setBits = setBits }
+}
+
 // MARK: - Envelope
 
 /// The tagged wire envelope. Swift synthesizes `Codable` as a single-key object
@@ -226,6 +237,12 @@ public enum NetMessage: Codable, Equatable, Sendable {
     case snapshot(WorldSnapshot)
     /// Session chat.
     case chat(ChatMessage)
+    /// Co-op story: control bits earned together, to union into the receiver's save.
+    case ncb(NCBUpdate)
+    /// Host → a player: you've been removed from the lobby (the id is the target,
+    /// so it can confirm the kick is meant for it). A ban is a kick the host also
+    /// remembers, refusing the id's presence thereafter.
+    case kick(String)
 }
 
 /// Serialization boundary for `NetMessage`. JSON for the P0 spine — readable and

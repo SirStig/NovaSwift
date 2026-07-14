@@ -41,6 +41,16 @@ public final class NetSession: TransportDelegate {
     /// snapshot's ships into its local `World` (inject/update remote players,
     /// interpolate). See `docs/MULTIPLAYER.md` → "Layer 2".
     public var onSnapshot: ((WorldSnapshot, PeerID) -> Void)?
+    /// Co-op story — fired when another player's shared storyline set control bits
+    /// (`NCBUpdate`). The app unions them into the local pilot's NCB vector
+    /// (non-destructive). See `docs/MULTIPLAYER.md` → "Story / NCB split".
+    public var onNCB: (([Int], PeerID) -> Void)?
+    /// Fired on a player the host has kicked — the app tears its session down.
+    public var onKicked: (() -> Void)?
+
+    /// Players this session (as host) has banned — their presence is refused and a
+    /// rejoin is ignored until the session ends.
+    public private(set) var bannedIDs: Set<String> = []
 
     public init(transport: Transport, rules: SessionRules = .fullStakes) {
         self.localPlayerID = transport.localPeerID
@@ -84,6 +94,24 @@ public final class NetSession: TransportDelegate {
         sessionRules = rules
         broadcast(.sessionRules(rules))
     }
+
+    // MARK: - Moderation (host)
+
+    /// Remove a player from the lobby (host action): tell them they're kicked and
+    /// drop their presence locally. `ban` also blacklists the id so a rejoin is
+    /// refused for the rest of the session.
+    public func kick(_ playerID: String, ban: Bool = false) {
+        guard playerID != localPlayerID else { return }
+        if ban { bannedIDs.insert(playerID) }
+        send(.kick(playerID), to: playerID)
+        if presence.removeValue(forKey: playerID) != nil { onPresenceChanged?(self) }
+    }
+
+    /// Ban a player: kick them and refuse their presence for the rest of the session.
+    public func ban(_ playerID: String) { kick(playerID, ban: true) }
+
+    /// Whether a player is currently banned from this (host's) session.
+    public func isBanned(_ playerID: String) -> Bool { bannedIDs.contains(playerID) }
 
     /// The name shown for the local player in chat — their presence name once
     /// announced, else their id.
@@ -132,6 +160,15 @@ public final class NetSession: TransportDelegate {
         broadcast(.snapshot(snapshot), channel: .unreliable)
     }
 
+    /// Send earned control bits to one co-located participant, on the **reliable**
+    /// channel — a lost story bit would desync progress, so unlike snapshots these
+    /// must arrive. Sent per-participant (not broadcast) so only co-located players
+    /// who shared the moment receive them.
+    public func sendNCB(_ setBits: [Int], to peer: PeerID) {
+        guard !setBits.isEmpty else { return }
+        send(.ncb(NCBUpdate(setBits: setBits)), to: peer, channel: .reliable)
+    }
+
     // MARK: - Send helpers
 
     private func broadcast(_ message: NetMessage, channel: NetChannel = .reliable) {
@@ -150,6 +187,7 @@ public final class NetSession: TransportDelegate {
         guard let message = try? NetCodec.decode(data) else { return }
         switch message {
         case .presence(let p):
+            guard !bannedIDs.contains(p.playerID) else { return }   // banned: ignore
             let changed = presence[p.playerID] != p
             presence[p.playerID] = p
             if changed { onPresenceChanged?(self) }
@@ -168,6 +206,13 @@ public final class NetSession: TransportDelegate {
 
         case .chat(let chat):
             appendChat(chat)
+
+        case .ncb(let update):
+            onNCB?(update.setBits, peer)
+
+        case .kick(let targetID):
+            // Sent to us — the host removed us from the lobby.
+            if targetID == localPlayerID { onKicked?() }
 
         case .input(let frame):
             onInput?(frame, peer)

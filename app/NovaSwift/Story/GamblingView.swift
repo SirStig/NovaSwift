@@ -99,7 +99,7 @@ struct GamblingView: View {
                     // real button row (y=196) flanking the two stake buttons —
                     // INSIDE the 230px-tall frame (the old cy=106/128 spots put
                     // Leave past the frame's bottom edge, floating on nothing).
-                    NovaText(creditsLabel(pilot.state.credits), size: 10,
+                    NovaText(pilot.state.credits.creditsAbbreviated, size: 10,
                              color: Color(red: 1, green: 0.85, blue: 0.4), width: 100, align: .center)
                         .novaPlace(space, -222, 88)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
@@ -163,7 +163,7 @@ struct GamblingView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(selectedColor == nil || pilot.state.credits < 5000)
             }
-            Text("You Have: \(creditsLabel(pilot.state.credits))").foregroundStyle(Color(red: 1, green: 0.85, blue: 0.4))
+            Text("You Have: \(pilot.state.credits.creditsAbbreviated)").foregroundStyle(Color(red: 1, green: 0.85, blue: 0.4))
             Button(graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), action: onDone).buttonStyle(.bordered)
         }
         .padding(24)
@@ -266,8 +266,8 @@ struct GamblingView: View {
             resultBoxes(space)
             if let winner {
                 NovaText(winner == selectedColor
-                         ? "You win \(creditsLabel(stake * 3))!"
-                         : "\(winner.name) wins — you lose \(creditsLabel(stake)).",
+                         ? "You win \((stake * 3).creditsAbbreviated)!"
+                         : "\(winner.name) wins — you lose \(stake.creditsAbbreviated).",
                          size: 12,
                          color: winner == selectedColor ? Color(red: 0.5, green: 0.9, blue: 0.5) : Color(red: 1, green: 0.5, blue: 0.5),
                          width: 238, align: .center)
@@ -279,7 +279,7 @@ struct GamblingView: View {
             // rather than a third, unneeded button — all 3 real rects still used.
             NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), width: 49, action: onDone)
                 .novaPlace(space, -119.5, 75)
-            NovaText(creditsLabel(pilot.state.credits), size: 10,
+            NovaText(pilot.state.credits.creditsAbbreviated, size: 10,
                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 75, align: .center)
                 .novaPlace(space, -38.5, 79)
             NovaButton(graphics: graphics, title: "Bet Again", width: 49, action: resetForNextRace)
@@ -313,10 +313,6 @@ struct GamblingView: View {
         selectedColor = nil; stake = 0; winner = nil; player = nil; phase = .choosing
     }
 
-    private func creditsLabel(_ n: Int) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal
-        return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
-    }
 }
 
 /// A frame-less, real-geometry panel for dialogs with no matching-size

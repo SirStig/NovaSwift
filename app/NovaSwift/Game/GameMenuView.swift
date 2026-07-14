@@ -29,9 +29,7 @@ struct GameMenuView: View {
     @State private var showPlayerInfo = false
     @State private var showMissions = false
     @State private var info: String?
-    #if canImport(GameKit)
-    @State private var showMatchmaker = false
-    #endif
+    @State private var showMultiplayer = false
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
 
@@ -92,23 +90,11 @@ struct GameMenuView: View {
                                                    set: { if !$0 { info = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(info ?? "") }
-        #if canImport(GameKit)
-        .sheet(isPresented: $showMatchmaker) {
-            GameCenterMatchmakerView(
-                onMatch: { match in
-                    showMatchmaker = false
-                    var name = model.pilot.state.pilotName
-                    if name.isEmpty { name = "Captain" }
-                    model.session.startGameCenter(
-                        match: match, displayName: name,
-                        systemID: model.pilot.state.currentSystem,
-                        shipTypeID: model.pilot.state.shipType)
-                    onResume()
-                },
-                onCancel: { showMatchmaker = false },
-                onError: { message in showMatchmaker = false; info = message })
+        .sheet(isPresented: $showMultiplayer) {
+            MultiplayerHubView(
+                onEnterFlight: { showMultiplayer = false; onResume() },
+                onClose: { showMultiplayer = false })
         }
-        #endif
     }
 
     /// Whether the Story Map / Pilot Log is open (drives its presentation).
@@ -153,33 +139,14 @@ struct GameMenuView: View {
                     }
 
                     sectionGap
-                    // Multiplayer: the single entry point. Starting a session
-                    // reveals the in-flight chat button + galaxy-map player
-                    // markers; there is no multiplayer chrome in single-player.
-                    if model.session.isActive {
-                        row("Leave Co-op", "xmark.circle.fill", tint: .red) {
-                            model.session.stop()
-                        }
-                    } else {
-                        row("Host Local Co-op", "antenna.radiowaves.left.and.right") {
-                            var name = model.pilot.state.pilotName
-                            if name.isEmpty { name = "Captain" }
-                            // Two copies on one machine (local-MP testing) share a
-                            // pilot name; tag the secondary so presence/chat tell
-                            // them apart. No-op in a normal single instance.
-                            if AppInstance.isSecondary { name += " #\(AppInstance.tag)" }
-                            model.session.startLocal(
-                                displayName: name,
-                                systemID: model.pilot.state.currentSystem,
-                                shipTypeID: model.pilot.state.shipType)
-                            onResume()   // drop back to flight with chat now live
-                        }
-                        #if canImport(GameKit)
-                        row("Online Co-op", "globe") {
-                            if model.gameCenter.isAuthenticated { showMatchmaker = true }
-                            else { info = "Sign in to Game Center (in Settings) to play online co-op." }
-                        }
-                        #endif
+                    // Multiplayer: the single entry point. The hub handles hosting
+                    // and joining lobbies (Local / Online) and the in-session roster;
+                    // there is no multiplayer chrome in single-player. A live session
+                    // shows a status subtitle here.
+                    row(model.session.isActive ? "Multiplayer — \(model.session.lobbyName)" : "Multiplayer",
+                        "person.2.fill",
+                        tint: model.session.isActive ? amber : .white) {
+                        showMultiplayer = true
                     }
 
                     sectionGap

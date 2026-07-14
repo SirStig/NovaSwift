@@ -432,6 +432,26 @@ final class PilotStore: ObservableObject {
         state.outfits = state.outfits.filter { id, _ in
             (game.outfit(id)?.flags ?? 0) & 0x0004 != 0
         }
+        // The new hull's own preinstalled outfits (shïp.outfits — turrets,
+        // launchers, jammers, etc. it ships with stock) become owned so the
+        // Outfitter/Ship-Info screens show them and they can be sold off like
+        // any other installed item. `Galaxy.loadout` already folds these (and
+        // the hull's built-in weapons) into the flown ship's stats/armament
+        // unconditionally, so this doesn't change combat behavior — it's
+        // purely so the player's inventory record matches what they're flying.
+        for (oid, count) in ship.outfits {
+            state.grantOutfit(oid, count: count)
+        }
+        // `armor`/`shield`/`fuel` are stored as raw absolute values with `nil`
+        // meaning "uninitialized (full)" (see `PlayerState`'s doc comment).
+        // Left alone, the *old* ship's raw numbers (e.g. 100/100) would carry
+        // over as a ceiling on the *new* ship's stats (`min(100, newMax)`) —
+        // a much bigger hull departs at a sliver of its real max instead of
+        // full. Reset to nil so the new hull starts genuinely full, matching
+        // "buying a ship restores it to full" like a real dealership handover.
+        state.armor = nil
+        state.shield = nil
+        state.fuel = nil
         save()
         return true
     }

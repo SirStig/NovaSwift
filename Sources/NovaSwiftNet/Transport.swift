@@ -1,5 +1,18 @@
 import Foundation
 
+/// A joinable lobby someone is hosting on the network (or, later, online), as
+/// surfaced to the lobby-list UI. `id` is the host's player id, which a joiner
+/// uses to connect to exactly that host — so two unrelated groups on the same
+/// network never get merged.
+public struct LobbyDescriptor: Identifiable, Equatable, Sendable {
+    public var id: String            // host player id
+    public var name: String          // lobby display name
+    public var hostName: String      // host's pilot name
+    public init(id: String, name: String, hostName: String) {
+        self.id = id; self.name = name; self.hostName = hostName
+    }
+}
+
 /// Stable identifier for a peer within a session.
 ///
 /// Convention across `NovaSwiftNet`: **the peer id *is* the player id.** For

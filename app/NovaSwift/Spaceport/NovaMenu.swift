@@ -102,15 +102,23 @@ struct NovaText: View {
     var width: CGFloat? = nil
     var align: TextAlignment = .leading
     var weight: Font.Weight = .regular
+    /// Force to a single line and shrink the font (down to 50%) instead of
+    /// wrapping — for a fixed-width field showing a variable-length value
+    /// (credit amounts, prices) where wrapping reads as row overflow/growth
+    /// rather than a clean single line. Off by default: most `NovaText` uses
+    /// (descriptions, labels) want their normal wrap-and-grow behavior.
+    var shrinkToFit: Bool = false
 
     init(_ text: String, size: CGFloat = 12, color: Color = .white,
-         width: CGFloat? = nil, align: TextAlignment = .leading, weight: Font.Weight = .regular) {
+         width: CGFloat? = nil, align: TextAlignment = .leading, weight: Font.Weight = .regular,
+         shrinkToFit: Bool = false) {
         self.text = text
         self.size = size
         self.color = color
         self.width = width
         self.align = align
         self.weight = weight
+        self.shrinkToFit = shrinkToFit
     }
 
     var body: some View {
@@ -118,6 +126,8 @@ struct NovaText: View {
             .font(.custom(NovaFontRole.body.family, size: size).weight(weight))
             .foregroundStyle(color)
             .multilineTextAlignment(align)
+            .lineLimit(shrinkToFit ? 1 : nil)
+            .minimumScaleFactor(shrinkToFit ? 0.5 : 1)
             .frame(width: width,
                    alignment: align == .leading ? .leading : (align == .trailing ? .trailing : .center))
             .fixedSize(horizontal: width == nil, vertical: true)

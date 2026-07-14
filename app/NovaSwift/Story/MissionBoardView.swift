@@ -41,7 +41,7 @@ struct MissionBoardView: View {
                         HStack(spacing: 6) {
                             NovaText(engine?.resolvedName(for: mission) ?? mission.displayName, size: 11, width: width - 65, align: .leading)
                             Spacer(minLength: 0)
-                            NovaText(creditsLabel(mission.pay), size: 11,
+                            NovaText(mission.pay.creditsAbbreviated, size: 11,
                                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 60, align: .trailing)
                         }
                         .padding(.vertical, 2.5)
@@ -100,12 +100,6 @@ struct MissionBoardView: View {
         pilot.state = engine.player
         services.pendingOffer = nil
     }
-}
-
-/// Formats a credit amount the way every spaceport screen does ("1,234 cr").
-private func creditsLabel(_ n: Int) -> String {
-    let f = NumberFormatter(); f.numberStyle = .decimal
-    return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
 }
 
 // MARK: - Frame containers
@@ -201,7 +195,7 @@ private struct MissionInfoSheet: View {
                     NovaText(offer.title, size: 11, width: 193, align: .leading, weight: .bold)
                         .novaPlace(space, -222.5, -76.5)
                     // item 6: (343,4)-(465,16) 122x12 — its reward
-                    NovaText(creditsLabel(offer.mission.pay), size: 11,
+                    NovaText(offer.mission.pay.creditsAbbreviated, size: 11,
                              color: Color(red: 1, green: 0.85, blue: 0.4), width: 122, align: .trailing)
                         .novaPlace(space, 107.5, -73.5)
                     // item 1: (9,24)-(204,108) 195x84 — other offers here

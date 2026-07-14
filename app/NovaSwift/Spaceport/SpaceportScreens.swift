@@ -7,11 +7,6 @@ import NovaSwiftStory
 // Center (8510), Outfitter (8502), Shipyard (8501) and Bar (8503). Item lists,
 // prices and descriptions all come from the player's own data.
 
-private func creditString(_ n: Int) -> String {
-    let f = NumberFormatter(); f.numberStyle = .decimal
-    return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
-}
-
 /// Default tons transacted per Buy/Sell tap. EV Nova buys one per click (and
 /// more while held); we default to a handful so trading a full hold isn't a
 /// hundred taps — but it's just the starting value for `TradeCenterView`'s
@@ -190,7 +185,7 @@ struct TradeCenterView: View {
             }
             .buttonStyle(.plain)
             Spacer(minLength: 0)
-            NovaText(creditString(pilot.state.credits), size: 10,
+            NovaText(pilot.state.credits.creditsAbbreviated, size: 10,
                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 130, align: .trailing)
         }
         .frame(width: 346, height: 24)
@@ -395,8 +390,8 @@ struct OutfitterView: View {
         // owned-quantity of the selected item, which is instead shown as the
         // small badge on the item's grid tile.
         return VStack(alignment: .leading, spacing: 10) {
-            infoRow("Item Price:", o.map { creditString(pilot.effectiveCost($0, galaxy: galaxy, priceMultiplier: rankMult)) } ?? "—")
-            infoRow("You Have:", creditString(pilot.state.credits))
+            infoRow("Item Price:", o.map { pilot.effectiveCost($0, galaxy: galaxy, priceMultiplier: rankMult).creditsAbbreviated } ?? "—")
+            infoRow("You Have:", pilot.state.credits.creditsAbbreviated)
             infoRow("Item Mass:", o.map { "\($0.mass) tons" } ?? "—")
             infoRow("Available:", "\(pilot.freeMass(galaxy: galaxy)) tons")
         }
@@ -410,7 +405,7 @@ struct OutfitterView: View {
     private func infoRow(_ label: String, _ value: String) -> some View {
         HStack(spacing: 6) {
             NovaText(label, size: 11, color: .gray, width: 74, align: .leading)
-            NovaText(value, size: 11, width: 90, align: .leading)
+            NovaText(value, size: 11, width: 90, align: .leading, shrinkToFit: true)
         }
     }
 
@@ -468,6 +463,8 @@ struct ShipyardView: View {
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
     let galaxy: Galaxy
+    /// Push the purchase into the live HUD immediately (see `SpaceportView.onLiveSync`).
+    var onLiveSync: () -> Void = {}
     var onDone: () -> Void
 
     @State private var selectedID: Int?
@@ -600,9 +597,9 @@ struct ShipyardView: View {
     private func info(_ space: NovaSpace) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 10) {
-            infoRow("Price:", s.map { creditString(pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult)) } ?? "—")
-            infoRow("Trade-in:", creditString(pilot.tradeInValue(game: game)))
-            infoRow("You Have:", creditString(pilot.state.credits))
+            infoRow("Price:", s.map { pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult).creditsAbbreviated } ?? "—")
+            infoRow("Trade-in:", pilot.tradeInValue(game: game).creditsAbbreviated)
+            infoRow("You Have:", pilot.state.credits.creditsAbbreviated)
         }
         // DITL #1004 item 8 (614,214)-(757,314) against the real 765×323
         // Shipyard frame (PICT 8501 — matches DLOG #1004's own bounds
@@ -613,7 +610,7 @@ struct ShipyardView: View {
     private func infoRow(_ label: String, _ value: String) -> some View {
         HStack(spacing: 6) {
             NovaText(label, size: 11, color: .gray, width: 66, align: .leading)
-            NovaText(value, size: 11, width: 100, align: .leading)
+            NovaText(value, size: 11, width: 100, align: .leading, shrinkToFit: true)
         }
     }
 
@@ -639,6 +636,7 @@ struct ShipyardView: View {
             }
             if pilot.buyShip(s, game: game, priceMultiplier: rankMult) {
                 Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(pilot.netPrice(of: s, game: game, priceMultiplier: rankMult), privacy: .public)cr")
+                onLiveSync()
             } else {
                 Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game, priceMultiplier: rankMult), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
             }

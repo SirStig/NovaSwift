@@ -80,6 +80,33 @@ final class Layer2SyncTests: XCTestCase {
         XCTAssertTrue(selfEcho.isEmpty, "an authority shouldn't receive its own broadcast")
     }
 
+    func testNCBBitsReachTargetedPeerOnly() {
+        // Co-op story bits are sent per-participant (not broadcast) on the reliable
+        // channel, tagged with the sender.
+        let s = makeSessions(["authority", "client", "bystander"])
+        let authority = s[0]
+
+        var clientGot: [([Int], PeerID)] = []
+        var bystanderGot: [([Int], PeerID)] = []
+        s[1].onNCB = { bits, peer in clientGot.append((bits, peer)) }
+        s[2].onNCB = { bits, peer in bystanderGot.append((bits, peer)) }
+
+        authority.sendNCB([100, 205, 3000], to: "client")
+
+        XCTAssertEqual(clientGot.count, 1)
+        XCTAssertEqual(clientGot.first?.0, [100, 205, 3000])
+        XCTAssertEqual(clientGot.first?.1, "authority")
+        XCTAssertTrue(bystanderGot.isEmpty, "a non-targeted peer receives nothing")
+    }
+
+    func testEmptyNCBIsNotSent() {
+        let s = makeSessions(["a", "b"])
+        var got = 0
+        s[1].onNCB = { _, _ in got += 1 }
+        s[0].sendNCB([], to: "b")
+        XCTAssertEqual(got, 0, "an empty bit set is a no-op")
+    }
+
     func testInputAndSnapshotRoundTripStream() {
         // A short bidirectional exchange: client sends 3 inputs, authority replies
         // with a snapshot after each — the basic Layer-2 loop shape.

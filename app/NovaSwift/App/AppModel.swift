@@ -116,6 +116,16 @@ final class AppModel: ObservableObject {
         sessionObserver = session.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        // Co-op story (NCB) sync: let the session read our control-bit vector to
+        // share bits we earn in a shared storyline, and union bits a partner earns
+        // into ours — strictly non-destructive (see `MultiplayerSession`).
+        session.playerBitsProvider = { [weak self] in self?.pilot.state.setBits ?? [] }
+        session.onRemoteBitsEarned = { [weak self] bits in
+            guard let self else { return }
+            let before = pilot.state.setBits
+            pilot.state.setBits.formUnion(bits)      // union only — never removes
+            if pilot.state.setBits != before { pilot.save() }
+        }
         #if canImport(GameKit)
         // Forward Game Center sign-in changes so the "Online Co-op" entry updates.
         gameCenterObserver = gameCenter.objectWillChange.sink { [weak self] _ in

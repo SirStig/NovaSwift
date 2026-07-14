@@ -50,7 +50,7 @@ struct DebugGameStateView: View {
     private var pilotSection: some View {
         Section("Pilot") {
             LabeledContent("Credits") {
-                TextField("Credits", value: pilotBinding(\.credits), format: .number)
+                TextField("Credits", value: creditsBinding, format: .number)
                     .multilineTextAlignment(.trailing)
                     #if os(iOS)
                     .keyboardType(.numberPad)
@@ -60,7 +60,11 @@ struct DebugGameStateView: View {
                 quickButton("+10k")  { addCredits(10_000) }
                 quickButton("+100k") { addCredits(100_000) }
                 quickButton("+1M")   { addCredits(1_000_000) }
-                quickButton("Zero", role: .destructive) { pilot.state.credits = 0; pilot.save() }
+                quickButton("Zero", role: .destructive) {
+                    pilot.state.credits = 0
+                    pilot.save()
+                    debug.scene?.debugSyncCredits(pilot.state.credits)
+                }
             }
             Stepper("Combat rating: \(pilot.state.combatRating)",
                     value: pilotBinding(\.combatRating), in: 0...1_000_000, step: 100)
@@ -334,6 +338,20 @@ struct DebugGameStateView: View {
         )
     }
 
+    /// Like `pilotBinding`, but also pushes the new balance into the live HUD —
+    /// `hud.credits` is a manually-synced cache (see `GameScene.debugSyncCredits`)
+    /// that a plain `pilotBinding` write would leave stale while flying.
+    private var creditsBinding: Binding<Int> {
+        Binding(
+            get: { pilot.state.credits },
+            set: {
+                pilot.state.credits = $0
+                pilot.save()
+                debug.scene?.debugSyncCredits(pilot.state.credits)
+            }
+        )
+    }
+
     /// A stepper binding for one component of the galaxy date.
     private func dateComponent(_ kp: WritableKeyPath<GameDate, Int>) -> Binding<Int> {
         Binding(
@@ -350,6 +368,7 @@ struct DebugGameStateView: View {
     private func addCredits(_ n: Int) {
         pilot.state.credits = max(0, pilot.state.credits + n)
         pilot.save()
+        debug.scene?.debugSyncCredits(pilot.state.credits)
     }
 
     private func shipName(_ id: Int) -> String {

@@ -426,8 +426,30 @@ simply won't fire for that player, rather than corrupting state.
 - **Authority handoff:** works via deterministic re-election (`currentAuthorityID`) +
   `needsResync` world-rebuild when the host leaves a system; both sides agree with no
   negotiation. Seamless mirror-promotion (no NPC re-roll) is a future refinement.
-- **Remaining:** mission/NCB-in-combat sync (the story-split layer); the finer PvP toggles;
-  the Game Center app setup above; seamless authority handoff.
+- **Story / NCB co-op sync DONE (compiles; net delivery tested):** players now progress
+  missions **together** without ever overwriting what they've done apart. The authority's
+  storyline is the shared one, so bits it sets during co-op are captured (frame diff of
+  `PlayerState.setBits`), sent per-participant on the reliable channel (`NCBUpdate`), and
+  **unioned non-destructively** into each co-located partner's own vector (`AppModel`
+  `onRemoteBitsEarned` → `setBits.formUnion` + save). Strict rules enforced: additions only
+  (never clears), baseline seeded at session start + re-seeded whenever not the authority so
+  **pre-existing / solo-earned bits never leak** (no passive inheritance). Personal services
+  (shop/shipyard/rank/credits) already resolve per-pilot, untouched.
+- **Lobby system + management UI DONE (compiles; net logic tested):** replaced the
+  auto-connect-everyone mesh with **named lobbies**. `MultipeerTransport` now has host/join
+  **modes** (host advertises a named lobby via Bonjour `discoveryInfo`; a joiner invites only
+  the chosen host id — separate groups on one network never merge); `MultipeerLobbyBrowser`
+  lists nearby lobbies (`LobbyDescriptor`). Host **moderation** in `NetSession`: `kick`/`ban`
+  (`.kick` wire msg + `bannedIDs` refusing presence, `onKicked`). New UI (responsive — iPhone/
+  iPad/Mac, `presentationDetents` + capped widths + scroll): single **"Multiplayer"** menu
+  button → `MultiplayerHubView` (Local / Online tabs) → `HostSetupView` (lobby name + stakes:
+  Co-op/Full-Stakes preset + PvP/Trade toggles) or a **nearby-lobby list** to join; in-session
+  `LobbyRosterView` (player list, host/you badges, per-player kick/ban menu, rules pills,
+  Return-to-Flight / Leave). Game Center matchmaker moved into the hub + given a real
+  `minHeight` on macOS (fixes the too-short/oversized-buttons sheet).
+- **Remaining:** **trade / item hand-off UI** (`allowTrade` — next); finer PvP toggles
+  (`friendlyFire`/`deathReal`/`pvpDamageReal`); seamless authority handoff. Core "come help me
+  fly / fight / quest together" is complete.
 
 ## Testing on one machine
 

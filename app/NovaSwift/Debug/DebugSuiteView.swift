@@ -169,7 +169,9 @@ struct DebugSuiteView: View {
                     }
                 }
                 quickChip("+100k") {
-                    model.pilot.state.credits += 100_000; model.pilot.save()
+                    model.pilot.state.credits += 100_000
+                    model.pilot.save()
+                    debug.scene?.debugSyncCredits(model.pilot.state.credits)
                 }
             }
         }

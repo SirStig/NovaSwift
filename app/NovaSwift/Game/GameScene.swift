@@ -4075,6 +4075,29 @@ final class GameScene: SKScene {
         world.diplomacy?.setPlayerRecord(govt, to: record)
     }
 
+    /// Push a just-persisted credits change into the live HUD. `hud.credits` is
+    /// a manually-synced cache of `PlayerState.credits` (see `refreshHUDStyle`
+    /// and `plunderTakeCredits` in `GameContainerView`), so any code that edits
+    /// `pilot.state.credits` while a scene is up must call this or the on-screen
+    /// balance keeps showing the old number until the next takeoff/jump.
+    func debugSyncCredits(_ credits: Int) {
+        hud?.credits = credits
+    }
+
+    /// Push fuel/shield/armor into the live HUD after a spaceport transaction
+    /// (new ship, refuel, repair) that only touched the persisted pilot state —
+    /// the same "manually-synced cache" situation `debugSyncCredits` documents,
+    /// so a purchase made while landed shows up immediately instead of only
+    /// after the takeoff rebuild reads the pilot state fresh.
+    func syncLiveHUDStats(fuel: Double, maxFuel: Double, shield: Double, maxShield: Double,
+                          armor: Double, maxArmor: Double) {
+        hud?.fuel = maxFuel > 0 ? fuel / maxFuel : 0
+        hud?.maxFuel = maxFuel
+        hud?.jumps = Int((fuel / 100).rounded(.down))
+        hud?.shield = maxShield > 0 ? shield / maxShield : 0
+        hud?.armor = maxArmor > 0 ? armor / maxArmor : 1
+    }
+
     // MARK: - Debug suite: live cheats
 
     /// Hold the debug suite's continuous cheats against the world each frame.
