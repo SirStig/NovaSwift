@@ -800,8 +800,19 @@ public final class World {
     /// default and the "safe" preset), players can't damage each other even when
     /// aiming at one another — the classic help-me-fight co-op. When true (full
     /// stakes), a player's weapons hit other players for real. Only affects
-    /// player-vs-player hits; player-vs-NPC and NPC-vs-anyone are unchanged.
+    /// player-vs-player **direct** hits; player-vs-NPC and NPC-vs-anyone are unchanged.
     public var pvpAllowed = false
+    /// Co-op `SessionRules.friendlyFire`: whether a player's **area/splash** damage
+    /// also catches other players (on top of `pvpAllowed`, which gates direct hits).
+    /// Off ⇒ your blast weapons never singe an ally even in a PvP session.
+    public var friendlyFireAllowed = false
+    /// Co-op `SessionRules.pvpDamageReal`: when false, a player-vs-player hit still
+    /// *registers* (flash/cloak-drop) but deals **zero** damage — a friendly spar.
+    public var pvpDamageReal = true
+    /// Co-op `SessionRules.deathReal`: when false, a **player-controlled** ship
+    /// can't be destroyed — its armor is floored at 1 so it survives, however hard
+    /// it's hit (by anyone). True (default) = normal, ships can die.
+    public var playerDeathReal = true
 
     public var tuning: FlightTuning
     public var combatTuning: CombatTuning
@@ -2059,8 +2070,13 @@ public final class World {
         }
         // Blast splash to everyone else in radius.
         if p.blastRadius > 0 {
+            let ownerIsPlayer = ship(id: p.ownerID)?.isPlayerControlled == true
             for splash in allShips where splash.isAlive && splash.entityID != directHit?.entityID {
                 guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: splash) else { continue }
+                // Co-op friendly fire: a player's blast only catches another player
+                // when friendly fire is enabled (direct hits already pass canHit's
+                // pvp gate; this is the extra splash-only guard).
+                if ownerIsPlayer, splash.isPlayerControlled, !friendlyFireAllowed { continue }
                 if (splash.position - pos).length <= p.blastRadius {
                     applyHit(to: splash, shield: p.shieldDamage * 0.5, armor: p.armorDamage * 0.5,
                              ownerID: p.ownerID, ionization: p.ionization * 0.5,
@@ -2127,6 +2143,12 @@ public final class World {
             shield *= combatTuning.playerDamageScale
             armor  *= combatTuning.playerDamageScale
         }
+        // Co-op sparring (`pvpDamageReal` off): a player-vs-player hit still lands
+        // (flash, cloak drop below) but deals no health damage.
+        if !pvpDamageReal, ship.isPlayerControlled,
+           let ownerShip = self.ship(id: ownerID), ownerShip.isPlayerControlled {
+            shield = 0; armor = 0
+        }
         let hadShield = ship.shield > 0
         // Per-hit logging isn't gated like everything else in this file (no
         // "log on change/transition" here — every hit is its own event), and
@@ -2136,6 +2158,9 @@ public final class World {
         // need one too — this was real, uncapped log volume that scaled
         // directly with how many ships were fighting.
         _ = ship.applyDamage(shield: shield, armor: armor, piercing: piercing)
+        // Co-op no-death (`deathReal` off): a player-controlled ship can't be
+        // destroyed — floor its armor so it survives however hard it's hit.
+        if !playerDeathReal, ship.isPlayerControlled, ship.armor < 1 { ship.armor = 1 }
         // Cloak flag 0x0008: taking damage forces the cloak off.
         if ship.cloakEngaged, ship.cloakDropsOnDamage { ship.cloakEngaged = false }
         if ionization > 0, ship.ionizeMax > 0 {
@@ -2161,9 +2186,10 @@ public final class World {
         // (`shïp.Flags` 0x0010 → 10%, otherwise 33% of max armor) — a one-time
         // deterministic state transition, not a random roll. Once already
         // disabled, further damage that zeroes armor is a real kill (handled by
-        // `isAlive`/`despawnDepartedAndDead`, not here). The player is never
-        // disabled this way (the app owns player death).
-        if !ship.isPlayer, !ship.disabled, ship.armor <= ship.maxArmor * ship.disableArmorFraction {
+        // `isAlive`/`despawnDepartedAndDead`, not here). No **player-controlled**
+        // ship is disabled this way (the local player's death is the app's; a
+        // co-op remote player dies or is floored by `deathReal`, never a hulk).
+        if !ship.isPlayerControlled, !ship.disabled, ship.armor <= ship.maxArmor * ship.disableArmorFraction {
             ship.disabled = true
             ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
             ship.shield = 0

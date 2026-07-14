@@ -26,7 +26,10 @@ public final class SystemSyncCoordinator {
     /// Client side: authority entity id → our local mirror ship's entity id, for
     /// every remote **player** we've injected into the local `World`. Reset when the
     /// local player changes system (a fresh `World` invalidates all mirrors).
-    private var mirrorIDByAuthorityID: [Int: Int] = [:]
+    /// Keyed by the owning **playerID** (not the authority's entity id) so a mirror
+    /// survives an authority handoff — the new authority reports the same players by
+    /// id, so their ships update in place instead of blinking out and respawning.
+    private var playerMirrorID: [String: Int] = [:]
     /// Client side: authority entity id → our local mirror id, for every **NPC**
     /// mirrored from the authority's snapshot (shared world / co-op combat).
     private var npcMirrorIDByAuthorityID: [Int: Int] = [:]
@@ -50,7 +53,19 @@ public final class SystemSyncCoordinator {
     /// Drop all per-system state. Call on a local system change or role change —
     /// the old `World`'s entity ids and the old authority's ids no longer apply.
     public func reset() {
-        mirrorIDByAuthorityID.removeAll()
+        playerMirrorID.removeAll()
+        npcMirrorIDByAuthorityID.removeAll()
+        latestInput.removeAll()
+        highestSeq.removeAll()
+        clientShipID.removeAll()
+        pendingEffects.removeAll()
+    }
+
+    /// Drop only the **NPC** mirrors + NPC-side state, keeping player mirrors. Used
+    /// on an authority handoff (same system, new host): NPC entity ids are the old
+    /// authority's and no longer valid, but players are keyed by stable id so their
+    /// ships carry through the switch without blinking.
+    public func resetForAuthorityChange() {
         npcMirrorIDByAuthorityID.removeAll()
         latestInput.removeAll()
         highestSeq.removeAll()
@@ -67,6 +82,32 @@ public final class SystemSyncCoordinator {
             world.emitVisualExplosion(at: Vec2(e.x, e.y), radius: e.radius, boomID: e.boomID)
         }
         pendingEffects.removeAll(keepingCapacity: true)
+    }
+
+    // MARK: - Authority handoff
+
+    /// Promote the world we were mirroring (as a client) into one we now own (as the
+    /// new authority) — a **seamless handoff**: nothing is torn down and respawned.
+    /// The co-located friends' `remotePlayer` ships become the client ships we drive
+    /// from their inputs; the `networkMirror` NPCs are handed back so the app can
+    /// re-attach AI brains, keeping the same cast rather than re-rolling it. Call
+    /// this instead of `reset()` when transitioning client → authority.
+    ///
+    /// Returns the NPC ships to promote (the app clears `networkMirror` + attaches a
+    /// brain on each).
+    @discardableResult
+    public func promoteToAuthority(world: World) -> [Ship] {
+        // Adopt co-located players as the clients we now simulate.
+        clientShipID.removeAll()
+        for ship in world.remotePlayerShips {
+            if let peer = ship.remotePlayer?.peerID { clientShipID[peer] = ship.entityID }
+        }
+        // Hand back the NPC mirrors for promotion; drop the client-side maps.
+        let npcs = world.npcs.filter { $0.networkMirror }
+        playerMirrorID.removeAll()
+        npcMirrorIDByAuthorityID.removeAll()
+        pendingEffects.removeAll()
+        return npcs
     }
 
     // MARK: - Authority side
@@ -164,7 +205,7 @@ public final class SystemSyncCoordinator {
                       makeNPCMirror: (ShipNetState) -> Ship = SystemSyncCoordinator.defaultMirror)
         -> (injected: [Int], removed: [Int])
     {
-        var seenPlayerIDs = Set<Int>()
+        var seenPlayerIDs = Set<String>()
         var seenNPCIDs = Set<Int>()
         var injected: [Int] = []
         var ownAuthorityID: Int?   // our ship's entity id in the authority's world
@@ -178,15 +219,15 @@ public final class SystemSyncCoordinator {
                 continue
             }
             if let owner = state.playerID {
-                // Another player.
-                seenPlayerIDs.insert(state.id)
-                if let localID = mirrorIDByAuthorityID[state.id], let ship = world.ship(id: localID) {
+                // Another player — keyed by stable playerID so it survives a handoff.
+                seenPlayerIDs.insert(owner)
+                if let localID = playerMirrorID[owner], let ship = world.ship(id: localID) {
                     updateMirror(ship, from: state)
                 } else {
                     let localID = world.spawnRemotePlayer(
                         makeMirror(state), info: RemotePlayerInfo(peerID: owner, name: state.name),
                         arrival: .populate)
-                    mirrorIDByAuthorityID[state.id] = localID
+                    playerMirrorID[owner] = localID
                     injected.append(localID)
                 }
             } else {
@@ -204,9 +245,9 @@ public final class SystemSyncCoordinator {
 
         // Anyone/anything that dropped out of the snapshot: remove its mirror.
         var removed: [Int] = []
-        for (authorityID, localID) in mirrorIDByAuthorityID where !seenPlayerIDs.contains(authorityID) {
+        for (owner, localID) in playerMirrorID where !seenPlayerIDs.contains(owner) {
             world.removeShip(entityID: localID)
-            mirrorIDByAuthorityID[authorityID] = nil
+            playerMirrorID[owner] = nil
             removed.append(localID)
         }
         for (authorityID, localID) in npcMirrorIDByAuthorityID where !seenNPCIDs.contains(authorityID) {

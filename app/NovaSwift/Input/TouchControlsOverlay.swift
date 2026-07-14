@@ -128,21 +128,41 @@ struct TouchControlsOverlay: View {
         }
     }
 
-    /// Current secondary weapon + tap-to-cycle, in the EV Nova dark/amber idiom.
+    /// Current secondary weapon: tap the chip to cycle forward, tap the small
+    /// leading chevron to go back — the forward direction keeps the large,
+    /// easy-to-hit tap target it always had; reverse is a smaller, secondary
+    /// affordance next to it rather than splitting the chip itself in half.
+    /// The chevron stays visible (disabled, not hidden) with zero/one
+    /// secondaries fitted, since the loadout can change mid-flight (buy an
+    /// outfit, get boarded) and a control that pops in and out is worse than
+    /// one that's just briefly unusable.
     private var weaponChip: some View {
-        Button { onDiscrete(.selectSecondaryNext) } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11 * m.s, weight: .bold))
-                Text(hud.weaponName.isEmpty ? "No 2nd weapon" : hud.weaponName)
-                    .font(.system(size: 11 * m.s, weight: .semibold)).lineLimit(1)
+        HStack(spacing: 3) {
+            Button { onDiscrete(.selectSecondaryPrev) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 10 * m.s, weight: .bold))
+                    .foregroundStyle(hud.hasSecondary ? novaAmber : Color(white: 0.4))
+                    .frame(width: 18 * m.s, height: 20 * m.s)
+                    .contentShape(Rectangle())
             }
-            .foregroundStyle(novaAmber)
-            .padding(.horizontal, 10 * m.s).padding(.vertical, 5 * m.s)
-            .frame(maxWidth: 160 * m.s)
-            .novaControlPanel(corner: 7 * m.s)
+            .buttonStyle(.plain)
+            .disabled(!hud.hasSecondary)
+
+            Button { onDiscrete(.selectSecondaryNext) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11 * m.s, weight: .bold))
+                    Text(hud.weaponName.isEmpty ? "No 2nd weapon" : hud.weaponName)
+                        .font(.system(size: 11 * m.s, weight: .semibold)).lineLimit(1)
+                }
+                .foregroundStyle(novaAmber)
+                .padding(.horizontal, 10 * m.s).padding(.vertical, 5 * m.s)
+                .frame(maxWidth: 140 * m.s)
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.leading, 2 * m.s)
+        .novaControlPanel(corner: 7 * m.s)
     }
 
     // MARK: Actions menu (top-right)
@@ -165,6 +185,10 @@ struct TouchControlsOverlay: View {
             ("xmark.circle", "Untarget", { onDiscrete(.clearTarget) }, true),
             ("antenna.radiowaves.left.and.right", "Hail", { onDiscrete(.hailTarget) }, true),
             ("shippingbox.fill", "Board", { onDiscrete(.board) }, true),
+            (hud.cloakEngaged ? "eye.slash.fill" : "eye.slash", hud.cloakEngaged ? "Uncloak" : "Cloak",
+             { onDiscrete(.toggleCloak) }, hud.hasCloak),
+            ("airplane.departure", "Launch", { onDiscrete(.launchFighters) }, hud.hasFighterBays),
+            ("airplane.arrival", "Recall", { onDiscrete(.recallFighters) }, hud.hasFighterBays),
             ("map.fill", "Map", { onDiscrete(.galaxyMap) }, true),
             ("bolt.horizontal.circle.fill", "Jump", { onDiscrete(.hyperjump) }, true),
             ("arrow.down.to.line", "Land", { onDiscrete(.land) }, hud.landReady),

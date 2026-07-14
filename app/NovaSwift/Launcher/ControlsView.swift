@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Full, rebindable keyboard controls (EV Nova scheme). Tap a key to rebind it,
 /// then press the new key. Escape cancels. Works with any hardware keyboard
@@ -11,7 +14,7 @@ struct ControlsView: View {
     var body: some View {
         List {
             Section {
-                Text("Tap a key to rebind, then press the new key (Esc cancels). These match EV Nova's scheme and drive keyboard play.")
+                Text("Tap a key to rebind, then press the new key — or hold a modifier alone, like Control (Esc cancels). These match EV Nova's scheme and drive keyboard play.")
                     .novaFont(.caption).foregroundStyle(.secondary)
             }
             ForEach(GameAction.Category.allCases) { category in
@@ -43,7 +46,24 @@ struct ControlsView: View {
             capturing = nil
             return .handled
         }
+        #if os(macOS)
+        // A bare modifier tap (e.g. Control, the real-EV-Nova default for
+        // "fire secondary weapon") never reaches `onKeyPress` above — see
+        // `ModifierFlagsBridge`'s doc comment — so it's captured here instead.
+        .background {
+            if capturing != nil { ModifierFlagsBridge(onChange: captureModifier) }
+        }
+        #endif
     }
+
+    #if os(macOS)
+    private func captureModifier(_ flags: NSEvent.ModifierFlags) {
+        guard let action = capturing, let token = bareModifierToken(flags) else { return }
+        model.bindings.rebind(action, to: token)
+        model.commitBindings()
+        capturing = nil
+    }
+    #endif
 
     private func actions(in category: GameAction.Category) -> [GameAction] {
         GameAction.allCases.filter { $0.category == category }

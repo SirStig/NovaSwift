@@ -316,6 +316,64 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         })
     }
 
+    func testPlayerMirrorSurvivesAuthorityHandoff() {
+        // A client mirrors a friend from authority-1's snapshot, then authority-2
+        // (a different host, different entity ids) reports the same friend — the
+        // mirror updates in place (same local ship), it doesn't blink out.
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+
+        let fromAuth1 = WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [
+            ShipNetState(id: 5, playerID: "friend", shipTypeID: 128, name: "Bo",
+                         x: 10, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+        ])
+        coord.apply(fromAuth1, to: world, authorityPeer: "auth1")
+        XCTAssertEqual(world.remotePlayerShips.count, 1)
+        let localID = world.remotePlayerShips.first!.entityID
+
+        // Handoff: same-system authority change keeps player mirrors.
+        coord.resetForAuthorityChange()
+
+        // Authority-2 reports the same friend under a DIFFERENT entity id.
+        let fromAuth2 = WorldSnapshot(tick: 2, ackInputSeq: 0, ships: [
+            ShipNetState(id: 99, playerID: "friend", shipTypeID: 128, name: "Bo",
+                         x: 40, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+        ])
+        coord.apply(fromAuth2, to: world, authorityPeer: "auth2")
+
+        XCTAssertEqual(world.remotePlayerShips.count, 1, "still one friend — no blink")
+        XCTAssertEqual(world.remotePlayerShips.first?.entityID, localID, "same local ship, updated in place")
+        XCTAssertEqual(world.remotePlayerShips.first?.position.x, 40, "updated to the new authority's state")
+    }
+
+    func testPromoteToAuthorityAdoptsMirrors() {
+        // A former client's world: a friend (remotePlayer) + an NPC (networkMirror).
+        // Promoting to authority adopts the friend as a client ship and returns the
+        // NPC for the app to re-brain.
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+        let snap = WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [
+            ShipNetState(id: 5, playerID: "friend", shipTypeID: 128, name: "Bo",
+                         x: 0, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+            ShipNetState(id: 9, playerID: nil, shipTypeID: 130, name: "Pirate",
+                         x: 5, y: 5, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .ai),
+        ])
+        coord.apply(snap, to: world, authorityPeer: "auth")
+        XCTAssertEqual(world.remotePlayerShips.count, 1)
+        XCTAssertEqual(world.npcs.filter { $0.networkMirror }.count, 1)
+
+        let toPromote = coord.promoteToAuthority(world: world)
+        XCTAssertEqual(toPromote.count, 1, "the NPC mirror is handed back for re-braining")
+        XCTAssertEqual(toPromote.first?.name, "Pirate")
+
+        // The friend is now a client we drive: feeding its input steers it.
+        var thrust = NetIntent(); thrust.thrust = true
+        coord.receiveInput(InputFrame(tick: 1, seq: 1, intent: thrust), from: "friend")
+        coord.applyInputs(to: world)
+        let friend = world.remotePlayerShips.first { $0.remotePlayer?.peerID == "friend" }!
+        XCTAssertEqual(world.remoteIntents[friend.entityID]?.thrust, true)
+    }
+
     func testStaleInputIsDropped() {
         // Authority keeps only the freshest input per client by seq.
         let coord = SystemSyncCoordinator(localPlayerID: "A")

@@ -3807,15 +3807,20 @@ final class GameScene: SKScene {
         hud.cargoUsed = p.cargoUsed
         hud.cargoCapacity = p.cargoCapacity
         // The weapon readout tracks the selected *secondary* (what the secondary
-        // trigger / weapon-switch control fires), matching EV Nova's status bar;
-        // falls back to the first weapon so a guns-only ship still shows one.
-        if let mount = p.effectiveSecondaryMount ?? p.weapons.first {
+        // trigger / weapon-switch control fires), matching EV Nova's status bar.
+        // A guns-only ship (no secondary fitted) correctly shows nothing here —
+        // the primary is "always available" and never occupies this readout.
+        if let mount = p.effectiveSecondaryMount {
             hud.weaponName = mount.spec.name.novaDisplayName
             hud.weaponAmmo = mount.ammo   // -1 = unlimited
         } else {
             hud.weaponName = ""
             hud.weaponAmmo = -1
         }
+        hud.hasSecondary = !p.secondaryWeaponIDs.isEmpty
+        hud.hasCloak = p.hasCloak
+        hud.cloakEngaged = p.cloakEngaged
+        hud.hasFighterBays = !p.fighterBays.isEmpty
         var deg = p.angle * 180 / .pi
         deg = deg.truncatingRemainder(dividingBy: 360)
         if deg < 0 { deg += 360 }

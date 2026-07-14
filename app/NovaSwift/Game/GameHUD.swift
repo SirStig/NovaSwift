@@ -29,8 +29,19 @@ final class GameHUDModel: ObservableObject {
     @Published var controllerConnected = false
     @Published var systemName = ""
     // Loadout readout.
-    @Published var weaponName = ""      // active primary weapon (empty = unarmed)
+    @Published var weaponName = ""      // selected secondary weapon (empty = none fitted/selected)
     @Published var weaponAmmo = -1      // rounds left; -1 = unlimited / n/a
+    /// Whether the ship has a secondary fitted at all — distinct from
+    /// `weaponName` being empty, which also happens transiently between
+    /// cycles. Drives whether the touch weapon-select control is enabled.
+    @Published var hasSecondary = false
+    /// Whether the ship has a cloaking device fitted (oütf ModType 17) and, if
+    /// so, whether it's currently engaged — gates/labels the touch cloak toggle.
+    @Published var hasCloak = false
+    @Published var cloakEngaged = false
+    /// Whether the ship has at least one fighter bay fitted — gates the touch
+    /// launch/recall controls (both are no-ops on a hull with none).
+    @Published var hasFighterBays = false
     @Published var cargoUsed = 0
     @Published var cargoCapacity = 0
     /// The player's credit balance, shown in the status bar's bottom readout

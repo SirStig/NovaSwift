@@ -8,11 +8,25 @@ struct KeyBindings: Codable, Equatable {
 
     init(map: [GameAction: String] = KeyBindings.defaults) { self.map = map }
 
+    // Real EV Nova default: Spacebar fires primary; secondaries are picked with
+    // W (Alt-W to go backwards, `KeyToken`'s "opt+w") and fired with the
+    // Control key. Bare Control has no `KeyPress` of its own — AppKit only
+    // reports it as a `flagsChanged` event, never a `keyDown` — so on macOS
+    // it's captured separately by `ModifierKeyControls`/`ModifierFlagsBridge`
+    // rather than through `KeyToken.from`. iOS has no reliable bare-modifier
+    // capture (no local `NSEvent` monitor there), so it keeps Return, which
+    // is fully reachable through ordinary `onKeyPress`.
+    #if os(macOS)
+    private static let fireSecondaryDefault = "control"
+    #else
+    private static let fireSecondaryDefault = "return"
+    #endif
+
     static let defaults: [GameAction: String] = [
         .accelerate: "up", .decelerate: "down", .turnLeft: "left", .turnRight: "right",
         .afterburner: "shift",
-        .firePrimary: "space", .fireSecondary: "return",
-        .selectSecondaryPrev: "[", .selectSecondaryNext: "]", .toggleCloak: "c",
+        .firePrimary: "space", .fireSecondary: fireSecondaryDefault,
+        .selectSecondaryPrev: "opt+w", .selectSecondaryNext: "w", .toggleCloak: "c",
         .launchFighters: "f", .recallFighters: "g",
         // Matches the real game's default control scheme: Tab cycles targets
         // ("Target Select"), R snaps to the closest ("Closest Targ"), Y hails.
@@ -63,8 +77,34 @@ struct KeyBindings: Codable, Equatable {
 }
 
 /// Maps SwiftUI key presses to stable tokens and back to human labels.
+///
+/// A token is either a bare key ("w", "space", "return", …) or, for a
+/// modifier held alongside a real key, "<mod>+<key>" ("opt+w"). `<mod>` is
+/// currently only "opt" — that's the one authentic EV Nova combo
+/// (`selectSecondaryPrev`). Bare-modifier-only tokens ("control", "option",
+/// "command" — no accompanying key) are also valid and stored the same way,
+/// but `KeyToken.from` never produces them: SwiftUI's `onKeyPress` has no
+/// `KeyPress` to report for a lone modifier tap, only for an actual key.
+/// Those come from `ModifierFlagsBridge` instead (macOS only).
 enum KeyToken {
     static func from(_ press: KeyPress) -> String {
+        let base = baseToken(press)
+        guard !base.isEmpty else { return "" }
+        // Only Option changes the produced token: Shift is already folded into
+        // `press.key.character`'s case/glyph by the time it gets here (so
+        // Shift+1 already reads as its own character, not "shift+1"), and
+        // Command-key combos are reserved for menu shortcuts elsewhere in the
+        // app rather than flight controls.
+        if press.modifiers.contains(.option) { return "opt+\(base)" }
+        return base
+    }
+
+    /// The physical key identity, ignoring modifier composition — using
+    /// `press.key.character` (not `press.characters`) matters here: on a US
+    /// layout, Option+W *composes* to "∑" in `.characters`, which would make
+    /// "Alt-W to go backwards" produce a different token every time depending
+    /// on what Option happens to compose the base key into.
+    private static func baseToken(_ press: KeyPress) -> String {
         switch press.key {
         case .leftArrow: return "left"
         case .rightArrow: return "right"
@@ -76,15 +116,39 @@ enum KeyToken {
         case .escape: return "escape"
         case .delete: return "delete"
         default:
-            if let c = press.characters.first, !press.characters.isEmpty {
-                return String(c).lowercased()
-            }
-            return ""
+            // `press.characters` (not `.key.character`) is the signal that a
+            // real key was actually pressed — it's empty for the odd event
+            // with no usable key at all, same guard as before this handled Option.
+            guard !press.characters.isEmpty else { return "" }
+            return String(press.key.character).lowercased()
         }
     }
 
     /// Human-readable label for a token (for the Controls UI).
     static func label(_ token: String) -> String {
+        if let range = token.range(of: "+") {
+            let mod = String(token[token.startIndex..<range.lowerBound])
+            let base = String(token[range.upperBound...])
+            return modLabel(mod) + baseLabel(base)
+        }
+        switch token {
+        case "control": return "⌃"
+        case "option": return "⌥"
+        case "command": return "⌘"
+        default: return baseLabel(token)
+        }
+    }
+
+    private static func modLabel(_ mod: String) -> String {
+        switch mod {
+        case "opt": return "⌥"
+        case "ctrl": return "⌃"
+        case "cmd": return "⌘"
+        default: return ""
+        }
+    }
+
+    private static func baseLabel(_ token: String) -> String {
         switch token {
         case "": return "—"
         case "left": return "←"

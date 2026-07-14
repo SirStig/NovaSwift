@@ -13,6 +13,9 @@ struct HostSetupView: View {
     @State private var lobbyName = ""
     @State private var preset: Preset = .fullStakes
     @State private var allowPvP = true
+    @State private var friendlyFire = true
+    @State private var pvpDamageReal = true
+    @State private var deathReal = true
     @State private var allowTrade = true
 
     private enum Preset: String, CaseIterable, Identifiable {
@@ -42,6 +45,9 @@ struct HostSetupView: View {
                             // Apply the preset's defaults, still tweakable below.
                             let r: SessionRules = new == .safe ? .safe : .fullStakes
                             allowPvP = r.allowPvP
+                            friendlyFire = r.friendlyFire
+                            pvpDamageReal = r.pvpDamageReal
+                            deathReal = r.deathReal
                             allowTrade = r.allowTrade
                         }
                         Text(preset == .safe
@@ -50,8 +56,17 @@ struct HostSetupView: View {
                             .novaFont(.caption).foregroundStyle(.secondary)
                     }
 
+                    field(title: "Combat") {
+                        Toggle("Allow PvP — players can attack each other", isOn: $allowPvP)
+                        if allowPvP {
+                            Toggle("Real PvP damage (off = friendly sparring)", isOn: $pvpDamageReal)
+                            Toggle("Splash damage hits allies (friendly fire)", isOn: $friendlyFire)
+                        }
+                        Toggle("Permadeath — players' ships can be destroyed", isOn: $deathReal)
+                    }
+                    .tint(amber)
+
                     field(title: "Options") {
-                        Toggle("Allow PvP (players can damage each other)", isOn: $allowPvP)
                         Toggle("Allow trading between players", isOn: $allowTrade)
                     }
                     .tint(amber)
@@ -91,6 +106,9 @@ struct HostSetupView: View {
     private var rules: SessionRules {
         var r: SessionRules = preset == .safe ? .safe : .fullStakes
         r.allowPvP = allowPvP
+        r.friendlyFire = friendlyFire
+        r.pvpDamageReal = pvpDamageReal
+        r.deathReal = deathReal
         r.allowTrade = allowTrade
         return r
     }

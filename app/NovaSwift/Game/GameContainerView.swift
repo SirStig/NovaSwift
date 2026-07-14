@@ -1888,6 +1888,13 @@ struct GameContainerView: View {
         .focusEffectDisabled()
         .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
                                    onDiscrete: handleDiscrete))
+        #if os(macOS)
+        // Bare-modifier bindings (default: Control fires the selected secondary
+        // weapon, matching real EV Nova) can't go through `KeyboardControls` —
+        // see `ModifierFlagsBridge`'s doc comment for why.
+        .modifier(ModifierKeyControls(input: host.input, bindings: model.bindings,
+                                      onDiscrete: handleDiscrete))
+        #endif
     }
 
     /// The on-screen flight controls show only during actual flight — hidden

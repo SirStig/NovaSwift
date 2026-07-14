@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import NovaSwiftKit
 import NovaSwiftNet
 import NovaSwiftEngine
 import NovaSwiftSync
@@ -99,6 +100,8 @@ final class MultiplayerSession: ObservableObject {
     private var needsResync = false
     /// The authority id used on the previous frame, to detect role/authority change.
     private var lastAuthorityID: String?
+    /// Whether we were the authority last frame — drives the handoff transition.
+    private var wasAuthority = false
 
     // MARK: - Co-op story (NCB) sync
 
@@ -222,6 +225,7 @@ final class MultiplayerSession: ObservableObject {
         coordinator = nil
         latestSnapshot = nil
         lastAuthorityID = nil
+        wasAuthority = false
         needsResync = false
         netTick = 0
         inputSeq = 0
@@ -456,33 +460,85 @@ final class MultiplayerSession: ObservableObject {
     /// Called by the game scene each frame **before** `world.step`. Injects/updates
     /// co-op ships and, on the authority, feeds clients' inputs into the world. A
     /// no-op in single-player or when the local player is alone in the system.
+    /// Full teardown of every co-op mirror + visual echo, spawner resumed — used on
+    /// a system change (fresh world) or when we drop back to solo.
+    private func fullClearMirrors(_ world: World, _ coordinator: SystemSyncCoordinator) {
+        let ids = world.npcs.filter { $0.remotePlayer != nil || $0.networkMirror }.map { $0.entityID }
+        for id in ids { world.removeShip(entityID: id) }
+        world.clearVisualProjectiles()
+        world.clearVisualBeams()
+        world.spawningPaused = false
+        coordinator.reset()
+        latestSnapshot = nil
+    }
+
+    /// Promote a mirrored NPC to a real, self-driving ship when we take over as
+    /// authority — keeps the shared cast alive across a handoff instead of clearing
+    /// and re-rolling it. It gets a plausible brain from its hull (armed ⇒ warship).
+    private func promoteNPC(_ ship: Ship, in world: World) {
+        ship.networkMirror = false
+        let type: AIType = ship.weapons.isEmpty ? .braveTrader : .warship
+        ship.brain = AIBrain(aiType: type, govt: ship.government)
+    }
+
+    /// Handle an authority change (host left / handoff) as seamlessly as the case
+    /// allows. Player mirrors are keyed by stable id, so friends' ships carry
+    /// through; only NPCs (whose ids are authority-specific) re-roll.
+    private func handleAuthorityChange(to authority: String?, iAmAuthority: Bool,
+                                       world: World, coordinator: SystemSyncCoordinator) {
+        latestSnapshot = nil
+        if authority == nil {
+            fullClearMirrors(world, coordinator)                 // dropped back to solo
+        } else if iAmAuthority && !wasAuthority {
+            // Client → new host: adopt the mirrored world instead of rebuilding it.
+            let toPromote = coordinator.promoteToAuthority(world: world)
+            for npc in toPromote { promoteNPC(npc, in: world) }
+            world.clearVisualProjectiles(); world.clearVisualBeams()   // we produce real ones now
+            world.spawningPaused = false
+        } else if !iAmAuthority && wasAuthority {
+            // Host → client (rare — a smaller id joined): tear down our own world;
+            // the client branch below repopulates as a mirror of the new host.
+            fullClearMirrors(world, coordinator)
+        } else {
+            // Client → a *different* host: keep player mirrors (stable ids reconcile
+            // in place — no blink), drop only the NPC mirrors (authority-specific ids).
+            let npcIDs = world.npcs.filter { $0.networkMirror }.map { $0.entityID }
+            for id in npcIDs { world.removeShip(entityID: id) }
+            world.clearVisualProjectiles(); world.clearVisualBeams()
+            coordinator.resetForAuthorityChange()                // spawner stays paused (still a client)
+        }
+    }
+
     func syncPreStep(world: World) {
         guard isActive, let coordinator, let net else { return }
 
-        // Honor the session's PvP stake (host-set). Applied every frame so a
+        // Honor the session's stakes (host-set). Applied every frame so a
         // mid-session rules change takes effect immediately.
         world.pvpAllowed = rules.allowPvP
+        world.friendlyFireAllowed = rules.friendlyFire
+        world.pvpDamageReal = rules.pvpDamageReal
+        world.playerDeathReal = rules.deathReal
 
         let authority = currentAuthorityID
-        // Role or authority changed (someone arrived/left, or handoff) — start clean.
-        if authority != lastAuthorityID { needsResync = true; lastAuthorityID = authority }
+        let iAmAuthority = (authority == localPlayerID)
         // Whenever we're not the story authority (solo or a client), re-seed the NCB
         // baseline so bits we earn *outside* a shared moment don't propagate when we
         // next become the authority — only bits earned while co-hosting are shared.
-        if authority != localPlayerID { bitsInitialized = false }
+        if !iAmAuthority { bitsInitialized = false }
+
         if needsResync {
-            // Drop every co-op mirror (players + NPCs) and let this world populate
-            // itself again — a fresh role/system starts from our own galaxy.
-            let mirrorIDs = world.npcs
-                .filter { $0.remotePlayer != nil || $0.networkMirror }
-                .map { $0.entityID }
-            for id in mirrorIDs { world.removeShip(entityID: id) }
-            world.clearVisualProjectiles()
-            world.clearVisualBeams()
-            world.spawningPaused = false
-            coordinator.reset()
-            latestSnapshot = nil
+            // A fresh **system** (new world) → full reset from our own galaxy.
+            fullClearMirrors(world, coordinator)
             needsResync = false
+            wasAuthority = iAmAuthority
+            lastAuthorityID = authority
+        } else if authority != lastAuthorityID {
+            // Authority **handoff** (same system, host left/changed) — handled
+            // seamlessly where possible (see `handleAuthorityChange`).
+            handleAuthorityChange(to: authority, iAmAuthority: iAmAuthority,
+                                  world: world, coordinator: coordinator)
+            wasAuthority = iAmAuthority
+            lastAuthorityID = authority
         }
         guard let authority else { return }   // alone → single-player sim
 

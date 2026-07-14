@@ -167,6 +167,53 @@ final class RemotePlayerTests: XCTestCase {
         XCTAssertTrue(scenario(pvp: true), "with PvP on, a player's shot hits another player")
     }
 
+    // MARK: Finer PvP toggles
+
+    /// A player + a player-controlled friend both at govt 200, with a real shot
+    /// from entity 0 heading into the friend at (30,0).
+    private func pvpWorld(_ configure: (World, Ship) -> Void) -> Ship {
+        let world = World(player: Ship(name: "A", stats: ShipStats(maxSpeed: 100, acceleration: 50, turnRate: .pi)))
+        world.player.government = 200
+        let friend = Ship(name: "B", stats: world.player.stats, position: Vec2(30, 0))
+        friend.government = 200
+        friend.maxShield = 0; friend.shield = 0     // straight to armor for a clean read
+        friend.maxArmor = 100; friend.armor = 100
+        world.spawnRemotePlayer(friend, info: RemotePlayerInfo(peerID: "B", name: "B"))
+        configure(world, friend)
+        let shot = Projectile(position: Vec2(0, 0), velocity: Vec2(600, 0), life: 1,
+                              shieldDamage: 200, armorDamage: 200, blastRadius: 0,
+                              ownerID: 0, ownerGovt: 200, homing: false, turnRate: 0,
+                              speed: 600, targetID: nil)
+        world.testInjectProjectile(shot)
+        for _ in 0..<10 { world.step(1.0 / 30.0) }
+        return friend
+    }
+
+    func testSparringRegistersButDealsNoDamage() {
+        // pvpAllowed but pvpDamageReal off → the hit lands but armor is untouched.
+        let friend = pvpWorld { w, _ in w.pvpAllowed = true; w.pvpDamageReal = false }
+        XCTAssertEqual(friend.armor, 100, accuracy: 1e-9, "sparring deals no damage")
+    }
+
+    func testRealPvPDamageWhenEnabled() {
+        let friend = pvpWorld { w, _ in w.pvpAllowed = true; w.pvpDamageReal = true }
+        XCTAssertLessThan(friend.armor, 100, "real PvP damage applies")
+    }
+
+    func testNoDeathFloorsPlayerArmorAtOne() {
+        // A very hard hit with deathReal off must leave the player-controlled ship
+        // alive (armor ≥ 1), never destroyed.
+        let friend = pvpWorld { w, _ in w.pvpAllowed = true; w.playerDeathReal = false }
+        XCTAssertGreaterThanOrEqual(friend.armor, 1, "no-death floors armor")
+        XCTAssertTrue(friend.isAlive)
+    }
+
+    func testDeathRealLetsPlayerShipDie() {
+        let friend = pvpWorld { w, _ in w.pvpAllowed = true; w.playerDeathReal = true }
+        XCTAssertLessThanOrEqual(friend.armor, 0, "with permadeath on, a hard hit kills")
+        XCTAssertFalse(friend.isAlive)
+    }
+
     // MARK: Single-player is unchanged
 
     func testNoRemoteShipsMeansEmptyRemoteState() {
