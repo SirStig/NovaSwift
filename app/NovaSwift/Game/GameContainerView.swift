@@ -718,11 +718,10 @@ struct GameContainerView: View {
 
                 MessageLogView(hud: host.hud)
 
-                // Multiplayer: start-local-co-op launcher + session chat. Passive
-                // bottom-leading cluster; empty regions don't block fly-to-tap.
-                MultiplayerChatCluster(session: model.session,
-                                       pilotName: model.pilot.state.pilotName,
-                                       currentSystemID: nav.currentSystemID)
+                // Multiplayer session chat — only rendered while a session is
+                // live (started from the in-game menu). Passive bottom-leading
+                // cluster; empty regions don't block fly-to-tap.
+                MultiplayerChatCluster(session: model.session)
 
                 if showFlightHints && landedSpobID == nil && !showMenu && !nav.showingMap {
                     flightHintsOverlay

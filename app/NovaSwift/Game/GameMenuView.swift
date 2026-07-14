@@ -128,6 +128,24 @@ struct GameMenuView: View {
                     }
 
                     sectionGap
+                    // Multiplayer: the single entry point. Starting a session
+                    // reveals the in-flight chat button + galaxy-map player
+                    // markers; there is no multiplayer chrome in single-player.
+                    if model.session.isActive {
+                        row("Leave Co-op", "xmark.circle.fill", tint: .red) {
+                            model.session.stop()
+                        }
+                    } else {
+                        row("Host Local Co-op", "antenna.radiowaves.left.and.right") {
+                            let name = model.pilot.state.pilotName
+                            model.session.startLocal(
+                                displayName: name.isEmpty ? "Captain" : name,
+                                systemID: model.pilot.state.currentSystem)
+                            onResume()   // drop back to flight with chat now live
+                        }
+                    }
+
+                    sectionGap
                     row("Save Pilot", "square.and.arrow.down") {
                         model.autosave(reason: .manual)
                         info = model.pilot.rosterID != nil

@@ -1,51 +1,29 @@
 import SwiftUI
 import NovaSwiftNet
 
-/// Bottom-leading in-flight cluster: a "Co-op" launcher that starts a local
-/// session, then a chat button + collapsible chat panel once a session is live.
-/// Self-contained so `GameContainerView` only adds one line to its overlay stack.
+/// Bottom-leading in-flight chat cluster — a chat button + collapsible panel.
+/// Shown **only while a multiplayer session is live**; renders nothing in
+/// single-player so no multiplayer chrome clutters the solo HUD. A session is
+/// started from the in-game menu ("Host Local Co-op"), not from here.
 ///
 /// The empty regions of the enclosing `VStack` have no background, so they don't
 /// intercept the tap/drag-to-fly steering underneath — only the button and panel
 /// are hit-testable.
 struct MultiplayerChatCluster: View {
     @ObservedObject var session: MultiplayerSession
-    /// The local pilot's display name, fed to presence + chat.
-    let pilotName: String
-    /// The system the local player is currently in, fed to presence on start.
-    let currentSystemID: Int
-
     @State private var showChat = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if session.isActive && showChat {
-                ChatOverlayView(session: session, isPresented: $showChat)
-            }
-            controlButton
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-        .padding(.leading, 16)
-        .padding(.bottom, 16)
-    }
-
-    @ViewBuilder private var controlButton: some View {
         if session.isActive {
-            ChatButton(session: session, showChat: $showChat)
-        } else {
-            Button {
-                session.startLocal(displayName: pilotName.isEmpty ? "Captain" : pilotName,
-                                   systemID: currentSystemID)
-                showChat = true
-            } label: {
-                Label("Co-op", systemImage: "person.2.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(.black.opacity(0.55), in: Capsule())
+            VStack(alignment: .leading, spacing: 8) {
+                if showChat {
+                    ChatOverlayView(session: session, isPresented: $showChat)
+                }
+                ChatButton(session: session, showChat: $showChat)
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.leading, 16)
+            .padding(.bottom, 16)
         }
     }
 }
