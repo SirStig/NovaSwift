@@ -128,6 +128,42 @@ public struct ProjectileNetState: Codable, Equatable, Sendable {
     }
 }
 
+/// One live beam segment in a `WorldSnapshot`, to echo on a client (visual only).
+/// `color` is `[r,g,b]` (0…1) or nil to use the weapon's default styling.
+public struct BeamNetState: Codable, Equatable, Sendable {
+    public var shooterID: Int        // authority entity that fired it (client skips its own)
+    public var weaponID: Int
+    public var fromX: Double
+    public var fromY: Double
+    public var toX: Double
+    public var toY: Double
+    public var hit: Bool
+    public var width: Double
+    public var color: [Double]?
+
+    public init(shooterID: Int, weaponID: Int, fromX: Double, fromY: Double, toX: Double,
+                toY: Double, hit: Bool, width: Double, color: [Double]?) {
+        self.shooterID = shooterID; self.weaponID = weaponID
+        self.fromX = fromX; self.fromY = fromY; self.toX = toX; self.toY = toY
+        self.hit = hit; self.width = width; self.color = color
+    }
+}
+
+/// A one-shot visual effect that happened on the authority this frame (currently
+/// explosions), to replay on clients. Unlike ship/shot/beam state (which is
+/// re-seeded each snapshot), effects are transient one-offs — the client plays
+/// each exactly once.
+public struct EffectNetState: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var radius: Double
+    public var boomID: Int?
+
+    public init(x: Double, y: Double, radius: Double, boomID: Int?) {
+        self.x = x; self.y = y; self.radius = radius; self.boomID = boomID
+    }
+}
+
 /// Authority → client, ~20 Hz. Wire type defined now; consumed starting in P1/P2.
 /// Delta compression against `ackInputSeq` is a later optimization.
 public struct WorldSnapshot: Codable, Equatable, Sendable {
@@ -137,13 +173,20 @@ public struct WorldSnapshot: Codable, Equatable, Sendable {
     /// Live shots to echo on clients (visual only). Defaulted empty so older call
     /// sites / ship-only snapshots stay valid.
     public var shots: [ProjectileNetState]
+    /// Live beam segments to echo on clients (visual only). Defaulted empty.
+    public var beams: [BeamNetState]
+    /// One-shot effects (explosions) that fired this frame, replayed once. Defaulted.
+    public var effects: [EffectNetState]
 
     public init(tick: UInt32, ackInputSeq: UInt32, ships: [ShipNetState],
-                shots: [ProjectileNetState] = []) {
+                shots: [ProjectileNetState] = [], beams: [BeamNetState] = [],
+                effects: [EffectNetState] = []) {
         self.tick = tick
         self.ackInputSeq = ackInputSeq
         self.ships = ships
         self.shots = shots
+        self.beams = beams
+        self.effects = effects
     }
 }
 

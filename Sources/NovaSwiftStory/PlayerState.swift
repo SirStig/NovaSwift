@@ -190,6 +190,17 @@ public struct PlayerState: Codable, Sendable {
     /// session takes off, so it never lingers to mis-place a later system entry.
     /// Optional for save-compat (like `fuel`/`armor`).
     public var landedSpob: Int?
+    /// The player ship's last known in-system position/heading, saved on every
+    /// autosave regardless of whether the player is docked. `landedSpob` takes
+    /// priority on load (it places the ship just off that pad, matching real
+    /// EV Nova's "you always save landed" assumption); these fields are what
+    /// let a save taken *while flying* — the periodic in-flight autosave,
+    /// backgrounding the app mid-flight, etc. — restore the exact spot instead
+    /// of falling back to the system centre. `nil` for a legacy save from
+    /// before these fields existed, or a save taken before the ship ever moved.
+    public var shipPositionX: Double?
+    public var shipPositionY: Double?
+    public var shipHeading: Double?
     public var exploredSystems: Set<Int>
     /// Systems revealed by a purchased/granted map or chart outfit (`oütf`
     /// ModType 16) but not physically visited — shown named on the galaxy map

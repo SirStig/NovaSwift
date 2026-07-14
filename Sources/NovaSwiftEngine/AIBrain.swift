@@ -118,6 +118,20 @@ public final class AIBrain {
     /// heads for the edge and jumps out — the visible outbound half of planet
     /// traffic. Only meaningful for trader dispositions.
     var spawnOutbound = false
+    /// The pad this ship launched from, for a ship spawned via the `.planet`
+    /// origin — consumed the first time `pickPlanetBody` resolves a travel
+    /// destination, so it never re-selects the body it just left as its very
+    /// first stop (which read as an instant re-land at spawn) while ordinary
+    /// later returns to that port are unaffected.
+    var spawnOriginSpobID: Int?
+    /// The hypergate this ship decided to use for its current departure, once
+    /// `depart()` has rolled that decision (see `pickDepartureGate`) — nil means
+    /// either "not decided yet" (checked via `departureGateChecked`) or "decided
+    /// to use the open edge instead." Read by `World`'s despawn sweep so a
+    /// gate departure fires `.shipDepartedViaGate` (the gate visibly opens) at
+    /// the gate instead of `.shipDeparted` at the system edge.
+    var departViaGateID: Int?
+    private var departureGateChecked = false
     /// The body index the last patrol standoff waypoint was taken off, so the
     /// beat never picks the same planet twice in a row (that consecutive repeat
     /// is what read as "circling one spot"). `nil` = no body leg yet / last leg
@@ -645,12 +659,40 @@ public final class AIBrain {
         return intent
     }
 
-    /// Head for the system edge and leave.
+    /// Head for the system edge and leave — or, if this ship rolls in favor of
+    /// it (mirroring `Spawner.emergenceGate`'s government preference), head for
+    /// a hypergate and transit through it instead. Rolled once per departure
+    /// and cached (`departureGateChecked`), not re-rolled every tick.
     private func depart(_ me: Ship, _ world: World) -> ControlIntent {
         me.wantsToDepart = true
+        if !departureGateChecked {
+            departureGateChecked = true
+            departViaGateID = pickDepartureGate(me, world)?.id
+        }
+        if let gateID = departViaGateID,
+           let gate = world.systemContext.bodies.first(where: { $0.id == gateID }) {
+            return seek(me, to: gate.position)
+        }
         var out = me.position - world.systemContext.center
         if out.length < 1 { out = Vec2(0, 1) }
         return seek(me, to: me.position + out.normalized * world.systemContext.jumpRadius)
+    }
+
+    /// Mirrors `Spawner.emergenceGate`'s government preference, but for a
+    /// *departing* ship deciding whether to use a hypergate instead of flying
+    /// out to the open edge. Without this, AI ships never actually transit a
+    /// gate — they only ever emerge from one as a spawn cosmetic — so a gate
+    /// never visibly opens for anyone but the player.
+    private func pickDepartureGate(_ me: Ship, _ world: World) -> StellarBody? {
+        guard let dip = world.diplomacy, let g = dip.govt(me.government), !g.avoidsHypergates
+        else { return nil }
+        let gates = world.systemContext.bodies.filter { $0.isHypergate }
+        guard !gates.isEmpty else { return nil }
+        let chancePercent = g.prefersHypergates ? 35 : 4
+        guard world.rng.int(in: 0...99) < chancePercent else { return nil }
+        let owned = gates.filter { $0.government == me.government }
+        let pool = owned.isEmpty ? gates : owned
+        return pool[world.rng.int(in: 0...(pool.count - 1))]
     }
 
     /// Trader travel: pick a planet and cruise toward it, then hand off to a
@@ -1041,24 +1083,36 @@ public final class AIBrain {
     private func pickPlanetBody(_ me: Ship, _ world: World) -> StellarBody? {
         let landable = world.systemContext.bodies.filter { $0.canLand }
         guard !landable.isEmpty else { return nil }
-        guard landable.count > 1 else { return landable[0] }
+        // A ship fresh off a launch shouldn't immediately pick the very pad it
+        // just left as its first travel destination — with `me.position` still
+        // sitting right by that body, the nearest-body weighting below would
+        // otherwise select it almost every time, and `travel()` would read the
+        // ~0 distance as "already arrived" and land it again the same tick.
+        // One-shot: consumed here regardless of outcome, so later, ordinary
+        // returns to this same port are unaffected.
+        let originID = spawnOriginSpobID
+        spawnOriginSpobID = nil
+        let pool = (originID != nil && landable.count > 1)
+            ? landable.filter { $0.id != originID }
+            : landable
+        guard pool.count > 1 else { return pool.first ?? landable[0] }
         // Bias toward a *nearer* landable body so the trader's run from its jump-in
         // point reads as a purposeful line to the closest port rather than a random
         // cross-system drift — but keep it a weighted roll, not strict nearest, so
         // traffic still spreads across a system's planets. Weight ∝ 1/(distance),
         // softened by a floor so the far ones aren't impossible.
-        let weights = landable.map { body -> Double in
+        let weights = pool.map { body -> Double in
             let d = (body.position - me.position).length
             return 1.0 / max(1.0, d / 1000.0)
         }
         let total = weights.reduce(0, +)
-        guard total > 0 else { return landable[world.rng.int(in: 0...(landable.count - 1))] }
+        guard total > 0 else { return pool[world.rng.int(in: 0...(pool.count - 1))] }
         var roll = world.rng.double(in: 0...total)
         for (i, w) in weights.enumerated() {
             roll -= w
-            if roll <= 0 { return landable[i] }
+            if roll <= 0 { return pool[i] }
         }
-        return landable[landable.count - 1]
+        return pool[pool.count - 1]
     }
 
     /// The next stop on a patrol beat. Rather than walking the bodies in strict

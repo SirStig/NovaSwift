@@ -535,7 +535,7 @@ public final class Spawner {
            let gate = emergenceGate(for: govt, world: world) {
             effectiveOrigin = .hypergate(spobID: gate.id)
         }
-        let (pos, ang, arrival) = spawnPose(world, origin: effectiveOrigin)
+        let (pos, ang, arrival, originSpobID) = spawnPose(world, origin: effectiveOrigin)
         // Equip NPCs from their real hull loadout (preinstalled outfits: afterburner,
         // extra shields/weapons, fuel) — the same aggregation the player uses — so a
         // spawned ship matches its authentic EV Nova fit, not a bare hull.
@@ -543,6 +543,7 @@ public final class Spawner {
                                                skillRoll: world.rng.double(in: -1...1)) else { return nil }
         let brain = AIBrain(aiType: dude.aiType, govt: govt)
         brain.leaderID = leaderID
+        brain.spawnOriginSpobID = originSpobID
         // A trader that lifts off a spaceport is usually done here — most head
         // straight back out to hyperspace (a visible departure), the rest hop to
         // another port. Only solo dudes (not fleet escorts, who stay with their
@@ -606,7 +607,7 @@ public final class Spawner {
             guard world.persSpawnEligible(persID) else { continue }
             guard !world.npcs.contains(where: { $0.personID == persID }) else { continue }
             let govt = pers.govt >= 128 ? pers.govt : table.systemGovt
-            let (pos, ang, arrival) = spawnPose(world, origin: .interior)
+            let (pos, ang, arrival, _) = spawnPose(world, origin: .interior)
             guard let ship = galaxy.makeLoadedShip(pers.shipType, government: govt, at: pos, angle: ang,
                                                    skillRoll: world.rng.double(in: -1...1)) else { continue }
             ship.brain = AIBrain(aiType: AIType(raw: pers.aiType), govt: govt)
@@ -695,7 +696,7 @@ public final class Spawner {
         let govt = fleet.govt >= 128 ? fleet.govt
                  : (galaxy.shipSpec(fleet.leadShip)?.government ?? table.systemGovt)
 
-        let (pos, ang, arrival) = spawnPose(world, origin: origin)
+        let (pos, ang, arrival, originSpobID) = spawnPose(world, origin: origin)
         guard let lead = galaxy.makeLoadedShip(fleet.leadShip, government: govt, at: pos, angle: ang,
                                                skillRoll: world.rng.double(in: -1...1)) else { return }
         // The flagship acts on its own hull's disposition (a freighter convoy leader
@@ -704,6 +705,7 @@ public final class Spawner {
         let leadBrain = AIBrain(aiType: leadAI == .unknown ? .warship : leadAI, govt: govt)
         leadBrain.isFleetMember = true
         leadBrain.fleetID = fleetID
+        leadBrain.spawnOriginSpobID = originSpobID
         lead.brain = leadBrain
         // flët `Flags` 0x0001: freighters (InherentAI <= 2) in this fleet carry
         // random cargo, so boarding a convoy hauler actually yields loot.
@@ -762,7 +764,11 @@ public final class Spawner {
         return pool[world.rng.int(in: 0...(pool.count - 1))]
     }
 
-    private func spawnPose(_ world: World, origin: SpawnOrigin) -> (Vec2, Double, World.ArrivalMode) {
+    /// Returns the spawn pose plus, for `.planet`, the id of the pad launched
+    /// from (nil otherwise) — callers feed that into `AIBrain.spawnOriginSpobID`
+    /// so the ship doesn't immediately pick the very body it just left as its
+    /// first travel destination (see `AIBrain.pickPlanetBody`).
+    private func spawnPose(_ world: World, origin: SpawnOrigin) -> (Vec2, Double, World.ArrivalMode, Int?) {
         let ctx = world.systemContext
         switch origin {
         case let .hypergate(spobID):
@@ -772,11 +778,11 @@ public final class Spawner {
             if let gate = ctx.bodies.first(where: { $0.id == spobID }) {
                 let ang = gate.gateEmergeAngle ?? world.rng.double(in: 0...(2 * .pi))
                 let pos = gate.position + Vec2(sin(ang), cos(ang)) * (gate.radius + 30)
-                return (pos, ang, .gate(spobID: spobID))
+                return (pos, ang, .gate(spobID: spobID), nil)
             }
             let bearing = world.rng.double(in: 0...(2 * .pi))
             let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * ctx.spawnRadius
-            return (pos, (ctx.center - pos).angle, .hyperspace)
+            return (pos, (ctx.center - pos).angle, .hyperspace, nil)
         case .planet:
             // `canLand` already means landable AND inhabited (see `StellarBody`'s
             // doc comment) — a system with no such body has nowhere to launch a
@@ -785,20 +791,28 @@ public final class Spawner {
             let pads = ctx.bodies.filter { $0.canLand }
             if !pads.isEmpty {
                 let pad = pads[world.rng.int(in: 0...(pads.count - 1))]
-                let outward = (pad.position - ctx.center)
-                let ang = (outward.length < 1 ? Vec2(0, 1) : outward).angle
-                return (pad.position, ang, .launch)
+                // Sit just clear of the pad's surface, nosed outward — the same
+                // "just took off" placement used for a load-from-dock or takeoff
+                // (`GameContainerView`'s dock-placement math), not exactly on top
+                // of it. Spawning *on* the pad put the ship at distance 0 from its
+                // own launch body, which `travel()`/`pickPlanetBody` then read as
+                // "already arrived" and landed it again the same tick.
+                var outward = pad.position - ctx.center
+                if outward.length < 1 { outward = Vec2(0, 1) }
+                let dir = outward.normalized
+                let pos = pad.position + dir * (pad.radius + 60)
+                return (pos, dir.angle, .launch, pad.id)
             }
             fallthrough
         case .edge:
             let bearing = world.rng.double(in: 0...(2 * .pi))
             let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * ctx.spawnRadius
-            return (pos, (ctx.center - pos).angle, .hyperspace)
+            return (pos, (ctx.center - pos).angle, .hyperspace, nil)
         case .interior:
             let bearing = world.rng.double(in: 0...(2 * .pi))
             let r = world.rng.double(in: 300...(ctx.jumpRadius * 0.6))
             let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * r
-            return (pos, (ctx.center - pos).angle, .populate)
+            return (pos, (ctx.center - pos).angle, .populate, nil)
         }
     }
 }

@@ -141,6 +141,32 @@ final class RemotePlayerTests: XCTestCase {
         XCTAssertTrue(world.npcs.contains { $0.networkMirror })
     }
 
+    // MARK: PvP gating (SessionRules.allowPvP)
+
+    func testPvPBlockedByDefaultAllowedWhenEnabled() {
+        // Two player-controlled ships sharing the co-op government. A projectile
+        // one fires at the other only lands when pvpAllowed is set.
+        func scenario(pvp: Bool) -> Bool {
+            let world = World(player: Ship(name: "A", stats: ShipStats(maxSpeed: 100, acceleration: 50, turnRate: .pi)))
+            world.player.government = 200
+            world.pvpAllowed = pvp
+            let friend = Ship(name: "B", stats: world.player.stats, position: Vec2(30, 0))
+            friend.government = 200                       // same co-op govt
+            friend.maxArmor = 100; friend.armor = 100
+            world.spawnRemotePlayer(friend, info: RemotePlayerInfo(peerID: "B", name: "B"))
+            // A real shot owned by the player (entity 0) heading into the friend.
+            let shot = Projectile(position: Vec2(0, 0), velocity: Vec2(600, 0), life: 1,
+                                  shieldDamage: 50, armorDamage: 50, blastRadius: 0,
+                                  ownerID: 0, ownerGovt: 200, homing: false, turnRate: 0,
+                                  speed: 600, targetID: nil)
+            world.testInjectProjectile(shot)
+            for _ in 0..<10 { world.step(1.0 / 30.0) }
+            return friend.shield < 100 || friend.armor < 100   // did the friend take damage?
+        }
+        XCTAssertFalse(scenario(pvp: false), "with PvP off, players can't damage each other")
+        XCTAssertTrue(scenario(pvp: true), "with PvP on, a player's shot hits another player")
+    }
+
     // MARK: Single-player is unchanged
 
     func testNoRemoteShipsMeansEmptyRemoteState() {

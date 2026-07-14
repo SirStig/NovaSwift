@@ -13,6 +13,11 @@ struct GameMenuView: View {
     @ObservedObject var hud: GameHUDModel
     var onResume: () -> Void
     var onOpenMap: () -> Void
+    /// Durably save the pilot — routed through `GameContainerView.saveGame` so
+    /// a manual save from this menu also captures the live ship's in-flight
+    /// position (not just `model.autosave`'s pilot-state snapshot), the same
+    /// as every other autosave path.
+    var onSave: (AppModel.SaveReason) -> Void = { _ in }
     /// Whether to show the Debug Suite row (debug mode enabled).
     var showDebug: Bool = false
     /// Open the in-game debug suite.
@@ -24,6 +29,9 @@ struct GameMenuView: View {
     @State private var showPlayerInfo = false
     @State private var showMissions = false
     @State private var info: String?
+    #if canImport(GameKit)
+    @State private var showMatchmaker = false
+    #endif
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
 
@@ -84,6 +92,23 @@ struct GameMenuView: View {
                                                    set: { if !$0 { info = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(info ?? "") }
+        #if canImport(GameKit)
+        .sheet(isPresented: $showMatchmaker) {
+            GameCenterMatchmakerView(
+                onMatch: { match in
+                    showMatchmaker = false
+                    var name = model.pilot.state.pilotName
+                    if name.isEmpty { name = "Captain" }
+                    model.session.startGameCenter(
+                        match: match, displayName: name,
+                        systemID: model.pilot.state.currentSystem,
+                        shipTypeID: model.pilot.state.shipType)
+                    onResume()
+                },
+                onCancel: { showMatchmaker = false },
+                onError: { message in showMatchmaker = false; info = message })
+        }
+        #endif
     }
 
     /// Whether the Story Map / Pilot Log is open (drives its presentation).
@@ -149,24 +174,30 @@ struct GameMenuView: View {
                                 shipTypeID: model.pilot.state.shipType)
                             onResume()   // drop back to flight with chat now live
                         }
+                        #if canImport(GameKit)
+                        row("Online Co-op", "globe") {
+                            if model.gameCenter.isAuthenticated { showMatchmaker = true }
+                            else { info = "Sign in to Game Center (in Settings) to play online co-op." }
+                        }
+                        #endif
                     }
 
                     sectionGap
                     row("Save Pilot", "square.and.arrow.down") {
-                        model.autosave(reason: .manual)
+                        onSave(.manual)
                         info = model.pilot.rosterID != nil
                             ? "Pilot saved (\(model.pilot.state.pilotName))."
                             : "This session isn't a roster pilot yet — start one from the main menu to save."
                     }
                     row("Load Pilot", "folder") {
                         // Loading a different pilot means returning to the roster.
-                        model.autosave(reason: .manual)
+                        onSave(.manual)
                         model.returnToMainMenu()
                     }
 
                     sectionGap
                     row("Main Menu", "rectangle.portrait.and.arrow.right", tint: .red) {
-                        model.autosave(reason: .manual)   // save on the way out
+                        onSave(.manual)   // save on the way out
                         model.returnToMainMenu()
                     }
                 }

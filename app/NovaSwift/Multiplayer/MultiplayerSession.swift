@@ -3,6 +3,9 @@ import Combine
 import NovaSwiftNet
 import NovaSwiftEngine
 import NovaSwiftSync
+#if canImport(GameKit)
+import GameKit
+#endif
 
 /// App-level owner of a live multiplayer `NetSession` (from `NovaSwiftNet`),
 /// bridged into SwiftUI as an `ObservableObject`. Hangs off `AppModel` so every
@@ -25,9 +28,12 @@ final class MultiplayerSession: ObservableObject {
     /// The agreed session rules.
     @Published private(set) var rules: SessionRules = .fullStakes
 
-    /// Stable per-launch id used as the transport peer id / Multipeer display
-    /// name. Distinct from the pilot's display name (two friends can share a name).
-    let localPlayerID: String = "p-" + String(UUID().uuidString.prefix(8))
+    /// This player's id in the live session — always equal to the transport's peer
+    /// id (`NetSession.localPlayerID`). Seeded with a per-launch id used for the
+    /// Multipeer display name; replaced by the transport's own id when a session
+    /// starts (e.g. Game Center's `gamePlayerID`). Distinct from the pilot's
+    /// display name (two friends can share a name).
+    private(set) var localPlayerID: String = "p-" + String(UUID().uuidString.prefix(8))
 
     /// Set by the chat UI so incoming messages don't count as unread while open.
     var chatVisible = false {
@@ -67,11 +73,38 @@ final class MultiplayerSession: ObservableObject {
                     rules: SessionRules = .fullStakes) {
         stop()
         #if canImport(MultipeerConnectivity)
-        if let shipTypeID { localShipTypeID = shipTypeID }
         let mp = MultipeerTransport(playerID: localPlayerID)
-        let session = NetSession(transport: mp, rules: rules)
+        activate(transport: mp, displayName: displayName, systemID: systemID,
+                 shipTypeID: shipTypeID, rules: rules)
+        mp.start()   // begin advertising/browsing (Multipeer-specific)
+        #endif
+    }
+
+    #if canImport(GameKit)
+    /// Start an **internet** session over Game Center, wrapping an already-created
+    /// `GKMatch` (the app runs authentication + matchmaking UI and hands the match
+    /// here). Same session/sync machinery as `startLocal`; only the transport
+    /// differs. Requires the Game Center entitlement + App Store Connect record.
+    func startGameCenter(match: GKMatch, displayName: String, systemID: Int,
+                         shipTypeID: Int? = nil, rules: SessionRules = .fullStakes) {
+        stop()
+        let gk = GameKitTransport(match: match)
+        activate(transport: gk, displayName: displayName, systemID: systemID,
+                 shipTypeID: shipTypeID, rules: rules)
+    }
+    #endif
+
+    /// Shared session bring-up: wrap a transport in a `NetSession`, adopt the
+    /// transport's peer id as our player id, wire callbacks + the sync coordinator,
+    /// announce presence and rules. Transport-specific kick-off (e.g. Multipeer's
+    /// `start()`) stays with the caller.
+    private func activate(transport: Transport, displayName: String, systemID: Int,
+                          shipTypeID: Int?, rules: SessionRules) {
+        if let shipTypeID { localShipTypeID = shipTypeID }
+        let session = NetSession(transport: transport, rules: rules)
+        localPlayerID = session.localPlayerID     // the transport owns the peer id
         wire(session)
-        transport = mp
+        self.transport = transport
         net = session
         coordinator = SystemSyncCoordinator(localPlayerID: localPlayerID)
         localSystemID = systemID
@@ -80,10 +113,8 @@ final class MultiplayerSession: ObservableObject {
         session.updateLocalPresence(name: displayName, systemID: systemID,
                                     shipTypeHint: localShipTypeID >= 0 ? localShipTypeID : nil)
         session.broadcastRules(rules)
-        mp.start()
         isActive = true
         syncPresence()
-        #endif
     }
 
     /// Leave the session and clear all mirrored state.
@@ -179,6 +210,10 @@ final class MultiplayerSession: ObservableObject {
     func syncPreStep(world: World) {
         guard isActive, let coordinator, let net else { return }
 
+        // Honor the session's PvP stake (host-set). Applied every frame so a
+        // mid-session rules change takes effect immediately.
+        world.pvpAllowed = rules.allowPvP
+
         let authority = currentAuthorityID
         // Role or authority changed (someone arrived/left, or handoff) — start clean.
         if authority != lastAuthorityID { needsResync = true; lastAuthorityID = authority }
@@ -190,6 +225,7 @@ final class MultiplayerSession: ObservableObject {
                 .map { $0.entityID }
             for id in mirrorIDs { world.removeShip(entityID: id) }
             world.clearVisualProjectiles()
+            world.clearVisualBeams()
             world.spawningPaused = false
             coordinator.reset()
             latestSnapshot = nil
@@ -245,6 +281,9 @@ final class MultiplayerSession: ObservableObject {
         } else {
             inputSeq &+= 1
             net.sendInput(coordinator.input(from: world.intent, tick: netTick, seq: inputSeq), to: authority)
+            // Replay the authority's one-shot effects (explosions) now — after the
+            // step cleared this frame's events, before the scene drains them.
+            coordinator.flushEffects(into: world)
         }
     }
 

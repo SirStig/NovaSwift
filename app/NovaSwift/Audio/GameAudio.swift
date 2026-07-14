@@ -188,6 +188,21 @@ final class GameAudio: ObservableObject {
     /// Stop the landed-spaceport ambience — called on takeoff.
     func stopAmbient() { engine.stopLoop(id: Self.ambientLoopKey) }
 
+    /// Key for the hyperspace charge-up loop — kept looping (rather than fired
+    /// as a one-shot) specifically so it can be silenced the instant the jump
+    /// commits, instead of running to the end of the underlying sample and
+    /// bleeding into the destination system.
+    private static let hyperspaceChargeLoopKey = "hyperspace-charge"
+
+    /// Start the "spinning up for a jump" loop — called as a jump begins.
+    func startHyperspaceCharge() {
+        guard !settings.muteAll, let buffer = library.buffer(for: GameEvent.hyperspaceCharge.soundID) else { return }
+        engine.playLoop(id: Self.hyperspaceChargeLoopKey, buffer: buffer, volume: Float(settings.sfxVolume), pan: 0)
+    }
+
+    /// Stop the charge-up loop — called the instant the jump commits (flash peak).
+    func stopHyperspaceCharge() { engine.stopLoop(id: Self.hyperspaceChargeLoopKey) }
+
     // MARK: Hailing
 
     /// Play a hailed government's voice line — the "Acknowledge" bank normally,

@@ -291,7 +291,13 @@ public final class Galaxy {
         var bodies: [StellarBody] = []
         for spobID in sys.spobs {
             guard let s = game.spob(spobID) else { continue }
-            let pos = Vec2(Double(s.x), Double(s.y))
+            // `spöb.X/Y` is the same classic Mac/QuickDraw-era coordinate format as
+            // `sÿst.X/Y` (galaxy-map position, authored +y-down — see
+            // `GameContainerView.outboundHeading`'s doc comment), so it needs the
+            // same flip into this engine's +y-up world. Left unflipped, every
+            // system's in-system layout (planet placement/orbit angle) renders
+            // vertically mirrored relative to the real game.
+            let pos = Vec2(Double(s.x), Double(-s.y))
             // Match the same sprite-derived size the renderer uses (GameContainerView's
             // PlanetVisual), so landing/collision geometry agrees with what's on screen
             // instead of every body sharing one hardcoded radius.

@@ -105,6 +105,9 @@ struct RootView: View {
             // Wire audio to the data and start menu music (if the player enabled it
             // and their data ships a track). Music carries through into the game.
             model.prepareAudioAndData()
+            #if canImport(GameKit)
+            model.gameCenter.authenticate()   // sign in for online co-op (safe if already signed in)
+            #endif
             #if DEBUG
             if ProcessInfo.processInfo.environment["NOVASWIFT_AUTOPLAY"] != nil,
                model.data.hasBaseData {

@@ -50,6 +50,25 @@ extension WorldSnapshot {
                 weaponID: p.weaponID, graphicSpinID: p.graphicSpinID,
                 spinShots: p.spinShots, translucentShots: p.translucentShots))
         }
-        return WorldSnapshot(tick: tick, ackInputSeq: ackInputSeq, ships: ships, shots: shots)
+        // Live beams, likewise echoed on clients (visual only).
+        var beams: [BeamNetState] = []
+        beams.reserveCapacity(world.activeBeams.count)
+        for b in world.activeBeams where !b.visualOnly {
+            beams.append(BeamNetState(
+                shooterID: b.shooterID, weaponID: b.weaponID,
+                fromX: b.from.x, fromY: b.from.y, toX: b.to.x, toY: b.to.y,
+                hit: b.hit, width: b.width,
+                color: b.color.map { [$0.r, $0.g, $0.b] }))
+        }
+        // One-shot effects fired this frame (explosions). Read `world.events`
+        // *before* the scene drains them — the authority's post-step sync does.
+        var effects: [EffectNetState] = []
+        for event in world.events {
+            if case let .explosion(at, radius, _, boomID) = event {
+                effects.append(EffectNetState(x: at.x, y: at.y, radius: radius, boomID: boomID))
+            }
+        }
+        return WorldSnapshot(tick: tick, ackInputSeq: ackInputSeq, ships: ships,
+                             shots: shots, beams: beams, effects: effects)
     }
 }

@@ -47,6 +47,12 @@ final class AppModel: ObservableObject {
     /// Inactive until a session is started; reached everywhere via `model.session`.
     let session = MultiplayerSession()
 
+    #if canImport(GameKit)
+    /// Game Center sign-in state for online co-op. Authentication is kicked off at
+    /// launch (`RootView`); it gates the "Online Co-op" entry.
+    let gameCenter = GameCenterManager()
+    #endif
+
     /// The durable library of all saved pilots (many `.evpilot` files + backups).
     /// Backed by iCloud or local storage per `settings.iCloudSaves` — built in
     /// `init` (after `settings`) so it can honour that toggle from launch.
@@ -79,6 +85,9 @@ final class AppModel: ObservableObject {
     private var dataObserver: AnyCancellable?
     private var rosterObserver: AnyCancellable?
     private var sessionObserver: AnyCancellable?
+    #if canImport(GameKit)
+    private var gameCenterObserver: AnyCancellable?
+    #endif
 
     init() {
         // Build the roster honouring the saved iCloud preference. Read the
@@ -107,6 +116,12 @@ final class AppModel: ObservableObject {
         sessionObserver = session.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        #if canImport(GameKit)
+        // Forward Game Center sign-in changes so the "Online Co-op" entry updates.
+        gameCenterObserver = gameCenter.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        #endif
         audio.apply(settings: settings)
         store.refresh(data: data)
     }

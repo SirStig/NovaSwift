@@ -404,10 +404,30 @@ simply won't fire for that player, rather than corrupting state.
   expire, no collision/damage — `stepProjectiles` skips them) and dead-reckons between. It
   **skips its own** shots (matched by `ownerID` = its ship's authority entity id) since it
   already fired those locally. The scene draws them for free (`world.projectiles`).
-- **Remaining:** **beam sync** (continuous/pulse beams — `activeBeams` — not echoed yet, so
-  a client won't see enemy *beam* weapons); mission/NCB-in-combat sync; `GameKitTransport`
-  (internet; Game Center entitlement + App Store Connect); authority handoff polish on
-  departure; PvP damage honoring `SessionRules`.
+- **Beam sync DONE (compiles; package logic tested):** continuous/pulse **beams** are now
+  echoed too (`BeamNetState` in `WorldSnapshot.beams`; client re-seeds `ActiveBeam.visualOnly`
+  segments each snapshot — `refreshActiveBeams` leaves them untouched — skipping its own by
+  `shooterID`). **Co-op combat is now fully visible on a client: ships, projectile fire, and
+  beam fire, with authoritative damage.**
+- **PvP + stakes DONE (tested):** `SessionRules.allowPvP` is enforced — `World.pvpAllowed`
+  gates player-vs-player hits in `canHit` (co-op partners share a government so they're
+  un-hittable allies until PvP is switched on). Set live from the session rules each frame.
+  (Finer toggles — `friendlyFire`, `deathReal`, `pvpDamageReal` — exist in `SessionRules`
+  but aren't separately enforced yet; `allowPvP` is the on/off stake.)
+- **Effect echoes DONE (tested):** explosions the authority produces are carried in
+  `WorldSnapshot.effects`, buffered in the coordinator, and flushed into the client's event
+  stream after its step (`World.emitVisualExplosion`) so a client sees the same booms.
+- **Internet play DONE (compiles; entitlement configured):** `GameKitTransport` (wraps a
+  `GKMatch`; peer id = `gamePlayerID`) + `MultiplayerSession.startGameCenter(match:…)`, and
+  the **matchmaking UI**: `GameCenterManager` (authenticates at launch from `RootView`),
+  `GameCenterMatchmakerView` (SwiftUI wrapper over `GKMatchmakerViewController`, iOS + macOS),
+  and an **"Online Co-op"** menu row that presents it and starts the session on `didFind`.
+  Not runtime-verified (no-launch; needs a real Game Center match to exercise).
+- **Authority handoff:** works via deterministic re-election (`currentAuthorityID`) +
+  `needsResync` world-rebuild when the host leaves a system; both sides agree with no
+  negotiation. Seamless mirror-promotion (no NPC re-roll) is a future refinement.
+- **Remaining:** mission/NCB-in-combat sync (the story-split layer); the finer PvP toggles;
+  the Game Center app setup above; seamless authority handoff.
 
 ## Testing on one machine
 

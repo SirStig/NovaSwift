@@ -30,6 +30,10 @@ public final class SystemSyncCoordinator {
     /// Client side: authority entity id → our local mirror id, for every **NPC**
     /// mirrored from the authority's snapshot (shared world / co-op combat).
     private var npcMirrorIDByAuthorityID: [Int: Int] = [:]
+    /// Client side: one-shot effects (explosions) from applied snapshots, waiting to
+    /// be replayed into the world *after* its step (step clears events). Drained by
+    /// `flushEffects`.
+    private var pendingEffects: [EffectNetState] = []
 
     /// Authority side: the freshest input each client has sent, plus the highest
     /// `seq` seen from it so stale/out-of-order unreliable frames are dropped.
@@ -51,6 +55,18 @@ public final class SystemSyncCoordinator {
         latestInput.removeAll()
         highestSeq.removeAll()
         clientShipID.removeAll()
+        pendingEffects.removeAll()
+    }
+
+    /// Replay one-shot effects (explosions) from applied snapshots into the world,
+    /// then clear them. Call **after** `world.step` (which clears the frame's
+    /// events) and before the scene drains — so a client sees the authority's booms.
+    public func flushEffects(into world: World) {
+        guard !pendingEffects.isEmpty else { return }
+        for e in pendingEffects {
+            world.emitVisualExplosion(at: Vec2(e.x, e.y), radius: e.radius, boomID: e.boomID)
+        }
+        pendingEffects.removeAll(keepingCapacity: true)
     }
 
     // MARK: - Authority side
@@ -210,6 +226,22 @@ public final class SystemSyncCoordinator {
                 weaponID: shot.weaponID, graphicSpinID: shot.graphicSpinID,
                 spinShots: shot.spinShots, translucentShots: shot.translucentShots)
         }
+
+        // Same for beams (also skip our own — the authority welds ours to our
+        // predicted ship, but we draw those from our own local beam already).
+        world.clearVisualBeams()
+        for beam in snapshot.beams where beam.shooterID != ownAuthorityID {
+            let color = beam.color.flatMap { c -> (r: Double, g: Double, b: Double)? in
+                c.count == 3 ? (c[0], c[1], c[2]) : nil
+            }
+            world.spawnVisualBeam(shooterID: beam.shooterID, weaponID: beam.weaponID,
+                                  from: Vec2(beam.fromX, beam.fromY), to: Vec2(beam.toX, beam.toY),
+                                  hit: beam.hit, width: beam.width, color: color)
+        }
+
+        // Buffer one-shot effects; the app flushes them into the world after its
+        // step (events are cleared at the start of `step`, so we can't emit now).
+        pendingEffects.append(contentsOf: snapshot.effects)
         return (injected, removed)
     }
 

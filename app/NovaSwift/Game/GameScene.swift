@@ -1202,6 +1202,12 @@ final class GameScene: SKScene {
                 playGateArrivalFlourish(gateSpobID)
             case let .shipDeparted(entityID, at, heading):
                 warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
+            case let .shipDepartedViaGate(entityID, gateSpobID, at):
+                // The AI-departure counterpart to `.shipEmergedFromGate`: the
+                // gate flashes open and the ship shrinks into it, instead of
+                // streaking off toward the edge.
+                playGateArrivalFlourish(gateSpobID)
+                gateDepartNode(id: entityID, gateSpobID: gateSpobID, at: CGPoint(x: at.x, y: at.y))
             case let .shipLanded(entityID, spobID, at):
                 landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
                 if entityID == 0 { audio?.play(.docking); Haptics.play(.medium) }
@@ -2602,8 +2608,10 @@ final class GameScene: SKScene {
         jumpPhase = instant ? .accelerate : .align
         // Orient the streak fan along the direction of travel.
         jumpStreaks?.zRotation = -CGFloat(outboundHeading)
-        // Spin-up sound as the maneuver starts.
-        audio?.play(.hyperspaceCharge)
+        // Spin-up sound as the maneuver starts — a loop, not a one-shot, so it
+        // can be cut off cleanly the instant the jump commits (see `stepJump`'s
+        // `.flash` case) instead of running past the jump into the new system.
+        audio?.startHyperspaceCharge()
         Log.scene.debug("beginJump -> system \(destSystemID) heading \(outboundHeading, format: .fixed(precision: 2)) instant=\(instant)")
     }
 
@@ -2625,7 +2633,7 @@ final class GameScene: SKScene {
         jumpClock = 0
         world.player.velocity = Vec2()      // you're sitting on the gate — no run-up
         jumpPhase = .flash                   // straight to the white-out; no maneuver
-        audio?.play(.hyperspaceCharge)
+        audio?.startHyperspaceCharge()
         Log.scene.debug("beginGateJump -> system \(systemID), emerge at gate \(destGateID)")
     }
 
@@ -2677,6 +2685,7 @@ final class GameScene: SKScene {
             showJumpStreaks(intensity: 1, stretch: 9)
             if !jumpCommitted, t >= 1 {
                 jumpCommitted = true
+                audio?.stopHyperspaceCharge()          // jump commits here — the charge sound stops with it
                 jumpCommit?()                          // app model: spend fuel, advance route, follow pilot, save
                 reloadSystem(to: jumpDestSystemID, outboundHeading: jumpOutboundHeading,
                              arriveAtGate: jumpArriveGateID)
@@ -2901,8 +2910,10 @@ final class GameScene: SKScene {
         game.stellarObjects(in: systemID).map { entry in
             let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
             let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
+            // `spöb.X/Y` is authored +y-down (same convention as `sÿst.X/Y`); flip
+            // to this engine/SpriteKit's +y-up world (see `Galaxy.systemContext`).
             return PlanetVisual(id: entry.spob.id, name: entry.spob.name,
-                                position: CGPoint(x: entry.spob.x, y: entry.spob.y),
+                                position: CGPoint(x: entry.spob.x, y: -entry.spob.y),
                                 texture: tex, radius: radius,
                                 government: entry.spob.government,
                                 isUninhabited: entry.spob.isUninhabited,
@@ -3028,6 +3039,19 @@ final class GameScene: SKScene {
         container.run(.sequence([.group([.move(to: target, duration: 0.5),
                                          .scale(to: 0.05, duration: 0.5),
                                          .fadeOut(withDuration: 0.5)]),
+                                 .removeFromParent()]))
+    }
+
+    /// A ship transiting out through a hypergate: detach its node and shrink +
+    /// fade it into the gate, mirroring `landNode` — faster than a landing dive
+    /// since a gate transit is meant to read as quick, not a slow port approach.
+    private func gateDepartNode(id: Int, gateSpobID: Int, at point: CGPoint) {
+        guard let container = detachNPCNode(id) else { return }
+        let target = planetVisuals.first { $0.id == gateSpobID }.map { $0.position } ?? point
+        effectsLayer.addChild(container)
+        container.run(.sequence([.group([.move(to: target, duration: 0.3),
+                                         .scale(to: 0.05, duration: 0.3),
+                                         .fadeOut(withDuration: 0.3)]),
                                  .removeFromParent()]))
     }
 

@@ -595,6 +595,10 @@ public final class ActiveBeam {
     public var life: Double
     public let width: Double
     public let color: (r: Double, g: Double, b: Double)?
+    /// Co-op client-side echo of an authority's beam: drawn from the synced
+    /// `from`/`to`, never refreshed from a shooter or life-counted — it just
+    /// persists until the next snapshot re-seeds it (see `refreshActiveBeams`).
+    public var visualOnly = false
 
     public init(shooterID: Int, mountIndex: Int, weaponID: Int = -1, from: Vec2, to: Vec2, hit: Bool,
                 continuous: Bool, life: Double, width: Double,
@@ -654,6 +658,11 @@ public enum WorldEvent {
     /// pops the ship out of it, then closes the gate. `gateSpobID` is the gate
     /// spöb to animate; the ship starts at its position heading outward.
     case shipEmergedFromGate(entityID: Int, gateSpobID: Int, at: Vec2)
+    /// A ship transited out through a hypergate (the AI-departure counterpart
+    /// to `shipEmergedFromGate`): the renderer should flash the gate open,
+    /// shrink the ship into it, then close — instead of the plain edge-departure
+    /// streak `shipDeparted` uses.
+    case shipDepartedViaGate(entityID: Int, gateSpobID: Int, at: Vec2)
     /// A ship's armor was knocked out but it survived as a drifting hulk.
     case shipDisabled(entityID: Int, at: Vec2)
     /// A government patrol/interceptor ran a scan pass on another ship (checking

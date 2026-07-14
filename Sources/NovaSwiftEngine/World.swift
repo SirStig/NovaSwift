@@ -533,6 +533,10 @@ public final class Ship {
     private var loggedNoBrain = false
 
     public var isPlayer: Bool { entityID == 0 }
+    /// Any human-driven ship in a co-op session: the local player (`isPlayer`) or
+    /// another player's ship (`remotePlayer != nil`). Used to gate player-vs-player
+    /// damage on the session's PvP rule.
+    public var isPlayerControlled: Bool { isPlayer || remotePlayer != nil }
     public var isAlive: Bool { armor > 0 }
     /// 0…1 overall health, shields included, for morale/retreat decisions.
     public var healthFraction: Double {
@@ -792,6 +796,13 @@ public final class World {
     /// authority populate normally.
     public var spawningPaused = false
 
+    /// Co-op PvP gate (host-set from `SessionRules.allowPvP`). When false (the
+    /// default and the "safe" preset), players can't damage each other even when
+    /// aiming at one another — the classic help-me-fight co-op. When true (full
+    /// stakes), a player's weapons hit other players for real. Only affects
+    /// player-vs-player hits; player-vs-NPC and NPC-vs-anyone are unchanged.
+    public var pvpAllowed = false
+
     public var tuning: FlightTuning
     public var combatTuning: CombatTuning
     /// Set once the player's death has been reported via `.playerDestroyed`,
@@ -1045,6 +1056,39 @@ public final class World {
     /// from a fresh snapshot. Leaves real, simulated shots untouched.
     public func clearVisualProjectiles() {
         projectiles.removeAll { $0.visualOnly }
+    }
+
+    /// Co-op: spawn a **visual-only** echo of an authority's beam segment so a
+    /// client sees enemy/ally beam weapons. Drawn straight from `from`→`to`; never
+    /// refreshed or life-counted (see `refreshActiveBeams`). `shooterID` is carried
+    /// so a client can skip echoing its own beams.
+    public func spawnVisualBeam(shooterID: Int, weaponID: Int, from: Vec2, to: Vec2, hit: Bool,
+                                width: Double, color: (r: Double, g: Double, b: Double)?) {
+        let beam = ActiveBeam(shooterID: shooterID, mountIndex: 0, weaponID: weaponID,
+                              from: from, to: to, hit: hit, continuous: false,
+                              life: .infinity, width: width, color: color)
+        beam.visualOnly = true
+        activeBeams.append(beam)
+    }
+
+    /// Remove all visual-only beam echoes (co-op client), before re-seeding from a
+    /// fresh snapshot. Leaves real beams untouched.
+    public func clearVisualBeams() {
+        activeBeams.removeAll { $0.visualOnly }
+    }
+
+    /// Co-op: replay an authority's explosion as a one-shot effect on a client, so
+    /// its scene plays the same boom/sound. Appends to this frame's `events` (which
+    /// the scene drains) — call it **after** `step` (step clears events at its
+    /// start), i.e. from the post-step sync flush.
+    public func emitVisualExplosion(at position: Vec2, radius: Double, boomID: Int?) {
+        events.append(.explosion(at: position, radius: radius, soundID: nil, boomID: boomID))
+    }
+
+    /// Test seam: inject a real (simulated) projectile into the world. Not used by
+    /// gameplay — the sim spawns shots through `fireWeapons`.
+    func testInjectProjectile(_ projectile: Projectile) {
+        projectiles.append(projectile)
     }
 
     /// A government patrol/interceptor completed a scan pass on another ship.
@@ -1840,6 +1884,7 @@ public final class World {
     private func refreshActiveBeams(_ dt: Double) {
         guard !activeBeams.isEmpty else { return }
         activeBeams.removeAll { beam in
+            if beam.visualOnly { return false }   // co-op echo: left as-is, replaced by the next snapshot
             if beam.continuous {
                 guard let ship = ship(id: beam.shooterID), ship.isAlive,
                       ship.activeBeamLoopMounts.contains(beam.mountIndex) else { return true }
@@ -2061,6 +2106,13 @@ public final class World {
     /// No self-hits and no friendly fire between the same government.
     private func canHit(owner: Int, ownerGovt: Int, victim: Ship) -> Bool {
         if victim.entityID == owner { return false }
+        // Player-vs-player: co-op partners carry a shared government (so they'd
+        // normally be un-hittable allies), so PvP is gated by the session rule
+        // instead of that government — regardless of faction, one player can only
+        // damage another when the host has enabled PvP.
+        if victim.isPlayerControlled, let ownerShip = ship(id: owner), ownerShip.isPlayerControlled {
+            return pvpAllowed
+        }
         // Same government doesn't shoot itself (independents are fair game).
         if ownerGovt != independentGovt && victim.government == ownerGovt { return false }
         return true
@@ -2192,15 +2244,29 @@ public final class World {
                 stopAllBeamLoops(for: npc)
                 continue
             }
-            // Departed past the system edge → gone to hyperspace.
+            // Departed past the system edge → gone to hyperspace. A ship that
+            // rolled in favor of a hypergate departure (`AIBrain.pickDepartureGate`)
+            // instead transits there, so the gate visibly opens for it too.
             if npc.wantsToDepart {
-                let d = (npc.position - systemContext.center).length
-                if d >= systemContext.jumpRadius {
-                    events.append(.shipDeparted(entityID: npc.entityID, at: npc.position,
-                                                heading: npc.angle))
-                    clearTarget(npc.entityID)
-                    stopAllBeamLoops(for: npc)
-                    continue
+                if let gateID = npc.brain?.departViaGateID,
+                   let gate = systemContext.bodies.first(where: { $0.id == gateID }) {
+                    let d = (npc.position - gate.position).length
+                    if d <= gate.radius + 40 {
+                        events.append(.shipDepartedViaGate(entityID: npc.entityID, gateSpobID: gateID,
+                                                           at: npc.position))
+                        clearTarget(npc.entityID)
+                        stopAllBeamLoops(for: npc)
+                        continue
+                    }
+                } else {
+                    let d = (npc.position - systemContext.center).length
+                    if d >= systemContext.jumpRadius {
+                        events.append(.shipDeparted(entityID: npc.entityID, at: npc.position,
+                                                    heading: npc.angle))
+                        clearTarget(npc.entityID)
+                        stopAllBeamLoops(for: npc)
+                        continue
+                    }
                 }
             }
             // A cold hulk that's drifted long enough is quietly retired.

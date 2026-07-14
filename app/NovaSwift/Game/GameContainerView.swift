@@ -165,8 +165,10 @@ final class GameHost {
                     }
                     let tex = sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
                     let radius = CGFloat(sprite?.frameWidth ?? 48) / 2
+                    // `spöb.X/Y` is authored +y-down (same convention as `sÿst.X/Y`);
+                    // flip to this engine/SpriteKit's +y-up world.
                     return PlanetVisual(id: spob.id, name: spob.name,
-                                        position: CGPoint(x: spob.x, y: spob.y),
+                                        position: CGPoint(x: spob.x, y: -spob.y),
                                         texture: tex, radius: radius,
                                         government: spob.government,
                                         isUninhabited: spob.isUninhabited || wreck)
@@ -176,8 +178,11 @@ final class GameHost {
                 // is a planet, and the player expects to resume *there*, not dumped
                 // at the system centre. Mirror the takeoff math in
                 // `GameScene.reloadForDeparture`: sit just clear of the body's
-                // surface, nosed outward, at rest. Otherwise (saved in flight, or a
-                // jump/other rebuild where `landedSpob` is nil) fall back to the
+                // surface, nosed outward, at rest. Otherwise, use the raw in-flight
+                // position/heading captured by `GameContainerView.saveGame` (every
+                // autosave, not just on landing) — that's what lets a save taken
+                // mid-flight resume exactly where it was instead of at the system
+                // centre. Only a legacy save with neither field falls back to the
                 // generic "a little south of centre so planets are in view."
                 let sysCtx = galaxy.systemContext(for: system.id)
                 if let sid = pilot.landedSpob,
@@ -187,6 +192,10 @@ final class GameHost {
                     let dir = outward.normalized
                     ship.position = body.position + dir * (body.radius + 60)
                     ship.angle = dir.angle
+                    ship.velocity = Vec2()
+                } else if let x = pilot.shipPositionX, let y = pilot.shipPositionY {
+                    ship.position = Vec2(x, y)
+                    ship.angle = pilot.shipHeading ?? 0
                     ship.velocity = Vec2()
                 } else {
                     ship.position = sysCtx.center + Vec2(0, -700)
@@ -368,7 +377,7 @@ final class GameHost {
                 let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
                 let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
                 return PlanetVisual(id: spob.id, name: spob.name,
-                                    position: CGPoint(x: spob.x, y: spob.y),
+                                    position: CGPoint(x: spob.x, y: -spob.y),
                                     texture: tex, radius: radius,
                                     government: spob.government,
                                     isUninhabited: spob.isUninhabited)
@@ -824,6 +833,7 @@ struct GameContainerView: View {
                     GameMenuView(hud: host.hud,
                                  onResume: { showMenu = false },
                                  onOpenMap: { nav.showingMap = true },
+                                 onSave: { saveGame(reason: $0) },
                                  showDebug: model.settings.debugModeEnabled,
                                  onOpenDebug: { showMenu = false; showDebugSuite = true })
                 }
@@ -941,7 +951,7 @@ struct GameContainerView: View {
             // live pilot has right now so it isn't lost.
             if phase != .active {
                 syncCombatStanding()
-                model.autosave(reason: .timer)
+                saveGame(reason: .timer)
                 // "Pause when app loses focus": freeze the sim while backgrounded
                 // (unless a modal already owns the pause state).
                 if model.settings.pauseOnFocusLoss { setScenePaused(true, reason: "focus lost") }
@@ -969,7 +979,7 @@ struct GameContainerView: View {
             guard host != nil, landedSpobID == nil, !showMenu, !nav.showingMap,
                   hailDialogState == nil, flightMissionServices.pendingOffer == nil else { return }
             syncCombatStanding()
-            model.autosave(reason: .periodic)
+            saveGame(reason: .periodic)
         }
         .onChange(of: landedSpobID) { _, id in
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
@@ -987,7 +997,7 @@ struct GameContainerView: View {
                     // service, per the Bible (free only via govt/rank flags).
                     repairOnLanding(spobID: id)
                     syncCombatStanding()
-                    model.autosave(reason: .land)               // EV Nova saves on every landing
+                    saveGame(reason: .land)               // EV Nova saves on every landing
                 }
                 model.audio.startAmbient(soundID: host?.game?.spob(id)?.ambientSoundID)
             } else {
@@ -1072,7 +1082,7 @@ struct GameContainerView: View {
                                              shipTypeID: model.pilot.state.shipType)
                 syncCombatStanding()   // the about-to-be-discarded Diplomacy is the source of truth
                 model.pilot.save()
-                model.autosave(reason: .jump)                 // durable per-pilot save on hyperjump
+                saveGame(reason: .jump)                 // durable per-pilot save on hyperjump
                 host = GameHost(model: model, systemID: newID, arrivedViaJump: true) // rebuild on jump
                 debug.attach(host?.scene)                     // re-point the debug suite (a jump ends any stress test)
                 setScenePaused(false, reason: "jump rebuild")
@@ -1280,7 +1290,7 @@ struct GameContainerView: View {
             model.pilot.state.exploredSystems.insert(destSystem)
             advanceGameDay()                              // gate travel still costs a calendar day
             model.pilot.save()
-            model.autosave(reason: .jump)
+            saveGame(reason: .jump)
             syncNav(host)
         }
     }
@@ -1297,7 +1307,7 @@ struct GameContainerView: View {
         // landing's `onChange`).
         DispatchQueue.main.async {
             model.pilot.save()
-            model.autosave(reason: .manual)   // catch any shopping done during this landing
+            saveGame(reason: .manual)   // catch any shopping done during this landing
             // Takeoff = reload the current system *in place* in the existing
             // scene (rebuilding the ship from the possibly-changed pilot loadout),
             // NOT a fresh `GameHost`. Rebuilding the host swaps the `SpriteView`'s
@@ -1508,7 +1518,7 @@ struct GameContainerView: View {
         default:              engine.missionShipDestroyed(missionID: missionID)
         }
         model.pilot.state = engine.player
-        model.autosave(reason: .timer)
+        saveGame(reason: .timer)
     }
 
     /// Drop any active mission's special **and** auxiliary ships into the live
@@ -1556,7 +1566,7 @@ struct GameContainerView: View {
         let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
         engine.missionShipLost(missionID: missionID)
         model.pilot.state = engine.player
-        model.autosave(reason: .timer)
+        saveGame(reason: .timer)
     }
 
     /// Fail every active mission whose static `mïsn` matches `predicate` (the
@@ -1576,7 +1586,7 @@ struct GameContainerView: View {
         guard failedAny else { return }
         model.pilot.state = engine.player
         host?.hud.post(reason)
-        model.autosave(reason: .timer)
+        saveGame(reason: .timer)
     }
 
     /// Map a `mïsn.ShipStart` code to a spawn arrival: `1` = jump in from
@@ -1724,6 +1734,21 @@ struct GameContainerView: View {
     /// mirrors `repairOnLanding`'s "sync live scene state into the persisted
     /// pilot" pattern for the same reason (a jump rebuilds `GameHost`, and
     /// with it a brand-new, unseeded-until-`GameHost.init` `Diplomacy`).
+    /// Snapshot the live ship's in-system position/heading into the pilot state
+    /// and durably save. Centralized here (instead of at each call site) so
+    /// every autosave — periodic, on-land, on-jump, backgrounding, manual —
+    /// always captures where the ship actually is; previously only a docked
+    /// save (`landedSpob`) recorded a usable position, so any save taken while
+    /// flying restored to the system centre on load.
+    private func saveGame(reason: AppModel.SaveReason) {
+        if let ship = host?.scene.playerShip {
+            model.pilot.state.shipPositionX = ship.position.x
+            model.pilot.state.shipPositionY = ship.position.y
+            model.pilot.state.shipHeading = ship.angle
+        }
+        model.autosave(reason: reason)
+    }
+
     private func syncCombatStanding() {
         guard let scene = host?.scene else { return }
         for (govt, value) in scene.liveLegalRecord {
@@ -1768,7 +1793,7 @@ struct GameContainerView: View {
             model.pilot.state.exploredSystems.insert(destID)
             advanceGameDay()                                   // each hyperjump is one calendar day
             model.pilot.save()
-            model.autosave(reason: .jump)                      // EV Nova saves on every hyperjump
+            saveGame(reason: .jump)                      // EV Nova saves on every hyperjump
             syncNav(host)                                      // refresh course/HUD (ship instance persists the swap)
         }
         return true
@@ -2159,7 +2184,7 @@ struct GameContainerView: View {
             else {
                 // Classic (sidebar off): mimic the original — save and drop straight
                 // to the authentic main menu, with no port-original overlay.
-                model.autosave(reason: .manual)
+                saveGame(reason: .manual)
                 model.returnToMainMenu()
             }
         case .galaxyMap:
@@ -2394,7 +2419,7 @@ struct GameContainerView: View {
         let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
         engine.dominateStellar(spobID)
         model.pilot.state = engine.player
-        model.autosave(reason: .timer)
+        saveGame(reason: .timer)
         let name = game.spob(spobID)?.name ?? "The stellar"
         host?.hud.post("\(name) submits to your rule — it will pay tribute daily.")
         if var state = hailDialogState, case let .planet(id) = state.kind, id == spobID {

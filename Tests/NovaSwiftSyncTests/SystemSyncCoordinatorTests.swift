@@ -230,6 +230,39 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         XCTAssertTrue(world.projectiles.filter { $0.visualOnly }.isEmpty)
     }
 
+    func testClientEchoesAuthorityBeamsSkippingItsOwn() {
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+
+        let snap = WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [
+            ShipNetState(id: 0, playerID: "me", shipTypeID: 128, name: "Me",
+                         x: 0, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+        ], beams: [
+            // Our own beam (shooter 0) — not echoed.
+            BeamNetState(shooterID: 0, weaponID: 200, fromX: 0, fromY: 0, toX: 10, toY: 0,
+                         hit: false, width: 2, color: nil),
+            // An enemy beam — echoed with its colour.
+            BeamNetState(shooterID: 9, weaponID: 201, fromX: 5, fromY: 5, toX: 25, toY: 5,
+                         hit: true, width: 3, color: [1, 0, 0]),
+        ])
+        coord.apply(snap, to: world, authorityPeer: "auth")
+
+        let echoes = world.activeBeams.filter { $0.visualOnly }
+        XCTAssertEqual(echoes.count, 1)
+        XCTAssertEqual(echoes.first?.shooterID, 9)
+        XCTAssertEqual(echoes.first?.to.x, 25)
+        XCTAssertEqual(echoes.first?.color?.r, 1)
+        XCTAssertEqual(echoes.first?.color?.g, 0)
+
+        // A visual beam is not refreshed away by a step (no shooter mount needed).
+        world.step(0.1)
+        XCTAssertEqual(world.activeBeams.filter { $0.visualOnly }.count, 1)
+
+        // Next snapshot with no beams clears the echo.
+        coord.apply(WorldSnapshot(tick: 2, ackInputSeq: 0, ships: snap.ships), to: world, authorityPeer: "auth")
+        XCTAssertTrue(world.activeBeams.filter { $0.visualOnly }.isEmpty)
+    }
+
     func testVisualProjectileFliesAndExpiresWithoutDamage() {
         // A visual-only shot moves on its velocity and expires, harming nothing.
         let world = World(player: Ship(name: "Me", stats: combatStats()))
@@ -246,6 +279,41 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(target.armor, armorBefore, "a visual shot deals no damage")
         world.step(0.1)                        // …then its life runs out
         XCTAssertTrue(world.projectiles.isEmpty, "expired visual shot is removed")
+    }
+
+    func testEffectsBufferedThenFlushedIntoWorld() {
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+
+        let snap = WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [
+            ShipNetState(id: 0, playerID: "me", shipTypeID: 128, name: "Me",
+                         x: 0, y: 0, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+        ], effects: [
+            EffectNetState(x: 10, y: 20, radius: 40, boomID: 300),
+        ])
+        coord.apply(snap, to: world, authorityPeer: "auth")
+
+        // Effects don't hit the world during apply (would be cleared by the step).
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(world.events.contains {
+            if case .explosion = $0 { return true } else { return false }
+        }, "no explosion yet — buffered until flush")
+
+        // Flushed after the step: the explosion event is now present for the scene.
+        coord.flushEffects(into: world)
+        let boom = world.events.first { if case .explosion = $0 { return true } else { return false } }
+        XCTAssertNotNil(boom)
+        if case let .explosion(at, radius, _, boomID) = boom {
+            XCTAssertEqual(at.x, 10); XCTAssertEqual(at.y, 20)
+            XCTAssertEqual(radius, 40); XCTAssertEqual(boomID, 300)
+        }
+
+        // Flushing again emits nothing (one-shot).
+        world.step(1.0 / 30.0)
+        coord.flushEffects(into: world)
+        XCTAssertFalse(world.events.contains {
+            if case .explosion = $0 { return true } else { return false }
+        })
     }
 
     func testStaleInputIsDropped() {
