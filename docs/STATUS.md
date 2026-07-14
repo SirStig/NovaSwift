@@ -12,13 +12,16 @@ because the library compiles. The three words we use, straight from
   loop calls it. As far as the player is concerned, it isn't in the game.
 - **Missing** — not built, or just a UI shell / "coming soon" placeholder.
 
-*Last walked through: 2026-07-12.*
+*Last walked through: 2026-07-14.*
 
 ## Where things stand
 
-The short version: **the game is a lot more complete than it used to be.** Most
-of what older versions of this doc filed under "built but not wired" is now
-genuinely wired, and the app builds and tests green.
+The short version: **NovaSwift is now a near-complete (~90%), faithful full port
+— the whole game is playable start to finish on macOS / iPadOS / iOS.** Almost
+everything older versions of this doc filed under "built but not wired" is now
+genuinely wired, and the app builds and tests green. What's left is polish &
+fidelity fine-tuning, bug/crash/performance hardening, and enhancements the 2002
+original never had — not missing core systems.
 
 The big one is the **story and mission system, which now runs end to end.** You
 can pick up a mission at the bar, fly it, and finish it — cargo, courier,
@@ -36,9 +39,17 @@ turret slots, and shooting up the wrong government dings your record. Named
 captains from the `përs` table roam the galaxy, and there's an in-game Story Map
 the original never had.
 
-And most recently, a batch of quality-of-life systems came online: **hiring and
+On top of that, a batch of quality-of-life systems came online: **hiring and
 managing escorts, gambling on the races at the bar, and creating and juggling
-multiple pilots** all work now. The tables below reflect all of this.
+multiple pilots** all work now.
+
+Most recently, two more big rocks landed. **Boarding, plunder & capture** is
+wired end to end — disable a ship, board it, and plunder its cargo, credits,
+fuel and ammo, or capture the hull outright. And the **renderer effects
+pipeline** is real: explosions are no longer a single orange flash but proper
+`bööm` sprites, backed by a particle/smoke system with weapon smoke/spark
+trails, hit-spray on shield and armor hits, asteroid debris bursts, and jagged
+lightning beams. The tables below reflect all of this.
 
 ## The one thing that still feels off: how ships fly and spawn
 
@@ -80,6 +91,8 @@ Everything else in this doc holds up well by comparison.
 | **Demand Tribute / planetary domination** | The "Demand Tribute" hail-dialog button calls `GameScene.demandTribute` → `World.demandTribute` (combat-rating gate, `DefenseDude` waves, `stellarDominated` event); each wave posts a HUD line and a surrender runs `StoryEngine.dominateStellar` (fires `OnDominate`, persists `dominatedStellars`, starts daily `payDailyTribute` income). Full demand → waves → surrender → tribute loop is playable | `GameContainerView.swift` (`demandPlanetTribute`, `handleStellarDominated`), `GameScene.swift`, `Domination.swift` — see [reverse-engineering/DOMINATION.md](reverse-engineering/DOMINATION.md) |
 | **Rank-gated purchases (`ränk.Contribute`)** | `ItemLocking.contributedBits` folds ship + outfit **and** active-rank + active-crön `Contribute` (mirroring `StoryEngine.activeContributeBits`), so a purchase gated on a rank the pilot holds unlocks in the shipyard/outfitter — the Bible's headline use | `Spaceport/ItemLocking.swift` |
 | **Freighter random cargo (`flët.Flags` 0x0001)** | `Spawner.spawnFleet` rolls random standard-commodity cargo into a fleet's freighters (InherentAI ≤ 2), so boarding a convoy hauler yields loot | `Spawner.swift` (`rollRandomFreighterCargo`) |
+| **Boarding, plunder & capture** | Disable → board → plunder loop is wired end to end: a disabled ship can be boarded to plunder cargo, credits, fuel and ammo, or captured hull-and-all | `World.swift`, `GameScene.swift`, `GameContainerView.swift` |
+| **Renderer effects pipeline** | Real `bööm` explosion sprites (the `.explosion` event carries `boomID`), a particle/smoke system, weapon smoke/spark trails, hit-spray on shield/armor hits (`.shieldHit`/`.armorHit` carry `weaponID`), asteroid debris bursts (new `.asteroidDebris` event from `röid` partColor/partCount), and jagged lightning beams (`wëap` LiDensity/LiAmplitude) — explosions are no longer a single orange flash | `GameScene.swift`, `World.swift` |
 | **Combat odds / armor-disable AI** | `AIBrain.power(_:)` drives odds-based flee/press; disabled-hulk transition on armor loss (NPC-only; the player-death path above owns the player) | `AIBrain.swift`, `World.swift` |
 | **Government legal-record penalties** | `Diplomacy.recordKill`/`.recordDisable` are called from `World.swift`'s combat-resolution disable/kill transitions, applying real `KillPenalty`/`DisabPenalty`; combat rating accrues in real play | `World.swift`, `Diplomacy.swift` |
 | **Target-lock + HUD + radar** | Real `selectNearestTarget`/`cycleTarget` with HUD brackets; live ship state, real planet/NPC blips with hostility color; authentic status bar from `ïntf` | `GameScene.swift`, `AuthenticHUDView.swift` |

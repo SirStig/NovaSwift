@@ -60,10 +60,12 @@ what's live today (see [STATUS.md](STATUS.md) for the wiring details):
 
 The remaining work, in priority order:
 
-### P0 — AI / spawning / flight fidelity ⚠️ *(the top gap now)*
-This is the biggest remaining delta between the port and the original, and it
-is **quality-of-reconstruction, not a missing feature**. EV Nova's AI/spawning
-was never open-sourced, so ours is rebuilt from data + observed behavior.
+### P0 — AI / spawning / flight fidelity ⚠️ *(fidelity fine-tuning)*
+With the core game complete, this is the most visible remaining delta between
+the port and the original — but it is **quality-of-reconstruction fine-tuning,
+not a missing feature**. EV Nova's AI/spawning was never open-sourced, so ours
+is rebuilt from data + observed behavior, and the goal now is making a pure
+Classic run *feel* exactly like 2002.
 - **Spawn cadence/density** (`Spawner.swift`) — the ambient trickle toward
   `sÿst.AvgShips` is a heuristic; tune it toward the original's real arrival
   rhythm and ship mix so traffic stops feeling too sparse/even.
@@ -125,10 +127,17 @@ demand → waves → surrender → tribute loop is playable end-to-end. See
 ## Later — depth & polish
 
 - **Combat/AI depth** (`docs/AI.md`, `docs/SHIP_SYSTEM.md`): deeper
-  hailing/bribing/boarding, distress calls & reinforcements, plundering,
-  guided-weapon lock-tone/lock-loss nuance, `bööm` explosion art, per-weapon
-  `snd `. (`përs` named captains — hail quotes, link-missions, grudges — are
-  now wired; remaining `përs` depth is the bribe/board nuance above.)
+  hailing/bribing, distress calls & reinforcements, guided-weapon
+  lock-tone/lock-loss nuance, per-weapon `snd `. (`përs` named captains — hail
+  quotes, link-missions, grudges — are now wired; remaining `përs` depth is the
+  bribe nuance above.)
+  - ✅ **Boarding, plunder & capture** — *done*: disable → board → plunder
+    cargo / credits / fuel / ammo and capture-hull, wired end to end.
+  - ✅ **Renderer effects pipeline** — *done*: real `bööm` explosion sprites, a
+    particle/smoke system, weapon smoke/spark trails, hit-spray on shield/armor
+    hits, asteroid debris bursts (`röid` partColor/partCount), and jagged
+    lightning beams (`wëap` LiDensity/LiAmplitude). Explosions are no longer a
+    single orange flash.
 - **Audio**: `snd ` SFX + music coverage; `STR#`/`dësc` text everywhere.
 - **Full options**: every EV Nova setting + difficulty; modern graphics/audio/
   accessibility layered on (opt-in, per charter).
