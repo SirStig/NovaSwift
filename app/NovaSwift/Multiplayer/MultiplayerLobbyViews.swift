@@ -114,6 +114,10 @@ struct LobbyRosterView: View {
 
     private var amber: Color { Color(red: 1.0, green: 0.7, blue: 0.28) }
     private var session: MultiplayerSession { model.session }
+    private var myName: String {
+        let n = model.pilot.state.pilotName
+        return n.isEmpty ? "Captain" : n
+    }
 
     var body: some View {
         ScrollView {
@@ -134,6 +138,11 @@ struct LobbyRosterView: View {
                             isYou: player.playerID == session.localPlayerID,
                             isHost: player.playerID == session.hostPlayerID,
                             canModerate: session.isHost && player.playerID != session.localPlayerID,
+                            canTrade: session.canTrade(with: player.playerID),
+                            onTrade: {
+                                session.inviteTrade(with: player.playerID, myName: myName)
+                                onEnterFlight()   // watch the trade window in flight
+                            },
                             onKick: { session.kick(player.playerID) },
                             onBan: { session.ban(player.playerID) })
                     }
@@ -212,6 +221,8 @@ private struct PlayerRosterRow: View {
     let isYou: Bool
     let isHost: Bool
     let canModerate: Bool
+    let canTrade: Bool
+    var onTrade: () -> Void
     var onKick: () -> Void
     var onBan: () -> Void
 
@@ -230,6 +241,14 @@ private struct PlayerRosterRow: View {
                 Text("System \(player.currentSystemID)").novaFont(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            if canTrade {
+                Button(action: onTrade) {
+                    Label("Trade", systemImage: "arrow.left.arrow.right")
+                        .labelStyle(.iconOnly).font(.title3)
+                        .foregroundStyle(Color(red: 1, green: 0.7, blue: 0.28))
+                }
+                .buttonStyle(.plain)
+            }
             if canModerate {
                 Menu {
                     Button(role: .destructive, action: onKick) { Label("Kick", systemImage: "boot") }

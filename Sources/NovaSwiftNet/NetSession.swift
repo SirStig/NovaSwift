@@ -47,6 +47,8 @@ public final class NetSession: TransportDelegate {
     public var onNCB: (([Int], PeerID) -> Void)?
     /// Fired on a player the host has kicked — the app tears its session down.
     public var onKicked: (() -> Void)?
+    /// Fired for a trade handshake message from `peer` (invite/offer/accept/cancel).
+    public var onTrade: ((TradeSignal, PeerID) -> Void)?
 
     /// Players this session (as host) has banned — their presence is refused and a
     /// rejoin is ignored until the session ends.
@@ -109,6 +111,14 @@ public final class NetSession: TransportDelegate {
 
     /// Ban a player: kick them and refuse their presence for the rest of the session.
     public func ban(_ playerID: String) { kick(playerID, ban: true) }
+
+    // MARK: - Trade
+
+    /// Send a trade handshake message to a specific peer (reliable — trade state
+    /// must not be lost).
+    public func sendTrade(_ signal: TradeSignal, to peer: String) {
+        send(.trade(signal), to: peer, channel: .reliable)
+    }
 
     /// Whether a player is currently banned from this (host's) session.
     public func isBanned(_ playerID: String) -> Bool { bannedIDs.contains(playerID) }
@@ -213,6 +223,9 @@ public final class NetSession: TransportDelegate {
         case .kick(let targetID):
             // Sent to us — the host removed us from the lobby.
             if targetID == localPlayerID { onKicked?() }
+
+        case .trade(let signal):
+            onTrade?(signal, peer)
 
         case .input(let frame):
             onInput?(frame, peer)

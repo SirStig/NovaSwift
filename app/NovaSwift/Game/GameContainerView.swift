@@ -763,6 +763,18 @@ struct GameContainerView: View {
                 // cluster; empty regions don't block fly-to-tap.
                 MultiplayerChatCluster(session: model.session)
 
+                // Trade / item hand-off — a live trade window, or an incoming
+                // invite prompt. Modal overlays, only while in a session.
+                if model.session.trade != nil {
+                    TradeView().transition(.opacity)
+                } else if let invite = model.session.incomingTradeInvite {
+                    ZStack {
+                        Color.black.opacity(0.55).ignoresSafeArea()
+                        TradeInvitePromptView(invite: invite)
+                    }
+                    .transition(.opacity)
+                }
+
                 if showFlightHints && landedSpobID == nil && !showMenu && !nav.showingMap {
                     flightHintsOverlay
                 }
@@ -2187,6 +2199,9 @@ struct GameContainerView: View {
         switch action {
         case .land:
             guard landedSpobID == nil, gateMapOrigin == nil, let scene = host?.scene else { break }
+            // Nothing selected yet (the player never clicked a planet) — target
+            // the closest landable body so Land always has something to act on.
+            scene.selectNearestLandableIfNoneSelected()
             if model.settings.autoLanding {
                 // Auto-landing: fly to the targeted/nearest landable body and set
                 // down on arrival. Pressing Land again cancels an in-progress

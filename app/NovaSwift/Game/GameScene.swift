@@ -1363,7 +1363,12 @@ final class GameScene: SKScene {
         var bestReach = 0.0
         for body in world.systemContext.bodies where isPlayerLandTarget(body) {
             let d = (body.position - p.position).length
-            if d < bestDist { bestDist = d; bestID = body.id; bestReach = body.radius + 55 }
+            // +70, not +55: takeoff/dock-load placement (`reloadForDeparture`,
+            // `GameContainerView`'s load-while-docked path) sets the ship down
+            // at exactly `body.radius + 60` — a reach of only +55 left that spot
+            // just outside landing range, so you couldn't press Land again
+            // right after spawning next to the very body you're standing on.
+            if d < bestDist { bestDist = d; bestID = body.id; bestReach = body.radius + 70 }
         }
         nearestLandableID = bestID
         let inReach = bestID != nil && bestDist <= bestReach
@@ -1462,6 +1467,19 @@ final class GameScene: SKScene {
     private func selectPlanet(_ id: Int) {
         selectedPlanetID = id
         world.clearPlayerTarget()
+    }
+
+    /// Select the nearest landable body if nothing is currently selected — what
+    /// pressing Land falls back to when the player hasn't targeted a planet
+    /// themselves, so the action always has something to act on (the
+    /// auto-landing autopilot, a follow-up Hail) instead of silently doing
+    /// nothing just because nothing was ever clicked.
+    @discardableResult
+    func selectNearestLandableIfNoneSelected() -> Int? {
+        guard selectedPlanetID == nil else { return selectedPlanetID }
+        guard let id = nearestLandableID else { return nil }
+        selectPlanet(id)
+        return id
     }
 
     func selectNearestTarget() {

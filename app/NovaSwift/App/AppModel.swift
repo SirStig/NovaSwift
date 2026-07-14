@@ -126,6 +126,25 @@ final class AppModel: ObservableObject {
             pilot.state.setBits.formUnion(bits)      // union only — never removes
             if pilot.state.setBits != before { pilot.save() }
         }
+        // Trade / hand-off: apply a committed trade to the pilot — remove what we
+        // gave, add what we received (credits, cargo, outfits) — then save.
+        session.onTradeCommitted = { [weak self] give, receive in
+            guard let self else { return }
+            var s = pilot.state
+            s.credits = max(0, s.credits - give.credits) + receive.credits
+            for (id, tons) in give.cargo {
+                let left = (s.cargo[id] ?? 0) - tons
+                s.cargo[id] = left > 0 ? left : nil
+            }
+            for (id, tons) in receive.cargo { s.cargo[id, default: 0] += tons }
+            for (id, n) in give.outfits {
+                let left = (s.outfits[id] ?? 0) - n
+                s.outfits[id] = left > 0 ? left : nil
+            }
+            for (id, n) in receive.outfits { s.outfits[id, default: 0] += n }
+            pilot.state = s
+            pilot.save()
+        }
         #if canImport(GameKit)
         // Forward Game Center sign-in changes so the "Online Co-op" entry updates.
         gameCenterObserver = gameCenter.objectWillChange.sink { [weak self] _ in

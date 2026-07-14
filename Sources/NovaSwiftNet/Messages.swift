@@ -218,6 +218,38 @@ public struct NCBUpdate: Codable, Equatable, Sendable {
     public init(setBits: [Int]) { self.setBits = setBits }
 }
 
+// MARK: - Trade / item hand-off
+
+/// One side's proposed contribution to a trade: credits plus item bundles keyed
+/// by their game ids (`cargo` = commodity id → tons, `outfits` = oütf id → count).
+/// Two players each build a `TradeOffer`; on mutual accept, each removes its own
+/// offer from its save and adds the partner's. Gated by `SessionRules.allowTrade`.
+public struct TradeOffer: Codable, Equatable, Sendable {
+    public var credits: Int
+    public var cargo: [Int: Int]
+    public var outfits: [Int: Int]
+    public init(credits: Int = 0, cargo: [Int: Int] = [:], outfits: [Int: Int] = [:]) {
+        self.credits = credits; self.cargo = cargo; self.outfits = outfits
+    }
+    /// Nothing on the table.
+    public var isEmpty: Bool { credits == 0 && cargo.isEmpty && outfits.isEmpty }
+}
+
+/// The trade handshake between two co-located players, all on the reliable channel.
+public enum TradeSignal: Codable, Equatable, Sendable {
+    /// A → B: "want to trade?" (carries A's pilot name for the prompt).
+    case invite(fromName: String)
+    /// B → A: declined the invite.
+    case decline
+    /// Either side's current offer — sent live as they add/remove items. Receiving
+    /// a new offer clears the receiver's own acceptance (the deal changed).
+    case offer(TradeOffer)
+    /// Either side toggling their acceptance. Both accepted ⇒ commit.
+    case accept(Bool)
+    /// Either side cancelled — the trade closes on both.
+    case cancel
+}
+
 // MARK: - Envelope
 
 /// The tagged wire envelope. Swift synthesizes `Codable` as a single-key object
@@ -243,6 +275,8 @@ public enum NetMessage: Codable, Equatable, Sendable {
     /// so it can confirm the kick is meant for it). A ban is a kick the host also
     /// remembers, refusing the id's presence thereafter.
     case kick(String)
+    /// Peer-to-peer trade handshake (invite / offer / accept / cancel).
+    case trade(TradeSignal)
 }
 
 /// Serialization boundary for `NetMessage`. JSON for the P0 spine — readable and

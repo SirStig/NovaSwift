@@ -447,9 +447,19 @@ simply won't fire for that player, rather than corrupting state.
   `LobbyRosterView` (player list, host/you badges, per-player kick/ban menu, rules pills,
   Return-to-Flight / Leave). Game Center matchmaker moved into the hub + given a real
   `minHeight` on macOS (fixes the too-short/oversized-buttons sheet).
-- **Remaining:** **trade / item hand-off UI** (`allowTrade` — next); finer PvP toggles
-  (`friendlyFire`/`deathReal`/`pvpDamageReal`); seamless authority handoff. Core "come help me
-  fly / fight / quest together" is complete.
+- **Trade / item hand-off DONE (compiles; net logic tested):** two players can swap
+  **credits + cargo + outfits** (gated by `SessionRules.allowTrade`). `TradeOffer` +
+  `TradeSignal` (invite/decline/offer/accept/cancel) over the reliable channel
+  (`NetSession.sendTrade`/`onTrade`); a two-sided state machine in `MultiplayerSession`
+  (`inviteTrade`/`accept`/`updateMyOffer`/`setTradeAccepted`/`cancel` — any offer change resets
+  both acceptances; both-accepted ⇒ each side applies the swap to its own save via
+  `AppModel.onTradeCommitted`). Polished responsive UI: `TradeView` (a two-column GIVE/RECEIVE
+  window with steppers over your held items, live partner mirror, dual-accept bar — side-by-side
+  on wide screens, stacked on a phone via `ViewThatFits`) + `TradeInvitePromptView`; initiated
+  from the lobby roster's per-player Trade button, shown as a flight overlay.
+- **Multiplayer feature complete.** Remaining are optional refinements only: finer PvP toggles
+  (`friendlyFire`/`deathReal`/`pvpDamageReal` — `allowPvP` is the master switch) and seamless
+  authority handoff (the world-rebuild handoff already works).
 
 ## Testing on one machine
 

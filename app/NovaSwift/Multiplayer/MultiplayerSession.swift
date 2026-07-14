@@ -37,6 +37,32 @@ final class MultiplayerSession: ObservableObject {
     /// Set true briefly when the host kicked us, so the UI can explain the exit.
     @Published var wasKicked = false
 
+    // MARK: - Trade
+
+    /// The live trade with another player, or nil. Drives the trade window overlay.
+    @Published var trade: TradeState?
+    /// A pending trade invite from another player awaiting our yes/no.
+    @Published var incomingTradeInvite: TradeInvite?
+    /// The app applies a committed trade to the pilot (remove `give`, add `receive`)
+    /// and saves. Set by `AppModel`.
+    var onTradeCommitted: ((_ give: TradeOffer, _ receive: TradeOffer) -> Void)?
+
+    /// Live two-sided trade state.
+    struct TradeState {
+        let partnerID: String
+        var partnerName: String
+        var myOffer = TradeOffer()
+        var theirOffer = TradeOffer()
+        var myAccepted = false
+        var theirAccepted = false
+        /// Whether the partner has joined the window (acknowledged the invite).
+        var partnerJoined: Bool
+    }
+    struct TradeInvite: Identifiable, Equatable {
+        var id: String        // inviter player id
+        var name: String
+    }
+
     /// This player's id in the live session — always equal to the transport's peer
     /// id (`NetSession.localPlayerID`). Seeded with a per-launch id used for the
     /// Multipeer display name; replaced by the transport's own id when a session
@@ -205,6 +231,8 @@ final class MultiplayerSession: ObservableObject {
         isHost = false
         joinedHostID = nil
         lobbyName = ""
+        trade = nil
+        incomingTradeInvite = nil
         chatLog = []
         presence = [:]
         unreadCount = 0
@@ -243,6 +271,104 @@ final class MultiplayerSession: ObservableObject {
         guard isHost else { return }
         rules = newRules
         net?.broadcastRules(newRules)
+    }
+
+    // MARK: - Trade API (used by the UI)
+
+    /// Whether we can start a trade with `playerID` right now.
+    func canTrade(with playerID: String) -> Bool {
+        rules.allowTrade && trade == nil && playerID != localPlayerID && presence[playerID] != nil
+    }
+
+    /// Invite another player to trade. Opens our (waiting) trade window.
+    func inviteTrade(with playerID: String, myName: String) {
+        guard canTrade(with: playerID) else { return }
+        let name = presence[playerID]?.name ?? "Player"
+        trade = TradeState(partnerID: playerID, partnerName: name, partnerJoined: false)
+        net?.sendTrade(.invite(fromName: myName), to: playerID)
+    }
+
+    /// Accept an incoming trade invite — opens the window and acks the inviter.
+    func acceptTradeInvite() {
+        guard let invite = incomingTradeInvite else { return }
+        trade = TradeState(partnerID: invite.id, partnerName: invite.name, partnerJoined: true)
+        net?.sendTrade(.offer(TradeOffer()), to: invite.id)   // ack + initial (empty) offer
+        incomingTradeInvite = nil
+    }
+
+    /// Decline an incoming trade invite.
+    func declineTradeInvite() {
+        guard let invite = incomingTradeInvite else { return }
+        net?.sendTrade(.decline, to: invite.id)
+        incomingTradeInvite = nil
+    }
+
+    /// Replace our current offer (called live as the player edits it). Any change
+    /// resets both sides' acceptance — the deal changed, so it must be re-confirmed.
+    func updateMyOffer(_ offer: TradeOffer) {
+        guard var t = trade else { return }
+        t.myOffer = offer
+        t.myAccepted = false
+        t.theirAccepted = false
+        trade = t
+        net?.sendTrade(.offer(offer), to: t.partnerID)
+    }
+
+    /// Toggle our acceptance; when both sides accept, the trade commits.
+    func setTradeAccepted(_ accepted: Bool) {
+        guard var t = trade else { return }
+        t.myAccepted = accepted
+        trade = t
+        net?.sendTrade(.accept(accepted), to: t.partnerID)
+        commitTradeIfReady()
+    }
+
+    /// Cancel the live trade and tell the partner.
+    func cancelTrade() {
+        guard let t = trade else { return }
+        net?.sendTrade(.cancel, to: t.partnerID)
+        trade = nil
+    }
+
+    private func commitTradeIfReady() {
+        guard let t = trade, t.myAccepted, t.theirAccepted else { return }
+        onTradeCommitted?(t.myOffer, t.theirOffer)
+        trade = nil
+    }
+
+    private func handleTrade(_ signal: TradeSignal, from peer: String) {
+        switch signal {
+        case .invite(let fromName):
+            // Only when trading is allowed and we're free; else politely decline.
+            if rules.allowTrade, trade == nil, incomingTradeInvite == nil {
+                incomingTradeInvite = TradeInvite(id: peer, name: fromName)
+            } else {
+                net?.sendTrade(.decline, to: peer)
+            }
+        case .decline:
+            if trade?.partnerID == peer { trade = nil }
+        case .offer(let offer):
+            guard var t = trade, t.partnerID == peer else { return }
+            t.theirOffer = offer
+            t.partnerJoined = true
+            t.myAccepted = false        // the deal changed — re-confirm
+            t.theirAccepted = false
+            trade = t
+        case .accept(let accepted):
+            guard var t = trade, t.partnerID == peer else { return }
+            t.theirAccepted = accepted
+            trade = t
+            commitTradeIfReady()
+        case .cancel:
+            if trade?.partnerID == peer { trade = nil }
+            if incomingTradeInvite?.id == peer { incomingTradeInvite = nil }   // inviter withdrew
+        }
+    }
+
+    /// Drop a live trade / invite if the other party has left the session.
+    private func pruneTradeIfPartnerGone() {
+        if let t = trade, presence[t.partnerID] == nil { trade = nil }
+        if let inv = incomingTradeInvite, presence[inv.id] == nil { incomingTradeInvite = nil }
     }
 
     // MARK: - Presence / chat API (used by the app)
@@ -296,9 +422,14 @@ final class MultiplayerSession: ObservableObject {
             self?.stop()
             self?.wasKicked = true
         }
+        // Trade handshakes from a partner.
+        session.onTrade = { [weak self] signal, peer in self?.handleTrade(signal, from: peer) }
     }
 
-    private func syncPresence() { presence = net?.presence ?? [:] }
+    private func syncPresence() {
+        presence = net?.presence ?? [:]
+        pruneTradeIfPartnerGone()
+    }
 
     // MARK: - Layer 2 role logic + game-loop hooks
 
