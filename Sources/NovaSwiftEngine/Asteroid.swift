@@ -27,6 +27,13 @@ public final class Asteroid {
     /// Average number of sub-asteroids on death, ±50% per the Bible.
     public let fragCount: Int
     public let explodeType: Int
+    /// The rock's death explosion as a resolved `bööm` resource id (or nil) —
+    /// drives the real explosion sprite the renderer plays when it shatters.
+    public let explosionBoomID: Int?
+    /// `röid.partColor`/`partCount` — the debris spray's tint and chunk count,
+    /// thrown as colored fragments alongside the explosion on death.
+    public let partColor: NovaColor
+    public let partCount: Int
     /// `röid.YieldType` — cargo id this rock yields when mined (0-5 standard
     /// commodity; -1 = nothing). `röid.YieldQty` is the average box count (±50%).
     public let yieldType: Int
@@ -47,6 +54,9 @@ public final class Asteroid {
         self.fragType2 = roid.fragType2
         self.fragCount = roid.fragCount
         self.explodeType = roid.explodeType
+        self.explosionBoomID = roid.explosionBoomID
+        self.partColor = roid.partColor
+        self.partCount = roid.partCount
         self.yieldType = roid.yieldType
         self.yieldQty = roid.yieldQty
     }

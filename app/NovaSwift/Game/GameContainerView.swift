@@ -3,6 +3,7 @@ import SpriteKit
 import NovaSwiftKit
 import NovaSwiftEngine
 import NovaSwiftStory
+import NovaSwiftNet
 
 /// Builds and owns the game scene, input, controller, and HUD for a play session.
 @MainActor
@@ -642,6 +643,19 @@ struct GameContainerView: View {
     /// Chance a "wary" (dislikes-you-but-not-hostile) crew agrees at all.
     private let assistanceWaryAcceptChance = 0.5
 
+    /// Other players' locations for the galaxy-map presence markers, keyed by
+    /// system id (excludes the local player; empty when no session is active).
+    private var galaxyPlayerMarkers: [Int: [GalaxyMapView.PlayerMapMarker]] {
+        guard model.session.isActive else { return [:] }
+        var result: [Int: [GalaxyMapView.PlayerMapMarker]] = [:]
+        for presence in model.session.presence.values
+        where presence.playerID != model.session.localPlayerID {
+            result[presence.currentSystemID, default: []]
+                .append(.init(id: presence.playerID, name: presence.name))
+        }
+        return result
+    }
+
     var body: some View {
         ZStack {
             if let host {
@@ -681,7 +695,8 @@ struct GameContainerView: View {
                 if nav.showingMap && gateMapOrigin == nil {
                     GalaxyMapView(nav: nav, pilot: model.pilot, onJump: { _ = attemptJump() },
                                   onClose: { nav.showingMap = false },
-                                  fullscreen: model.settings.fullscreenGalaxyMap)
+                                  fullscreen: model.settings.fullscreenGalaxyMap,
+                                  playerMarkers: galaxyPlayerMarkers)
                         .transition(.opacity)
                 }
 
@@ -1827,11 +1842,14 @@ struct GameContainerView: View {
                 targetName: m.name,
                 cargoLines: m.cargo.map { PlunderLine(label: commodityLabel($0.commodity),
                                                       amount: "\($0.tons)") },
-                creditsAboard: m.credits, ammoAboard: 0, energyAboard: 0,
+                creditsAboard: m.credits,
+                ammoAboard: scene.ammoAboard(m.shipID),
+                energyAboard: Int(scene.fuelAboard(m.shipID).rounded()),
                 captureChance: m.captureChance,
                 onTakeCargo: { plunderTakeCargo(scene, shipID: m.shipID) },
                 onTakeCredits: { plunderTakeCredits(scene, shipID: m.shipID) },
-                onTakeAmmo: {}, onTakeEnergy: {},
+                onTakeAmmo: { plunderTakeAmmo(scene, shipID: m.shipID) },
+                onTakeEnergy: { plunderTakeFuel(scene, shipID: m.shipID) },
                 onCaptureShip: { plunderCapture(scene, shipID: m.shipID) },
                 onDemandTribute: { plunderTakeCredits(scene, shipID: m.shipID) },
                 onDismiss: { boardManifest = nil })
@@ -1868,6 +1886,30 @@ struct GameContainerView: View {
         model.pilot.save()
         let total = taken.reduce(0) { $0 + $1.tons }
         host?.hud.post("Took \(total) tons of cargo.")
+        refreshBoard(scene, shipID: shipID)
+    }
+
+    /// "Energy" plunder button — siphon the hulk's jump fuel. The engine adds it
+    /// to the live player ship (clamped to capacity); persist the new value to the
+    /// pilot so it survives the flight, and let `updateHUD` repaint the gauge.
+    private func plunderTakeFuel(_ scene: GameScene, shipID: Int) {
+        let took = scene.plunderFuel(shipID)
+        guard took >= 1 else { return }
+        model.pilot.state.fuel = scene.playerShip?.fuel
+        model.pilot.save()
+        let jumps = Int((took / 100).rounded())
+        host?.hud.post(jumps > 0 ? "Siphoned \(Int(took)) fuel (~\(jumps) jump\(jumps == 1 ? "" : "s"))."
+                                 : "Siphoned \(Int(took)) fuel.")
+        refreshBoard(scene, shipID: shipID)
+    }
+
+    /// "Ammo" plunder button — top up the player's matching weapons from the
+    /// hulk's magazines. Ammunition lives on the in-flight weapon mounts (no
+    /// separate save field), so this needs no pilot write.
+    private func plunderTakeAmmo(_ scene: GameScene, shipID: Int) {
+        let rounds = scene.plunderAmmo(shipID)
+        guard rounds > 0 else { return }
+        host?.hud.post("Transferred \(rounds) round\(rounds == 1 ? "" : "s") of ammunition.")
         refreshBoard(scene, shipID: shipID)
     }
 

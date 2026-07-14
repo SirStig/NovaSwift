@@ -191,6 +191,49 @@ final class GameScene: SKScene {
     private var weaponGraphicCache: [Int: [SKTexture]] = [:]
     /// Monotonic clock for looping shot-spin / effect animation.
     private var effectClock: Double = 0
+
+    // MARK: Effects pipeline — particles, smoke, real explosion sprites
+
+    /// A single lightweight CPU-stepped particle: a pooled `SKSpriteNode` given a
+    /// velocity, lifetime, and size/alpha curve, advanced in `updateParticles`.
+    /// One system serves explosion sparks, weapon smoke/trails, hit spray, and
+    /// asteroid debris — pooled + batched like the flash and projectile nodes, so
+    /// a busy firefight stays cheap.
+    private struct Particle {
+        let node: SKSpriteNode
+        var vx: CGFloat
+        var vy: CGFloat
+        var age: Double
+        let life: Double
+        let startSize: CGFloat
+        let endSize: CGFloat
+        let startAlpha: CGFloat
+        let drag: CGFloat
+    }
+    private var activeParticles: [Particle] = []
+    private var particlePool: [SKSpriteNode] = []
+    /// Hard cap so a chaotic firefight can't grow the particle set without bound —
+    /// new particles are dropped (not force-recycled) once we're at the ceiling.
+    private let maxParticles = 900
+
+    /// A one-shot explosion sprite animation: a pooled `SKSpriteNode` that plays a
+    /// `bööm`'s real `rlëD` frames once at its authored `FrameAdvance` rate, then
+    /// recycles. Replaces the generic orange flash whenever the event carries a
+    /// resolvable bööm id.
+    private struct SpriteAnim {
+        let node: SKSpriteNode
+        let frames: [SKTexture]
+        var age: Double
+        let frameDuration: Double
+    }
+    private var activeAnims: [SpriteAnim] = []
+    private var animPool: [SKSpriteNode] = []
+    /// Decoded bööm explosion frames + per-frame duration, per bööm id (data-keyed,
+    /// kept across systems like `weaponGraphicCache`). An empty entry is a negative
+    /// cache — a bööm with no usable graphic, so we don't re-resolve it every hit.
+    private var boomFrameCache: [Int: (frames: [SKTexture], frameDuration: Double)] = [:]
+    /// Pooled jagged shape nodes for lightning beams (`wëap.LiDensity` > 0).
+    private var lightningNodes: [SKShapeNode] = []
     private var systemName = ""
     /// True when this scene was just built because the player jumped in from
     /// hyperspace (not a fresh game start, a landing depart, or a load) — the
@@ -1056,10 +1099,19 @@ final class GameScene: SKScene {
                 let key = "\(shooterID):\(mountIndex)"
                 activeBeamLoops.removeValue(forKey: key)
                 audio?.stopLoop(key: key)
-            case let .explosion(at, radius, soundID):
-                spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
+            case let .explosion(at, radius, soundID, boomID):
+                spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius), boomID: boomID)
                 audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
+            case let .shieldHit(at, weaponID):
+                spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: true)
+            case let .armorHit(at, weaponID):
+                spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: false)
+            case let .asteroidDebris(at, color, count):
+                spawnParticles(at: CGPoint(x: at.x, y: at.y), count: min(count, 20),
+                               color: SKColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
+                                              blue: CGFloat(color.b) / 255, alpha: 1),
+                               speed: 70, life: 0.7, size: 4, additive: false, grow: false, drag: 2.0)
             case let .asteroidMined(cargoType, quantity, _):
                 // Player mining scoop collected an asteroid's yield — the host adds
                 // it to pilot cargo (clamped to free hold) and reports what stowed.
@@ -1586,6 +1638,15 @@ final class GameScene: SKScene {
 
     /// Take a boarded përs hulk's ItemClass outfit loot (outfit ids); once only.
     func plunderOutfits(_ id: Int) -> [Int] { world?.takePlunderOutfits(from: id) ?? [] }
+
+    /// Jump fuel a boarded hulk holds (for the "Energy" plunder button's state).
+    func fuelAboard(_ id: Int) -> Double { world?.fuelAboard(id) ?? 0 }
+    /// Siphon a boarded hulk's jump fuel into the player; returns units taken.
+    func plunderFuel(_ id: Int) -> Double { world?.takePlunderFuel(from: id) ?? 0 }
+    /// Ammunition a boarded hulk holds for weapons the player also carries.
+    func ammoAboard(_ id: Int) -> Int { world?.ammoAboard(id) ?? 0 }
+    /// Transfer a boarded hulk's matching ammunition into the player's weapons.
+    func plunderAmmo(_ id: Int) -> Int { world?.takePlunderAmmo(from: id) ?? 0 }
 
     /// Roll to capture a boarded hulk into the escort wing; returns success.
     /// Attempt to board-and-capture ship `id`. On success returns the captured
@@ -3169,10 +3230,187 @@ final class GameScene: SKScene {
         }
     }
 
-    /// An expanding, fading flash for an explosion.
-    private func spawnExplosion(at point: CGPoint, radius: CGFloat) {
-        spawnFlash(at: point, startRadius: max(10, radius * 0.6), endRadius: max(10, radius * 0.6) * 2.2,
-                   color: SKColor(red: 1.0, green: 0.75, blue: 0.35, alpha: 1), duration: 0.35)
+    /// An explosion effect: plays the real `bööm` sprite animation when `boomID`
+    /// resolves to authored art, always with a short spark accent and a soft
+    /// under-glow flash. Falls back to just the orange flash for events with no
+    /// bööm (small proximity taps, point-defense pops, plug-in data gaps) so
+    /// nothing ever renders nothing.
+    private func spawnExplosion(at point: CGPoint, radius: CGFloat, boomID: Int? = nil) {
+        var playedSprite = false
+        if let boomID, let boom = boomTextures(boomID) {
+            // Scale the animation to roughly the blast size, but never below the
+            // size the art reads at, so a capital ship's death fills the space.
+            spawnSpriteAnim(frames: boom.frames, frameDuration: boom.frameDuration,
+                            at: point, diameter: max(radius * 2.4, 28))
+            playedSprite = true
+        }
+        // Spark accent — a few fast additive embers, sized to the blast.
+        spawnParticles(at: point, count: playedSprite ? 10 : 6,
+                       color: SKColor(red: 1.0, green: 0.85, blue: 0.5, alpha: 1),
+                       speed: max(60, radius * 6), life: 0.5, size: max(3, radius * 0.18),
+                       additive: true, grow: false)
+        // Soft under-glow: a full flash on its own, or a brief bloom beneath a sprite.
+        let glow = max(10, radius * 0.6)
+        if playedSprite {
+            spawnFlash(at: point, startRadius: glow * 0.7, endRadius: glow * 1.4,
+                       color: SKColor(red: 1.0, green: 0.8, blue: 0.45, alpha: 1), duration: 0.18)
+        } else {
+            spawnFlash(at: point, startRadius: glow, endRadius: glow * 2.2,
+                       color: SKColor(red: 1.0, green: 0.75, blue: 0.35, alpha: 1), duration: 0.35)
+        }
+    }
+
+    /// A spark spray at an impact point. Uses the hitting weapon's authored hit
+    /// particles (`wëap` @76-84) when it defines them; otherwise a generic spark —
+    /// cool blue over live shields, hot orange against bare armor.
+    private func spawnHitSpray(at point: CGPoint, weaponID: Int, onShield: Bool) {
+        if let w = galaxy?.game.weapon(weaponID), w.hitParticles.isActive {
+            let hp = w.hitParticles
+            let c = hp.color
+            spawnParticles(at: point, count: min(hp.count, 24),
+                           color: SKColor(red: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
+                                          blue: CGFloat(c.b) / 255, alpha: 1),
+                           speed: max(30, min(360, CGFloat(hp.velocity) * 24)),
+                           life: max(0.2, Double(hp.lifeMax) / 30.0),
+                           size: 3, additive: true, grow: false)
+            return
+        }
+        let color = onShield ? SKColor(red: 0.5, green: 0.75, blue: 1.0, alpha: 1)
+                             : SKColor(red: 1.0, green: 0.7, blue: 0.35, alpha: 1)
+        spawnParticles(at: point, count: onShield ? 5 : 7, color: color,
+                       speed: 90, life: 0.3, size: 3, additive: true, grow: false)
+    }
+
+    /// Decoded, cached explosion frames + per-frame duration for a `bööm` id.
+    /// Resolves the bööm's `graphicSpinID` → `rlëD` sheet once and derives the
+    /// frame duration from `FrameAdvance` (Bible: 100 ⇒ 30 fps, like `SpinRate`),
+    /// so the animation plays at the authored speed. Empty = no usable graphic.
+    private func boomTextures(_ boomID: Int) -> (frames: [SKTexture], frameDuration: Double)? {
+        if let cached = boomFrameCache[boomID] { return cached.frames.isEmpty ? nil : cached }
+        guard let game = galaxy?.game, let boom = game.boomSprite(boomID) else {
+            boomFrameCache[boomID] = ([], 0)   // negative cache
+            return nil
+        }
+        let frames = SpriteTextures.rotationFrames(from: boom.sheet, rotationCount: boom.sheet.frameCount)
+        // FrameAdvance R: fps = R/100 × 30, so each frame shows 100/(30R) seconds.
+        let rate = boom.animationRate
+        let frameDuration = rate > 0 ? 100.0 / (30.0 * Double(rate)) : 1.0 / 30.0
+        let entry = (frames, frameDuration)
+        boomFrameCache[boomID] = entry
+        return frames.isEmpty ? nil : entry
+    }
+
+    /// Play a decoded bööm animation once at `point`, scaled so its largest frame
+    /// dimension spans `diameter`. Pooled — the node returns to `animPool` when the
+    /// sequence finishes (`updateSpriteAnims`).
+    private func spawnSpriteAnim(frames: [SKTexture], frameDuration: Double,
+                                 at point: CGPoint, diameter: CGFloat) {
+        guard !frames.isEmpty else { return }
+        let node = animPool.popLast() ?? {
+            let s = SKSpriteNode(texture: frames[0])
+            s.zPosition = 14
+            effectsLayer.addChild(s)
+            return s
+        }()
+        node.texture = frames[0]
+        node.blendMode = .alpha           // real bööm art carries its own mask
+        node.colorBlendFactor = 0
+        node.alpha = 1
+        node.isHidden = false
+        node.position = point
+        let base = frames[0].size()
+        node.setScale(max(0.2, diameter / max(base.width, base.height, 1)))
+        // A little rotation variety so repeated booms don't look stamped.
+        node.zRotation = CGFloat(effectClock).truncatingRemainder(dividingBy: 2 * .pi)
+        activeAnims.append(SpriteAnim(node: node, frames: frames, age: 0, frameDuration: max(0.01, frameDuration)))
+    }
+
+    /// Advance explosion sprite animations one step each; recycle finished nodes.
+    private func updateSpriteAnims(_ dt: Double) {
+        guard !activeAnims.isEmpty else { return }
+        var i = 0
+        while i < activeAnims.count {
+            activeAnims[i].age += dt
+            let a = activeAnims[i]
+            let idx = Int(a.age / a.frameDuration)
+            if idx >= a.frames.count {
+                a.node.isHidden = true
+                animPool.append(a.node)
+                activeAnims.remove(at: i)
+                continue
+            }
+            a.node.texture = a.frames[idx]
+            i += 1
+        }
+    }
+
+    /// Emit up to `count` pooled particles from `point`. `speed` is the launch
+    /// speed in px/sec (randomized 0.4–1×), `life` seconds (0.6–1×), `size` the
+    /// start diameter (0.7–1.2×). `additive` picks glowing embers vs. soft
+    /// smoke/debris; `grow` expands over life (smoke) vs. shrinks (sparks/debris).
+    /// `cone` biases the launch direction (angle ± spread); nil = a full circle.
+    /// Suppressed entirely under the "reduce flashing" accessibility setting.
+    private func spawnParticles(at point: CGPoint, count: Int, color: SKColor,
+                                speed: CGFloat, life: Double, size: CGFloat,
+                                additive: Bool, grow: Bool, drag: CGFloat = 1.5,
+                                cone: (angle: CGFloat, spread: CGFloat)? = nil) {
+        guard count > 0, !settings.reduceFlashing else { return }
+        let n = min(count, maxParticles - activeParticles.count)
+        guard n > 0 else { return }
+        for _ in 0..<n {
+            let node = particlePool.popLast() ?? {
+                let s = SKSpriteNode(texture: projectileTexture)
+                s.zPosition = 13
+                s.colorBlendFactor = 1
+                effectsLayer.addChild(s)
+                return s
+            }()
+            let dir: CGFloat = cone.map { $0.angle + .random(in: -$0.spread...$0.spread) }
+                ?? .random(in: 0...(2 * .pi))
+            let spd = speed * CGFloat.random(in: 0.4...1.0)
+            let startSize = size * CGFloat.random(in: 0.7...1.2)
+            node.blendMode = additive ? .add : .alpha
+            node.colorBlendFactor = 1
+            node.color = color
+            node.isHidden = false
+            node.alpha = 1
+            node.position = point
+            node.size = CGSize(width: startSize, height: startSize)
+            activeParticles.append(Particle(
+                node: node, vx: cos(dir) * spd, vy: sin(dir) * spd,
+                age: 0, life: life * Double.random(in: 0.6...1.0),
+                startSize: startSize, endSize: grow ? startSize * 2.4 : startSize * 0.4,
+                startAlpha: additive ? 1.0 : 0.85, drag: drag))
+        }
+    }
+
+    /// Advance every live particle: integrate with light drag, lerp size, fade
+    /// alpha to zero over its life, then recycle the node into the pool.
+    private func updateParticles(_ dt: Double) {
+        guard !activeParticles.isEmpty else { return }
+        let fdt = CGFloat(dt)
+        let damp = max(0, 1 - fdt)   // base per-step damping; scaled by each drag
+        var i = 0
+        while i < activeParticles.count {
+            activeParticles[i].age += dt
+            let p = activeParticles[i]
+            let t = min(1, p.age / p.life)
+            if t >= 1 {
+                p.node.isHidden = true
+                particlePool.append(p.node)
+                activeParticles.remove(at: i)
+                continue
+            }
+            let d = pow(damp, p.drag)
+            activeParticles[i].vx *= d
+            activeParticles[i].vy *= d
+            p.node.position.x += activeParticles[i].vx * fdt
+            p.node.position.y += activeParticles[i].vy * fdt
+            let sz = p.startSize + (p.endSize - p.startSize) * CGFloat(t)
+            p.node.size = CGSize(width: sz, height: sz)
+            p.node.alpha = p.startAlpha * CGFloat(1 - t)
+            i += 1
+        }
     }
 
     /// The player's death spectacle: a run of staggered explosion bursts scattered

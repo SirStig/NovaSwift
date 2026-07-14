@@ -153,6 +153,10 @@ public final class Ship {
     /// This hull's death-explosion `snd` id (from `shïp`'s breakup/final
     /// explosion → `bööm`), or nil if it has none.
     public var explosionSoundID: Int?
+    /// This hull's death-explosion `bööm` id (`shïp` final, falling back to
+    /// breakup), or nil if it has none. Drives the real explosion sprite the
+    /// renderer plays when the ship dies, not just the sound.
+    public var explosionBoomID: Int?
     /// Faction/government. Drives who this ship will fight (see `Diplomacy`).
     public var government: Int = independentGovt
     /// Collision radius (px). Set from the sprite size where known.
@@ -1091,7 +1095,12 @@ public final class World {
     /// own `FragType` points at (e.g. "Big"/"Medium"); no invented scale factor.
     private func destroyAsteroid(_ rock: Asteroid, killerID: Int = -1) {
         rock.isAlive = false
-        events.append(.explosion(at: rock.position, radius: max(20, rock.radius * 1.2), soundID: nil))
+        let rockBoomSound = rock.explosionBoomID.flatMap { galaxy?.game.boom($0)?.soundID }
+        events.append(.explosion(at: rock.position, radius: max(20, rock.radius * 1.2),
+                                 soundID: rockBoomSound, boomID: rock.explosionBoomID))
+        if rock.partCount > 0 {
+            events.append(.asteroidDebris(at: rock.position, color: rock.partColor, count: rock.partCount))
+        }
         // Mining: if the player destroyed this rock with a mining scoop fitted, it
         // scoops the röid's YieldType/YieldQty (±50%) yield. The host clamps the
         // amount to the player's free cargo space (the engine doesn't track cargo).
@@ -1194,7 +1203,7 @@ public final class World {
         // so the player's weapon loop doesn't keep sounding into the menu.
         stopAllBeamLoops(for: player)
         events.append(.explosion(at: player.position, radius: max(24, player.radius * 1.5),
-                                 soundID: player.explosionSoundID))
+                                 soundID: player.explosionSoundID, boomID: player.explosionBoomID))
         events.append(.playerDestroyed(hadEscapePod: player.hasEscapePod))
     }
 
@@ -1246,10 +1255,10 @@ public final class World {
                 // it's destroyed. 0 (the default) ⇒ shot down by this single hit.
                 if target.pdDurability > 0 {
                     target.pdDurability -= 1
-                    events.append(.explosion(at: target.position, radius: 6, soundID: nil))
+                    events.append(.explosion(at: target.position, radius: 6, soundID: nil, boomID: nil))
                 } else {
                     target.alive = false
-                    events.append(.explosion(at: target.position, radius: 10, soundID: nil))
+                    events.append(.explosion(at: target.position, radius: 10, soundID: nil, boomID: nil))
                     Log.combat.debug("\(ship.name) [\(ship.entityID)] point defense shot down an incoming projectile")
                 }
             }
@@ -1528,7 +1537,7 @@ public final class World {
         let cast = beamCast(from: origin, dir: dir, range: spec.range, owner: ship)
         if let h = cast.hitShip {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
-                     ionization: spec.ionization, piercing: spec.penetratesShields)
+                     ionization: spec.ionization, piercing: spec.penetratesShields, weaponID: spec.id)
             // Tractor beam (negative Impact): pull the target toward the firing
             // ship each time the beam connects, more strongly on lighter hulls.
             if spec.isTractorBeam {
@@ -1547,7 +1556,7 @@ public final class World {
                 existing.life = 0.08
             } else {
                 activeBeams.append(ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
-                                              from: origin, to: cast.end, hit: hit,
+                                              weaponID: spec.id, from: origin, to: cast.end, hit: hit,
                                               continuous: false, life: 0.08,
                                               width: spec.beamWidth, color: spec.beamColor))
             }
@@ -1594,7 +1603,7 @@ public final class World {
     private func spawnActiveBeam(for ship: Ship, mount: WeaponMount, mountIndex: Int, continuous: Bool) {
         guard !activeBeams.contains(where: { $0.shooterID == ship.entityID && $0.mountIndex == mountIndex }) else { return }
         let beam = ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
-                              from: ship.position, to: ship.position, hit: false,
+                              weaponID: mount.spec.id, from: ship.position, to: ship.position, hit: false,
                               continuous: continuous, life: .infinity,
                               width: mount.spec.beamWidth, color: mount.spec.beamColor)
         activeBeams.append(beam)
@@ -1786,7 +1795,7 @@ public final class World {
                           spawned: inout [Projectile]) {
         if let h = directHit {
             applyHit(to: h, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
-                     ionization: p.ionization, piercing: p.penetratesShields)
+                     ionization: p.ionization, piercing: p.penetratesShields, weaponID: p.weaponID)
             if p.impact > 0 {
                 // Knockback along the shot's travel, inversely ∝ target size
                 // (a proxy for mass — heavier hulls barely budge).
@@ -1800,7 +1809,7 @@ public final class World {
                 if (splash.position - pos).length <= p.blastRadius {
                     applyHit(to: splash, shield: p.shieldDamage * 0.5, armor: p.armorDamage * 0.5,
                              ownerID: p.ownerID, ionization: p.ionization * 0.5,
-                             piercing: p.penetratesShields)
+                             piercing: p.penetratesShields, weaponID: p.weaponID)
                 }
             }
         }
@@ -1810,7 +1819,8 @@ public final class World {
         if shouldExplode {
             let boomSound = p.explosionBoomID.flatMap { galaxy?.game.boom($0)?.soundID }
             let radius = p.blastRadius > 0 ? p.blastRadius : 12
-            events.append(.explosion(at: pos, radius: max(8, radius), soundID: boomSound))
+            events.append(.explosion(at: pos, radius: max(8, radius), soundID: boomSound,
+                                     boomID: p.explosionBoomID))
         }
         // Submunitions: split into child weapons on detonation (and on expiry
         // when `subIfExpire`), capped by the recursion limit.
@@ -1847,7 +1857,7 @@ public final class World {
     }
 
     private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
-                          ionization: Double = 0, piercing: Bool = false) {
+                          ionization: Double = 0, piercing: Bool = false, weaponID: Int = -1) {
         // Difficulty: scale only the damage the *player* takes (Easy softens,
         // Hard sharpens); NPC-vs-NPC combat is untouched.
         var shield = shield, armor = armor
@@ -1869,7 +1879,8 @@ public final class World {
         if ionization > 0, ship.ionizeMax > 0 {
             ship.ionCharge = min(ship.ionizeMax, ship.ionCharge + ionization)
         }
-        events.append(hadShield ? .shieldHit(at: ship.position) : .armorHit(at: ship.position))
+        events.append(hadShield ? .shieldHit(at: ship.position, weaponID: weaponID)
+                                 : .armorHit(at: ship.position, weaponID: weaponID))
 
         // Player fire provokes the victim into fighting back. Per the Bible
         // (Appendix II §2.1), `ShootPenalty` is "currently ignored" in the
@@ -1941,7 +1952,7 @@ public final class World {
                     events.append(.personDefeated(personID: pid))
                 }
                 events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
-                                         soundID: npc.explosionSoundID))
+                                         soundID: npc.explosionSoundID, boomID: npc.explosionBoomID))
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
                                              at: npc.position))
                 // A destroyed mission ship meets a "destroy" (or "chase off",

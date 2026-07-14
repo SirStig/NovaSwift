@@ -75,22 +75,18 @@ them.
 ## Where it's at — honestly
 
 It runs and plays well on macOS, iPadOS, and iOS. What's left is mostly fidelity
-and polish rather than missing gameplay. The three biggest open pieces:
+and polish rather than missing gameplay. The two biggest open pieces:
 
 - **A · Real explosions & particle effects** *(renderer)* — explosions are a
   single orange flash right now, and there's no particle or smoke system yet. One
   piece of work unlocks proper explosion sprites, weapon smoke and hit-spray,
   asteroid debris, and beam shapes all at once.
-- **B · Fully data-driven HUD theming** *(presentation)* — plug-ins can recolor
-  and restyle the interface, and we read nearly all of that data, but only some of
-  it drives the live HUD today. Until it's finished, total conversions that reskin
-  the interface won't fully apply.
-- **C · Boarding, plunder & capture** *(mechanic)* — disabling a ship and boarding
+- **B · Boarding, plunder & capture** *(mechanic)* — disabling a ship and boarding
   it to loot cargo or capture the hull isn't wired up yet. The data behind it
   (bribes, booty, capture outcomes) is already there; the mechanic that uses it is
   the missing piece.
 
-Beyond those three, it's smaller bugs, some performance and crash fixes, and AI
+Beyond those two, it's smaller bugs, some performance and crash fixes, and AI
 that's much closer to the original's feel than it used to be — but not quite
 dialed in yet. If you find something off, the
 [issue tracker](https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/issues) is

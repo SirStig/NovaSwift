@@ -99,6 +99,9 @@ public struct ShipSpec {
     /// `snd ` id for this hull's death explosion (final explosion, falling back
     /// to the breakup explosion), or nil if neither resolves to a sound.
     public let explosionSoundID: Int?
+    /// `bööm` id for this hull's death explosion (final, falling back to breakup),
+    /// or nil — drives the real explosion sprite the renderer plays on death.
+    public let explosionBoomID: Int?
     /// Real weapon exit points from this hull's `shän`, or nil if it has none.
     public let exitPoints: ShipExitPoints?
 }
@@ -239,6 +242,7 @@ public final class Galaxy {
             fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo, inertialess: s.inertialess,
             ionizeMax: Double(max(0, s.ionizeMax)), deionizePerSec: Double(max(0, s.deionize)) * 0.3,
             mounts: mounts, explosionSoundID: game.deathExplosionSoundID(s),
+            explosionBoomID: s.finalExplosionBoomID ?? s.breakupExplosionBoomID,
             exitPoints: exitPoints(forShip: id))
         shipCache[id] = spec
         return spec
@@ -257,6 +261,7 @@ public final class Galaxy {
         let ship = Ship(name: spec.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
         ship.explosionSoundID = spec.explosionSoundID
+        ship.explosionBoomID = spec.explosionBoomID
         ship.government = govt ?? spec.government
         ship.radius = spec.radius
         ship.exitPoints = spec.exitPoints

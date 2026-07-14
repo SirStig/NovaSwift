@@ -581,6 +581,9 @@ public struct ShipExitPoints {
 public final class ActiveBeam {
     public let shooterID: Int
     public let mountIndex: Int
+    /// The `wëap` id that fired this beam, so the renderer can pick up its
+    /// lightning (`LiDensity`/`LiAmplitude`) and other beam styling; -1 if unknown.
+    public let weaponID: Int
     public var from: Vec2
     public var to: Vec2
     public var hit: Bool
@@ -591,10 +594,10 @@ public final class ActiveBeam {
     public let width: Double
     public let color: (r: Double, g: Double, b: Double)?
 
-    public init(shooterID: Int, mountIndex: Int, from: Vec2, to: Vec2, hit: Bool,
+    public init(shooterID: Int, mountIndex: Int, weaponID: Int = -1, from: Vec2, to: Vec2, hit: Bool,
                 continuous: Bool, life: Double, width: Double,
                 color: (r: Double, g: Double, b: Double)?) {
-        self.shooterID = shooterID; self.mountIndex = mountIndex
+        self.shooterID = shooterID; self.mountIndex = mountIndex; self.weaponID = weaponID
         self.from = from; self.to = to; self.hit = hit
         self.continuous = continuous; self.life = life
         self.width = width; self.color = color
@@ -615,9 +618,19 @@ public enum WorldEvent {
     /// start/stop a real looping voice rather than retrigger a one-shot per tick.
     case beamLoopStart(shooterID: Int, mountIndex: Int, soundID: Int?)
     case beamLoopStop(shooterID: Int, mountIndex: Int)
-    case shieldHit(at: Vec2)
-    case armorHit(at: Vec2)
-    case explosion(at: Vec2, radius: Double, soundID: Int?)
+    /// `weaponID` is the `wëap` that landed the hit, so the renderer can throw
+    /// that weapon's authored impact-particle spray (`wëap` hit particles); -1
+    /// when unknown (the renderer then uses a generic shield/armor spark).
+    case shieldHit(at: Vec2, weaponID: Int)
+    case armorHit(at: Vec2, weaponID: Int)
+    /// `boomID` is the `bööm` whose real sprite/animation the renderer should
+    /// play (nil = a generic flash, e.g. small proximity taps). `soundID` is
+    /// resolved separately so a silent bööm still bangs where the caller wants.
+    case explosion(at: Vec2, radius: Double, soundID: Int?, boomID: Int?)
+    /// A shattered `röid` throws colored debris. `color` is the rock's decoded
+    /// `partColor`, `count` its `partCount` — the renderer sprays that many
+    /// short-lived chunky fragments in that tint alongside the rock's explosion.
+    case asteroidDebris(at: Vec2, color: NovaColor, count: Int)
     /// The player's mining scoop collected an asteroid's yield (`röid.YieldType`
     /// cargo, `YieldQty` boxes ±50%). `cargoType` follows the cargo-id convention
     /// (0-5 standard commodity). The host adds it to pilot cargo if there's room.

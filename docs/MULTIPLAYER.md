@@ -345,6 +345,24 @@ simply won't fire for that player, rather than corrupting state.
 - Seam lives in NovaSwiftStory (NCB engine) + the spaceport/interaction layer +
   the `GameServices` bridge. Exact functions confirmed in "Key files & seams."
 
+## Implementation status (2026-07-13)
+
+- **Netcode layer (`Sources/NovaSwiftNet`, in SwiftPM):** DONE & tested (26 tests).
+  `Transport` protocol; `LoopbackTransport` (tests) + `MultipeerTransport` (LAN);
+  `NetSession` with presence table, co-location queries, session-wide chat
+  (history + sender names), and `SessionRules` propagation.
+- **App wiring (Xcode target, compiles — `xcodebuild` BUILD SUCCEEDED):**
+  `NovaSwiftNet` linked in; `MultiplayerSession` observable on `AppModel`;
+  in-game **chat** (launcher + panel + unread badge) live over local Wi-Fi;
+  presence announced on every hyperjump; **galaxy-map presence markers** (coloured
+  pip + name, offset from mission arrows).
+- **Remaining P0/P1:** `GameKitTransport` (internet; needs Game Center entitlement
+  + App Store Connect). **Minimap player blips + in-world nameplates are blocked on
+  P2** — they need the remote ship's in-system position, which only exists once
+  Layer-2 snapshot sync runs.
+- **Not started:** P2 engine one→N externally-driven-ship generalization and the
+  Layer-2 sync loop — the next major (engine) step.
+
 ## Phasing
 
 Each phase is independently demoable.

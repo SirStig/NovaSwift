@@ -97,6 +97,88 @@ final class BoardingTests: XCTestCase {
         return Resource(type: NovaType.outfit, id: id, name: "Marines", data: Data(b))
     }
 
+    // MARK: fuel plunder ("Energy" button)
+
+    func testPlunderFuelSiphonsCappedAtPlayerCapacity() {
+        let player = Ship(name: "P", stats: stats())
+        player.maxFuel = 400; player.fuel = 100          // room for 300
+        let world = World(player: player)
+        let hulk = disabledTarget(crew: 5, strength: 1, in: world)
+        hulk.maxFuel = 500; hulk.fuel = 500
+        XCTAssertEqual(world.fuelAboard(hulk.entityID), 500)
+
+        let took = world.takePlunderFuel(from: hulk.entityID)
+        XCTAssertEqual(took, 300, "clamped to the player's 300 units of room")
+        XCTAssertEqual(player.fuel, 400)
+        XCTAssertEqual(hulk.fuel, 200, "the siphoned fuel leaves the hulk")
+        // Re-boarding a full tank yields nothing more.
+        XCTAssertEqual(world.takePlunderFuel(from: hulk.entityID), 0)
+    }
+
+    func testPlunderFuelIgnoresNonHulks() {
+        let player = Ship(name: "P", stats: stats())
+        player.maxFuel = 400; player.fuel = 0
+        let world = World(player: player)
+        // An alive, *not* disabled ship can't be boarded/siphoned.
+        let live = Ship(name: "Live", stats: stats())
+        live.maxFuel = 500; live.fuel = 500
+        _ = world.addNPC(live)
+        XCTAssertEqual(world.fuelAboard(live.entityID), 0)
+        XCTAssertEqual(world.takePlunderFuel(from: live.entityID), 0)
+        XCTAssertEqual(player.fuel, 0)
+    }
+
+    // MARK: ammo plunder ("Ammo" button)
+
+    private func ammoWeap(_ id: Int, maxAmmo: Int) -> Resource {
+        var b = [UInt8](repeating: 0, count: 200)
+        put16(&b, 108, maxAmmo)   // WeapRes.MaxAmmo @108
+        return Resource(type: NovaType.weapon, id: id, name: "Missile", data: Data(b))
+    }
+    private func ammoSpec(_ id: Int) -> WeaponSpec {
+        WeaponSpec(id: id, name: "Missile", shieldDamage: 10, armorDamage: 10,
+                   reloadSeconds: 1, projectileSpeed: 500, range: 500,
+                   accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
+                   blastRadius: 0, ammoPerShot: 1)
+    }
+
+    func testPlunderAmmoToppsUpMatchingWeapons() {
+        var col = ResourceCollection()
+        col.add(ammoWeap(140, maxAmmo: 10))
+        let galaxy = Galaxy(game: NovaGame(col))
+
+        let player = Ship(name: "P", stats: stats())
+        player.weapons = [WeaponMount(spec: ammoSpec(140), ammo: 2)]   // room for 8
+        let world = World(player: player)
+        world.galaxy = galaxy
+        let hulk = disabledTarget(crew: 5, strength: 1, in: world)
+        hulk.weapons = [WeaponMount(spec: ammoSpec(140), ammo: 6)]
+
+        XCTAssertEqual(world.ammoAboard(hulk.entityID), 6, "6 rounds fit in the 8 rounds of room")
+        let took = world.takePlunderAmmo(from: hulk.entityID)
+        XCTAssertEqual(took, 6)
+        XCTAssertEqual(player.weapons[0].ammo, 8)
+        XCTAssertEqual(hulk.weapons[0].ammo, 0, "rounds leave the hulk (can't be duplicated)")
+    }
+
+    func testPlunderAmmoOnlyForWeaponsThePlayerCarries() {
+        var col = ResourceCollection()
+        col.add(ammoWeap(140, maxAmmo: 10))
+        col.add(ammoWeap(141, maxAmmo: 10))
+        let galaxy = Galaxy(game: NovaGame(col))
+
+        let player = Ship(name: "P", stats: stats())
+        player.weapons = [WeaponMount(spec: ammoSpec(140), ammo: 0)]   // player has weapon 140 only
+        let world = World(player: player)
+        world.galaxy = galaxy
+        let hulk = disabledTarget(crew: 5, strength: 1, in: world)
+        hulk.weapons = [WeaponMount(spec: ammoSpec(141), ammo: 9)]     // hulk carries 141
+
+        XCTAssertEqual(world.ammoAboard(hulk.entityID), 0, "no matching weapon → nothing to take")
+        XCTAssertEqual(world.takePlunderAmmo(from: hulk.entityID), 0)
+        XCTAssertEqual(hulk.weapons[0].ammo, 9)
+    }
+
     func testMarinesLoadoutConsumption() throws {
         var col = ResourceCollection()
         col.add(shipRes(128, crew: 30))

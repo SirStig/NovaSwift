@@ -517,6 +517,42 @@ struct GalaxyMapView: View {
         ctx.fill(shaft, with: .color(missionOrange))
     }
 
+    /// A stack of coloured pips + names to the right of a system, one per player
+    /// present there. Each name gets a cheap dark drop-shadow so it reads over
+    /// bright nebulae and territory glow.
+    private func drawPlayerMarkers(ctx: inout GraphicsContext, at p: CGPoint,
+                                   players: [PlayerMapMarker]) {
+        let dotR: CGFloat = 3
+        let rowH: CGFloat = 12
+        let startY = p.y - CGFloat(players.count - 1) * rowH / 2
+        for (i, player) in players.enumerated() {
+            let cy = startY + CGFloat(i) * rowH
+            let cx = p.x + 9
+            let color = Self.playerColor(for: player.id)
+
+            let dot = Path(ellipseIn: CGRect(x: cx - dotR, y: cy - dotR,
+                                             width: dotR * 2, height: dotR * 2))
+            ctx.stroke(dot, with: .color(.black.opacity(0.7)), lineWidth: 1.5)
+            ctx.fill(dot, with: .color(color))
+
+            var label = ctx.resolve(Text(player.name).font(.system(size: 9, weight: .bold)))
+            let tx = cx + dotR + 4
+            label.shading = .color(.black.opacity(0.75))
+            ctx.draw(label, at: CGPoint(x: tx + 0.7, y: cy + 0.7), anchor: .leading)
+            label.shading = .color(color)
+            ctx.draw(label, at: CGPoint(x: tx, y: cy), anchor: .leading)
+        }
+    }
+
+    /// A stable, distinct colour per player id. Avoids mission orange so a friend
+    /// pip is never mistaken for a mission destination.
+    static func playerColor(for id: String) -> Color {
+        let palette: [Color] = [.cyan, .green, .yellow, .pink, .mint, .purple, .teal, .blue]
+        var hash = 5381
+        for byte in id.utf8 { hash = (hash &* 33) &+ Int(byte) }
+        return palette[abs(hash) % palette.count]
+    }
+
     /// Four corner brackets around a point (the classic map cursor).
     private func crosshair(at p: CGPoint, arm: CGFloat, gap: CGFloat) -> Path {
         var path = Path()

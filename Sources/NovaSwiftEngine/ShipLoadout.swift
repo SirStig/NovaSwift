@@ -429,6 +429,7 @@ extension Galaxy {
         let ship = Ship(name: lo.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
         ship.explosionSoundID = shipRes.flatMap { game.deathExplosionSoundID($0) }
+        ship.explosionBoomID = shipRes.flatMap { $0.finalExplosionBoomID ?? $0.breakupExplosionBoomID }
         ship.government = govt ?? shipRes?.inherentGovt ?? independentGovt
         ship.radius = radius
         ship.exitPoints = exitPoints(forShip: shipID)

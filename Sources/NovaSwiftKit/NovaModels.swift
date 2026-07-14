@@ -661,6 +661,10 @@ public struct RoidRes {
     public let explodeType: Int
     public let mass: Int
 
+    /// The rock's death explosion resolved to a real `bööm` resource id (or nil),
+    /// applying the standard raw→id convention like `wëap`/`shïp` explosion fields.
+    public var explosionBoomID: Int? { boomID(raw: explodeType) }
+
     public init(_ r: Resource) {
         id = r.id
         name = r.name.isEmpty ? "Asteroid \(r.id)" : r.name
@@ -1211,6 +1215,24 @@ public struct NovaGame {
         }
         if resources.resource(NovaType.rleD, spinID) != nil {
             return decodedRLE(spinID)
+        }
+        return nil
+    }
+
+    /// Resolve a `bööm` explosion's animation: `bööm` id → its `graphicSpinID`
+    /// (`spïn`, already offset +400 at decode) → `rlëD` sprite sheet, plus the
+    /// bööm's `animationRate` so the renderer can play the frames at the authored
+    /// speed. Same spïn→rlëD path as `weaponSprite`; returns nil when the bööm or
+    /// its graphic is absent (the renderer then falls back to a generic flash).
+    public func boomSprite(_ boomID: Int) -> (sheet: SpriteSheet, animationRate: Int)? {
+        guard let b = boom(boomID) else { return nil }
+        let spinID = b.graphicSpinID
+        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil,
+           let sheet = decodedRLE(spin.spriteID) {
+            return (sheet, b.animationRate)
+        }
+        if resources.resource(NovaType.rleD, spinID) != nil, let sheet = decodedRLE(spinID) {
+            return (sheet, b.animationRate)
         }
         return nil
     }

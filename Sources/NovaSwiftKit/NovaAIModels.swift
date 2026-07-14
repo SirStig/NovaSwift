@@ -630,8 +630,29 @@ public struct WeapRes {
     /// of its shots survives before being shot down. 0 = destroyed by any PD hit
     /// (the default). Ignored for non-guided projectiles and beams.
     public let durability: Int
+    /// `Trail` particle system (@36-46): the smoke/spark trail this shot leaves as
+    /// it flies. `count` particles per emit, launched at `velocity` px/frame with a
+    /// life in `lifeMin...lifeMax` frames, tinted `color`. Inactive when count ≤ 0.
+    public let trailParticles: WeaponParticleSpec
+    /// Hit particle spray (@76-84): the burst thrown off the impact point when a
+    /// shot connects (`count`, single `life`, `velocity`, `color`). Inactive when
+    /// count ≤ 0 — the renderer then falls back to a generic shield/armor spark.
+    public let hitParticles: WeaponParticleSpec
+    /// `LiDensity` (@110): zig-zags per 100 px for a *beam* weapon. 0 = a normal
+    /// straight beam; > 0 makes it a lightning beam (Bible). Ignored for non-beams.
+    public let lightningDensity: Int
+    /// `LiAmplitude` (@112): the amplitude in px of each lightning zig-zag (Bible).
+    public let lightningAmplitude: Int
 
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
+    /// `Flags` 0x0200 / 0x0400: this weapon generates small / big smoke as its
+    /// shots fly. `Flags` 0x0800: that smoke trail is more persistent (Bible).
+    public var generatesSmallSmoke: Bool { flagsRaw & 0x0200 != 0 }
+    public var generatesBigSmoke: Bool { flagsRaw & 0x0400 != 0 }
+    public var persistentSmoke: Bool { flagsRaw & 0x0800 != 0 }
+    /// A beam whose `LiDensity` is positive renders as a jagged lightning bolt
+    /// rather than a straight line (Bible: "makes it look cool").
+    public var isLightningBeam: Bool { lightningDensity > 0 }
     /// `Guidance 99` — "Carried ship (AmmoType is the ID of the ship class)"
     /// (Bible). A fighter bay: firing it launches a real sub-ship rather than a
     /// projectile.
@@ -752,6 +773,36 @@ public struct WeapRes {
         turnRate = ai16(d, 106)
         maxAmmo = ai16(d, 108)
         count = ai16(d, 118)
+        // Trail particles (@36 count, @38 velocity, @40/@42 life min/max, @44 color)
+        // and hit particles (@76 count, @78 life, @80 velocity, @82 color) — the
+        // shot's smoke/spark trail and its impact spray, straight from the wëap.
+        trailParticles = WeaponParticleSpec(count: ai16(d, 36), velocity: ai16(d, 38),
+                                            lifeMin: ai16(d, 40), lifeMax: ai16(d, 42),
+                                            color: acolor(d, 44))
+        let hitLife = ai16(d, 78)
+        hitParticles = WeaponParticleSpec(count: ai16(d, 76), velocity: ai16(d, 80),
+                                          lifeMin: hitLife, lifeMax: hitLife,
+                                          color: acolor(d, 82))
+        lightningDensity = ai16(d, 110)
+        lightningAmplitude = ai16(d, 112)
+    }
+}
+
+/// A `wëap` particle burst descriptor — the shared shape of the weapon's `Trail`
+/// (in-flight smoke/sparks) and its impact spray. Counts/velocities/lifetimes are
+/// in the game's native units (particles per emit, px per 30 fps frame, frames);
+/// the renderer scales them into its own particle system.
+public struct WeaponParticleSpec: Equatable {
+    public let count: Int
+    public let velocity: Int
+    public let lifeMin: Int
+    public let lifeMax: Int
+    public let color: NovaColor
+    /// Whether this weapon actually emits these particles (a non-zero count).
+    public var isActive: Bool { count > 0 }
+    public init(count: Int, velocity: Int, lifeMin: Int, lifeMax: Int, color: NovaColor) {
+        self.count = count; self.velocity = velocity
+        self.lifeMin = lifeMin; self.lifeMax = lifeMax; self.color = color
     }
 }
 
