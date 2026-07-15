@@ -224,9 +224,11 @@ public final class StoryEngine {
         if mission.availLocation != location { return false }
         if let spobID, !availStellarMatches(mission, spobID: spobID) { return false }
         if player.combatRating < mission.availRating { return false }
-        // Legal record: availRecord is a *minimum* standing with the offering govt.
+        // Legal record: availRecord is a *minimum* standing with the offering
+        // govt — the "displayed legal status" here, i.e. universal + local at
+        // this spöb's system (see `PlayerState.effectiveLegalRecord`).
         if let spobID, let govt = game.spob(spobID)?.government {
-            if (player.legalRecord[govt] ?? 0) < mission.availRecord { return false }
+            if player.effectiveLegalRecord(govt: govt, atSystem: player.currentSystem) < mission.availRecord { return false }
         }
         if !shipTypeMatches(mission.availShipType) { return false }
         if !evaluate(test: mission.availBits) { return false }

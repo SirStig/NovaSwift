@@ -107,4 +107,76 @@ struct ModifierKeyControls: ViewModifier {
 func bareModifierToken(_ flags: NSEvent.ModifierFlags) -> String? {
     bareModifierTokens.first { flags.contains($0.flag) }?.token
 }
+
+/// Safety net for the one race `GameContainerView.grabSceneFocus` can lose:
+/// `KeyboardControls.onKeyPress` only fires while SwiftUI's `@FocusState`
+/// has actually landed on the flight scene, and reclaiming it after an
+/// overlay closes is asynchronous and can take a beat. A held arrow key
+/// repeats several `keyDown`s a second — while the reclaim is still in
+/// flight, every one of those falls through unhandled and AppKit answers
+/// with the default system beep. This monitor drives the same turn/thrust
+/// state `KeyboardControls` would and consumes the event (preventing the
+/// beep), but only while `isReclaiming()` reports true, so it never
+/// double-handles input once focus is actually settled, and never steals
+/// arrow keys some other view (a text field, an overlay's own list
+/// navigation) legitimately holds focus for.
+struct ArrowKeyFocusFallback: NSViewRepresentable {
+    let input: InputController
+    let bindings: KeyBindings
+    let isReclaiming: () -> Bool
+
+    func makeNSView(context: Context) -> PassthroughView {
+        let view = PassthroughView()
+        context.coordinator.install(input: input, bindings: bindings, isReclaiming: isReclaiming)
+        return view
+    }
+
+    func updateNSView(_ nsView: PassthroughView, context: Context) {
+        context.coordinator.input = input
+        context.coordinator.bindings = bindings
+        context.coordinator.isReclaiming = isReclaiming
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var input: InputController?
+        var bindings: KeyBindings?
+        var isReclaiming: (() -> Bool)?
+        private var monitor: Any?
+
+        func install(input: InputController, bindings: KeyBindings, isReclaiming: @escaping () -> Bool) {
+            self.input = input
+            self.bindings = bindings
+            self.isReclaiming = isReclaiming
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+                guard let self, self.isReclaiming?() == true,
+                      let token = Self.arrowToken(event.keyCode),
+                      let action = self.bindings?.action(for: token) else { return event }
+                let pressed = event.type == .keyDown
+                switch action.flightEffect {
+                case .turnLeft: self.input?.keyboard.turnLeft = pressed
+                case .turnRight: self.input?.keyboard.turnRight = pressed
+                case .thrust: self.input?.keyboard.thrust = pressed
+                case .reverse: self.input?.keyboard.reverse = pressed
+                default: break
+                }
+                return nil
+            }
+        }
+
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+
+        private static func arrowToken(_ keyCode: UInt16) -> String? {
+            switch keyCode {
+            case 123: return "left"
+            case 124: return "right"
+            case 125: return "down"
+            case 126: return "up"
+            default: return nil
+            }
+        }
+    }
+}
 #endif

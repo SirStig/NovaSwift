@@ -254,6 +254,19 @@ final class GameScene: SKScene {
     /// Per-weapon lightning-beam params (`LiDensity`/`LiAmplitude`), cached; nil =
     /// a normal straight beam. Keyed by weapon id like the trail cache.
     private var weaponLightningCache: [Int: (density: Int, amplitude: Int)?] = [:]
+    /// Per-weapon beam art (`wëap.graphicSpinID` → `rlëD` frames), cached; nil = no
+    /// authored beam graphic, so the beam falls back to the generic gradient bar.
+    /// Keyed by weapon id like the other beam-styling caches.
+    private var weaponBeamGraphicCache: [Int: [SKTexture]?] = [:]
+    /// Per-weapon core→corona glow texture (real EV Nova beams have no sprite
+    /// art — `beamColor`/`coronaColor`/`coronaFalloff` bake into this gradient
+    /// bar, which IS a beam's authored look), cached; nil = no color data
+    /// resolvable, falls back to the old single-tint gradient. Keyed by weapon id.
+    private var weaponCoronaTextureCache: [Int: SKTexture?] = [:]
+    /// Per-weapon `Flags2` 0x0200 ("uses the ship's weapon sprite"), cached —
+    /// gates whether firing this weapon flashes the shooter's `shän` weapon-glow
+    /// overlay. Keyed by weapon id.
+    private var weaponUsesShipSpriteCache: [Int: Bool] = [:]
     private var systemName = ""
     /// True when this scene was just built because the player jumped in from
     /// hyperspace (not a fresh game start, a landing depart, or a load) — the
@@ -910,7 +923,17 @@ final class GameScene: SKScene {
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = spriteFilter
-            applyGovernmentShipColor(to: sprite, government: world.player.government)
+            // `oütf` ModType 43 (paint): a deliberately-chosen custom hull
+            // color overrides the government's own subtle tint outright,
+            // rather than blending with it — there's no sane way to mix "the
+            // player chose this color" with "this government's fleet color."
+            if let paint = world.player.paintColor {
+                sprite.color = SKColor(red: CGFloat(paint.r), green: CGFloat(paint.g),
+                                       blue: CGFloat(paint.b), alpha: 1)
+                sprite.colorBlendFactor = 0.7
+            } else {
+                applyGovernmentShipColor(to: sprite, government: world.player.government)
+            }
             node.addChild(sprite)
             shipSprite = sprite
             shipRadius = max(first.size().width, first.size().height) / 2
@@ -1130,7 +1153,7 @@ final class GameScene: SKScene {
         // spawned, so firing reflects the real weapon system, not the raw input.
         for event in world.drainEvents() {
             switch event {
-            case let .weaponFired(shooterID, at, _, soundID):
+            case let .weaponFired(shooterID, at, _, soundID, weaponID):
                 // Positional for every shooter — the player's own shots report
                 // right at the listener (near-zero distance = full volume), NPC
                 // fire attenuates/pans naturally by distance.
@@ -1138,11 +1161,17 @@ final class GameScene: SKScene {
                     audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 }
                 // Flash the shooter's weapon-glow overlay (shän weapon layer), if
-                // its hull has one. Player is entityID 0; NPCs match by entity.
-                if shooterID == 0 {
-                    if weaponGlowNode != nil { weaponGlowFlare = 1 }
-                } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
-                    node.weaponGlowFlare = 1
+                // its hull has one — but only for a weapon that actually declares
+                // `Flags2` 0x0200 ("uses the ship's weapon sprite"); every weapon
+                // fire used to trigger it unconditionally, flashing the overlay
+                // for guns/missiles that shouldn't touch it at all. Player is
+                // entityID 0; NPCs match by entity.
+                if weaponUsesShipSprite(weaponID) {
+                    if shooterID == 0 {
+                        if weaponGlowNode != nil { weaponGlowFlare = 1 }
+                    } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
+                        node.weaponGlowFlare = 1
+                    }
                 }
             case let .beam(_, _, from, _, _, soundID):
                 // Geometry is drawn from `world.activeBeams` in `syncBeams()`;
@@ -1500,12 +1529,6 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Scramble every docked fighter from the player's own bays right now.
-    func launchPlayerFighters() {
-        guard !world.player.fighterBays.isEmpty else { return }
-        world.playerLaunchFighters()
-    }
-
     /// Call every deployed player fighter back to dock, regardless of combat.
     func recallPlayerFighters() {
         guard !world.player.fighterBays.isEmpty else { return }
@@ -1758,15 +1781,19 @@ final class GameScene: SKScene {
     /// Transfer a boarded hulk's matching ammunition into the player's weapons.
     func plunderAmmo(_ id: Int) -> Int { world?.takePlunderAmmo(from: id) ?? 0 }
 
-    /// Roll to capture a boarded hulk into the escort wing; returns success.
-    /// Attempt to board-and-capture ship `id`. On success returns the captured
-    /// hull's live entityID / shïp type / name so the container can register it
-    /// as a persistent (free) escort record and tag the ship; nil on failure.
+    /// Roll to capture a boarded hulk. On success returns the captured hull's
+    /// live entityID / shïp type / name, but doesn't decide what happens to
+    /// it — the container shows the "use as escort or take command" choice
+    /// and commits via `recruitCapturedEscort` or its own flagship swap.
+    /// nil on failure.
     func attemptCapture(_ id: Int) -> (entityID: Int, shipType: Int, name: String)? {
-        guard let world, world.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)),
-              let ship = world.ship(id: id) else { return nil }
-        return (ship.entityID, ship.shipTypeID, ship.name)
+        guard let world, let cap = world.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)) else { return nil }
+        return (id, cap.shipTypeID, cap.name)
     }
+
+    /// Commit the "use as escort" outcome for a hulk `attemptCapture` already
+    /// rolled a success for.
+    func recruitCapturedEscort(_ id: Int) { world?.recruitCapturedEscort(shipID: id) }
 
     /// Click/tap hit-test in scene space (== world space here): nearest ship
     /// first, then nearest planet; clears the selection if nothing was hit.
@@ -1892,6 +1919,7 @@ final class GameScene: SKScene {
             hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0
             hud.targetHostile = false; hud.targetGovtLabel = ""
             hud.targetShipTypeID = nil
+            hud.targetCargo = []
             return
         }
         hud.targetName = target.name
@@ -1900,6 +1928,22 @@ final class GameScene: SKScene {
         hud.targetArmor = target.maxArmor > 0 ? target.armor / target.maxArmor : 1
         hud.targetHostile = isEffectivelyHostileToPlayer(target)
         hud.targetGovtLabel = galaxy?.game.govt(target.government)?.targetCode ?? ""
+        // `oütf` ModType 13 (density scanner): reveals a targeted ship's cargo
+        // hold — ownership-gated (the Bible's ModVal is "ignored"), and only
+        // worth resolving names for while it'd actually be shown.
+        hud.targetCargo = world.player.hasDensityScanner ? cargoBreakdown(target.cargo) : []
+    }
+
+    /// Name-resolve a `Ship.cargo` dict (commodity/junk id → tons) into
+    /// display-ready rows, tons > 0 only — shared by the player's own cargo
+    /// readout and the density-scanner target reveal.
+    private func cargoBreakdown(_ cargo: [Int: Int]) -> [(name: String, tons: Int)] {
+        guard let game = galaxy?.game else { return [] }
+        return cargo.compactMap { id, tons in
+            guard tons > 0 else { return nil }
+            let name = Commodity(rawValue: id).map { game.commodityName($0) } ?? game.junk(id)?.name ?? "Cargo #\(id)"
+            return (name, tons)
+        }.sorted { $0.name < $1.name }
     }
 
     /// The click-selected planet/station nav destination, if any (independent
@@ -2178,8 +2222,32 @@ final class GameScene: SKScene {
                 node.position = from
                 node.zRotation = atan2(CGFloat(dy), CGFloat(dx))
                 node.size = CGSize(width: length, height: max(2, width))
-                node.color = color
-                node.alpha = alpha
+                if let frames = beamGraphicTextures(for: b.weaponID), !frames.isEmpty {
+                    // This weapon's own authored beam art, stretched along the
+                    // real length/placement (already correct) instead of the
+                    // shared procedural bar. A multi-frame strip animates.
+                    let idx = frames.count > 1 ? Int(effectClock * 15) % frames.count : 0
+                    node.texture = frames[idx]
+                    node.colorBlendFactor = 0
+                    node.blendMode = .alpha
+                    node.alpha = alpha
+                } else if let corona = beamCoronaTexture(for: b) {
+                    // Real EV Nova beams carry no sprite art at all — a bright
+                    // `beamColor` core fading to `coronaColor` at the edges IS
+                    // their authored art. Baked into the texture (not tinted
+                    // via colorBlendFactor) since two independent colors can't
+                    // be expressed with a single tint.
+                    node.texture = corona
+                    node.colorBlendFactor = 0
+                    node.blendMode = .add
+                    node.alpha = alpha
+                } else {
+                    node.texture = beamTexture
+                    node.color = color
+                    node.colorBlendFactor = 1
+                    node.blendMode = .add
+                    node.alpha = alpha
+                }
                 node.isHidden = false
             }
         }
@@ -2234,6 +2302,77 @@ final class GameScene: SKScene {
         }
         weaponLightningCache[weaponID] = params
         return params
+    }
+
+    /// This beam weapon's own authored art (`wëap.graphicSpinID` → `spïn` → `rlëD`),
+    /// or nil if it has none (falls back to the generic gradient bar). The same
+    /// `graphicSpinID` field doubles as a shot's projectile art and a beam's strip
+    /// art in the real `wëap` resource, so this reuses `weaponGraphicTextures`
+    /// exactly like `syncProjectiles` does.
+    private func beamGraphicTextures(for weaponID: Int) -> [SKTexture]? {
+        if weaponID < 128 { return nil }
+        if let cached = weaponBeamGraphicCache[weaponID] { return cached }
+        var frames: [SKTexture]?
+        if let w = galaxy?.game.weapon(weaponID), let spinID = w.graphicSpinID {
+            let f = weaponGraphicTextures(spinID)
+            frames = f.isEmpty ? nil : f
+        }
+        weaponBeamGraphicCache[weaponID] = frames
+        return frames
+    }
+
+    /// Whether firing `weaponID` should flash the shooter's `shän` weapon-glow
+    /// overlay (`wëap.Flags2` 0x0200, "uses the ship's weapon sprite"). Cached.
+    private func weaponUsesShipSprite(_ weaponID: Int) -> Bool {
+        if weaponID < 128 { return false }
+        if let cached = weaponUsesShipSpriteCache[weaponID] { return cached }
+        let uses = galaxy?.game.weapon(weaponID)?.usesShipWeaponSprite ?? false
+        weaponUsesShipSpriteCache[weaponID] = uses
+        return uses
+    }
+
+    /// This beam's authored core→corona glow gradient, cached per weapon id
+    /// from the first beam seen (the color pair is fixed per weapon). Real EV
+    /// Nova beams have no sprite art — this bright-core-fading-to-tinted-edge
+    /// bar (`wëap.beamColor`/`coronaColor`/`coronaFalloff`) is what actually
+    /// made every stock beam look distinct in the original game; before this,
+    /// every beam without its own `graphicSpinID` (i.e. almost all of them)
+    /// rendered as the same flat white bar tinted only by `beamColor`.
+    private func beamCoronaTexture(for beam: ActiveBeam) -> SKTexture? {
+        let weaponID = beam.weaponID
+        if weaponID < 128 { return nil }
+        if let cached = weaponCoronaTextureCache[weaponID] { return cached }
+        var texture: SKTexture?
+        if let core = beam.color, let corona = beam.coronaColor {
+            let coreColor = SKColor(red: CGFloat(core.r), green: CGFloat(core.g), blue: CGFloat(core.b), alpha: 1)
+            let coronaColor = SKColor(red: CGFloat(corona.r), green: CGFloat(corona.g), blue: CGFloat(corona.b), alpha: 1)
+            // `coronaFalloff` has no documented exact curve; higher values read
+            // as "pinch the bright core tighter" in-game, so this maps it to a
+            // core-width fraction rather than reproducing an unverified formula.
+            let coreStart = CGFloat(max(0.05, min(0.45, 0.45 - beam.coronaFalloff / 200.0)))
+            texture = GameScene.makeCoronaTexture(core: coreColor, corona: coronaColor, coreStart: coreStart)
+        }
+        weaponCoronaTextureCache[weaponID] = texture
+        return texture
+    }
+
+    /// A vertical 5-stop gradient bar: transparent corona → soft corona glow →
+    /// opaque core → soft corona glow → transparent corona. `coreStart` is the
+    /// fraction of the bar's half-width the glow occupies before reaching the
+    /// solid core.
+    private static func makeCoronaTexture(core: SKColor, corona: SKColor,
+                                          coreStart: CGFloat, thickness: Int = 32) -> SKTexture {
+        let h = max(4, thickness)
+        return imageTexture(width: 4, height: h) { ctx in
+            let cs = CGColorSpaceCreateDeviceRGB()
+            let coronaClear = corona.withAlphaComponent(0)
+            let coronaGlow = corona.withAlphaComponent(0.65)
+            let colors = [coronaClear.cgColor, coronaGlow.cgColor, core.cgColor,
+                          coronaGlow.cgColor, coronaClear.cgColor] as CFArray
+            let locations: [CGFloat] = [0, coreStart, 0.5, 1 - coreStart, 1]
+            guard let grad = CGGradient(colorsSpace: cs, colors: colors, locations: locations) else { return }
+            ctx.drawLinearGradient(grad, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: Double(h)), options: [])
+        }
     }
 
     /// A soft round dot used for every projectile (radial white→transparent).
@@ -2990,6 +3129,8 @@ final class GameScene: SKScene {
         npcShieldCache.removeAll()
         asteroidTextureCache.removeAll()
         weaponGraphicCache.removeAll()
+        weaponBeamGraphicCache.removeAll()
+        weaponCoronaTextureCache.removeAll()
     }
 
     // MARK: Jump / landing effects
@@ -3240,7 +3381,9 @@ final class GameScene: SKScene {
 
     /// EV Nova's "no-jump zone": you can't enter hyperspace within this radius of
     /// the system centre (Bible: the standard radius is 1000px, adjustable by the
-    /// "hyperspace dist mod" outfit #23). Fixed at the stock 1000 for now.
+    /// "hyperspace dist mod" outfit #23). Synced from `PilotStore.hyperspaceNoJumpRadius`
+    /// before each jump attempt (`GameContainerView.attemptJump`); defaults to the
+    /// stock 1000 until that first sync.
     var hyperspaceNoJumpRadius: Double = 1000
 
     /// True when the player is clear of the no-jump zone and may jump. Too close,
@@ -4123,6 +4266,16 @@ final class GameScene: SKScene {
         hud?.armor = maxArmor > 0 ? armor / maxArmor : 1
     }
 
+    /// Trigger a self-contained explosion effect at the player's current
+    /// position — used by outfit-driven hazards (`oütf` ModTypes 47/50, bomb
+    /// and nonlethal bomb) that damage the ship directly via
+    /// `Ship.applyDamage` outside the normal projectile/beam hit pipeline,
+    /// which otherwise raises this effect on its own.
+    func triggerPlayerOutfitExplosion(radius: Double = 32, boomID: Int? = nil) {
+        guard let world, let player = playerShip else { return }
+        world.emitExplosion(at: player.position, radius: radius, boomID: boomID)
+    }
+
     // MARK: - Debug suite: live cheats
 
     /// Hold the debug suite's continuous cheats against the world each frame.
@@ -4268,12 +4421,26 @@ final class GameScene: SKScene {
     }
     var liveEscortCount: Int { world?.playerEscorts.count ?? 0 }
 
-    /// The live world's per-government legal record right now — read at
-    /// natural save points (landing, jump-out) to persist into
-    /// `PlayerState.legalRecord`, since a fresh `Diplomacy` (and thus a fresh
-    /// in-memory record) is built on every jump. See `GameHost.init`'s seeding
-    /// call for the inbound half of this bridge.
-    var liveLegalRecord: [Int: Int] { world.diplomacy?.playerRecord ?? [:] }
+    /// This-system legal-record delta earned since the world was seeded (or
+    /// the last sync) — drains the live tally, so fold the result into
+    /// `PlayerState.localLegalRecord[govt][currentSystemID]`, NOT
+    /// `PlayerState.legalRecord` (the universal/mission-only component).
+    /// Read at natural save points (landing, jump-out), since a fresh
+    /// `Diplomacy` is built on every jump. See `GameHost.init`'s seeding call
+    /// for the inbound half of this bridge.
+    func consumeLocalLegalRecordDelta() -> [Int: Int] { world.diplomacy?.consumeLocalRecordDelta() ?? [:] }
+
+    /// Legal-record deltas earned this session in systems *other* than the
+    /// current one (the Legal Status radius rule's tapered spread) — drains
+    /// the live tally. govt id -> system id -> delta.
+    func consumeLocalLegalSpread() -> [Int: [Int: Int]] { world.diplomacy?.consumeLocalSpread() ?? [:] }
+
+    /// The system id the live `Diplomacy` is actually scoped to right now —
+    /// use this (not `nav.currentSystemID`, which may have already advanced
+    /// past a jump by the time a sync point fires) when folding
+    /// `consumeLocalLegalRecordDelta()`'s result into `PlayerState
+    /// .localLegalRecord`.
+    var diplomacySystemID: Int? { world.diplomacy?.currentSystemID }
 
     /// Combat rating earned since the last call, draining the live tally back
     /// to 0 — fold the result into `PlayerState.combatRating`. Safe to call

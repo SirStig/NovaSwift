@@ -187,7 +187,9 @@ struct TouchControlsOverlay: View {
             ("shippingbox.fill", "Board", { onDiscrete(.board) }, true),
             (hud.cloakEngaged ? "eye.slash.fill" : "eye.slash", hud.cloakEngaged ? "Uncloak" : "Cloak",
              { onDiscrete(.toggleCloak) }, hud.hasCloak),
-            ("airplane.departure", "Launch", { onDiscrete(.launchFighters) }, hud.hasFighterBays),
+            // Fighters launch via the normal secondary-weapon fire control (select
+            // the bay like any other secondary, then fire) — recall is the one
+            // dedicated fighter-bay touch command left.
             ("airplane.arrival", "Recall", { onDiscrete(.recallFighters) }, hud.hasFighterBays),
             ("map.fill", "Map", { onDiscrete(.galaxyMap) }, true),
             ("bolt.horizontal.circle.fill", "Jump", { onDiscrete(.hyperjump) }, true),

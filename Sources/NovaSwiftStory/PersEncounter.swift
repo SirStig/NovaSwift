@@ -26,7 +26,7 @@ public enum PersEncounter {
     public static func likesPlayer(_ pers: PersRes, player: PlayerState) -> Bool {
         guard !player.persHoldsGrudge(pers.id) else { return false }
         guard pers.govt >= 0 else { return true }
-        return (player.legalRecord[pers.govt] ?? 0) >= 0
+        return player.effectiveLegalRecord(govt: pers.govt, atSystem: player.currentSystem) >= 0
     }
 
     /// The `mïsn` this person offers right now (LinkMission), if it's valid,

@@ -391,6 +391,94 @@ public struct GovtRes {
     }
 }
 
+/// Applies a legal-record penalty to `govt` plus the Bible's §1.2 ally/enemy
+/// propagation: "Doing evil deeds to one government will improve your rating
+/// with its enemies, and vice versa. Allied governments also communicate your
+/// actions, so attacking one government will make its allies hate you too."
+/// Neither propagation's magnitude is quantified by the Bible; both use the
+/// same invented-but-consistent half-penalty, mirrored in sign (allies
+/// suffer, enemies benefit). Used for the *universal* (mission-driven) legal
+/// record — see `applyLocal` for the spatial version hostile ship-to-ship
+/// actions use instead. Shared by `NovaSwiftEngine.Diplomacy` and
+/// `NovaSwiftStory.ContrabandScan` so both apply the same rule instead of
+/// drifting apart — `NovaSwiftStory` can't depend on `NovaSwiftEngine`, so
+/// this lives in the shared base module.
+public enum LegalRecordPropagation {
+    public static func apply(penalty: Int, to govt: Int, in record: inout [Int: Int], govts: [Int: GovtRes]) {
+        record[govt, default: 0] -= penalty
+        guard let victim = govts[govt] else { return }
+        for (id, other) in govts where id != govt {
+            if !Set(other.classes).isDisjoint(with: victim.allies) {
+                record[id, default: 0] -= penalty / 2
+            }
+            if !Set(other.classes).isDisjoint(with: victim.enemies) {
+                record[id, default: 0] += penalty / 2
+            }
+        }
+    }
+
+    /// The same ally/enemy propagation as `apply`, but for a hostile action
+    /// against a ship (combat, boarding, a detected-smuggling scan) rather
+    /// than a mission reward — per the EVN wiki's Legal Status page: "Hostile
+    /// actions against ships will be reflected locally, while status changes
+    /// due to missions will be reflected universally... Hostile actions
+    /// against ships that a government regards favorably will be reflected
+    /// in a 3 system radius. Hostile actions against ships that a government
+    /// regards negatively will be reflected in a 5 system radius." `current`
+    /// (the system the action happened in) gets the full, unscaled penalty —
+    /// same magnitude as `apply` would give it. `spread` receives a tapered
+    /// share (linear falloff to 0 at the radius edge — the wiki doesn't
+    /// quantify the falloff shape, only that farther systems count for less)
+    /// in every *other* system within radius, keyed govt id -> system id.
+    public static func applyLocal(penalty: Int, to govt: Int, atSystem origin: Int,
+                                  current: inout [Int: Int], spread: inout [Int: [Int: Int]],
+                                  govts: [Int: GovtRes], game: NovaGame) {
+        func apply(delta: Int, to targetGovt: Int) {
+            guard delta != 0 else { return }
+            current[targetGovt, default: 0] += delta
+            let radius = delta < 0 ? 5 : 3   // unfavorable felt farther than favorable
+            for (systemID, hop) in game.systemsWithinHops(of: origin, maxHops: radius) where hop > 0 {
+                let scaled = delta * (radius - hop) / radius
+                guard scaled != 0 else { continue }
+                spread[targetGovt, default: [:]][systemID, default: 0] += scaled
+            }
+        }
+        apply(delta: -penalty, to: govt)
+        guard let victim = govts[govt] else { return }
+        for (id, other) in govts where id != govt {
+            if !Set(other.classes).isDisjoint(with: victim.allies) { apply(delta: -penalty / 2, to: id) }
+            if !Set(other.classes).isDisjoint(with: victim.enemies) { apply(delta: penalty / 2, to: id) }
+        }
+    }
+}
+
+extension NovaGame {
+    /// System ids within `maxHops` hyperspace jumps of `origin` (via
+    /// `sÿst.links`), BFS-limited, mapped to their hop distance (`origin`
+    /// itself is hop 0). Backs `LegalRecordPropagation.applyLocal`'s spatial
+    /// decay — the wiki's "actions in adjacent systems are also taken into
+    /// consideration, although given less weight than actions committed in
+    /// the immediate vicinity."
+    public func systemsWithinHops(of origin: Int, maxHops: Int) -> [Int: Int] {
+        var dist: [Int: Int] = [origin: 0]
+        var frontier = [origin]
+        var hop = 0
+        while hop < maxHops, !frontier.isEmpty {
+            hop += 1
+            var next: [Int] = []
+            for sid in frontier {
+                guard let s = system(sid) else { continue }
+                for link in s.links where dist[link] == nil {
+                    dist[link] = hop
+                    next.append(link)
+                }
+            }
+            frontier = next
+        }
+        return dist
+    }
+}
+
 // MARK: düde — an AI ship archetype (what actually gets spawned)
 
 /// EV Nova's AI dispositions, from `düde`'s AI Type field. Higher-fidelity
@@ -581,6 +669,16 @@ public struct WeapRes {
     /// on-screen beam tint so e.g. a Polaris beam renders in its authentic hue
     /// instead of a generic white line. Only meaningful for beam weapons.
     public let beamColor: NovaColor
+    /// Beam glow colour (`wëap` @58, a 4-byte `0x00RRGGBB` field, novaparse
+    /// `coronaColor`): the outer edge tint a beam fades to away from its
+    /// `beamColor` core. Real EV Nova beams have no sprite art at all — they're
+    /// drawn as this two-tone core→corona gradient, which is why every beam
+    /// looked identical before this was decoded (only the flat core tint was).
+    public let coronaColor: NovaColor
+    /// How sharply a beam's glow falls off from its core to `coronaColor`
+    /// (`wëap` @52, novaparse `coronaFalloff`). Higher = a tighter, harder-edged
+    /// core; lower = a softer, wider glow.
+    public let coronaFalloff: Int
     /// Which set of `shän` weapon exit points a shot leaves from (`wëap` @88):
     /// -1 = ship centre, 0 = gun, 1 = turret, 2 = guided, 3 = beam. Offset
     /// verified against novaparse `WeapResource.ts` (`exitTypeN`).
@@ -676,6 +774,12 @@ public struct WeapRes {
     public var penetratesShields: Bool { flagsRaw & 0x0020 != 0 }
     /// `Flags` 0x8000: "shot detonates at the end of its lifespan" (flak).
     public var detonateOnExpire: Bool { flagsRaw & 0x8000 != 0 }
+    /// `Flags2` 0x0200: "This weapon uses the ship's weapon sprite, if
+    /// applicable" (Bible) — this shot flashes the firing hull's own `shän`
+    /// weapon-glow overlay (`ShanRes.weaponGlowSpriteID`, faded per `WeapDecay`)
+    /// instead of (or alongside) its own shot art. Only weapons with this flag
+    /// should trigger that overlay.
+    public var usesShipWeaponSprite: Bool { flags2Raw & 0x0200 != 0 }
     /// `Flags3` 0x0020: exclusive — while this weapon is firing or reloading, no
     /// other weapon on the ship may fire (Bible).
     public var isExclusive: Bool { flags3Raw & 0x0020 != 0 }
@@ -757,7 +861,9 @@ public struct WeapRes {
         blastRadius = ai16(d, 26)
         beamLength = ai16(d, 48)
         beamWidth = ai16(d, 50)
+        coronaFalloff = ai16(d, 52)
         beamColor = acolor(d, 54)
+        coronaColor = acolor(d, 58)
         subCount = ai16(d, 62)
         subID = ai16(d, 64)
         subTheta = ai16(d, 66)

@@ -494,6 +494,15 @@ public struct ShipRes {
     /// shows greyed-out; these bits mean "omit it from the shipyard list
     /// entirely" instead.
     public var hidesWhenLocked: Bool { flags3 & 0x0100 != 0 || flags3 & 0x0200 != 0 }
+    /// Bible `Flags3` 0x0010: "Ship ignores gravity" — this hull is immune to
+    /// a stellar's `Gravity` pull/push outright, no outfit needed. Combines
+    /// with a fitted `oütf` ModType 41 (gravityResist) at the loadout layer.
+    public var ignoresGravity: Bool { flags3 & 0x0010 != 0 }
+    /// Bible `Flags3` 0x0020: "Ship ignores deadly stellars" — this hull
+    /// survives touching a `SpobRes.isDeadly` stellar outright, no outfit
+    /// needed. Combines with a fitted `oütf` ModType 42 (stellarResist) at
+    /// the loadout layer.
+    public var ignoresDeadlyStellars: Bool { flags3 & 0x0020 != 0 }
 }
 
 // MARK: sÿst — star system (map position, hyperspace links, stellar objects)
@@ -826,6 +835,13 @@ public struct SpobRes {
     /// This stellar is a wormhole (lands → transported to a linked wormhole).
     public var isWormhole: Bool { flags2 & 0x2000 != 0 }
     public var isGate: Bool { isHypergate || isWormhole }
+    /// Bible `Flags2` 0x0100: "Stellar is deadly - all ships that touch it are
+    /// destroyed immediately." Verified empirically alongside `isHypergate`/
+    /// `isWormhole` above (same `flags2` field, same 0x1000/0x2000 bits
+    /// confirmed against every real HG-*/Wormhole stellar in the base game);
+    /// no stock stellar sets this particular bit, but the field itself reads
+    /// correctly.
+    public var isDeadly: Bool { flags2 & 0x0100 != 0 }
 
     /// Gates are always something the player can fly to and set down on, even
     /// when the stock data flags them a "station"/uninhabited (HG-V01 is flagged

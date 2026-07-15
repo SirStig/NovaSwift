@@ -103,14 +103,22 @@ final class GameHost {
             let galaxy = Galaxy(game: game)
             aiGame = game
             aiGalaxy = galaxy
+            let target = systemID ?? pilot.currentSystem
             // A fresh Galaxy means a fresh Diplomacy (`makeDiplomacy()` caches
             // per-Galaxy, and every jump rebuilds `GameHost` from scratch) — seed
-            // it from the persisted pilot so standing survives across jumps.
-            // Combat rating isn't seeded here; it's a per-session delta folded
-            // into `PlayerState.combatRating` at sync points instead (see
-            // `GameContainerView.syncCombatStanding()`).
+            // it from the persisted pilot so standing survives across jumps. The
+            // seed combines the universal (mission-driven) component with the
+            // local (combat-driven) component already on record for the system
+            // being entered — see `PlayerState.effectiveLegalRecords(atSystem:)`
+            // and the EVN wiki's Legal Status page ("status changes due to
+            // missions will be reflected universally, while hostile actions
+            // against ships will be reflected locally"). `currentSystemID`/`game`
+            // are what let live combat spread a tapered penalty to nearby
+            // systems too (`Diplomacy.recordKill`/etc. → `localSpread`).
             let dip = galaxy.makeDiplomacy()
-            dip.seed(legalRecord: pilot.legalRecord)
+            dip.currentSystemID = target
+            dip.game = game
+            dip.seed(legalRecord: pilot.effectiveLegalRecords(atSystem: target))
             // Ranks with "govt won't attack" (Flags 0x0100) shield the player
             // from that government's ships for as long as the rank is held.
             dip.rankProtectedGovts = Set(pilot.activeRanks
@@ -132,12 +140,15 @@ final class GameHost {
             hud.shipName = session.shipName
             // Load the requested system (or the pilot's current one — every call
             // site passes an explicit systemID today, but this stays as a safe
-            // default if that ever changes).
-            let target = systemID ?? pilot.currentSystem
+            // default if that ever changes). `target` was already resolved above
+            // to seed `dip`; this can still fall back to `startingSystem()` if
+            // `target` doesn't resolve to real data, so correct `dip`'s origin
+            // to match in that rare case.
             let targetSystem = game.system(target) ?? game.startingSystem()
             if let system = targetSystem {
                 systemName = system.name
                 aiSystemID = system.id
+                dip.currentSystemID = system.id
                 // Message buoy (sÿst.Message → STR# 1000): shown on arriving in a
                 // system that has one — light narrative/flavor delivery on entry.
                 if arrivedViaJump, system.message >= 0,
@@ -639,6 +650,15 @@ struct GameContainerView: View {
     /// all. Re-asserted whenever a menu/map/spaceport overlay that took focus
     /// away closes back to flight.
     @FocusState private var isSceneFocused: Bool
+    /// True from the moment `grabSceneFocus` is asked to reclaim focus until
+    /// it either confirms `isSceneFocused` stuck or gives up. `onKeyPress`
+    /// only fires while `isSceneFocused` is actually true, so a held arrow
+    /// key repeats straight into AppKit's unhandled-key beep for however long
+    /// this reclaim is in flight; `ArrowKeyFocusFallback` uses this flag to
+    /// step in only for that specific window, never when some other view
+    /// (a text field, an overlay's own arrow-key handling) legitimately holds
+    /// focus on purpose.
+    @State private var reclaimingSceneFocus = false
     /// The open hail/communication dialog, if any (nil = closed).
     @State private var hailDialogState: HailDialogState?
     /// Backs the in-flight LinkMission offer a hailed/boarded `pêrs` makes —
@@ -660,6 +680,9 @@ struct GameContainerView: View {
     @State private var boardManifest: World.BoardingManifest?
     /// Bumped after taking loot so the plunder dialog re-reads the manifest.
     @State private var boardRefresh = 0
+    /// A hulk that just rolled a successful capture, awaiting the player's
+    /// "use as escort" vs. "take command of it" choice (nil = no pending choice).
+    @State private var pendingCaptureChoice: (entityID: Int, shipType: Int, name: String)?
     /// Credit cost of "Request Assistance" by how the hailed crew feels about
     /// the player (`GameScene.AssistanceTier`) — allies help for free; a
     /// crew that dislikes the player (negative but not-yet-hostile legal
@@ -675,6 +698,14 @@ struct GameContainerView: View {
     /// land-is-the-save model. Backups rotate (newest 8 + first), so this can't
     /// grow unbounded.
     private let backupHeartbeat = Timer.publish(every: 180, on: .main, in: .common).autoconnect()
+    /// Heartbeat for outfit-driven flight hazards (`oütf` ModTypes 47/50 —
+    /// bomb, nonlethal bomb). A few seconds is plenty granular for "occasional"
+    /// self-destruct rolls without adding real per-frame cost.
+    private let hazardOutfitHeartbeat = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
+    /// Set once a carried bomb outfit (ModType 47) has been detected and its
+    /// one-time delayed detonation scheduled, so a second heartbeat tick
+    /// before it goes off doesn't schedule a duplicate.
+    @State private var bombDetonationScheduled = false
     /// Chance a "wary" (dislikes-you-but-not-hostile) crew agrees at all.
     private let assistanceWaryAcceptChance = 0.5
 
@@ -994,6 +1025,11 @@ struct GameContainerView: View {
             syncCombatStanding()
             saveGame(reason: .periodic)
         }
+        .onReceive(hazardOutfitHeartbeat) { _ in
+            guard let host, landedSpobID == nil, !showMenu, !nav.showingMap,
+                  host.scene.playerShip?.isAlive == true else { return }
+            checkHazardOutfits(host)
+        }
         .onChange(of: landedSpobID) { _, id in
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
             // Mirror the docked state into the persisted pilot so the on-land save
@@ -1060,6 +1096,17 @@ struct GameContainerView: View {
                             titleVisibility: .visible) {
             Button("Land") { if let id = landConfirmID { landConfirmID = nil; landedSpobID = id } }
             Button("Cancel", role: .cancel) { landConfirmID = nil }
+        }
+        // A successful capture offers a choice, same as the real game: fly
+        // the captured hull yourself, or send it into the wing as an escort.
+        .confirmationDialog("Ship captured!",
+                            isPresented: Binding(get: { pendingCaptureChoice != nil },
+                                                 set: { if !$0 { pendingCaptureChoice = nil } }),
+                            presenting: pendingCaptureChoice) { cap in
+            Button("Take Command") { takeCommandOfCapturedShip(cap) }
+            Button("Use as Escort") { recruitCapturedShipAsEscort(cap) }
+        } message: { cap in
+            Text("\(cap.name.isEmpty ? "The ship" : cap.name) is yours. Fly it yourself, or add it to your escort wing?")
         }
     }
 
@@ -1138,15 +1185,18 @@ struct GameContainerView: View {
     /// Logs every attempt/outcome (subsystem com.novaswift.app, category Input) so
     /// the failure mode is visible in Console without attaching a debugger.
     private func grabSceneFocus(reason: String, attempt: Int = 0) {
+        reclaimingSceneFocus = true
         DispatchQueue.main.async {
             isSceneFocused = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                 if isSceneFocused {
+                    reclaimingSceneFocus = false
                     Log.input.debug("grabSceneFocus(\(reason, privacy: .public)) confirmed, attempt \(attempt)")
                 } else if attempt < 5 {
                     Log.input.debug("grabSceneFocus(\(reason, privacy: .public)) attempt \(attempt) didn't stick — retrying")
                     grabSceneFocus(reason: reason, attempt: attempt + 1)
                 } else {
+                    reclaimingSceneFocus = false
                     Log.input.error("grabSceneFocus(\(reason, privacy: .public)) gave up after \(attempt) attempts — keyboard input will not reach the scene")
                 }
             }
@@ -1226,8 +1276,10 @@ struct GameContainerView: View {
             return "Landing denied. You lack a travel permit for \(govt.commName) space."
         }
         // Legal standing: a deeply-wanted pilot is turned away (same threshold the
-        // stellar hail uses). Dominate it or earn a rank to land anyway.
-        if (model.pilot.state.legalRecord[govtID] ?? 0) <= -150 {
+        // stellar hail uses). Dominate it or earn a rank to land anyway. Uses
+        // the effective (universal + local-here) standing — landing denial
+        // should reflect trouble caused nearby, not just anywhere ever.
+        if model.pilot.state.effectiveLegalRecord(govt: govtID, atSystem: nav.currentSystemID) <= -150 {
             return "Landing denied. You are a wanted criminal here."
         }
         return nil
@@ -1763,10 +1815,20 @@ struct GameContainerView: View {
     }
 
     private func syncCombatStanding() {
-        guard let scene = host?.scene else { return }
-        for (govt, value) in scene.liveLegalRecord {
-            model.pilot.state.legalRecord[govt] = value
+        guard let scene = host?.scene, let here = scene.diplomacySystemID else { return }
+        // Combat/boarding/smuggling legal-record changes are LOCAL (see the
+        // wiki's Legal Status page) — they fold into `localLegalRecord`, not
+        // `legalRecord` (the universal, mission-only component).
+        var local = model.pilot.state.localLegalRecord ?? [:]
+        for (govt, delta) in scene.consumeLocalLegalRecordDelta() {
+            local[govt, default: [:]][here, default: 0] += delta
         }
+        for (govt, bySystem) in scene.consumeLocalLegalSpread() {
+            for (systemID, delta) in bySystem {
+                local[govt, default: [:]][systemID, default: 0] += delta
+            }
+        }
+        model.pilot.state.localLegalRecord = local
         let delta = scene.consumeCombatRatingDelta()
         if delta != 0 { model.pilot.state.combatRating += delta }
     }
@@ -1785,10 +1847,14 @@ struct GameContainerView: View {
         let hops = nav.nextJumpHopCount
         guard hops > 0, nav.canAfford(hops: hops) else { return false }
         // No-jump zone: you can't enter hyperspace too close to the system centre
-        // (Bible: 1000px). The scene posts a "fly further out" message; close the
-        // map (if it was the trigger) so that message is visible, and return `true`
-        // (handled) so a `J` press doesn't then re-open the map over it — the
-        // player has a course, they're just too close to use it yet.
+        // (Bible: 1000px, adjustable by "hyperspace dist mod" outfits). The scene
+        // posts a "fly further out" message; close the map (if it was the trigger)
+        // so that message is visible, and return `true` (handled) so a `J` press
+        // doesn't then re-open the map over it — the player has a course, they're
+        // just too close to use it yet.
+        if let galaxy = host.galaxy {
+            host.scene.hyperspaceNoJumpRadius = model.pilot.hyperspaceNoJumpRadius(galaxy: galaxy)
+        }
         guard host.scene.canEnterHyperspace() else { nav.showingMap = false; return true }
         let destID = nav.route[hops - 1]
         let outbound = outboundHeading(from: nav.currentSystemID, to: destID)
@@ -1889,11 +1955,13 @@ struct GameContainerView: View {
         .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
                                    onDiscrete: handleDiscrete))
         #if os(macOS)
-        // Bare-modifier bindings (default: Control fires the selected secondary
-        // weapon, matching real EV Nova) can't go through `KeyboardControls` —
+        // Bare-modifier bindings (Control/Option/Command rebound to a flight
+        // action in Settings -> Controls) can't go through `KeyboardControls` —
         // see `ModifierFlagsBridge`'s doc comment for why.
         .modifier(ModifierKeyControls(input: host.input, bindings: model.bindings,
                                       onDiscrete: handleDiscrete))
+        .background(ArrowKeyFocusFallback(input: host.input, bindings: model.bindings,
+                                          isReclaiming: { reclaimingSceneFocus }))
         #endif
     }
 
@@ -1991,6 +2059,53 @@ struct GameContainerView: View {
     /// current pilot state and that ship's real loadout, the same source
     /// `depart()`'s own rebuild (`GameHost.buildPlayerShip`) uses, so this is
     /// safe to call after any purchase regardless of what changed.
+    /// `oütf` ModTypes 47/50 (bomb, nonlethal bomb) — checked on
+    /// `hazardOutfitHeartbeat` while actively flying. Neither is carried by
+    /// any stock outfit (they're plot/hazard items for missions to grant via
+    /// `grantOutfit`), but both have clear, literal Bible specs.
+    private func checkHazardOutfits(_ host: GameHost) {
+        guard let game = host.game else { return }
+        for (oid, count) in model.pilot.state.outfits where count > 0 {
+            guard let o = game.outfit(oid) else { continue }
+            for (type, value) in o.modifiers {
+                switch type {
+                case .bomb:
+                    // Bible: "destroys the player in flight. set the modval to
+                    // the ID of the desc resource to show..., or -1 for none."
+                    // No randomness is documented (unlike its nonlethal
+                    // sibling below) — a short delay after it's first found
+                    // aboard just keeps the detonation from reading as an
+                    // instant, un-telegraphed death the moment it's granted.
+                    guard !bombDetonationScheduled else { continue }
+                    bombDetonationScheduled = true
+                    let descID = value
+                    Log.scene.notice("Bomb outfit \(oid, privacy: .public) armed — detonating shortly")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 3...8)) { [weak host] in
+                        guard let host, host.scene.playerShip?.isAlive == true else { return }
+                        if descID >= 0 { host.hud.post(game.descText(descID)) }
+                        _ = host.scene.playerShip?.applyDamage(shield: 1_000_000, armor: 1_000_000, piercing: true)
+                    }
+                case .nonlethalBomb:
+                    // Bible: "randomly destroys itself and damages the player
+                    // (nonfatally)... set this field to the ID of a bööm
+                    // resource to display." A low per-tick chance keeps this
+                    // rare rather than a repeat annoyance; the specific unit
+                    // is consumed so the same outfit can't re-trigger forever.
+                    guard Double.random(in: 0...1) < 0.03, let ship = host.scene.playerShip else { continue }
+                    model.pilot.state.removeOutfit(oid)
+                    model.pilot.save()
+                    let shieldDmg = min(ship.shield, ship.maxShield * 0.3)
+                    let armorDmg = max(0, min(ship.maxArmor * 0.12, ship.armor - 1))  // never fatal
+                    _ = ship.applyDamage(shield: shieldDmg, armor: armorDmg, piercing: true)
+                    host.scene.triggerPlayerOutfitExplosion(radius: 24, boomID: value >= 0 ? value : nil)
+                    host.hud.post("An outfit malfunctioned and exploded!")
+                    Log.scene.notice("Nonlethal bomb outfit \(oid, privacy: .public) self-destructed")
+                default: break
+                }
+            }
+        }
+    }
+
     private func syncHUDFromPilotState() {
         guard let host, let galaxy = host.galaxy, let game = host.game else { return }
         let state = model.pilot.state
@@ -2126,30 +2241,63 @@ struct GameContainerView: View {
         flightMissionPersonID = nil
     }
 
+    /// Roll a capture attempt. On success, closes the plunder dialog and hands
+    /// off to `pendingCaptureChoice` so the player picks "use as escort" or
+    /// "take command of it" — EV Nova offers both outcomes for a successful
+    /// capture, not just recruit-as-escort.
     private func plunderCapture(_ scene: GameScene, shipID: Int) {
-        if let cap = scene.attemptCapture(shipID) {
-            // A captured escort is FREE (no daily fee) — register it in the
-            // persistent roster so it follows the player between systems and can
-            // later be sold/upgraded at a shipyard.
-            let name = cap.name.isEmpty ? (model.data.game?.ship(cap.shipType)?.name ?? "Escort") : cap.name
-            let record = model.pilot.state.registerEscort(shipType: cap.shipType, name: name, origin: .captured)
-            scene.tagEscort(entityID: cap.entityID, recordID: record.id)
-            // Bible `shïp.OnCapture`: control-bit set expression run when the player
-            // captures a hull of this type (usually blank; some story hulls flip a
-            // bit on capture). Runs over the shared pilot state before the save.
-            if let game = model.data.game, let onCapture = game.ship(cap.shipType)?.onCapture,
-               !onCapture.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let engine = StoryEngine(game: game, player: model.pilot.state)
-                engine.apply(set: onCapture)
-                model.pilot.state = engine.player
-            }
-            model.pilot.save()
-            host?.hud.post("Ship captured — it joins your escorts.")
-            boardManifest = nil
-        } else {
+        guard let cap = scene.attemptCapture(shipID) else {
             host?.hud.post("Capture attempt failed.")
             refreshBoard(scene, shipID: shipID)
+            return
         }
+        boardManifest = nil
+        pendingCaptureChoice = cap
+    }
+
+    /// "Use as escort" outcome: register the captured hull in the persistent
+    /// roster (free — no daily fee) so it follows the player between systems
+    /// and can later be sold/upgraded at a shipyard.
+    private func recruitCapturedShipAsEscort(_ cap: (entityID: Int, shipType: Int, name: String)) {
+        guard let scene = host?.scene else { return }
+        scene.recruitCapturedEscort(cap.entityID)
+        let name = cap.name.isEmpty ? (model.data.game?.ship(cap.shipType)?.name ?? "Escort") : cap.name
+        let record = model.pilot.state.registerEscort(shipType: cap.shipType, name: name, origin: .captured)
+        scene.tagEscort(entityID: cap.entityID, recordID: record.id)
+        applyOnCapture(shipType: cap.shipType)
+        model.pilot.save()
+        host?.hud.post("Ship captured — it joins your escorts.")
+        pendingCaptureChoice = nil
+    }
+
+    /// "Take command" outcome: the captured hull becomes the player's new
+    /// flagship, and the ship they were flying joins the wing as a free
+    /// escort instead (same billing as a normal capture — `EscortOrigin
+    /// .captured` — just applied to the ship being stepped out of). Mirrors
+    /// the mission `C/E/H` ship-swap path: the hull change lands in
+    /// `PlayerState` first, then `rebuildFlightHost` picks it up.
+    private func takeCommandOfCapturedShip(_ cap: (entityID: Int, shipType: Int, name: String)) {
+        let oldType = model.pilot.state.shipType
+        let oldName = model.data.game?.ship(oldType)?.name ?? "Escort"
+        _ = model.pilot.state.registerEscort(shipType: oldType, name: oldName, origin: .captured)
+        model.pilot.state.shipType = cap.shipType
+        applyOnCapture(shipType: cap.shipType)
+        model.pilot.save()
+        host?.hud.post("You take command of \(cap.name.isEmpty ? "the captured ship" : cap.name).")
+        pendingCaptureChoice = nil
+        rebuildFlightHost(reason: "captured-ship command swap")
+    }
+
+    /// Bible `shïp.OnCapture`: control-bit set expression run when the player
+    /// captures a hull of this type (usually blank; some story hulls flip a
+    /// bit on capture). Applies regardless of which capture outcome is chosen
+    /// — capturing that hull type is what matters, not what's done with it.
+    private func applyOnCapture(shipType: Int) {
+        guard let game = model.data.game, let onCapture = game.ship(shipType)?.onCapture,
+              !onCapture.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state)
+        engine.apply(set: onCapture)
+        model.pilot.state = engine.player
     }
 
     /// Release the escort with persistent `recordID` — the "Release from
@@ -2262,8 +2410,6 @@ struct GameContainerView: View {
             host?.scene.cycleSecondaryWeapon(forward: false)
         case .toggleCloak:
             host?.scene.togglePlayerCloak()
-        case .launchFighters:
-            host?.scene.launchPlayerFighters()
         case .recallFighters:
             host?.scene.recallPlayerFighters()
         case .board:

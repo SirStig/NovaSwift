@@ -21,8 +21,34 @@ public let govtResourceBase = 128
 public final class Diplomacy {
     /// government id → decoded record.
     public private(set) var govts: [Int: GovtRes]
-    /// Player's standing with each government (negative = criminal there).
+    /// Player's standing with each government *at `currentSystemID`*
+    /// (negative = criminal there) — the EVN wiki's "displayed legal
+    /// status," combining the universal (mission-driven) and local
+    /// (combat-driven) components already on record for this system, seeded
+    /// once via `seed(legalRecord:)`. Live combat mutates this directly (full
+    /// weight, same as before spatial decay existed — see `recordCrime`) and
+    /// additionally spreads a tapered share to nearby systems in `localSpread`.
     public private(set) var playerRecord: [Int: Int] = [:]
+    /// `playerRecord` as of the last `seed(legalRecord:)` call — the baseline
+    /// `consumeLocalRecordDelta()` diffs against to find what changed at
+    /// `currentSystemID` this session.
+    private var seededPlayerRecord: [Int: Int] = [:]
+    /// Legal-record deltas earned this session in systems *other* than
+    /// `currentSystemID`, from the Legal Status radius rule (hostile actions
+    /// felt in nearby systems at reduced weight). govt id -> system id ->
+    /// delta. Drained by `consumeLocalSpread()`.
+    public private(set) var localSpread: [Int: [Int: Int]] = [:]
+    /// The system this `Diplomacy` instance is scoped to — a fresh instance
+    /// is built per system-session (see `seed(legalRecord:)`'s doc comment),
+    /// so this is also the origin for `recordKill`/`recordDisable`/
+    /// `recordBoard`'s spatial spread. Set by the caller (`GameContainerView`)
+    /// right after construction, alongside `game`.
+    public var currentSystemID = -1
+    /// Game data backing `NovaGame.systemsWithinHops` for the spatial spread.
+    /// nil (e.g. in unit tests that hand-build bare `GovtRes` values with no
+    /// backing `NovaGame`) simply skips neighboring-system propagation —
+    /// `playerRecord`, the current system's own standing, is unaffected.
+    public var game: NovaGame?
     /// Fallback record-at-or-below-which-hostile, used only when a government
     /// is unknown/missing from the table (so `crimeTolerance` can't be read) —
     /// see `isCriminal`. Per-government hostility now uses `gövt.CrimeTol`
@@ -55,8 +81,10 @@ public final class Diplomacy {
     /// the same "unknown government" warning every tick.
     private var warnedMissingGovt: Set<Int> = []
 
-    public init(govts: [GovtRes]) {
+    public init(govts: [GovtRes], currentSystemID: Int = -1, game: NovaGame? = nil) {
         self.govts = Dictionary(uniqueKeysWithValues: govts.map { ($0.id, $0) })
+        self.currentSystemID = currentSystemID
+        self.game = game
     }
 
     public func govt(_ id: Int) -> GovtRes? {
@@ -157,23 +185,57 @@ public final class Diplomacy {
         return isCriminal(with: g)
     }
 
-    /// Force the player's standing with a government to an exact value. Unlike
-    /// `recordCrime`/`recordKill`, this doesn't propagate to allies or apply any
-    /// penalty scaling — it's a direct override, used by the in-game debug suite
-    /// to make a government instantly friendly or hostile so combat/hailing
-    /// behaviour can be exercised on demand.
+    /// Force the player's standing with a government at the current system to
+    /// an exact value. Unlike `recordCrime`/`recordKill`, this doesn't
+    /// propagate to allies or apply any penalty scaling — it's a direct
+    /// override, used by the in-game debug suite to make a government
+    /// instantly friendly or hostile so combat/hailing behaviour can be
+    /// exercised on demand. Also clears any pending spread to other systems
+    /// for this govt from earlier this session, so the override actually
+    /// sticks rather than being partly undone by a later sync.
     public func setPlayerRecord(_ govt: Int, to value: Int) {
         playerRecord[govt] = value
+        seededPlayerRecord[govt] = value
+        localSpread[govt] = nil
     }
 
-    /// Bulk-seed `playerRecord` from a persisted snapshot (e.g.
-    /// `PlayerState.legalRecord`). A fresh `Diplomacy` is built from scratch on
+    /// Bulk-seed `playerRecord` from a persisted, already-combined snapshot
+    /// (e.g. `PlayerState.effectiveLegalRecords(atSystem:)`, universal +
+    /// local-at-this-system). A fresh `Diplomacy` is built from scratch on
     /// every jump/session rebuild (`GameHost.init` → `Galaxy(game:)` →
     /// `makeDiplomacy()`), so without this the player's standing would silently
     /// reset to neutral every time they jumped. Call once, right after
-    /// construction, before any combat can mutate it.
+    /// construction (and after setting `currentSystemID`/`game`), before any
+    /// combat can mutate it — this also snapshots the baseline
+    /// `consumeLocalRecordDelta()` diffs against.
     public func seed(legalRecord: [Int: Int]) {
         for (govt, value) in legalRecord { playerRecord[govt] = value }
+        seededPlayerRecord = playerRecord
+    }
+
+    /// How much `playerRecord` (standing at `currentSystemID`) has changed
+    /// since the last `seed`/`consumeLocalRecordDelta` call, and resets the
+    /// baseline — mirrors `consumeCombatRatingDelta`'s drain-on-read pattern
+    /// so calling this from multiple sync points in a session never double-
+    /// counts. Fold the result into `PlayerState.localLegalRecord[govt]
+    /// [currentSystemID]` (NOT `PlayerState.legalRecord`, the universal/
+    /// mission-only component this must never touch).
+    public func consumeLocalRecordDelta() -> [Int: Int] {
+        defer { seededPlayerRecord = playerRecord }
+        var result: [Int: Int] = [:]
+        for (govt, value) in playerRecord {
+            let delta = value - (seededPlayerRecord[govt] ?? 0)
+            if delta != 0 { result[govt] = delta }
+        }
+        return result
+    }
+
+    /// Drain `localSpread` (legal-record deltas earned this session in
+    /// systems other than `currentSystemID`) — same drain-on-read safety as
+    /// `consumeLocalRecordDelta()`.
+    public func consumeLocalSpread() -> [Int: [Int: Int]] {
+        defer { localSpread = [:] }
+        return localSpread
     }
 
     /// Returns the combat rating earned since the last call and resets the live
@@ -196,18 +258,18 @@ public final class Diplomacy {
     /// government will make its allies hate you too." Neither propagation's
     /// magnitude is quantified by the Bible; both use the same invented-but-
     /// consistent half-penalty, mirrored in sign (allies suffer, enemies
-    /// benefit).
+    /// benefit). `playerRecord` (standing at `currentSystemID`) always gets
+    /// the full penalty; when `game` is available, a tapered share also
+    /// spreads to nearby systems via `localSpread` (see `applyLocal`'s doc
+    /// comment for the wiki-sourced radius rule) — without it (e.g. a unit
+    /// test with no backing `NovaGame`), only the current system is affected.
     public func recordCrime(against govt: Int, penalty: Int) {
-        playerRecord[govt, default: 0] -= penalty
-        let victimAllies = govts[govt]?.allies ?? []
-        let victimEnemies = govts[govt]?.enemies ?? []
-        for (id, other) in govts where id != govt {
-            if !Set(other.classes).isDisjoint(with: victimAllies) {
-                playerRecord[id, default: 0] -= penalty / 2
-            }
-            if !Set(other.classes).isDisjoint(with: victimEnemies) {
-                playerRecord[id, default: 0] += penalty / 2
-            }
+        if let game {
+            LegalRecordPropagation.applyLocal(penalty: penalty, to: govt, atSystem: currentSystemID,
+                                              current: &playerRecord, spread: &localSpread,
+                                              govts: govts, game: game)
+        } else {
+            LegalRecordPropagation.apply(penalty: penalty, to: govt, in: &playerRecord, govts: govts)
         }
     }
 
@@ -245,10 +307,9 @@ public final class Diplomacy {
     }
 
     /// The player boarded/plundered a ship belonging to `govt`. Applies
-    /// `BoardPenalty` evilness. No boarding/plunder mechanic exists anywhere
-    /// in this codebase yet (no event to hook this into) — see
-    /// docs/reverse-engineering/GOVERNMENT.md §5. Provided so the method
-    /// exists and is correct the moment boarding is implemented.
+    /// `BoardPenalty` evilness. Called from `World.board(shipID:)` the moment
+    /// the player docks with a hulk — that's the single "forced entry" event,
+    /// independent of what's taken or whether a follow-up capture succeeds.
     public func recordBoard(of govt: Int) {
         if let gov = self.govt(govt) {
             recordCrime(against: govt, penalty: gov.boardPenalty)

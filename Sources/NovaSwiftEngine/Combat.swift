@@ -87,6 +87,13 @@ public struct WeaponSpec {
     public let beamWidth: Double
     /// Rendered beam colour as 0–1 RGB (beams only). Nil → engine default tint.
     public let beamColor: (r: Double, g: Double, b: Double)?
+    /// The glow colour a beam fades to away from its `beamColor` core (beams
+    /// only). Nil → engine default (no distinct corona tint). Real EV Nova
+    /// beams have no sprite art; this core→corona gradient IS their art.
+    public let coronaColor: (r: Double, g: Double, b: Double)?
+    /// How sharply the beam's glow falls off from its core to `coronaColor`.
+    /// 0 → engine default falloff.
+    public let coronaFalloff: Double
     public let turnRate: Double          // rad/sec, guided munitions
     public let blastRadius: Double       // px, 0 = direct hit only
     public let ammoPerShot: Int          // 0/1 typically; drains mount ammo
@@ -194,6 +201,7 @@ public struct WeaponSpec {
                 turnRate: Double, blastRadius: Double, ammoPerShot: Int,
                 exitType: WeaponExitType = .center,
                 beamWidth: Double = 0, beamColor: (r: Double, g: Double, b: Double)? = nil,
+                coronaColor: (r: Double, g: Double, b: Double)? = nil, coronaFalloff: Double = 0,
                 fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false,
                 isPointDefense: Bool = false, vulnerableToPD: Bool = true,
                 ionization: Double = 0, cantFireWhileIonized: Bool = false,
@@ -218,6 +226,7 @@ public struct WeaponSpec {
         self.range = range; self.accuracyRadians = accuracyRadians
         self.isBeam = isBeam; self.isGuided = isGuided; self.turnRate = turnRate
         self.exitType = exitType; self.beamWidth = beamWidth; self.beamColor = beamColor
+        self.coronaColor = coronaColor; self.coronaFalloff = coronaFalloff
         self.blastRadius = blastRadius; self.ammoPerShot = ammoPerShot
         self.fireSoundID = fireSoundID; self.explosionBoomID = explosionBoomID
         self.loopSound = loopSound
@@ -294,6 +303,10 @@ public struct WeaponSpec {
         beamColor = w.isBeam ? (Double(w.beamColor.r) / 255.0,
                                 Double(w.beamColor.g) / 255.0,
                                 Double(w.beamColor.b) / 255.0) : nil
+        coronaColor = w.isBeam ? (Double(w.coronaColor.r) / 255.0,
+                                  Double(w.coronaColor.g) / 255.0,
+                                  Double(w.coronaColor.b) / 255.0) : nil
+        coronaFalloff = Double(max(0, w.coronaFalloff))
         turnRate = Double(w.turnRate) * 3.0 * .pi / 180.0
         blastRadius = Double(w.blastRadius)
         // Bible: `AmmoType` -1 = "ignored (unlimited ammo)"; 0-255 = draws from
@@ -606,6 +619,13 @@ public final class ActiveBeam {
     public var life: Double
     public let width: Double
     public let color: (r: Double, g: Double, b: Double)?
+    /// The glow colour this beam fades to away from its `color` core — real EV
+    /// Nova beams have no sprite art, just this core→corona gradient, so it's
+    /// what makes different beam weapons actually look different on screen.
+    public let coronaColor: (r: Double, g: Double, b: Double)?
+    /// How sharply the glow falls off from the core to `coronaColor`. 0 →
+    /// renderer default.
+    public let coronaFalloff: Double
     /// Co-op client-side echo of an authority's beam: drawn from the synced
     /// `from`/`to`, never refreshed from a shooter or life-counted — it just
     /// persists until the next snapshot re-seeds it (see `refreshActiveBeams`).
@@ -613,11 +633,13 @@ public final class ActiveBeam {
 
     public init(shooterID: Int, mountIndex: Int, weaponID: Int = -1, from: Vec2, to: Vec2, hit: Bool,
                 continuous: Bool, life: Double, width: Double,
-                color: (r: Double, g: Double, b: Double)?) {
+                color: (r: Double, g: Double, b: Double)?,
+                coronaColor: (r: Double, g: Double, b: Double)? = nil, coronaFalloff: Double = 0) {
         self.shooterID = shooterID; self.mountIndex = mountIndex; self.weaponID = weaponID
         self.from = from; self.to = to; self.hit = hit
         self.continuous = continuous; self.life = life
         self.width = width; self.color = color
+        self.coronaColor = coronaColor; self.coronaFalloff = coronaFalloff
     }
 }
 
@@ -625,7 +647,7 @@ public final class ActiveBeam {
 /// world appends them during `step`; the scene drains them after. Persistent
 /// entities (ships, projectiles) are read directly off the world instead.
 public enum WorldEvent {
-    case weaponFired(shooterID: Int, at: Vec2, heading: Double, soundID: Int?)
+    case weaponFired(shooterID: Int, at: Vec2, heading: Double, soundID: Int?, weaponID: Int = -1)
     /// `mountIndex` lets the renderer correlate this shot with an active
     /// `beamLoopStart` on the same mount (continuous beams reposition one
     /// persistent line instead of spawning a fresh flash node every tick).

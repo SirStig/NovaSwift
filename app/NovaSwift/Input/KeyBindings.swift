@@ -8,26 +8,27 @@ struct KeyBindings: Codable, Equatable {
 
     init(map: [GameAction: String] = KeyBindings.defaults) { self.map = map }
 
-    // Real EV Nova default: Spacebar fires primary; secondaries are picked with
-    // W (Alt-W to go backwards, `KeyToken`'s "opt+w") and fired with the
-    // Control key. Bare Control has no `KeyPress` of its own — AppKit only
-    // reports it as a `flagsChanged` event, never a `keyDown` — so on macOS
-    // it's captured separately by `ModifierKeyControls`/`ModifierFlagsBridge`
-    // rather than through `KeyToken.from`. iOS has no reliable bare-modifier
-    // capture (no local `NSEvent` monitor there), so it keeps Return, which
-    // is fully reachable through ordinary `onKeyPress`.
-    #if os(macOS)
-    private static let fireSecondaryDefault = "control"
-    #else
+    // Real EV Nova default: Spacebar fires primary; secondaries are picked
+    // with W (Alt-W to go backwards, `KeyToken`'s "opt+w") and fired with the
+    // Control key. Bare Control can still be rebound to in Settings ->
+    // Controls (via `ModifierKeyControls`/`ModifierFlagsBridge`), but it's
+    // deliberately NOT the shipped default: every arrow direction chorded
+    // with Control is a reserved macOS "symbolic hotkey" by default (Mission
+    // Control / move-a-space / app windows), which the WindowServer resolves
+    // before the event ever reaches this app — no in-app key handling can
+    // intercept it. Shipping Control as the default made flying-while-firing
+    // (turn + fire secondary, i.e. Control + an arrow) intermittently punt
+    // the player out to Mission Control or another Space. Return has no such
+    // conflict and is fully reachable through ordinary `onKeyPress`, so both
+    // platforms default to it.
     private static let fireSecondaryDefault = "return"
-    #endif
 
     static let defaults: [GameAction: String] = [
         .accelerate: "up", .decelerate: "down", .turnLeft: "left", .turnRight: "right",
         .afterburner: "shift",
         .firePrimary: "space", .fireSecondary: fireSecondaryDefault,
         .selectSecondaryPrev: "opt+w", .selectSecondaryNext: "w", .toggleCloak: "c",
-        .launchFighters: "f", .recallFighters: "g",
+        .recallFighters: "g",
         // Matches the real game's default control scheme: Tab cycles targets
         // ("Target Select"), R snaps to the closest ("Closest Targ"), Y hails.
         .targetNearest: "r", .targetNext: "tab", .nearestHostile: "t", .clearTarget: "u",

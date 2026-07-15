@@ -254,7 +254,11 @@ struct GalaxyMapView: View {
         let gov = s.government
         guard gov >= 0, let g = game.govt(gov) else { return relUninhabited }
         if g.alwaysAttacksPlayer || g.xenophobic { return relPirate }
-        let standing = pilot.state.legalRecord[gov] ?? g.initialRecord
+        // The dot's own system, not wherever the player currently is — each
+        // system shows its own true local standing (per the wiki's Legal
+        // Status radius rule, trouble caused nearby doesn't follow you
+        // everywhere that government has territory).
+        let standing = pilot.state.effectiveLegalRecord(govt: gov, atSystem: s.id, fallback: g.initialRecord)
         if standing < 0 { return relEnemy }
         if standing > 0 || g.neverAttacksPlayer { return relFriendly }
         return relNeutral

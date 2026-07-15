@@ -199,7 +199,7 @@ final class AIBehaviorTests: XCTestCase {
         world.step(1.0 / 30.0)
         XCTAssertEqual(npc.brain?.state, .attacking)
         XCTAssertTrue(world.events.contains {
-            if case .weaponFired(let shooterID, _, _, _) = $0 { return shooterID == npc.entityID }
+            if case .weaponFired(let shooterID, _, _, _, _) = $0 { return shooterID == npc.entityID }
             return false
         }, "a turret should fire at a target regardless of hull heading")
     }

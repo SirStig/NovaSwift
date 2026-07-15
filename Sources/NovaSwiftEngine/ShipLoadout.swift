@@ -165,6 +165,47 @@ public struct Loadout {
     /// `shïp.Flags3` 0x0002 ("scoops asteroid debris") — lets this ship auto-collect
     /// an asteroid's `röid.YieldType`/`YieldQty` yield when it destroys the rock.
     public var hasMiningScoop: Bool = false
+    /// `oütf` ModType 23 (`hyperspaceDist`): summed adjustment to the no-jump
+    /// zone's radius (Bible: "standard radius is 1000"; negative narrows it,
+    /// letting the ship jump from closer to a system's populated core).
+    public var hyperspaceDistBonus: Int = 0
+    /// `oütf` ModType 19 (`autoRefuel`): the fuel tank tops off for free on
+    /// landing/departure instead of needing to be bought at the Trade Center.
+    public var hasAutoRefuel: Bool = false
+    /// `oütf` ModType 13 (`densityScanner`): reveals a targeted ship's cargo
+    /// hold contents in the targeting readout (Bible ModVal is "ignored" —
+    /// ownership alone is what matters).
+    public var hasDensityScanner: Bool = false
+    /// `oütf` ModType 49 (`repairSystem`): "will occasionally repair the ship
+    /// when it's disabled." Not player-restricted in the Bible, so an NPC hull
+    /// stocked with one benefits too.
+    public var hasRepairSystem: Bool = false
+    /// `oütf` ModType 44 (`reinforcementInhibitor`), player-only per the Bible.
+    /// Each fitted item's ModVal is a `gövt.Class1-4` value that can no longer
+    /// call in reinforcements while the player is in-system; `-1` inhibits
+    /// every government. Empty = no inhibitor fitted.
+    public var reinforcementInhibitorClasses: Set<Int> = []
+    /// `oütf` ModType 48 (`iffScrambler`), player-only per the Bible. Each
+    /// fitted item's ModVal is a `gövt.Class1-4` value that's fooled into
+    /// treating the player as friendly (won't attack without provocation);
+    /// `-1` scrambles every government. Empty = no scrambler fitted.
+    public var iffScramblerClasses: Set<Int> = []
+    /// `oütf` ModType 43 (`paint`), player-only per the Bible: "the color to
+    /// paint the player's ship," a 15-bit `0RRRRRGGGGGBBBBB` value (5 bits per
+    /// channel, 0...1 here). Nil = no paint fitted (fly the hull's stock/
+    /// government tint instead). The last fitted paint outfit wins if more
+    /// than one is somehow installed — the Bible doesn't say what happens
+    /// with two, and there's no sane way to blend "the" ship color.
+    public var paintColor: (r: Double, g: Double, b: Double)? = nil
+    /// `oütf` ModType 41 (`gravityResist`): fitted, this ship also ignores a
+    /// stellar's `Gravity` pull/push even without the hull's own `Flags3`
+    /// 0x0010. Folded with the hull flag at `Ship.ignoresGravity`.
+    public var hasGravityResist: Bool = false
+    /// `oütf` ModType 42 (`stellarResist`): fitted, this ship also survives
+    /// touching a deadly stellar (`SpobRes.isDeadly`) even without the hull's
+    /// own `Flags3` 0x0020. Folded with the hull flag at
+    /// `Ship.ignoresDeadlyStellars`.
+    public var hasStellarResist: Bool = false
 }
 
 /// A fighter bay fitted to a ship (`wëap` Guidance 99). Immutable spec resolved
@@ -282,6 +323,12 @@ extension Galaxy {
         var inertialess = s.inertialess        // hull flag; an inertial-dampener outfit ORs in below
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
+        var hyperspaceDistBonus = 0
+        var hasAutoRefuel = false, hasDensityScanner = false, hasRepairSystem = false
+        var reinforcementInhibitorClasses: Set<Int> = []
+        var iffScramblerClasses: Set<Int> = []
+        var paintColor: (r: Double, g: Double, b: Double)?
+        var hasGravityResist = false, hasStellarResist = false
 
         for (oid, count) in outfitCounts {
             guard let o = game.outfit(oid) else {
@@ -339,11 +386,33 @@ extension Galaxy {
                 case .jam1, .jam2, .jam3, .jam4:
                     jammingBonus += v                                // ModTypes 33-36 → jamming defense
                 case .miningScoop:     hasMiningScoop = true         // ModType 31 → collect asteroid yield
+                case .hyperspaceDist:  hyperspaceDistBonus += v      // ModType 23 → no-jump zone radius delta
+                case .autoRefuel:      hasAutoRefuel = true          // ModType 19 → free refuel at spaceport
+                case .densityScanner:  hasDensityScanner = true      // ModType 13 → reveal target cargo
+                case .repairSystem:    hasRepairSystem = true        // ModType 49 → self-repair while disabled
+                case .reinforcementInhibitor:
+                    reinforcementInhibitorClasses.insert(value)      // ModType 44 → govt class (-1 = all)
+                case .iffScrambler:
+                    iffScramblerClasses.insert(value)                // ModType 48 → govt class (-1 = all)
+                case .paint:
+                    // ModType 43 → 15-bit 0RRRRRGGGGGBBBBB (5 bits/channel).
+                    let u = UInt16(truncatingIfNeeded: value)
+                    let r = Double((u >> 10) & 0x1F) / 31.0
+                    let g = Double((u >> 5) & 0x1F) / 31.0
+                    let b = Double(u & 0x1F) / 31.0
+                    paintColor = (r, g, b)
+                case .gravityResist: hasGravityResist = true   // ModType 41
+                case .stellarResist: hasStellarResist = true   // ModType 42
                 // ModType 27 (increaseMax) is not a ship-stat modifier: its only
                 // effect is raising another outfit's purchase cap, enforced at buy
                 // time by `NovaGame.effectiveMaxInstallable` / `PilotStore`. Nothing
-                // to fold into the flown ship here. Other unhandled ModTypes
-                // (interference/murk/hyperspaceDist/…) likewise have no stat effect.
+                // to fold into the flown ship here. ModTypes 43/41/42 (paint,
+                // gravity/stellar resist) are handled by the app layer directly off
+                // owned outfits (sprite tint, hazard damage), not folded into a ship
+                // stat here. ModTypes 47/50 (bomb, nonlethal bomb) likewise stay in
+                // the app layer — they consume/remove the specific owned outfit unit
+                // on trigger, which this aggregation (a pure, non-mutating function)
+                // has no business doing.
                 default: break
                 }
             }
@@ -386,15 +455,20 @@ extension Galaxy {
             }
         }
         // Fighter bays (`wëap` Guidance 99) don't fire projectiles — they launch
-        // carried fighters. Pull them out of the firing-weapon list into a
-        // dedicated bay list (capacity × number of bays fitted).
+        // carried fighters. Build the dedicated bay list (capacity × number of
+        // bays fitted) for the live docked/deployed state, but keep the bay's
+        // own mount in `weapons` too (ammo seeded to that same capacity, not
+        // whatever stock ammo-pool value it inherited) so it's selectable as a
+        // secondary weapon like any other — real EV Nova bays act exactly like a
+        // missile launcher: select it, pull the trigger, one fighter launches.
         var fighterBays: [FighterBaySpec] = []
         for (wid, entry) in byID where game.weapon(wid)?.isFighterBay == true {
             guard let w = game.weapon(wid) else { continue }
+            let capacity = w.fighterCapacity * max(1, entry.count)
             fighterBays.append(FighterBaySpec(bayWeaponID: wid, fighterShipID: w.fighterShipID,
-                                              capacity: w.fighterCapacity * max(1, entry.count),
+                                              capacity: capacity,
                                               launchIntervalFrames: max(1, w.reload)))
-            byID[wid] = nil
+            byID[wid] = (entry.count, capacity)
         }
         let weapons = byID.map { (id: $0.key, count: $0.value.count, ammo: $0.value.ammo) }
             .sorted { $0.id < $1.id }
@@ -436,7 +510,14 @@ extension Galaxy {
             hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject, inertialess: inertialess,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus,
             ionCapacityBonus: max(0, ionCapBonus), deionizeBonus: max(0, deionizeBonus),
-            jamming: max(0, jammingBonus), hasMiningScoop: hasMiningScoop)
+            jamming: max(0, jammingBonus), hasMiningScoop: hasMiningScoop,
+            hyperspaceDistBonus: hyperspaceDistBonus,
+            hasAutoRefuel: hasAutoRefuel, hasDensityScanner: hasDensityScanner,
+            hasRepairSystem: hasRepairSystem,
+            reinforcementInhibitorClasses: reinforcementInhibitorClasses,
+            iffScramblerClasses: iffScramblerClasses,
+            paintColor: paintColor,
+            hasGravityResist: hasGravityResist, hasStellarResist: hasStellarResist)
     }
 
     /// Build a live ship with its **full loadout** applied: outfit-modified flight
@@ -498,6 +579,13 @@ extension Galaxy {
         ship.murkModifier = lo.murkModifier
         ship.hasEscapePod = lo.hasEscapePod
         ship.hasAutoEject = lo.hasAutoEject
+        ship.hasRepairSystem = lo.hasRepairSystem
+        ship.hasDensityScanner = lo.hasDensityScanner
+        ship.reinforcementInhibitorClasses = lo.reinforcementInhibitorClasses
+        ship.iffScramblerClasses = lo.iffScramblerClasses
+        ship.paintColor = lo.paintColor
+        ship.ignoresGravity = (shipRes?.ignoresGravity ?? false) || lo.hasGravityResist
+        ship.ignoresDeadlyStellars = (shipRes?.ignoresDeadlyStellars ?? false) || lo.hasStellarResist
 
         var mounts: [WeaponMount] = []
         for w in lo.weapons {

@@ -119,7 +119,7 @@ struct PlayerInfoView: View {
         lines.append("Your combat rating is \(CombatRating.title(forRating: p.combatRating)).")
         if let govt = game.system(p.currentSystem)?.government,
            let name = game.govt(govt)?.name {
-            let record = p.legalRecord[govt] ?? 0
+            let record = p.effectiveLegalRecord(govt: govt, atSystem: p.currentSystem)
             let status: String
             switch record {
             case ..<(-200): return lines.joined(separator: "\n") + "\nYou are an enemy of the \(name)."

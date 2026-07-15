@@ -239,7 +239,20 @@ public struct PlayerState: Codable, Sendable {
 
     // Reputation
     public var combatRating: Int
+    /// The *universal* (mission-driven) component of legal standing per govt
+    /// — the EVN wiki's Legal Status page: "status changes due to missions
+    /// will be reflected universally." Combine with `localLegalRecord` via
+    /// `effectiveLegalRecord`/`effectiveLegalRecords` to get the actual
+    /// "displayed legal status" at a given system; don't read this alone for
+    /// anything player-facing.
     public var legalRecord: [Int: Int]    // govt id → standing (+ good, − wanted)
+    /// The *local* (combat/boarding/smuggling-driven) component of legal
+    /// standing: govt id -> system id -> standing. Per the wiki: "Hostile
+    /// actions against ships will be reflected locally", felt in full at the
+    /// system it happened in and at reduced weight in a radius around it (see
+    /// `LegalRecordPropagation.applyLocal`). Optional so pilots saved before
+    /// this existed still decode (treated as empty), like `dominatedStellars`.
+    public var localLegalRecord: [Int: [Int: Int]]?
     public var activeRanks: Set<Int>      // ränk ids currently held
     /// `spöb` ids the player has dominated via Demand Tribute. Each pays its
     /// `spöb.Tribute` (credits/day) automatically as the galaxy clock advances
@@ -451,9 +464,41 @@ public struct PlayerState: Codable, Sendable {
 
     /// Clear the player's legal record with government `govt` (set standing back
     /// to neutral), or with *every* government when `govt == -1` — the effect of
-    /// an acquired `oütf` ModType 21 ("clean legal record") item.
+    /// an acquired `oütf` ModType 21 ("clean legal record") item. Clears both
+    /// the universal and local (every system) components — a clean record
+    /// wipes your history everywhere, not just where you're currently docked.
     public mutating func clearLegalRecord(govt: Int) {
-        if govt == -1 { legalRecord.removeAll() } else { legalRecord[govt] = nil }
+        if govt == -1 {
+            legalRecord.removeAll()
+            localLegalRecord = nil
+        } else {
+            legalRecord[govt] = nil
+            localLegalRecord?[govt] = nil
+        }
+    }
+
+    /// The player's standing with `govt`, combining the universal (mission-
+    /// driven) component with the local (combat/boarding/smuggling-driven)
+    /// component at `system` — the EVN wiki's "displayed legal status." This
+    /// is what player-facing reads (landing gates, hailing, status displays)
+    /// should use, not `legalRecord` alone. `fallback` is returned only when
+    /// *neither* component has ever been touched for this government
+    /// (matches the common `?? govt.initialRecord` caller pattern).
+    public func effectiveLegalRecord(govt: Int, atSystem system: Int, fallback: Int = 0) -> Int {
+        guard legalRecord[govt] != nil || localLegalRecord?[govt]?[system] != nil else { return fallback }
+        return legalRecord[govt, default: 0] + (localLegalRecord?[govt]?[system] ?? 0)
+    }
+
+    /// Every government's `effectiveLegalRecord` at `system` — the union of
+    /// every government either component has ever touched. Used to seed a
+    /// live `Diplomacy` when entering a system.
+    public func effectiveLegalRecords(atSystem system: Int) -> [Int: Int] {
+        var result = legalRecord
+        for (govt, bySystem) in localLegalRecord ?? [:] {
+            guard let local = bySystem[system], local != 0 else { continue }
+            result[govt, default: 0] += local
+        }
+        return result
     }
 
     // MARK: pêrs interaction helpers

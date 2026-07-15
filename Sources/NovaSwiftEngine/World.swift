@@ -285,6 +285,37 @@ public final class Ship {
     /// rock (`oütf` ModType 31 mining scoop, or `shïp.Flags3` 0x0002). Only the
     /// player's collection is surfaced (as a `.asteroidMined` event to the host).
     public var hasMiningScoop: Bool = false
+    /// `oütf` ModType 49 (repair system): "will occasionally repair the ship
+    /// when it's disabled" — not player-restricted, so an NPC hull stocked
+    /// with one benefits too. See `World`'s disabled-hulk tick.
+    public var hasRepairSystem: Bool = false
+    /// `oütf` ModType 13 (density scanner): reveals a targeted ship's cargo
+    /// hold contents in the targeting readout. Bible ModVal is "ignored" —
+    /// ownership alone is what matters.
+    public var hasDensityScanner: Bool = false
+    /// `oütf` ModType 44 (reinforcement inhibitor), player-only per the Bible:
+    /// the `gövt.Class1-4` values this ship's fitted inhibitors block from
+    /// calling reinforcements while it's in-system (`-1` = every government).
+    /// Only ever non-empty on `World.player` — copied generically from
+    /// `Loadout` like any other fitted-outfit effect, but nothing sets it for
+    /// NPCs since they're never built with a player-outfit inhibitor.
+    public var reinforcementInhibitorClasses: Set<Int> = []
+    /// `oütf` ModType 48 (IFF scrambler), player-only per the Bible: the
+    /// `gövt.Class1-4` values fooled into treating this ship as friendly
+    /// (`-1` = every government). See `reinforcementInhibitorClasses`.
+    public var iffScramblerClasses: Set<Int> = []
+    /// `oütf` ModType 43 (paint), player-only per the Bible: a custom hull
+    /// tint (0...1 RGB) from a fitted paint outfit. Nil = fly the hull's
+    /// stock/government tint instead.
+    public var paintColor: (r: Double, g: Double, b: Double)?
+    /// `shïp.Flags3` 0x0010 ("ignores gravity") OR a fitted `oütf` ModType 41
+    /// (gravityResist) — either makes this ship immune to a stellar's
+    /// `Gravity` pull/push.
+    public var ignoresGravity: Bool = false
+    /// `shïp.Flags3` 0x0020 ("ignores deadly stellars") OR a fitted `oütf`
+    /// ModType 42 (stellarResist) — either lets this ship touch a
+    /// `SpobRes.isDeadly` stellar and survive.
+    public var ignoresDeadlyStellars: Bool = false
 
     // Fuel — EV Nova's blue gauge. Spent by hyperspace jumps (100 per jump) and
     // by the afterburner; regenerates only if the hull/outfits grant it.
@@ -380,9 +411,15 @@ public final class Ship {
     /// ModType 11 (`escapePod`): if the player is flying this hull when
     /// destroyed, they eject and survive instead of a real game-over.
     public var hasEscapePod: Bool = false
-    /// ModType 20 (`autoEject`): ignored without `hasEscapePod` — ejection
-    /// itself is currently automatic either way, so this is tracked for
-    /// completeness but doesn't change the outcome.
+    /// ModType 20 (`autoEject`), a real purchasable stock outfit (#187): Bible
+    /// says it's "ignored (requires escape pod to work)" — implying a plain
+    /// pod alone might otherwise need a manual eject action before this
+    /// outfit exists to automate it. This engine has no manual-eject control
+    /// at all (a pod-equipped ship already always survives destruction), so
+    /// gating that on also owning this $20,000 outfit would only ever be a
+    /// strict downgrade for existing pod owners — not implemented on purpose;
+    /// tracked here for completeness/future use if a manual-eject control is
+    /// ever added.
     public var hasAutoEject: Bool = false
     /// Set on a launched fighter: the entity id of the carrier it flew from, so
     /// it can dock back and be freed if the carrier dies. nil = not a fighter.
@@ -834,6 +871,16 @@ public final class World {
     /// Append a world event. Exists so code in sibling files (e.g.
     /// `Domination.swift`) can emit without `events`' file-private setter.
     func emit(_ event: WorldEvent) { events.append(event) }
+
+    /// Trigger a self-contained explosion effect (sprite + sound + screen
+    /// shake) at a point — the same rendering the normal projectile/beam hit
+    /// pipeline uses, exposed for app-layer code that damages a ship directly
+    /// via `Ship.applyDamage` outside that pipeline (e.g. an outfit-driven
+    /// hazard like a nonlethal-bomb self-destruct) and still wants the hit to
+    /// read as one.
+    public func emitExplosion(at position: Vec2, radius: Double, soundID: Int? = nil, boomID: Int? = nil) {
+        events.append(.explosion(at: position, radius: radius, soundID: soundID, boomID: boomID))
+    }
 
     /// Diplomacy table (governments & player standing). Optional so a bare
     /// physics world still works; when nil, nobody is hostile.
@@ -1373,6 +1420,20 @@ public final class World {
                     npc.angle += npc.disableSpin * dt
                     npc.position += npc.velocity * dt
                     wrapIntoSystem(npc)
+                    // `oütf` ModType 49 (repair system): "will occasionally repair
+                    // the ship when it's disabled." The Bible gives no rate, so
+                    // this is a low per-second chance of a partial armor patch —
+                    // "occasionally", not a fast or guaranteed fix — that can take
+                    // more than one success to climb back over the disable
+                    // threshold and return the hulk to action.
+                    if npc.hasRepairSystem, rng.double(in: 0...1) < 0.05 * dt {
+                        npc.armor = min(npc.maxArmor, npc.armor + npc.maxArmor * 0.20)
+                        if npc.armor > npc.maxArmor * npc.disableArmorFraction {
+                            npc.disabled = false
+                            npc.disabledClock = 0
+                            Log.combat.debug("\(npc.name) [\(npc.entityID)] repair system restored it above the disable threshold — back in action")
+                        }
+                    }
                     continue
                 }
                 let npcIntent: ControlIntent
@@ -1419,6 +1480,7 @@ public final class World {
             }
         }
 
+        prof("sim.deadlyStellars") { checkDeadlyStellarCollisions() }
         prof("sim.pointDefense") { runPointDefense() }
         prof("sim.projectiles") { stepProjectiles(dt) }
         prof("sim.despawn") { despawnDepartedAndDead() }
@@ -1433,6 +1495,31 @@ public final class World {
         if let profiler {
             let totalNs = DispatchTime.now().uptimeNanoseconds &- profStepT0
             profiler("sim.other", Double(totalNs &- min(totalNs, profMeasuredNs)) / 1_000_000_000)
+        }
+    }
+
+    /// `spöb.Flags2` 0x0100 (Bible): "Stellar is deadly - all ships that touch
+    /// it are destroyed immediately." No stock stellar sets this bit (see
+    /// `SpobRes.isDeadly`), so this never fires against the base game, but a
+    /// plug-in stellar that does gets exactly the documented behavior. A ship
+    /// with `ignoresGravity`/`ignoresDeadlyStellars`... only the latter matters
+    /// here (`shïp.Flags3` 0x0020, or a fitted `oütf` ModType 42 stellarResist)
+    /// passes straight through unharmed. Zeroing shield/armor here — rather
+    /// than calling a dedicated "destroy" method — is deliberate: it lets the
+    /// existing `despawnDepartedAndDead`/`reportPlayerDeathIfNeeded` death
+    /// pipeline (already run later this same tick) pick it up exactly like any
+    /// other kill, with the same explosion/event/escape-pod handling, instead
+    /// of duplicating that logic here.
+    private func checkDeadlyStellarCollisions() {
+        let deadly = systemContext.bodies.filter { $0.isDeadly }
+        guard !deadly.isEmpty else { return }
+        for ship in allShips where ship.isAlive && !ship.disabled && !ship.ignoresDeadlyStellars {
+            for body in deadly where (ship.position - body.position).length < body.radius + ship.radius {
+                ship.shield = 0
+                ship.armor = 0
+                Log.combat.debug("\(ship.name) [\(ship.entityID)] touched deadly stellar #\(body.id) — destroyed")
+                break
+            }
         }
     }
 
@@ -1495,7 +1582,7 @@ public final class World {
                 mount.didFire(shots: 1)
                 events.append(.weaponFired(shooterID: ship.entityID, at: ship.position,
                                            heading: (target.position - ship.position).angle,
-                                           soundID: mount.spec.fireSoundID))
+                                           soundID: mount.spec.fireSoundID, weaponID: mount.spec.id))
                 // `wëap.Durability`: a tough guided shot soaks up N PD hits before
                 // it's destroyed. 0 (the default) ⇒ shot down by this single hit.
                 if target.pdDurability > 0 {
@@ -1574,6 +1661,34 @@ public final class World {
             // AmmoType ≤ -1000: a fuel-burning weapon can't fire without the fuel.
             if spec.fuelPerShot > 0 && ship.fuel < spec.fuelPerShot { continue }
 
+            // Fighter bays (`wëap` Guidance 99) don't fire projectiles — selecting
+            // one as the secondary and pulling the trigger launches a real docked
+            // fighter instead, one per reload tick (same cadence a missile
+            // launcher fires at), matching EV Nova's "bay acts like a secondary
+            // weapon" behavior. NPC carriers are untouched: they keep launching
+            // via `updateFighterBays`'s own combat-driven auto-launch, so a bay
+            // mount is skipped here entirely for AI ships to avoid double-launching.
+            if spec.guidance == .bay {
+                guard !isAI, let bay = ship.fighterBays.first(where: { $0.spec.bayWeaponID == spec.id })
+                else { continue }
+                let barrels = max(1, mount.count)
+                let toLaunch = spec.fireSimultaneously ? barrels : 1
+                var launched = 0
+                for _ in 0..<toLaunch {
+                    guard bay.docked > 0, let fighter = launchFighter(from: ship, bay: bay) else { break }
+                    bay.docked -= 1
+                    bay.deployed.insert(fighter.entityID)
+                    launched += 1
+                }
+                guard launched > 0 else { mount.logBlockedIfNeeded(for: ship); continue }
+                mount.didFire(shots: launched)
+                mount.ammo = bay.docked   // `bay.docked` stays the single source of truth
+                let muzzle = ship.muzzle(exitType: spec.exitType, index: mount.exitCursor)
+                events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: ship.angle,
+                                           soundID: spec.fireSoundID, weaponID: spec.id))
+                continue
+            }
+
             // A group fires ONE barrel per event (cycling exit points) — unless
             // it has the "fire simultaneously" flag, which volleys all `count`.
             let barrels = max(1, mount.count)
@@ -1602,7 +1717,7 @@ public final class World {
                                     ownerVelocity: ship.velocity,
                                     targetID: spec.homes ? ship.currentTargetID : nil,
                                     subDepth: 0)
-                    events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID))
+                    events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID, weaponID: spec.id))
                     // Recoil kicks the firing ship backward, opposite the shot,
                     // scaled down by its own mass (radius proxy) — same knockback
                     // model as projectile impact on a target.
@@ -1813,7 +1928,8 @@ public final class World {
                 activeBeams.append(ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
                                               weaponID: spec.id, from: origin, to: cast.end, hit: hit,
                                               continuous: false, life: 0.08,
-                                              width: spec.beamWidth, color: spec.beamColor))
+                                              width: spec.beamWidth, color: spec.beamColor,
+                                              coronaColor: spec.coronaColor, coronaFalloff: spec.coronaFalloff))
             }
         }
         // Telemetry/audio event (renderer draws geometry from `activeBeams`, not
@@ -1860,7 +1976,8 @@ public final class World {
         let beam = ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
                               weaponID: mount.spec.id, from: ship.position, to: ship.position, hit: false,
                               continuous: continuous, life: .infinity,
-                              width: mount.spec.beamWidth, color: mount.spec.beamColor)
+                              width: mount.spec.beamWidth, color: mount.spec.beamColor,
+                              coronaColor: mount.spec.coronaColor, coronaFalloff: mount.spec.coronaFalloff)
         activeBeams.append(beam)
         refreshBeam(beam)
     }
@@ -2495,17 +2612,22 @@ public final class World {
         return t.isAlive && !t.disabled
     }
 
-    /// Per-frame fighter-bay processing: carriers in combat launch fighters up to
-    /// each bay's capacity (throttled by the bay's launch interval); deployed
-    /// fighters that run out of ammo, get badly hurt, or whose carrier has left
-    /// combat return and dock (restoring the bay); a carrier's death orphans its
-    /// still-flying fighters (they become independent ships of the same govt).
+    /// Per-frame fighter-bay processing: NPC carriers in combat auto-launch
+    /// fighters up to each bay's capacity (throttled by the bay's launch
+    /// interval) — the player instead launches via selecting the bay as a
+    /// secondary weapon and firing (see `fireWeapons`), so this pass skips the
+    /// player entirely. Deployed fighters that run out of ammo or get badly hurt
+    /// return and dock (restoring the bay) — simply losing their target or their
+    /// carrier's combat ending does NOT recall them; they keep flying escort
+    /// until actually damaged/dry or explicitly recalled (`playerRecallFighters`/
+    /// `f.recallToCarrier`). A carrier's death orphans its still-flying fighters
+    /// (they become independent ships of the same govt).
     private func updateFighterBays(_ dt: Double) {
         guard galaxy != nil else { return }   // fighters are spawned via the galaxy
 
         // Launch pass over a snapshot (launching appends to `npcs`).
         for carrier in allShips where !carrier.fighterBays.isEmpty && carrier.isAlive && !carrier.disabled {
-            let inCombat = carrierInCombat(carrier)
+            let inCombat = !carrier.isPlayer && carrierInCombat(carrier)
             for bay in carrier.fighterBays {
                 bay.launchCooldown = max(0, bay.launchCooldown - dt)
                 // Drop dead/orphaned fighters from the roster.
@@ -2515,6 +2637,14 @@ public final class World {
                     bay.docked -= 1
                     bay.deployed.insert(fighter.entityID)
                     bay.launchCooldown = Double(bay.spec.launchIntervalFrames) / 30.0
+                }
+                // Keep the bay's WeaponMount ammo readout (the HUD's "Bay - N"
+                // secondary-weapon display) in sync with the real docked count —
+                // the mount only exists for secondary-weapon selection/display;
+                // `bay.docked` stays the single source of truth (also updated
+                // directly by the player's own launch path in `fireWeapons`).
+                if let mount = carrier.weapons.first(where: { $0.spec.id == bay.spec.bayWeaponID }) {
+                    mount.ammo = bay.docked
                 }
             }
         }
@@ -2529,8 +2659,13 @@ public final class World {
                 continue
             }
             if !f.recallToCarrier {
+                // Only return when the fighter itself needs it (dry on ammo,
+                // badly hurt) or the player explicitly recalls it — NOT just
+                // because the carrier lost its target/left combat, which used
+                // to yank every fighter home the instant you deselected a
+                // target rather than only on an actual command.
                 let outOfAmmo = !f.weapons.isEmpty && f.weapons.allSatisfy { $0.ammo == 0 }
-                if outOfAmmo || f.healthFraction < 0.3 || !carrierInCombat(carrier) {
+                if outOfAmmo || f.healthFraction < 0.3 {
                     f.recallToCarrier = true
                 }
             }
@@ -2550,7 +2685,12 @@ public final class World {
     }
 
     /// Launch one fighter from `carrier`'s `bay`: a real sub-ship of the bay's
-    /// fighter class, allied to the carrier and ordered to hunt its enemies.
+    /// fighter class, joining the carrier's formation as an escort on Defend
+    /// (attacks only if the carrier/escort group is attacked) — matching real
+    /// EV Nova, where launched fighters behave like any other escort rather
+    /// than auto-hunting. `brain.escortOrder` only has any effect when
+    /// `leaderID == 0` (the carrier is the player); it's simply unread for an
+    /// NPC-led fleet, so this default is safe for both.
     private func launchFighter(from carrier: Ship, bay: Ship.FighterBay) -> Ship? {
         guard let galaxy else { return nil }
         let pos = carrier.position + Vec2.heading(carrier.angle) * (carrier.radius + 20)
@@ -2559,7 +2699,7 @@ public final class World {
         let brain = fighter.brain ?? AIBrain(aiType: .interceptor, govt: carrier.government)
         fighter.brain = brain
         brain.leaderID = carrier.entityID
-        brain.escortOrder = .aggressive
+        brain.escortOrder = .defensive
         // Distinct slots so a bay's fighters fan out into their own formation
         // positions behind the carrier instead of converging on the same spot.
         brain.formationSlot = allShips.filter { $0.brain?.leaderID == carrier.entityID }.count
@@ -2570,22 +2710,10 @@ public final class World {
         return fighter
     }
 
-    /// Player command: launch every docked fighter from the player's own bays
-    /// right now, bypassing the ambient auto-launch's combat gate/cooldown —
-    /// an explicit "scramble" isn't throttled the way passive combat launches are.
-    public func playerLaunchFighters() {
-        for bay in player.fighterBays {
-            while bay.docked > 0, let fighter = launchFighter(from: player, bay: bay) {
-                bay.docked -= 1
-                bay.deployed.insert(fighter.entityID)
-            }
-        }
-    }
-
     /// Player command: recall every fighter currently flying from the
-    /// player's own bays — they head back and dock regardless of whether the
-    /// player is still in combat (the ambient auto-recall only docks once
-    /// combat ends).
+    /// player's own bays — they head back and dock regardless of what they're
+    /// doing (the ambient auto-recall otherwise only docks a fighter that's
+    /// dry on ammo or badly hurt).
     public func playerRecallFighters() {
         for f in npcs where f.carrierID == World.playerEntityID {
             f.recallToCarrier = true
@@ -2681,6 +2809,11 @@ public final class World {
     public func board(shipID: Int) -> BoardingManifest? {
         guard let manifest = boardingManifest(for: shipID), let s = ship(id: shipID) else { return nil }
         events.append(.shipBoarded(entityID: s.entityID, at: s.position))
+        // Forcing entry onto a hulk is itself the crime (`BoardPenalty`),
+        // independent of what's later taken or whether capture succeeds —
+        // this is the only call site (`board` only ever fires for the
+        // player; NPCs don't board).
+        diplomacy?.recordBoard(of: s.government)
         // A `rescue` mission ship starts pre-disabled and is completed by
         // *boarding* it (tow/rescue the derelict) — not by the disable transition
         // that fires the other goals (it never gets an `applyHit` disable, so that
@@ -2734,15 +2867,26 @@ public final class World {
     /// Attempt to capture a hulk given a 0–99 `roll` (supplied by the caller so
     /// the outcome is reproducible for a given roll). The base chance is jittered
     /// by ±5% (world RNG, per the Bible) before the roll is compared. On success
-    /// the ship joins the player's escort wing and a `.shipCaptured` event fires.
-    public func attemptCapture(shipID: Int, roll: Int) -> Bool {
+    /// a `.shipCaptured` event fires and the captured hull's type/name are
+    /// returned; nil on failure. Deliberately does **not** decide what happens
+    /// to the hulk — EV Nova offers a choice here ("use as escort" or "take
+    /// command of it yourself"), so the caller commits via `recruitEscort`
+    /// (join the wing) or its own flagship-swap logic (take command), using
+    /// this same roll rather than re-rolling for each possible outcome.
+    public func attemptCapture(shipID: Int, roll: Int) -> (shipTypeID: Int, name: String)? {
         guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
-              let chance = captureChance(of: s) else { return false }
+              let chance = captureChance(of: s) else { return nil }
         let effective = min(75, max(1, chance + rng.int(in: -5...5)))
-        guard roll < effective else { return false }
-        recruitEscort(s)
+        guard roll < effective else { return nil }
         events.append(.shipCaptured(entityID: s.entityID, shipTypeID: s.shipTypeID, at: s.position))
-        return true
+        return (s.shipTypeID, personName(s) ?? s.name)
+    }
+
+    /// Recruit an already-captured hulk (`attemptCapture` succeeded for
+    /// `shipID`) into the player's escort wing — the "use as escort" outcome.
+    public func recruitCapturedEscort(shipID: Int) {
+        guard let s = ship(id: shipID) else { return }
+        recruitEscort(s)
     }
 
     /// Recruit `ship` as a player escort — ally it to the player, clear any

@@ -38,8 +38,10 @@ public enum ContrabandScan {
 
         // Already-attackable gate: evilness ≥ CrimeTol means they'd be shot at,
         // not fined (Bible: fined only "if he isn't yet evil enough to attack").
+        // Uses the *effective* (universal + local-here) standing — the same
+        // "displayed legal status" combat hostility checks against.
         if let g = game.govt(govtID) {
-            let evilness = max(0, -(player.legalRecord[govtID] ?? 0))
+            let evilness = max(0, -player.effectiveLegalRecord(govt: govtID, atSystem: player.currentSystem))
             if g.crimeTolerance > 0, evilness >= g.crimeTolerance { return nil }
         }
 
@@ -67,8 +69,28 @@ public enum ContrabandScan {
         guard let result = inspect(player: player, game: game, govtID: govtID) else { return nil }
         if result.fine > 0 { player.credits = max(0, player.credits - result.fine) }
         if result.smugglingPenalty > 0 {
-            // Detected smuggling makes the player more wanted with this govt.
-            player.legalRecord[govtID, default: 0] -= result.smugglingPenalty
+            // Detected smuggling is a hostile-action-against-ships-style
+            // event, not a mission reward, so — per the wiki's Legal Status
+            // page — it's felt *locally*: full weight at the current system,
+            // tapered into nearby ones, plus the usual §1.2 ally/enemy
+            // propagation at each. Same rule live combat uses
+            // (`NovaSwiftEngine.Diplomacy.recordCrime`), reimplemented here
+            // via the shared `LegalRecordPropagation.applyLocal` since
+            // `NovaSwiftStory` can't depend on `NovaSwiftEngine`.
+            let govtsByID = Dictionary(uniqueKeysWithValues: game.govts().map { ($0.id, $0) })
+            let here = player.currentSystem
+            var local = player.localLegalRecord ?? [:]
+            var current: [Int: Int] = [:]
+            for (govt, bySystem) in local { if let v = bySystem[here] { current[govt] = v } }
+            var spread: [Int: [Int: Int]] = [:]
+            LegalRecordPropagation.applyLocal(penalty: result.smugglingPenalty, to: govtID, atSystem: here,
+                                              current: &current, spread: &spread,
+                                              govts: govtsByID, game: game)
+            for (govt, value) in current { local[govt, default: [:]][here] = value }
+            for (govt, bySystem) in spread {
+                for (systemID, delta) in bySystem { local[govt, default: [:]][systemID, default: 0] += delta }
+            }
+            player.localLegalRecord = local
         }
         return result
     }

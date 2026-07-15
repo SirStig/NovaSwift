@@ -183,6 +183,15 @@ final class PilotStore: ObservableObject {
         return min(4.0, max(1.0, 1.0 + Double(bonus) / 100.0))
     }
 
+    /// The no-jump zone's radius around a system's centre (`oütf` ModType 23,
+    /// summed across fitted outfits; Bible: "standard radius is 1000"), clamped
+    /// so it can never invert to a negative/zero radius from a large enough
+    /// reduction. See `GameScene.hyperspaceNoJumpRadius`/`canEnterHyperspace`.
+    func hyperspaceNoJumpRadius(galaxy: Galaxy) -> Double {
+        let bonus = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.hyperspaceDistBonus ?? 0
+        return max(0, 1000 + Double(bonus))
+    }
+
     /// Systems revealed by map/chart outfits the player has acquired (`oütf`
     /// ModType 16). Unlike the old "owns a map ⇒ see the whole galaxy" flag,
     /// this is the concrete scoped set recorded at purchase/grant time (N jumps

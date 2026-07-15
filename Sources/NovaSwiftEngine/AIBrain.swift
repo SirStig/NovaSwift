@@ -215,10 +215,26 @@ public final class AIBrain {
             // A named person the player has wronged holds a grudge and attacks
             // wherever they meet (pêrs.Flags 0x0001).
             if let pid = me.personID, world.playerPersGrudges.contains(pid) { return true }
+            if isIFFScrambled(me, world) { return false }
             return world.diplomacy?.isHostileToPlayer(me.government) ?? false
         }
         // NPC vs NPC.
         return world.diplomacy?.areEnemies(me.government, other.government) ?? false
+    }
+
+    /// `oütf` ModType 48 (IFF scrambler), player-only per the Bible: while the
+    /// player carries one whose class matches this ship's government (or
+    /// `-1` for "every government"), that government is "fooled into
+    /// thinking the player is a friendly ship and will not attack without
+    /// provocation" — this only suppresses the *default* diplomacy check;
+    /// genuine provocation (a real hit, or a person's grudge) already
+    /// returned `true` above before this ever runs.
+    private func isIFFScrambled(_ me: Ship, _ world: World) -> Bool {
+        let scrambled = world.player.iffScramblerClasses
+        guard !scrambled.isEmpty else { return false }
+        if scrambled.contains(-1) { return true }
+        guard let classes = world.diplomacy?.govt(me.government)?.classes else { return false }
+        return !scrambled.isDisjoint(with: classes)
     }
 
     /// Nearest hostile within scan range, if any.
@@ -234,9 +250,19 @@ public final class AIBrain {
         return best
     }
 
+    /// This ship's real firing mounts — every weapon except fighter bays
+    /// (`wëap` Guidance 99), which sit in `Ship.weapons` so the player can
+    /// select/fire one as a secondary but don't shoot a "shot" of their own;
+    /// their `speed`/`duration` fields (borrowed for the launched fighter, not
+    /// a projectile) would otherwise pollute range/lead-time perception below
+    /// with a bogus huge "range" and skew NPC carrier engagement distance.
+    private func firingWeapons(_ me: Ship) -> [WeaponMount] {
+        me.weapons.filter { $0.spec.guidance != .bay }
+    }
+
     /// This ship's longest weapon reach (0 if unarmed).
     func weaponRange(_ me: Ship) -> Double {
-        me.weapons.map { $0.spec.range }.max() ?? 0
+        firingWeapons(me).map { $0.spec.range }.max() ?? 0
     }
 
     /// This ship's shortest weapon reach — used to decide how close to actually
@@ -244,15 +270,17 @@ public final class AIBrain {
     /// doesn't sit at missile range and leave its beam permanently out of
     /// reach. Falls back to `weaponRange` when every mount shares one range.
     func minWeaponRange(_ me: Ship) -> Double {
-        let ranges = me.weapons.map { $0.spec.range }.filter { $0 > 0 }
+        let ranges = firingWeapons(me).map { $0.spec.range }.filter { $0 > 0 }
         return ranges.min() ?? weaponRange(me)
     }
 
     /// True once every ammo-*using* weapon mount is dry (`ammo == 0`). Ships
     /// that carry only unlimited-ammo weapons (`ammo == -1`, e.g. most guns
-    /// and beams) never trigger this — there's nothing to run dry on.
+    /// and beams) never trigger this — there's nothing to run dry on. Fighter
+    /// bays are excluded: an empty bay isn't "out of ammo" in the fleeing
+    /// sense this drives, it's just between launch cycles.
     func outOfAmmo(_ me: Ship) -> Bool {
-        let ammoMounts = me.weapons.filter { $0.ammo >= 0 }
+        let ammoMounts = firingWeapons(me).filter { $0.ammo >= 0 }
         guard !ammoMounts.isEmpty else { return false }
         return ammoMounts.allSatisfy { $0.ammo == 0 }
     }
@@ -626,7 +654,7 @@ public final class AIBrain {
         let closeRange = max(120, minWeaponRange(me))
 
         // Lead the target so shots and nose end up where it will be.
-        let projSpeed = me.weapons.first?.spec.projectileSpeed ?? 600
+        let projSpeed = firingWeapons(me).first?.spec.projectileSpeed ?? 600
         let lead = dist / max(1, projSpeed)
         let aimPoint = target.position + target.velocity * lead
         let desired = (aimPoint - me.position).angle
@@ -660,7 +688,7 @@ public final class AIBrain {
         // the target regardless of hull heading, so gating the *intent* to fire
         // on hull alignment defeats the entire point of carrying one (an AI ship
         // with only a turret would then never fire unless pointed at its target).
-        let hasOmniWeapon = me.weapons.contains { $0.spec.isTurret }
+        let hasOmniWeapon = firingWeapons(me).contains { $0.spec.isTurret }
         let inFiringSolution = dist <= range && (hasOmniWeapon || aimError < 0.22)
         if hadFiringSolution != inFiringSolution {
             hadFiringSolution = inFiringSolution

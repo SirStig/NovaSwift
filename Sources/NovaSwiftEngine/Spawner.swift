@@ -441,11 +441,25 @@ public final class Spawner {
         // "outmatched" — falling back to the system's controlling government
         // when the fleet has none set, same fallback order `spawnFleet` uses.
         let reinforcementGovt = fleet.govt >= 128 ? fleet.govt : table.systemGovt
+        guard !isReinforcementInhibited(reinforcementGovt, world: world) else { return }
         guard governmentUnderAttackAndOutmatched(reinforcementGovt, world: world) else { return }
 
         let delaySeconds = Double(max(0, table.reinforcementDelay)) / max(1, galaxy.combatTuning.framesPerSecond)
         reinforcementDueAt = simClock + delaySeconds
         Log.world.debug("Spawner: reinforcement fleet \(self.table.reinforcementFleet) triggered for govt \(reinforcementGovt), arriving in \(delaySeconds, format: .fixed(precision: 1))s")
+    }
+
+    /// `oütf` ModType 44 (reinforcement inhibitor), player-only per the Bible:
+    /// "any govt with this value in its Class1-4 fields will be prevented
+    /// from calling in reinforcements while the player is in the system and
+    /// has this outfit... note that this outfit will only work when carried
+    /// by the player." `-1` inhibits every government regardless of class.
+    private func isReinforcementInhibited(_ govt: Int, world: World) -> Bool {
+        let inhibited = world.player.reinforcementInhibitorClasses
+        guard !inhibited.isEmpty else { return false }
+        if inhibited.contains(-1) { return true }
+        guard let classes = world.diplomacy?.govt(govt)?.classes else { return false }
+        return !inhibited.isDisjoint(with: classes)
     }
 
     /// System-wide odds check for the reinforcement trigger: are `govt`'s

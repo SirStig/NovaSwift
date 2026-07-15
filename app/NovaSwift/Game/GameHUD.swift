@@ -104,6 +104,11 @@ final class GameHUDModel: ObservableObject {
     /// `shïp.Flags` 0x0200 (Bible: "Don't show armor or shield state on
     /// status display") — omit the shield/armor line entirely for this target.
     @Published var targetHidesShieldArmorLine = false
+    /// The target's cargo hold contents, name-resolved and tons > 0 only —
+    /// populated only while the player carries a density scanner (`oütf`
+    /// ModType 13). Empty otherwise, including for an unarmed/no-scanner
+    /// player, so the target panel can just hide the row when it's empty.
+    @Published var targetCargo: [(name: String, tons: Int)] = []
     /// The click-selected planet/station nav destination, if any — independent
     /// of the ship target above (empty name = none selected).
     @Published var navTargetName = ""
@@ -342,6 +347,15 @@ struct GameHUDView: View {
                     if !model.targetHidesShieldArmorLine {
                         bar("SHIELD", model.targetShield, Color.cyan)
                         bar("ARMOR", model.targetArmor, amber)
+                    }
+                    // Density scanner (`oütf` ModType 13): only ever populated
+                    // while the player carries one — see `GameScene.updateTargetHUD`.
+                    if !model.targetCargo.isEmpty {
+                        sectionLabel("CARGO")
+                        ForEach(model.targetCargo, id: \.name) { row in
+                            Text("\(row.tons)t \(row.name)")
+                                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

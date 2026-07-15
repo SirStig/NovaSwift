@@ -17,6 +17,10 @@ public struct StellarBody {
     public let government: Int
     public let isHypergate: Bool
     public let isWormhole: Bool
+    /// `spöb.Flags2` 0x0100: "all ships that touch it are destroyed
+    /// immediately" (Bible). No stock stellar sets this bit — see
+    /// `SpobRes.isDeadly` — but the flag reads correctly if a plug-in uses it.
+    public let isDeadly: Bool
     /// Fixed emerge angle (radians, engine convention) for ships appearing from
     /// this gate, or nil to pick a random direction. Non-gates: nil.
     public let gateEmergeAngle: Double?
@@ -24,10 +28,10 @@ public struct StellarBody {
 
     public init(id: Int, position: Vec2, radius: Double, canLand: Bool,
                 government: Int = independentGovt, isHypergate: Bool = false,
-                isWormhole: Bool = false, gateEmergeAngle: Double? = nil) {
+                isWormhole: Bool = false, isDeadly: Bool = false, gateEmergeAngle: Double? = nil) {
         self.id = id; self.position = position; self.radius = radius; self.canLand = canLand
         self.government = government; self.isHypergate = isHypergate
-        self.isWormhole = isWormhole; self.gateEmergeAngle = gateEmergeAngle
+        self.isWormhole = isWormhole; self.isDeadly = isDeadly; self.gateEmergeAngle = gateEmergeAngle
     }
 }
 
@@ -311,6 +315,7 @@ public final class Galaxy {
                 id: spobID, position: pos, radius: radius,
                 canLand: s.isLandable && !s.isUninhabited,
                 government: s.government, isHypergate: s.isHypergate, isWormhole: s.isWormhole,
+                isDeadly: s.isDeadly,
                 gateEmergeAngle: s.gateEmergeAngle.map { $0 * .pi / 180 }))
         }
         // The system's actual centre of mass — not the world origin, which a

@@ -22,6 +22,7 @@ func usage() -> Never {
       \(name) library <baseDir> [plugDir] Discover base + plug-ins; show override effect
       \(name) ship    <baseDir> [id]      Decode ship stats + full loadout + sprite → PNG
       \(name) outfit  <baseDir> [id]      List outfits, or one outfit's modifiers
+      \(name) govt    <baseDir> [id]      List governments, or one govt's decoded fields
       \(name) system  <baseDir> [id]      List a system's planets + resolve sprites
       \(name) char    <baseDir> [id]      List starting scenarios (chär), or preview a new pilot
       \(name) sounds  <baseDir>           List all snd resources (id, name, rate, length)
@@ -367,8 +368,9 @@ case "weapon":
     for w in weps {
         var tags: [String] = ["guidance=\(w.guidance)", "ammoType=\(w.ammoType)", "maxAmmo=\(w.maxAmmo)"]
         if w.firedBySecondTrigger { tags.append("SECONDARY") }
+        if w.usesShipWeaponSprite { tags.append("SHIP-WEAPON-SPRITE") }
         if w.fireSimultaneously { tags.append("SIMUL") }
-        if w.isBeam { tags.append("beam(len \(w.beamLength) w \(w.beamWidth))") }
+        if w.isBeam { tags.append("beam(len \(w.beamLength) w \(w.beamWidth) core=\(w.beamColor.r),\(w.beamColor.g),\(w.beamColor.b) corona=\(w.coronaColor.r),\(w.coronaColor.g),\(w.coronaColor.b) falloff=\(w.coronaFalloff))") }
         if w.exitType != -1 { tags.append("exit=\(w.exitType)") }
         if w.burstCount > 0 { tags.append("burst \(w.burstCount)/\(w.burstReload)") }
         if w.proxRadius > 0 { tags.append("prox \(w.proxRadius)+safety\(w.proxSafety)") }
@@ -381,6 +383,44 @@ case "weapon":
                      w.id, w.name as NSString, w.shieldDamage, w.armorDamage, w.reload, w.speed,
                      w.duration, tags.joined(separator: " ") as NSString))
     }
+
+case "govt":
+    guard args.count == 2 || args.count == 3 else { usage() }
+    let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let game: NovaGame
+    do { game = NovaGame(try GameLibrary.merge(baseFiles: baseFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+
+    if args.count == 2 {
+        let govts = game.govts()
+        print("\(govts.count) governments:")
+        for g in govts {
+            var tags: [String] = []
+            if g.xenophobic { tags.append("XENOPHOBIC") }
+            if g.alwaysAttacksPlayer { tags.append("ALWAYS-ATTACKS") }
+            if g.neverAttacksPlayer { tags.append("NEVER-ATTACKS") }
+            if g.nosy { tags.append("NOSY") }
+            if g.roadsideAssistance { tags.append("FREE-REPAIR") }
+            print(String(format: "  #%-5d  %-28@  crimeTol %-6d  classes=%@ allies=%@ enemies=%@  [%@]",
+                         g.id, g.name as NSString, g.crimeTolerance,
+                         "\(g.classes)" as NSString, "\(g.allies)" as NSString, "\(g.enemies)" as NSString,
+                         tags.joined(separator: " ") as NSString))
+        }
+        break
+    }
+    guard let id = Int(args[2]), let g = game.govt(id) else {
+        FileHandle.standardError.write(Data("error: no govt with id \(args[2])\n".utf8)); exit(1)
+    }
+    print("""
+    govt #\(g.id): \(g.name)
+      commName "\(g.commName)"  targetCode "\(g.targetCode)"  mediumName "\(g.mediumName)"
+      classes \(g.classes)  allies \(g.allies)  enemies \(g.enemies)
+      crimeTolerance \(g.crimeTolerance)  initialRecord \(g.initialRecord)  maxOdds \(g.maxOdds)  shipSpeedFactor \(g.shipSpeedFactor)
+      penalties: scanFine \(g.scanFine)  smuggle \(g.smugglePenalty)  disable \(g.disablePenalty)  board \(g.boardPenalty)  kill \(g.killPenalty)  shoot(dead) \(g.shootPenalty)
+      scanMask 0x\(String(g.scanMask, radix: 16))  require 0x\(String(g.require, radix: 16))  jamming \(g.jamming)
+      interface \(g.interface)  newsPic \(g.newsPic)  voiceType \(g.voiceType)
+      flags: xenophobic=\(g.xenophobic) nosy=\(g.nosy) alwaysAttacksPlayer=\(g.alwaysAttacksPlayer) immuneToPlayer=\(g.immuneToPlayer) warshipsRetreat=\(g.warshipsRetreat) neverAttacksPlayer=\(g.neverAttacksPlayer) warshipsTakeBribes=\(g.warshipsTakeBribes) cantBeHailed=\(g.cantBeHailed) plundersBeforeKilling=\(g.plundersBeforeKilling) nonTalkative=\(g.nonTalkative) roadsideAssistance=\(g.roadsideAssistance) avoidsHypergates=\(g.avoidsHypergates) prefersHypergates=\(g.prefersHypergates) prefersWormholes=\(g.prefersWormholes)
+    """)
 
 case "system":
     guard args.count == 2 || args.count == 3 else { usage() }
@@ -903,7 +943,7 @@ case "mission-spawn":
                 goalEvents += 1
                 print("  [t=\(String(format: "%.1f", Double(i) * msDt))s] GOAL REACHED mission #\(mid) ship #\(eid) goal=\(goal) byPlayer=\(byPlayer)")
             case .missionShipsDespawned: despawnedEvents += 1
-            case let .weaponFired(shooter, _, _, _): if shooter != 0 { for s in msWorld.missionShips() where s.entityID == shooter { playerShots += 1 } }
+            case let .weaponFired(shooter, _, _, _, _): if shooter != 0 { for s in msWorld.missionShips() where s.entityID == shooter { playerShots += 1 } }
             default: break
             }
         }

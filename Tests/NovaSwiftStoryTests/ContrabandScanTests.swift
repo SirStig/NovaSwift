@@ -67,7 +67,12 @@ final class ContrabandScanTests: XCTestCase {
         let r = ContrabandScan.enforce(on: &p, game: game(scanFine: 1000, smug: 50), govtID: 128)
         XCTAssertEqual(r?.smugglingMissions, [400])
         XCTAssertEqual(p.credits, 19000, "still fined for the illegal cargo")
-        XCTAssertEqual(p.legalRecord[128], -50, "detected smuggling makes you more wanted")
+        // Smuggling is a hostile-action-style event, so it's LOCAL (the wiki's
+        // Legal Status radius rule) — it lands in `localLegalRecord`, not the
+        // universal `legalRecord`.
+        XCTAssertNil(p.legalRecord[128], "smuggling penalty must not touch the universal component")
+        XCTAssertEqual(p.effectiveLegalRecord(govt: 128, atSystem: 128), -50,
+                       "detected smuggling makes you more wanted here")
     }
 
     func testAlreadyCriminalIsNotFined() {

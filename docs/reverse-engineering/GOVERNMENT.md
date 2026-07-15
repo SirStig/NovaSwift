@@ -16,15 +16,6 @@ that §5 originally listed as gaps:
   (`GovtRes.crimeTolerance`) instead of a single hardcoded threshold for
   every govt — the per-government-ratio model in §2 is now correctly
   modeled at the hostility-check layer.
-- `Diplomacy` gained `combatRating` tracking and four new methods —
-  `recordKill`/`recordDisable`/`recordBoard`/`recordSmuggling` — that apply
-  the correct, Bible-documented penalty field (`KillPenalty`/`DisabPenalty`/
-  `BoardPenalty`/`SmugPenalty`) instead of the dead `ShootPenalty` field.
-  **These methods are correct but not yet called from anywhere** — `World`'s
-  actual combat code (`World.swift`) still docks legal record from
-  `gov.shootPenalty` on every hit, and its disable/kill transitions
-  (`.shipDisabled`/`.shipDestroyed` events) don't invoke the new methods.
-  See the "implemented but not wired" rows below.
 - `GovtRes` gained six previously-undecoded fields: `require`, `jamming`
   (`InhJam1-4`), `mediumName`, `mapColor`, `shipColor`, `interface`,
   `newsPic` — closing the byte-verified "six fields genuinely missing from
@@ -43,6 +34,53 @@ that §5 originally listed as gaps:
   active-crön Contribute (mirroring `StoryEngine.activeContributeBits`), so a
   rank-gated purchase — the Bible's own headline example for `ränk.Contribute`
   — is now achievable through the shipyard/outfitter UI.
+
+**2026-07-14 — the four combat/piracy evilness methods are now fully wired,
+and legal record is spatially correct.** A wiki cross-check (every one of the
+68 real `gövt` resources checked against the EVN Fandom Wiki) found the
+government *relations* model (§1.2/§1.3, classes/allies/enemies + flags) was
+already fully correct and needed zero changes — but surfaced that the
+combat/legal-record *machinery* itself had real gaps, now closed:
+
+- `Diplomacy.recordKill`/`recordDisable` **are called** from `World.swift`'s
+  disable/destroy transitions (not the dead `ShootPenalty` field — see
+  §2.1's "currently ignored" note, now actually honored: a per-hit
+  `shootPenalty` docking no longer happens at all).
+- `Diplomacy.recordBoard` is called from `World.board(shipID:)` — boarding a
+  hulk (a real, substantially-built mechanic; see `Boarding.swift` and
+  `app/NovaSwift/Game/PlunderView.swift`) now applies `BoardPenalty`.
+- `NovaSwiftStory.ContrabandScan.enforce`'s smuggling branch applies
+  `SmugPenalty` with full §1.2 ally/enemy propagation (previously a bare
+  `legalRecord[govt] -= penalty`, no propagation at all).
+- **Legal record is now spatial, per the wiki's Legal Status page**: "status
+  changes due to missions will be reflected universally, while hostile
+  actions against ships will be reflected locally... favorably... in a 3
+  system radius... negatively... in a 5 system radius." `PlayerState` now
+  splits this into `legalRecord` (universal, mission-driven — unchanged) and
+  a new `localLegalRecord: [govt: [system: Int]]` (combat/boarding/smuggling-
+  driven, full weight at the system it happened in, linearly tapering to 0
+  at the radius edge in nearby systems). `PlayerState.effectiveLegalRecord`/
+  `effectiveLegalRecords` combine the two into the "displayed legal status"
+  player-facing code should read — landing gates, mission `AvailRecord`,
+  `pêrs` grudge/like checks, and the galaxy map's per-system relation color
+  all use it now. The shared propagation math (ally/enemy split, plus the
+  new radius taper) lives in `NovaSwiftKit.LegalRecordPropagation` (`apply`
+  for universal, `applyLocal` for local) since `NovaSwiftStory` can't depend
+  on `NovaSwiftEngine`. `NovaGame.systemsWithinHops` (BFS over `sÿst.links`)
+  backs the radius computation.
+- `Diplomacy` itself is unchanged in shape for existing callers — a fresh
+  instance is still one system's session, `playerRecord` still means "standing
+  at that system" (now literally true, since it's seeded from the *combined*
+  value), and `recordKill`/`recordDisable`/`recordBoard` still write it in
+  full — they *additionally* spread a tapered share to nearby systems into
+  `localSpread` when a `NovaGame` is attached (`Diplomacy.game`), draining via
+  `consumeLocalRecordDelta()`/`consumeLocalSpread()` (mirrors
+  `consumeCombatRatingDelta()`'s multi-sync-point-safe drain pattern). See
+  `Sources/NovaSwiftEngine/Diplomacy.swift` and
+  `Tests/NovaSwiftEngineTests/DiplomacyTests.swift`'s spatial-decay tests.
+- Also added while here: the "take command of a captured ship" outcome
+  (previously only "join as escort" existed) and a
+  `novaswift-extract govt <baseDir> [id]` inspector subcommand.
 
 This doc does **not** re-derive:
 - `gövt.MaxOdds` combat-odds gating — see [AI_GROUND_TRUTH.md](../AI_GROUND_TRUTH.md#2-combat-odds-gating-gövtmaxodds--completely-missing-from-our-sim),
@@ -467,59 +505,35 @@ evaluates either.
 - **`CrimeTol` — resolved, see "Correctly modeled" above.** (Kept as a
   removed-item marker so a reader diffing this doc against an older copy
   can see the gap was closed, not silently dropped.)
-- ⚠️ **Implemented but not wired: `recordKill`/`recordDisable`/
-  `recordBoard`/`recordSmuggling`.** `Diplomacy` now has all four methods
-  (`Diplomacy.swift:170-209`), each applying the correct live Bible field
-  (`KillPenalty`/`DisabPenalty`/`BoardPenalty`/`SmugPenalty`) via
-  `recordCrime`, and `recordKill` also credits `Diplomacy.combatRating`
-  with the destroyed ship's `shïp.Strength`. **None of the four are called
-  from anywhere in `Sources/` or `app/`** — verified by a repo-wide grep;
-  the only call sites are the methods' own definitions and their doc
-  comments. `World.applyHit` (`World.swift:828-834`) still docks legal
-  record from `gov.shootPenalty` on *every hit* — the one field the Bible
-  explicitly says is **"currently ignored"** in the real game — and
-  `World`'s disable/kill transitions (`World.swift:846-858` for
-  `.shipDisabled`, `World.swift:863-871` for `.shipDestroyed`) emit events
-  but never call `recordDisable`/`recordKill`. So today: shooting (not
-  destroying/disabling/boarding) is still the only thing that dents legal
-  record, still using the one documented-dead field, and `combatRating`
-  still cannot increase through play (see below). Closing this gap needs
-  exactly two call sites added in `World.swift`: `recordDisable` where
-  `.shipDisabled` is emitted, `recordKill` where `.shipDestroyed` is
-  emitted (using the destroyed ship's `shïp.strength`) — and the
-  every-hit `gov.shootPenalty` call removed. `recordBoard`/
-  `recordSmuggling` remain correct-but-unreachable until boarding and
-  scan-and-fine mechanics exist at all (see next two points, unchanged).
-  `ScanFine`/`SmugPenalty` still have no illegal-cargo-detection system to
-  attach to (see next point).
-- **No illegal-cargo/ScanMask system.** `MissionRes.scanMask`
-  (`MissionModels.swift:123/206`) is decoded; `GovtRes` has no `scanMask`
-  field decoded at all (see below). Nothing in the engine ever checks
-  "is the player carrying scan-illegal cargo" — `AIBrain.swift:441`'s own
-  comment confirms this ("no illegal-cargo/ScanMask system yet"). `ScanFine`
-  and `SmugPenalty` are consequently unreachable.
-- **No positive-propagation-to-enemies rule.** `Diplomacy.recordCrime`
-  (`Diplomacy.swift:105-112`) only propagates a *penalty* (half the amount)
-  to governments allied with the victim; it never raises standing with the
-  victim's *enemies*, despite the Bible's explicit "will improve your rating
-  with its enemies" clause. The half-penalty magnitude for the ally
-  propagation is also an invented constant — not specified by the Bible.
-- ❌ **`combatRating` still never increments during play.**
-  `PilotFactory.swift:66` sets `NovaSwiftStory.PlayerState.combatRating` once
-  from `chär.Kills` at character creation, and nothing ever adds to it
-  afterward. `NovaSwiftEngine.Diplomacy` now separately tracks its own
-  `combatRating` field and a `recordKill(of:shipStrength:)` method that
-  *would* increment it correctly on a kill (see the "implemented but not
-  wired" entry above) — but that's a different module's separate tally
-  (`Diplomacy` has no dependency on `NovaSwiftStory` and can't write to
-  `PlayerState` directly), and it's equally unreached in practice since
-  nothing calls `recordKill` either. So both the story-layer and the
-  engine-layer combat-rating counters are frozen for the entire game today;
-  a pilot's combat rating never moves past whatever their starting scenario
-  granted. Closing this needs both the `World.swift` wiring above *and* a
-  bridge that copies `Diplomacy.combatRating` into `PlayerState.combatRating`
-  (there's no such bridge yet — the two modules "never talk to each other,"
-  as already noted below for the story-layer selectors).
+- **`recordKill`/`recordDisable`/`recordBoard`/`recordSmuggling` — resolved,
+  all four wired (2026-07-14).** (Kept as a removed-item marker; see the
+  "Implementation status" section at the top for what changed and where.)
+  `recordKill`/`recordDisable` fire from `World.swift`'s disable/destroy
+  transitions; the every-hit `gov.shootPenalty` docking is gone entirely.
+  `recordBoard` fires from `World.board(shipID:)`. `recordSmuggling`'s Kit-
+  layer sibling (`LegalRecordPropagation.applyLocal`) is called from
+  `ContrabandScan.enforce` — `NovaSwiftStory` can't call `Diplomacy` directly,
+  so it reimplements the same propagation via the shared Kit function instead.
+- **No illegal-cargo/ScanMask system — resolved.** (Kept as a removed-item
+  marker.) `GovtRes.scanMask` is decoded; `Contraband.swift`/
+  `ContrabandScan.swift` implement the full scan-and-fine flow (matches
+  `oütf`/`jünk`/`mïsn` ScanMask bits against a scanning govt's, level fines,
+  applies `SmugPenalty` on detected mission-cargo smuggling), wired from
+  `GameContainerView.swift`'s `onPlayerScanned` off `WorldEvent.shipScanned`.
+- **No positive-propagation-to-enemies rule — resolved.** (Kept as a
+  removed-item marker.) `LegalRecordPropagation.apply`/`applyLocal`
+  (`NovaSwiftKit`) both raise standing with the victim's enemies (half the
+  penalty, mirrored in sign) alongside docking allies — see
+  `DiplomacyTests.testRecordCrimePropagatesToAlliesAndEnemiesOfVictim`. The
+  half-penalty magnitude is still an invented-but-consistent constant, not
+  specified by the Bible.
+- **`combatRating` never incrementing during play — resolved.**
+  (Kept as a removed-item marker.) `GameContainerView.syncCombatStanding()`
+  drains `Diplomacy.consumeCombatRatingDelta()` at every natural sync point
+  (landing, jump-out, periodic autosave, backgrounding) and folds it into
+  `PlayerState.combatRating` — the bridge this entry originally said didn't
+  exist. A pilot's combat rating now moves through play, not just from their
+  starting scenario's seed.
 - **Combat-rating title ladder doesn't match Appendix I.**
   `CombatRating` (`PilotSave.swift:131-142`) has 9 titles at thresholds
   `[0,100,200,400,800,1600,3200,6400,12800]`. The Bible's table has 11 rows
