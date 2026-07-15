@@ -493,14 +493,16 @@ public final class AIBrain {
 
         // Retreat conditions by disposition.
         let govt = world.diplomacy?.govt(me.government)
-        // Retreat gauges *overall* health (shields + armor), not shields alone.
-        // Many hulls — most fighters especially — carry little or no shield, so a
-        // shield-only test (`shieldFraction` is 0 whenever `maxShield == 0`) read a
-        // brand-new, full-hull shieldless ship as "below 25% shields" and sent it
-        // fleeing the instant it launched, forever. `pêrs.Coward` (a percentage)
-        // still tunes the threshold; it just applies to total health now.
+        // Retreat is a *shield* percentage (Bible: warships run "below 25%
+        // shields"; `pêrs.Coward` overrides the percent) — but only for hulls
+        // that actually have shields. A shieldless hull (most fighters) has
+        // `shieldFraction == 0` by definition, which read a brand-new, full-hull
+        // ship as "below 25% shields" and sent it fleeing the instant it
+        // launched, forever. Guard on `maxShield > 0` so a shieldless ship is
+        // judged fit to fight, not perpetually routed.
         let cowardThreshold = personCoward.map { Double($0) / 100.0 } ?? 0.25
-        let warshipRetreat = (govt?.warshipsRetreat ?? false) && me.healthFraction < cowardThreshold
+        let warshipRetreat = (govt?.warshipsRetreat ?? false)
+            && me.maxShield > 0 && me.shieldFraction < cowardThreshold
         // Bible: "AI ships of this type will run away/dock if out of ammo for
         // all ammo-using weapons" (`shïp.Flags2` 0x0080) — checked regardless
         // of disposition; dock (head to a planet) if nothing's chasing us,
