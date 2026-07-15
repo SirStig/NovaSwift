@@ -2004,6 +2004,14 @@ struct GameContainerView: View {
         host.scene.syncLiveHUDStats(fuel: fuel, maxFuel: lo.maxFuel,
                                     shield: shield, maxShield: lo.maxShield,
                                     armor: armor, maxArmor: lo.maxArmor)
+        // Cargo/mass-affecting outfits (Cargo Expansion, etc.) and speed/accel/
+        // turn outfits only ever change `lo`, never a cached copy — but the HUD's
+        // own cargo/speed readouts are separate manually-synced caches too, and
+        // were missing from this sync entirely, so buying one of these left the
+        // sidebar showing stale numbers until the next takeoff rebuilt the ship.
+        host.hud.cargoCapacity = lo.cargoCapacity
+        host.hud.cargoUsed = state.usedCargoSpace
+        host.hud.maxSpeed = lo.speed
     }
 
     private func plunderTakeCredits(_ scene: GameScene, shipID: Int) {

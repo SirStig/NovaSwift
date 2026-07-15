@@ -57,6 +57,10 @@ struct TradeCenterView: View {
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
     let galaxy: Galaxy
+    /// Push a purchase/sale into the live HUD immediately (see
+    /// `SpaceportView.onLiveSync`) — cargo bought here changes `cargoFree`,
+    /// which the HUD's cargo readout needs to reflect right away.
+    var onLiveSync: () -> Void = {}
     var onDone: () -> Void
     @Environment(\.novaTheme) private var theme
 
@@ -219,6 +223,7 @@ struct TradeCenterView: View {
             Log.spaceport.notice("Trade buy no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) price=\(c.price, privacy: .public)cr/ton credits=\(pilot.state.credits, privacy: .public) cargoFree=\(free, privacy: .public)")
         } else {
             Log.spaceport.debug("Trade bought \(bought, privacy: .public)t of cargo \(c.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
+            onLiveSync()
         }
     }
     private func sell() {
@@ -232,6 +237,7 @@ struct TradeCenterView: View {
             Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
         } else {
             Log.spaceport.debug("Trade sold \(sold, privacy: .public)t of cargo \(c.cargoID, privacy: .public) @ \(c.price, privacy: .public)cr/ton at spöb \(spob.id, privacy: .public)")
+            onLiveSync()
         }
     }
     /// Middle "level" column text for a row: a standard commodity shows its
@@ -283,6 +289,10 @@ struct OutfitterView: View {
     @ObservedObject var pilot: PilotStore
     let galaxy: Galaxy
     var showHints: Bool = false
+    /// Push a purchase/sale into the live HUD immediately (see
+    /// `SpaceportView.onLiveSync`) — every outfit needs to *apply* the instant
+    /// it's bought, not just look right in this dialog's own numbers.
+    var onLiveSync: () -> Void = {}
     var onDone: () -> Void
 
     @State private var selectedID: Int?
@@ -346,9 +356,11 @@ struct OutfitterView: View {
         case .buy:
             let bought = pilot.buyOutfit(o, count: qty, galaxy: galaxy, priceMultiplier: rankMult)
             Log.spaceport.debug("Outfitter bought \(bought, privacy: .public)× outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public)")
+            if bought > 0 { onLiveSync() }
         case .sell:
             let sold = pilot.sellOutfit(o, count: qty, galaxy: galaxy, priceMultiplier: rankMult)
             Log.spaceport.debug("Outfitter sold \(sold, privacy: .public)× outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public)")
+            if sold > 0 { onLiveSync() }
         }
     }
 
@@ -434,11 +446,18 @@ struct OutfitterView: View {
         // info panel and the real game, e.g. "You Have: 2.34M cr") — NOT the
         // owned-quantity of the selected item, which is instead shown as the
         // small badge on the item's grid tile.
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 8) {
             infoRow("Item Price:", o.map { pilot.effectiveCost($0, galaxy: galaxy, priceMultiplier: rankMult).creditsAbbreviated } ?? "—")
             infoRow("You Have:", pilot.state.credits.creditsAbbreviated)
             infoRow("Item Mass:", o.map { "\($0.mass) tons" } ?? "—")
-            infoRow("Available:", "\(pilot.freeMass(galaxy: galaxy)) tons")
+            infoRow("Free Mass:", "\(pilot.freeMass(galaxy: galaxy)) tons")
+            // Not in the real DITL #1002 layout (that dialog only ever showed free
+            // *mass*, never cargo tons) — added so a Cargo Expansion's actual
+            // effect (and a Mass Expansion freeing room to buy one) is visible the
+            // instant it's bought, right here, instead of only in the Trade Center
+            // or after the next takeoff. Reads live off `pilot` (`@ObservedObject`),
+            // so it updates the moment `buyOutfit`/`sellOutfit` mutate `state`.
+            infoRow("Cargo:", "\(pilot.cargoUsed())/\(pilot.cargoCapacity(galaxy: galaxy)) tons")
         }
         .frame(width: 150, alignment: .leading)
         // DITL #1002 item 8 (618,214)-(753,314) against the real 765×321 Outfit
@@ -475,6 +494,7 @@ struct OutfitterView: View {
             }
             if pilot.buyOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) {
                 Log.spaceport.debug("Bought outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
+                onLiveSync()
             } else {
                 Log.spaceport.notice("Outfitter buy no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) cost=\(o.cost, privacy: .public) credits=\(pilot.state.credits, privacy: .public) freeMass=\(pilot.freeMass(galaxy: galaxy), privacy: .public) — insufficient credits, mass, or max-installed reached")
             }
@@ -490,6 +510,7 @@ struct OutfitterView: View {
             }
             if pilot.sellOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) {
                 Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
+                onLiveSync()
             } else {
                 Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")
             }

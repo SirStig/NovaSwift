@@ -104,7 +104,7 @@ cloaks, gadgets, permits — is one `oütf` resource. There is no separate
 Field | Meaning
 ---|---
 `DispWeight` | Sort order in the outfitter list — "items with a higher display weight are shown closer to the top." Purely cosmetic ordering, not a slot/category.
-`Mass` | Tons of free mass the item consumes (0 = no appreciable mass). Consumed from the hull's free-mass pool exactly like cargo does — outfits and cargo share one mass budget.
+`Mass` | Tons of free mass the item consumes (0 = no appreciable mass), from `shïp.FreeMass` — its own separate budget from `Holds` (cargo). Earlier text here claimed outfits and cargo "share one mass budget"; that's not supported by the Bible (`FreeMass` line 2422: "space available to add additional items and upgrades... in addition to the space taken up by the ship's stock weapons" — a distinct pool from `Holds`, line 2407). An outfit can still trade one for the other explicitly via two ordinary fields on the same item — negative `Mass` frees equipment budget, a negative ModType-2 (`freeCargo`) modifier shrinks the cargo hold (e.g. stock "Mass Expansion": `Mass -10`, `freeCargo -15`) — but that's the *outfit's* doing, not an engine-level shared pool. `shïp.Holds`'s negative-sign convention ("prevent the player from purchasing mass expansions", line 2408) gates exactly that: `ShipRes.blocksMassExpansion`, enforced in `PilotStore.canBuyOutfit` against any outfit with a negative `.freeCargo` value.
 `Flags 0x0001` | "This item is a fixed gun" — installs into a **gun** mount.
 `Flags 0x0002` | "This item is a turret" — installs into a **turret** mount.
 `Flags 0x0400` | "This item's total mass (at purchase) is proportional to the player's ship's mass" — `shipClass.Mass × outfit.Mass / 100`. Positive-mass items only.

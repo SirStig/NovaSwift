@@ -54,9 +54,10 @@ struct SpaceportView: View {
                     switch screen {
                     case .hub:      EmptyView()
                     case .trade:    TradeCenterView(graphics: graphics, spob: spob, pilot: pilot,
-                                                    galaxy: galaxy, onDone: { screen = .hub })
+                                                    galaxy: galaxy, onLiveSync: onLiveSync, onDone: { screen = .hub })
                     case .outfit:   OutfitterView(graphics: graphics, spob: spob, pilot: pilot,
-                                                  galaxy: galaxy, showHints: showHints, onDone: { screen = .hub })
+                                                  galaxy: galaxy, showHints: showHints, onLiveSync: onLiveSync,
+                                                  onDone: { screen = .hub })
                     case .shipyard: ShipyardView(graphics: graphics, spob: spob, pilot: pilot,
                                                  galaxy: galaxy, onLiveSync: onLiveSync, onDone: { screen = .hub })
                     case .bar:      BarView(graphics: graphics, spob: spob, pilot: pilot, onDone: { screen = .hub })

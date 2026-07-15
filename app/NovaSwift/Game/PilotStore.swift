@@ -310,6 +310,17 @@ final class PilotStore: ObservableObject {
         // already-installed outfits.
         let addedMass = galaxy.effectiveMass(of: o, forShip: state.shipType)
         if addedMass > 0, freeMass(galaxy: galaxy) < addedMass { return false }
+        // A negative `.freeCargo` modifier (e.g. "Mass Expansion"/"Mass Retool")
+        // sells cargo hold tons for equipment mass. Bible `shïp.Holds`: a
+        // negative-signed hull "prevent[s] the player from purchasing mass
+        // expansions" outright; and regardless of the hull, nothing evicts
+        // cargo already loaded, so a sale that would leave less room than
+        // what's aboard has to be rejected here — it's the only gate.
+        let cargoDelta = o.value(of: .freeCargo)
+        if cargoDelta < 0, let lo = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits) {
+            if lo.blocksMassExpansion { return false }
+            if cargoUsed() > lo.cargoCapacity + cargoDelta { return false }
+        }
         let cap = maxInstallable(o, galaxy: galaxy)
         if cap > 0, owned(outfit: o.id) >= cap { return false }
         // Bible `Flags 0x0001/0x0002`: a fixed gun / turret consumes one of the

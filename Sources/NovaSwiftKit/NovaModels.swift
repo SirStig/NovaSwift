@@ -239,7 +239,13 @@ public struct ShipRes {
     public let name: String
 
     // Cargo & mass
-    public let cargoSpace: Int      // @0  base cargo hold, tons
+    public let cargoSpace: Int      // @0  base cargo hold, tons (always non-negative — see `blocksMassExpansion`)
+    /// Bible `Holds`: "Put a negative sign in front of this value if you want
+    /// to prevent the player from purchasing mass expansions." The sign is a
+    /// flag, not part of the tonnage — `cargoSpace` above always holds the
+    /// magnitude (a hull with `Holds = -100` has the same 100 tons of hold as
+    /// one with `Holds = 100`; only this flag differs).
+    public let blocksMassExpansion: Bool  // @0  sign bit of Holds
     public let freeMass: Int        // @12 free mass available for outfits, tons
     public let mass: Int            // @62 hull mass (inertia / scan)
 
@@ -410,7 +416,9 @@ public struct ShipRes {
         id = r.id
         name = r.name.isEmpty ? "Ship \(r.id)" : r.name
         let d = r.data
-        cargoSpace = i16(d, 0)
+        let holds = i16(d, 0)
+        cargoSpace = abs(holds)
+        blocksMassExpansion = holds < 0
         shield = i16(d, 2)
         acceleration = i16(d, 4)
         speed = i16(d, 6)

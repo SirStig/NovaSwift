@@ -71,10 +71,54 @@ final class ShipSystemTests: XCTestCase {
         XCTAssertEqual(lo.jumpRange, 4)
         XCTAssertNotNil(lo.afterburner, "outfit grants an afterburner")
         XCTAssertEqual(lo.usedMass, 5)
-        XCTAssertEqual(lo.massCapacity, 45, "free 40 + used 5")
-        XCTAssertEqual(lo.freeMass, 40)
+        // Bible `shïp.FreeMass`: "space available to add additional items...
+        // in addition to the space taken up by the ship's stock weapons" — the
+        // decoded field is the fixed ceiling as-is, not inflated by whatever's
+        // currently installed.
+        XCTAssertEqual(lo.massCapacity, 40, "the hull's raw FreeMass field, unchanged by what's installed")
+        XCTAssertEqual(lo.freeMass, 35, "40 capacity − 5 used by the preinstalled outfit")
         // Stock weapon 128 + outfit-granted weapon 129.
         XCTAssertEqual(Set(lo.weapons.map(\.id)), [128, 129])
+    }
+
+    func testFreeMassActuallyShrinksAsOutfitsAreBought() throws {
+        // Regression: `massCapacity` used to be defined as `hull.freeMass +
+        // usedMass`, which made `freeMass` (== massCapacity − usedMass)
+        // collapse back to the hull's raw constant no matter what was
+        // installed — buying any number of mass-consuming outfits never moved
+        // the "Free Mass" readout and was never actually gated by it.
+        let galaxy = Galaxy(game: makeGame())
+        let zero = try XCTUnwrap(galaxy.loadout(shipID: 128, extraOutfits: [:]))
+        let one = try XCTUnwrap(galaxy.loadout(shipID: 128, extraOutfits: [200: 1]))
+        let three = try XCTUnwrap(galaxy.loadout(shipID: 128, extraOutfits: [200: 3]))
+
+        XCTAssertEqual(zero.freeMass, 35, "just the preinstalled outfit (mass 5) against 40 capacity")
+        XCTAssertEqual(one.freeMass, 30, "one more 5-ton outfit bought on top")
+        XCTAssertEqual(three.freeMass, 20, "three more 5-ton outfits bought on top")
+        XCTAssertEqual(one.massCapacity, zero.massCapacity, "the ceiling itself never moves, only usedMass")
+    }
+
+    func testMassExpansionSellsCargoForMass() throws {
+        // A real stock EV Nova outfit ("Mass Expansion"): negative `Mass`
+        // (frees equipment budget) and a negative `.freeCargo` modifier
+        // (shrinks the cargo hold) on the same item — the "convert cargo into
+        // mass" mechanic is just these two ordinary fields, no special-cased
+        // conversion logic needed once the identity bug above is fixed.
+        var col = ResourceCollection()
+        var ship = [UInt8](repeating: 0, count: 2000)
+        put16(&ship, 0, 50)    // cargo (Holds)
+        put16(&ship, 12, 10)   // free mass
+        col.add(Resource(type: NovaType.ship, id: 128, name: "Hauler", data: Data(ship)))
+
+        var out = [UInt8](repeating: 0, count: 40)
+        put16(&out, 2, -10)                       // Mass field: frees 10 tons
+        put16(&out, 18, 2); put16(&out, 20, -15)   // freeCargo −15
+        col.add(Resource(type: NovaType.outfit, id: 300, name: "Mass Expansion", data: Data(out)))
+
+        let galaxy = Galaxy(game: NovaGame(col))
+        let lo = try XCTUnwrap(galaxy.loadout(shipID: 128, extraOutfits: [300: 1]))
+        XCTAssertEqual(lo.cargoCapacity, 35, "50 − 15 tons sold off")
+        XCTAssertEqual(lo.freeMass, 20, "10 + 10 tons freed up")
     }
 
     func testJumpOutfitsAggregateHopsAndInstantJump() throws {

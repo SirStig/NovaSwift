@@ -55,6 +55,9 @@ struct DebugDiagnosticsView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear { if !hasRun { run() } }
+        #if os(macOS)
+        .frame(minWidth: 480, idealWidth: 560, minHeight: 560, idealHeight: 720, maxHeight: 900)
+        #endif
     }
 
     private func run() {

@@ -43,6 +43,9 @@ struct DebugGameStateView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .preferredColorScheme(.dark)
+        #if os(macOS)
+        .frame(minWidth: 480, idealWidth: 560, minHeight: 560, idealHeight: 720, maxHeight: 900)
+        #endif
     }
 
     // MARK: Pilot — credits / combat rating

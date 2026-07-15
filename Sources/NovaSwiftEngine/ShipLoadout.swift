@@ -63,6 +63,11 @@ public struct Loadout {
     public var massCapacity: Int    // total free mass for outfits (tons)
     public var usedMass: Int        // mass consumed by installed outfits (tons)
     public var freeMass: Int { max(0, massCapacity - usedMass) }
+    /// Bible `shïp.Holds` negative-sign convention: this hull refuses to sell
+    /// its own cargo-hold tons for equipment mass — an outfit that trades
+    /// cargo capacity for free mass (negative `.freeCargo`, e.g. "Mass
+    /// Expansion") can't be bought here even with room for both.
+    public var blocksMassExpansion: Bool
 
     // Weapon mounts available on the hull.
     public var maxGuns: Int
@@ -408,7 +413,17 @@ extension Galaxy {
             fuelRegenPerSec: Double(max(0, fuelRegenStat)) * 0.03,
             afterburner: afterburner,
             cargoCapacity: max(0, cargo),
-            massCapacity: s.freeMass + usedMass, usedMass: usedMass,
+            // `s.freeMass` is the Bible-documented ceiling as-is — "in addition
+            // to the space taken up by the ship's stock weapons" means the
+            // decoded field is already net of stock weapon mass, so it's the
+            // budget directly; `usedMass` (installed *outfits*, stock + bought)
+            // is what actually eats into it. Previously this was
+            // `s.freeMass + usedMass`, which made `freeMass` (== massCapacity −
+            // usedMass) collapse back to the constant `s.freeMass` no matter
+            // what was installed — the "Free Mass" readout never moved and no
+            // mass-consuming outfit purchase was ever actually gated by it.
+            massCapacity: s.freeMass, usedMass: usedMass,
+            blocksMassExpansion: s.blocksMassExpansion,
             maxGuns: maxGuns, maxTurrets: maxTurrets,
             usedGunSlots: usedGunSlots, usedTurretSlots: usedTurretSlots,
             outfits: outfitCounts, weapons: weapons,
