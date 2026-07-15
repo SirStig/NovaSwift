@@ -372,6 +372,35 @@ public final class AIBrain {
         return target.brain?.provokedByPlayer == true || target.currentTargetID == leader.entityID
     }
 
+    /// The ship a *defensive* escort should engage this frame, or nil to hold
+    /// formation. Defensive escorts fight only reactively — they never start a
+    /// fight with a neutral or a government-enemy that hasn't touched the fleet
+    /// (the "my escorts attack for no reason" complaint). In priority order:
+    ///   • a ship the leader is genuinely fighting (`isGenuineEngagementTarget`),
+    ///   • any hostile actively attacking the leader, or
+    ///   • the hostile currently attacking us, when we're personally under fire.
+    private func defensiveEngagementTarget(_ me: Ship, leader: Ship, threat: Ship?, world: World) -> Ship? {
+        // The leader's own fight comes first.
+        if let lt = leader.currentTargetID, let lts = world.ship(id: lt),
+           lts.isAlive, !lts.disabled, isHostile(me, lts, world),
+           isGenuineEngagementTarget(lts, leader: leader) {
+            return lts
+        }
+        // Anyone actively shooting at the leader — an NPC only sets
+        // `currentTargetID` while attacking, so this is a real assault, not a
+        // bare selection.
+        for other in world.allShips
+        where other.entityID != me.entityID && other.isAlive && !other.disabled
+              && other.currentTargetID == leader.entityID && isHostile(me, other, world) {
+            return other
+        }
+        // Anyone shooting at us.
+        if personallyUnderFire(me, world), let th = threat, isHostile(me, th, world) {
+            return th
+        }
+        return nil
+    }
+
     /// Is this ship the local authority — i.e. does it belong to the government
     /// that controls this system, or an ally of it? Only the local authority
     /// runs the patrol beat / scans traffic; a foreign warship passing through
@@ -464,50 +493,72 @@ public final class AIBrain {
 
         // Retreat conditions by disposition.
         let govt = world.diplomacy?.govt(me.government)
+        // Retreat gauges *overall* health (shields + armor), not shields alone.
+        // Many hulls — most fighters especially — carry little or no shield, so a
+        // shield-only test (`shieldFraction` is 0 whenever `maxShield == 0`) read a
+        // brand-new, full-hull shieldless ship as "below 25% shields" and sent it
+        // fleeing the instant it launched, forever. `pêrs.Coward` (a percentage)
+        // still tunes the threshold; it just applies to total health now.
         let cowardThreshold = personCoward.map { Double($0) / 100.0 } ?? 0.25
-        let warshipRetreat = (govt?.warshipsRetreat ?? false) && me.shieldFraction < cowardThreshold
+        let warshipRetreat = (govt?.warshipsRetreat ?? false) && me.healthFraction < cowardThreshold
         // Bible: "AI ships of this type will run away/dock if out of ammo for
         // all ammo-using weapons" (`shïp.Flags2` 0x0080) — checked regardless
         // of disposition; dock (head to a planet) if nothing's chasing us,
         // otherwise run for the edge.
         let ammoExhausted = me.fleeWhenOutOfAmmo && outOfAmmo(me)
 
-        switch aiType {
-        case .wimpyTrader:
-            if threat != nil { enter(.fleeing) }
-        case .braveTrader:
-            if ammoExhausted {
-                enter(threat != nil ? .fleeing : .traveling)
-            } else if let th = threat, armed, (th.position - me.position).length <= weaponRange(me) {
-                // Bible: "fights back when attacked, but runs away when his
-                // attacker is out of range" — not a hull-% threshold.
-                targetID = th.entityID; enter(.attacking)
-            } else if threat != nil {
-                enter(.fleeing)
+        // Only *free*, leaderless ships act on their raw `aiType` disposition
+        // here. A ship flying under a leader — an NPC-fleet escort, a
+        // carrier-launched fighter, or the player's own wing — is governed
+        // entirely by its escort order below. Running this generic brain for
+        // them is what made a "defensive" escort autonomously pick fights with
+        // any government-enemy in sight and, worse, break off and run for the
+        // hyperspace edge on its own. Escorts don't do either in EV Nova.
+        if leaderID == nil {
+            switch aiType {
+            case .wimpyTrader:
+                if threat != nil { enter(.fleeing) }
+            case .braveTrader:
+                if ammoExhausted {
+                    enter(threat != nil ? .fleeing : .traveling)
+                } else if let th = threat, armed, (th.position - me.position).length <= weaponRange(me) {
+                    // Bible: "fights back when attacked, but runs away when his
+                    // attacker is out of range" — not a hull-% threshold.
+                    targetID = th.entityID; enter(.attacking)
+                } else if threat != nil {
+                    enter(.fleeing)
+                }
+            case .warship, .interceptor:
+                if ammoExhausted {
+                    enter(threat != nil ? .fleeing : .traveling)
+                } else if warshipRetreat, state != .departing {
+                    // Break off when badly hurt — but only into a fresh flee, not
+                    // back out of an in-progress departure. `flee()` promotes a
+                    // pursuer-free run to `.departing`; without this guard a still-
+                    // hurt ship would be yanked `departing -> fleeing` every frame
+                    // while `flee()` shoved it `fleeing -> departing` right back,
+                    // an infinite per-frame oscillation that flooded the log.
+                    enter(.fleeing)
+                } else if let th = threat, armed,
+                         state == .attacking || personallyUnderFire(me, world) || favorableOdds(me, world) {
+                    targetID = th.entityID; enter(.attacking)
+                } else if armed, isSystemAuthority(me, world),
+                          favorableOdds(me, world), let culprit = pickPirateInterventionTarget(me, world) {
+                    // No direct threat of our own — but someone's picking on a
+                    // non-enemy while we're watching. Only the local authority
+                    // steps in (it's *their* space to police), and only when the
+                    // odds favor it — so interventions stay occasional, not a
+                    // system-wide brawl every time two ships tangle. The Bible
+                    // scopes unprovoked "piracy police" watching to interceptors,
+                    // but any government warship defends its own territory once
+                    // it notices a hostile actively attacking someone there —
+                    // pirates are everyone's enemy, and a system's patrols
+                    // shouldn't stand by while they maul a visitor.
+                    targetID = culprit.entityID; enter(.attacking)
+                }
+            case .unknown:
+                if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
             }
-        case .warship, .interceptor:
-            if ammoExhausted {
-                enter(threat != nil ? .fleeing : .traveling)
-            } else if warshipRetreat { enter(.fleeing) }
-            else if let th = threat, armed,
-                     state == .attacking || personallyUnderFire(me, world) || favorableOdds(me, world) {
-                targetID = th.entityID; enter(.attacking)
-            } else if armed, isSystemAuthority(me, world),
-                      favorableOdds(me, world), let culprit = pickPirateInterventionTarget(me, world) {
-                // No direct threat of our own — but someone's picking on a
-                // non-enemy while we're watching. Only the local authority
-                // steps in (it's *their* space to police), and only when the
-                // odds favor it — so interventions stay occasional, not a
-                // system-wide brawl every time two ships tangle. The Bible
-                // scopes unprovoked "piracy police" watching to interceptors,
-                // but any government warship defends its own territory once
-                // it notices a hostile actively attacking someone there —
-                // pirates are everyone's enemy, and a system's patrols
-                // shouldn't stand by while they maul a visitor.
-                targetID = culprit.entityID; enter(.attacking)
-            }
-        case .unknown:
-            if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
         }
 
         // Mission "always attack the player" ships lock the player and engage
@@ -556,33 +607,35 @@ public final class AIBrain {
                     me.currentTargetID = nil
                     return ControlIntent()
                 case .evasive:
-                    // Keep formation, but run from any real threat rather than engage.
-                    if threat != nil { enter(.fleeing) }
-                    else if state != .attacking { enter(.escorting) }
+                    // Avoid combat: hold formation and never engage. An escort
+                    // never breaks off to run for the hyperspace edge — in EV Nova
+                    // your wing stays with you, it doesn't flee the system.
+                    if state != .escorting { enter(.escorting) }
                 case .aggressive:
-                    // Adopt the leader's target, else hunt the nearest hostile.
-                    // A player leader's `currentTargetID` is only trusted as an
-                    // attack order once it's a genuine fight, not a bare UI
+                    // Adopt the leader's genuine target, else hunt the nearest
+                    // hostile. A player leader's `currentTargetID` is only trusted
+                    // as an attack order once it's a genuine fight, not a bare UI
                     // selection (see `isGenuineEngagementTarget`).
                     let leaderTarget = leader.currentTargetID.flatMap { world.ship(id: $0) }
                     let mark = (leaderTarget.map { isGenuineEngagementTarget($0, leader: leader) } ?? false)
                         ? leaderTarget : threat
                     if armed, let m = mark, isHostile(me, m, world) {
                         targetID = m.entityID; enter(.attacking)
-                    } else if state != .attacking && state != .fleeing {
+                    } else if state != .attacking {
                         enter(.escorting)
                     }
                 case .defensive:
-                    if state != .attacking && state != .fleeing { enter(.escorting) }
-                    // Adopt the leader's target only once it's a genuine fight
-                    // (see `isGenuineEngagementTarget`) — otherwise a freshly
-                    // launched fighter/escort would jump straight to attacking
-                    // whatever the player merely has selected (Tab/click), with
-                    // zero actual hostiles engaged anywhere in the system.
-                    if state != .fleeing, let lt = leader.currentTargetID,
-                       let lts = world.ship(id: lt), armed, isHostile(me, lts, world),
-                       isGenuineEngagementTarget(lts, leader: leader) {
-                        targetID = lt; enter(.attacking)
+                    // Reactive defense only: engage a ship the leader is genuinely
+                    // fighting, or one that's actively attacking the leader or us —
+                    // never a neutral or a mere government-enemy just passing by.
+                    // That autonomous fight-picking (via the disposition brain,
+                    // now gated off for escorts) is exactly what read as "my
+                    // escorts attack ships for no reason." Hold formation
+                    // otherwise; never flee.
+                    if armed, let mark = defensiveEngagementTarget(me, leader: leader, threat: threat, world: world) {
+                        targetID = mark.entityID; enter(.attacking)
+                    } else if state != .attacking {
+                        enter(.escorting)
                     }
                 }
             } else {
