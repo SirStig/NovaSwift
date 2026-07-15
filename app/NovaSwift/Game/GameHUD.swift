@@ -155,6 +155,10 @@ struct RadarContact {
     /// friend stands out on the scope. Nil for ordinary ships/stellars.
     var playerColor: Color? = nil
     var playerName: String? = nil
+    /// True when this contact is the player's current locked ship target or
+    /// selected nav/landing target — drawn with a bright white blinking ring
+    /// so the selected dot is unmistakable among same-colour neighbours.
+    var isTarget: Bool = false
 }
 
 /// The player marker at the centre of the radar: a slim needle arrow pointing
@@ -368,27 +372,41 @@ struct GameHUDView: View {
             Circle().fill(Color.black.opacity(0.3))
             Circle().strokeBorder(amber.opacity(0.5), lineWidth: 1)
             Circle().strokeBorder(.white.opacity(0.08), lineWidth: 1).scaleEffect(0.6)
-            Canvas { ctx, size in
-                let c = CGPoint(x: size.width / 2, y: size.height / 2)
-                let r = min(size.width, size.height) / 2 - 5
-                for b in model.planetBlips {
-                    let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5, width: 5, height: 5)
-                    ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
-                }
-                for b in model.blips {
-                    // A co-op player: their colour, a slightly larger dot, and their
-                    // name — so a friend reads at a glance among ordinary contacts.
-                    if let pc = b.playerColor {
+            // The locked/selected contact blinks a bright white ring on top of its
+            // own dot — a `TimelineView` drives the blink independent of the HUD's
+            // own ~12 Hz refresh, same idiom as the galaxy map's blinking markers.
+            TimelineView(.periodic(from: .now, by: 0.35)) { timeline in
+                let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.35) % 2 == 0
+                Canvas { ctx, size in
+                    let c = CGPoint(x: size.width / 2, y: size.height / 2)
+                    let r = min(size.width, size.height) / 2 - 5
+                    for b in model.planetBlips {
                         let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5, width: 5, height: 5)
-                        ctx.fill(Path(ellipseIn: rect), with: .color(pc))
-                        if let name = b.playerName {
-                            ctx.draw(Text(name).font(.system(size: 7, weight: .bold)).foregroundColor(pc),
-                                     at: CGPoint(x: c.x + b.x * r, y: c.y + b.y * r - 7))
+                        ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
+                        if b.isTarget && blinkOn {
+                            let ring = rect.insetBy(dx: -3, dy: -3)
+                            ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)
                         }
-                        continue
                     }
-                    let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5, width: 3, height: 3)
-                    ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
+                    for b in model.blips {
+                        // A co-op player: their colour, a slightly larger dot, and their
+                        // name — so a friend reads at a glance among ordinary contacts.
+                        if let pc = b.playerColor {
+                            let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5, width: 5, height: 5)
+                            ctx.fill(Path(ellipseIn: rect), with: .color(pc))
+                            if let name = b.playerName {
+                                ctx.draw(Text(name).font(.system(size: 7, weight: .bold)).foregroundColor(pc),
+                                         at: CGPoint(x: c.x + b.x * r, y: c.y + b.y * r - 7))
+                            }
+                            continue
+                        }
+                        let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5, width: 3, height: 3)
+                        ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
+                        if b.isTarget && blinkOn {
+                            let ring = rect.insetBy(dx: -3, dy: -3)
+                            ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)
+                        }
+                    }
                 }
             }
             ZStack {

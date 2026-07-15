@@ -143,6 +143,67 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertEqual(defender.brain?.state, .attacking, "1-to-1 odds are acceptable — it should engage")
     }
 
+    func testOutnumberedShipStillRetaliatesWhenPersonallyUnderFire() {
+        // Same 3-to-1 setup as testWarshipDeclinesUnfavorableOdds, but one of
+        // the hostiles is actively engaging the defender itself. MaxOdds gates
+        // *picking* a fight it isn't already in — it must not also stop a ship
+        // that's personally being shot at from defending itself (the "escort
+        // never fights back" bug: an outnumbered/isolated ship under fire
+        // should never just sit there and take it).
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                                       position: Vec2(9_000, 9_000)))
+        world.diplomacy = Diplomacy(govts: [
+            govt(210, classes: [10], enemies: [11], maxOdds: 100),
+            govt(211, classes: [11], enemies: [10]),
+        ])
+        let defender = warship("Defender", govt: 210, at: Vec2(0, -300), angle: 0)
+        defender.brain = AIBrain(aiType: .warship, govt: 210)
+        world.addNPC(defender)
+        var raiders: [Ship] = []
+        for i in 0..<3 {
+            let raider = warship("Raider\(i)", govt: 211, at: Vec2(Double(i) * 40, 0))
+            world.addNPC(raider)
+            raiders.append(raider)
+        }
+        raiders[0].currentTargetID = defender.entityID   // actively engaging the defender itself
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(defender.brain?.state, .attacking,
+                       "personally engaged by a hostile, it must fight back despite being outnumbered")
+    }
+
+    func testTurretFiresRegardlessOfHullHeading() {
+        // `World.fireAngle` already aims turret/beam-turret mounts straight at
+        // the target regardless of hull facing — but the AI's own "should I
+        // pull the trigger" gate used to require the hull be roughly pointed at
+        // the target for every weapon alike, so a ship armed only with a turret
+        // would never fire unless it happened to be nose-on to its target,
+        // defeating the entire point of carrying one.
+        let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(0, 400))
+        player.maxShield = 100; player.shield = 100; player.maxArmor = 100; player.armor = 100
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(200, classes: [1], flags1: 0x0004)]) // always attacks player
+
+        let npc = Ship(name: "Gunship", stats: ShipStats(maxSpeed: 400, acceleration: 300, turnRate: 3),
+                      position: Vec2(), angle: .pi)   // facing directly AWAY from the player
+        npc.government = 200; npc.radius = 20
+        npc.maxShield = 80; npc.shield = 80; npc.maxArmor = 120; npc.armor = 120
+        npc.weapons = [WeaponMount(spec: WeaponSpec(
+            id: 130, name: "Turret", shieldDamage: 20, armorDamage: 20, reloadSeconds: 0.1,
+            projectileSpeed: 2200, range: 5000, accuracyRadians: 0, isBeam: false, isGuided: false,
+            turnRate: 0, blastRadius: 0, ammoPerShot: 0, guidance: .turret, isTurret: true))]
+        npc.brain = AIBrain(aiType: .warship, govt: 200)
+        world.addNPC(npc)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(npc.brain?.state, .attacking)
+        XCTAssertTrue(world.events.contains {
+            if case .weaponFired(let shooterID, _, _, _) = $0 { return shooterID == npc.entityID }
+            return false
+        }, "a turret should fire at a target regardless of hull heading")
+    }
+
     func testWimpyTraderFlees() {
         let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
                           position: Vec2(0, 300))
@@ -240,6 +301,42 @@ final class AIBehaviorTests: XCTestCase {
         world.step(1.0 / 30.0)
         XCTAssertEqual(interceptor.brain?.state, .attacking, "should intervene against the aggressor")
         XCTAssertEqual(interceptor.brain?.targetID, aggressor.entityID)
+    }
+
+    func testAuthorityInterceptsPlayerAfterARealHitOnANeutral() {
+        // Complement to testAuthorityIgnoresPlayerMerelySelectingANeutral: once
+        // the player has actually landed a shot on a non-enemy ship — not merely
+        // selected it — the local system authority should step in, the same way
+        // it would against an NPC pirate caught mid-attack.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 10, acceleration: 10, turnRate: 3),
+                          position: Vec2())
+        player.weapons = [WeaponMount(spec: gun())]
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50]), govt(600, classes: [60])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 3000), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
+
+        let cop = warship("Cop", govt: 500, at: Vec2(200, 150))
+        cop.brain = AIBrain(aiType: .interceptor, govt: 500)
+        world.addNPC(cop)
+        let neutral = warship("Trader", govt: 600, at: Vec2(0, 150), armed: false)
+        neutral.brain = AIBrain(aiType: .wimpyTrader, govt: 600)
+        world.addNPC(neutral)
+
+        // The player actually opens fire on the neutral (not a bare selection).
+        player.currentTargetID = neutral.entityID
+        world.intent.firePrimary = true
+
+        var intervened = false
+        for _ in 0..<150 {   // 5 seconds
+            world.step(1.0 / 30.0)
+            if cop.brain?.state == .attacking, cop.brain?.targetID == World.playerEntityID {
+                intervened = true
+                break
+            }
+        }
+        XCTAssertTrue(intervened, "once the player actually fires on a neutral, the local authority should intervene")
     }
 
     func testTraderTravelsTowardPlanet() {

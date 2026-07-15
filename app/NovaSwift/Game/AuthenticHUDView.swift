@@ -345,27 +345,41 @@ private struct RadarContactsView: View {
                         Log.radar.debug("RadarContactsView size=\(geo.size.width, privacy: .public)x\(geo.size.height, privacy: .public) planetBlips=\(model.planetBlips.count, privacy: .public) blips=\(model.blips.count, privacy: .public)")
                     }
                 }
-                Canvas { ctx, _ in
-                    // Stellar objects: hollow ring outlines (EV Nova draws worlds
-                    // as circles, distinct from the small filled ship dots).
-                    for b in model.planetBlips {
-                        let r = CGRect(x: cx + b.x * radius - 3, y: cy + b.y * radius - 3, width: 6, height: 6)
-                        ctx.stroke(Path(ellipseIn: r), with: .color(radarColor(b.relationship)), lineWidth: 1)
-                    }
-                    // Ships: small filled dots. A co-op player keeps their own
-                    // colour + name so they stand out from the two-tone scope.
-                    for b in model.blips {
-                        if let pc = b.playerColor {
-                            let r = CGRect(x: cx + b.x * radius - 2, y: cy + b.y * radius - 2, width: 4, height: 4)
-                            ctx.fill(Path(ellipseIn: r), with: .color(pc))
-                            if let name = b.playerName {
-                                ctx.draw(Text(name).font(.system(size: 6, weight: .bold)).foregroundColor(pc),
-                                         at: CGPoint(x: cx + b.x * radius, y: cy + b.y * radius - 6))
+                // The locked/selected contact blinks a bright white ring on top of
+                // its own dot, driven independently of the HUD's own refresh rate —
+                // same `TimelineView` idiom as the galaxy map's blinking markers.
+                TimelineView(.periodic(from: .now, by: 0.35)) { timeline in
+                    let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.35) % 2 == 0
+                    Canvas { ctx, _ in
+                        // Stellar objects: hollow ring outlines (EV Nova draws worlds
+                        // as circles, distinct from the small filled ship dots).
+                        for b in model.planetBlips {
+                            let r = CGRect(x: cx + b.x * radius - 3, y: cy + b.y * radius - 3, width: 6, height: 6)
+                            ctx.stroke(Path(ellipseIn: r), with: .color(radarColor(b.relationship)), lineWidth: 1)
+                            if b.isTarget && blinkOn {
+                                let ring = r.insetBy(dx: -2.5, dy: -2.5)
+                                ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)
                             }
-                            continue
                         }
-                        let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
-                        ctx.fill(Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
+                        // Ships: small filled dots. A co-op player keeps their own
+                        // colour + name so they stand out from the two-tone scope.
+                        for b in model.blips {
+                            if let pc = b.playerColor {
+                                let r = CGRect(x: cx + b.x * radius - 2, y: cy + b.y * radius - 2, width: 4, height: 4)
+                                ctx.fill(Path(ellipseIn: r), with: .color(pc))
+                                if let name = b.playerName {
+                                    ctx.draw(Text(name).font(.system(size: 6, weight: .bold)).foregroundColor(pc),
+                                             at: CGPoint(x: cx + b.x * radius, y: cy + b.y * radius - 6))
+                                }
+                                continue
+                            }
+                            let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
+                            ctx.fill(Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
+                            if b.isTarget && blinkOn {
+                                let ring = r.insetBy(dx: -2.5, dy: -2.5)
+                                ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)
+                            }
+                        }
                     }
                 }
                 .clipShape(Circle())   // contacts scroll off the rim, never pile on it

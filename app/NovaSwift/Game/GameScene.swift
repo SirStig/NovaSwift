@@ -3838,7 +3838,8 @@ final class GameScene: SKScene {
             let dx = (Double(pv.position.x) - shipPos.x) / Double(radarRange)
             let dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
             guard dx * dx + dy * dy <= 1 else { return nil }
-            return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv))
+            return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv),
+                                isTarget: pv.id == selectedPlanetID)
         }
         // A cloaked ship drops off the player's radar entirely unless its own
         // device flags it "visible on radar" regardless (oütf ModType 17
@@ -3856,19 +3857,20 @@ final class GameScene: SKScene {
             let dx = (npc.position.x - shipPos.x) / shipRadarRange
             let dy = -(npc.position.y - shipPos.y) / shipRadarRange
             guard dx * dx + dy * dy <= 1 else { return nil }
+            let isTarget = npc.entityID == p.currentTargetID
             // A co-op partner always shows on the scope in their own colour + name,
             // bypassing the IFF gate below — you should never lose your friend.
             if let info = npc.remotePlayer {
                 return RadarContact(x: dx, y: dy, relationship: .friendlyOrOwned,
                                     playerColor: GalaxyMapView.playerColor(for: info.peerID),
-                                    playerName: info.name)
+                                    playerName: info.name, isTarget: isTarget)
             }
             // IFF gates allegiance coloring (EV Nova oütf ModType 14): with an IFF
             // outfit, blips tint red/green/grey by relationship; without one, every
             // ship contact is drawn in the single neutral radar color, so friend and
             // foe are indistinguishable — you have to lock a target to identify it.
             let rel = playerHasIFF ? relationship(for: npc) : .neutral
-            return RadarContact(x: dx, y: dy, relationship: rel)
+            return RadarContact(x: dx, y: dy, relationship: rel, isTarget: isTarget)
         }
     }
 

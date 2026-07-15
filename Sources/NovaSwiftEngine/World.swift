@@ -2084,9 +2084,14 @@ public final class World {
                 }
             }
         }
-        // Explosion effect (skip a silent end-of-life fizzle for a plain shot
-        // that isn't flak and has no blast).
-        let shouldExplode = directHit != nil || p.blastRadius > 0 || p.detonateOnExpire || p.explosionBoomID != nil
+        // Explosion effect — only for a shot that actually explodes (has splash,
+        // detonates on expiry like flak, or carries its own authored `bööm`).
+        // A plain direct hit (e.g. a Blaster bolt) is NOT an explosion in the
+        // real game: it's just the shield/armor spark `applyHit` already raised
+        // above (`.shieldHit`/`.armorHit`). Treating every hit as `shouldExplode`
+        // made every weapon — including ones with no explosion at all — flash a
+        // fireball and fall back to a generic "boom" sound (id 303) on impact.
+        let shouldExplode = p.blastRadius > 0 || p.detonateOnExpire || p.explosionBoomID != nil
         if shouldExplode {
             let boomSound = p.explosionBoomID.flatMap { galaxy?.game.boom($0)?.soundID }
             let radius = p.blastRadius > 0 ? p.blastRadius : 12

@@ -268,14 +268,15 @@ public final class AIBrain {
         var bestDist = scanRange
         for aggressor in world.allShips
         where aggressor.entityID != me.entityID && aggressor.isAlive && !aggressor.disabled {
-            // Never treat the PLAYER as an "aggressor" here: the player's
-            // `currentTargetID` is set the instant they *select* a ship in the UI —
-            // with no combat implied — whereas an NPC only sets it while actively
-            // attacking. Reading a bare player selection as an attack made police
-            // interceptors jump an idle, clean player merely for targeting a neutral
-            // (the "Federation ships attack me for no reason" bug). Genuine player
-            // aggression is handled properly elsewhere — the victim is `provokedByPlayer`
-            // and disabling/killing records a crime that flips standing hostile.
+            // Never treat the PLAYER as an "aggressor" here via `currentTargetID`:
+            // it's set the instant they *select* a ship in the UI, with no combat
+            // implied, whereas an NPC only sets it while actively attacking. Reading
+            // a bare player selection as an attack made police interceptors jump an
+            // idle, clean player merely for targeting a neutral (the "Federation
+            // ships attack me for no reason" bug). Genuine player aggression is
+            // still caught below via each victim's `provokedByPlayer` — set only by
+            // an actual hit (`World.applyHit`), which can't be triggered by
+            // targeting alone.
             if aggressor.isPlayer { continue }
             guard let victimID = aggressor.currentTargetID, victimID != me.entityID,
                   let victim = world.ship(id: victimID), victim.isAlive, !victim.disabled,
@@ -283,6 +284,18 @@ public final class AIBrain {
                   !isHostile(me, victim, world) else { continue }
             let d = (aggressor.position - me.position).length
             if d < bestDist { bestDist = d; best = aggressor }
+        }
+        // The player is a genuine aggressor once they've actually landed a hit on
+        // some non-enemy ship nearby (`provokedByPlayer`) — the local authority
+        // steps in against the player directly, same as it would against an NPC
+        // pirate caught mid-attack.
+        if world.player.isAlive {
+            for victim in world.allShips
+            where victim.entityID != me.entityID && victim.isAlive && !victim.disabled
+                && victim.brain?.provokedByPlayer == true && !isHostile(me, victim, world) {
+                let d = (world.player.position - me.position).length
+                if d < bestDist { bestDist = d; best = world.player }
+            }
         }
         return best
     }
@@ -308,6 +321,24 @@ public final class AIBrain {
         if aiType.isTrader { return .traveling }
         guard isSystemAuthority(me, world) else { return .traveling }
         return aiType == .interceptor ? .orbiting : .patrolling
+    }
+
+    /// True if some hostile is *personally* engaging this ship right now — it
+    /// hit me directly (`provokedByPlayer`, set only by a real hit in
+    /// `World.applyHit`, never by mere targeting) or an NPC hostile currently
+    /// has me as its own target. `MaxOdds`/`favorableOdds` is the Bible's
+    /// "won't *pick* a fight it can't win" check (Appendix II: "before picking
+    /// a fight..."); it was never meant to also stop a ship already under fire
+    /// from defending itself, which just reads as "shot at and does nothing."
+    /// A ship this outmatched can still break off via `warshipRetreat` once
+    /// its shields drop below its coward threshold — this only guarantees it
+    /// fights back in the meantime instead of sitting passive.
+    func personallyUnderFire(_ me: Ship, _ world: World) -> Bool {
+        if provokedByPlayer { return true }
+        return world.allShips.contains { other in
+            other.entityID != me.entityID && other.isAlive && !other.disabled
+                && other.currentTargetID == me.entityID && isHostile(me, other, world)
+        }
     }
 
     /// EV Nova's combat-odds check (`gövt.MaxOdds`): before picking a fight, a
@@ -386,7 +417,8 @@ public final class AIBrain {
             if ammoExhausted {
                 enter(threat != nil ? .fleeing : .traveling)
             } else if warshipRetreat { enter(.fleeing) }
-            else if let th = threat, armed, state == .attacking || favorableOdds(me, world) {
+            else if let th = threat, armed,
+                     state == .attacking || personallyUnderFire(me, world) || favorableOdds(me, world) {
                 targetID = th.entityID; enter(.attacking)
             } else if armed, isSystemAuthority(me, world),
                       favorableOdds(me, world), let culprit = pickPirateInterventionTarget(me, world) {
@@ -623,8 +655,13 @@ public final class AIBrain {
             // Too close — ease off the throttle (simple strafing feel).
             intent.thrust = false
         }
-        // Fire when the target is within reach and in the firing arc.
-        let inFiringSolution = dist <= range && aimError < 0.22
+        // Fire when the target is within reach and in the firing arc — except
+        // turrets/beam-turrets, which `World.fireAngle` already aims straight at
+        // the target regardless of hull heading, so gating the *intent* to fire
+        // on hull alignment defeats the entire point of carrying one (an AI ship
+        // with only a turret would then never fire unless pointed at its target).
+        let hasOmniWeapon = me.weapons.contains { $0.spec.isTurret }
+        let inFiringSolution = dist <= range && (hasOmniWeapon || aimError < 0.22)
         if hadFiringSolution != inFiringSolution {
             hadFiringSolution = inFiringSolution
             let tag = shipTag
