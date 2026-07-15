@@ -51,7 +51,11 @@ struct EscortsView: View {
     var onSell: (Int) -> Void = { _ in }
     var onClose: () -> Void = {}
 
-    @State private var selectedRecordID: Int? = nil
+    /// The selected row's live `EscortInfo.id` (entity id) — entity-keyed, not
+    /// record-keyed, so a fighter (which has no `EscortRecord`) can still be
+    /// selected to show its status; only the action strip's Upgrade/Sell/Release
+    /// gate on whether that selection is a fighter.
+    @State private var selectedEntityID: Int? = nil
 
     // PICT #8513's decoded size — the coordinate origin every item is placed
     // relative to (frame centre, top-left anchored; see NovaMenu.swift).
@@ -69,10 +73,16 @@ struct EscortsView: View {
         guard let rid = e.recordID else { return nil }
         return records.first { $0.id == rid }
     }
-    /// The currently selected escort's record, if the selection is still present.
+    /// The currently selected escort row, if the selection is still present.
+    private var selectedEscort: GameScene.EscortInfo? {
+        guard let eid = selectedEntityID else { return nil }
+        return escorts.first { $0.id == eid }
+    }
+    /// The selected escort's persistent record — nil for a fighter (no record
+    /// exists) or an untracked wing member.
     private var selectedRecord: EscortRecord? {
-        guard let rid = selectedRecordID else { return nil }
-        return records.first { $0.id == rid }
+        guard let sel = selectedEscort else { return nil }
+        return record(for: sel)
     }
 
     var body: some View {
@@ -155,13 +165,12 @@ struct EscortsView: View {
     }
 
     private func escortRow(_ e: GameScene.EscortInfo) -> some View {
-        let rec = record(for: e)
-        let selected = rec != nil && rec?.id == selectedRecordID
+        let selected = selectedEntityID == e.id
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
                 NovaText(e.name, size: 11, color: .white, width: 118, align: .leading, weight: .semibold)
                 Spacer(minLength: 0)
-                if let rec { originLabel(rec) }
+                if e.isFighter { fighterLabel } else if let rec = record(for: e) { originLabel(rec) }
             }
             HStack(spacing: 6) {
                 bar("SH", e.shieldFraction, Color(red: 0.4, green: 0.7, blue: 1))
@@ -178,10 +187,10 @@ struct EscortsView: View {
         .overlay(Rectangle().strokeBorder(selected ? theme.escortHilite : Color.clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture {
-            // "Hail" the escort — select it to reveal its lifecycle action. Only
-            // roster-tracked escorts (with a record) can be hailed/released.
-            guard let rec else { return }
-            selectedRecordID = (selectedRecordID == rec.id) ? nil : rec.id
+            // "Hail" the escort — select it to reveal its status/actions. Fighters
+            // are selectable too (to show their status), but the action strip
+            // below gates Upgrade/Sell/Release off for them explicitly.
+            selectedEntityID = (selectedEntityID == e.id) ? nil : e.id
         }
     }
 
@@ -196,6 +205,10 @@ struct EscortsView: View {
             }
         }()
         return NovaText(text, size: 8, color: color)
+    }
+
+    private var fighterLabel: some View {
+        NovaText("Fighter", size: 8, color: Color(white: 0.6))
     }
 
     private func bar(_ label: String, _ frac: Double, _ color: Color) -> some View {
@@ -223,10 +236,14 @@ struct EscortsView: View {
 
     private var actionBar: some View {
         HStack(spacing: 6) {
-            if let sel = selectedRecord {
-                hailStatus(sel)
+            if let sel = selectedEscort, sel.isFighter {
+                fighterStatus(sel)
                 Spacer(minLength: 6)
-                hailActions(sel)
+                fighterActions
+            } else if let rec = selectedRecord {
+                hailStatus(rec)
+                Spacer(minLength: 6)
+                hailActions(rec)
             } else {
                 NovaText(hasEscorts ? "Select an escort to hail it." : "Hail an escort to command it.",
                          size: 10, color: Color(white: 0.45))
@@ -238,6 +255,24 @@ struct EscortsView: View {
         .frame(width: Self.frameW, height: Self.actionBarH)
         .background(Color(white: 0.08))
         .overlay(Rectangle().fill(novaAmber.opacity(0.22)).frame(height: 1), alignment: .top)
+    }
+
+    /// A selected fighter's status — no upkeep/upgrade/resale to show, since it
+    /// isn't an independently-tracked escort.
+    private func fighterStatus(_ sel: GameScene.EscortInfo) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            NovaText(sel.name, size: 11, color: novaAmber, weight: .bold)
+            NovaText("Bay fighter · managed via its carrier", size: 9, color: Color(white: 0.55))
+        }
+        .frame(minWidth: 90, alignment: .leading)
+    }
+
+    /// A fighter can't be individually upgraded, sold or released — those only
+    /// apply to a roster-tracked (hired/captured/mission) escort — so the same
+    /// verb is shown disabled rather than omitted, making the restriction
+    /// visible instead of the row simply doing nothing when tapped.
+    private var fighterActions: some View {
+        authButton("Release", width: 46, enabled: false) {}
     }
 
     /// The selected escort's name and, for a captured ship, its upgrade/resale
@@ -270,10 +305,10 @@ struct EscortsView: View {
             authButton("Upgrade", width: 46) { onUpgrade(sel.id) }
         }
         if sel.origin == .captured {
-            authButton("Sell", width: 32) { onSell(sel.id); selectedRecordID = nil }
+            authButton("Sell", width: 32) { onSell(sel.id); selectedEntityID = nil }
         }
         authButton(sel.origin == .hired ? "Release" : "Dismiss", width: 46) {
-            onRelease(sel.id); selectedRecordID = nil
+            onRelease(sel.id); selectedEntityID = nil
         }
     }
 

@@ -140,6 +140,11 @@ struct SettingsView: View {
                 ForEach(GameSettings.GameSpeed.allCases) { Text($0.label).tag($0) }
             }
             .pickerStyle(.segmented)
+            .disabled(model.session.isActive)
+            if model.session.isActive {
+                Text("Set by the lobby host while in a co-op session.")
+                    .novaFont(.caption).foregroundStyle(.secondary)
+            }
             Toggle("Auto-target after firing", isOn: binding(\.autoTargetAfterFiring))
             Toggle("Auto-landing", isOn: binding(\.autoLanding))
             Toggle("Confirm before landing", isOn: binding(\.confirmLanding))

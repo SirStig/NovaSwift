@@ -93,6 +93,13 @@ final class GameScene: SKScene {
     /// this system, so single-player pays nothing.
     var syncPreStep: ((World) -> Void)?
     var syncPostStep: ((World) -> Void)?
+    /// While a co-op session is active, overrides `settings.gameSpeed.multiplier`
+    /// with the lobby's shared `SessionRules.gameSpeedMultiplier` — set by the
+    /// container from `MultiplayerSession`. Nil in single-player (and briefly
+    /// while joining), where the local setting applies as usual. Without this,
+    /// each device would scale weapon reload, regen and travel time by its own
+    /// local speed setting, letting the shared simulations drift apart.
+    var gameSpeedMultiplierOverride: (() -> Double?)?
     private var input: InputController!
     private var controllerInput: GameControllerInput?
     #if os(iOS)
@@ -1048,8 +1055,12 @@ final class GameScene: SKScene {
         // rates; higher settings speed the whole world up uniformly — accel, top
         // speed, turning, travel, weapon reload and regen all ride this one dt.
         // The stability clamp is applied to the real delta first, so a high
-        // multiplier can't blow the physics up on a hitched frame.
-        let simDT = dt * settings.gameSpeed.multiplier
+        // multiplier can't blow the physics up on a hitched frame. In a co-op
+        // session every device uses the host's shared multiplier instead of its
+        // own local setting (see `gameSpeedMultiplierOverride`), so the lobby's
+        // sims stay on one clock.
+        let gameSpeedMultiplier = gameSpeedMultiplierOverride?() ?? settings.gameSpeed.multiplier
+        let simDT = dt * gameSpeedMultiplier
         frameDT = simDT
 
         controllerInput?.poll()
@@ -1608,20 +1619,29 @@ final class GameScene: SKScene {
         let id: Int
         /// The persistent `EscortRecord.id`, when this live ship was spawned from
         /// the roster (captured/hired/mission escorts). nil for any escort not
-        /// tied to a record (e.g. debug-spawned wing).
+        /// tied to a record (e.g. debug-spawned wing) — always nil for a fighter.
         let recordID: Int?
         let name: String
         let shipType: Int
         let shieldFraction: Double
         let armorFraction: Double
+        /// True for a bay-launched fighter (`Ship.carrierID != nil`) rather than a
+        /// hired/captured/mission escort. Fighters share the wing's standing
+        /// orders like any other escort, but aren't individually upgraded, sold
+        /// or released — that's all managed through the carrier's bay — so the
+        /// UI must gate those actions on this explicitly rather than relying on
+        /// `recordID` being nil as an incidental proxy for "is a fighter".
+        let isFighter: Bool
     }
 
-    /// The player's current escort wing (captured / recruited ships).
+    /// The player's current escort wing (captured / recruited ships and
+    /// bay-launched fighters alike).
     func escortRoster() -> [EscortInfo] {
         (world?.playerEscorts ?? []).map {
             EscortInfo(id: $0.entityID, recordID: $0.escortRecordID, name: $0.name,
                        shipType: $0.shipTypeID,
-                       shieldFraction: $0.shieldFraction, armorFraction: $0.armorFraction)
+                       shieldFraction: $0.shieldFraction, armorFraction: $0.armorFraction,
+                       isFighter: $0.carrierID != nil)
         }
     }
 

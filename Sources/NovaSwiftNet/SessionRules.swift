@@ -21,15 +21,24 @@ public struct SessionRules: Codable, Equatable, Sendable {
     /// Outcomes in an authority's system (kills, loot) carry back to a visitor's
     /// own galaxy.
     public var carryEncounter: Bool
+    /// The host's `GameSettings.gameSpeed.multiplier` (physics-timestep scale),
+    /// pushed to every guest so the whole lobby's ships, weapons and regen run
+    /// on one shared clock. Each device previously applied its own local
+    /// setting, which let two sims silently drift apart (see
+    /// `SystemSyncCoordinator.reconcileOwnShip`) whenever players had picked
+    /// different speeds — this makes speed a session-wide rule like the others.
+    public var gameSpeedMultiplier: Double
 
     public init(pvpDamageReal: Bool, deathReal: Bool, friendlyFire: Bool,
-                allowPvP: Bool, allowTrade: Bool, carryEncounter: Bool) {
+                allowPvP: Bool, allowTrade: Bool, carryEncounter: Bool,
+                gameSpeedMultiplier: Double = 1.0) {
         self.pvpDamageReal = pvpDamageReal
         self.deathReal = deathReal
         self.friendlyFire = friendlyFire
         self.allowPvP = allowPvP
         self.allowTrade = allowTrade
         self.carryEncounter = carryEncounter
+        self.gameSpeedMultiplier = gameSpeedMultiplier
     }
 
     /// Sparring / safe: players can fight but nothing hurts for real.

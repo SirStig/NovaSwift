@@ -128,6 +128,12 @@ private struct LocalLobbySection: View {
         .sheet(isPresented: $showHostSetup) {
             HostSetupView { name, rules in
                 showHostSetup = false
+                // The host's own game-speed becomes the whole lobby's shared
+                // clock (see `SessionRules.gameSpeedMultiplier`) — guests adopt
+                // it via the normal rules broadcast rather than each running
+                // their own local setting.
+                var rules = rules
+                rules.gameSpeedMultiplier = model.settings.gameSpeed.multiplier
                 model.session.hostLocalLobby(
                     lobbyName: name, displayName: hostDisplayName,
                     systemID: model.pilot.state.currentSystem,

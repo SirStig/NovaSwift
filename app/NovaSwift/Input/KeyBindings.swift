@@ -34,6 +34,13 @@ struct KeyBindings: Codable, Equatable {
         .targetNearest: "r", .targetNext: "tab", .nearestHostile: "t", .clearTarget: "u",
         .land: "l", .hyperjump: "j", .galaxyMap: "m", .autopilot: "a",
         .hailTarget: "y", .board: "b",
+        // Real EV Nova's Fleet Control keys — F/D/V match the original exactly
+        // (Attack/Defend/Hold Position); "C" is already `toggleCloak` in this
+        // port's scheme, so Formation has no analog and "Evasive" (a NovaSwift
+        // addition with no original counterpart) takes a free key instead.
+        .commandEscortAggressive: "f", .commandEscortDefensive: "d",
+        .commandEscortEvasive: "x", .commandEscortHold: "v",
+        .openEscorts: "e",
         .pauseGame: "p", .openMenu: "escape",
     ]
 

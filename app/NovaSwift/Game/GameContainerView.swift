@@ -340,6 +340,12 @@ final class GameHost {
             // sim sync around each step. No-ops unless ≥2 players share the system.
             scene.syncPreStep = { world in model.session.syncPreStep(world: world) }
             scene.syncPostStep = { world in model.session.syncPostStep(world: world) }
+            // Co-op: the lobby's shared game-speed (host-set, broadcast via
+            // `SessionRules`) overrides each device's own local setting so the
+            // whole lobby's sims share one clock instead of drifting apart.
+            scene.gameSpeedMultiplierOverride = {
+                model.session.isActive ? model.session.rules.gameSpeedMultiplier : nil
+            }
             // The world was already built by `configure` above — push the pilot's
             // existing grudges/eligibility onto it now.
             scene.syncPersStateToWorld()
@@ -2412,6 +2418,17 @@ struct GameContainerView: View {
             host?.scene.togglePlayerCloak()
         case .recallFighters:
             host?.scene.recallPlayerFighters()
+        case .commandEscortAggressive:
+            host?.scene.commandEscorts(.aggressive)
+        case .commandEscortDefensive:
+            host?.scene.commandEscorts(.defensive)
+        case .commandEscortEvasive:
+            host?.scene.commandEscorts(.evasive)
+        case .commandEscortHold:
+            host?.scene.commandEscorts(.hold)
+        case .openEscorts:
+            model.audio.play(.uiSelect)
+            showEscortsPanel = true
         case .board:
             // Board the targeted hulk if it's disabled and in reach.
             if let m = host?.scene.attemptBoard() {
@@ -2431,7 +2448,7 @@ struct GameContainerView: View {
     private func hail() {
         guard let scene = host?.scene, let result = scene.attemptHail() else { return }
         switch result {
-        case let .ship(entityID, name, shipTypeID, govt, hostile):
+        case let .ship(entityID, _, shipTypeID, govt, hostile):
             // Hailing one of your own escorts opens its command window (EV Nova's
             // Escorts dialog, DITL #1022) rather than the generic comm dialog.
             if scene.isPlayerEscort(entityID) {
