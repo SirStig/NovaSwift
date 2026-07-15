@@ -1,5 +1,8 @@
 import SwiftUI
 import NovaSwiftEngine
+#if os(iOS)
+import UIKit
+#endif
 
 /// Container-owned panels the mobile controls can open (these live in
 /// `GameContainerView`, not reachable through `handleDiscrete`).
@@ -94,12 +97,16 @@ struct TouchControlsOverlay: View {
     // MARK: Steering (bottom-left)
 
     private var turnCluster: some View {
-        HStack(spacing: m.gap) {
-            HoldButton(size: m.big, onChange: { input.touch.turnLeft = $0 }) {
-                NovaControlCap(system: "arrowtriangle.left.fill", size: m.big)
+        HStack(alignment: .bottom, spacing: m.gap) {
+            labeled("Turn Left") {
+                HoldButton(size: m.big, onChange: { input.touch.turnLeft = $0 }) {
+                    NovaControlCap(system: "arrowtriangle.left.fill", size: m.big)
+                }
             }
-            HoldButton(size: m.big, onChange: { input.touch.turnRight = $0 }) {
-                NovaControlCap(system: "arrowtriangle.right.fill", size: m.big)
+            labeled("Turn Right") {
+                HoldButton(size: m.big, onChange: { input.touch.turnRight = $0 }) {
+                    NovaControlCap(system: "arrowtriangle.right.fill", size: m.big)
+                }
             }
         }
     }
@@ -109,22 +116,62 @@ struct TouchControlsOverlay: View {
     private var driveCluster: some View {
         VStack(alignment: .trailing, spacing: m.gap) {
             weaponChip
-            HStack(spacing: m.gap) {
-                HoldButton(size: m.small, onChange: { input.touch.afterburner = $0 }) {
-                    NovaControlCap(system: "flame.fill", size: m.small, accent: true)
+            // Combat targeting, always visible: locking an enemy (and cycling to
+            // the next) must never mean opening the Actions menu mid-dogfight.
+            HStack(alignment: .bottom, spacing: m.gap) {
+                labeled("Target") {
+                    TapButton(size: m.small, onTap: { onDiscrete(.targetNearest) }) {
+                        NovaControlCap(system: "scope", size: m.small, accent: true)
+                    }
                 }
-                HoldButton(size: m.small, onChange: { input.touch.fireSecondary = $0 }) {
-                    NovaControlCap(system: "burst.fill", size: m.small, accent: true)
-                }
-            }
-            HStack(spacing: m.gap) {
-                HoldButton(size: m.big, onChange: { input.touch.firePrimary = $0 }) {
-                    NovaControlCap(system: "bolt.fill", size: m.big, accent: true)
-                }
-                HoldButton(size: m.big, onChange: { input.touch.thrust = $0 }) {
-                    NovaControlCap(system: "chevron.up.2", size: m.big)
+                labeled("Next") {
+                    TapButton(size: m.small, onTap: { onDiscrete(.targetNext) }) {
+                        NovaControlCap(system: "arrow.triangle.2.circlepath", size: m.small)
+                    }
                 }
             }
+            HStack(alignment: .bottom, spacing: m.gap) {
+                labeled("Afterburn") {
+                    HoldButton(size: m.small, onChange: { input.touch.afterburner = $0 }) {
+                        NovaControlCap(system: "flame.fill", size: m.small, accent: true)
+                    }
+                }
+                labeled("Fire 2nd") {
+                    HoldButton(size: m.small, onChange: { input.touch.fireSecondary = $0 }) {
+                        NovaControlCap(system: "burst.fill", size: m.small, accent: true)
+                    }
+                }
+            }
+            HStack(alignment: .bottom, spacing: m.gap) {
+                labeled("Fire") {
+                    HoldButton(size: m.big, onChange: { input.touch.firePrimary = $0 }) {
+                        NovaControlCap(system: "bolt.fill", size: m.big, accent: true)
+                    }
+                }
+                labeled("Thrust") {
+                    HoldButton(size: m.big, onChange: { input.touch.thrust = $0 }) {
+                        NovaControlCap(system: "chevron.up.2", size: m.big)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stack a short caption under a control so each button's job is legible at a
+    /// glance. Captions carry a dark shadow so they stay readable over the
+    /// starfield, and are `.allowsHitTesting(false)` so they never absorb a press
+    /// meant for the cap above them.
+    @ViewBuilder
+    private func labeled<Content: View>(_ text: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 2 * m.s) {
+            content()
+            Text(text)
+                .font(.system(size: 9.5 * m.s, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+                .shadow(color: .black.opacity(0.85), radius: 1.5, y: 0.5)
+                .lineLimit(1)
+                .fixedSize()
+                .allowsHitTesting(false)
         }
     }
 
@@ -168,11 +215,13 @@ struct TouchControlsOverlay: View {
     // MARK: Actions menu (top-right)
 
     private var actionsToggle: some View {
-        Button { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { menuOpen.toggle() } } label: {
-            NovaControlCap(system: menuOpen ? "xmark" : "square.grid.2x2.fill",
-                           size: m.toggle, accent: !menuOpen, glyphScale: 0.42)
+        labeled(menuOpen ? "Close" : "Actions") {
+            TapButton(size: m.toggle,
+                      onTap: { withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { menuOpen.toggle() } }) {
+                NovaControlCap(system: menuOpen ? "xmark" : "square.grid.2x2.fill",
+                               size: m.toggle, accent: !menuOpen, glyphScale: 0.42)
+            }
         }
-        .buttonStyle(.plain)
     }
 
     /// The action tiles, in reading order. Kept as data so the grid can lay all
@@ -279,9 +328,15 @@ private extension View {
 }
 
 /// A press-and-hold button reporting down/up as a boolean, for the flight
-/// controls. Uses a padded rectangular hit area (bigger than the visual cap) and
-/// a `.simultaneousGesture` so edge presses register and two thumbs can hold two
-/// buttons at once — the reliability the earlier circle-only hit shape lacked.
+/// controls. Uses a padded rectangular hit area (bigger than the visual cap) so
+/// edge presses register and two thumbs can hold two buttons at once.
+///
+/// On iOS the press is captured by a real UIKit view (`PressCatcher`) laid over
+/// the cap rather than a SwiftUI gesture: the controls sit on top of the
+/// SpriteKit `SpriteView`, and a SwiftUI `DragGesture` there competes with the
+/// SKView's own touch handling — the reason presses felt dropped. A UIView wins
+/// UIKit hit-testing above the SKView, so the hold lands on the first touch and
+/// the scene never also mistakes the press for a fly-to / target tap.
 struct HoldButton<Label: View>: View {
     var size: CGFloat = 60
     let onChange: (Bool) -> Void
@@ -293,13 +348,117 @@ struct HoldButton<Label: View>: View {
             .opacity(pressed ? 0.6 : 1)
             .overlay(pressed ? Circle().fill(novaAmber.opacity(0.18)).frame(width: size, height: size) : nil)
             .scaleEffect(pressed ? 0.93 : 1)
-            .padding(size * 0.1)                  // margin around the visual cap (bigger hit area)
+            .padding(size * 0.12)                 // margin around the visual cap (bigger hit area)
             .contentShape(Rectangle())            // the whole padded box is tappable
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in if !pressed { pressed = true; onChange(true) } }
-                    .onEnded { _ in if pressed { pressed = false; onChange(false) } }
-            )
+            .modifier(PressHandling(pressed: $pressed) { down in
+                if pressed != down { pressed = down; onChange(down) }
+            })
             .animation(.easeOut(duration: 0.08), value: pressed)
     }
 }
+
+/// A momentary tap button (targeting, actions toggle) that goes through the same
+/// reliable UIKit hit path as `HoldButton`, so single taps over the SpriteKit
+/// view register on the first press instead of occasionally being swallowed.
+struct TapButton<Label: View>: View {
+    var size: CGFloat = 52
+    let onTap: () -> Void
+    @ViewBuilder let label: () -> Label
+    @State private var pressed = false
+
+    var body: some View {
+        label()
+            .opacity(pressed ? 0.6 : 1)
+            .scaleEffect(pressed ? 0.93 : 1)
+            .padding(size * 0.12)
+            .contentShape(Rectangle())
+            .modifier(PressHandling(pressed: $pressed, onTap: onTap) { _ in })
+            .animation(.easeOut(duration: 0.08), value: pressed)
+    }
+}
+
+/// Wires a control's visual to the platform touch handling: a UIKit `PressCatcher`
+/// on iOS (reliable over the SpriteKit view), a plain SwiftUI gesture on macOS
+/// (where the overlay never actually appears, but the type must still compile).
+private struct PressHandling: ViewModifier {
+    @Binding var pressed: Bool
+    var onTap: (() -> Void)? = nil
+    let onPressChange: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.overlay(PressCatcher(onPressChange: onPressChange, onTap: onTap))
+        #else
+        content
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in if !pressed { pressed = true; onPressChange(true) } }
+                    .onEnded { _ in if pressed { pressed = false; onPressChange(false); onTap?() } }
+            )
+        #endif
+    }
+}
+
+#if os(iOS)
+/// A transparent UIKit touch target overlaid on a control's visual cap.
+///
+/// SwiftUI gestures layered directly over the SpriteKit `SpriteView` are
+/// unreliable — the underlying `SKView` competes for the very same touch, which
+/// is why the on-screen controls felt like they "didn't register." A real UIView
+/// wins UIKit hit-testing above the SKView, so the press lands on the first tap
+/// and the scene never also treats it as a fly-to / target tap. `isMultipleTouch`
+/// + non-exclusive so two thumbs (turn + thrust) register at the same instant.
+struct PressCatcher: UIViewRepresentable {
+    var onPressChange: (Bool) -> Void = { _ in }
+    var onTap: (() -> Void)? = nil
+
+    func makeUIView(context: Context) -> CatcherView {
+        let v = CatcherView()
+        v.isMultipleTouchEnabled = true
+        v.isExclusiveTouch = false
+        v.backgroundColor = .clear
+        v.onPressChange = onPressChange
+        v.onTap = onTap
+        return v
+    }
+
+    func updateUIView(_ v: CatcherView, context: Context) {
+        v.onPressChange = onPressChange
+        v.onTap = onTap
+    }
+
+    final class CatcherView: UIView {
+        var onPressChange: (Bool) -> Void = { _ in }
+        var onTap: (() -> Void)?
+        private var active = Set<UITouch>()
+        private var slidOff = false
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            let wasIdle = active.isEmpty
+            active.formUnion(touches)
+            if wasIdle { slidOff = false; onPressChange(true) }
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+            // A finger that wanders well off the cap cancels a *tap*, but a held
+            // control keeps firing while the thumb stays anywhere on/near it.
+            guard onTap != nil, let t = touches.first else { return }
+            if !bounds.insetBy(dx: -28, dy: -28).contains(t.location(in: self)) { slidOff = true }
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+            let endedInside = touches.contains { bounds.insetBy(dx: -20, dy: -20).contains($0.location(in: self)) }
+            active.subtract(touches)
+            if active.isEmpty {
+                onPressChange(false)
+                if let onTap, endedInside, !slidOff { onTap() }
+            }
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            active.subtract(touches)
+            if active.isEmpty { onPressChange(false) }
+        }
+    }
+}
+#endif
