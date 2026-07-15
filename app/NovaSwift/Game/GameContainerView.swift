@@ -1961,13 +1961,16 @@ struct GameContainerView: View {
         .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
                                    onDiscrete: handleDiscrete))
         #if os(macOS)
-        // Bare-modifier bindings (Control/Option/Command rebound to a flight
-        // action in Settings -> Controls) can't go through `KeyboardControls` —
-        // see `ModifierFlagsBridge`'s doc comment for why.
-        .modifier(ModifierKeyControls(input: host.input, bindings: model.bindings,
-                                      onDiscrete: handleDiscrete))
-        .background(ArrowKeyFocusFallback(input: host.input, bindings: model.bindings,
-                                          isReclaiming: { reclaimingSceneFocus }))
+        // On macOS the flight scene owns the keyboard through one AppKit event
+        // monitor rather than SwiftUI focus. It drives every binding — including
+        // bare modifiers (Control/Option/Command/Shift), which `.onKeyPress`
+        // never reports — and *consumes* the key while flying, so nothing falls
+        // through to the system alert beep or to SwiftUI focus navigation
+        // ("switching screens"). Gated on `flightControlsVisible`, so overlays
+        // and text fields keep normal keyboard behaviour. See FlightKeyboardMonitor.
+        .background(FlightKeyboardMonitor(input: host.input, bindings: model.bindings,
+                                          isActive: { flightControlsVisible },
+                                          onDiscrete: handleDiscrete))
         #endif
     }
 
