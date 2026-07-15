@@ -25,7 +25,6 @@ struct GameMenuView: View {
 
     @State private var showSettings = false
     @State private var storyModel: StoryGuideModel?
-    @State private var storyTab: StoryGuideView.Tab = .story
     @State private var showPlayerInfo = false
     @State private var showMissions = false
     @State private var info: String?
@@ -106,7 +105,7 @@ struct GameMenuView: View {
     /// the sized sheet on macOS).
     @ViewBuilder private var storyGuideContent: some View {
         if let storyModel {
-            StoryGuideView(model: storyModel, initialTab: storyTab,
+            StoryGuideView(model: storyModel,
                            onClose: { self.storyModel = nil },
                            onAbort: { abortMission($0) })
                 .preferredColorScheme(.dark)
@@ -129,8 +128,8 @@ struct GameMenuView: View {
                         if model.uiGraphics != nil, model.data.game != nil { showMissions = true }
                         else { info = "Import your EV Nova data to view missions." }
                     }
-                    row("Story Map", "point.3.connected.trianglepath.dotted") {
-                        openStoryGuide(.map)
+                    row("Story Guide", "point.3.connected.trianglepath.dotted") {
+                        openStoryGuide()
                     }
                     row("Preferences", "gearshape.fill") { showSettings = true }
                     if showDebug {
@@ -196,12 +195,11 @@ struct GameMenuView: View {
     /// Open the Pilot Log over the live game + current pilot, on `tab`. Builds a
     /// fresh guide model (indexing the mission graph) on demand; without loaded
     /// game data there's nothing to show, so explain that instead.
-    private func openStoryGuide(_ tab: StoryGuideView.Tab) {
+    private func openStoryGuide() {
         guard let game = model.data.game else {
             info = "Load your EV Nova data to view your pilot log."
             return
         }
-        storyTab = tab
         storyModel = .over(game, player: model.pilot.state, plugins: model.data.plugins)
     }
 
