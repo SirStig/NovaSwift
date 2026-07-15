@@ -1936,7 +1936,7 @@ public final class World {
         // this). `loopSound` beams get their audio from beamLoopStart/Stop, so
         // they carry no one-shot id here.
         events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: origin, to: cast.end,
-                            hit: hit, soundID: spec.loopSound ? nil : spec.fireSoundID))
+                            hit: hit, soundID: spec.loopSound ? nil : spec.fireSoundID, weaponID: spec.id))
     }
 
     /// Raycast a beam of `range` px from `origin` along unit `dir`: the nearest

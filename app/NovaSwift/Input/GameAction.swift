@@ -12,6 +12,14 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     /// This is the one explicit fighter command left: call every deployed
     /// fighter home regardless of what it's doing.
     case recallFighters
+    /// Standing orders for the whole escort wing (hired/captured escorts and
+    /// bay-launched fighters alike) — EV Nova's Fleet Control keys, which work
+    /// instantly without opening the Escorts window first.
+    case commandEscortAggressive, commandEscortDefensive, commandEscortEvasive, commandEscortHold
+    /// Opens the Escorts roster window directly. The original only reaches it
+    /// by hailing a targeted escort/fighter (still works via `hailTarget`);
+    /// this is a NovaSwift convenience to pull it up without targeting first.
+    case openEscorts
     // Targeting
     case targetNearest, targetNext, nearestHostile, clearTarget
     // Navigation
@@ -41,9 +49,10 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .accelerate, .decelerate, .turnLeft, .turnRight, .afterburner: return .flight
         case .firePrimary, .fireSecondary, .selectSecondaryPrev, .selectSecondaryNext, .toggleCloak,
-             .recallFighters: return .combat
+             .recallFighters, .commandEscortAggressive, .commandEscortDefensive, .commandEscortEvasive,
+             .commandEscortHold: return .combat
         case .targetNearest, .targetNext, .nearestHostile, .clearTarget: return .targeting
-        case .land, .hyperjump, .galaxyMap, .autopilot, .hailTarget, .board: return .navigation
+        case .land, .hyperjump, .galaxyMap, .autopilot, .hailTarget, .board, .openEscorts: return .navigation
         case .pauseGame, .openMenu: return .interface
         }
     }

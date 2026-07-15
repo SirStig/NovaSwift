@@ -233,7 +233,7 @@ final class CombatTests: XCTestCase {
         world.intent.firePrimary = true
         world.step(1.0 / 30.0)                                      // a single frame
         XCTAssertLessThan(target.shield, 100, "beam damages on the same frame it fires")
-        XCTAssertTrue(world.events.contains { if case .beam(_, _, _, _, let hit, _) = $0 { return hit } else { return false } })
+        XCTAssertTrue(world.events.contains { if case .beam(_, _, _, _, let hit, _, _) = $0 { return hit } else { return false } })
     }
 
     // MARK: exit points & beam tracking

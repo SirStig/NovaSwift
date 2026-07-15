@@ -880,9 +880,13 @@ public final class AIBrain {
 
     /// Escort: hold a numbered slot in a tight triangle wing off the leader,
     /// rotated to the leader's heading. The leader flies the point; escorts fill
-    /// alternating left/right rows stepping back and out, so the group flies as a
-    /// crisp delta, not a swarm — and holds it while the leader cruises (matching
-    /// its heading and keeping pace) instead of braking every time it catches up.
+    /// the triangle's rows front-to-back — row 1 is a single ship dead astern,
+    /// row 2 flanks it, row 3 widens further, and so on — so the formation reads
+    /// as a solid wedge whose interior fills in as more escorts join, rather than
+    /// just its two raked edges. It holds this while the leader cruises (matching
+    /// its heading and keeping pace) instead of braking every time it catches up,
+    /// and always squares its nose to the leader's heading once parked on station
+    /// so a stopped/slow leader doesn't leave escorts facing a stale direction.
     /// They only leave this to attack when the leader actually engages (handled
     /// in `think`), then fall straight back into the wing.
     private func escort(_ me: Ship, _ world: World, _ dt: Double) -> ControlIntent {
@@ -895,13 +899,21 @@ public final class AIBrain {
             enter(defaultIdleState(me, world))
             return ControlIntent()
         }
-        // Slot → (side, rank): even slots to the right, odd to the left, each
-        // successive rank stepping one notch further back and out — the two
-        // trailing edges of a triangle with the leader at its apex.
-        let side: Double = (formationSlot % 2 == 0) ? 1 : -1
-        let rank = Double(formationSlot / 2 + 1)
-        let lateral = side * 72 * rank   // right of the leader (+) / left (−)
-        let behind = -64 * rank          // trailing the leader
+        // Slot → (row, column): row r (1-based) holds r ships, centered behind
+        // the leader and spread evenly across the row — row 1 is one ship dead
+        // astern, row 2 flanks it left/right, row 3 adds a centered ship plus two
+        // more flanks, etc. Triangular numbering (row = smallest r whose triangle
+        // number r(r+1)/2 exceeds the slot) fills the wedge's interior instead of
+        // only ever placing ships along its two trailing edges.
+        var remaining = formationSlot
+        var row = 1
+        while remaining >= row {
+            remaining -= row
+            row += 1
+        }
+        let col = remaining   // 0..<row within this row
+        let lateral = (Double(col) - Double(row - 1) / 2.0) * 72   // right of the leader (+) / left (−)
+        let behind = -64 * Double(row)                             // trailing the leader
         // Leader frame: forward = (sin a, cos a); right = (cos a, −sin a).
         let fwd = Vec2(sin(leader.angle), cos(leader.angle))
         let right = Vec2(cos(leader.angle), -sin(leader.angle))
@@ -917,8 +929,12 @@ public final class AIBrain {
         // modest limit-lift keeps the approach brisk and lets it catch a cruising
         // leader, while still reading as real thruster flight.
         if d > 150 || leaderSpeed < 30 {
-            let (intent, _) = moveTo(me, toward: station, matching: leader.velocity,
+            var (intent, arrived) = moveTo(me, toward: station, matching: leader.velocity,
                                      arriveRadius: 16, arriveSpeed: max(6, me.stats.maxSpeed * 0.04))
+            // Parked on station: square up to the leader's heading rather than
+            // holding whatever direction we last steered toward the station —
+            // otherwise a stopped/slow leader leaves escorts facing stale.
+            if arrived { intent.desiredHeading = leader.angle }
             me.formationBoost = d > 150 ? 0.6 : 1.0
             return intent
         }

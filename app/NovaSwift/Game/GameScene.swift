@@ -1043,9 +1043,10 @@ final class GameScene: SKScene {
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
 
         // Game-speed option: scale the *simulation* timestep (not the real frame
-        // delta used for perf/diagnostics above). `x1` runs below real-time for
-        // the faithful slow cruise; higher settings speed the whole world up
-        // uniformly — accel, top speed, turning and travel all ride this one dt.
+        // delta used for perf/diagnostics above). `x1` is exactly real-time —
+        // the faithful pace, matching the Bible's documented reload/regen/accel
+        // rates; higher settings speed the whole world up uniformly — accel, top
+        // speed, turning, travel, weapon reload and regen all ride this one dt.
         // The stability clamp is applied to the real delta first, so a high
         // multiplier can't blow the physics up on a hitched frame.
         let simDT = dt * settings.gameSpeed.multiplier
@@ -1173,13 +1174,25 @@ final class GameScene: SKScene {
                         node.weaponGlowFlare = 1
                     }
                 }
-            case let .beam(_, _, from, _, _, soundID):
+            case let .beam(shooterID, _, from, _, _, soundID, weaponID):
                 // Geometry is drawn from `world.activeBeams` in `syncBeams()`;
                 // this event only carries the pulse-beam fire sound. Retrigger
                 // the player's own beam only on the rising edge so a held
                 // trigger doesn't stutter; NPC beams aren't gated by `wasFiring`.
                 if let soundID, !wasFiring {
                     audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
+                }
+                // Beams fire every reload tick same as bullets, so mirror
+                // .weaponFired's ship-weapon-sprite flash here — beam guidance
+                // never emits .weaponFired, so without this a hull's authored
+                // weapon-glow overlay (e.g. the Raven's) never lights up for
+                // its own beam weapons.
+                if weaponUsesShipSprite(weaponID) {
+                    if shooterID == 0 {
+                        if weaponGlowNode != nil { weaponGlowFlare = 1 }
+                    } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
+                        node.weaponGlowFlare = 1
+                    }
                 }
             case let .beamLoopStart(shooterID, mountIndex, soundID):
                 // Beam geometry is now drawn from `world.activeBeams` in

@@ -334,11 +334,15 @@ public final class Galaxy {
         // systems park a lone stellar tens of thousands of units out, which
         // otherwise stretched the jump radius so far the system felt empty and
         // traffic took forever to cross. Clamp to a sane band so density stays
-        // believable everywhere.
+        // believable everywhere. Tuned down from an earlier 2600–6000 band that
+        // left the player's post-hyperjump arrival (spawnRadius, below) coasting
+        // in from far past where the real game ever put you — the original
+        // arrival always read as "just off the system's bulk," not a multi-second
+        // crossing from its outer edge.
         let dists = bodies.map { ($0.position - center).length }.sorted()
-        let ref: Double = dists.isEmpty ? 1200
+        let ref: Double = dists.isEmpty ? 900
             : dists[min(dists.count - 1, Int((Double(dists.count - 1) * 0.8).rounded()))]
-        let jumpRadius = min(6000, max(2600, ref * 1.5 + 700))
+        let jumpRadius = min(3200, max(1400, ref * 1.1 + 400))
         // Fixed, finite playfield that wraps toroidally (EV Nova's systems roll
         // over at the edge). Held well clear of `jumpRadius` (max 6000) so ships
         // heading out to jump always hit the hyperspace edge before the wrap.

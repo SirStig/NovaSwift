@@ -50,14 +50,18 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
-    /// Overall simulation speed. The original EV Nova ran at a deliberately
-    /// leisurely cruising pace and let you toggle Caps-Lock for a ~2× "fast"
-    /// mode; this generalises that into a proper option. `x1` is the faithful,
-    /// unhurried default — ships accelerate and cross a system slowly; each step
-    /// up roughly doubles the pace, so `x8` is the modern "get me there" speed.
-    /// Applied as a multiplier on the physics timestep, so it uniformly scales
-    /// acceleration, top speed, turning and travel time without touching any
-    /// ship stats.
+    /// Overall simulation speed. `x1` is real time — the original ran a fixed
+    /// 30fps sim and read acceleration/top-speed/weapon-reload straight off
+    /// `shïp`/`wëap` data with no global time dilation, so real time *is* the
+    /// faithful pace; the original's slow cruise feel comes entirely from those
+    /// low stat values, not from an artificial slow-motion multiplier. The
+    /// original also let you toggle Caps-Lock for a ~2× "fast" mode that sped
+    /// the whole engine up uniformly (including combat); `x2`/`x4`/`x8` here
+    /// generalise that into a proper option. Applied as a multiplier on the
+    /// physics timestep, so it uniformly scales acceleration, top speed,
+    /// turning, travel time, weapon reload and shield/armor regen — leave it at
+    /// `x1` for combat and travel pacing that matches the documented Bible
+    /// formulas exactly.
     enum GameSpeed: String, Codable, CaseIterable, Identifiable {
         case x1, x2, x4, x8
         var id: String { rawValue }
@@ -69,15 +73,13 @@ struct GameSettings: Codable, Equatable {
             case .x8: return "8×"
             }
         }
-        /// Physics-timestep multiplier. `x1` deliberately runs below real-time so
-        /// the base pace feels like the original's slow cruise; the labels double
-        /// cleanly from there (0.4 → 0.8 → 1.6 → 3.2).
+        /// Physics-timestep multiplier — `x1` is exactly real-time.
         var multiplier: Double {
             switch self {
-            case .x1: return 0.4
-            case .x2: return 0.8
-            case .x4: return 1.6
-            case .x8: return 3.2
+            case .x1: return 1.0
+            case .x2: return 2.0
+            case .x4: return 4.0
+            case .x8: return 8.0
             }
         }
     }
@@ -154,8 +156,8 @@ struct GameSettings: Codable, Equatable {
     // MARK: Gameplay
 
     var difficulty: Difficulty = .normal
-    /// Overall simulation speed (see `GameSpeed`). Default `x1` — the faithful,
-    /// deliberately slow cruising pace.
+    /// Overall simulation speed (see `GameSpeed`). Default `x1` — real time,
+    /// the faithful pace.
     var gameSpeed: GameSpeed = .x1
     /// After firing, auto-select the nearest hostile if nothing is targeted.
     var autoTargetAfterFiring: Bool = false

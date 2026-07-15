@@ -189,7 +189,9 @@ public final class SystemSyncCoordinator {
     /// world. For each ship the authority reports:
     /// - **our own ship** (`playerID == localPlayerID`): we keep predicting its
     ///   position locally but adopt the authority's **health** (shield/armor), so
-    ///   damage the authority's sim deals to us actually lands;
+    ///   damage the authority's sim deals to us actually lands, and blend/snap our
+    ///   predicted transform toward the authority's report (`reconcileOwnShip`) so
+    ///   the two independent sims can't drift apart unbounded;
     /// - **another player**: inject/update a `remotePlayer` mirror (nameplate/blip);
     /// - **an NPC** (`playerID == nil`): inject/update a `networkMirror` mirror, so
     ///   both players see and fight the same ambient/AI ships.
@@ -216,6 +218,7 @@ public final class SystemSyncCoordinator {
                 ownAuthorityID = state.id
                 world.player.shield = state.shield
                 world.player.armor = state.armor
+                reconcileOwnShip(world.player, authoritative: state)
                 continue
             }
             if let owner = state.playerID {
@@ -295,6 +298,37 @@ public final class SystemSyncCoordinator {
         ship.angle = state.angle
         ship.shield = state.shield
         ship.armor = state.armor
+    }
+
+    /// Small per-snapshot blend factor for the own-ship convergence correction.
+    private static let ownShipBlendFactor = 0.15
+    /// Divergence (world units) beyond which we snap instead of blending — a gap
+    /// this big means the two sims have genuinely desynced (e.g. differing
+    /// per-device `gameSpeed`, a dropped input) rather than ordinary float drift,
+    /// so smoothing it out over many frames would just look like sliding.
+    private static let ownShipSnapDistance = 400.0
+
+    /// Correct our own predicted ship toward the authority's report of it. We don't
+    /// keep an input-seq history to replay (no true client-side reconciliation
+    /// yet — see docs/MULTIPLAYER.md), so this is a convergence correction: each
+    /// snapshot nudges position/velocity a fraction of the way toward the
+    /// authoritative value. Without this, the two sims run independent, unsynced
+    /// physics steps (different `dt` sequences, possibly different per-device
+    /// `gameSpeed`) with nothing ever pulling them back together, so any tiny
+    /// per-frame difference compounds forever.
+    private func reconcileOwnShip(_ ship: Ship, authoritative state: ShipNetState) {
+        let authoritativePosition = Vec2(state.x, state.y)
+        let authoritativeVelocity = Vec2(state.vx, state.vy)
+        let error = (authoritativePosition - ship.position).length
+        guard error > 0.01 else { return }
+        if error > Self.ownShipSnapDistance {
+            ship.position = authoritativePosition
+            ship.velocity = authoritativeVelocity
+            ship.angle = state.angle
+        } else {
+            ship.position = ship.position + (authoritativePosition - ship.position) * Self.ownShipBlendFactor
+            ship.velocity = ship.velocity + (authoritativeVelocity - ship.velocity) * Self.ownShipBlendFactor
+        }
     }
 
     /// Default mirror hull for headless use: generous stats so the dead-reckoning

@@ -176,10 +176,13 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         ])
         coord.apply(snap, to: world, authorityPeer: "auth")
 
-        // Own health adopted from the authority; position NOT teleported (predicted).
+        // Own health adopted from the authority. Position is predicted locally, but
+        // still reconciled toward the authority's report: this gap (999 vs. the
+        // default 0,0) is past the snap threshold, so it corrects immediately
+        // rather than staying permanently diverged (see reconcileOwnShip).
         XCTAssertEqual(world.player.shield, 40, accuracy: 1e-9)
         XCTAssertEqual(world.player.armor, 55, accuracy: 1e-9)
-        XCTAssertNotEqual(world.player.position.x, 999)
+        XCTAssertEqual(world.player.position.x, 999, accuracy: 1e-9)
 
         // Friend mirrored as a remote player (nameplate/blip); NPC as a plain mirror.
         XCTAssertEqual(world.remotePlayerShips.map { $0.remotePlayer!.peerID }, ["friend"])
@@ -198,6 +201,32 @@ final class SystemSyncCoordinatorTests: XCTestCase {
         coord.apply(snap2, to: world, authorityPeer: "auth")
         XCTAssertFalse(world.npcs.contains { $0.networkMirror })
         XCTAssertEqual(world.remotePlayerShips.count, 1)
+    }
+
+    func testOwnShipSmallDriftBlendsRatherThanSnapping() {
+        // A small, ordinary divergence (float/dt drift between the two independent
+        // sims) should ease toward the authority over several snapshots rather than
+        // popping instantly — a visible teleport every snapshot would look worse
+        // than the drift it's fixing.
+        let coord = SystemSyncCoordinator(localPlayerID: "me")
+        let world = World(player: Ship(name: "Me", stats: combatStats()))
+        world.player.position = Vec2(100, 100)
+
+        let snap = WorldSnapshot(tick: 1, ackInputSeq: 0, ships: [
+            ShipNetState(id: 0, playerID: "me", shipTypeID: 128, name: "Me",
+                         x: 106, y: 100, vx: 0, vy: 0, angle: 0, shield: 100, armor: 100, control: .remote),
+        ])
+        coord.apply(snap, to: world, authorityPeer: "auth")
+
+        // Corrected toward 106, but not snapped all the way there in one snapshot.
+        XCTAssertGreaterThan(world.player.position.x, 100)
+        XCTAssertLessThan(world.player.position.x, 106)
+
+        // Feeding the same authoritative state repeatedly converges toward it.
+        for _ in 0..<40 {
+            coord.apply(snap, to: world, authorityPeer: "auth")
+        }
+        XCTAssertEqual(world.player.position.x, 106, accuracy: 0.1)
     }
 
     func testClientEchoesAuthorityShotsSkippingItsOwn() {

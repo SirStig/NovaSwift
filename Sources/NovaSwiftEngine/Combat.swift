@@ -259,7 +259,13 @@ public struct WeaponSpec {
         reloadSeconds = max(0.1, Double(w.reload) / tuning.framesPerSecond)
         projectileSpeed = Double(w.speed) * tuning.unitToPxPerSec
         // WeapRes.range is speed(unit/frame)×duration(frames); scale to px.
-        range = max(60, w.range * tuning.unitToPxPerSec / tuning.framesPerSecond)
+        // A beam's `range` is already a plain pixel length (`max(beamLength, 50)`,
+        // see `WeapRes.range`), not a speed×duration product — applying the same
+        // frame-rate scale to it crushed every beam's actual hit distance down to
+        // the 60px floor regardless of its real beamLength (a 260–400px beam could
+        // only ever connect within ~60px), which read as "this weapon does nothing."
+        range = w.isBeam ? Double(max(60, w.range))
+                          : max(60, w.range * tuning.unitToPxPerSec / tuning.framesPerSecond)
         accuracyRadians = Double(w.accuracy) * .pi / 180.0
         isBeam = w.isBeam
         isGuided = w.isGuided
@@ -299,7 +305,10 @@ public struct WeaponSpec {
             else { et = .gun }
         }
         exitType = et
-        beamWidth = Double(max(0, w.beamWidth))
+        // The Bible's `BeamWidth` is a radius in pixels ("actually, radius"),
+        // so double it here — every downstream consumer (ActiveBeam, the
+        // renderer's beam sprite/lightning stroke) expects a full width.
+        beamWidth = Double(max(0, w.beamWidth)) * 2
         beamColor = w.isBeam ? (Double(w.beamColor.r) / 255.0,
                                 Double(w.beamColor.g) / 255.0,
                                 Double(w.beamColor.b) / 255.0) : nil
@@ -651,7 +660,7 @@ public enum WorldEvent {
     /// `mountIndex` lets the renderer correlate this shot with an active
     /// `beamLoopStart` on the same mount (continuous beams reposition one
     /// persistent line instead of spawning a fresh flash node every tick).
-    case beam(shooterID: Int, mountIndex: Int, from: Vec2, to: Vec2, hit: Bool, soundID: Int?)
+    case beam(shooterID: Int, mountIndex: Int, from: Vec2, to: Vec2, hit: Bool, soundID: Int?, weaponID: Int = -1)
     /// A `loopSound` beam mount started/stopped continuous fire (trigger
     /// held/released, independent of the reload tick) — the renderer should
     /// start/stop a real looping voice rather than retrigger a one-shot per tick.
