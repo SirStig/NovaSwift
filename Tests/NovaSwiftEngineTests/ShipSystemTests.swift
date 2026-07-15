@@ -371,15 +371,21 @@ final class ShipSystemTests: XCTestCase {
         col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
         let galaxy = Galaxy(game: NovaGame(col))
 
+        // Raw stat -> px/sec² goes through `FlightTuning.default.accelScale`
+        // (currently 0.55, calibrated against the original's flight feel —
+        // see `FlightTuning`'s doc comment) before SkillVar's jitter is
+        // applied on top, so expectations are derived from that scale rather
+        // than assuming raw stats pass straight through unscaled.
+        let scaledAccel = 200 * FlightTuning.default.accelScale
         let stock = try XCTUnwrap(galaxy.makeShip(128))
-        XCTAssertEqual(stock.stats.acceleration, 200, "no roll supplied -> no jitter")
+        XCTAssertEqual(stock.stats.acceleration, scaledAccel, accuracy: 1e-9, "no roll supplied -> no jitter")
 
         let ace = try XCTUnwrap(galaxy.makeShip(128, skillRoll: 1.0))
-        XCTAssertEqual(ace.stats.acceleration, 240, accuracy: 1e-9, "+20% at roll = 1.0")
+        XCTAssertEqual(ace.stats.acceleration, scaledAccel * 1.2, accuracy: 1e-9, "+20% at roll = 1.0")
         XCTAssertEqual(ace.stats.turnRate, stock.stats.turnRate * 1.2, accuracy: 1e-9)
 
         let rookie = try XCTUnwrap(galaxy.makeShip(128, skillRoll: -1.0))
-        XCTAssertEqual(rookie.stats.acceleration, 160, accuracy: 1e-9, "-20% at roll = -1.0")
+        XCTAssertEqual(rookie.stats.acceleration, scaledAccel * 0.8, accuracy: 1e-9, "-20% at roll = -1.0")
         XCTAssertEqual(rookie.stats.maxSpeed, stock.stats.maxSpeed, "SkillVar doesn't touch top speed")
     }
 

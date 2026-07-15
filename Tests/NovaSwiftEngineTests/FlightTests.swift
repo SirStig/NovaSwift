@@ -73,9 +73,13 @@ final class FlightTests: XCTestCase {
     }
 
     func testStatsFromNovaUnits() {
+        // Raw stat -> px/sec(²) goes through `FlightTuning.default`'s
+        // speed/accel scale (currently 0.55, calibrated against the
+        // original's flight feel — see `FlightTuning`'s doc comment), not a
+        // 1:1 passthrough.
         let s = ShipStats(speed: 300, acceleration: 500, turnRate: 40)
-        XCTAssertEqual(s.maxSpeed, 300 * 1.0, accuracy: 1e-9)
-        XCTAssertEqual(s.acceleration, 500 * 1.0, accuracy: 1e-9)
+        XCTAssertEqual(s.maxSpeed, 300 * FlightTuning.default.speedScale, accuracy: 1e-9)
+        XCTAssertEqual(s.acceleration, 500 * FlightTuning.default.accelScale, accuracy: 1e-9)
         XCTAssertGreaterThan(s.turnRate, 0)
     }
 

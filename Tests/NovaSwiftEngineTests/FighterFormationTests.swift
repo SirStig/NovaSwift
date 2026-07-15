@@ -2,10 +2,13 @@ import XCTest
 @testable import NovaSwiftKit
 @testable import NovaSwiftEngine
 
-/// TEMP diagnostic: trace a player-launched fighter's state + distance from the
-/// player over time, with NO enemies present, to reproduce the reported
-/// "fighters fly off far away and circle forever" bug.
-final class FighterTraceTests: XCTestCase {
+/// Regression: a player-launched fighter must hold formation on its carrier
+/// even while the carrier is continuously maneuvering. The original bug had the
+/// escort controller pure-pursue the (orbiting) formation slot of a turning
+/// leader, which settled into a fixed-radius lag orbit — "launch a fighter and
+/// it flies off to a random point and circles forever." The velocity-matching
+/// controller converges instead, so the fighter stays on station.
+final class FighterFormationTests: XCTestCase {
 
     private func put16(_ b: inout [UInt8], _ off: Int, _ v: Int) {
         let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
@@ -40,24 +43,19 @@ final class FighterTraceTests: XCTestCase {
         return NovaGame(col)
     }
 
-    func testTracePlayerLaunchedFighterNoEnemies() throws {
+    func testFighterHoldsFormationOnManeuveringCarrier() throws {
         let galaxy = Galaxy(game: game())
-        world_diplomacy: do {}
-        // Player IS the carrier: give the player the bay-equipped hull.
+        // Player IS the carrier.
         let player = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))
         player.position = Vec2(0, 0)
         player.velocity = Vec2(0, 0)
         let world = World(player: player)
         world.galaxy = galaxy
         world.diplomacy = galaxy.makeDiplomacy()
-
-        // Manually launch a fighter the way the player's fire path does.
         let bay = try XCTUnwrap(player.fighterBays.first)
-        // Step a few frames first so roster is built.
         world.step(1.0 / 30.0)
 
-        // Simulate the player pulling the bay trigger: spawn one fighter as an
-        // escort of the player. Mirror launchFighter's setup.
+        // Launch one fighter as a player escort (mirrors the fire-path setup).
         let pos = player.position + Vec2.heading(player.angle) * (player.radius + 20)
         let fighter = try XCTUnwrap(galaxy.makeLoadedShip(bay.spec.fighterShipID, government: player.government,
                                                           at: pos, angle: player.angle))
@@ -65,35 +63,33 @@ final class FighterTraceTests: XCTestCase {
         fighter.brain = brain
         brain.leaderID = World.playerEntityID
         brain.escortOrder = EscortOrder.defensive
-        brain.formationSlot = 0
         fighter.carrierID = World.playerEntityID
         fighter.velocity = player.velocity
         _ = world.addNPC(fighter)
 
-        print("=== TRACE: player-launched fighter, NO enemies — 8s hard turn, then 8s straight cruise ===")
-        // Drive the player like a real pilot: hold a cruise velocity along its
-        // heading and slowly turn, so the leader's angle changes over time.
-        for f in 0..<480 {
-            // First 8s: continuous hard turn (the worst case). Then straight
-            // cruise, to confirm the wing closes tight and holds without
-            // overshoot/oscillation.
-            if f < 240 { player.angle += 0.4 * (1.0 / 30.0) }
-            let cruise = player.stats.maxSpeed
-            player.velocity = Vec2.heading(player.angle) * cruise
-            player.position += player.velocity * (1.0 / 30.0)
+        // The slot for row 0 sits ~one slot-spacing behind the leader; the wing
+        // should hold within a small multiple of that, never run away to the
+        // hundreds-of-units lag orbit the bug produced (~550+).
+        let slotSpacing = max(64, player.radius + fighter.radius + 40)
+        let maxAllowed = slotSpacing * 2.2
 
+        var maxSeen = 0.0
+        for f in 0..<600 {
+            // Continuous hard turn at cruise — the worst case for formation
+            // keeping, and exactly what a carrier dogfighting does.
+            player.angle += 0.4 * (1.0 / 30.0)
+            player.velocity = Vec2.heading(player.angle) * player.stats.maxSpeed
+            player.position += player.velocity * (1.0 / 30.0)
             world.step(1.0 / 30.0)
-            if f % 15 == 0 {
+            // Allow a couple seconds to close from the launch point first.
+            if f > 60 {
                 let d = (fighter.position - player.position).length
-                let st = fighter.brain?.state.rawValue ?? "?"
-                let tgt = fighter.brain?.targetID.map(String.init) ?? "nil"
-                print(String(format: "t=%.1fs state=%@ target=%@ dist=%.0f fpos=(%.0f,%.0f) fspd=%.0f ppos=(%.0f,%.0f)",
-                             Double(f) / 30.0, st, tgt, d,
-                             fighter.position.x, fighter.position.y, fighter.velocity.length,
-                             player.position.x, player.position.y))
+                maxSeen = max(maxSeen, d)
+                XCTAssertEqual(fighter.brain?.state, .escorting,
+                               "fighter should stay escorting, not peel off")
             }
         }
-        let finalDist = (fighter.position - player.position).length
-        print("=== final dist from player: \(Int(finalDist)) ===")
+        XCTAssertLessThan(maxSeen, maxAllowed,
+                          "fighter held within \(Int(maxAllowed))px of its maneuvering carrier (saw \(Int(maxSeen)))")
     }
 }
