@@ -126,4 +126,32 @@ final class PresenceTests: XCTestCase {
         XCTAssertEqual(s[1].sessionRules, .safe)
         XCTAssertEqual(received, .safe)
     }
+
+    /// A joiner that connects *after* the host set the rules must still converge to
+    /// them — the host re-sends its rules on peer connect (`providesRules`). Without
+    /// this a late joiner keeps its seed rules (e.g. `.safe`, no real PvP damage).
+    func testLateJoinerAdoptsHostRules() {
+        let net = LoopbackNetwork()
+        // Host A owns full-stakes rules and provides them to newcomers.
+        let tA = LoopbackTransport(peerID: "A", network: net)
+        let sA = NetSession(transport: tA, rules: .fullStakes)
+        sA.providesRules = true
+        sA.updateLocalPresence(name: "Ari", systemID: 100)
+        tA.connect()   // host alone — the initial broadcast reaches nobody
+
+        // Guest B joins later, seeded with `.safe` (no real PvP damage) and never
+        // pushing its own rules.
+        let tB = LoopbackTransport(peerID: "B", network: net)
+        let sB = NetSession(transport: tB, rules: .safe)
+        var received: SessionRules?
+        sB.onRulesChanged = { received = $0 }
+        tB.connect()
+
+        // On connect, B should have been handed the host's full-stakes rules.
+        XCTAssertEqual(sB.sessionRules, .fullStakes)
+        XCTAssertEqual(received, .fullStakes)
+        XCTAssertTrue(sB.sessionRules.pvpDamageReal)
+        // The host must not have adopted the guest's seed rules.
+        XCTAssertEqual(sA.sessionRules, .fullStakes)
+    }
 }

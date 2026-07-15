@@ -202,6 +202,10 @@ final class MultiplayerSession: ObservableObject {
                           shipTypeID: Int?, rules: SessionRules, broadcastRules: Bool = true) {
         if let shipTypeID { localShipTypeID = shipTypeID }
         let session = NetSession(transport: transport, rules: rules)
+        // The host owns the rules: it must (re)send them to every peer that connects
+        // later, or a joiner keeps its seed `.safe` rules (no real PvP damage) even
+        // when it becomes a system's sync authority. Guests never push rules.
+        session.providesRules = broadcastRules
         localPlayerID = session.localPlayerID     // the transport owns the peer id
         wire(session)
         self.transport = transport

@@ -54,6 +54,14 @@ public final class NetSession: TransportDelegate {
     /// rejoin is ignored until the session ends.
     public private(set) var bannedIDs: Set<String> = []
 
+    /// Whether this node owns the session rules (the host). When true, a peer that
+    /// connects *after* the rules were set is sent the current rules immediately —
+    /// without this, a late joiner keeps its seed rules forever (the host's
+    /// `broadcastRules` at start reaches nobody, since no peer is connected yet).
+    /// Must stay false on guests so they never overwrite the host's rules with
+    /// their own seed. Set by the app when it hosts.
+    public var providesRules = false
+
     public init(transport: Transport, rules: SessionRules = .fullStakes) {
         self.localPlayerID = transport.localPeerID
         self.transport = transport
@@ -241,6 +249,11 @@ public final class NetSession: TransportDelegate {
             send(.presence(mine), to: peer)
         }
         send(.presenceRequest, to: peer)
+        // Host: the newcomer wasn't connected when we set the rules, so send them
+        // now — otherwise it stays on its seed rules (e.g. no real PvP damage).
+        if providesRules {
+            send(.sessionRules(sessionRules), to: peer)
+        }
     }
 
     public func transport(_ transport: Transport, peerDidDisconnect peer: PeerID) {

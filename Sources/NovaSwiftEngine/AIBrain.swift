@@ -150,6 +150,11 @@ public final class AIBrain {
     /// it lifts off and departs. Rolled once on touchdown so dwell times vary
     /// ship-to-ship; -1 means "not yet rolled".
     var dockDwell: Double = -1
+    /// A fixed point just outside the planet surface the docked trader holds
+    /// station on — set once on touchdown from where the ship pulled up. Holding
+    /// a fixed spot (not the planet centre, which the ship can never reach) is
+    /// what lets it actually brake to a standstill instead of orbiting.
+    var dockPoint: Vec2?
     /// The hypergate this ship decided to use for its current departure, once
     /// `depart()` has rolled that decision (see `pickDepartureGate`) — nil means
     /// either "not decided yet" (checked via `departureGateChecked`) or "decided
@@ -970,32 +975,31 @@ public final class AIBrain {
         guard let sid = destSpob,
               let body = world.systemContext.bodies.first(where: { $0.id == sid }) else {
             // Port gone (system swapped out from under us) — just leave.
-            destination = nil; destSpob = nil
+            destination = nil; destSpob = nil; dockPoint = nil; dockDwell = -1
             enter(.departing)
             return depart(me, world)
         }
-        if dockDwell < 0 { dockDwell = world.rng.double(in: 6...16) }
+        if dockDwell < 0 { dockDwell = world.rng.double(in: 8...16) }
+        // Pin the spot we park on the first frame here: a fixed point just off the
+        // planet surface, in the direction the ship pulled up from. We steer to
+        // *this*, not the planet centre — a ship told to arrive at the centre can
+        // never reach it (the planet's in the way), so it would thrust in and
+        // orbit forever at speed instead of ever coming to rest.
+        if dockPoint == nil {
+            let away = me.position - body.position
+            let dir = away.length > 1 ? away.normalized : Vec2(0, 1)
+            dockPoint = body.position + dir * (body.radius + 50)
+        }
         // Lift off once we've loitered long enough.
         if stateClock > dockDwell {
-            dockDwell = -1
-            destination = nil; destSpob = nil
+            destination = nil; destSpob = nil; dockPoint = nil; dockDwell = -1
             enter(.departing)
             return depart(me, world)
         }
-        let hold = body.radius + 30
-        let dist = (body.position - me.position).length
-        // Drifted off the pad → ease back onto it; otherwise brake any residual
-        // motion to a standstill and sit.
-        if dist > hold + 40 {
-            return arrive(me, to: body.position, slowRadius: max(120, hold))
-        }
-        var intent = ControlIntent()
-        if me.velocity.length > 6 {
-            // Point retrograde and burn to kill the last bit of drift.
-            intent.desiredHeading = (me.velocity * -1).angle
-            intent.thrust = true
-        }
-        return intent
+        // Arrive onto the fixed park point and hold it — `moveTo` brakes the ship
+        // to a stop within tolerance and then issues no thrust, so the trader sits
+        // still beside the pad for the dwell.
+        return arrive(me, to: dockPoint ?? body.position, slowRadius: 120)
     }
 
     /// Warship patrol: fly a steady beat from one stellar object to the next — a

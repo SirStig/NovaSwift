@@ -382,9 +382,7 @@ final class AIBehaviorTests: XCTestCase {
         for _ in 0..<600 {                                              // up to 20s
             world.step(1.0 / 30.0)
             maxCrossTrack = max(maxCrossTrack, abs(trader.position.x))
-            if world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }) {
-                landed = true; break
-            }
+            if trader.brain?.state == .docked { landed = true; break }  // reached & parked at the pad
         }
         // Velocity-compensated steering pulls the +x drift back toward the course:
         // the excursion stays bounded (naïve steering would fling it far off and
@@ -425,9 +423,7 @@ final class AIBehaviorTests: XCTestCase {
             let before = trader.angle
             world.step(1.0 / 30.0)
             totalRotation += abs(trader.angle - before)
-            if world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }) {
-                landed = true; break
-            }
+            if trader.brain?.state == .docked { landed = true; break }  // reached & parked at the pad
         }
         XCTAssertTrue(landed, "a trader on a clean, direct approach should still land")
         XCTAssertLessThan(totalRotation, 3 * 2 * .pi,
@@ -513,7 +509,9 @@ final class AIBehaviorTests: XCTestCase {
         XCTFail("further damage on an already-disabled hulk should destroy it outright")
     }
 
-    func testTraderLandsAndVanishesIntoSpaceport() {
+    func testTraderParksBesidePlanetThenDepartsInsteadOfVanishing() {
+        // EV Nova traders don't dive into the spaceport and disappear — they pull
+        // up beside the pad, sit still for a spell, then throttle up and leave.
         let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
                                        position: Vec2(9_000, 9_000)))
         world.diplomacy = Diplomacy(govts: [govt(202, classes: [3])])
@@ -525,15 +523,33 @@ final class AIBehaviorTests: XCTestCase {
         trader.brain = AIBrain(aiType: .braveTrader, govt: 202)
         world.addNPC(trader)
 
-        var landed = false
-        for _ in 0..<600 {                                     // up to 20s
+        // Fly it in and find the window where it's parked (docked).
+        var reachedDock = false
+        var dockedFrames = 0
+        var slowestWhileDocked = Double.greatestFiniteMagnitude
+        var departedAfterDock = false
+        for _ in 0..<1800 {                                     // up to 60s
             world.step(1.0 / 30.0)
-            if world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }) {
-                landed = true; break
+            let st = trader.brain?.state
+            if st == .docked {
+                reachedDock = true
+                dockedFrames += 1
+                slowestWhileDocked = min(slowestWhileDocked, trader.velocity.length)
+            } else if reachedDock, st == .departing {
+                departedAfterDock = true
+                break
             }
+            // It must never despawn into the spaceport under the new model.
+            XCTAssertFalse(world.events.contains(where: { if case .shipLanded = $0 { return true } else { return false } }),
+                           "a trader should park beside the planet, not vanish into the spaceport")
         }
-        XCTAssertTrue(landed, "a trader should reach a planet and set down")
-        XCTAssertFalse(world.npcs.contains { $0 === trader }, "a landed ship vanishes into the spaceport")
+        XCTAssertTrue(reachedDock, "a trader should reach the planet and park beside it")
+        XCTAssertTrue(world.npcs.contains { $0 === trader }, "a docked ship stays present in the system")
+        // It should sit for a real dwell (dockDwell rolls 6…16s), not a split second.
+        XCTAssertGreaterThan(Double(dockedFrames) / 30.0, 4.0,
+                             "the trader should loiter at the pad for several seconds, not blink through it")
+        XCTAssertLessThan(slowestWhileDocked, 20.0, "while parked it should actually come (nearly) to a stop")
+        XCTAssertTrue(departedAfterDock, "after loitering, the trader lifts off and departs the system")
     }
 
     func testTraderNeverLandsOnUninhabitedOrNonLandableBody() {
