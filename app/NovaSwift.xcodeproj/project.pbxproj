@@ -265,6 +265,7 @@
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = LaunchScreen.storyboard;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
+				INFOPLIST_KEY_GCSupportsGameMode = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_NSBonjourServices = "_novaswift-mp._tcp _novaswift-mp._udp";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";
@@ -316,6 +317,7 @@
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = LaunchScreen.storyboard;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
+				INFOPLIST_KEY_GCSupportsGameMode = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_NSBonjourServices = "_novaswift-mp._tcp _novaswift-mp._udp";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";

@@ -1,6 +1,9 @@
 import SwiftUI
 import NovaSwiftKit
 import NovaSwiftStory
+#if os(macOS)
+import AppKit
+#endif
 
 /// The in-game menu — a single, clean, animated panel that slides in from the
 /// left and hosts every non-flight action: resume, galaxy map, mission log,
@@ -132,6 +135,14 @@ struct GameMenuView: View {
                         openStoryGuide()
                     }
                     row("Preferences", "gearshape.fill") { showSettings = true }
+                    #if os(macOS)
+                    // Native full screen also works from the green window button
+                    // or ⌃⌘F; this is the in-game control. Full screen is what
+                    // lets macOS Game Mode kick in (see GCSupportsGameMode).
+                    row("Full Screen", "arrow.up.left.and.arrow.down.right") {
+                        NSApp.keyWindow?.toggleFullScreen(nil)
+                    }
+                    #endif
                     if showDebug {
                         row("Debug Suite", "ladybug.fill",
                             tint: Color(red: 0.35, green: 0.95, blue: 0.5)) { onOpenDebug() }

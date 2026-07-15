@@ -43,6 +43,13 @@ final class GameControllerInput {
         if ly > dz { c.thrust = true }
         if ly < -dz { c.reverse = true }
 
+        // D-pad mirrors the left stick (digital, no dead zone) so the ship can
+        // be flown entirely from the pad without touching an analog stick.
+        if pad.dpad.left.isPressed { c.turnLeft = true }
+        if pad.dpad.right.isPressed { c.turnRight = true }
+        if pad.dpad.up.isPressed { c.thrust = true }
+        if pad.dpad.down.isPressed { c.reverse = true }
+
         // Right stick: absolute aim (magnitude past deadzone).
         let rx = pad.rightThumbstick.xAxis.value
         let ry = pad.rightThumbstick.yAxis.value
