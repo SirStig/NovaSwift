@@ -47,8 +47,10 @@ final class FighterBayTests: XCTestCase {
         XCTAssertEqual(lo.fighterBays.count, 1)
         XCTAssertEqual(lo.fighterBays.first?.fighterShipID, 144)
         XCTAssertEqual(lo.fighterBays.first?.capacity, 3)
-        // The bay is NOT a firing weapon mount.
-        XCTAssertFalse(lo.weapons.contains { $0.id == 149 })
+        // The bay's own mount stays in `weapons` too, so it's selectable as a
+        // secondary — real EV Nova bays act exactly like a missile launcher:
+        // select it, pull the trigger, one fighter launches.
+        XCTAssertTrue(lo.weapons.contains { $0.id == 149 })
     }
 
     func testCarrierLaunchesFightersInCombat() throws {
@@ -101,7 +103,15 @@ final class FighterBayTests: XCTestCase {
         XCTAssertEqual(slots.count, 3, "each fighter got its own formation slot instead of stacking on 0")
     }
 
-    func testFightersDockWhenCarrierLeavesCombat() throws {
+    func testFightersStayOutWhenCarrierLeavesCombatButDockWhenBadlyHurt() throws {
+        // Regression-guarding the *current*, deliberate behavior (see
+        // `updateFighterBays`'s doc comment): a fighter does NOT get yanked home
+        // just because its carrier lost its target/left combat — only when the
+        // fighter itself is dry on ammo or badly hurt (or the player explicitly
+        // recalls it). The old version of this test asserted the opposite
+        // (carrier-leaves-combat ⇒ auto-recall), which is exactly the "yank every
+        // fighter home the instant you deselected a target" behavior the current
+        // code deliberately moved away from.
         let galaxy = Galaxy(game: game())
         let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))
         carrier.brain = nil
@@ -115,12 +125,21 @@ final class FighterBayTests: XCTestCase {
         let fighter = try XCTUnwrap(world.npcs.first { $0.carrierID == carrier.entityID })
         XCTAssertEqual(carrier.fighterBays.first?.docked, 2)
 
-        // Carrier leaves combat → the fighter is recalled; place it on the carrier
-        // so it docks immediately.
+        // Carrier leaves combat: place the fighter right on the carrier (so
+        // proximity is never the blocker) and step — it should NOT dock.
         carrier.currentTargetID = nil
         fighter.position = carrier.position
         for _ in 0..<3 { world.step(1.0 / 30.0) }
-        XCTAssertFalse(world.npcs.contains { $0.entityID == fighter.entityID }, "fighter docked away")
+        XCTAssertTrue(world.npcs.contains { $0.entityID == fighter.entityID },
+                      "leaving combat alone shouldn't recall a healthy, armed fighter")
+        XCTAssertEqual(carrier.fighterBays.first?.docked, 2, "bay unchanged — fighter still deployed")
+
+        // Now badly hurt it (below the 30% health-fraction recall threshold):
+        // still on top of the carrier, it should dock on the next step.
+        fighter.armor = fighter.maxArmor * 0.1
+        fighter.shield = 0
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(world.npcs.contains { $0.entityID == fighter.entityID }, "badly hurt fighter docks away")
         XCTAssertEqual(carrier.fighterBays.first?.docked, 3, "bay restored on dock")
     }
 

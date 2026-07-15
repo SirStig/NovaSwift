@@ -715,7 +715,9 @@ public struct WeapRes {
     /// long `burstReload` cooldown (Bible, @90/@92). 0/-1 = no burst.
     public let burstCount: Int
     public let burstReload: Int
-    /// Recoil impulse applied to the firing ship (@86). -1 → 0.
+    /// Recoil impulse applied to the firing ship (@86). -1 → 0 (no recoil);
+    /// any other negative value means "thrust the ship forward" instead of the
+    /// usual backward kick (Bible), so the sign must survive past decode.
     public let recoil: Int
     /// Raw `Flags2` field (@72), for submunition/prox behaviour flags.
     public let flags2Raw: UInt16
@@ -872,7 +874,8 @@ public struct WeapRes {
         flags2Raw = au16(d, 72)
         flags3Raw = au16(d, 102)
         durability = ai16(d, 104)
-        recoil = max(0, ai16(d, 86))
+        let rawRecoil = ai16(d, 86)
+        recoil = rawRecoil == -1 ? 0 : rawRecoil
         exitType = ai16(d, 88)
         burstCount = ai16(d, 90)
         burstReload = ai16(d, 92)

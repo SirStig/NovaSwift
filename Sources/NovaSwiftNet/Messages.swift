@@ -140,12 +140,39 @@ public struct BeamNetState: Codable, Equatable, Sendable {
     public var hit: Bool
     public var width: Double
     public var color: [Double]?
+    /// The glow color/falloff this beam fades to away from its core `color` —
+    /// without these a guest's echoed beam always renders as a flat generic
+    /// bar instead of the weapon's real core→corona art. Defaulted so old
+    /// snapshots (or a peer on a stale build) still decode.
+    public var coronaColor: [Double]?
+    public var coronaFalloff: Double
 
     public init(shooterID: Int, weaponID: Int, fromX: Double, fromY: Double, toX: Double,
-                toY: Double, hit: Bool, width: Double, color: [Double]?) {
+                toY: Double, hit: Bool, width: Double, color: [Double]?,
+                coronaColor: [Double]? = nil, coronaFalloff: Double = 0) {
         self.shooterID = shooterID; self.weaponID = weaponID
         self.fromX = fromX; self.fromY = fromY; self.toX = toX; self.toY = toY
         self.hit = hit; self.width = width; self.color = color
+        self.coronaColor = coronaColor; self.coronaFalloff = coronaFalloff
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case shooterID, weaponID, fromX, fromY, toX, toY, hit, width, color, coronaColor, coronaFalloff
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        shooterID = try c.decode(Int.self, forKey: .shooterID)
+        weaponID = try c.decode(Int.self, forKey: .weaponID)
+        fromX = try c.decode(Double.self, forKey: .fromX)
+        fromY = try c.decode(Double.self, forKey: .fromY)
+        toX = try c.decode(Double.self, forKey: .toX)
+        toY = try c.decode(Double.self, forKey: .toY)
+        hit = try c.decode(Bool.self, forKey: .hit)
+        width = try c.decode(Double.self, forKey: .width)
+        color = try c.decodeIfPresent([Double].self, forKey: .color)
+        coronaColor = try c.decodeIfPresent([Double].self, forKey: .coronaColor)
+        coronaFalloff = try c.decodeIfPresent(Double.self, forKey: .coronaFalloff) ?? 0
     }
 }
 

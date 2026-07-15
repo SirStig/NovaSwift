@@ -58,7 +58,9 @@ extension WorldSnapshot {
                 shooterID: b.shooterID, weaponID: b.weaponID,
                 fromX: b.from.x, fromY: b.from.y, toX: b.to.x, toY: b.to.y,
                 hit: b.hit, width: b.width,
-                color: b.color.map { [$0.r, $0.g, $0.b] }))
+                color: b.color.map { [$0.r, $0.g, $0.b] },
+                coronaColor: b.coronaColor.map { [$0.r, $0.g, $0.b] },
+                coronaFalloff: b.coronaFalloff))
         }
         // One-shot effects fired this frame (explosions). Read `world.events`
         // *before* the scene drains them — the authority's post-step sync does.

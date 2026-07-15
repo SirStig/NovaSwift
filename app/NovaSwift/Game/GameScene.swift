@@ -1187,10 +1187,13 @@ final class GameScene: SKScene {
                 }
             case let .beam(shooterID, _, from, _, _, soundID, weaponID):
                 // Geometry is drawn from `world.activeBeams` in `syncBeams()`;
-                // this event only carries the pulse-beam fire sound. Retrigger
-                // the player's own beam only on the rising edge so a held
-                // trigger doesn't stutter; NPC beams aren't gated by `wasFiring`.
-                if let soundID, !wasFiring {
+                // this event only carries the pulse-beam fire sound (`soundID`
+                // is nil for `loopSound` beams, which get their audio from
+                // `.beamLoopStart`/`.beamLoopStop` instead). `.beam` only fires
+                // once per real reload tick, same as `.weaponFired` — which
+                // plays unconditionally every shot — so a held trigger should
+                // click on every shot here too, not just the first.
+                if let soundID {
                     audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
                 }
                 // Beams fire every reload tick same as bullets, so mirror
@@ -2221,11 +2224,36 @@ final class GameScene: SKScene {
                 continue
             }
             let b = beams[i]
+            // Continuous beams only get a `.beam` event once per real reload
+            // tick (≥0.1s apart), but `weaponGlowFlare` decays every physics
+            // frame — re-arming just from that event made a held continuous
+            // beam's glow visibly strobe between ticks instead of holding
+            // steady. `syncBeams` runs every frame, so re-arm it here for as
+            // long as the beam is actually live. Also covers a co-op guest's
+            // `visualOnly` echo of another player's/NPC's beam: mirrored ships
+            // never run through this machine's own `World.step`, so they never
+            // emit a real `.beam`/`.weaponFired` event locally — without this,
+            // a guest would see the beam itself but never its ship-weapon-sprite
+            // glow. The echo is re-seeded every snapshot only while the remote
+            // beam is actually firing, so "present in `activeBeams` this frame"
+            // is as good a proxy for "flash it" as a guest can get.
+            if (b.continuous || b.visualOnly) && weaponUsesShipSprite(b.weaponID) {
+                if b.shooterID == 0 {
+                    if weaponGlowNode != nil { weaponGlowFlare = 1 }
+                } else if let node = npcNodes[b.shooterID], node.weaponGlow != nil {
+                    node.weaponGlowFlare = 1
+                }
+            }
             let from = CGPoint(x: b.from.x, y: b.from.y)
             let to = CGPoint(x: b.to.x, y: b.to.y)
             let dx = b.to.x - b.from.x, dy = b.to.y - b.from.y
             let length = max(1, CGFloat((dx * dx + dy * dy).squareRoot()))
-            let width = CGFloat(b.width > 0 ? b.width : 3)
+            // BeamWidth == 0 is a deliberate authoring choice (Bible: "no center
+            // beam, just corona glow") — give it real room to render its glow
+            // rather than collapsing to the same `3` fallback used when a beam
+            // simply has no color data at all (see the plain-bar branch below).
+            let isCoronaOnly = b.width <= 0
+            let width = CGFloat(isCoronaOnly ? 8 : b.width)
             let color: SKColor
             if let c = b.color {
                 color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)
@@ -2234,8 +2262,13 @@ final class GameScene: SKScene {
                               : SKColor(white: 0.85, alpha: 1)
             }
             // A continuous beam holds full brightness while its trigger is down;
-            // a pulse beam fades out over its short life instead of blinking off.
-            let alpha = b.continuous ? 0.95 : max(0.1, CGFloat(b.life / 0.08))
+            // a pulse beam fades out over its own real onscreen duration (the
+            // weapon's `maxLife`, not a shared hardcoded constant) instead of
+            // blinking off. A co-op visual-only echo is never life-counted
+            // (`life == .infinity`) — treat it like a continuous beam rather
+            // than divide infinity by infinity into NaN.
+            let alpha = (b.continuous || !b.life.isFinite) ? 0.95
+                        : max(0.1, CGFloat(b.life / max(b.maxLife, 0.001)))
 
             if let li = lightningParams(for: b.weaponID) {
                 // Lightning beam: a jagged, per-frame re-seeded bolt (LiDensity
@@ -2264,7 +2297,7 @@ final class GameScene: SKScene {
                     node.colorBlendFactor = 0
                     node.blendMode = .alpha
                     node.alpha = alpha
-                } else if let corona = beamCoronaTexture(for: b) {
+                } else if let corona = beamCoronaTexture(for: b, coreless: isCoronaOnly) {
                     // Real EV Nova beams carry no sprite art at all — a bright
                     // `beamColor` core fading to `coronaColor` at the edges IS
                     // their authored art. Baked into the texture (not tinted
@@ -2371,10 +2404,15 @@ final class GameScene: SKScene {
     /// made every stock beam look distinct in the original game; before this,
     /// every beam without its own `graphicSpinID` (i.e. almost all of them)
     /// rendered as the same flat white bar tinted only by `beamColor`.
-    private func beamCoronaTexture(for beam: ActiveBeam) -> SKTexture? {
+    /// `coreless` renders `BeamWidth == 0`'s "no center beam, just corona glow"
+    /// (Bible) — a distinct texture from the normal solid-cored one, so it's
+    /// keyed separately in the cache (a weapon's width is constant, so a given
+    /// id is never seen both ways).
+    private func beamCoronaTexture(for beam: ActiveBeam, coreless: Bool) -> SKTexture? {
         let weaponID = beam.weaponID
         if weaponID < 128 { return nil }
-        if let cached = weaponCoronaTextureCache[weaponID] { return cached }
+        let cacheKey = coreless ? -weaponID : weaponID   // weaponID is always > 0 here
+        if let cached = weaponCoronaTextureCache[cacheKey] { return cached }
         var texture: SKTexture?
         if let core = beam.color, let corona = beam.coronaColor {
             let coreColor = SKColor(red: CGFloat(core.r), green: CGFloat(core.g), blue: CGFloat(core.b), alpha: 1)
@@ -2383,24 +2421,32 @@ final class GameScene: SKScene {
             // as "pinch the bright core tighter" in-game, so this maps it to a
             // core-width fraction rather than reproducing an unverified formula.
             let coreStart = CGFloat(max(0.05, min(0.45, 0.45 - beam.coronaFalloff / 200.0)))
-            texture = GameScene.makeCoronaTexture(core: coreColor, corona: coronaColor, coreStart: coreStart)
+            texture = GameScene.makeCoronaTexture(core: coreColor, corona: coronaColor,
+                                                  coreStart: coreStart, coreless: coreless)
         }
-        weaponCoronaTextureCache[weaponID] = texture
+        // Don't cache a `nil` miss permanently — a beam glimpsed before its real
+        // color data is available (e.g. a co-op echo racing ahead of the sync
+        // fields) would otherwise poison every later beam of the same weapon,
+        // including ones with correct data, to "no corona" for the rest of the run.
+        if let texture { weaponCoronaTextureCache[cacheKey] = texture }
         return texture
     }
 
     /// A vertical 5-stop gradient bar: transparent corona → soft corona glow →
-    /// opaque core → soft corona glow → transparent corona. `coreStart` is the
-    /// fraction of the bar's half-width the glow occupies before reaching the
-    /// solid core.
-    private static func makeCoronaTexture(core: SKColor, corona: SKColor,
-                                          coreStart: CGFloat, thickness: Int = 32) -> SKTexture {
+    /// core → soft corona glow → transparent corona. `coreStart` is the fraction
+    /// of the bar's half-width the glow occupies before reaching the middle.
+    /// `coreless` (`BeamWidth == 0`, "no center beam, just corona glow") swaps
+    /// the middle stop from an opaque solid core to the corona glow color, so
+    /// there's no distinct bright center — just one continuous glow.
+    private static func makeCoronaTexture(core: SKColor, corona: SKColor, coreStart: CGFloat,
+                                          coreless: Bool = false, thickness: Int = 32) -> SKTexture {
         let h = max(4, thickness)
         return imageTexture(width: 4, height: h) { ctx in
             let cs = CGColorSpaceCreateDeviceRGB()
             let coronaClear = corona.withAlphaComponent(0)
             let coronaGlow = corona.withAlphaComponent(0.65)
-            let colors = [coronaClear.cgColor, coronaGlow.cgColor, core.cgColor,
+            let center = coreless ? corona.withAlphaComponent(0.85) : core
+            let colors = [coronaClear.cgColor, coronaGlow.cgColor, center.cgColor,
                           coronaGlow.cgColor, coronaClear.cgColor] as CFArray
             let locations: [CGFloat] = [0, coreStart, 0.5, 1 - coreStart, 1]
             guard let grad = CGGradient(colorsSpace: cs, colors: colors, locations: locations) else { return }

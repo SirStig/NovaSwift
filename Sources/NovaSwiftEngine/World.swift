@@ -1121,10 +1121,13 @@ public final class World {
     /// refreshed or life-counted (see `refreshActiveBeams`). `shooterID` is carried
     /// so a client can skip echoing its own beams.
     public func spawnVisualBeam(shooterID: Int, weaponID: Int, from: Vec2, to: Vec2, hit: Bool,
-                                width: Double, color: (r: Double, g: Double, b: Double)?) {
+                                width: Double, color: (r: Double, g: Double, b: Double)?,
+                                coronaColor: (r: Double, g: Double, b: Double)? = nil,
+                                coronaFalloff: Double = 0) {
         let beam = ActiveBeam(shooterID: shooterID, mountIndex: 0, weaponID: weaponID,
                               from: from, to: to, hit: hit, continuous: false,
-                              life: .infinity, width: width, color: color)
+                              life: .infinity, width: width, color: color,
+                              coronaColor: coronaColor, coronaFalloff: coronaFalloff)
         beam.visualOnly = true
         activeBeams.append(beam)
     }
@@ -1718,13 +1721,8 @@ public final class World {
                                     targetID: spec.homes ? ship.currentTargetID : nil,
                                     subDepth: 0)
                     events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID, weaponID: spec.id))
-                    // Recoil kicks the firing ship backward, opposite the shot,
-                    // scaled down by its own mass (radius proxy) — same knockback
-                    // model as projectile impact on a target.
-                    if spec.recoil > 0 {
-                        ship.velocity += Vec2(-cos(aim), -sin(aim)) * (spec.recoil * 6.0 / max(4, ship.radius))
-                    }
                 }
+                applyRecoil(to: ship, spec: spec, aim: aim)
                 fired += 1
                 if !spec.fireSimultaneously { mount.exitCursor = (mount.exitCursor + 1) % barrels }
             }
@@ -1866,8 +1864,20 @@ public final class World {
     /// the ship every frame.
     private func updateBeamLoops(for ship: Ship, primary: Bool, secondary: Bool, isAI: Bool) {
         for (idx, mount) in ship.weapons.enumerated() where mount.spec.isBeam && mount.spec.loopSound {
-            // A continuous beam loops while its own fire group's trigger is held.
-            let held = isAI ? (primary || secondary) : (mount.spec.isSecondary ? secondary : primary)
+            // A continuous beam loops while its own fire group's trigger is held —
+            // and, same as `fireWeapons`'s own `triggered` gate, a player's secondary
+            // beam only loops while it's the *selected* secondary. Without this a
+            // fitted-but-unselected secondary beam mount would start its loop
+            // sound/visual (and read as "hitting") on the raw secondary trigger
+            // alone, while `fireWeapons` correctly never fires it at all.
+            let held: Bool
+            if isAI {
+                held = primary || secondary
+            } else if mount.spec.isSecondary {
+                held = secondary && mount.spec.id == ship.effectiveSecondaryID
+            } else {
+                held = primary
+            }
             let looping = ship.activeBeamLoopMounts.contains(idx)
             if held && ship.isAlive {
                 if !looping {
@@ -1896,6 +1906,19 @@ public final class World {
         ship.activeBeamLoopMounts.removeAll()
     }
 
+    /// Recoil impulse on the firing ship, scaled down by its own mass (radius
+    /// proxy) — applies to every weapon that fires, beam or projectile, since
+    /// the Bible doesn't exempt beams from `Recoil`. Positive kicks the ship
+    /// backward, opposite the shot; negative thrusts it forward along the shot
+    /// direction instead (the documented "0 or -1 = none, else may be negative
+    /// to thrust forwards" `Recoil` semantics).
+    private func applyRecoil(to ship: Ship, spec: WeaponSpec, aim: Double) {
+        guard spec.recoil != 0 else { return }
+        let shotDir = Vec2(cos(aim), sin(aim))
+        let kickDir = spec.recoil > 0 ? shotDir * -1 : shotDir
+        ship.velocity += kickDir * (abs(spec.recoil) * 6.0 / max(4, ship.radius))
+    }
+
     /// Instant-hit beam fired this reload tick: apply damage along the ray from
     /// the mount's real exit point. Continuous beams keep their persistent
     /// `ActiveBeam` (refreshed each frame); pulse beams get a brief flash beam
@@ -1913,6 +1936,11 @@ public final class World {
             if spec.isTractorBeam {
                 let pull = (ship.position - h.position).normalized * (-spec.impact * 3.0 / max(4, h.radius))
                 h.velocity += pull
+            } else if spec.impact > 0 {
+                // Positive Impact: knockback along the beam's travel direction,
+                // same model as a projectile's direct-hit knockback in `detonate`
+                // — beams aren't exempt from `Impact` any more than they are `Recoil`.
+                h.velocity += dir * (spec.impact * 6.0 / max(4, h.radius))
             }
         } else if let rock = cast.hitAsteroid {
             applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage, shooterID: ship.entityID)
@@ -1923,11 +1951,11 @@ public final class World {
             // beams instead keep the persistent ActiveBeam from updateBeamLoops.
             if let existing = activeBeams.first(where: { $0.shooterID == ship.entityID && $0.mountIndex == mountIndex && !$0.continuous }) {
                 existing.from = origin; existing.to = cast.end; existing.hit = hit
-                existing.life = 0.08
+                existing.life = existing.maxLife
             } else {
                 activeBeams.append(ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
                                               weaponID: spec.id, from: origin, to: cast.end, hit: hit,
-                                              continuous: false, life: 0.08,
+                                              continuous: false, life: spec.pulseBeamLifeSeconds,
                                               width: spec.beamWidth, color: spec.beamColor,
                                               coronaColor: spec.coronaColor, coronaFalloff: spec.coronaFalloff))
             }
@@ -1995,11 +2023,14 @@ public final class World {
         let mount = ship.weapons[beam.mountIndex]
         let spec = mount.spec
         let origin = ship.muzzle(for: mount)
-        // Beams track the current target; otherwise they fire straight ahead.
-        var aim = ship.angle
-        if let tID = ship.currentTargetID, let t = self.ship(id: tID), t.isAlive {
-            aim = (t.position - origin).angle
-        }
+        // Reuse `fireAngle`'s own guidance switch so the *visual* weld matches
+        // what actually deals damage each reload tick: unconditionally tracking
+        // the current target here (regardless of guidance) used to make a
+        // fixed-mount beam visibly swivel onto a locked target while the real
+        // hit-detecting raycast (driven by `fireAngle`) kept firing straight
+        // along the hull — a beam that looked like it connected but didn't.
+        let target: Ship? = ship.currentTargetID.flatMap { self.ship(id: $0) }.flatMap { $0.isAlive ? $0 : nil }
+        let aim = fireAngle(for: spec, ship: ship, muzzle: origin, target: target) ?? ship.angle
         let cast = beamCast(from: origin, dir: Vec2.heading(aim), range: spec.range, owner: ship)
         beam.from = origin
         beam.to = cast.end

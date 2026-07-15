@@ -6,9 +6,16 @@ import NovaSwiftKit
 /// as ship speeds, so we reuse the flight speed scale to keep ships and their
 /// shots proportional. Damage numbers are HP and used directly.
 public struct CombatTuning {
-    /// Stat "speed unit" → px/sec. Matches `FlightTuning.speedScale` so a shot
-    /// from a fast ship still outruns it.
-    public var unitToPxPerSec: Double = 1.0
+    /// Raw `wëap.Speed` → px/sec. The Bible stores weapon speed as "pixels per
+    /// frame × 100" at 30fps (unlike ship `Speed`, which is already a plain
+    /// px/sec value) — `raw × 30fps / 100 = raw × 0.3`, matching the reference
+    /// EV Nova decoder (NovaJS's `WEAP_SPEED_FACTOR = 3/10`). Also drives
+    /// `WeaponSpec.range` below (that formula already divides by
+    /// `framesPerSecond`, so this one constant fixes both). Was `1.0` — treating
+    /// the ×100-scaled raw value as already-real px/sec made every projectile
+    /// (and its range) ~3.33× too fast, e.g. a Light Blaster bolt at 1500 px/sec
+    /// — faster than any ship in the game.
+    public var unitToPxPerSec: Double = 0.3
     /// The rate EV Nova ticks weapon durations/reloads at.
     public var framesPerSecond: Double = 30
     /// Global multiplier on all weapon damage (difficulty / feel).
@@ -94,6 +101,10 @@ public struct WeaponSpec {
     /// How sharply the beam's glow falls off from its core to `coronaColor`.
     /// 0 → engine default falloff.
     public let coronaFalloff: Double
+    /// How long a non-looping (pulse) beam's flash stays onscreen, in seconds
+    /// (beams only). Bible: `Count` frames, or `Count + 16 - CoronaFalloff`
+    /// frames when `Decay > 0` (the beam "shrinks" before it disappears).
+    public let pulseBeamLifeSeconds: Double
     public let turnRate: Double          // rad/sec, guided munitions
     public let blastRadius: Double       // px, 0 = direct hit only
     public let ammoPerShot: Int          // 0/1 typically; drains mount ammo
@@ -140,8 +151,9 @@ public struct WeaponSpec {
     public let detonateOnExpire: Bool
     /// Knockback impulse on hit (inversely ∝ target mass).
     public let impact: Double
-    /// Recoil "kick" pushed onto the *firing* ship opposite the shot direction
-    /// (`wëap.Recoil`), inversely ∝ the shooter's mass. 0 = none.
+    /// Impulse pushed onto the *firing* ship (`wëap.Recoil`), inversely ∝ the
+    /// shooter's mass. Positive = kick opposite the shot direction; negative =
+    /// thrust the ship forward along the shot direction instead (Bible). 0 = none.
     public let recoil: Double
     /// `spïn` id of this weapon's own shot graphic, or nil (falls back to a dot).
     public let graphicSpinID: Int?
@@ -202,6 +214,7 @@ public struct WeaponSpec {
                 exitType: WeaponExitType = .center,
                 beamWidth: Double = 0, beamColor: (r: Double, g: Double, b: Double)? = nil,
                 coronaColor: (r: Double, g: Double, b: Double)? = nil, coronaFalloff: Double = 0,
+                pulseBeamLifeSeconds: Double = 0.08,
                 fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false,
                 isPointDefense: Bool = false, vulnerableToPD: Bool = true,
                 ionization: Double = 0, cantFireWhileIonized: Bool = false,
@@ -227,6 +240,7 @@ public struct WeaponSpec {
         self.isBeam = isBeam; self.isGuided = isGuided; self.turnRate = turnRate
         self.exitType = exitType; self.beamWidth = beamWidth; self.beamColor = beamColor
         self.coronaColor = coronaColor; self.coronaFalloff = coronaFalloff
+        self.pulseBeamLifeSeconds = pulseBeamLifeSeconds
         self.blastRadius = blastRadius; self.ammoPerShot = ammoPerShot
         self.fireSoundID = fireSoundID; self.explosionBoomID = explosionBoomID
         self.loopSound = loopSound
@@ -256,7 +270,19 @@ public struct WeaponSpec {
         shieldDamage = Double(w.shieldDamage) * tuning.damageScale
         armorDamage = Double(w.armorDamage) * tuning.damageScale
         penetratesShields = w.penetratesShields
-        reloadSeconds = max(0.1, Double(w.reload) / tuning.framesPerSecond)
+        // The Bible's `Reload` is "frames to reload; 30 = 1 shot/sec" with no
+        // documented floor — `Reload = 0` (near-universal on beam weapons,
+        // which rely entirely on `BurstCount`/`BurstReload` for their actual
+        // pacing) means "as fast as the sim ticks," i.e. one frame. Flooring at
+        // a flat 0.1s (3 frames) instead of one frame silently capped every
+        // fast/continuous weapon at 10 shots/sec and, worse, stretched a
+        // burst's real duration well past what `BurstCount` specifies — e.g. a
+        // 60-shot burst at `Reload=0` should span 60 frames (2s at 30fps); the
+        // old floor stretched it to 60×0.1s = 6s, more than doubling the real
+        // gap between bursts and cutting sustained DPS by over half. One frame
+        // is still a real floor (never literally 0, avoiding div-by-zero-style
+        // runaway fire), just not one three times too coarse.
+        reloadSeconds = max(1.0 / tuning.framesPerSecond, Double(w.reload) / tuning.framesPerSecond)
         projectileSpeed = Double(w.speed) * tuning.unitToPxPerSec
         // WeapRes.range is speed(unit/frame)×duration(frames); scale to px.
         // A beam's `range` is already a plain pixel length (`max(beamLength, 50)`,
@@ -316,6 +342,18 @@ public struct WeaponSpec {
                                   Double(w.coronaColor.g) / 255.0,
                                   Double(w.coronaColor.b) / 255.0) : nil
         coronaFalloff = Double(max(0, w.coronaFalloff))
+        // Bible: for beam guidance, `Duration` ("Count") is how many frames the
+        // beam stays onscreen — or `Count + 16 - CoronaFalloff` frames when
+        // `Decay > 0` (the beam "shrinks" before disappearing). Floored at a
+        // few frames so a degenerate/zero value never renders as an invisible
+        // instant flash.
+        if w.isBeam {
+            let count = Double(max(0, w.duration))
+            let frames = w.decay > 0 ? (count + 16 - Double(w.coronaFalloff)) : count
+            pulseBeamLifeSeconds = max(4, frames) / tuning.framesPerSecond
+        } else {
+            pulseBeamLifeSeconds = 0.08
+        }
         turnRate = Double(w.turnRate) * 3.0 * .pi / 180.0
         blastRadius = Double(w.blastRadius)
         // Bible: `AmmoType` -1 = "ignored (unlimited ammo)"; 0-255 = draws from
@@ -626,6 +664,10 @@ public final class ActiveBeam {
     /// and removed on trigger release; pulse beams count `life` down.
     public let continuous: Bool
     public var life: Double
+    /// `life` this pulse beam started at, so the renderer can fade it out over
+    /// its own real onscreen duration instead of a shared hardcoded constant.
+    /// Unused for continuous beams.
+    public let maxLife: Double
     public let width: Double
     public let color: (r: Double, g: Double, b: Double)?
     /// The glow colour this beam fades to away from its `color` core — real EV
@@ -641,12 +683,12 @@ public final class ActiveBeam {
     public var visualOnly = false
 
     public init(shooterID: Int, mountIndex: Int, weaponID: Int = -1, from: Vec2, to: Vec2, hit: Bool,
-                continuous: Bool, life: Double, width: Double,
+                continuous: Bool, life: Double, maxLife: Double? = nil, width: Double,
                 color: (r: Double, g: Double, b: Double)?,
                 coronaColor: (r: Double, g: Double, b: Double)? = nil, coronaFalloff: Double = 0) {
         self.shooterID = shooterID; self.mountIndex = mountIndex; self.weaponID = weaponID
         self.from = from; self.to = to; self.hit = hit
-        self.continuous = continuous; self.life = life
+        self.continuous = continuous; self.life = life; self.maxLife = maxLife ?? life
         self.width = width; self.color = color
         self.coronaColor = coronaColor; self.coronaFalloff = coronaFalloff
     }

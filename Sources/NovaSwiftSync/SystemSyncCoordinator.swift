@@ -278,9 +278,13 @@ public final class SystemSyncCoordinator {
             let color = beam.color.flatMap { c -> (r: Double, g: Double, b: Double)? in
                 c.count == 3 ? (c[0], c[1], c[2]) : nil
             }
+            let coronaColor = beam.coronaColor.flatMap { c -> (r: Double, g: Double, b: Double)? in
+                c.count == 3 ? (c[0], c[1], c[2]) : nil
+            }
             world.spawnVisualBeam(shooterID: beam.shooterID, weaponID: beam.weaponID,
                                   from: Vec2(beam.fromX, beam.fromY), to: Vec2(beam.toX, beam.toY),
-                                  hit: beam.hit, width: beam.width, color: color)
+                                  hit: beam.hit, width: beam.width, color: color,
+                                  coronaColor: coronaColor, coronaFalloff: beam.coronaFalloff)
         }
 
         // Buffer one-shot effects; the app flushes them into the world after its
