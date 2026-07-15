@@ -178,5 +178,9 @@ struct ArrowKeyFocusFallback: NSViewRepresentable {
             }
         }
     }
+
+    final class PassthroughView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
 }
 #endif
