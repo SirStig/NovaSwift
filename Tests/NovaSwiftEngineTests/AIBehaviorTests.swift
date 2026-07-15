@@ -1080,4 +1080,80 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertLessThan(totalTurn, 0.2,
                           "a settled escort should hold heading, not constantly correct (total turn \(totalTurn) rad over 1s)")
     }
+
+    // MARK: retreat / escort-disposition regressions
+
+    /// A shieldless hull (most fighters) has `shieldFraction == 0` by
+    /// definition. The old shield-only retreat test read that as "below 25%
+    /// shields" and sent a brand-new, full-armor ship of a `warshipsRetreat`
+    /// government fleeing the instant it existed. It should fight, not run.
+    func testShieldlessWarshipDoesNotFleeAtFullHull() {
+        let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(0, 300))
+        player.maxShield = 100; player.shield = 100; player.maxArmor = 100; player.armor = 100
+        let world = World(player: player)
+        // Govt attacks the player AND its warships retreat when badly hurt.
+        world.diplomacy = Diplomacy(govts: [govt(240, classes: [40], flags1: 0x0004 | 0x0010)])
+        let npc = warship("Fighter", govt: 240, at: Vec2())
+        npc.maxShield = 0; npc.shield = 0        // armor-only hull, full armor
+        npc.brain = AIBrain(aiType: .warship, govt: 240)
+        world.addNPC(npc)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(npc.brain?.state, .attacking,
+                       "a full-hull shieldless ship must engage, not read as perpetually-routed and flee")
+    }
+
+    /// The player's own wing never breaks off to run for the hyperspace edge —
+    /// even a hurt one of a `warshipsRetreat` government. In EV Nova your
+    /// escorts stay with you; they don't flee the system on their own.
+    func testPlayerEscortNeverFlees() {
+        let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        player.maxShield = 100; player.shield = 100; player.maxArmor = 100; player.armor = 100
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(241, classes: [41], flags1: 0x0010)]) // warshipsRetreat
+        let escort = warship("Wing", govt: 241, at: Vec2(40, -40))
+        escort.shield = 4                        // 5% shields — well under any retreat threshold
+        escort.brain = AIBrain(aiType: .warship, govt: 241)
+        world.addNPC(escort)
+        world.recruitEscort(escort)              // leaderID = player, defensive
+
+        for _ in 0..<30 { world.step(1.0 / 30.0) }
+        XCTAssertNotEqual(escort.brain?.state, .fleeing, "a player escort must never flee on its own")
+        XCTAssertNotEqual(escort.brain?.state, .departing, "a player escort must never run for the edge")
+        XCTAssertFalse(escort.wantsToDepart, "a player escort must not try to leave the system")
+    }
+
+    /// A defensive escort holds formation when a government-enemy is merely
+    /// present and hasn't touched the fleet — it does NOT autonomously open
+    /// fire (the "my escorts attack ships for no reason" report).
+    func testDefensiveEscortIgnoresNeutralGovtEnemyUntilItActs() {
+        let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [
+            govt(250, classes: [50], enemies: [51]),
+            govt(251, classes: [51], enemies: [50]),
+        ])
+        let escort = warship("Wing", govt: 250, at: Vec2(40, -40))
+        escort.brain = AIBrain(aiType: .warship, govt: 250)
+        world.addNPC(escort)
+        world.recruitEscort(escort)
+        escort.government = 250                   // keep it a govt-250 ship after recruit
+
+        // A govt-251 ship the escort's government considers an enemy, but which
+        // isn't attacking anyone.
+        let bystander = warship("Bystander", govt: 251, at: Vec2(0, 200))
+        world.addNPC(bystander)
+
+        world.step(1.0 / 30.0)
+        XCTAssertNotEqual(escort.brain?.state, .attacking,
+                          "a defensive escort must not start a fight with a bystander the player hasn't engaged")
+
+        // Now the bystander opens fire on the escort (an NPC only sets
+        // `currentTargetID` while actually attacking) — it must defend itself.
+        bystander.currentTargetID = escort.entityID
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(escort.brain?.state, .attacking,
+                       "a defensive escort must fight back once actually attacked")
+    }
 }
