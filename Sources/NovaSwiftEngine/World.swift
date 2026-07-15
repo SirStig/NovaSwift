@@ -97,7 +97,17 @@ public struct FlightTuning {
     /// (every NPC), matching EV Nova's precise AI flight.
     public var aiInertialess: AIInertialessScope = .all
 
-    public static let `default` = FlightTuning(speedScale: 1.0, accelScale: 1.0,
+    // The Bible states an explicit real-time ratio for Maneuver ("10 ≈ 30°/sec",
+    // giving turnScale=3.0 exactly) but gives Speed/Accel no units at all — no
+    // "per frame," no ratio, unlike every other timing field in the same
+    // resources (Reload, weapon Speed/Duration, ShieldRecharge all explicitly
+    // convert from a frame count). Taking raw Speed/Accel as already-real
+    // px/sec (scale=1.0, the previous value) was the simplest reading of that
+    // silence, but direct side-by-side play against the original showed it
+    // reads roughly 2x too fast — 0.55 is calibrated to that comparison, not
+    // derived from the text (which doesn't settle it either way). Revisit if a
+    // harder source ever turns up.
+    public static let `default` = FlightTuning(speedScale: 0.55, accelScale: 0.55,
                                                turnScale: 3.0, dragPerSecond: 0.0)
 }
 

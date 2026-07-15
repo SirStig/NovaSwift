@@ -45,6 +45,15 @@ struct GameSettings: Codable, Equatable {
             case .unlimited: return "Unlimited"
             }
         }
+        /// Desktop has the headroom for 60fps by default; mobile defaults to
+        /// 30fps for battery life (matches the original's own frame rate).
+        static var platformDefault: FrameRateCap {
+            #if os(macOS)
+            return .fps60
+            #else
+            return .fps30
+            #endif
+        }
         var fps: Int? {
             switch self { case .fps30: return 30; case .fps60: return 60; case .fps120: return 120; case .unlimited: return nil }
         }
@@ -192,7 +201,7 @@ struct GameSettings: Codable, Equatable {
     /// Smooth (linear) vs. crisp (nearest) sprite scaling. EV Nova art is pixel
     /// art, so crisp is the faithful default.
     var smoothSprites: Bool = false
-    var frameRateCap: FrameRateCap = .fps60
+    var frameRateCap: FrameRateCap = .platformDefault
     /// Engine exhaust / weapon glow effects.
     var engineGlow: Bool = true
     /// Camera shake on impacts / explosions.
@@ -203,6 +212,12 @@ struct GameSettings: Codable, Equatable {
     /// Show the planet/station name under each stellar. The original never labelled
     /// planets in-flight, so this is off by default.
     var showPlanetLabels: Bool = false
+    /// In-flight camera zoom: world units shown per screen point, as a
+    /// multiplier on SpriteKit's native 1:1 scale (1 world pixel = 1 screen
+    /// point) — the original's own zoom, since it never scaled the camera at
+    /// all. Higher values zoom out (show more world, everything reads smaller
+    /// and slower-moving); lower values zoom in.
+    var cameraZoom: Double = 1.0
 
     // MARK: Audio
 
@@ -368,6 +383,7 @@ struct GameSettings: Codable, Equatable {
         screenShake           = v(.screenShake, d.screenShake)
         shipBarPosition       = v(.shipBarPosition, d.shipBarPosition)
         showPlanetLabels      = v(.showPlanetLabels, d.showPlanetLabels)
+        cameraZoom            = v(.cameraZoom, d.cameraZoom)
         masterVolume          = v(.masterVolume, d.masterVolume)
         musicVolume           = v(.musicVolume, d.musicVolume)
         sfxVolume             = v(.sfxVolume, d.sfxVolume)

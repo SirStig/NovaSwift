@@ -331,13 +331,13 @@ final class GameScene: SKScene {
     // of the system centre (p90 across the base data) and combat happens within
     // a couple of thousand, so 3000 keeps the scope readable edge to edge.
     private let radarRange: CGFloat = 3000
-    // Ship art is native-pixel-sized (authored for 640×480-era screens) and the
-    // camera previously ran at SpriteKit's default scale of 1.0 (1 world unit =
-    // 1 screen point), so on a modern window the play area showed only a tiny
-    // sliver of the system — far less than `radarRange` implies — while making
-    // everything feel crowded/too-close. Zooming the camera out widens the
-    // visible world per window without touching any world-space simulation math.
-    private let cameraZoom: CGFloat = 1.75
+    // The original never scaled its camera at all — 1 world pixel = 1 screen
+    // point (SpriteKit's own default scale) is the faithful, native zoom, and
+    // is now the default (`GameSettings.cameraZoom = 1.0`; the in-flight
+    // design canvas is verified 1024×768 via PICT #8000, not the 640×480 this
+    // used to assume). User-adjustable in Settings for anyone who wants more
+    // of the system visible per window.
+    private var cameraZoom: CGFloat { CGFloat(settings.cameraZoom) }
 
     // Landing: the nearest landable stellar object, and whether the player is
     // close/slow enough to set down on it right now. `attemptLand()` (called by
@@ -3381,7 +3381,9 @@ final class GameScene: SKScene {
     /// Settings updates the live scene without waiting for a system rebuild.
     func applyDisplaySettings(_ newSettings: GameSettings) {
         let filterChanged = newSettings.smoothSprites != settings.smoothSprites
+        let zoomChanged = newSettings.cameraZoom != settings.cameraZoom
         settings = newSettings
+        if zoomChanged { cameraNode.setScale(cameraZoom) }
         controllerInput?.deadzone = Float(settings.stickDeadzone)   // live "Stick dead zone"
         Haptics.enabled = settings.hapticsEnabled
         applyColorblindFilter()

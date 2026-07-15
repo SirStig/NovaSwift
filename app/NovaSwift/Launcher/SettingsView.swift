@@ -208,6 +208,7 @@ struct SettingsView: View {
     private var graphicsSection: some View {
         Section {
             sliderRow("Starfield density", binding(\.starfieldDensity), 0.2...2.0)
+            sliderRow("Camera zoom", binding(\.cameraZoom), 0.5...2.5)
             Picker("Frame rate limit", selection: binding(\.frameRateCap)) {
                 ForEach(GameSettings.FrameRateCap.allCases) { Text($0.label).tag($0) }
             }
@@ -217,7 +218,7 @@ struct SettingsView: View {
         } header: {
             Label("Graphics", systemImage: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Camera zoom defaults to 1.0, the original's own native scale (1 world pixel = 1 screen point); higher shows more of the system at once. A lower frame-rate limit saves battery on mobile.")
         }
     }
 
