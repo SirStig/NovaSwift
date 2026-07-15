@@ -321,12 +321,21 @@ struct NovaTextField: View {
 struct NovaSelectRow<Detail: View>: View {
     let title: String
     let selected: Bool
+    /// Optional leading glyph (e.g. for a category/menu list) — tinted to
+    /// match the row's text color. `nil` (the default) omits it entirely, so
+    /// existing scenario/option-list call sites are unaffected.
+    var systemImage: String? = nil
     @ViewBuilder var detail: () -> Detail
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .foregroundStyle(selected ? .black : .white)
+                        .frame(width: 18)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     NovaText(title, size: 13, color: selected ? .black : .white, weight: .bold)
                     detail()

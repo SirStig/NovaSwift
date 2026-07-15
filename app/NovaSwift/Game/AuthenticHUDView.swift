@@ -155,6 +155,16 @@ struct AuthenticHUDView: View {
                             .foregroundStyle(color(style.intf.dimText))
                     }
                 }
+                // Status word at the bottom of the readout — disabled takes
+                // precedence (a disabled hulk can't threaten you regardless of
+                // its government).
+                if model.targetDisabled {
+                    Text("Disabled").novaFont(.hud, weight: .bold, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                } else if model.targetHostile {
+                    Text("Hostile").novaFont(.hud, weight: .bold, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.brightRadar))
+                }
             }
             .padding(.horizontal, 6).padding(.vertical, 4)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

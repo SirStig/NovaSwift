@@ -540,8 +540,6 @@ public final class Ship {
     public var disabled = false
     /// Idle tumble (rad/sec) applied to a disabled hulk so it drifts believably.
     public var disableSpin: Double = 0
-    /// Seconds a hulk has been drifting; the world eventually clears cold wrecks.
-    public var disabledClock: Double = 0
 
     /// True if the player dealt the hit that dropped this ship to 0 armor —
     /// read once by `despawnDepartedAndDead` to attribute `Diplomacy.recordKill`
@@ -1428,7 +1426,6 @@ public final class World {
         prof("sim.ai") {
             for npc in npcs where npc.isAlive {
                 if npc.disabled {
-                    npc.disabledClock += dt
                     npc.velocity = npc.velocity * max(0, 1 - 0.35 * dt)
                     npc.angle += npc.disableSpin * dt
                     npc.position += npc.velocity * dt
@@ -1443,7 +1440,6 @@ public final class World {
                         npc.armor = min(npc.maxArmor, npc.armor + npc.maxArmor * 0.20)
                         if npc.armor > npc.maxArmor * npc.disableArmorFraction {
                             npc.disabled = false
-                            npc.disabledClock = 0
                             Log.combat.debug("\(npc.name) [\(npc.entityID)] repair system restored it above the disable threshold — back in action")
                         }
                     }
@@ -1687,8 +1683,18 @@ public final class World {
                 let barrels = max(1, mount.count)
                 let toLaunch = spec.fireSimultaneously ? barrels : 1
                 var launched = 0
+                // Running slot counter across this whole volley — see the
+                // matching comment in `updateFighterBays`. A multi-barrel bay
+                // firing simultaneously launches several fighters in one call,
+                // all reading the same pre-launch `allShips` snapshot, so
+                // without this every fighter in the volley collides on one
+                // formation slot.
+                var nextFormationSlot = allShips.filter { $0.brain?.leaderID == ship.entityID }.count
                 for _ in 0..<toLaunch {
-                    guard bay.docked > 0, let fighter = launchFighter(from: ship, bay: bay) else { break }
+                    guard bay.docked > 0,
+                          let fighter = launchFighter(from: ship, bay: bay, formationSlot: nextFormationSlot)
+                    else { break }
+                    nextFormationSlot += 1
                     bay.docked -= 1
                     bay.deployed.insert(fighter.entityID)
                     launched += 1
@@ -2332,17 +2338,23 @@ public final class World {
         events.append(hadShield ? .shieldHit(at: ship.position, weaponID: weaponID)
                                  : .armorHit(at: ship.position, weaponID: weaponID))
 
-        // Player fire provokes the victim into fighting back. Per the Bible
-        // (Appendix II §2.1), `ShootPenalty` is "currently ignored" in the
-        // real game — shooting alone never dents legal record; only the
-        // disable/kill/board/smuggling outcomes below do (`recordDisable`/
-        // `recordKill`, `Diplomacy.swift`).
-        if ownerID == 0 && !ship.isPlayer {
+        // Player-fleet fire (the player OR one of their escorts/fighters)
+        // provokes the victim into fighting the whole fleet, not just
+        // whichever ship actually shot it — see `AIBrain.provokedByPlayer`/
+        // `isHostile`. Per the Bible (Appendix II §2.1), `ShootPenalty` is
+        // "currently ignored" in the real game — shooting alone never dents
+        // legal record; only the disable/kill/board/smuggling outcomes below
+        // do (`recordDisable`/`recordKill`, `Diplomacy.swift`).
+        if !isPlayerFleetMember(ship.entityID), isPlayerFleetMember(ownerID) {
             ship.brain?.provokedByPlayer = true
         }
-        // NPC fire on player: let the player's would-be attacker be remembered.
-        if !ship.isPlayer, ship.brain?.targetID == nil, ownerID != 0 {
-            // (no-op hook for future player-side AI/escorts)
+        // The reverse: something that shoots a player-fleet member becomes
+        // provoked (hostile) toward the whole fleet too — an escort fighting
+        // back on its own no longer leaves the player and its other escorts
+        // blind to the fact that this ship is now an enemy.
+        if isPlayerFleetMember(ship.entityID), !isPlayerFleetMember(ownerID),
+           let attacker = self.ship(id: ownerID) {
+            attacker.brain?.provokedByPlayer = true
         }
 
         // EV Nova disables a ship the moment its armor crosses a fixed threshold
@@ -2458,12 +2470,6 @@ public final class World {
                     }
                 }
             }
-            // A cold hulk that's drifted long enough is quietly retired.
-            if npc.disabled && npc.disabledClock > 25 {
-                clearTarget(npc.entityID)
-                stopAllBeamLoops(for: npc)
-                continue
-            }
             survivors.append(npc)
         }
         npcs = survivors
@@ -2516,6 +2522,13 @@ public final class World {
     /// ships whose fleet leader is the player.
     public var playerEscorts: [Ship] {
         npcs.filter { $0.isAlive && $0.brain?.leaderID == Self.playerEntityID }
+    }
+
+    /// The player themselves, or one of their own escorts/fighters — used by
+    /// `applyHit` to widen "provoked by the player" into "provoked by the
+    /// player's whole fleet" (see `AIBrain.provokedByPlayer`/`isHostile`).
+    private func isPlayerFleetMember(_ entityID: Int) -> Bool {
+        entityID == Self.playerEntityID || ship(id: entityID)?.brain?.leaderID == Self.playerEntityID
     }
 
     /// Issue a standing order to the whole escort wing.
@@ -2669,12 +2682,20 @@ public final class World {
         // Launch pass over a snapshot (launching appends to `npcs`).
         for carrier in allShips where !carrier.fighterBays.isEmpty && carrier.isAlive && !carrier.disabled {
             let inCombat = !carrier.isPlayer && carrierInCombat(carrier)
+            // Running slot counter for this carrier, seeded from its existing
+            // wing and incremented as bays launch below — `allShips` itself
+            // only refreshes via `refreshRoster()`, so if two-plus bays come
+            // off cooldown the same frame, re-deriving each slot from
+            // `allShips` would hand every fighter launched this pass the exact
+            // same (stale) count, and they'd all fight over one formation slot.
+            var nextFormationSlot = allShips.filter { $0.brain?.leaderID == carrier.entityID }.count
             for bay in carrier.fighterBays {
                 bay.launchCooldown = max(0, bay.launchCooldown - dt)
                 // Drop dead/orphaned fighters from the roster.
                 bay.deployed = bay.deployed.filter { ship(id: $0)?.carrierID == carrier.entityID }
                 if inCombat, bay.docked > 0, bay.launchCooldown <= 0,
-                   let fighter = launchFighter(from: carrier, bay: bay) {
+                   let fighter = launchFighter(from: carrier, bay: bay, formationSlot: nextFormationSlot) {
+                    nextFormationSlot += 1
                     bay.docked -= 1
                     bay.deployed.insert(fighter.entityID)
                     bay.launchCooldown = Double(bay.spec.launchIntervalFrames) / 30.0
@@ -2732,7 +2753,7 @@ public final class World {
     /// than auto-hunting. `brain.escortOrder` only has any effect when
     /// `leaderID == 0` (the carrier is the player); it's simply unread for an
     /// NPC-led fleet, so this default is safe for both.
-    private func launchFighter(from carrier: Ship, bay: Ship.FighterBay) -> Ship? {
+    private func launchFighter(from carrier: Ship, bay: Ship.FighterBay, formationSlot: Int) -> Ship? {
         guard let galaxy else { return nil }
         let pos = carrier.position + Vec2.heading(carrier.angle) * (carrier.radius + 20)
         guard let fighter = galaxy.makeLoadedShip(bay.spec.fighterShipID, government: carrier.government,
@@ -2743,7 +2764,9 @@ public final class World {
         brain.escortOrder = .defensive
         // Distinct slots so a bay's fighters fan out into their own formation
         // positions behind the carrier instead of converging on the same spot.
-        brain.formationSlot = allShips.filter { $0.brain?.leaderID == carrier.entityID }.count
+        // Passed in by the caller, which tracks a running count across this
+        // frame's whole launch pass — see the comment at the call site.
+        brain.formationSlot = formationSlot
         brain.provokedByPlayer = carrier.isPlayer ? false : (carrier.brain?.provokedByPlayer ?? false)
         fighter.carrierID = carrier.entityID
         fighter.velocity = carrier.velocity
@@ -2928,6 +2951,23 @@ public final class World {
     public func recruitCapturedEscort(shipID: Int) {
         guard let s = ship(id: shipID) else { return }
         recruitEscort(s)
+    }
+
+    /// The player leaves a hulk they boarded without capturing it: forcing
+    /// entry dooms the ship rather than leaving it drifting forever — it's
+    /// destroyed here (zeroed armor/shield lets the normal explosion/
+    /// `.shipDestroyed` pipeline in `despawnDepartedAndDead` handle the rest
+    /// next step) unless it's no longer a boardable disabled hulk, which
+    /// covers the capture case for free: `recruitEscort` already clears
+    /// `disabled` before this could ever run for a captured ship. A `.rescue`
+    /// mission ship is exempted — boarding it already completed the mission by
+    /// *saving* it (`World.board`), so blowing it up afterward would fire a
+    /// contradictory `missionShipLost` right behind the success.
+    public func finishBoardingWithoutCapture(shipID: Int) {
+        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
+              s.missionShipGoal != .rescue else { return }
+        s.armor = 0
+        s.shield = 0
     }
 
     /// Recruit `ship` as a player escort — ally it to the player, clear any

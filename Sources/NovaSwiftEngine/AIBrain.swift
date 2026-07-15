@@ -57,8 +57,14 @@ public final class AIBrain {
     public var homeGovt: Int
     /// Current combat target (entity id).
     public var targetID: Int?
-    /// Set true when the player damages this ship — it will fight back even if
-    /// its government is otherwise neutral.
+    /// Set true when this ship trades fire with the player OR any of the
+    /// player's escorts/fighters — it will fight back against the whole fleet
+    /// even if its government is otherwise neutral. Despite the name, this is
+    /// shared fleet-wide provocation, not literally "only the player's own
+    /// shots": `World.applyHit` sets it symmetrically on whichever side of a
+    /// fight (fleet member or outsider) isn't already part of the fleet, and
+    /// `isHostile` reads an outsider's flag from every fleet member, not just
+    /// the one ship that actually pulled the trigger.
     public var provokedByPlayer = false
     /// Fleet leader to escort, if any. A `leaderID` of `World.playerEntityID`
     /// (0) marks a ship as one of the *player's* escorts — commanded via
@@ -81,6 +87,18 @@ public final class AIBrain {
     /// instant it thrusts/turns rather than lagging and snatching a correction a
     /// frame later. Nil until the first escorting frame / after the leader is lost.
     private var prevLeaderVel: Vec2?
+    /// Rate-limited copy of the leader's heading, used only to orient the
+    /// formation wedge (see `escort()`). AI ships fly inertialess, so a
+    /// fighting leader's `angle` *is* its instantaneous aim direction — it can
+    /// snap through a full circle within a second while dogfighting. Locking
+    /// the wedge straight to that raw angle swings the trailing station point
+    /// around the leader just as fast, and an escort chasing a swinging point
+    /// traces the same loop ("launch a fighter, it circles forever" bug). This
+    /// tracks `leader.angle` at a bounded turn rate instead, so the wedge holds
+    /// a stable orientation through a dogfight and only reorients at a normal
+    /// flight pace when the leader is actually changing course. Nil until the
+    /// first escorting frame / after the leader is lost.
+    private var formationHeading: Double?
     /// Standing order for a player escort (`leaderID == 0`). Ignored by ordinary
     /// NPC-fleet escorts, which always behave as `.defensive`.
     public var escortOrder: EscortOrder = .defensive
@@ -218,6 +236,17 @@ public final class AIBrain {
             if isIFFScrambled(me, world) { return false }
             return world.diplomacy?.isHostileToPlayer(me.government) ?? false
         }
+        // The player's escorts/fighters share the player's enemies and vice
+        // versa: whichever side of a fight *isn't* a fleet member gets
+        // `provokedByPlayer` set on it (symmetrically, in `World.applyHit`),
+        // so every OTHER fleet member reads it as hostile too — not just the
+        // one ship that actually traded fire with it.
+        let meIsFleet = me.brain?.leaderID == World.playerEntityID
+        let otherIsFleet = other.brain?.leaderID == World.playerEntityID
+        if meIsFleet != otherIsFleet {
+            let outsider = meIsFleet ? other : me
+            if outsider.brain?.provokedByPlayer == true { return true }
+        }
         // NPC vs NPC.
         return world.diplomacy?.areEnemies(me.government, other.government) ?? false
     }
@@ -326,6 +355,21 @@ public final class AIBrain {
             }
         }
         return best
+    }
+
+    /// Whether `target` (the leader's `currentTargetID`) represents a real
+    /// fight worth an escort/fighter joining, rather than a bare UI selection.
+    /// An NPC leader only ever sets `currentTargetID` via its own attack
+    /// decision (see the `aiType` switch in `think`), so it's always trusted.
+    /// A PLAYER leader's selection carries no combat intent on its own — Tab or
+    /// a click locks any ship, hostile or not, exactly the same concern
+    /// `pickPirateInterventionTarget` already guards against — so for a player
+    /// leader this additionally requires the target to have actually traded
+    /// fire with the fleet (`provokedByPlayer`, set symmetrically in
+    /// `World.applyHit`) or to be currently targeting the leader itself.
+    private func isGenuineEngagementTarget(_ target: Ship, leader: Ship) -> Bool {
+        guard leader.isPlayer else { return true }
+        return target.brain?.provokedByPlayer == true || target.currentTargetID == leader.entityID
     }
 
     /// Is this ship the local authority — i.e. does it belong to the government
@@ -517,7 +561,12 @@ public final class AIBrain {
                     else if state != .attacking { enter(.escorting) }
                 case .aggressive:
                     // Adopt the leader's target, else hunt the nearest hostile.
-                    let mark = leader.currentTargetID.flatMap { world.ship(id: $0) } ?? threat
+                    // A player leader's `currentTargetID` is only trusted as an
+                    // attack order once it's a genuine fight, not a bare UI
+                    // selection (see `isGenuineEngagementTarget`).
+                    let leaderTarget = leader.currentTargetID.flatMap { world.ship(id: $0) }
+                    let mark = (leaderTarget.map { isGenuineEngagementTarget($0, leader: leader) } ?? false)
+                        ? leaderTarget : threat
                     if armed, let m = mark, isHostile(me, m, world) {
                         targetID = m.entityID; enter(.attacking)
                     } else if state != .attacking && state != .fleeing {
@@ -525,9 +574,14 @@ public final class AIBrain {
                     }
                 case .defensive:
                     if state != .attacking && state != .fleeing { enter(.escorting) }
-                    // Adopt the leader's target when it has one.
+                    // Adopt the leader's target only once it's a genuine fight
+                    // (see `isGenuineEngagementTarget`) — otherwise a freshly
+                    // launched fighter/escort would jump straight to attacking
+                    // whatever the player merely has selected (Tab/click), with
+                    // zero actual hostiles engaged anywhere in the system.
                     if state != .fleeing, let lt = leader.currentTargetID,
-                       let lts = world.ship(id: lt), isHostile(me, lts, world), armed {
+                       let lts = world.ship(id: lt), armed, isHostile(me, lts, world),
+                       isGenuineEngagementTarget(lts, leader: leader) {
                         targetID = lt; enter(.attacking)
                     }
                 }
@@ -663,14 +717,34 @@ public final class AIBrain {
         let aimError = abs(angleDelta(from: me.angle, to: desired))
         // Interceptors crowd the target; warships hold at a comfortable range.
         // A named pêrs's `Aggress` (1 close … 3 far) overrides that default.
-        let standoff: Double
+        let standoffFromRange: Double
         if let aggress = personAggression {
             let factor = aggress <= 1 ? 0.4 : (aggress == 2 ? 0.7 : 1.0)
-            standoff = closeRange * factor
+            standoffFromRange = closeRange * factor
         } else {
-            standoff = aiType == .interceptor ? closeRange * 0.5 : closeRange * 0.7
+            standoffFromRange = aiType == .interceptor ? closeRange * 0.5 : closeRange * 0.7
         }
-        if dist > standoff {
+        // Never target a station-keeping distance inside the two hulls' combined
+        // radii, plus a real gap — a standoff derived purely from weapon range
+        // could come out smaller than `me.radius + target.radius` for anything
+        // bigger than a small fighter, so "correctly" holding it still meant
+        // sitting on top of the target: overlapping its hull and blocking a
+        // fixed-forward primary (the player's) from ever tracking/hitting it.
+        let hullFloor = me.radius + target.radius + 30
+        let standoff = max(standoffFromRange, hullFloor)
+        // Brake *before* the standoff line, not at it — the same braking-distance
+        // math `moveTo` uses for arrivals (`0.5 * closingSpeed² / accel`). Cutting
+        // thrust only once `dist <= standoff` ignored momentum: the nose stays
+        // pinned on the target for aiming, so under the driftless AI flight model
+        // its velocity keeps steering onto that heading and coasts on inward for
+        // several frames while decelerating — for a ship closing fast (or a big,
+        // slow-decelerating hull) that overshoot was enough to sail right through
+        // the standoff radius and overlap the target. Folding in closing speed
+        // (relative, so a moving target is handled too) makes the ship start
+        // coasting early enough to actually settle at the bubble's edge.
+        let closingSpeed = max(0, (me.velocity - target.velocity).dot(toTarget.normalized))
+        let brakeDist = 0.5 * closingSpeed * closingSpeed / max(me.stats.acceleration, 1)
+        if dist > standoff + brakeDist {
             // Thrust when roughly pointed the right way, so we actually close.
             if aimError < .pi / 2 {
                 intent.thrust = true
@@ -679,10 +753,33 @@ public final class AIBrain {
                 if aiType == .interceptor && dist > range * 1.5
                     && aimError < 0.5 && canBurn(me) { intent.afterburner = true }
             }
-        } else if dist < standoff * 0.6 {
-            // Too close — ease off the throttle (simple strafing feel).
-            intent.thrust = false
+        } else if dist < hullFloor {
+            // Genuinely about to overlap the target's hull — back off rather
+            // than merely coast. This can still happen even with the braking
+            // margin above (a target that itself closes in, a spawn that
+            // starts too close) and previously left the ship just sitting
+            // there overlapping the target's hull until distance happened to
+            // open back up on its own. Turn tail and thrust away — overriding
+            // the aim-at-target heading set above — until clear; turreted/
+            // beam-turreted weapons keep firing through the retreat below
+            // (they aim independent of hull heading), fixed mounts simply
+            // hold fire until back at range, exactly like closing in from
+            // outside the bubble in reverse.
+            //
+            // Deliberately gated on `hullFloor`, not the full `standoff`: a
+            // ship anywhere inside its *preferred* standoff but still well
+            // clear of the target's hull has a perfectly good shot — e.g. two
+            // warships that spawn well inside standoff but far outside hull
+            // range should just trade fire in place, not both turn tail. Only
+            // near-overlap actually needs an active retreat.
+            intent.desiredHeading = (me.position - target.position).angle
+            intent.thrust = true
         }
+        // Else: between the hull floor and the standoff/braking line — coast
+        // (no thrust, the `ControlIntent()` default). Inside standoff but
+        // clear of the hull, that's a stable engagement distance, not
+        // something to correct; just outside it, momentum bleeds off before
+        // the ship ever needs to cross the standoff line in the first place.
         // Fire when the target is within reach and in the firing arc — except
         // turrets/beam-turrets, which `World.fireAngle` already aims straight at
         // the target regardless of hull heading, so gating the *intent* to fire
@@ -896,9 +993,24 @@ public final class AIBrain {
             Log.ai.debug("\(tag) escort leader [\(leaderDesc)] gone — reverting to own disposition")
             leaderID = nil
             prevLeaderVel = nil
+            formationHeading = nil
             enter(defaultIdleState(me, world))
             return ControlIntent()
         }
+        // Snap straight to the leader's heading the first frame (nothing to
+        // smooth from yet), then chase it at a bounded turn rate — fast enough
+        // to follow an ordinary course change, far too slow to track a
+        // dogfight's rapid re-aiming. `angleDelta` gives the shortest signed
+        // turn so this always closes the short way around, never the long way.
+        let maxWedgeTurnPerSec = 1.2   // ~69°/sec
+        if let h = formationHeading {
+            let delta = angleDelta(from: h, to: leader.angle)
+            let step = max(-maxWedgeTurnPerSec * dt, min(maxWedgeTurnPerSec * dt, delta))
+            formationHeading = h + step
+        } else {
+            formationHeading = leader.angle
+        }
+        let wedgeHeading = formationHeading ?? leader.angle
         // Slot → (row, column): row r (1-based) holds r ships, centered behind
         // the leader and spread evenly across the row — row 1 is one ship dead
         // astern, row 2 flanks it left/right, row 3 adds a centered ship plus two
@@ -912,69 +1024,79 @@ public final class AIBrain {
             row += 1
         }
         let col = remaining   // 0..<row within this row
-        let lateral = (Double(col) - Double(row - 1) / 2.0) * 72   // right of the leader (+) / left (−)
-        let behind = -64 * Double(row)                             // trailing the leader
-        // Leader frame: forward = (sin a, cos a); right = (cos a, −sin a).
-        let fwd = Vec2(sin(leader.angle), cos(leader.angle))
-        let right = Vec2(cos(leader.angle), -sin(leader.angle))
+        // Slot spacing scales with the hulls actually involved — a fixed 64/72pt
+        // offset was tuned for small-ship wings and left almost no clearance
+        // behind a big leader (e.g. a Raven): row 1 landed inside/overlapping its
+        // stern instead of trailing it. Mirrors the padding `attack()` uses for
+        // its combat standoff bubble (`me.radius + target.radius`, plus a gap).
+        let slotSpacing = max(64, leader.radius + me.radius + 40)
+        let lateral = (Double(col) - Double(row - 1) / 2.0) * slotSpacing  // right of the leader (+) / left (−)
+        let behind = -slotSpacing * Double(row)                           // trailing the leader
+        // Wedge frame: forward = (sin a, cos a); right = (cos a, −sin a) — built
+        // from the smoothed `wedgeHeading`, not the leader's raw (possibly
+        // combat-swinging) nose angle; see `formationHeading` above.
+        let fwd = Vec2(sin(wedgeHeading), cos(wedgeHeading))
+        let right = Vec2(cos(wedgeHeading), -sin(wedgeHeading))
         let station = leader.position + fwd * behind + right * lateral
-        let toStation = station - me.position
-        let d = toStation.length
-        let leaderSpeed = leader.velocity.length
+        let posErr = station - me.position
 
-        // FAR from the slot (returning from a fight, freshly hired), OR the leader is
-        // essentially parked (no travel heading to lock onto): fly in / settle onto
-        // the fixed station point with the stopping-point steering, which decelerates
-        // cleanly onto the mark instead of sailing through and wheeling around it. A
-        // modest limit-lift keeps the approach brisk and lets it catch a cruising
-        // leader, while still reading as real thruster flight.
-        if d > 150 || leaderSpeed < 30 {
-            var (intent, arrived) = moveTo(me, toward: station, matching: leader.velocity,
-                                     arriveRadius: 16, arriveSpeed: max(6, me.stats.maxSpeed * 0.04))
-            // Parked on station: square up to the leader's heading rather than
-            // holding whatever direction we last steered toward the station —
-            // otherwise a stopped/slow leader leaves escorts facing stale.
-            if arrived { intent.desiredHeading = leader.angle }
-            me.formationBoost = d > 150 ? 0.6 : 1.0
+        // Velocity-matching formation controller. The desired velocity is the
+        // leader's own velocity (feed-forward: keep pace with a cruising leader)
+        // plus a proportional pull toward the slot (close any positional gap).
+        //
+        // This replaces an earlier pure-pursuit-toward-the-slot-point approach,
+        // which had a fatal flaw against a *turning* leader: the slot point
+        // orbits the leader as it wheels, and a pursuer aimed straight at the
+        // current slot (no lead term) settles into a fixed-radius lag orbit,
+        // trailing forever without ever converging — the reported "launch a
+        // fighter and it flies off and circles a random point forever" bug.
+        // Folding the leader's velocity in as feed-forward makes the controller
+        // converge: with the gap closed, `desiredVel` reduces to the leader's
+        // velocity and the escort simply flies alongside on station.
+        //
+        // EV Nova escorts "ignore their own speed and maneuverability to hold
+        // formation" (they stay on your tail no matter how fast you fly), so the
+        // correction term is allowed to demand well above the hull's own top
+        // speed; `formationBoost` is scaled to whatever `desiredVel` needs so
+        // the limit lift actually delivers it.
+        let desiredVel = leader.velocity + posErr * formationPullGain
+        let desiredSpeed = desiredVel.length
+        var intent = ControlIntent()
+
+        // Parked on station (stopped leader, sitting on the mark): `desiredVel`
+        // is near zero, whose angle is pure noise — chasing it is what makes a
+        // parked escort's nose twitch. Square up to the wedge heading and coast.
+        let parkThreshold = max(6, me.stats.maxSpeed * 0.04)
+        if desiredSpeed < parkThreshold {
+            intent.desiredHeading = wedgeHeading
+            me.formationBoost = 1.0
             return intent
         }
 
-        // IN the slot behind a MOVING leader: lift the ship's limits (EV Nova escorts
-        // ignore their own
-        // speed/maneuverability to hold formation) and fly *as the leader flies* —
-        // face its heading and match its speed — rather than chasing a blended PD
-        // acceleration command. A formation hull flies inertialess (its velocity is
-        // always along its nose), so a PD command with any braking/lateral component
-        // can only be realised by rotating the nose toward it; the limit-lifted
-        // escort overshoots the leader's speed, the controller then commands a
-        // retrograde brake, and the nose flips 180° — a violent spin that never
-        // settles (the "escort circles its slot forever" bug). Instead: hold the
-        // leader's heading with a small *bounded* nudge that eases lateral drift out
-        // (never enough to flip the nose), and gate thrust on a target speed derived
-        // from the along-track gap. Stable by construction — the nose stays within a
-        // narrow cone of the leader's heading, so a straight-cruising wing holds
-        // heading instead of twitching.
-        me.formationBoost = 1.0
-        let posErr = toStation
-        var intent = ControlIntent()
-
-        // Decompose the station offset in the leader's frame: `along` (+ = station is
-        // ahead of us along the leader's travel) drives speed; `cross` (+ = station is
-        // to our right) drives a small heading nudge.
-        let along = fwd.dot(posErr)
-        let cross = right.dot(posErr)
-        let headingNudge = max(-0.3, min(0.3, cross / 220))
-        intent.desiredHeading = leader.angle + headingNudge
-
-        // Match the leader's speed, biased by the along-track gap so we close or drop
-        // back onto station without ever needing to reverse the nose.
-        let wantSpeed = max(0, leaderSpeed + max(-leaderSpeed, min(leaderSpeed, along * 0.6)))
-        if me.velocity.length < wantSpeed,
-           Vec2.heading(me.angle).dot(Vec2.heading(leader.angle)) > cosThrustCone {
+        // Point the nose along the desired velocity and throttle up toward its
+        // magnitude — an inertialess hull realises a target velocity by facing
+        // it and ramping speed. Bang-bang on speed (thrust while under the
+        // target), gated on rough alignment so it never accelerates off-axis
+        // while still swinging onto heading.
+        intent.desiredHeading = desiredVel.angle
+        if me.velocity.length < desiredSpeed,
+           Vec2.heading(me.angle).dot(desiredVel.normalized) > cosThrustCone {
             intent.thrust = true
         }
+        // Lift the hull's caps enough to actually reach `desiredSpeed`
+        // (`World.step` applies `topSpeed *= 1 + boost`), scaled to the demand
+        // with a floor so gentle station-keeping still gets some help and a
+        // ceiling (3× top speed) so it closes fast without teleporting.
+        let speedRatio = desiredSpeed / max(me.stats.maxSpeed, 1)
+        me.formationBoost = min(2.0, max(0.4, speedRatio - 1))
         return intent
     }
+
+    /// Proportional gain (1/sec) pulling a formation escort toward its slot:
+    /// a positional gap of `g` px adds `g × gain` px/sec toward the slot on top
+    /// of matching the leader's velocity. High enough to hold a tight wing
+    /// through hard turns, low enough not to overshoot into oscillation.
+    private var formationPullGain: Double { 2.5 }
 
     /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
     /// applied once via `World.deliverAssistance`). After delivering: if the

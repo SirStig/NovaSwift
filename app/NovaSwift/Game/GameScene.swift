@@ -1831,6 +1831,12 @@ final class GameScene: SKScene {
     /// rolled a success for.
     func recruitCapturedEscort(_ id: Int) { world?.recruitCapturedEscort(shipID: id) }
 
+    /// The player leaves a boarded hulk without having captured it — real EV
+    /// Nova dooms a boarded ship unless you save it by capturing, rather than
+    /// leaving it drifting forever. A no-op if it was captured (no longer a
+    /// disabled hulk) or is gone already.
+    func finishBoardingWithoutCapture(_ id: Int) { world?.finishBoardingWithoutCapture(shipID: id) }
+
     /// Click/tap hit-test in scene space (== world space here): nearest ship
     /// first, then nearest planet; clears the selection if nothing was hit.
     /// Called by `GameContainerView` off a tap gesture on the `SpriteView`.
@@ -1953,7 +1959,7 @@ final class GameScene: SKScene {
         guard let hud else { return }
         guard let target else {
             hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0
-            hud.targetHostile = false; hud.targetGovtLabel = ""
+            hud.targetHostile = false; hud.targetDisabled = false; hud.targetGovtLabel = ""
             hud.targetShipTypeID = nil
             hud.targetCargo = []
             return
@@ -1963,6 +1969,7 @@ final class GameScene: SKScene {
         hud.targetShield = target.maxShield > 0 ? target.shield / target.maxShield : 0
         hud.targetArmor = target.maxArmor > 0 ? target.armor / target.maxArmor : 1
         hud.targetHostile = isEffectivelyHostileToPlayer(target)
+        hud.targetDisabled = target.disabled
         hud.targetGovtLabel = galaxy?.game.govt(target.government)?.targetCode ?? ""
         // `oütf` ModType 13 (density scanner): reveals a targeted ship's cargo
         // hold — ownership-gated (the Bible's ModVal is "ignored"), and only
@@ -2000,7 +2007,7 @@ final class GameScene: SKScene {
     /// nearby explosion; decays to nothing over `shakeDuration`.
     private var shakeTime: CGFloat = 0
     private var shakeMag: CGFloat = 0
-    private let shakeDuration: CGFloat = 0.4
+    private let shakeDuration: CGFloat = 0.3
 
     /// Register a camera-shake impulse from an explosion, scaled by how close it
     /// went off and how big it was. Gated by the "Screen shake" setting and
@@ -2013,7 +2020,11 @@ final class GameScene: SKScene {
         // Haptics are independent of the visual-shake preference.
         if falloff > 0.35 { Haptics.play(.light) }
         guard settings.screenShake, !settings.reduceFlashing else { return }
-        shakeMag = min(20, max(shakeMag, (6 + radius * 0.35) * falloff))
+        // Most explosions (even a modest missile) were slamming into the 20pt cap,
+        // making every hit shake the screen by the same jarring amount regardless
+        // of size — toned down and re-capped so only the biggest blasts (a ship
+        // dying) reach the new ceiling.
+        shakeMag = min(8, max(shakeMag, (2 + radius * 0.12) * falloff))
         shakeTime = shakeDuration
     }
 
@@ -2597,13 +2608,13 @@ final class GameScene: SKScene {
             }
             node.lastShield = npc.shield
             if npc.disabled {
-                // A drifting hulk: dimmed, engines dead, no health readout.
-                setDisabledLook(node, on: true)
+                // A drifting hulk: engines dead, no health readout — looks
+                // exactly like a normal ship otherwise, just stopped (real EV
+                // Nova doesn't dim/tint a disabled hull).
                 node.thruster?.isHidden = true
                 node.engineGlow?.isHidden = true
                 node.healthBar?.isHidden = true
             } else {
-                setDisabledLook(node, on: false)
                 updateNPCThruster(node, npc: npc)
                 updateNPCHealth(node, npc: npc)
             }
@@ -2749,17 +2760,6 @@ final class GameScene: SKScene {
                           at: CGPoint(x: npc.position.x, y: npc.position.y), heading: npc.angle)
         }
         return n
-    }
-
-    /// Dim (or restore) a node to read as a powered-down hulk.
-    private func setDisabledLook(_ n: NPCNode, on: Bool) {
-        let a: CGFloat = on ? 0.45 : 1.0
-        n.sprite?.alpha = a
-        n.placeholder?.alpha = a
-        if let sprite = n.sprite {
-            sprite.colorBlendFactor = on ? 0.5 : 0
-            sprite.color = SKColor(white: 0.2, alpha: 1)
-        }
     }
 
     // MARK: Hyperspace jump (player)

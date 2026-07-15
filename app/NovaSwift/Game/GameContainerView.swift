@@ -2041,7 +2041,14 @@ struct GameContainerView: View {
                 onTakeEnergy: { plunderTakeFuel(scene, shipID: m.shipID) },
                 onCaptureShip: { plunderCapture(scene, shipID: m.shipID) },
                 onDemandTribute: { plunderTakeCredits(scene, shipID: m.shipID) },
-                onDismiss: { boardManifest = nil })
+                onDismiss: {
+                    // Forcing entry dooms the hulk unless it was saved by
+                    // capturing — a no-op if `plunderCapture` already
+                    // succeeded (that path clears `boardManifest` itself
+                    // before this can ever run for a captured ship).
+                    scene.finishBoardingWithoutCapture(m.shipID)
+                    boardManifest = nil
+                })
                 .transition(.opacity)
         }
     }
@@ -2348,7 +2355,14 @@ struct GameContainerView: View {
     private func openMobilePanel(_ panel: MobilePanel) {
         switch panel {
         case .missions:  showMissionsPanel = true
-        case .pilotInfo: showPilotInfoPanel = true
+        case .pilotInfo:
+            // Combat rating/legal record only flow from the live `Diplomacy`/
+            // scene into the persisted pilot at landing/jump/backgrounding or
+            // the 3-minute heartbeat (`syncCombatStanding`) — opening Pilot Info
+            // mid-flight right after a kill could otherwise show stale numbers
+            // for up to those 3 minutes.
+            syncCombatStanding()
+            showPilotInfoPanel = true
         }
     }
 
@@ -2512,12 +2526,21 @@ struct GameContainerView: View {
             // still withhold clearance (see landingRefusalReason).
             let refusal = host?.game?.spob(spobID).flatMap { landingRefusalReason(spob: $0) }
             let cleared = landable && refusal == nil
+            // Only offer "Demand Tribute" where it could actually do something:
+            // a defense fleet to break, or the always-dominated flag (an
+            // immediate win) — otherwise `World.demandTribute` just hands back
+            // a canned refusal no matter what, on literally every planet hailed.
+            let spob = host?.game?.spob(spobID)
+            let alreadyDominated = model.pilot.state.hasDominated(spobID)
+            let canDemandTribute = !alreadyDominated
+                && (spob?.hasDefenseFleet == true || spob?.startsDominated == true)
             hailDialogState = HailDialogState(
                 kind: .planet(spobID: spobID), name: name, govtLabel: govt?.targetCode ?? "", hostile: hostile,
                 landable: cleared,
                 // "Channel open to X" is the manual's own wording for a stellar hail.
                 responseText: cleared ? "Channel open to \(name)."
-                                      : "Channel open to \(name). \(refusal ?? "Landing clearance is not currently granted.")")
+                                      : "Channel open to \(name). \(refusal ?? "Landing clearance is not currently granted.")",
+                canDemandTribute: canDemandTribute)
         }
     }
 
@@ -2917,6 +2940,12 @@ struct HailDialogState {
     /// A `pêrs`'s custom `HailPict`, when this hail is with a named character
     /// that specifies one — overrides the default ship/planet portrait.
     var customPictID: Int? = nil
+    /// Planet hails only: whether "Demand Tribute" makes sense to even offer —
+    /// a world with no defense fleet to break and no always-dominated flag can
+    /// never be dominated, and one already dominated has nothing left to
+    /// demand, so `World.demandTribute` would just hand back a canned refusal
+    /// every time. Always true for ship hails (unused there).
+    var canDemandTribute = true
 }
 
 /// Routes hardware-keyboard presses into flight intents using the user's

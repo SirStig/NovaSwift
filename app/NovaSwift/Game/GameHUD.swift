@@ -91,6 +91,9 @@ final class GameHUDModel: ObservableObject {
     @Published var targetShield = 1.0   // 0…1
     @Published var targetArmor = 1.0    // 0…1
     @Published var targetHostile = false
+    /// Whether the locked target is a disabled hulk — shown as a "Disabled"
+    /// status line on the target readout (real EV Nova's target status word).
+    @Published var targetDisabled = false
     /// The target's government, e.g. "Trader" (`gövt.TargetCode`).
     @Published var targetGovtLabel = ""
     /// `shïp.Subtitle` (Nova Bible) — a short descriptor shown under the
@@ -343,6 +346,17 @@ struct GameHUDView: View {
                     if !model.targetGovtLabel.isEmpty {
                         Text(model.targetGovtLabel)
                             .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                    }
+                    // Status word — disabled takes precedence (a disabled hulk
+                    // can't threaten you regardless of its government).
+                    if model.targetDisabled {
+                        Text("DISABLED")
+                            .font(.system(size: 9, design: .monospaced).weight(.bold))
+                            .foregroundStyle(Color(white: 0.6))
+                    } else if model.targetHostile {
+                        Text("HOSTILE")
+                            .font(.system(size: 9, design: .monospaced).weight(.bold))
+                            .foregroundStyle(Color(red: 0.95, green: 0.35, blue: 0.3))
                     }
                     if !model.targetHidesShieldArmorLine {
                         bar("SHIELD", model.targetShield, Color.cyan)

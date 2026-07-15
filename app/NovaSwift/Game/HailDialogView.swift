@@ -128,7 +128,8 @@ struct HailDialogView: View {
 
         // Items 1/2/0 top-to-bottom (146×26 each, stacked left column, x=27):
         //  • top: Greetings, or "Request Landing" when clearance isn't granted
-        //  • middle: Demand Tribute — the forceful-takeover option
+        //  • middle: Demand Tribute — the forceful-takeover option, only where
+        //    it could actually do something (see `canDemandTribute`)
         //  • bottom: Close Channel
         if planetLandable {
             responseButton(graphics.buttonLabel(SpaceportLabel.greetings, fallback: "Greetings"),
@@ -139,9 +140,11 @@ struct HailDialogView: View {
                            width: 120, action: onRequestLanding, graphics: graphics)
                 .novaPlace(space, -243, 36.5)
         }
-        responseButton(graphics.buttonLabel(SpaceportLabel.demandTribute, fallback: "Demand Tribute"),
-                       width: 120, action: onDemandTribute, graphics: graphics)
-            .novaPlace(space, -243, 66.5)         // item 2 (middle): (27,214)-(173,240)
+        if state.canDemandTribute {
+            responseButton(graphics.buttonLabel(SpaceportLabel.demandTribute, fallback: "Demand Tribute"),
+                           width: 120, action: onDemandTribute, graphics: graphics)
+                .novaPlace(space, -243, 66.5)     // item 2 (middle): (27,214)-(173,240)
+        }
         responseButton(graphics.buttonLabel(SpaceportLabel.closeChannel, fallback: "Close Channel"),
                        width: 120, action: onClose, graphics: graphics)
             .novaPlace(space, -243, 96.5)         // item 0 (bottom): (27,244)-(173,270)
