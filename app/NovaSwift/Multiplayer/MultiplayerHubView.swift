@@ -171,7 +171,14 @@ private struct LobbyRow: View {
                 Circle().fill(color).frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(lobby.name).novaFont(.button, weight: .medium).foregroundStyle(.white)
-                    Text("Host: \(lobby.hostName)").novaFont(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text("Host: \(lobby.hostName)").novaFont(.caption).foregroundStyle(.secondary)
+                        Text("·").novaFont(.caption).foregroundStyle(.secondary)
+                        Label("\(lobby.playerCount)", systemImage: "person.2.fill")
+                            .labelStyle(.titleAndIcon)
+                            .novaFont(.caption, weight: .medium)
+                            .foregroundStyle(color)
+                    }
                 }
                 Spacer()
                 Text("Join").novaFont(.caption, weight: .bold)

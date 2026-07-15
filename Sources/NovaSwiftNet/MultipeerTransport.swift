@@ -27,9 +27,16 @@ public final class MultipeerTransport: NSObject, Transport {
     private let mode: Mode
     private let myPeer: MCPeerID
     private let session: MCSession
-    private let advertiser: MCNearbyServiceAdvertiser?
+    private let serviceType: String
+    /// Host mode only: recreated whenever the advertised player count changes
+    /// (MultipeerConnectivity's `discoveryInfo` is fixed at construction, so a new
+    /// count means a new advertiser). `nil` while not advertising / when joining.
+    private var advertiser: MCNearbyServiceAdvertiser?
     private let browser: MCNearbyServiceBrowser?
     private let callbackQueue: DispatchQueue
+    /// Whether `start()` has been called — gates (re)starting the advertiser on a
+    /// count refresh so we don't begin advertising before the host is ready.
+    private var advertising = false
 
     public init(playerID: PeerID, mode: Mode,
                 serviceType: String = "novaswift-mp",
@@ -37,30 +44,47 @@ public final class MultipeerTransport: NSObject, Transport {
         self.localPeerID = playerID
         self.mode = mode
         self.myPeer = MCPeerID(displayName: playerID)
+        self.serviceType = serviceType
         self.session = MCSession(peer: myPeer, securityIdentity: nil, encryptionPreference: .required)
         switch mode {
-        case let .host(lobbyName, hostName):
-            self.advertiser = MCNearbyServiceAdvertiser(
-                peer: myPeer,
-                discoveryInfo: [DiscoveryKey.lobby: lobbyName, DiscoveryKey.host: hostName],
-                serviceType: serviceType)
+        case .host:
             self.browser = nil
         case .join:
-            self.advertiser = nil
             self.browser = MCNearbyServiceBrowser(peer: myPeer, serviceType: serviceType)
         }
         self.callbackQueue = callbackQueue
         super.init()
         session.delegate = self
-        advertiser?.delegate = self
+        if case .host = mode { rebuildAdvertiser() }
         browser?.delegate = self
     }
 
     /// Begin hosting (advertise) or joining (browse for the target host). Call
     /// after `delegate` is set.
     public func start() {
+        advertising = true
         advertiser?.startAdvertisingPeer()
         browser?.startBrowsingForPeers()
+    }
+
+    /// The current lobby size the host advertises: itself plus everyone connected.
+    private var advertisedCount: Int { session.connectedPeers.count + 1 }
+
+    /// (Re)create the host advertiser with the current player count baked into its
+    /// discovery info, and resume advertising if we were already. Called at start
+    /// and whenever a peer connects or drops so browsers see the count change.
+    private func rebuildAdvertiser() {
+        guard case let .host(lobbyName, hostName) = mode else { return }
+        advertiser?.stopAdvertisingPeer()
+        let info = [
+            DiscoveryKey.lobby: lobbyName,
+            DiscoveryKey.host: hostName,
+            DiscoveryKey.count: String(advertisedCount),
+        ]
+        let next = MCNearbyServiceAdvertiser(peer: myPeer, discoveryInfo: info, serviceType: serviceType)
+        next.delegate = self
+        advertiser = next
+        if advertising { next.startAdvertisingPeer() }
     }
 
     public var connectedPeers: [PeerID] { session.connectedPeers.map(\.displayName) }
@@ -77,6 +101,7 @@ public final class MultipeerTransport: NSObject, Transport {
     }
 
     public func disconnect() {
+        advertising = false
         advertiser?.stopAdvertisingPeer()
         browser?.stopBrowsingForPeers()
         session.disconnect()
@@ -91,6 +116,7 @@ public final class MultipeerTransport: NSObject, Transport {
 enum DiscoveryKey {
     static let lobby = "lobby"
     static let host = "host"
+    static let count = "n"      // current player count (host + joiners)
 }
 
 extension MultipeerTransport: MCSessionDelegate {
@@ -99,8 +125,12 @@ extension MultipeerTransport: MCSessionDelegate {
         callbackQueue.async { [weak self] in
             guard let self else { return }
             switch state {
-            case .connected:    self.delegate?.transport(self, peerDidConnect: name)
-            case .notConnected: self.delegate?.transport(self, peerDidDisconnect: name)
+            case .connected:
+                self.rebuildAdvertiser()    // host: roster grew — re-advertise the count
+                self.delegate?.transport(self, peerDidConnect: name)
+            case .notConnected:
+                self.rebuildAdvertiser()    // host: roster shrank — re-advertise the count
+                self.delegate?.transport(self, peerDidDisconnect: name)
             case .connecting:   break
             @unknown default:   break
             }
@@ -180,7 +210,9 @@ extension MultipeerLobbyBrowser: MCNearbyServiceBrowserDelegate {
                         withDiscoveryInfo info: [String: String]?) {
         let name = info?[DiscoveryKey.lobby] ?? "Lobby"
         let host = info?[DiscoveryKey.host] ?? peerID.displayName
-        found[peerID.displayName] = LobbyDescriptor(id: peerID.displayName, name: name, hostName: host)
+        let count = info?[DiscoveryKey.count].flatMap(Int.init) ?? 1
+        found[peerID.displayName] = LobbyDescriptor(id: peerID.displayName, name: name,
+                                                    hostName: host, playerCount: max(1, count))
         publish()
     }
 

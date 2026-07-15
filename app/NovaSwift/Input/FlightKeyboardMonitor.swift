@@ -27,9 +27,12 @@ import AppKit
 /// through untouched while `isActive()` is false, so overlays, text fields and
 /// the launcher keep ordinary keyboard behaviour.
 ///
-/// It coexists with the cross-platform `KeyboardControls`: on macOS this
-/// monitor consumes the keys first, so `onKeyPress` simply never sees them;
-/// on iOS this type doesn't exist and `KeyboardControls` still runs.
+/// This fully *replaces* the cross-platform `KeyboardControls` on macOS —
+/// `GameContainerView` applies `KeyboardControls` only on non-macOS. Running
+/// both would double-handle every key: `.onKeyPress` on the `.focusable()`
+/// flight view still fires even though this monitor returns `nil`, and while a
+/// discrete action *toggles* (menu/map), two fires per press cancel out. On
+/// iOS this type doesn't exist and `KeyboardControls` still runs.
 struct FlightKeyboardMonitor: NSViewRepresentable {
     let input: InputController
     let bindings: KeyBindings

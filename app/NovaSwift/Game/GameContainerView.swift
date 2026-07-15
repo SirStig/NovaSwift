@@ -1958,8 +1958,6 @@ struct GameContainerView: View {
         .ignoresSafeArea()
         .focusable()
         .focusEffectDisabled()
-        .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
-                                   onDiscrete: handleDiscrete))
         #if os(macOS)
         // On macOS the flight scene owns the keyboard through one AppKit event
         // monitor rather than SwiftUI focus. It drives every binding — including
@@ -1968,9 +1966,20 @@ struct GameContainerView: View {
         // through to the system alert beep or to SwiftUI focus navigation
         // ("switching screens"). Gated on `flightControlsVisible`, so overlays
         // and text fields keep normal keyboard behaviour. See FlightKeyboardMonitor.
+        //
+        // The cross-platform `KeyboardControls` (`.onKeyPress`) is deliberately
+        // NOT applied on macOS: `.onKeyPress` on this `.focusable()` view still
+        // fires even though the monitor returns `nil`, so running both would
+        // double-handle every key. Continuous bindings (`= pressed`) are
+        // idempotent and survive that, but discrete actions *toggle* — two fires
+        // per press cancel out, so ESC/M would open the menu/map and instantly
+        // close it. The monitor already covers every binding onKeyPress did.
         .background(FlightKeyboardMonitor(input: host.input, bindings: model.bindings,
                                           isActive: { flightControlsVisible },
                                           onDiscrete: handleDiscrete))
+        #else
+        .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
+                                   onDiscrete: handleDiscrete))
         #endif
     }
 

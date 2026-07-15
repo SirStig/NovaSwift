@@ -8,8 +8,13 @@ public struct LobbyDescriptor: Identifiable, Equatable, Sendable {
     public var id: String            // host player id
     public var name: String          // lobby display name
     public var hostName: String      // host's pilot name
-    public init(id: String, name: String, hostName: String) {
+    /// How many players are in the lobby right now (host + connected joiners), as
+    /// advertised by the host. At least 1 (the host). Live-ish: the host
+    /// re-advertises it as peers connect/leave, so a browser sees it change.
+    public var playerCount: Int
+    public init(id: String, name: String, hostName: String, playerCount: Int = 1) {
         self.id = id; self.name = name; self.hostName = hostName
+        self.playerCount = playerCount
     }
 }
 

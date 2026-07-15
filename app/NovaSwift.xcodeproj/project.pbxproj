@@ -20,8 +20,18 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		AA000000000000000000E6 /* NovaSwift */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = NovaSwift; sourceTree = "<group>"; };
+		AA000000000000000000E6 /* NovaSwift */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (AA000000000000000000FD /* Exceptions for "NovaSwift" folder in "NovaSwift" target */, ); explicitFileTypes = {}; explicitFolders = (); path = NovaSwift; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		AA000000000000000000FD /* Exceptions for "NovaSwift" folder in "NovaSwift" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = AA000000000000000000E4 /* NovaSwift */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		AA000000000000000000E8 /* Frameworks */ = {
@@ -264,10 +274,10 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = LaunchScreen.storyboard;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NovaSwift/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
 				INFOPLIST_KEY_GCSupportsGameMode = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
-				INFOPLIST_KEY_NSBonjourServices = "_novaswift-mp._tcp _novaswift-mp._udp";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -316,10 +326,10 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = LaunchScreen.storyboard;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NovaSwift/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
 				INFOPLIST_KEY_GCSupportsGameMode = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
-				INFOPLIST_KEY_NSBonjourServices = "_novaswift-mp._tcp _novaswift-mp._udp";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

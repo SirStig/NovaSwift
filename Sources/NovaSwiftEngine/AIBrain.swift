@@ -24,7 +24,11 @@ public enum EscortOrder: String, Sendable, CaseIterable, Identifiable {
 public enum AIState: String, Sendable {
     case spawning      // just arrived; pick an initial goal
     case traveling     // trader heading to a planet
-    case landing       // trader on final approach, diving into the spaceport
+    case landing       // trader on final approach, coasting to the pad
+    /// Parked alongside a planet, engines idle. EV Nova traders don't vanish
+    /// into a spaceport — they pull up beside the pad, sit still for a spell,
+    /// then throttle back up and leave the system. This is that dwell.
+    case docked
     case patrolling    // warship roaming, watching for hostiles
     /// Interceptor idle default: holds a slow orbit near a stellar object,
     /// buzzing passing ships, instead of walking the warship patrol beat.
@@ -142,6 +146,10 @@ public final class AIBrain {
     /// first stop (which read as an instant re-land at spawn) while ordinary
     /// later returns to that port are unaffected.
     var spawnOriginSpobID: Int?
+    /// Seconds this trader will loiter parked beside the pad in `.docked` before
+    /// it lifts off and departs. Rolled once on touchdown so dwell times vary
+    /// ship-to-ship; -1 means "not yet rolled".
+    var dockDwell: Double = -1
     /// The hypergate this ship decided to use for its current departure, once
     /// `depart()` has rolled that decision (see `pickDepartureGate`) — nil means
     /// either "not decided yet" (checked via `departureGateChecked`) or "decided
@@ -591,11 +599,11 @@ public final class AIBrain {
                 // leaders (those with a brain) trigger this — a player-led wing is
                 // handled by the host when the player lands.
                 if let lb = leader.brain {
-                    if (lb.state == .landing || leader.wantsToLand),
+                    if (lb.state == .landing || lb.state == .docked || leader.wantsToLand),
                        let sid = lb.destSpob ?? leader.landingSpob {
                         destSpob = sid
-                        if state != .landing { enter(.landing) }
-                        return land(me, world)
+                        if state != .landing && state != .docked { enter(.landing) }
+                        return state == .docked ? dock(me, world) : land(me, world)
                     }
                     if lb.state == .departing || leader.wantsToDepart {
                         if state != .departing { enter(.departing) }
@@ -713,6 +721,7 @@ public final class AIBrain {
         case .fleeing:    return flee(me, world)
         case .traveling:  return travel(me, world)
         case .landing:    return land(me, world)
+        case .docked:     return dock(me, world)
         case .patrolling: return patrol(me, world, dt)
         case .orbiting:   return orbit(me, world, dt)
         case .scanning:   return scan(me, world)
@@ -930,8 +939,9 @@ public final class AIBrain {
         return arrive(me, to: dest, slowRadius: 260)
     }
 
-    /// Final approach: settle onto the pad, then dock. Setting `wantsToLand` lets
-    /// the world remove the ship into the spaceport and fire a `shipLanded` event.
+    /// Final approach: coast in beside the pad, then park. Rather than diving into
+    /// the spaceport and vanishing, the trader pulls up next to the planet and hands
+    /// off to `.docked`, where it sits idle for a while before lifting off again.
     private func land(_ me: Ship, _ world: World) -> ControlIntent {
         guard let sid = destSpob,
               let body = world.systemContext.bodies.first(where: { $0.id == sid }) else {
@@ -943,14 +953,49 @@ public final class AIBrain {
         }
         let dist = (body.position - me.position).length
         let slowEnough = me.velocity.length < me.stats.maxSpeed * 0.35
-        // Touch down when we're over the pad and slow — or give up circling and
-        // set down anyway after a while, so no trader gets stuck orbiting.
+        // Park when we're over the pad and slow — or give up circling and set down
+        // anyway after a while, so no trader gets stuck orbiting.
         if (dist < body.radius + 40 && slowEnough) || stateClock > 14 {
-            me.landingSpob = sid
-            me.wantsToLand = true
-            return ControlIntent()
+            enter(.docked)
+            return dock(me, world)
         }
         return arrive(me, to: body.position, slowRadius: max(160, body.radius + 120))
+    }
+
+    /// Parked beside the pad: engines idle, holding station near the planet for a
+    /// randomized dwell, then lift off and depart. The trader never disappears —
+    /// it's a visible ship sitting at the port. If it drifts off the pad it eases
+    /// back; otherwise it brakes to a dead stop and waits.
+    private func dock(_ me: Ship, _ world: World) -> ControlIntent {
+        guard let sid = destSpob,
+              let body = world.systemContext.bodies.first(where: { $0.id == sid }) else {
+            // Port gone (system swapped out from under us) — just leave.
+            destination = nil; destSpob = nil
+            enter(.departing)
+            return depart(me, world)
+        }
+        if dockDwell < 0 { dockDwell = world.rng.double(in: 6...16) }
+        // Lift off once we've loitered long enough.
+        if stateClock > dockDwell {
+            dockDwell = -1
+            destination = nil; destSpob = nil
+            enter(.departing)
+            return depart(me, world)
+        }
+        let hold = body.radius + 30
+        let dist = (body.position - me.position).length
+        // Drifted off the pad → ease back onto it; otherwise brake any residual
+        // motion to a standstill and sit.
+        if dist > hold + 40 {
+            return arrive(me, to: body.position, slowRadius: max(120, hold))
+        }
+        var intent = ControlIntent()
+        if me.velocity.length > 6 {
+            // Point retrograde and burn to kill the last bit of drift.
+            intent.desiredHeading = (me.velocity * -1).angle
+            intent.thrust = true
+        }
+        return intent
     }
 
     /// Warship patrol: fly a steady beat from one stellar object to the next — a

@@ -4641,6 +4641,7 @@ final class GameScene: SKScene {
         case .spawning:   return "SPAWN"
         case .traveling:  return "TRVL"
         case .landing:    return "LAND"
+        case .docked:     return "DOCK"
         case .patrolling: return "PATRL"
         case .orbiting:   return "ORBIT"
         case .attacking:  return "ATK"
@@ -4660,7 +4661,7 @@ final class GameScene: SKScene {
             return SKColor(red: 0.95, green: 0.35, blue: 0.3, alpha: 1)
         case .fleeing, .departing:
             return SKColor(red: 1.0, green: 0.7, blue: 0.3, alpha: 1)
-        case .traveling, .landing:
+        case .traveling, .landing, .docked:
             return SKColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1)
         case .escorting, .assisting, .scanning:
             return SKColor(red: 0.45, green: 0.9, blue: 0.5, alpha: 1)
