@@ -174,11 +174,12 @@ struct RadarContact {
 }
 
 /// Maps a stellar object's world-space visual radius to its radar blip diameter
-/// in points, so a gas giant reads bigger than an asteroid on the scope while
-/// staying legible regardless of the underlying sprite size.
+/// in points. EV Nova draws worlds as small circles on the scope, so this stays
+/// deliberately tight (~3–5.5 pt): a gas giant reads a touch larger than an
+/// asteroid, but never as the fat dot that overwhelms the original's look.
 func radarPlanetBlipDiameter(worldRadius: CGFloat) -> CGFloat {
-    guard worldRadius > 0 else { return 4 }
-    return min(11, max(3.5, 2 + worldRadius * 0.14))
+    guard worldRadius > 0 else { return 3.5 }
+    return min(5.5, max(3, 2.5 + worldRadius * 0.045))
 }
 
 /// The player marker at the centre of the radar: a slim needle arrow pointing

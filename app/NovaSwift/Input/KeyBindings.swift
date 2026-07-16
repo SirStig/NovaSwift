@@ -41,6 +41,9 @@ struct KeyBindings: Codable, Equatable {
         .commandEscortAggressive: "f", .commandEscortDefensive: "d",
         .commandEscortEvasive: "x", .commandEscortHold: "v",
         .openEscorts: "e",
+        // "I" for (ship) Info — a free key in this scheme; the pilot-info panel
+        // is menu-driven and holds no binding, so there's no conflict.
+        .shipInfo: "i",
         .pauseGame: "p", .openMenu: "escape",
     ]
 

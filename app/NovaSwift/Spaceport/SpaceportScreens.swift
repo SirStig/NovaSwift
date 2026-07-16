@@ -539,6 +539,8 @@ struct ShipyardView: View {
 
     @State private var selectedID: Int?
     @State private var topRow = 0
+    /// The full Ship Info card, opened by tapping the large preview picture.
+    @State private var showInfo = false
     private var game: NovaGame { graphics.game }
     /// Port rank `PriceMod` discount for this spöb's govt (1.0 = none) — applied
     /// to the new-hull cost in the displayed net price and the buy transaction.
@@ -556,6 +558,27 @@ struct ShipyardView: View {
     }
 
     var body: some View {
+        ZStack {
+            shipyardMenu
+            // Full Ship Info card over the shipyard (its own dimmed dialog, the
+            // Bar sub-panel pattern) — tap-out or Done to dismiss.
+            if showInfo {
+                Color.black.opacity(0.6).ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { showInfo = false }
+                    .transition(.opacity)
+                ShipInfoView(graphics: graphics, ship: selected,
+                             priceText: selected.map {
+                                 pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult).creditsAbbreviated
+                             },
+                             onDone: { showInfo = false })
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: showInfo)
+    }
+
+    @ViewBuilder private var shipyardMenu: some View {
         if let frame = graphics.frame(.shipyard) {
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)
@@ -573,9 +596,20 @@ struct ShipyardView: View {
                 detail.frame(width: 190, height: 265, alignment: .topLeading)
                     .clipped().novaPlace(space, -28.5, -150.5)
                 // Ship picture — DITL #1004 item 7 (557,8)-(757,208), 200×200.
+                // Tappable: opens the full Ship Info card. The corner glyph
+                // advertises that the preview is more than decoration.
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
                         .frame(width: 200, height: 200).clipped()
+                        .overlay(alignment: .topTrailing) {
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .shadow(radius: 2)
+                                .padding(5)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { showInfo = true }
                         .novaPlace(space, 174.5, -152.5)
                 }
                 info(space)

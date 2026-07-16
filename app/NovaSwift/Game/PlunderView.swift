@@ -73,6 +73,7 @@ struct PlunderView: View {
     fileprivate static let frameSize = CGSize(width: 309, height: 198)
 
     private var hasCargo: Bool { cargoLines.contains { $0.amount != "0" } }
+    private var totalCargoTons: Int { cargoLines.compactMap { Int($0.amount) }.reduce(0, +) }
 
     var body: some View {
         ZStack {
@@ -113,24 +114,33 @@ struct PlunderView: View {
         NovaButton(graphics: graphics, title: title, width: width, enabled: enabled, action: action)
     }
 
-    /// Item [4]: the disabled 287×96 readout — target name, cargo manifest,
-    /// then a credits/ammo/energy summary line, all real data from the
-    /// caller (no invented sample commodities baked into the view itself).
+    /// Item [4]: the disabled 287×96 readout. Title and the "Cargo:"/"Ammo:"/
+    /// "Capture Odds:" labels are the real game's own text — verbatim from
+    /// `STR# 2002` ("misc strings"), confirmed via
+    /// `novaswift-extract raw "data/EV Nova" 'STR#' 2002`:
+    ///
+    ///     Select what to plunder from this ship:.Cargo:.Ammo:.Capture Odds:
+    ///
+    /// No "Credits:" or "Energy:" label exists anywhere in the game's string
+    /// tables — EV Nova never prefixes a credits/energy amount with a label,
+    /// it's always a bare "<n> credits"/"<n> energy" — so those two stay an
+    /// unlabeled summary line, same as before. A screenshot of the original
+    /// dialog also shows a "Capture Odds: 33 (Unregistered)" row — "odds
+    /// computed, but blocked because the pilot isn't a registered citizen"
+    /// (a real capture precondition per the wiki's Matt Burch capture-formula
+    /// writeup). This engine doesn't model pilot registration status, so the
+    /// row is only shown when `captureChance` is non-nil, without that
+    /// qualifier.
     private var manifest: some View {
         VStack(alignment: .leading, spacing: 3) {
-            NovaText(targetName, size: 12, color: novaAmber, weight: .bold)
-            if cargoLines.isEmpty {
-                NovaText("Cargo hold is empty.", size: 11, color: Color(white: 0.6))
-            } else {
-                ForEach(cargoLines) { line in
-                    HStack {
-                        NovaText(line.label, size: 11, width: 180)
-                        NovaText(line.amount, size: 11, width: 80, align: .trailing)
-                    }
-                }
+            NovaText("Select what to plunder from this ship:", size: 11, color: novaAmber, weight: .bold)
+            manifestRow("Cargo:", hasCargo ? "\(totalCargoTons) tons" : "None")
+            manifestRow("Ammo:", ammoAboard > 0 ? "\(ammoAboard)" : "None")
+            if let captureChance {
+                manifestRow("Capture Odds:", "\(captureChance)%")
             }
             Divider().overlay(Color(white: 0.3))
-            NovaText("\(creditsAboard) cr · \(ammoAboard) ammo · \(energyAboard) energy",
+            NovaText("\(creditsAboard) credits · \(energyAboard) energy",
                      size: 10, color: Color(white: 0.65))
         }
         .padding(6)
@@ -139,23 +149,27 @@ struct PlunderView: View {
         .clipped()
     }
 
+    private func manifestRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            NovaText(label, size: 11, width: 100)
+            NovaText(value, size: 11, width: 100, align: .trailing)
+        }
+    }
+
     // MARK: Fallback (no loaded PICT/button art — demo/no-data path)
 
     private var fallbackPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(targetName).novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
-            if cargoLines.isEmpty {
-                Text("Cargo hold is empty.").novaFont(.body).foregroundStyle(Color(white: 0.6))
-            } else {
-                ForEach(cargoLines) { line in
-                    HStack {
-                        Text(line.label).novaFont(.body).foregroundStyle(.white)
-                        Spacer()
-                        Text(line.amount).novaFont(.body).foregroundStyle(.white)
-                    }
-                }
+            Text("Select what to plunder from this ship:").novaFont(.heading, weight: .bold).foregroundStyle(novaAmber)
+            HStack { Text("Cargo:").novaFont(.body).foregroundStyle(.white); Spacer()
+                     Text(hasCargo ? "\(totalCargoTons) tons" : "None").novaFont(.body).foregroundStyle(.white) }
+            HStack { Text("Ammo:").novaFont(.body).foregroundStyle(.white); Spacer()
+                     Text(ammoAboard > 0 ? "\(ammoAboard)" : "None").novaFont(.body).foregroundStyle(.white) }
+            if let captureChance {
+                HStack { Text("Capture Odds:").novaFont(.body).foregroundStyle(.white); Spacer()
+                         Text("\(captureChance)%").novaFont(.body).foregroundStyle(.white) }
             }
-            Text("\(creditsAboard) cr · \(ammoAboard) ammo · \(energyAboard) energy")
+            Text("\(creditsAboard) credits · \(energyAboard) energy")
                 .novaFont(.caption).foregroundStyle(Color(white: 0.65))
             let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
             LazyVGrid(columns: cols, spacing: 8) {

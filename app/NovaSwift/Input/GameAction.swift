@@ -26,6 +26,10 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     case land, hyperjump, galaxyMap, autopilot, hailTarget, board
     // Interface
     case pauseGame, openMenu
+    /// Opens the Ship Info card for the currently targeted ship (or your own
+    /// hull when nothing is targeted) — a NovaSwift convenience with no original
+    /// key, the flight-side entry to the standalone ship-detail screen.
+    case shipInfo
 
     var id: String { rawValue }
 
@@ -53,7 +57,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
              .commandEscortHold: return .combat
         case .targetNearest, .targetNext, .nearestHostile, .clearTarget: return .targeting
         case .land, .hyperjump, .galaxyMap, .autopilot, .hailTarget, .board, .openEscorts: return .navigation
-        case .pauseGame, .openMenu: return .interface
+        case .pauseGame, .openMenu, .shipInfo: return .interface
         }
     }
 
@@ -87,6 +91,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .board: return "Board Target"
         case .pauseGame: return "Pause"
         case .openMenu: return "Menu"
+        case .shipInfo: return "Ship Info"
         }
     }
 

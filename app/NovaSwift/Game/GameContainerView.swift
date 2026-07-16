@@ -685,6 +685,9 @@ struct GameContainerView: View {
     @State private var showMissionsPanel = false
     @State private var showPilotInfoPanel = false
     @State private var showEscortsPanel = false
+    /// The Ship Info card over flight — the targeted ship, or your own hull when
+    /// nothing is targeted (opened by the `.shipInfo` key).
+    @State private var showShipInfoPanel = false
     /// Bumped when an escort order is issued so the command window re-renders
     /// with the new highlighted order (engine state changes don't publish).
     @State private var escortRefresh = 0
@@ -995,6 +998,12 @@ struct GameContainerView: View {
             // comm dialog.
             setMenuPaused(open, reason: "showEscortsPanel=\(open)")
             if !open { grabSceneFocus(reason: "escorts window closed") }
+        }
+        .onChange(of: showShipInfoPanel) { _, open in
+            // Ship Info is a read-only card; pause the sim behind it (like the other
+            // mobile panels) and hand keyboard focus back to flight on close.
+            setMenuPaused(open, reason: "showShipInfoPanel=\(open)")
+            if !open { grabSceneFocus(reason: "ship info closed") }
         }
         .onChange(of: flightMissionServices.pendingOffer != nil) { _, open in
             setMenuPaused(open, reason: "flightMissionOffer=\(open)")
@@ -1996,7 +2005,7 @@ struct GameContainerView: View {
     private var flightControlsVisible: Bool {
         landedSpobID == nil && !nav.showingMap && !showMenu && hailDialogState == nil
             && !showMissionsPanel && !showPilotInfoPanel && !showEscortsPanel
-            && boardManifest == nil && !showDebugSuite
+            && !showShipInfoPanel && boardManifest == nil && !showDebugSuite
     }
 
     /// Push the touch steering mode (Settings ▸ Touch scheme) down to the live
@@ -2040,6 +2049,17 @@ struct GameContainerView: View {
                         onSell: { sellEscort($0) },
                         onClose: { showEscortsPanel = false })
                 .shrinkToFitViewport()
+                .transition(.opacity)
+        }
+        if showShipInfoPanel, let graphics = model.uiGraphics, let game = model.data.game {
+            Color.black.opacity(0.5).ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { showShipInfoPanel = false }
+            // Describe the targeted ship if one is locked, otherwise the player's
+            // own hull — the same "target, falling back to self" the HUD uses.
+            let shipID = host?.hud.targetShipTypeID ?? model.pilot.state.shipType
+            ShipInfoView(graphics: graphics, ship: game.ship(shipID),
+                         onDone: { showShipInfoPanel = false })
                 .transition(.opacity)
         }
         if let m = boardManifest, let scene = host?.scene {
@@ -2460,6 +2480,9 @@ struct GameContainerView: View {
         case .openEscorts:
             model.audio.play(.uiSelect)
             showEscortsPanel = true
+        case .shipInfo:
+            model.audio.play(.uiSelect)
+            showShipInfoPanel = true
         case .board:
             // Board the targeted hulk if it's disabled and in reach.
             if let m = host?.scene.attemptBoard() {
