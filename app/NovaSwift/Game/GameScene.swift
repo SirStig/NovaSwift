@@ -328,6 +328,17 @@ final class GameScene: SKScene {
     private var murkFog: SKSpriteNode?
 
     private var lastUpdate: TimeInterval = 0
+    /// Banked simulation time (seconds) not yet consumed by a fixed sim tick. The
+    /// world advances only in whole `Self.simFixedStep` slices; whatever real time
+    /// is left over each frame is carried here into the next. See `update(_:)`.
+    private var simAccumulator: TimeInterval = 0
+    /// The simulation's fixed tick — EV Nova's native 30 Hz. Every rate-based stat
+    /// (accel, top speed, turn, reload, regen) was tuned against this cadence, so
+    /// the sim always steps by exactly this, independent of the display refresh.
+    private static let simFixedStep: TimeInterval = 1.0 / 30.0
+    /// Most sim ticks to run in one frame — a spiral-of-death guard so a hitch or
+    /// paused breakpoint drops the backlog instead of freezing to catch up.
+    private static let simMaxCatchupTicks = 5
     private var hudClock: TimeInterval = 0
     private var moveDiagClock: TimeInterval = 0
     // Radar scope radius in world units. Stellar objects sit within ~900 units
@@ -1128,7 +1139,25 @@ final class GameScene: SKScene {
         }
 
         syncPreStep?(world)   // co-op: inject/feed friends' ships (authority) or apply snapshot (client)
-        world.step(simDT)     // sim sub-phases recorded via `world.profiler`
+        // Fixed-step accumulator. The entire simulation (flight, AI, weapons,
+        // reload/regen) was tuned against EV Nova's fixed 30 Hz tick, so advance it
+        // in whole `simFixedStep` slices regardless of whether the display runs at
+        // 60 or 120 Hz — banking the leftover real time for next frame. A variable
+        // per-frame `dt` silently re-tunes every rate-based stat with the refresh
+        // rate and loses the original's deterministic, "weighty" 30 fps cadence;
+        // stepping fixed restores it and makes physics/AI behave identically on any
+        // monitor. The game-speed multiplier still rides `simDT` into the bank, so
+        // faster settings simply spend more ticks per frame. `intent` is re-applied
+        // each tick since `World.step` may consume one-shot intent flags.
+        simAccumulator += simDT
+        let fixedStep = Self.simFixedStep
+        let catchupCap = fixedStep * Double(Self.simMaxCatchupTicks)
+        if simAccumulator > catchupCap { simAccumulator = catchupCap }
+        while simAccumulator >= fixedStep {
+            world.intent = intent
+            world.step(fixedStep)   // sim sub-phases recorded via `world.profiler`
+            simAccumulator -= fixedStep
+        }
         syncPostStep?(world)  // co-op: broadcast snapshot (authority) or send input (client)
 
         let p = world.player

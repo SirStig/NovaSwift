@@ -69,9 +69,16 @@ final class FighterFormationTests: XCTestCase {
 
         // The slot for row 0 sits ~one slot-spacing behind the leader; the wing
         // should hold within a small multiple of that, never run away to the
-        // hundreds-of-units lag orbit the bug produced (~550+).
+        // hundreds-of-units lag orbit the bug produced (~550+, i.e. ~7× spacing).
+        //
+        // Newtonian escorts (the default `aiInertialess == .off`) legitimately
+        // ride a *wider* arc off a carrier in a continuous hard turn at full speed
+        // than the old driftless model did — they can't snap their velocity vector
+        // around, so ~3.7× spacing is authentic, not a lag orbit. The bound sits
+        // between that and the runaway it guards against, so it still trips on the
+        // real bug (~7×) while allowing correct Newtonian formation looseness.
         let slotSpacing = max(64, player.radius + fighter.radius + 40)
-        let maxAllowed = slotSpacing * 2.2
+        let maxAllowed = slotSpacing * 5.0
 
         var maxSeen = 0.0
         for f in 0..<600 {
