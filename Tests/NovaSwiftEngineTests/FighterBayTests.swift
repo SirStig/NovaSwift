@@ -103,6 +103,57 @@ final class FighterBayTests: XCTestCase {
         XCTAssertEqual(slots.count, 3, "each fighter got its own formation slot instead of stacking on 0")
     }
 
+    /// A fighter off one of the player's escort carriers is the player's too.
+    /// Its leader is the *carrier*, not the player, so a one-level "leaderID ==
+    /// player" fleet test read it as an outsider: any stray hit from the player's
+    /// own fleet marked it `provokedByPlayer`, and it turned on the carrier it
+    /// launched from. It also fights under the wing's standing order, like every
+    /// other escort, rather than a hardcoded Defend.
+    func testFighterOffAPlayerEscortCarrierIsPlayerFleetAndTakesTheWingOrder() throws {
+        let galaxy = Galaxy(game: game())
+        let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        world.galaxy = galaxy
+        world.diplomacy = galaxy.makeDiplomacy()
+        _ = world.addNPC(carrier)
+        // The carrier flies for the player, on Attack. It needs a gun of its own
+        // to engage: `AIBrain.armed` counts only firing weapons, not bays.
+        carrier.weapons.append(WeaponMount(spec: WeaponSpec(
+            id: 300, name: "Gun", shieldDamage: 10, armorDamage: 10, reloadSeconds: 0.1,
+            projectileSpeed: 2000, range: 4000, accuracyRadians: 0, isBeam: false,
+            isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0)))
+        carrier.brain = AIBrain(aiType: .warship, govt: 128)
+        carrier.brain?.leaderID = World.playerEntityID
+        world.setPlayerEscortOrder(.aggressive)
+        XCTAssertEqual(carrier.brain?.escortOrder, .aggressive)
+
+        // Something that has already traded fire with the player's fleet: the
+        // carrier engages it on its own, which is what puts its bays into combat.
+        let enemy = Ship(name: "E", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                         position: Vec2(0, 600))
+        enemy.brain = AIBrain(aiType: .warship, govt: 200)
+        enemy.brain?.provokedByPlayer = true
+        _ = world.addNPC(enemy)
+        world.player.currentTargetID = enemy.entityID
+        for _ in 0..<3 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(carrier.currentTargetID, enemy.entityID, "the carrier engaged on its wing order")
+
+        let fighter = try XCTUnwrap(world.npcs.first { $0.carrierID == carrier.entityID })
+        XCTAssertTrue(world.isPlayerFleetMember(fighter.entityID),
+                      "the fleet test follows the chain of command through the carrier")
+        XCTAssertTrue(world.isPlayerEscort(fighter), "so the radar/targeting read it as yours")
+        XCTAssertEqual(fighter.brain?.escortOrder, .aggressive,
+                       "it flies under the same standing order as the wing it belongs to")
+        // Even if something has marked the fighter as provoked, it is on the
+        // player's side of `isHostile`'s fleet-vs-outsider test, so it never
+        // turns on the carrier it launched from (or on the player).
+        fighter.brain?.provokedByPlayer = true
+        XCTAssertFalse(fighter.brain!.isHostile(fighter, carrier, world),
+                       "a fighter never turns on the carrier it launched from")
+        XCTAssertFalse(fighter.brain!.isHostile(fighter, world.player, world),
+                       "nor on the player whose fleet it belongs to")
+    }
+
     func testFightersStayOutWhenCarrierLeavesCombatButDockWhenBadlyHurt() throws {
         // Regression-guarding the *current*, deliberate behavior (see
         // `updateFighterBays`'s doc comment): a fighter does NOT get yanked home

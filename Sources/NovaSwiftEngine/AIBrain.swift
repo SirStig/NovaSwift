@@ -247,6 +247,10 @@ public final class AIBrain {
             case .protectPlayer: return false
             case .standard, .attackStellars: break
             }
+            // A ship flying in the player's own fleet never reads the player as
+            // an enemy, whatever provocation or government disposition it may be
+            // carrying — you hired it (or launched it), it doesn't shoot you.
+            if world.isPlayerFleetMember(me.entityID) { return false }
             if provokedByPlayer { return true }
             // A named person the player has wronged holds a grudge and attacks
             // wherever they meet (pêrs.Flags 0x0001).
@@ -258,9 +262,12 @@ public final class AIBrain {
         // versa: whichever side of a fight *isn't* a fleet member gets
         // `provokedByPlayer` set on it (symmetrically, in `World.applyHit`),
         // so every OTHER fleet member reads it as hostile too — not just the
-        // one ship that actually traded fire with it.
-        let meIsFleet = me.brain?.leaderID == World.playerEntityID
-        let otherIsFleet = other.brain?.leaderID == World.playerEntityID
+        // one ship that actually traded fire with it. Membership follows the
+        // whole chain of command (`World.isPlayerFleetMember`), so a fighter off
+        // one of your carriers is on your side of this test rather than reading
+        // as an outsider to the fleet it belongs to.
+        let meIsFleet = world.isPlayerFleetMember(me.entityID)
+        let otherIsFleet = world.isPlayerFleetMember(other.entityID)
         if meIsFleet != otherIsFleet {
             let outsider = meIsFleet ? other : me
             if outsider.brain?.provokedByPlayer == true { return true }
@@ -437,6 +444,12 @@ public final class AIBrain {
     /// with no fight to join just crosses the system like a trader and leaves,
     /// so patrols read as "this government's police," not a free-for-all.
     private func defaultIdleState(_ me: Ship, _ world: World) -> AIState {
+        // Anyone with a leader idles back onto its leader's wing — it has a job.
+        // Without this, a ship that had just finished a kill fell through to its
+        // disposition's idle goal and flew off across the system (or started a
+        // patrol beat) instead of reforming; escorts and carrier fighters visibly
+        // peeled away after every kill.
+        if let lid = leaderID, world.ship(id: lid)?.isAlive == true { return .escorting }
         if aiType.isTrader { return .traveling }
         guard isSystemAuthority(me, world) else { return .traveling }
         return aiType == .interceptor ? .orbiting : .patrolling
@@ -1243,29 +1256,60 @@ public final class AIBrain {
         let desiredSpeed = desiredVel.length
         var intent = ControlIntent()
 
+        // Formation glue — EV Nova's actual escort cheat, and the only model that
+        // can satisfy both halves of what a wing is supposed to do at once. Every
+        // other flight model here couples the nose to the motion (a Newtonian hull
+        // thrusts along its nose; a driftless hull's velocity is *steered onto* its
+        // nose — see `Ship.step`), so an escort with any station-keeping error to
+        // work off must point at the error to correct it. That's the whole reason
+        // a wing's noses wander off the leader's heading whenever it's not already
+        // perfectly parked, and no amount of tuning the aim fixes it: pointing at
+        // the slot and pointing where the leader points are simply different
+        // directions, and a coupled model can only ever have one of them.
+        //
+        // The Bible's "escorts ignore their own speed and maneuverability to hold
+        // formation" is a licence to stop pretending: while holding station an
+        // escort drives its *velocity* straight at what the formation controller
+        // asks for and its *heading* straight at the wedge — independently, with
+        // limits lifted past its own hull's and past the leader's. So the nose is
+        // always right, the slot is always held however hard the leader maneuvers,
+        // and a fighter reeling in from a fight does exactly the thing the wing is
+        // remembered for: comes in hot, swings its nose around onto the leader's
+        // heading, and *drifts* the rest of the way in — translating onto the mark
+        // while already square, decelerating smoothly to nothing as the gap closes
+        // (`desiredVel` shrinks with the position error, so the arrival is a clean
+        // exponential settle: no braking to compute, no overshoot to correct, no
+        // micro-adjust to hunt).
+        //
+        // Skipped under `.off`, which is explicitly the "everyone obeys identical
+        // physics" mode — there escorts fly Newtonian through `moveTo` below and
+        // wear the consequences.
+        if world.tuning.aiInertialess != .off {
+            // Cheated caps keyed to the *leader*, not this hull: whatever it can
+            // do, its wing can do harder. Speed covers a leader that simply
+            // outruns us (plus headroom to close a gap); the turn rate also has
+            // to beat `maxWedgeTurnPerSec` since that's how fast the wedge itself
+            // can swing, and the nose has to be able to catch it.
+            let glueSpeedCap = max(me.stats.maxSpeed, leader.stats.maxSpeed) * formationGlueSpeedCheat
+            var glueVel = desiredVel
+            if glueVel.length > glueSpeedCap { glueVel = glueVel.normalized * glueSpeedCap }
+            let glueTurnRate = max(me.stats.turnRate, leader.stats.turnRate, maxWedgeTurnPerSec)
+                * formationGlueTurnCheat
+            me.formationGlue = Ship.FormationGlue(targetVelocity: glueVel,
+                                                  targetHeading: wedgeHeading,
+                                                  turnRate: glueTurnRate,
+                                                  response: formationGlueResponse)
+            return intent
+        }
+
         // Parked on station (stopped leader, sitting on the mark): `desiredVel`
         // is near zero, whose angle is pure noise — chasing it is what makes a
         // parked escort's nose twitch. Square up to the wedge heading and coast.
-        // Below `parkThreshold` this fully takes over (no thrust needed at all);
-        // through a band above it, the *heading* eases from `desiredVel.angle`
-        // onto the wedge heading while the ordinary thrust logic below keeps
-        // running unmodified — a hard cutoff right at `parkThreshold` used to
-        // snap the nose over in one frame the instant a cruising leader slowed
-        // near a stop (docking, launch, disengaging) while the escort was still
-        // closing in.
         let parkThreshold = max(6, me.stats.maxSpeed * 0.04)
-        let parkBand = parkThreshold * 4
-        var parkedHeadingOverride: Double?
-        if desiredSpeed < parkBand {
-            let raw = min(1, max(0, (parkBand - desiredSpeed) / (parkBand - parkThreshold)))
-            let t = raw * raw * (3 - 2 * raw)
-            let aimAngle = desiredSpeed > 1e-6 ? desiredVel.angle : wedgeHeading
-            parkedHeadingOverride = blendedHeading(from: aimAngle, toward: wedgeHeading, weight: t)
-            if desiredSpeed < parkThreshold {
-                intent.desiredHeading = parkedHeadingOverride!
-                me.formationBoost = 1.0
-                return intent
-            }
+        if desiredSpeed < parkThreshold {
+            intent.desiredHeading = wedgeHeading
+            me.formationBoost = 1.0
+            return intent
         }
 
         if inertialessNow {
@@ -1295,13 +1339,6 @@ public final class AIBrain {
                                   finalHeading: wedgeHeading)
             intent = cmd
         }
-        // Above `parkThreshold` but still inside the ease band: let the heading
-        // override win over whatever the thrust branches above computed — their
-        // alignment/thrust *decisions* (which already reasonably key off
-        // `desiredVel`) stay as computed, only the reported heading changes.
-        if let parkedHeadingOverride {
-            intent.desiredHeading = parkedHeadingOverride
-        }
         // Lift the hull's caps enough to actually reach `desiredSpeed`
         // (`World.step` applies `topSpeed *= 1 + boost`), scaled to the demand
         // with a floor so gentle station-keeping still gets some help and a
@@ -1323,6 +1360,30 @@ public final class AIBrain {
     /// change instead of chasing the gap it opens. Long enough to kill the lag
     /// wobble, short enough not to over-anticipate into an oscillation of its own.
     private var formationAccelLookahead: Double { 0.25 }
+
+    /// How hard a glued escort's velocity chases what the formation controller
+    /// asks for, as an exponential rate (1/sec): each tick it closes
+    /// `1 - exp(-response·dt)` of the gap, so it converges smoothly and is
+    /// frame-rate independent. Must stay several times quicker than
+    /// `formationPullGain` — that's the rate the *position* error decays at, and
+    /// a velocity loop that isn't clearly faster than the position loop it
+    /// serves lags it into overshoot, which is the station-keeping hunt this
+    /// whole model exists to kill. At 10 vs 2.5 the velocity settles in ~0.1s
+    /// against the position's ~0.4s: a hard burn, well past any real hull's
+    /// acceleration, which is exactly the cheat intended.
+    private var formationGlueResponse: Double { 10.0 }
+
+    /// Ceiling on a glued escort's speed, as a multiple of the faster of its own
+    /// and its leader's top speed. Above 1 purely so it can *close* a gap faster
+    /// than it cruises — a fighter reeling in from a fight comes in hot rather
+    /// than trailing forever at cruise.
+    private var formationGlueSpeedCheat: Double { 3.0 }
+
+    /// Ceiling on a glued escort's turn rate, as a multiple of the fastest of its
+    /// own hull, its leader's, and the wedge's own swing rate. Above 1 so the
+    /// nose can *close* an alignment gap (a fighter swinging around off a fight),
+    /// not merely match the wedge's rate and trail it forever.
+    private var formationGlueTurnCheat: Double { 2.0 }
 
     /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
     /// applied once via `World.deliverAssistance`). After delivering: if the

@@ -100,10 +100,6 @@ final class GameHUDModel: ObservableObject {
     /// target's name on the target readout, e.g. a hull's class tagline.
     /// Empty = the target's ship type defines none.
     @Published var targetSubtitle = ""
-    /// `shïp.Flags` 0x0100 (Bible: "Show % armor on target display instead of
-    /// 'Shields Down'") — once `targetShield` hits 0, show `targetArmor`
-    /// instead of literal "Shields Down" text.
-    @Published var targetShowArmorWhenShieldsDown = false
     /// `shïp.Flags` 0x0200 (Bible: "Don't show armor or shield state on
     /// status display") — omit the shield/armor line entirely for this target.
     @Published var targetHidesShieldArmorLine = false

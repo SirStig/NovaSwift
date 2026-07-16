@@ -172,7 +172,7 @@ final class GameScene: SKScene {
     private var hullAnim = HullAnim()
     private var animClock: Double = 0
     private var blinkClock: Double = 0
-    private var lastPlayerAngle: Double = .nan
+    private var playerBank = BankTracker()
     /// Clamped per-frame delta, cached so `syncNPCs()` (no dt param) can decay
     /// each NPC's shield flare at the same rate as the player's.
     private var frameDT: TimeInterval = 1.0 / 60.0
@@ -637,14 +637,22 @@ final class GameScene: SKScene {
         var hullAnim = HullAnim()
         var animClock: Double = 0
         var blinkClock: Double = 0
-        var lastAngle: Double = .nan
-        var healthFill: SKSpriteNode?
+        var bank = BankTracker()
+        /// The stacked shield (top) / armor (bottom) bars over a ship. `shieldRow`
+        /// is the whole top row — track included — so it can be hidden wholesale
+        /// for a hull that carries no shields at all.
+        var shieldFill: SKSpriteNode?
+        var shieldRow: SKNode?
+        var armorFill: SKSpriteNode?
         var healthBar: SKNode?
         /// Co-op: a name label under another player's ship (nil for NPCs).
         var nameplate: SKLabelNode?
         var textures: [SKTexture] = []
         var radius: CGFloat = 16
-        var lastArmor: Double = -1
+        /// Last shield/armor the *bars* were drawn for — distinct from `lastShield`,
+        /// which the shield-flare effect owns and updates on its own schedule.
+        var lastBarShield: Double = -1
+        var lastBarArmor: Double = -1
         /// Smoothed (not raw-random-per-frame) flame alpha/scale so the plume
         /// reads as a flicker, not a strobe.
         var thrusterAlpha: CGFloat = 0.8
@@ -700,7 +708,7 @@ final class GameScene: SKScene {
         self.weaponGlowFlare = 0
         self.animClock = 0
         self.blinkClock = 0
-        self.lastPlayerAngle = .nan
+        self.playerBank = BankTracker()
         self.settings = settings
         self.input = input
         self.controllerInput = controller
@@ -1409,11 +1417,10 @@ final class GameScene: SKScene {
         // framesPerSet, plus the heading. The engine-glow, running-light and
         // weapon-glow sheets carry the same set/heading layout, so they reuse it.
         // Interpolated heading for the *displayed* sprite frame (smooth rotation
-        // between ticks); the banking `turnSign` still reads the true sim angle so
-        // it senses the real turn direction, not the interpolation.
+        // between ticks); the bank still reads the true sim angle so it senses the
+        // real turn direction, not the interpolation.
         let heading = hullAnim.heading(forAngle: renderHeading(p))
-        let turn = turnSign(fromAngle: lastPlayerAngle, toAngle: p.angle, dt: dt)
-        lastPlayerAngle = p.angle
+        let turn = playerBank.update(angle: p.angle, dt: dt)
         animClock += dt
         blinkClock += dt
         let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false)
@@ -1631,32 +1638,38 @@ final class GameScene: SKScene {
         world.playerRecallFighters()
     }
 
-    /// One entry in the combined Tab-cycle order: every in-range ship plus
-    /// every planet in the system, ordered by distance from the player, so
-    /// Tab reaches planets too — not just ships found by clicking.
-    private func cycleCandidates() -> [(isShip: Bool, id: Int, dist: Double)] {
+    /// The Tab-cycle order: every in-range ship the player can actually see,
+    /// nearest first. Planets/stations are selected by clicking them, not by the
+    /// ship targeting cycle, matching EV Nova.
+    ///
+    /// The player's own escorts sort to the *back* of the order rather than by
+    /// distance, so Tab walks every other ship in the system before it ever
+    /// offers you your own wing — escorts fly closest to you, and in the
+    /// original game they crowded the front of the cycle during a fight.
+    private func cycleCandidates() -> [Int] {
         let p = world.player.position
-        // Tab-cycling (and the nearest/hostile hotkeys) target **ships only** —
-        // planets/stations are selected by clicking them, not by the ship
-        // targeting cycle, matching EV Nova.
-        var items: [(isShip: Bool, id: Int, dist: Double)] = []
-        for npc in world.npcs where npc.isAlive && !npc.disabled {
+        var others: [(id: Int, dist: Double)] = []
+        var escorts: [(id: Int, dist: Double)] = []
+        for npc in world.npcs
+        where npc.isAlive && !npc.disabled && world.canDetect(npc, by: world.player) {
             let d = (npc.position - p).length
-            if d <= World.targetLockRange { items.append((true, npc.entityID, d)) }
+            guard d <= World.targetLockRange else { continue }
+            if world.isPlayerEscort(npc) {
+                escorts.append((npc.entityID, d))
+            } else {
+                others.append((npc.entityID, d))
+            }
         }
-        return items.sorted { $0.dist < $1.dist }
+        let byDistance: ((id: Int, dist: Double), (id: Int, dist: Double)) -> Bool = { $0.dist < $1.dist }
+        return (others.sorted(by: byDistance) + escorts.sorted(by: byDistance)).map(\.id)
     }
 
-    /// Cycle the single selection forward through every in-range ship plus
-    /// every planet in the system, ordered by distance, wrapping around.
+    /// Cycle the ship target forward through the in-range ships, wrapping around.
     func cycleTarget() {
         let candidates = cycleCandidates()
         guard !candidates.isEmpty else { return }
-        let currentIdx = candidates.firstIndex { c in
-            c.isShip ? c.id == world.player.currentTargetID : c.id == selectedPlanetID
-        }
-        let next = candidates[(currentIdx.map { $0 + 1 } ?? 0) % candidates.count]
-        if next.isShip { selectShip(next.id) } else { selectPlanet(next.id) }
+        let currentIdx = candidates.firstIndex { $0 == world.player.currentTargetID }
+        selectShip(candidates[(currentIdx.map { $0 + 1 } ?? 0) % candidates.count])
     }
 
     /// Drop the current selection entirely, ship or planet — after this,
@@ -2062,6 +2075,7 @@ final class GameScene: SKScene {
             hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0
             hud.targetHostile = false; hud.targetDisabled = false; hud.targetGovtLabel = ""
             hud.targetShipTypeID = nil
+            hud.targetHidesShieldArmorLine = false
             hud.targetCargo = []
             return
         }
@@ -2072,6 +2086,10 @@ final class GameScene: SKScene {
         hud.targetHostile = isEffectivelyHostileToPlayer(target)
         hud.targetDisabled = target.disabled
         hud.targetGovtLabel = galaxy?.game.govt(target.government)?.targetCode ?? ""
+        // `shïp.Flags` 0x0200: this hull type keeps its shield/armor state off the
+        // target display entirely (the readout falls back to "Hostile").
+        hud.targetHidesShieldArmorLine = galaxy?.game.ship(target.shipTypeID)?
+            .hidesShieldArmorOnStatusDisplay ?? false
         // `oütf` ModType 13 (density scanner): reveals a targeted ship's cargo
         // hold — ownership-gated (the Bible's ModVal is "ignored"), and only
         // worth resolving names for while it'd actually be shown.
@@ -2573,9 +2591,11 @@ final class GameScene: SKScene {
                               coreless: Bool) -> (height: CGFloat, coreStart: CGFloat) {
         let cw = max(1, coreWidth)
         let f = CGFloat(max(2, min(16, falloff)))
-        // Per-side glow reaching well beyond the core: falloff 2 → ~2.5×cw,
-        // falloff 16 → ~0.75×cw. A coreless beam is all glow.
-        let glowHalf = cw * (0.5 + 4.0 / f)
+        // Per-side glow, as a multiple of the core: falloff 2 → ~1.25×cw,
+        // falloff 16 → ~0.4×cw. A coreless beam is all glow. The glow used to
+        // reach twice this far, which (additively blended) made every beam read
+        // as a fat bar of light rather than a bright line with a halo.
+        let glowHalf = cw * (0.25 + 2.0 / f)
         let height = cw + glowHalf * 2
         let coreFraction = coreless ? 0.12 : cw / height
         return (height, max(0.03, 0.5 - coreFraction / 2))
@@ -2592,9 +2612,13 @@ final class GameScene: SKScene {
         let h = max(4, thickness)
         return imageTexture(width: 4, height: h) { ctx in
             let cs = CGColorSpaceCreateDeviceRGB()
+            // The Bible on CoronaColor: "since the corona is translucent, it will
+            // appear approximately half as bright at its maximum as what you
+            // specify in this field" — so the glow peaks at half alpha, and a
+            // coreless beam (all corona, no center) peaks there too.
             let coronaClear = corona.withAlphaComponent(0)
-            let coronaGlow = corona.withAlphaComponent(0.65)
-            let center = coreless ? corona.withAlphaComponent(0.85) : core
+            let coronaGlow = corona.withAlphaComponent(0.5)
+            let center = coreless ? corona.withAlphaComponent(0.5) : core
             let colors = [coronaClear.cgColor, coronaGlow.cgColor, center.cgColor,
                           coronaGlow.cgColor, coronaClear.cgColor] as CFArray
             let locations: [CGFloat] = [0, coreStart, 0.5, 1 - coreStart, 1]
@@ -2724,8 +2748,7 @@ final class GameScene: SKScene {
             node.animClock += frameDT
             node.blinkClock += frameDT
             let heading = node.hullAnim.heading(forAngle: renderHeading(npc))
-            let turn = turnSign(fromAngle: node.lastAngle, toAngle: npc.angle, dt: frameDT)
-            node.lastAngle = npc.angle
+            let turn = node.bank.update(angle: npc.angle, dt: frameDT)
             let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock, disabled: npc.disabled)
             if let sprite = node.sprite, !node.textures.isEmpty {
                 sprite.texture = node.textures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.textures.count)]
@@ -2875,26 +2898,40 @@ final class GameScene: SKScene {
             n.shield = shield
         }
 
-        // A slim armor/shield bar that only appears once the ship is hurt. Solid
-        // `SKSpriteNode`s (shared white texture → they batch) instead of the two
+        // Two slim bars stacked over the ship — shields on top, armor below,
+        // mirroring the target readout's SHIELD-over-ARMOR order. Solid
+        // `SKSpriteNode`s (shared white texture → they batch) instead of the
         // per-ship `SKShapeNode`s they replaced.
         let barWidth: CGFloat = max(20, n.radius * 1.6)
-        let barBG = SKSpriteNode(color: SKColor(white: 0, alpha: 0.5), size: CGSize(width: barWidth, height: 3))
-        let fill = SKSpriteNode(color: SKColor(red: 0.3, green: 0.9, blue: 0.4, alpha: 1), size: CGSize(width: barWidth, height: 3))
-        // Deplete from the right: anchor the fill at its left edge.
-        fill.anchorPoint = CGPoint(x: 0, y: 0.5)
-        fill.position = CGPoint(x: -barWidth / 2, y: 0)
+        // Deplete from the right: anchor each fill at its left edge.
+        func makeRow(color: SKColor, y: CGFloat) -> (row: SKNode, fill: SKSpriteNode) {
+            let track = SKSpriteNode(color: SKColor(white: 0, alpha: 0.5),
+                                     size: CGSize(width: barWidth, height: Self.barRowHeight))
+            let fill = SKSpriteNode(color: color, size: CGSize(width: barWidth, height: Self.barRowHeight))
+            fill.anchorPoint = CGPoint(x: 0, y: 0.5)
+            fill.position = CGPoint(x: -barWidth / 2, y: 0)
+            let row = SKNode()
+            row.position = CGPoint(x: 0, y: y)
+            row.addChild(track)
+            row.addChild(fill)
+            return (row, fill)
+        }
+        let rowStep = Self.barRowHeight + 1
+        let shieldRow = makeRow(color: SKColor(red: 0.3, green: 0.75, blue: 0.95, alpha: 1), y: rowStep / 2)
+        let armorRow = makeRow(color: SKColor(red: 0.3, green: 0.9, blue: 0.4, alpha: 1), y: -rowStep / 2)
         let barHolder = SKNode()
         // Above (default), below, or hidden entirely, per Settings ▸ Graphics.
         // The original never floated these over ships, so `off` is the faithful
         // look. `updateNPCHealth` respects `off` too, so it can't un-hide them.
         barHolder.position = CGPoint(x: 0, y: barOffsetY(radius: n.radius))
-        barHolder.addChild(barBG)
-        barHolder.addChild(fill)
+        barHolder.addChild(shieldRow.row)
+        barHolder.addChild(armorRow.row)
         barHolder.isHidden = true
         n.container.addChild(barHolder)
         n.healthBar = barHolder
-        n.healthFill = fill
+        n.shieldRow = shieldRow.row
+        n.shieldFill = shieldRow.fill
+        n.armorFill = armorRow.fill
 
         // Co-op: another player's ship wears their name under the hull, in their
         // assigned colour (matching their radar blip + galaxy-map marker). Static —
@@ -3282,7 +3319,7 @@ final class GameScene: SKScene {
         self.weaponGlowFlare = 0
         self.animClock = 0
         self.blinkClock = 0
-        self.lastPlayerAngle = .nan
+        self.playerBank = BankTracker()
         shipNode?.removeFromParent()
         buildShip()
         self.planetVisuals = makePlanetVisuals(systemID: systemID, game: game)
@@ -3513,26 +3550,40 @@ final class GameScene: SKScene {
     }
 
     private func updateNPCHealth(_ n: NPCNode, npc: Ship) {
-        guard let holder = n.healthBar, let fill = n.healthFill else { return }
-        let frac = max(0, min(1, npc.healthFraction))
-        // Only redraw when it actually changed; hide the bar at full health.
-        if npc.armor == n.lastArmor { return }
-        n.lastArmor = npc.armor
-        // Hidden when the player turned bars off, otherwise shown only when hurt.
-        holder.isHidden = settings.shipBarPosition == .off || frac >= 0.999
-        fill.xScale = CGFloat(max(0.001, frac))
+        guard let holder = n.healthBar, let shieldFill = n.shieldFill, let armorFill = n.armorFill else { return }
+        // Only redraw when a bar actually moved. Both stats are checked: keying
+        // this on armor alone left a ship taking pure shield damage frozen at its
+        // last-drawn state.
+        if npc.shield == n.lastBarShield && npc.armor == n.lastBarArmor { return }
+        n.lastBarShield = npc.shield
+        n.lastBarArmor = npc.armor
+        // Unlike the old single bar, these stay up at full health — the player
+        // asked to read a ship's state at a glance without shooting it first.
+        holder.isHidden = settings.shipBarPosition == .off
+        // A hull with no shields at all shows the armor bar alone rather than a
+        // permanently-empty top row.
+        n.shieldRow?.isHidden = npc.maxShield <= 0
+        shieldFill.xScale = CGFloat(max(0.001, min(1, npc.shieldFraction)))
+        let armorFrac = max(0, min(1, npc.armorFraction))
+        armorFill.xScale = CGFloat(max(0.001, armorFrac))
         // Green when healthy, through amber, to red when critical.
-        fill.color = SKColor(red: CGFloat(1 - frac) * 0.9 + 0.1,
-                             green: CGFloat(frac) * 0.9,
-                             blue: 0.25, alpha: 1)
+        armorFill.color = SKColor(red: CGFloat(1 - armorFrac) * 0.9 + 0.1,
+                                  green: CGFloat(armorFrac) * 0.9,
+                                  blue: 0.25, alpha: 1)
     }
 
-    /// Y offset for a ship's hull/shield bar, per the player's chosen position.
-    /// `off` is positioned like `above` but kept hidden (bars never un-hide when off).
+    /// Height of one shield/armor bar row; the stack is two of these plus a 1px gap.
+    private static let barRowHeight: CGFloat = 3
+
+    /// Y offset for the centre of a ship's shield/armor bar stack, per the player's
+    /// chosen position. `off` is positioned like `above` but kept hidden (bars never
+    /// un-hide when off). The stack is taller than the single bar it replaced, so it
+    /// clears the hull by its own half-height.
     private func barOffsetY(radius: CGFloat) -> CGFloat {
+        let clearance = radius + 8 + (Self.barRowHeight + 1) / 2
         switch settings.shipBarPosition {
-        case .above, .off: return radius + 8
-        case .below:       return -(radius + 8)
+        case .above, .off: return clearance
+        case .below:       return -clearance
         }
     }
 
@@ -3562,7 +3613,7 @@ final class GameScene: SKScene {
             if settings.shipBarPosition == .off {
                 holder.isHidden = true
             } else {
-                n.lastArmor = -1   // force updateNPCHealth to re-evaluate visibility
+                n.lastBarArmor = -1   // force updateNPCHealth to re-evaluate visibility
             }
         }
         // Smooth-scaling toggled: re-flip every live sprite's texture filtering so
@@ -3728,10 +3779,12 @@ final class GameScene: SKScene {
     /// counts as an enemy even when the player's legal standing with its
     /// government is still neutral — so anything shooting at you reads red rather
     /// than staying a confusing neutral blip.
+    ///
+    /// Defers to the engine's own test so the radar's red and the "target nearest
+    /// hostile" hotkey can never disagree about who the enemy is.
     private func isEffectivelyHostileToPlayer(_ npc: Ship) -> Bool {
         if isEntityAttackingPlayer(npc.entityID) { return true }
-        if npc.brain?.provokedByPlayer == true { return true }
-        return world.diplomacy?.isHostileToPlayer(npc.government) == true
+        return world.isEffectivelyHostileToPlayer(npc)
     }
 
     private func relationship(for npc: Ship) -> RadarRelationship {
@@ -3739,8 +3792,9 @@ final class GameScene: SKScene {
         // Your own escorts always read as friendly (green), whatever their base
         // government or the current diplomacy — a ship flying in your wing is
         // yours. Checked before hostility so a mercenary of an otherwise-hostile
-        // government still shows green while it's escorting you.
-        if npc.brain?.leaderID == World.playerEntityID { return .friendlyOrOwned }
+        // government still shows green while it's escorting you. Fighters off
+        // your escorts' bays are yours too (`isPlayerEscort` follows the chain).
+        if world.isPlayerEscort(npc) { return .friendlyOrOwned }
         if isEffectivelyHostileToPlayer(npc) { return .hostile }
         if npc.government == world.player.government
             || world.diplomacy?.areAllied(npc.government, world.player.government) == true {
@@ -3929,8 +3983,12 @@ final class GameScene: SKScene {
         if let boomID, let boom = boomTextures(boomID) {
             // Scale the animation to roughly the blast size, but never below the
             // size the art reads at, so a capital ship's death fills the space.
+            // Note: this is opaque bitmap art (unlike the soft translucent flash
+            // below), so it reads much larger than the same numeric size would
+            // as a blurred glow — cut well below the old flash-era multiplier
+            // to compensate.
             spawnSpriteAnim(frames: boom.frames, frameDuration: boom.frameDuration,
-                            at: point, diameter: max(radius * 2.4, 28))
+                            at: point, diameter: max(radius * 0.3, 5))
             playedSprite = true
         }
         // Spark accent — a few fast additive embers, sized to the blast.

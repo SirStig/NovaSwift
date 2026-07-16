@@ -222,7 +222,7 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Gameplay", icon: "gamecontroller")
         } footer: {
-            Text("Difficulty scales the damage you take. Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
+            Text("Difficulty scales the damage you take, from Very Easy for a mostly-story run up to Hard. Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
         }
     }
 

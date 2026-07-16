@@ -41,7 +41,7 @@ struct AuthenticHUDView: View {
                         .novaPlace(layout, origin: origin(style.intf.radarArea), size: size(style.intf.radarArea))
                 }
 
-                targetReadout(layout)
+                targetReadout()
                     .novaPlace(layout, origin: origin(style.intf.targetArea), size: size(style.intf.targetArea))
 
                 weaponReadout
@@ -117,13 +117,9 @@ struct AuthenticHUDView: View {
     /// outright, 0x0100 substitutes armor % for "Shields Down" once shields
     /// hit 0.
     @ViewBuilder
-    private func targetReadout(_ layout: NovaLayout) -> some View {
+    private func targetReadout() -> some View {
         if !model.targetName.isEmpty {
             let sprite = model.targetShipTypeID.flatMap { targetSprite($0) }
-            // The placed box is `targetArea` design-units × layout.scale tall;
-            // the stacked silhouette takes a fraction of that height so it scales
-            // in lockstep with the HUD without crowding the text rows.
-            let boxSide = CGFloat(style.intf.targetArea.height) * layout.scale * 0.55
             VStack(spacing: 2) {
                 Text(model.targetName)
                     .novaFont(.hud, weight: .bold, size: statusSize)
@@ -138,11 +134,19 @@ struct AuthenticHUDView: View {
                         .foregroundStyle(color(style.intf.dimText))
                         .multilineTextAlignment(.center)
                 }
+                // The silhouette claims every point the text rows don't, kept
+                // square by its aspect ratio, so the ship fills the `targetArea`
+                // box the way the original's does instead of floating in it at a
+                // fixed fraction of the box height. Greedy sizing rather than a
+                // hardcoded side also means it can't overflow the padded column
+                // or under-fill a reskin whose targetArea is a different shape.
                 if let sprite {
                     ShipSilhouetteView(sprite: sprite, tint: targetTint)
-                        .frame(width: boxSide, height: boxSide)
+                        .aspectRatio(1, contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Spacer(minLength: 2)
                 }
-                Spacer(minLength: 2)
                 // EV Nova packs the whole status line into a single row beneath the
                 // ship picture: a status word on the left, the government/class label
                 // on the right. "Disabled" takes precedence over the shield/armor
@@ -196,16 +200,13 @@ struct AuthenticHUDView: View {
                             : Color(red: 0.85, green: 0.34, blue: 0.28)
     }
 
-    /// "Shield N%" while shields remain; once depleted, literal "Shields Down"
-    /// unless the target's `shïp.Flags` 0x0100 asks for its armor % instead.
+    /// "Shield N%" while shields remain, "Armor N%" once they're gone. The
+    /// original gated the armor readout on `shïp.Flags` 0x0100 and otherwise
+    /// showed literal "Shields Down"; we show the armor % for every ship, since
+    /// a bare "Shields Down" throws away the number the player is watching for.
     private var targetShieldArmorLine: String {
-        if model.targetShield > 0 {
-            return "Shield \(Int(model.targetShield * 100))%"
-        } else if model.targetShowArmorWhenShieldsDown {
-            return "Armor \(Int(model.targetArmor * 100))%"
-        } else {
-            return "Shields Down"
-        }
+        model.targetShield > 0 ? "Shield \(Int(model.targetShield * 100))%"
+                               : "Armor \(Int(model.targetArmor * 100))%"
     }
 
     /// The selected secondary weapon (EV Nova's status bar shows the *secondary*

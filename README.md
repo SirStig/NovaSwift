@@ -30,36 +30,55 @@ Running on iPhone (iOS):
 | Flight | Galaxy map |
 |---|---|
 | ![Flight HUD](docs/branding/screenshots/flight-hud.png) | ![Galaxy map](docs/branding/screenshots/galaxy-map.png) |
+| Touch controls, the classic status bar, and Earth waiting to be landed on. | Plot a course from Sol — services, governments, hypergates and wormholes. |
+
+| Story map | Multiplayer |
+|---|---|
+| ![Story map](docs/branding/screenshots/story-map.png) | ![Multiplayer](docs/branding/screenshots/multiplayer.png) |
+| Every campaign in your data, drawn against how far your pilot has actually gotten. | Host or join a co-op lobby over local Wi-Fi or Game Center. |
+
+| Plug-in store |
+|---|
+| ![Plug-in store](docs/branding/screenshots/plugin-store.png) |
+| Browse and install community plug-ins and total conversions without leaving the game. |
 
 ## What you can do today
 
-This is EV Nova — the whole game, ported. Point it at your own data and jump in;
-the in-game clock keeps ticking whether you're paying attention or not, so the
-galaxy carries on around you.
+It's the year 1177. The Federation holds the core worlds and is rotting from the
+inside, the Auroran Empire is tearing itself apart over honor, the Polaris won't
+say what they know, and you're in a Shuttle with a few thousand credits and no
+particular plans. This is all of EV Nova — point it at your own copy of the game
+data and go. The clock keeps ticking whether you're paying attention or not, so
+the galaxy carries on without you.
 
-- **Fly and fight** — the original drifting, momentum-based flight; enemies that
-  spawn from the real fleet tables; target locks, ion damage, real explosion
-  sprites and particle effects, and ships that weigh their odds before committing.
-- **Explore and trade** — chart a course across the galaxy and burn real fuel to
-  get there, then land to trade goods, refit your ship, and buy new hulls.
-  Prices, cargo limits, and repairs all cost you.
-- **Play the story** — pick up missions and see them through. News and events
-  fire as days pass, mission ships turn up and fight, and the branching campaigns
-  in your data actually move forward.
-- **Fight dirty, and lose for real** — disable a ship and board it to plunder its
-  cargo or capture the hull, demand tribute from a planet and conquer it — or take
-  your own armor to zero and punch out in an escape pod (if you have one). Attack
-  the wrong government and the grudge sticks.
-- **Meet the locals** — run into named captains with their own lines and history,
-  hire escorts who draw a daily wage, and throw some credits at the holovid races.
-- **Keep your progress** — your pilot is saved and backed up as you go; roll up
-  several pilots from different starting scenarios and switch between them.
-- **Play together** — something the 2002 original never had: host or join a co-op
-  session over local Wi-Fi or Game Center, share a system with a friend to fly and
-  fight side by side (or against each other), trade cargo and credits, and chat in
-  real time. PvP stakes are yours to set, from safe sparring to full-stakes real
-  damage and death. See [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md) for the full
-  design and current status.
+- **Fly and fight** — the drifting, momentum-heavy flight the original was built
+  on: you don't turn, you swing the nose around and keep going the way you were.
+  Pirates jump in on top of you, bounty hunters come looking, and warships weigh
+  the odds before they commit. Lock a target, strip its shields, watch the ion
+  cannons leave it drifting.
+- **Explore and trade** — hyperjump between hundreds of systems on real fuel,
+  land, and work the spread: buy food where it's cheap and sell it where the war
+  made it dear. Then spend it all in the shipyard, trading the Shuttle up through
+  a Starbridge to something with real guns bolted on.
+- **Play the story** — pick a starting scenario, take the missions people offer
+  you, and see them through. Fly for the Federation or defect to the Rebellion,
+  get pulled into the Auroran succession, find out what the Vell-os are. The
+  campaigns branch and the news reacts as the days pass. Your pilot saves and
+  backs up as you go, and you can keep several running at once.
+- **Fight dirty, and lose for real** — disable a freighter and board it to take
+  its cargo, or put a prize crew aboard and fly the hull home. Park over a planet,
+  demand tribute, beat its defenses, and it pays you every day thereafter. Shoot
+  the wrong ship in the wrong system and the government remembers — and when your
+  own armor hits zero, you punch out in an escape pod, if you bought one.
+- **Meet the locals** — named captains with their own lines and history turn up in
+  the shipping lanes, escorts you hire draw a daily wage whether they're useful or
+  not, and there's always somewhere to throw credits away on the holovid races.
+- **Play together** — the one thing the 2002 original never had. Host or join a
+  co-op session over local Wi-Fi or Game Center: your friend keeps their own
+  galaxy and their own pilot, but when you're both in the same system you fly it
+  together — same NPCs, same fight, real damage. Trade cargo and credits, chat
+  from anywhere in the galaxy, and set the PvP stakes yourself, from safe sparring
+  to real damage and real death. See [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md).
 
 ## Modern touches — classic at heart
 

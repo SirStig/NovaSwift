@@ -460,9 +460,43 @@ final class CombatTests: XCTestCase {
         s.ionizeMax = 100
         s.ionCharge = 100
         s.deionizePerSec = 30
-        s.regen(1.0)
+        s.deionize(1.0)
         XCTAssertEqual(s.ionCharge, 70, accuracy: 1e-9)
         XCTAssertFalse(s.isIonized, "charge dropped back below the threshold")
+    }
+
+    /// A hulk recovers no shields/armor/fuel, but ionization is an externally
+    /// applied charge dissipating on its own — it must still fade, or a ship
+    /// ionized and then disabled glows (and pulses) at full strength forever.
+    func testIonizationDissipatesOnADisabledHulk() {
+        let world = World(player: makeShip("P", govt: 1, at: Vec2()))
+        let hulk = makeShip("x", govt: 1, at: Vec2(500, 0))
+        hulk.ionizeMax = 100
+        hulk.ionCharge = 100
+        hulk.deionizePerSec = 30
+        hulk.ionizeColor = (1, 0, 0)
+        hulk.disabled = true
+        world.addNPC(hulk)
+        world.step(1.0)
+        XCTAssertEqual(hulk.ionCharge, 70, accuracy: 1e-9, "a hulk still bleeds off ion charge")
+        world.step(3.0)
+        XCTAssertEqual(hulk.ionCharge, 0, accuracy: 1e-9)
+        XCTAssertNil(hulk.ionizeColor, "the glow clears once the charge is gone")
+    }
+
+    /// A hulk has no attitude control: it coasts on the momentum it had, on the
+    /// heading it had. It must not steer itself.
+    func testDisabledHulkDriftsWithoutTurning() {
+        let world = World(player: makeShip("P", govt: 1, at: Vec2()))
+        let hulk = makeShip("x", govt: 1, at: Vec2(500, 0))
+        hulk.disabled = true
+        hulk.angle = 1.25
+        hulk.velocity = Vec2(40, 0)
+        world.addNPC(hulk)
+        for _ in 0..<30 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(hulk.angle, 1.25, accuracy: 1e-9, "a hulk holds its heading")
+        XCTAssertGreaterThan(hulk.position.x, 500, "but it still drifts")
+        XCTAssertLessThan(hulk.velocity.length, 40, "bleeding off speed as it goes")
     }
 
     func testCantFireWhileIonizedWeaponIsBlocked() {

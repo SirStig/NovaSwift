@@ -1097,6 +1097,69 @@ final class AIBehaviorTests: XCTestCase {
                           "a settled escort should hold heading, not constantly correct (total turn \(totalTurn) rad over 1s)")
     }
 
+    /// The escort cheat, half one: a wing holds its leader's heading *while it is
+    /// still flying itself onto its slot* — the "comes in hot, swings its nose
+    /// around onto your heading, then drifts the rest of the way in" arrival.
+    /// This can only pass with the nose decoupled from the motion
+    /// (`Ship.FormationGlue`): every steering model here couples them — a
+    /// Newtonian hull thrusts along its nose, a driftless hull's velocity is
+    /// steered *onto* its nose — so a coupled escort with a gap to close has to
+    /// point at the gap, and its nose necessarily wanders off the leader's
+    /// heading exactly when it's most visible.
+    func testEscortNoseHoldsLeaderHeadingWhileStillClosingTheGap() {
+        let player = Ship(name: "Lead", stats: ShipStats(maxSpeed: 250, acceleration: 200, turnRate: 3))
+        let world = World(player: player)
+        // Far out and facing backwards — a fighter that just disengaged and is
+        // reeling in from a long way off.
+        let escort = Ship(name: "Wing", stats: ShipStats(maxSpeed: 200, acceleration: 150, turnRate: 2),
+                          position: Vec2(1500, -1500))
+        escort.angle = .pi
+        escort.radius = 20
+        world.addNPC(escort)
+        world.recruitEscort(escort)
+        world.intent.thrust = true                     // leader cruises straight "up" (angle 0)
+
+        for _ in 0..<30 { world.step(1.0 / 30.0) }     // 1s: long enough to swing the nose round
+
+        // Still a long way from station — this is mid-approach, not settled.
+        let gap = (escort.position - player.position).length
+        XCTAssertGreaterThan(gap, 300, "test is only meaningful mid-approach (gap \(gap))")
+        // ...and yet the nose is already on the leader's heading, not aimed at
+        // the slot it's flying toward.
+        let noseError = abs(angleDelta(from: escort.angle, to: player.angle))
+        XCTAssertLessThan(noseError, 0.2,
+                          "an escort should square onto its leader's heading and drift in, not point where it's flying (nose off by \(noseError) rad at \(gap) units out)")
+    }
+
+    /// The escort cheat, half two: the wing keeps station off a leader that
+    /// massively out-turns, out-accelerates and outruns it. The Bible's escorts
+    /// "ignore their own speed and maneuverability to hold formation", so a barge
+    /// escorting an interceptor pins to its slot anyway — its own hull's limits
+    /// are not allowed to be the reason it falls out of formation.
+    func testSluggishEscortPinsToAFarMoreAgileLeader() {
+        // The leader simply outruns its wing: nearly 3x the escort's top speed.
+        // A limit lift derived from the escort's own hull tops out at roughly
+        // parity here, which is enough to *pace* the leader but never to close a
+        // gap — an escort left behind stays behind. The Bible's escorts "ignore
+        // their own speed and maneuverability to hold formation", so this one
+        // reels in regardless.
+        let player = Ship(name: "Interceptor", stats: ShipStats(maxSpeed: 400, acceleration: 400, turnRate: 3))
+        let world = World(player: player)
+        let escort = Ship(name: "Barge", stats: ShipStats(maxSpeed: 150, acceleration: 40, turnRate: 0.5),
+                          position: Vec2(0, -800))     // trailing well behind
+        escort.radius = 20
+        world.addNPC(escort)
+        world.recruitEscort(escort)
+        world.intent.thrust = true                     // leader runs flat out, straight
+
+        for _ in 0..<180 { world.step(1.0 / 30.0) }    // 6s to reel in and hold
+
+        let gap = (escort.position - player.position).length
+        XCTAssertLessThan(gap, 250,
+                          "a slow escort must ignore its own top speed and reel in on a much faster leader, not trail it forever (gap \(gap))")
+        XCTAssertEqual(escort.brain?.state, .escorting, "it should still be holding formation")
+    }
+
     // MARK: retreat / escort-disposition regressions
 
     /// A shieldless hull (most fighters) has `shieldFraction == 0` by

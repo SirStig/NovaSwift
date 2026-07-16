@@ -252,9 +252,13 @@ struct AuthenticMainMenuView: View {
                 // box regardless of how short the text is.
                 .frame(width: 150 * sc, alignment: .trailing)
 
+                // Roughly square and tall enough to match the three-field text
+                // columns flanking it: ship sprites are square-ish, so the old
+                // 88×54 letterboxed them down to 54pt of ship in an 88pt slot —
+                // small enough that the hull was hard to make out at a glance.
                 pilotShip(shipType: save.player.shipType)
-                    .frame(width: 88 * sc, height: 54 * sc)
-                    .padding(.top, 12 * sc)
+                    .frame(width: 104 * sc, height: 100 * sc)
+                    .padding(.top, 4 * sc)
 
                 VStack(alignment: .leading, spacing: 7 * sc) {
                     infoField("Legal Status", legalStatusText(save), bright, dim, sc)

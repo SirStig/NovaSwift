@@ -54,13 +54,16 @@ struct HullAnim {
     /// level set (set 0) — no worse than today, and ready to extend.
     func baseSet(turnSign: Int, animClock: Double, disabled: Bool) -> Int {
         guard setCount > 1 else { return 0 }
+        // A hulk has no attitude control, so it can't bank and its animation is
+        // dead: it always draws the level set, whatever it seems to be doing.
+        guard !disabled else { return 0 }
         switch mode {
         case .banking:
             if turnSign > 0 { return min(1, setCount - 1) }   // bank left  = set 1
             if turnSign < 0 { return min(2, setCount - 1) }   // bank right = set 2
             return 0
         case .animation:
-            return disabled ? 0 : Int(animClock / animDelaySec) % setCount
+            return Int(animClock / animDelaySec) % setCount
         case .none, .folding, .keyCarried:
             return 0
         }
@@ -118,6 +121,39 @@ struct HullAnim {
         let perTick = Double(max(1, weapDecay)) / 100.0   // fraction lost per 1/30 s tick
         let ticks = dt * 30.0
         return CGFloat(pow(max(0.0, 1.0 - perTick), ticks))
+    }
+}
+
+/// Tracks which way a hull is banking, across frames.
+///
+/// The sim advances angles on a fixed 30 Hz tick while the scene draws at 60 or
+/// 120 Hz, so measuring `(angle - lastAngle) / frameDT` every displayed frame
+/// sees a doubled turn rate on the frames a tick landed on and a dead stop on
+/// the ones between — which strobes a banking hull between its banked and level
+/// sprite sets every single frame. Timing each angle change against how long it
+/// has actually been since the angle last *changed*, and holding that verdict
+/// over the frames in between, samples the sim's real turn rate instead of the
+/// display's.
+struct BankTracker {
+    private var lastAngle: Double = .nan
+    private var age: TimeInterval = 0
+    private var sign = 0
+
+    /// How long a frozen heading is allowed to hold its bank before the hull
+    /// levels out — comfortably over one 30 Hz tick, so a real stop still reads
+    /// as level almost immediately.
+    private static let holdSeconds: TimeInterval = 0.05
+
+    mutating func update(angle: Double, dt: TimeInterval) -> Int {
+        age += dt
+        if angle != lastAngle {
+            if lastAngle.isFinite { sign = turnSign(fromAngle: lastAngle, toAngle: angle, dt: age) }
+            lastAngle = angle
+            age = 0
+        } else if age > Self.holdSeconds {
+            sign = 0
+        }
+        return sign
     }
 }
 

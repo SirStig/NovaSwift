@@ -1,157 +1,108 @@
-# Multiplayer — Design & Implementation Spec
+# Multiplayer
 
-Status: **Design (2026-07-13, rev 2)** — decisions made; implementation not yet started.
+Status: **Built and playable** (2026-07-16). Every feature described below exists in
+the codebase and is covered by tests. What has *not* happened is runtime verification
+on real hardware over a real network — the netcode and sync logic are proven
+headlessly (two live `World`s talking over a loopback transport), and the app-side
+wiring compiles, but nobody has yet sat down at two machines and played a session
+end to end. Known gaps are listed in "What isn't done" at the bottom.
 
-## Goal
+## What multiplayer is
 
-Play alongside friends in a shared multiplayer session while **each player runs
-their own persistent galaxy and pilot save**. You each fly freely through your
-own game; when two or more players are in the **same star system**, that system
-is synced 100% (all ships, combat, events) so you truly play together — help each
-other, fight together, or fight each other. When you're in different systems,
-nothing heavy is synced; you just each play your own game. The canonical "I'm
-stuck, come help me" flow: your friend jumps to your system and drops in.
+Play alongside friends while **each player runs their own persistent galaxy and
+pilot save**. You each fly freely through your own game. When two or more players
+are in the **same star system**, that system is synced completely — ships, combat,
+projectiles, events — so you genuinely play together: help each other, fight
+together, or fight each other. When you're in different systems, nothing heavy is
+synced; you each just play your own game. The canonical flow is "I'm stuck, come
+help me": your friend jumps to your system and drops in.
 
-**Constraint: we host no servers.** Internet play uses Apple's Game Center
-infrastructure (Apple runs matchmaking + relay). Local play uses the LAN
-directly. We host nothing.
+**We host no servers.** Internet play rides Apple's Game Center infrastructure
+(Apple runs matchmaking and the relay). Local play uses the LAN directly via
+Bonjour. There is no NovaSwift backend to run or pay for.
 
-## Decisions
+## Core model
 
-| Topic | Decision |
+| Topic | How it works |
 |---|---|
-| **Model** | **Independent galaxies + per-system sync.** Every player always plays their own real save. Multiplayer is an overlay. No forced co-location — everyone roams freely. |
-| **Co-located system** | If ≥2 players are in the **same** system, it's synced 100% — all ships, events, combat. One co-located player is that system's **authority**; others are clients for it. |
-| **Separated systems** | No ship/combat/event sync. Only the lightweight **presence** layer (who's in which system) stays live. |
-| **Joining an occupied system** | On jump-in, the joiner does a snapshot handshake with the system's authority, then renders its live world. A **short loading screen** here is acceptable. |
-| **Authority** | Per-system and **dynamic**. First co-located player (or the lobby host if present) is authority; migrates to a remaining player if the authority leaves. |
-| **Stakes** | Each player's own save always persists (they're in their own galaxy). `SessionRules` governs **inter-player interactions**: PvP damage real?, death real?, trades allowed, friendly fire. Presets from *Safe/sparring* → *Full stakes*. |
-| **Interactions** | Co-op combat + PvP + shared missions + trade / item hand-off. |
-| **Story / progression** | Shared world runs the **authority's** storyline/missions; **personal services** (outfitter, shipyard, re-arm/ammo, escort hiring, salary, rank, combat rating) resolve against each player's **own** save. NCB merges are **non-destructive & additive**: no overwrite, no passive inheritance — you only *gain* bits you **earn together**. |
-| **Connection** | Game Center invite (internet) + direct join code (on Game Center) + local Wi-Fi (Multipeer). One `Transport` protocol, swappable backends. |
+| **Galaxies** | Independent. Every player always plays their own real save; multiplayer is an overlay, never a merge. Nobody is forced to co-locate. |
+| **Shared system** | If ≥2 players are in the same system, it's synced completely. One co-located player is that system's **authority**; the others are clients for it. |
+| **Separated systems** | No ship/combat/event sync — only the lightweight presence layer (who's in which system) stays live. |
+| **Alone in a system** | You are trivially your own authority. No networking, no clients; it runs exactly like single-player. |
+| **Authority** | Per-system and dynamic — the smallest co-located player id wins. Deterministic, so both sides agree with no negotiation. |
+| **Stakes** | `SessionRules` governs inter-player interactions: is PvP damage real, is death real, friendly fire, PvP allowed, trade allowed, session game speed. Presets: `.safe` (sparring) and `.fullStakes`. |
+| **Interactions** | Co-op combat, PvP, shared mission progress, and credit/cargo/outfit trade. |
+| **Story** | The shared world runs the **authority's** storyline. Personal services (outfitter, shipyard, re-arm, escorts, salary, rank, combat rating) resolve against each player's **own** save. NCB bit merges are additive and non-destructive: you only *gain* bits you earn together. |
+| **Connection** | Game Center for internet play, MultipeerConnectivity for local Wi-Fi. One `Transport` protocol, swappable backends. |
 
-## The one hard technical truth
+### Why Game Center, and why no lockstep
 
-Peer-to-peer over the **internet** requires NAT traversal (hole-punching), which
-requires a rendezvous/signaling server and often a TURN relay. We will not run
-those. Apple's turnkey escape hatch is **Game Center (`GKMatch`)**: Apple runs
-matchmaking *and* relay for free, up to 16 players in a match, with a real-time
-send/receive transport.
+Peer-to-peer over the internet needs NAT traversal, which needs a rendezvous server
+and usually a TURN relay. We won't run those, so Game Center's `GKMatch` is the only
+"host nothing, works over the internet" option on Apple platforms — Apple provides
+matchmaking and relay for free, up to 16 players. A "direct join code" would be
+layered on top of Game Center via programmatic matchmaking, not a separate
+serverless path; a code that bypasses Game Center only ever works on a LAN. Internet
+play requires the `com.apple.developer.game-center` entitlement, which is present in
+`app/NovaSwift/NovaSwift.entitlements`.
 
-- **Internet play ⇒ Game Center is the backbone.** Only "we host nothing, works
-  over the internet" option on Apple platforms.
-- **Direct join code** is layered on top of Game Center (a code resolves to a
-  `GKMatch` via programmatic matchmaking), *not* a separate serverless internet
-  path. A pure non-Game-Center code only works on a local network.
-- **Local Wi-Fi ⇒ MultipeerConnectivity**, no infrastructure, lowest latency.
-- **Prerequisite:** internet play needs Game Center enabled in App Store Connect
-  + the `com.apple.developer.game-center` entitlement. Config, not code.
+The engine is strongly deterministic (seeded `SplitMix64`, no wall-clock, no ambient
+RNG — `Sources/NovaSwiftEngine/RNG.swift`), so lockstep would be *possible*. We don't
+use it: lockstep is fragile across join-in-progress and authority handoff, and needs
+perfect fixed-tick sync, whereas our loop is variable-`dt` and frame-coupled to
+SpriteKit. Host-authoritative state-sync is simpler and more robust, and the client
+side is cheap because the renderer only reads world state and drains events — it
+never mutates the sim.
 
-## Two-layer sync model
+## The two sync layers
 
-The whole design is two independent layers with very different rates and scopes.
+### Layer 1 — Presence (always on, all players, low rate)
 
-### Layer 1 — Presence (always on, all players, low-rate)
+Every player broadcasts `PlayerPresence { playerID, name, currentSystemID,
+shipTypeHint }` on each system change plus a slow heartbeat. It costs a few bytes per
+jump and is the *only* thing synced when players are apart. It drives the galaxy-map
+friend markers and co-location detection: when your `currentSystemID` matches another
+player's, Layer 2 engages for that system.
 
-Every player broadcasts, on each system change (and a slow heartbeat):
+### Layer 2 — System simulation sync (co-located players only)
 
-```
-PresenceUpdate { playerID, name, currentSystemID, shipTypeHint, lastSeenTick }
-```
+Host-authoritative per system. The authority owns the live `World` — NPC traffic,
+combat, projectiles, events, domination, defenses. Every other co-located player is a
+client: it streams its `ControlIntent` up (~30 Hz, unreliable), predicts its own ship
+locally, and renders the authority's streamed world. Snapshots come down at ~20 Hz
+(unreliable); events, handshakes, chat, trade, and NCB updates ride a reliable
+channel.
 
-Cheap (a few bytes per jump). It is the *only* thing synced when players are
-apart. It powers:
+A client pauses its own spawner (`World.spawningPaused`) and clears its AI
+(`removeAINPCs()`), then mirrors the authority's NPCs from each snapshot as
+`networkMirror` ships (`spawnNetworkMirror`) built from the real hull via
+`Galaxy.makeShip(shipTypeID:)` with the real government, so hostiles read hostile.
+The client's **own ship health is authoritative** — adopted from the snapshot, so the
+authority's combat really damages it — while its position stays locally predicted and
+drift-blended back (`SystemSyncCoordinator.reconcileOwnShip`).
 
-- **Galaxy-map markers** — show where each friend is (see UI below).
-- **Co-location detection** — when your `currentSystemID` matches another
-  player's, Layer 2 engages for that system.
+Projectiles and beams are echoed for visuals: the snapshot carries live shots and
+beams, and the client re-seeds them each snapshot as `visualOnly` copies that fly
+straight and expire without collision or damage, dead-reckoned between snapshots. A
+client skips its own shots (matched by owner id) since it already fired those
+locally. Explosions the authority produces ride in `WorldSnapshot.effects` and are
+flushed into the client's event stream after its step, so everyone sees the same
+booms.
 
-Broadcast to all peers (mesh via `GKMatch`); the lobby host may relay presence
-as a star topology if mesh chatter grows at higher player counts.
+### Authority handoff
 
-### Layer 2 — System simulation sync (only co-located players)
+The first player in a system is its authority; the smallest co-located player id wins
+re-election. A player jumping into an occupied system requests a snapshot, loads it,
+and becomes a client. When the authority leaves a still-occupied system, authority
+re-elects deterministically and the new authority rebuilds its world
+(`needsResync`) — a brief hiccup. When the last player leaves, the system reverts to
+plain single-player for whoever enters next.
 
-Engages only among the players physically in one system. Host-authoritative
-**per system**:
-
-- One co-located player is the **authority** for that system. It owns the live
-  `World` — NPC traffic, combat, projectiles, events, domination, defenses.
-- Every other co-located player is a **client** for that system: streams its
-  `ControlIntent` up, predicts its own ship locally, and renders the authority's
-  streamed world (interpolating other ships/projectiles).
-- **Alone in a system ⇒ you are trivially your own authority.** No networking,
-  no clients — it runs exactly like single-player today.
-
-Rates: input up ~30 Hz (unreliable), snapshots down ~20 Hz (unreliable, delta-
-compressed), events + handshakes reliable.
-
-### Dynamic authority
-
-- **Assignment:** the first player in a system is its authority. If the lobby
-  host is among the co-located players, it can hold authority for stability.
-- **Join-in:** a player jumping into an occupied system requests a full snapshot
-  from the current authority, loads it (short loading screen OK), then becomes a
-  client for that system.
-- **Handoff:** when the authority leaves a still-occupied system, authority
-  migrates to a remaining co-located player. Because the sim is deterministic and
-  that player already holds a full mirror, it **promotes its mirror to
-  authoritative** and keeps simulating. A brief hiccup / loading is acceptable.
-- **Empty:** when the last player leaves a shared system, it reverts to plain
-  single-player for whoever enters next.
-
-### Canonical world when co-located
-
-Every player has their own galaxy, so *your* system X and *my* system X can
-differ (different NPC spawns, domination state, economy, mission progress).
-Default rule: **the authority's version of the system is canonical for that
-shared encounter.** Visitors temporarily see and interact with the authority's X;
-their own galaxy's X is untouched unless a `SessionRules` toggle says a specific
-outcome carries back. This keeps co-location an *overlay*, not a merge.
-
-## Why host-authoritative (not lockstep)
-
-The engine is strongly deterministic (seeded `SplitMix64`, no wall-clock, no
-ambient RNG — `Sources/NovaSwiftEngine/RNG.swift`), so lockstep is *possible*. We
-don't use it: lockstep is fragile across join-in-progress and dynamic authority
-handoff, and needs perfect fixed-tick sync (our loop is variable-`dt`, frame-
-coupled to SpriteKit). Host-authoritative state-sync is simpler and robust, and
-our render/sim split makes the client side cheap: the renderer only *reads* world
-state and drains events, never mutates the sim (`World.swift:707-708`).
-
-## UI features
-
-1. **Minimap player blips + names.** When co-located, remote players are real
-   ships in the authority's roster, so they appear on the minimap automatically.
-   Give player ships a distinct blip color and a short name label. (Not shown when
-   apart — they aren't in your system, which is correct.)
-2. **In-world nameplate.** Render the player's name under their ship sprite in
-   the main view. Presentation-only, reads the ship's control-source + name.
-3. **Galaxy-map presence markers.** From Layer 1 presence, place a marker on each
-   friend's current system. Must be **visually distinct from the mission marker
-   and must not occlude it** — render as an offset avatar/ring (e.g. small
-   pilot chip beside the system, layered under mission markers, with its own
-   color per player). Drawn from `PresenceUpdate.currentSystemID`.
-
-### Chat (session-wide text)
-
-In-game text chat between everyone in the session. Rides the **reliable** channel
-and is **independent of co-location** — you can message a friend before you've met
-up ("come help me at Sol"), which is the whole point. Not tied to Layer 2, so it
-works even when players are in different systems.
-
-- `ChatMessage { playerID, senderName, text }` — `senderName` is embedded so old
-  messages still render the author after they disconnect (presence is gone by
-  then).
-- `NetSession` keeps a `chatLog` (oldest-first history, sent + received) and fires
-  `onChat` per message; a UI binds to either. `sendChat(_:)` trims blank input,
-  appends locally, and broadcasts.
-- **UI (to build during app wiring):** a collapsible chat panel / message feed
-  overlay in-game + a compact unread indicator; a text field to send. Optional
-  later: proximity vs. session-wide channels, quick-canned messages for
-  controller/touch.
-
-*Status: net-layer complete and tested; in-game UI lands with the app-side
-session bootstrap (see Phasing P1).*
+Because every player has their own galaxy, *your* system X and *my* system X can
+differ (different spawns, domination state, economy, mission progress). The
+authority's version is canonical for a shared encounter; a visitor temporarily sees
+and interacts with the authority's X, and their own galaxy's X is untouched. That's
+what keeps co-location an overlay rather than a merge.
 
 ## Architecture
 
@@ -161,420 +112,281 @@ session bootstrap (see Phasing P1).*
    PlayerA @ Sys X (authority)      PlayerB @ Sys Y (alone, own authority)     │
         │  snapshot ▼   ▲ input          │  (no net traffic)                   │
         │             PlayerC @ Sys X (client of A)                            │
-        └──────── Layer 2: Sys X synced 100% among {A, C} ───────────────────┘
+        └──────── Layer 2: Sys X synced among {A, C} ───────────────────────┘
 
-   When B jumps X→X-of-A:  B ⇢ JoinSystem → A sends snapshot → B loads (short
-   loading screen) → B becomes client of A.  Now {A, B, C} all synced in Sys X.
-   If A then jumps away:   authority migrates to B or C (mirror promotion).
+   When B jumps into A's system:  B ⇢ presence → A's snapshot → B mirrors A's
+   world and becomes a client.  Now {A, B, C} all synced in Sys X.
+   If A then jumps away:  authority re-elects to B or C and rebuilds.
 ```
 
-### Transport layer (new)
+### `Sources/NovaSwiftNet` — the wire
 
-`protocol Transport` — connect / disconnect / send(channel, bytes) / receive
-callback / peer lifecycle. Backends:
+- **`Transport.swift`** — the `Transport` protocol (connect/disconnect/send on a
+  channel/receive callback/peer lifecycle), `TransportDelegate`, `NetChannel`
+  (reliable vs unreliable), `LobbyDescriptor`.
+- **`LoopbackTransport.swift`** — in-process, for testing full handshakes with no
+  devices and no entitlement.
+- **`MultipeerTransport.swift`** — `MCSession` over Bonjour for same-network play,
+  with host/join modes: a host advertises a *named* lobby via `discoveryInfo` and a
+  joiner invites only the chosen host id, so separate groups on one network never
+  merge. `MultipeerLobbyBrowser` lists nearby lobbies.
+- **`GameKitTransport.swift`** — wraps a `GKMatch` for internet play; peer id is the
+  `gamePlayerID`. Reliable/unreliable map to `GKMatch.SendDataMode`.
+- **`Messages.swift`** — every wire type: `PlayerPresence`, `NetIntent`,
+  `InputFrame`, `ShipNetState`, `ProjectileNetState`, `BeamNetState`,
+  `EffectNetState`, `WorldSnapshot`, `ChatMessage`, `NCBUpdate`, `TradeOffer`,
+  `TradeSignal`, the `NetMessage` envelope, and `NetCodec`.
+- **`NetSession.swift`** — owns the transport, lobby role, peer roster, presence
+  table, `SessionRules` propagation, chat log, host moderation (kick/ban, with
+  `bannedIDs` refusing presence), and the Layer-2 send/receive calls
+  (`sendInput`/`sendSnapshot`/`broadcastSnapshot`, `onInput`/`onSnapshot` tagged with
+  the sending peer).
+- **`SessionRules.swift`** — the stakes struct and its presets.
+- **`PluginManifest.swift`** — plug-in compatibility. Each enabled plug-in is an id +
+  display name + content hash, so players match on the same *version*, not just the
+  same name. A joiner whose manifest differs from the host's is blocked with a diff
+  telling them what to install, disable, or update (`PluginMismatch`). The manifest's
+  FNV-1a `signature` is the cheap lobby-list compatibility hint and its `groupID`
+  becomes the Game Center `playerGroup`, so auto-match only pairs identical content.
+  This matters because a mismatched plug-in set would silently desync the shared
+  galaxy — the same ship/outfit/system id would mean different things on each side.
 
-- `GameKitTransport` — `GKMatch` for internet (friend invite + join-code
-  matchmaking). Reliable/unreliable → `GKMatch.SendDataMode`.
-- `MultipeerTransport` — `MCSession` over Bonjour for same-network play.
-- `LoopbackTransport` — in-process, for unit-testing full handshakes with no
-  devices or entitlement.
+### `Sources/NovaSwiftSync` — the bridge
 
-Message framing, ordering, and channel semantics live in a `NetChannel`
-abstraction (reliable: presence, handshake, events, trade; unreliable: input,
-snapshots).
+`SystemSyncCoordinator` runs both sides. As authority: `receiveInput`, `applyInputs`,
+`snapshot(of:)`, `syncClients`. As client: `apply(_:to:)` with mirror
+inject/update/remove, `reconcileOwnShip` drift-blending, `flushEffects`, plus
+stale-input dropping and `promoteToAuthority` for handoff. It also maps
+`NetIntent ⇄ ControlIntent` and builds `WorldSnapshot`s recipient-agnostically (each
+`ShipNetState` is tagged with a `playerID`).
 
-### Session & roles
+### `Sources/NovaSwiftEngine` — N externally-driven ships
 
-- `NetSession` — owns the transport, the lobby role, the peer roster, the
-  presence table (playerID → system), and `SessionRules`.
-- `SystemNet` — per-occupied-system sync coordinator: tracks who's here, who's
-  authority, and runs Layer 2 for this system. Created when a system gains a 2nd
-  player; torn down when it drops below 2.
+The engine originally assumed exactly one externally-controlled ship. It's now
+generalized, additively and without breaking the single-player path:
 
-### Engine change: one → N externally-driven ships
+- `Ship.remotePlayer: RemotePlayerInfo?` marks another player's ship;
+  `Ship.networkMirror` marks a mirrored NPC; `isPlayerControlled` distinguishes.
+- `World.remoteIntents: [EntityID: ControlIntent]` drives remote ships;
+  `spawnRemotePlayer` / `remotePlayerShips` / `spawnNetworkMirror` / `removeAINPCs`
+  manage them, and `removeShip` clears intents.
+- `World.spawningPaused`, `pvpAllowed`, `friendlyFireAllowed`, `pvpDamageReal`, and
+  `playerDeathReal` are the session-rule hooks the sim reads.
 
-Today `World` assumes exactly one externally-controlled ship (`player`, id 0,
-single `World.intent`); all others are AI (`brain != nil`). Generalize:
+This preserves the symmetry the engine already had — a player and an AI are both just
+a `ControlIntent` plus `Ship.step`. A remote player is simply a ship whose intent
+arrives over the wire.
 
-- Add `enum ControlSource { case local; case remote(PeerID); case ai }` to
-  `Ship`. AI = `brain != nil`; local + remote = `brain == nil`, intent from
-  different sources.
-- Replace single `World.intent` with per-ship intent — `World.intents:
-  [EntityID: ControlIntent]` (id 0 = local player). In `World.step`, each
-  `brain == nil` ship applies its intent (`fireWeapons` + `Ship.step`); AI keeps
-  `brain.think`.
-- Remote-player ships enter via the existing seam
-  **`World.addNPC(_:arrival:)`** (`World.swift:830`) with `brain == nil`,
-  `control == .remote(peer)`, built from the joiner's real loadout via
-  `galaxy.makeLoadedShip(...)`. Nameplate + minimap color key off `control`.
+### App layer — `app/NovaSwift/Multiplayer`
 
-This preserves the "player and AI are the same `ControlIntent` + `Ship.step`"
-symmetry the engine already has (`World.swift:4-7`): a remote player is a ship
-whose intent arrives over the wire.
+`MultiplayerSession` is the observable on `AppModel` that owns the session: it
+computes the per-system authority, drives a `SystemSyncCoordinator`, exposes
+`syncPreStep`/`syncPostStep` (which `GameScene` calls around `world.step`, no-op
+unless ≥2 players share the system), pushes the session rules into the world each
+frame, and runs the trade state machine.
 
-### Message protocol
+The UI is one **Multiplayer** menu button opening `MultiplayerHubView` (Local /
+Online tabs), which leads to `HostSetupView` (lobby name + stakes preset + toggles) or
+a nearby-lobby list, and `PluginMismatchView` when content doesn't match. In session,
+`LobbyRosterView` shows the player list with host/you badges, rules pills, per-player
+kick/ban/trade menus, and Return-to-Flight / Leave. `GameCenterMatchmaking.swift`
+wraps `GKMatchmakerViewController` for both UIKit and AppKit; `GameCenterManager`
+authenticates at launch from `RootView`. `TradeView` is a two-column GIVE/RECEIVE
+window with steppers over your held items, a live mirror of the partner's offer, and a
+dual-accept bar (side-by-side on wide screens, stacked on a phone).
+`ChatOverlayView` is the in-game chat cluster with an unread badge. Everything is
+responsive across iPhone/iPad/Mac.
 
-Presence (reliable, low-rate, all peers):
-- `PresenceUpdate { playerID, name, currentSystemID, shipTypeHint }`
+Identity is consistent everywhere: a friend's ship wears an in-world nameplate under
+the hull, a named and colour-coded radar blip on both HUDs (the co-op blip bypasses
+the IFF gate so a friend never disappears), and a galaxy-map presence marker offset
+from the mission arrows. All three read one palette
+(`GalaxyMapView.playerColor(for:)`), so a given friend is the same colour in every
+view.
 
-Co-located, Client → Authority (unreliable, ~30 Hz):
-- `InputFrame { tick, seq, intent: ControlIntent }`
+## Chat
 
-Co-located, Authority → Client (unreliable, ~20 Hz, delta-compressed):
-- `WorldSnapshot { tick, ships: [ShipNetState], projectiles: [...], beams: [...],
-  ackInputSeq }` — `ShipNetState` = id, control-source, name, position, velocity,
-  angle, shield, armor, ionization, cloak, current-target, flags.
-
-Reliable, co-located:
-- `JoinSystem { pilotSummary, shipLoadout }` / `JoinAccept { sessionRules,
-  systemID, worldSeed, initialSnapshot }`
-- `AuthorityHandoff { systemID, newAuthority, tick }`
-- `WorldEvent { ... }` — mirrors `World.drainEvents()` so clients fire correct
-  SFX/VFX (arrivals, destructions, explosions, mission beats).
-- `TradeOffer` / `TradeResult`, `ChatMessage`.
-
-### Latency hiding (client side)
-
-- **Own ship:** client-side prediction — apply local intent immediately, keep an
-  input history, reconcile against the snapshot that acks each input seq (replay
-  unacked inputs on correction).
-- **Everyone else:** snapshot interpolation with a ~100 ms buffer; brief
-  extrapolation on packet loss.
+Session-wide text chat between everyone in the session, on the reliable channel and
+**independent of co-location** — you can message a friend before you've met up ("come
+help me at Sol"), which is the whole point. `ChatMessage` embeds `senderName` so old
+messages still render their author after that player disconnects. `NetSession` keeps
+an oldest-first `chatLog` of sent and received messages and fires `onChat` per
+message; `sendChat(_:)` trims blank input, appends locally, and broadcasts.
 
 ## Stakes / SessionRules
 
 Because everyone plays their own galaxy, each player's own save always persists.
-`SessionRules` governs only **inter-player interactions** while co-located:
+`SessionRules` governs only inter-player interactions while co-located:
 
-```
+```swift
 struct SessionRules {
-    var pvpDamageReal:   Bool   // damage from another player actually hurts your ship
-    var deathReal:       Bool   // being destroyed by/near another player is real death
-    var friendlyFire:    Bool   // co-op partners can hit each other
-    var allowPvP:        Bool
-    var allowTrade:      Bool
-    var carryEncounter:  Bool   // do outcomes in an authority's system (kills, loot)
-                                // carry back to a visitor's own galaxy
-    // Presets: .safe (pvpDamageReal=false, deathReal=false — sparring),
-    //          .fullStakes (all real), .custom
+    var pvpDamageReal:       Bool    // enforced — World.swift
+    var deathReal:           Bool    // enforced — World.swift
+    var friendlyFire:        Bool    // enforced — splash-damage gate
+    var allowPvP:            Bool    // enforced — canHit gate
+    var allowTrade:          Bool    // enforced — MultiplayerSession
+    var carryEncounter:      Bool    // DECLARED ONLY — see "What isn't done"
+    var gameSpeedMultiplier: Double  // enforced — the host's speed, session-wide
+    // Presets: .safe (sparring — PvP allowed, nothing hurts), .fullStakes (all real)
 }
 ```
 
-Host sets the preset/toggles when opening the lobby; each joiner sees and accepts
-them. `.fullStakes` means your ship is your real ship — damage and death are real
-in your own game; trades move real items between real saves.
+The host sets the preset and toggles when opening the lobby; each joiner sees them.
+`.fullStakes` means your ship is your real ship: damage and death are real in your own
+game, and trades move real items between real saves. Co-op partners share a government
+so they're un-hittable allies until PvP is switched on.
 
-## Persistence model
+`gameSpeedMultiplier` is a rule rather than a local preference for a real reason: each
+device used to apply its own `GameSettings.gameSpeed`, which let two sims silently
+drift apart whenever two players had picked different speeds. Pushing the host's value
+to every guest puts the whole lobby's ships, weapons, and regen on one clock.
 
-- No "working-copy save" and no forced save-merge — everyone is always in their
-  own persistent galaxy.
-- Interaction outcomes apply per `SessionRules` (damage/death real or not; trades
-  move real items; `carryEncounter` decides whether kills/loot in an authority's
-  system reach a visitor's own galaxy).
-- The authority's galaxy is the canonical sim for a shared encounter; a visitor's
-  own galaxy state elsewhere is never touched.
+## Persistence
 
-## Story, control bits (NCB) & the per-player services split
+There is no working-copy save and no forced save-merge — everyone is always in their
+own persistent galaxy. Interaction outcomes apply per `SessionRules`. The authority's
+galaxy is the canonical sim for a shared encounter; a visitor's own galaxy state
+elsewhere is never touched.
 
-Principle: **the shared world runs the authority's storyline; personal
-progression stays personal; nothing is ever overwritten; you can only *gain* — and
-only by earning it together.** This resolves the "a more-progressed friend joins a
-less-progressed host (or vice versa)" problem without merging or clobbering either
-save.
+## Story, control bits (NCB), and the per-player services split
 
-Everything splits into two buckets by *what kind of thing it is*:
+The principle: **the shared world runs the authority's storyline; personal progression
+stays personal; nothing is ever overwritten; you can only gain, and only by earning it
+together.** This is what makes "a more-progressed friend joins a less-progressed host,
+or vice versa" work without clobbering either save.
 
-### A. Authority-driven — the shared, in-space world
+Everything splits into two buckets by what kind of thing it is.
 
-Resolved against the **authority's** NCB / story state:
+**Authority-driven — the shared, in-space world.** Resolved against the authority's
+NCB/story state: which NPCs and fleets spawn, planet states, domination, stellar
+defenses, ambient traffic, and which missions and story beats are live in the shared
+world. All physical, in-space, synced reality.
 
-- Star-system setup: which NPCs/fleets spawn, spöb (planet) states, domination,
-  stellar defenses, ambient traffic.
-- Which missions / story beats are "live" in the shared world — everyone together
-  experiences the authority's storyline while co-located.
-- All physical, in-space, synced reality.
+**Per-player — personal services.** Resolved against each player's own save, visible
+only to them: outfitter inventory and shipyard availability (gated by their own
+NCBs/tech/rank/government status), ammo and re-arm, escort hiring, salary, credits,
+combat rating, ranks. Two co-located players landing on the same authority-owned
+planet each get an independent personal spaceport driven by their own save — the
+planet's identity and world state is the authority's, but the shop contents are yours.
+The reasoning: a more-progressed player who joins a less-progressed host must still be
+able to buy and re-arm what their own story unlocked, and a less-progressed player
+must not be blocked or spoiled by the host's further-along state.
 
-### B. Per-player — personal services (yours only, even at the authority's planet)
+This falls out almost free from the existing architecture: landing already renders a
+per-player local overlay (`landedSpobID` in each client's own `GameContainerView`,
+over its own `PilotStore`), and the outfitter/shipyard gating functions all take the
+`pilot`/`PlayerState` as an explicit input, so they're trivially routable per player.
 
-Resolved against **each player's own** save/NCB state, visible only to that
-player:
-
-- Outfitter inventory & shipyard availability (gated by that player's own NCBs /
-  tech / rank / government status).
-- Ammo / re-arm for their existing weapons.
-- Escort hiring, salary, credits.
-- Combat rating, ranks.
-
-These are personal economy/UI interactions — you land, you shop. Two co-located
-players landing on the same (authority-owned) planet each get an **independent
-personal spaceport UI** driven by their own save. The planet's *identity and world
-state* (which planet, its domination) is the authority's; the *shop contents* are
-yours.
-
-Rationale: a more-progressed player who joins a less-progressed host must still be
-able to buy / re-arm / upgrade what their own story unlocked; a less-progressed
-player must not be blocked or spoofed by the host's further-along state.
-
-### NCB merge rules (strict)
+### How NCB merging works
 
 1. **Non-destructive** — joining never clears or removes bits from anyone.
-2. **No passive inheritance** — joining a more-progressed player does NOT copy
-   their pre-existing bits to you, and joining a less-progressed one costs you
-   nothing. Separate progress is untouched in both directions.
-3. **Earn-together is additive** — bits SET by missions/events you actually
-   participate in during shared play are unioned into each participating player's
-   own NCB set. Progress made together counts for each of you.
-4. Rewards (credits / outfits / ship) from shared missions follow `SessionRules`
-   (e.g. `carryEncounter`).
+2. **No passive inheritance** — joining a more-progressed player does not copy their
+   pre-existing bits to you, and joining a less-progressed one costs you nothing.
+3. **Earn-together is additive** — bits set by missions and events you actually
+   participate in during shared play are unioned into each participating player's own
+   set.
 
-**Accepted consequence:** a lagging player can acquire a later mission's bits
-"out of order" relative to their own solo storyline (they earned it together).
-This is intended. Guard only that story logic which hard-depends on an earlier
-prerequisite bit **degrades gracefully** — a mission whose condition isn't met
-simply won't fire for that player, rather than corrupting state.
+In code: the authority's set-bit changes are captured as a frame diff of
+`PlayerState.setBits`, sent per-participant on the reliable channel as `NCBUpdate`,
+and unioned into each co-located partner's own vector (`AppModel.onRemoteBitsEarned`
+→ `setBits.formUnion` + save). The baseline is seeded at session start and re-seeded
+whenever you aren't the authority, so pre-existing and solo-earned bits never leak.
 
-### Engine mapping
+**Accepted consequence:** a lagging player can acquire a later mission's bits out of
+order relative to their own solo storyline, because they earned it together. That's
+intended. The guard is that story logic depending on an earlier prerequisite bit
+degrades gracefully — a mission whose condition isn't met simply doesn't fire for that
+player rather than corrupting state.
 
-- NCB state is per-pilot (each save's own bit-set). The design adds a **"which
-  NCB context does this query use"** routing decision at the story/services seam:
-  shared-world queries (system/spöb/mission-availability) resolve against the
-  **authority's** bit-set; personal-service queries (outfitter/shipyard/rank/…)
-  resolve against the **local** player's bit-set.
-- Shared-mission bit-sets are applied **per participant** (set-union into each
-  player's own bits), never a wholesale copy of the authority's set.
-- Seam lives in NovaSwiftStory (NCB engine) + the spaceport/interaction layer +
-  the `GameServices` bridge. Exact functions confirmed in "Key files & seams."
+## Trade
 
-## Implementation status (2026-07-14)
+Two players can swap credits, cargo, and outfits when `SessionRules.allowTrade` is on.
+`TradeOffer` and `TradeSignal` (invite/decline/offer/accept/cancel) ride the reliable
+channel via `NetSession.sendTrade`/`onTrade`. `MultiplayerSession` runs a two-sided
+state machine (`inviteTrade`/`accept`/`updateMyOffer`/`setTradeAccepted`/`cancel`);
+any change to either offer resets both acceptances, and when both sides have accepted,
+each applies the swap to its own save through `AppModel.onTradeCommitted`. It's
+started from the lobby roster's per-player Trade button and shown as a flight overlay.
 
-- **Netcode layer (`Sources/NovaSwiftNet`, in SwiftPM):** DONE & tested (30 tests).
-  `Transport` protocol; `LoopbackTransport` (tests) + `MultipeerTransport` (LAN);
-  `NetSession` with presence table, co-location queries, session-wide chat
-  (history + sender names), `SessionRules` propagation, and **Layer-2 send/receive**
-  (`sendInput`/`sendSnapshot`/`broadcastSnapshot` on the unreliable channel +
-  `onInput`/`onSnapshot` callbacks tagged with the sending peer).
-- **Engine N-ship generalization (`Sources/NovaSwiftEngine/World.swift`):** DONE &
-  tested (6 tests), additive/non-breaking. `Ship.remotePlayer: RemotePlayerInfo?`
-  marks another player's ship; `World.remoteIntents: [EntityID: ControlIntent]`
-  drives them; `spawnRemotePlayer`/`remotePlayerShips`; `removeShip` clears intents.
-  Single-player path unchanged.
-- **Layer-2 sync bridge (`Sources/NovaSwiftSync`, new SwiftPM target dep engine+net):**
-  DONE & tested (4 tests). `NetIntent ⇄ ControlIntent` mapping; `WorldSnapshot.build(from:)`
-  (recipient-agnostic tagging via `ShipNetState.playerID`); `SystemSyncCoordinator`
-  (authority: `receiveInput`/`applyInputs`/`snapshot`; client: `input`/`apply` with
-  mirror inject/update/remove + dead-reckon between snapshots; stale-input drop).
-  **The end-to-end co-op loop is proven headlessly**: an integration test runs two
-  real `World`s + two `NetSession`s over `LoopbackNetwork` and verifies a friend's
-  ship appears and moves in the other player's world, and each client's inputs drive
-  its ship authoritatively on the authority. Player-ship scope; NPC/projectile sync
-  is the next layer on the same channel.
-- **App wiring (Xcode target, compiles — `xcodebuild` BUILD SUCCEEDED):**
-  `NovaSwiftNet` linked in; `MultiplayerSession` observable on `AppModel`;
-  in-game **chat** (launcher + panel + unread badge) live over local Wi-Fi;
-  presence announced on every hyperjump; **galaxy-map presence markers** (coloured
-  pip + name, offset from mission arrows).
-- **App game-loop integration (Xcode target, compiles — `xcodebuild` BUILD SUCCEEDED):**
-  `NovaSwiftSync` linked into the app; `MultiplayerSession` owns a `SystemSyncCoordinator`,
-  computes the per-system authority (smallest co-located player id — deterministic, no
-  negotiation), and exposes `syncPreStep`/`syncPostStep`. `GameScene` calls those around
-  `world.step` (no-op unless ≥2 players share the system). Mirror ships are built from the
-  friend's real hull via `Galaxy.makeShip(shipTypeHint…)`, so the existing `npcNodes`
-  render path draws them **and** the minimap-blip pass (`world.npcs`) shows them for free.
-  Presence now carries `shipTypeHint` (announced on jump + co-op start). Not runtime-verified
-  (no-launch policy) — the sync *logic* it drives is end-to-end tested in-package.
-- **Co-op ship identity DONE (Xcode target, compiles):** another player's ship now wears
-  an **in-world nameplate** (name label under the hull, `NPCNode.nameplate`, created in
-  `makeNPCNode` for `remotePlayer` ships) and a **named + colour-coded radar blip** on
-  both HUDs (`RadarContact.playerColor`/`playerName`; the co-op blip bypasses the IFF gate
-  so a friend never disappears). Nameplate, radar blip, and galaxy-map marker all share one
-  palette (`GalaxyMapView.playerColor(for:)`) so a given friend is the same colour
-  everywhere. Not runtime-verified (no-launch).
-- **Shared world / co-op combat (NPC sync) DONE (compiles; package logic tested):** when
-  co-located, both players now share **one cast of NPCs** — the authority's. A **client**
-  pauses its own spawner (`World.spawningPaused`) and clears its AI (`removeAINPCs()`), then
-  mirrors the authority's NPCs from the snapshot as `networkMirror` ships
-  (`spawnNetworkMirror`) — real hull/sprite via `Galaxy.makeShip(shipTypeID…)`, real
-  government so hostiles read hostile. The client's **own ship health is authoritative**
-  (adopted from the snapshot) so the authority's combat actually damages it, while its
-  position stays locally predicted. Snapshot now carries `ShipNetState.shipTypeID` +
-  `government`. Not runtime-verified.
-- **Projectile sync DONE (compiles; package logic tested):** a client now sees enemy/ally
-  **fire**. The snapshot carries live shots (`ProjectileNetState` in `WorldSnapshot.shots`);
-  the client re-seeds them each snapshot as `Projectile.visualOnly` echoes (fly straight +
-  expire, no collision/damage — `stepProjectiles` skips them) and dead-reckons between. It
-  **skips its own** shots (matched by `ownerID` = its ship's authority entity id) since it
-  already fired those locally. The scene draws them for free (`world.projectiles`).
-- **Beam sync DONE (compiles; package logic tested):** continuous/pulse **beams** are now
-  echoed too (`BeamNetState` in `WorldSnapshot.beams`; client re-seeds `ActiveBeam.visualOnly`
-  segments each snapshot — `refreshActiveBeams` leaves them untouched — skipping its own by
-  `shooterID`). **Co-op combat is now fully visible on a client: ships, projectile fire, and
-  beam fire, with authoritative damage.**
-- **PvP + stakes DONE (tested):** `SessionRules.allowPvP` is enforced — `World.pvpAllowed`
-  gates player-vs-player hits in `canHit` (co-op partners share a government so they're
-  un-hittable allies until PvP is switched on). Set live from the session rules each frame.
-  (Finer toggles — `friendlyFire`, `deathReal`, `pvpDamageReal` — exist in `SessionRules`
-  but aren't separately enforced yet; `allowPvP` is the on/off stake.)
-- **Effect echoes DONE (tested):** explosions the authority produces are carried in
-  `WorldSnapshot.effects`, buffered in the coordinator, and flushed into the client's event
-  stream after its step (`World.emitVisualExplosion`) so a client sees the same booms.
-- **Internet play DONE (compiles; entitlement configured):** `GameKitTransport` (wraps a
-  `GKMatch`; peer id = `gamePlayerID`) + `MultiplayerSession.startGameCenter(match:…)`, and
-  the **matchmaking UI**: `GameCenterManager` (authenticates at launch from `RootView`),
-  `GameCenterMatchmakerView` (SwiftUI wrapper over `GKMatchmakerViewController`, iOS + macOS),
-  and an **"Online Co-op"** menu row that presents it and starts the session on `didFind`.
-  Not runtime-verified (no-launch; needs a real Game Center match to exercise).
-- **Authority handoff:** works via deterministic re-election (`currentAuthorityID`) +
-  `needsResync` world-rebuild when the host leaves a system; both sides agree with no
-  negotiation. Seamless mirror-promotion (no NPC re-roll) is a future refinement.
-- **Story / NCB co-op sync DONE (compiles; net delivery tested):** players now progress
-  missions **together** without ever overwriting what they've done apart. The authority's
-  storyline is the shared one, so bits it sets during co-op are captured (frame diff of
-  `PlayerState.setBits`), sent per-participant on the reliable channel (`NCBUpdate`), and
-  **unioned non-destructively** into each co-located partner's own vector (`AppModel`
-  `onRemoteBitsEarned` → `setBits.formUnion` + save). Strict rules enforced: additions only
-  (never clears), baseline seeded at session start + re-seeded whenever not the authority so
-  **pre-existing / solo-earned bits never leak** (no passive inheritance). Personal services
-  (shop/shipyard/rank/credits) already resolve per-pilot, untouched.
-- **Lobby system + management UI DONE (compiles; net logic tested):** replaced the
-  auto-connect-everyone mesh with **named lobbies**. `MultipeerTransport` now has host/join
-  **modes** (host advertises a named lobby via Bonjour `discoveryInfo`; a joiner invites only
-  the chosen host id — separate groups on one network never merge); `MultipeerLobbyBrowser`
-  lists nearby lobbies (`LobbyDescriptor`). Host **moderation** in `NetSession`: `kick`/`ban`
-  (`.kick` wire msg + `bannedIDs` refusing presence, `onKicked`). New UI (responsive — iPhone/
-  iPad/Mac, `presentationDetents` + capped widths + scroll): single **"Multiplayer"** menu
-  button → `MultiplayerHubView` (Local / Online tabs) → `HostSetupView` (lobby name + stakes:
-  Co-op/Full-Stakes preset + PvP/Trade toggles) or a **nearby-lobby list** to join; in-session
-  `LobbyRosterView` (player list, host/you badges, per-player kick/ban menu, rules pills,
-  Return-to-Flight / Leave). Game Center matchmaker moved into the hub + given a real
-  `minHeight` on macOS (fixes the too-short/oversized-buttons sheet).
-- **Trade / item hand-off DONE (compiles; net logic tested):** two players can swap
-  **credits + cargo + outfits** (gated by `SessionRules.allowTrade`). `TradeOffer` +
-  `TradeSignal` (invite/decline/offer/accept/cancel) over the reliable channel
-  (`NetSession.sendTrade`/`onTrade`); a two-sided state machine in `MultiplayerSession`
-  (`inviteTrade`/`accept`/`updateMyOffer`/`setTradeAccepted`/`cancel` — any offer change resets
-  both acceptances; both-accepted ⇒ each side applies the swap to its own save via
-  `AppModel.onTradeCommitted`). Polished responsive UI: `TradeView` (a two-column GIVE/RECEIVE
-  window with steppers over your held items, live partner mirror, dual-accept bar — side-by-side
-  on wide screens, stacked on a phone via `ViewThatFits`) + `TradeInvitePromptView`; initiated
-  from the lobby roster's per-player Trade button, shown as a flight overlay.
-- **Multiplayer feature complete.** Remaining are optional refinements only: finer PvP toggles
-  (`friendlyFire`/`deathReal`/`pvpDamageReal` — `allowPvP` is the master switch) and seamless
-  authority handoff (the world-rebuild handoff already works).
+## Testing
 
-## Testing on one machine
+**Automated:** roughly 66 test functions. `Tests/NovaSwiftNetTests` (~46) covers
+Layer-2 sync, chat, the message codec, plug-in manifests, presence, loopback,
+multipeer, moderation, and trade. `Tests/NovaSwiftSyncTests` (13) covers the
+coordinator, including `testTwoWorldsSyncPlayersEndToEnd` — a genuine integration test
+that runs two real `World`s and two `NetSession`s over a loopback network and verifies
+a friend's ship appears and moves in the other player's world and that each client's
+inputs drive its ship authoritatively on the authority. It also covers authority
+handoff, drift-blending, shot/beam echoes, and stale-input dropping.
+`Tests/NovaSwiftEngineTests/RemotePlayerTests.swift` (14) covers the engine hooks.
 
-Two copies of NovaSwift on one Mac, so you can test co-op against yourself:
+**Two copies on one Mac:**
 
     scripts/run-two.sh
 
-Builds once, launches **instance 1** (normal) and **instance 2** (`NOVASWIFT_INSTANCE=2`).
-The env var (see `AppInstance.swift`) gives instance 2 its **own pilot roster/saves**
+Builds once, launches instance 1 normally and instance 2 with `NOVASWIFT_INSTANCE=2`.
+That env var (see `AppInstance.swift`) gives instance 2 its own pilot roster and saves
 (`…/Application Support/NovaSwift-2`) and its own selected-pilot default, while both
-**share the game data you already imported** — so no re-import, no save corruption. The
-secondary tags its co-op name (`Captain #2`) so you can tell them apart in presence/chat.
+share the game data you already imported — so no re-import and no save corruption. The
+secondary tags its co-op name (`Captain #2`) so you can tell them apart in presence and
+chat. In each window: start or resume a pilot → **Multiplayer** → host or join a local
+lobby. They discover each other over Bonjour, no Game Center needed. Put both pilots in
+the same star system to see each other's ship and fly together; chat works session-wide
+regardless of location. Ctrl-C the script to quit both. For a true two-device test, run
+one copy on a second Mac or iPad on the same Wi-Fi — same flow, no env var.
 
-In each window: start/resume a pilot → in-game menu ▸ **Host Local Co-op**. They
-auto-discover over local Wi-Fi/Bonjour (`MultipeerTransport`) — no Game Center/internet.
-Put both pilots in the **same star system** to see each other's ship + fly together;
-chat works session-wide from the bubble button regardless of location. Ctrl-C the script
-to quit both. (For a true two-device test, run one copy on a second Mac/iPad on the same
-Wi-Fi instead — same flow, no env var needed.)
+## What isn't done
 
-## Phasing
+- **No real-hardware runtime verification.** Nothing here has been played on two
+  machines or over a real Game Center match. The sync logic is proven headlessly and
+  the app wiring compiles, but the first live session will surface things tests can't.
+  This is the biggest outstanding item.
+- **`carryEncounter` is declared but never read.** It's a field on `SessionRules` with
+  a doc comment and a value in both presets, and nothing in the engine, app, or tests
+  ever consults it. It also has no toggle in `HostSetupView`, so a host can't set it
+  independently of a preset. Kills and loot in an authority's system currently do not
+  carry back to a visitor's own galaxy regardless of what this says. Either implement
+  it or delete the field.
+- **Authority handoff rebuilds instead of promoting.** When the authority leaves,
+  re-election is deterministic and correct, but the new authority rebuilds its world
+  rather than promoting the mirror it already holds, so NPCs re-roll and there's a
+  visible hiccup. Seamless mirror-promotion is a refinement, not a blocker.
+- **Bandwidth is untuned.** No delta compression and no interest management; snapshots
+  ship full state. Fine for small groups, unexamined at higher player counts. `GKMatch`
+  allows 16 players and nothing hard-codes 2, but nothing has been measured either.
+- **Residual story edge case:** a planet or outfitter whose very *existence* is
+  bit-gated and differs between authority and visitor. The rule is that personal
+  services always use the local player's bits (you see your own outfitter even at the
+  authority's planet) while the planet's world identity stays the authority's, but this
+  hasn't been exercised.
 
-Each phase is independently demoable.
+## Key files
 
-- **P0 — Netcode spine + presence.** `Transport` (+ `LoopbackTransport`,
-  `MultipeerTransport`, `GameKitTransport`); `NetSession`; lobby/invite/join-
-  code/local discovery; message framing + channels; **Layer 1 presence**.
-  *Demo:* friends connect; each sees the others' live positions on the **galaxy
-  map** as they jump around — no system sync yet.
-- **P1 — See each other in a shared system (read-only).** Co-location handshake
-  + `SystemNet`; authority streams its player ship; joiner renders a remote ship
-  with **nameplate** + **minimap blip**. Proves Layer 2 wire + snapshot +
-  interpolation + render-from-received-state.
-- **P2 — Fly together.** Generalize `World` to N externally-driven ships; inject
-  the joiner's ship via `addNPC`; client sends `InputFrame`, authority simulates
-  + streams the roster; client predicts its own ship. *Actually playing together.*
-- **P3 — Interact.** Combat/damage/event sync (co-op + PvP under `SessionRules`);
-  shared-mission participation (guest ship counts toward the authority's mission
-  triggers) with the per-player services split + additive NCB merge (see "Story,
-  control bits (NCB) & the per-player services split"); trade / credit + item
-  hand-off, rules-gated.
-- **P4 — Robustness & polish.** Dynamic authority handoff; join-into-occupied-
-  system loading screen; disconnect/rejoin; bandwidth tuning (delta compression,
-  interest management); UI (lobby, invite, rules screen, in-game roster/chat,
-  galaxy-map marker polish).
+**Netcode:** `Sources/NovaSwiftNet/` — `Transport.swift`, `LoopbackTransport.swift`,
+`MultipeerTransport.swift`, `GameKitTransport.swift`, `Messages.swift`,
+`NetSession.swift`, `SessionRules.swift`, `PluginManifest.swift`.
 
-## Key files & seams (today)
+**Sync bridge:** `Sources/NovaSwiftSync/` — `SystemSyncCoordinator.swift`.
 
-- Sim entry: `World.step(_:)` — `Sources/NovaSwiftEngine/World.swift:1084`.
-- Frame clock: `GameScene.update(_:)` — `app/NovaSwift/Game/GameScene.swift:924`.
-- Ship model / player id 0: `World.swift:135`, `:711`, `:474`.
-- Intent abstraction: `ControlIntent` — `World.swift:8`; input merge —
-  `app/NovaSwift/Input/InputController.swift`.
-- Injection seam: `World.addNPC(_:arrival:)` — `World.swift:830`.
-- World build / system: `GameSession.makeWorld` —
-  `Sources/NovaSwiftEngine/GameSession.swift:23`; system rebuild on jump —
-  `app/NovaSwift/Game/GameContainerView.swift:966`.
-- Determinism: `Sources/NovaSwiftEngine/RNG.swift` (seeded, no wall-clock).
-- Save/pilot store: `app/NovaSwift/Game/PilotStore.swift` (`@Published var state:
-  PlayerState`, `:18`).
-- Galaxy map (for presence markers) & minimap (for player blips): in
-  `app/NovaSwift` — locate exact views during P0/P1.
+**Engine:** `Sources/NovaSwiftEngine/World.swift` — `Ship.networkMirror`,
+`Ship.remotePlayer`, `World.remoteIntents`, `spawningPaused`, `pvpAllowed`,
+`spawnRemotePlayer`, `spawnNetworkMirror`, `removeAINPCs`. Determinism lives in
+`RNG.swift`; world construction in `GameSession.makeWorld`.
 
-### Story / NCB & services seams (confirmed — for the per-player split)
+**App:** `app/NovaSwift/Multiplayer/` — `MultiplayerSession.swift`,
+`MultiplayerHubView.swift`, `MultiplayerLobbyViews.swift`, `TradeView.swift`,
+`ChatOverlayView.swift`, `GameCenterMatchmaking.swift`. Sync is driven from
+`GameScene.update`; presence markers live in `GalaxyMapView.swift`; the entitlement is
+in `app/NovaSwift/NovaSwift.entitlements`.
 
-- **NCB bit-set (per-pilot):** `PlayerState.setBits: Set<Int>` —
-  `Sources/NovaSwiftStory/PlayerState.swift:294`. Mutate via `setBit/clearBit/
-  toggleBit` (`:347-351`); test via `isBitSet(_:)` (`:451`, conforms
-  `NCBTestContext`). Expression engine: `Sources/NovaSwiftStory/NCBExpression.swift`
-  (`NCBTest.evaluate` `:69`, `NCBSet.parse` `:239`). Engine seam:
-  `StoryEngine.evaluate(test:)` (`StoryEngine.swift:50`) / `apply(set:)` (`:56`).
-  **One `StoryEngine` owns one `PlayerState`** (`StoryEngine.swift:18`) — so
-  authority-vs-local routing = which engine/`PlayerState` a query evaluates against.
-- **Mission availability / bit-setting:** `StoryEngine.isEligible(_:at:spobID:)`
-  (`StoryEngine.swift:220`, gates on `availBits`/`Require`/rating/legal/ship);
-  `completeMission` applies `onSuccess` bits via `apply(set:)` (`:459`); crons via
-  `runCronHook` (`:834`).
-- **Outfitter/shipyard gating (two layers):** tech-level inventory —
-  `NovaEconomy.outfitsSold(at:day:)` / `shipsSold(at:day:)`
-  (`Sources/NovaSwiftKit/NovaEconomy.swift:247`, `:268`); story/rank/govt locks —
-  `NovaGame.lockState(for:pilot:…)` (`app/NovaSwift/Spaceport/ItemLocking.swift:63`,
-  `:74`), gating on `availBits`+`Require`/Contribute (incl. active ranks). UI:
-  `SpaceportScreens.swift` OutfitterView `:217` / ShipyardView `:404`. **All take
-  the `pilot`/`PlayerState` as explicit input ⇒ trivially routable per-player.**
-- **Rank / combat rating / salary (per-pilot):** `PlayerState.combatRating` (`:222`),
-  `legalRecord` (`:223`), `activeRanks: Set<Int>` (`:224`, rank resource ids, NOT
-  bits — activated by NCB SET ops). Salary paid in `StoryEngine.payDailySalaries()`
-  (`:735`). Rank price discount: `PilotStore.rankPriceMultiplier(govt:game:)`
-  (`PilotStore.swift:245`).
-- **GameServices bridge:** `Sources/NovaSwiftStory/GameServices.swift:16`; app
-  conformer `app/NovaSwift/Story/AppGameServices.swift:12`. Pure `PlayerState`
-  mutations (credits/bits/ranks/outfits) stay client-local; the **world-affecting
-  callbacks to elevate to the authority** are `spawnMissionShips`,
-  `setStellarDestroyed`, `movePlayer`, `changePlayerShip`, `leaveStellar`,
-  `showNews`.
-- **Landing → spaceport UI is already a per-player local overlay:**
-  `landedSpobID` `@State` in each client's own `GameContainerView`
-  (`GameContainerView.swift:582`, rendered `:782`), over its own `PilotStore`. Two
-  co-located players landing on the same spöb each get an **independent personal
-  spaceport** — the per-player services split is essentially free here.
-
-## Open questions
-
-1. **Cross-galaxy shared missions** — RESOLVED by the "Story, control bits (NCB)
-   & the per-player services split" section above (authority-driven world +
-   per-player personal services + strict non-destructive/additive NCB merge).
-   Residual edge: a spöb/outfitter whose very *existence* is bit-gated and differs
-   between authority and visitor — default: personal services always use the local
-   player's bits (you see your own outfitter even at the authority's planet), while
-   the planet's world identity/state stays the authority's. Finalize in P3.
-2. **Authority selection policy** — first-in vs. lobby-host-priority vs. lowest-
-   latency. Start with "lobby host if present, else first-in"; revisit if handoff
-   churn is bad.
-3. **Player count** — v1 targets small groups (GKMatch allows 16); the N-ship
-   generalization must not hard-code 2. Bandwidth/interest-management scaling is a
-   P4 concern.
-4. **PvP + co-op friendly-fire edges** — governed by `SessionRules`; finalize in
-   P3.
+**Story seams:** `PlayerState.setBits` (`Sources/NovaSwiftStory/PlayerState.swift`)
+with `setBit`/`clearBit`/`isBitSet`; `StoryEngine.evaluate(test:)` / `apply(set:)` —
+one `StoryEngine` owns one `PlayerState`, so authority-vs-local routing is just a
+question of which engine a query evaluates against. Mission gating:
+`StoryEngine.isEligible(_:at:spobID:)`. Shop gating: `NovaEconomy.outfitsSold(at:day:)`
+/ `shipsSold(at:day:)` for tech level, `NovaGame.lockState(for:pilot:…)`
+(`app/NovaSwift/Spaceport/ItemLocking.swift`) for story/rank/govt locks. Bridge:
+`Sources/NovaSwiftStory/GameServices.swift`, app conformer
+`app/NovaSwift/Story/AppGameServices.swift` — the world-affecting callbacks that would
+need elevating to the authority are `spawnMissionShips`, `setStellarDestroyed`,
+`movePlayer`, `changePlayerShip`, `leaveStellar`, `showNews`.

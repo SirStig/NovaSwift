@@ -28,12 +28,26 @@ struct GameSettings: Codable, Equatable {
     }
 
     enum Difficulty: String, Codable, CaseIterable, Identifiable {
-        case easy, normal, hard
+        case veryEasy, easy, normal, hard
         var id: String { rawValue }
-        var label: String { rawValue.capitalized }
+        var label: String {
+            switch self {
+            case .veryEasy: return "Very Easy"
+            case .easy: return "Easy"
+            case .normal: return "Normal"
+            case .hard: return "Hard"
+            }
+        }
         /// Damage the player takes, scaled. Easy is more forgiving; hard, less.
+        /// Very Easy halves Easy again, for players who want the story without
+        /// the fights — still lethal if you ignore your shields entirely.
         var playerDamageScale: Double {
-            switch self { case .easy: return 0.6; case .normal: return 1.0; case .hard: return 1.5 }
+            switch self {
+            case .veryEasy: return 0.3
+            case .easy: return 0.6
+            case .normal: return 1.0
+            case .hard: return 1.5
+            }
         }
     }
 
@@ -69,16 +83,18 @@ struct GameSettings: Codable, Equatable {
     /// low stat values, not from an artificial slow-motion multiplier. The
     /// original also let you toggle Caps-Lock for a ~2× "fast" mode that sped
     /// the whole engine up uniformly (including combat); `x2`/`x4`/`x8` here
-    /// generalise that into a proper option. Applied as a multiplier on the
-    /// physics timestep, so it uniformly scales acceleration, top speed,
-    /// turning, travel time, weapon reload and shield/armor regen — leave it at
-    /// `x1` for combat and travel pacing that matches the documented Bible
-    /// formulas exactly.
+    /// generalise that into a proper option, and `x0_5` extends it the other
+    /// way into slow motion for players who want more reaction time in a
+    /// dogfight. Applied as a multiplier on the physics timestep, so it
+    /// uniformly scales acceleration, top speed, turning, travel time, weapon
+    /// reload and shield/armor regen — leave it at `x1` for combat and travel
+    /// pacing that matches the documented Bible formulas exactly.
     enum GameSpeed: String, Codable, CaseIterable, Identifiable {
-        case x1, x2, x4, x8
+        case x0_5, x1, x2, x4, x8
         var id: String { rawValue }
         var label: String {
             switch self {
+            case .x0_5: return "0.5×"
             case .x1: return "1×"
             case .x2: return "2×"
             case .x4: return "4×"
@@ -88,6 +104,7 @@ struct GameSettings: Codable, Equatable {
         /// Physics-timestep multiplier — `x1` is exactly real-time.
         var multiplier: Double {
             switch self {
+            case .x0_5: return 0.5
             case .x1: return 1.0
             case .x2: return 2.0
             case .x4: return 4.0

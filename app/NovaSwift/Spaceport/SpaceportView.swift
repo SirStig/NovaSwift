@@ -210,18 +210,20 @@ struct SpaceportView: View {
     /// (the stale-bounds junk this dialog family carries), so a big centred
     /// button there floated in black under the artwork. Using the real 4th
     /// slot keeps it inside the frame and reads cleanly under Recharge.
+    /// Which role sits in which slot is a separate question from where the slots
+    /// are: the left column runs Bar / Mission BBS / Trade Center, top to bottom.
     private static let rightSlotY: [String: CGFloat] = ["shipyard": 74, "outfitter": 116, "recharge": 158, "leave": 198]
-    private static let leftSlotY: [String: CGFloat] = ["tradeCenter": 74, "bar": 116, "missionBBS": 158]
+    private static let leftSlotY: [String: CGFloat] = ["bar": 74, "missionBBS": 116, "tradeCenter": 158]
     private static let leftX: CGFloat = -304
     private static let rightX: CGFloat = 160
 
     private typealias ButtonItem = (key: String, title: String, action: () -> Void)
 
+    /// Listed top-to-bottom as they appear; `leftSlotY` is what actually places
+    /// them, so a port missing a service leaves that slot empty rather than
+    /// shifting the rest up.
     private var leftButtonItems: [ButtonItem] {
         var items: [ButtonItem] = []
-        if spob.hasCommodityExchange {
-            items.append(("tradeCenter", graphics.buttonLabel(SpaceportLabel.tradeCenter, fallback: "Trade Center"), { screen = .trade }))
-        }
         if spob.hasBar {
             items.append(("bar", graphics.buttonLabel(SpaceportLabel.bar, fallback: "Bar"), { screen = .bar }))
         }
@@ -229,6 +231,9 @@ struct SpaceportView: View {
         if !spob.isUninhabited {
             items.append(("missionBBS", graphics.buttonLabel(SpaceportLabel.missionBBS, fallback: "Mission BBS"),
                           { screen = .missions }))
+        }
+        if spob.hasCommodityExchange {
+            items.append(("tradeCenter", graphics.buttonLabel(SpaceportLabel.tradeCenter, fallback: "Trade Center"), { screen = .trade }))
         }
         return items
     }

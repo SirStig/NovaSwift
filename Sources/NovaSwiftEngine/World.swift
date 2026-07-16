@@ -561,8 +561,6 @@ public final class Ship {
     /// carries no thrust or weapons and other ships leave it be; further damage
     /// finishes it off. Set by the world's damage handler.
     public var disabled = false
-    /// Idle tumble (rad/sec) applied to a disabled hulk so it drifts believably.
-    public var disableSpin: Double = 0
 
     /// True if the player dealt the hit that dropped this ship to 0 armor —
     /// read once by `despawnDepartedAndDead` to attribute `Diplomacy.recordKill`
@@ -584,6 +582,28 @@ public final class Ship {
     /// frame, so it reads as flying, not teleporting. `Ship.step` reads and clears
     /// it each frame; 0 for everything not currently holding formation.
     var formationBoost: Double = 0
+
+    /// A formation-holding escort's direct drive on its own motion, requested by
+    /// its AI *this frame* (see `AIBrain.escort`). This is EV Nova's escort cheat
+    /// made explicit: rather than steering a hull — where the nose and the motion
+    /// are the same control, so an escort can either point where its leader points
+    /// or fly toward its slot but never both — a glued escort drives its velocity
+    /// and its heading *independently*, past its own hull's limits and its
+    /// leader's. `Ship.step` reads and clears it each frame; nil for everything
+    /// not currently holding station.
+    struct FormationGlue {
+        /// Velocity to fly at — the formation controller's `desiredVel`, already
+        /// speed-capped. Chased exponentially rather than snapped, so the ship
+        /// still reads as flying (a very hard burn) rather than teleporting.
+        var targetVelocity: Vec2
+        /// Heading to hold, independent of which way the ship is actually moving.
+        var targetHeading: Double
+        /// Cheated turn rate (rad/sec) toward `targetHeading`.
+        var turnRate: Double
+        /// Exponential rate (1/sec) at which `velocity` closes on `targetVelocity`.
+        var response: Double
+    }
+    var formationGlue: FormationGlue?
 
     /// EV Nova's inertialess flight (`shïp` Flags2 0x0040, or the inertial-dampener
     /// outfit ModType 38): the ship has no momentum — its velocity tracks the nose
@@ -673,11 +693,17 @@ public final class Ship {
         if fuel < maxFuel && fuelRegenPerSec > 0 {
             fuel = min(maxFuel, fuel + fuelRegenPerSec * dt)
         }
-        if ionCharge > 0 {
-            ionCharge = max(0, ionCharge - deionizePerSec * dt)
-            if ionCharge == 0 { ionizeColor = nil }   // glow fades with the charge
-        }
         logFuelTransitions()
+    }
+
+    /// Bleed off ionization. Unlike `regen`, this is not a system the ship has to
+    /// power — it's an externally applied charge dissipating on its own — so it
+    /// runs even for a disabled hulk, whose glow would otherwise stay frozen
+    /// (and pulsing) at full strength forever.
+    func deionize(_ dt: Double) {
+        guard ionCharge > 0 else { return }
+        ionCharge = max(0, ionCharge - deionizePerSec * dt)
+        if ionCharge == 0 { ionizeColor = nil }   // glow fades with the charge
     }
 
     /// Log-on-change fuel/jump-capability transitions — called after anything
@@ -764,6 +790,31 @@ public final class Ship {
         // visibly rotates and thrusts. Consumed each frame.
         let boost = formationBoost
         formationBoost = 0
+
+        // Formation glue: an escort holding station drives its heading and its
+        // velocity independently, both past its own hull's limits (see
+        // `FormationGlue` / `AIBrain.escort`). Taken before any of the ordinary
+        // steering below because it replaces it wholesale — there's no thrust
+        // decision to make and no nose-to-motion coupling to honour. An ionized
+        // ship is "nearly immobilized" and gets no cheat: it drops through to
+        // coast on whatever momentum it had, same as any other hull.
+        let glue = formationGlue
+        formationGlue = nil
+        if controllable, let glue {
+            let maxGlueTurn = glue.turnRate * dt
+            let delta = angleDelta(from: angle, to: glue.targetHeading)
+            angle += max(-maxGlueTurn, min(maxGlueTurn, delta))
+            velocity += (glue.targetVelocity - velocity) * (1 - exp(-glue.response * dt))
+            // Keep the driftless model's throttle in step with our real speed, so
+            // an escort that peels off to fight (`.attacking` drops the glue)
+            // picks up flying at the speed it was actually doing rather than
+            // snapping to a stale one.
+            throttleSpeed = velocity.length
+            position += velocity * dt
+            guardFiniteMotion()
+            return
+        }
+
         let effectiveTurnRate = stats.turnRate * (1 + 6 * boost)
 
         let maxTurn = effectiveTurnRate * dt * max(0.05, intent.turnScale)
@@ -1299,7 +1350,6 @@ public final class World {
                 ship.disabled = true
                 ship.armor = max(1, ship.maxArmor * 0.02)
                 ship.shield = 0
-                ship.disableSpin = rng.double(in: -0.5...0.5)
                 mode = .populate   // it's adrift in-system, not warping in
             }
             placed.append(addNPC(ship, arrival: mode))
@@ -1486,14 +1536,15 @@ public final class World {
         }
 
         // NPCs: each brain decides an intent. Disabled hulks don't think — they
-        // just tumble and bleed off speed until they cool and drift away. This
-        // loop (AI think + fire + physics for every NPC) is the sim's dominant
-        // cost under a crowded fight, so it gets its own profiler phase.
+        // just bleed off speed and drift. A hulk has no attitude control, so its
+        // heading is frozen wherever it was when it died: it coasts nose-first
+        // along its last course rather than turning.
+        // This loop (AI think + fire + physics for every NPC) is the sim's
+        // dominant cost under a crowded fight, so it gets its own profiler phase.
         prof("sim.ai") {
             for npc in npcs where npc.isAlive {
                 if npc.disabled {
                     npc.velocity = npc.velocity * max(0, 1 - 0.35 * dt)
-                    npc.angle += npc.disableSpin * dt
                     npc.position += npc.velocity * dt
                     wrapIntoSystem(npc)
                     // `oütf` ModType 49 (repair system): "will occasionally repair
@@ -1535,10 +1586,12 @@ public final class World {
             }
         }
 
-        // Cooldowns & regen (hulks recover nothing).
+        // Cooldowns, ion dissipation & regen (hulks *recover* nothing, but their
+        // weapons still cool and their ion charge still bleeds away).
         prof("sim.regen") {
             for s in allShips {
                 for w in s.weapons { w.tick(dt) }
+                s.deionize(dt)
                 if !s.disabled { s.regen(dt) }
             }
         }
@@ -2471,7 +2524,6 @@ public final class World {
             ship.disabled = true
             ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
             ship.shield = 0
-            ship.disableSpin = rng.double(in: -0.5...0.5)
             ship.wantsToDepart = false
             ship.currentTargetID = nil
             ship.brain?.targetID = nil
@@ -2594,15 +2646,36 @@ public final class World {
     /// default positional-audio falloff range, a reasonable "nearby" radius.
     public static let targetLockRange: Double = 3000
 
+    /// Whether `npc` would actually fight the player right now. Broader than the
+    /// government-level `Diplomacy.isHostileToPlayer`: it runs the AI's own
+    /// hostility test, so a ship provoked into attacking you, a `pêrs` holding a
+    /// grudge, or a mission ship ordered to attack all count — while an IFF-
+    /// scrambled or "protect the player" ship correctly doesn't. Your own
+    /// escorts are never hostile, whatever their government.
+    public func isEffectivelyHostileToPlayer(_ npc: Ship) -> Bool {
+        guard !isPlayerFleetMember(npc.entityID) else { return false }
+        guard let brain = npc.brain else {
+            return diplomacy?.isHostileToPlayer(npc.government) == true
+        }
+        return brain.isHostile(npc, player, self)
+    }
+
     /// Lock the nearest eligible ship within range (`hostileOnly` narrows to
-    /// ships `diplomacy` considers hostile to the player). Reuses
+    /// ships that would actually fight the player). Reuses
     /// `player.currentTargetID`, so locking a target also makes the player's
     /// guided weapons track it. Returns the newly-locked ship, if any.
+    ///
+    /// Ships in the player's own fleet are never picked: these hotkeys exist to
+    /// find something to *shoot*, and in the original game snapping to your own
+    /// escort — often the closest ship to you, since it flies in formation —
+    /// made the closest-target key useless in a fight. Escorts stay reachable by
+    /// clicking them or by Tab-cycling past every other ship.
     @discardableResult
     public func selectNearestTarget(hostileOnly: Bool) -> Ship? {
         let candidates = npcs.filter { npc in
             npc.isAlive && !npc.disabled && canDetect(npc, by: player)
-                && (!hostileOnly || diplomacy?.isHostileToPlayer(npc.government) == true)
+                && !isPlayerFleetMember(npc.entityID)
+                && (!hostileOnly || isEffectivelyHostileToPlayer(npc))
         }
         guard let nearest = candidates.min(by: {
             ($0.position - player.position).length < ($1.position - player.position).length
@@ -2627,16 +2700,41 @@ public final class World {
         npcs.filter { $0.isAlive && $0.brain?.leaderID == Self.playerEntityID }
     }
 
-    /// The player themselves, or one of their own escorts/fighters — used by
-    /// `applyHit` to widen "provoked by the player" into "provoked by the
-    /// player's whole fleet" (see `AIBrain.provokedByPlayer`/`isHostile`).
-    private func isPlayerFleetMember(_ entityID: Int) -> Bool {
-        entityID == Self.playerEntityID || ship(id: entityID)?.brain?.leaderID == Self.playerEntityID
+    /// The player themselves, or anyone under their command — used by `applyHit`
+    /// to widen "provoked by the player" into "provoked by the player's whole
+    /// fleet" (see `AIBrain.provokedByPlayer`/`isHostile`).
+    ///
+    /// Follows the whole chain of command, not just the first link: a fighter
+    /// launched by one of your escort carriers has that *carrier* as its leader,
+    /// so a one-level `leaderID == player` test read it as an outsider. Anything
+    /// that then splashed it — including its own carrier's turrets — tripped
+    /// `applyHit`'s "an outsider was hit by the player's fleet" rule, marked it
+    /// `provokedByPlayer`, and `AIBrain.isHostile`'s fleet-vs-outsider check then
+    /// had the fighter open fire on the carrier it launched from.
+    public func isPlayerFleetMember(_ entityID: Int) -> Bool {
+        var id = entityID
+        // Cap the walk: a corrupted/cyclic leader chain must not hang the sim,
+        // and no real fleet is anywhere near this deep.
+        for _ in 0..<8 {
+            if id == Self.playerEntityID { return true }
+            guard let leader = ship(id: id)?.brain?.leaderID else { return false }
+            id = leader
+        }
+        return false
     }
 
-    /// Issue a standing order to the whole escort wing.
+    /// Whether `ship` flies for the player — the escort-wing/fighter test used by
+    /// the AI, the radar and the targeting hotkeys, so all three agree on who is
+    /// "yours". The player themselves is not one of their own escorts.
+    public func isPlayerEscort(_ ship: Ship) -> Bool {
+        !ship.isPlayer && isPlayerFleetMember(ship.entityID)
+    }
+
+    /// Issue a standing order to the whole escort wing — including the fighters
+    /// flying off your escorts' own bays, which fight under the same order as
+    /// the wing they belong to.
     public func setPlayerEscortOrder(_ order: EscortOrder) {
-        for e in playerEscorts { e.brain?.escortOrder = order }
+        for npc in npcs where npc.isAlive && isPlayerEscort(npc) { npc.brain?.escortOrder = order }
     }
 
     /// The current wing order (the most common one among escorts), or nil when
@@ -2817,12 +2915,18 @@ public final class World {
         // Recall & dock pass — collect removals, apply after iterating.
         var docked: Set<Int> = []
         for f in npcs where f.carrierID != nil && f.isAlive {
-            guard let carrier = ship(id: f.carrierID!), carrier.isAlive, !carrier.disabled else {
-                // Carrier gone: the fighter is orphaned — it keeps fighting for
-                // its government but has no bay to return to.
+            guard let carrier = ship(id: f.carrierID!), carrier.isAlive else {
+                // Carrier gone for good: the fighter is orphaned — it keeps
+                // fighting for its government but has no bay to return to.
                 f.carrierID = nil; f.recallToCarrier = false; f.brain?.leaderID = nil
                 continue
             }
+            // A *disabled* carrier is a hulk, not a wreck: it can't take fighters
+            // aboard while it's adrift, but its wing still belongs to it and it
+            // may yet be repaired. Orphaning the wing here (permanently — nothing
+            // ever re-adopts them) sent every fighter off to fly for itself the
+            // moment its carrier took a bad hit.
+            guard !carrier.disabled else { continue }
             if !f.recallToCarrier {
                 // Only return when the fighter itself needs it (dry on ammo,
                 // badly hurt) or the player explicitly recalls it — NOT just
@@ -2850,12 +2954,17 @@ public final class World {
     }
 
     /// Launch one fighter from `carrier`'s `bay`: a real sub-ship of the bay's
-    /// fighter class, joining the carrier's formation as an escort on Defend
-    /// (attacks only if the carrier/escort group is attacked) — matching real
-    /// EV Nova, where launched fighters behave like any other escort rather
-    /// than auto-hunting. `brain.escortOrder` only has any effect when
-    /// `leaderID == 0` (the carrier is the player); it's simply unread for an
-    /// NPC-led fleet, so this default is safe for both.
+    /// fighter class, joining the carrier's formation as an escort — matching
+    /// real EV Nova, where launched fighters behave like any other escort rather
+    /// than auto-hunting.
+    ///
+    /// A fighter flies under whatever standing order its carrier's wing is on,
+    /// so it fights exactly like the escorts around it: the player's own bays
+    /// inherit the wing order set in the escort command window, and an NPC
+    /// carrier's fighters inherit that carrier's own order (which, for a carrier
+    /// escorting the player, is itself the player's wing order). Hardcoding
+    /// `.defensive` here is what left fighters holding fire in a fight the rest
+    /// of a wing set to Attack had already joined.
     private func launchFighter(from carrier: Ship, bay: Ship.FighterBay, formationSlot: Int) -> Ship? {
         guard let galaxy else { return nil }
         let pos = carrier.position + Vec2.heading(carrier.angle) * (carrier.radius + 20)
@@ -2864,7 +2973,8 @@ public final class World {
         let brain = fighter.brain ?? AIBrain(aiType: .interceptor, govt: carrier.government)
         fighter.brain = brain
         brain.leaderID = carrier.entityID
-        brain.escortOrder = .defensive
+        brain.escortOrder = carrier.isPlayer ? (playerEscortOrder ?? .defensive)
+                                             : (carrier.brain?.escortOrder ?? .defensive)
         // Distinct slots so a bay's fighters fan out into their own formation
         // positions behind the carrier instead of converging on the same spot.
         // Passed in by the caller, which tracks a running count across this
