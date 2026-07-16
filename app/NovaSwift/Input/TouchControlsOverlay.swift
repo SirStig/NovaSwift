@@ -233,6 +233,7 @@ struct TouchControlsOverlay: View {
             ("arrow.triangle.2.circlepath", "Next", { onDiscrete(.targetNext) }, true),
             ("xmark.circle", "Untarget", { onDiscrete(.clearTarget) }, true),
             ("antenna.radiowaves.left.and.right", "Hail", { onDiscrete(.hailTarget) }, true),
+            ("person.3.fill", "Escorts", { onDiscrete(.openEscorts) }, true),
             ("shippingbox.fill", "Board", { onDiscrete(.board) }, true),
             (hud.cloakEngaged ? "eye.slash.fill" : "eye.slash", hud.cloakEngaged ? "Uncloak" : "Cloak",
              { onDiscrete(.toggleCloak) }, hud.hasCloak),

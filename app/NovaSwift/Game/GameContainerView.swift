@@ -2531,12 +2531,18 @@ struct GameContainerView: View {
     /// Silently does nothing with no selection — matches `attemptLand()`'s
     /// "no prompt, no action" pattern.
     private func hail() {
-        guard let scene = host?.scene, let result = scene.attemptHail() else { return }
+        guard let scene = host?.scene, let result = scene.attemptHail() else {
+            let debug = host?.scene.debugTargetState
+            Log.input.debug("hail() — attemptHail() returned nil; currentTargetID=\(debug?.id?.description ?? "nil", privacy: .public) resolves=\(debug?.resolves ?? false, privacy: .public) selectedPlanetID=\(host?.scene.selectedPlanetID?.description ?? "nil", privacy: .public)")
+            return
+        }
         switch result {
-        case let .ship(entityID, _, shipTypeID, govt, hostile):
+        case let .ship(entityID, name, shipTypeID, govt, hostile):
             // Hailing one of your own escorts opens its command window (EV Nova's
             // Escorts dialog, DITL #1022) rather than the generic comm dialog.
-            if scene.isPlayerEscort(entityID) {
+            let isEscort = scene.isPlayerEscort(entityID)
+            Log.input.debug("hail() -> ship entityID=\(entityID, privacy: .public) name=\(name, privacy: .public) isPlayerEscort=\(isEscort, privacy: .public)")
+            if isEscort {
                 model.audio.play(.uiSelect)
                 showEscortsPanel = true
                 return
@@ -2545,24 +2551,28 @@ struct GameContainerView: View {
             // `gövt.cantBeHailed` (Flags1 0x0400): ships of this government give no
             // response to a generic hail. A named pêrs aboard is still reachable —
             // they carry their own comm quotes — so only gate the anonymous case.
-            if personID == nil, govt.cantBeHailed {
+            // No `govt` at all (Independent, `GalaxyMapView`'s own fallback for
+            // the same case) always gives a response — nothing to gate on.
+            if personID == nil, govt?.cantBeHailed == true {
                 model.audio.play(.uiSelect)
                 host?.hud.post("No response to your hail.")
                 return
             }
-            model.audio.playHailVoice(govt: govt, hostile: hostile)
+            if let govt { model.audio.playHailVoice(govt: govt, hostile: hostile) }
             // The comm identifies a generic ship by its government's `CommName`
             // (Bible: "the short string to show for ships of this government when
             // they are hailed"), not its internal ship name. `nonTalkative`
-            // (Flags2 0x0001) govts answer but have nothing to say.
-            var displayName = govt.commName
+            // (Flags2 0x0001) govts answer but have nothing to say. No resolvable
+            // govt (Independent) falls back to that label, same as elsewhere.
+            let commName = govt?.commName ?? "Independent"
+            var displayName = commName
             var response: String
             if hostile {
                 response = "They aren't interested in talking."
-            } else if govt.nonTalkative {
-                response = "This is \(govt.commName). They have nothing further to say."
+            } else if govt?.nonTalkative == true {
+                response = "This is \(commName). They have nothing further to say."
             } else {
-                response = "This is \(govt.commName). Go ahead."
+                response = "This is \(commName). Go ahead."
             }
             var customPictID: Int?
             // Named person (pêrs): replace the generic response with their comm
@@ -2584,7 +2594,7 @@ struct GameContainerView: View {
             }
             hailDialogState = HailDialogState(
                 kind: .ship(entityID: entityID, shipTypeID: shipTypeID),
-                name: displayName, govtLabel: govt.targetCode, hostile: hostile,
+                name: displayName, govtLabel: govt?.targetCode ?? "", hostile: hostile,
                 responseText: response, customPictID: customPictID)
         case let .planet(spobID, name, govt, landable):
             // Hostile when the player is deeply wanted by the stellar's govt

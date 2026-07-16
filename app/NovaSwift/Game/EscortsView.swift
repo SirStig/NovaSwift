@@ -279,19 +279,20 @@ struct EscortsView: View {
         authButton("Release", width: 46, enabled: false) {}
     }
 
-    /// The selected escort's name and, for a captured ship, its upgrade/resale
-    /// costs — the detail the button verbs stay short by not repeating.
+    /// The selected escort's name and its upgrade/resale costs (resale only
+    /// for a captured ship) — the detail the button verbs stay short by not
+    /// repeating.
     private func hailStatus(_ sel: EscortRecord) -> some View {
         let detail: String = {
             if let pendingID = sel.pendingUpgradeTo, let target = game?.ship(pendingID) {
                 return "Upgrade → \(target.displayName) queued · applies at next shipyard landing"
             }
-            guard sel.origin == .captured, let ship = game?.ship(sel.shipType) else {
+            guard let ship = game?.ship(sel.shipType) else {
                 return sel.origin == .hired ? "Hired · \(sel.dailyFee)cr/day" : "Under command"
             }
-            var parts = ["Captured"]
+            var parts = [sel.origin == .captured ? "Captured" : "Hired · \(sel.dailyFee)cr/day"]
             if ship.escortUpgradesTo > 0 { parts.append("upgrade \(ship.escortUpgradeCost)cr") }
-            parts.append("sell \(escortSellValue(ship))cr")
+            if sel.origin == .captured { parts.append("sell \(escortSellValue(ship))cr") }
             return parts.joined(separator: " · ")
         }()
         return VStack(alignment: .leading, spacing: 1) {
@@ -301,14 +302,17 @@ struct EscortsView: View {
         .frame(minWidth: 90, alignment: .leading)
     }
 
-    /// The hail-menu actions for the selected escort. A captured ship can be
-    /// upgraded (`UpgradeTo`, queued until the next shipyard landing — see
-    /// `onUpgrade`/`onCancelUpgrade`) and sold (`EscSellValue`); every escort
-    /// can be released/dismissed.
+    /// The hail-menu actions for the selected escort. `UpgradeTo`/`EscUpgrdCost`
+    /// are hull-level Bible fields with no origin restriction in their text —
+    /// "if an escort ship of this type can be upgraded" — so any escort of an
+    /// upgradeable hull can queue one (queued until the next shipyard landing —
+    /// see `onUpgrade`/`onCancelUpgrade`), hired or captured alike. Only sale
+    /// (`EscSellValue`, "for selling off a captured escort") is captured-only;
+    /// every escort can be released/dismissed regardless of origin.
     @ViewBuilder
     private func hailActions(_ sel: EscortRecord) -> some View {
         let ship = game?.ship(sel.shipType)
-        let canUpgrade = sel.origin == .captured && (ship?.escortUpgradesTo ?? 0) > 0
+        let canUpgrade = (ship?.escortUpgradesTo ?? 0) > 0
         if sel.pendingUpgradeTo != nil {
             authButton("Cancel Upgrade", width: 90) { onCancelUpgrade(sel.id) }
         } else if canUpgrade {

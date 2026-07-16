@@ -1525,13 +1525,23 @@ final class GameScene: SKScene {
     /// ship, so pressing Hail with no selection does nothing rather than
     /// contacting a ship the player never actually chose.
     enum HailResult {
-        case ship(entityID: Int, name: String, shipTypeID: Int, govt: GovtRes, hostile: Bool)
+        case ship(entityID: Int, name: String, shipTypeID: Int, govt: GovtRes?, hostile: Bool)
         case planet(spobID: Int, name: String, govt: GovtRes?, landable: Bool)
     }
 
     func attemptHail() -> HailResult? {
         if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
-            guard let game = galaxy?.game, let govt = game.govt(ship.government) else { return nil }
+            // `govt` is nil for a ship whose government doesn't resolve to a real
+            // `gövt` resource — notably `independentGovt` (-1), the "no faction"
+            // sentinel every player escort's government is forced to
+            // (`World.recruitEscort`) when the player themselves is Independent.
+            // That must not block the hail outright (it used to, via a `guard`
+            // here, which made every escort of an Independent pilot permanently
+            // unhailable) — the caller either short-circuits before needing govt
+            // at all (hailing your own escort) or falls back gracefully (see
+            // `hail()`'s `.ship` case), matching the `.planet` case below, which
+            // already treats `govt` as optional.
+            let govt = galaxy?.game.govt(ship.government)
             return .ship(entityID: ship.entityID, name: ship.name, shipTypeID: ship.shipTypeID,
                         govt: govt, hostile: world.diplomacy?.isHostileToPlayer(ship.government) == true)
         }
@@ -1571,8 +1581,9 @@ final class GameScene: SKScene {
     /// Select ship `id`, clearing any planet selection — only one thing is
     /// ever selected at a time.
     private func selectShip(_ id: Int) {
-        world.selectTarget(id: id)
+        let locked = world.selectTarget(id: id)
         selectedPlanetID = nil
+        Log.input.debug("selectShip(\(id, privacy: .public)) -> selectTarget returned \(locked?.entityID.description ?? "nil", privacy: .public), player.currentTargetID now \(self.world.player.currentTargetID?.description ?? "nil", privacy: .public)")
     }
 
     /// Select planet/station `id`, clearing any ship target — only one thing
@@ -1712,6 +1723,15 @@ final class GameScene: SKScene {
         world?.playerEscorts.contains { $0.entityID == entityID } ?? false
     }
 
+    /// Raw `(currentTargetID, does that id still resolve to a live ship)` —
+    /// diagnostic only, for telling "nothing is targeted" apart from "something
+    /// is targeted but its id no longer resolves" when `attemptHail()` returns
+    /// nil.
+    var debugTargetState: (id: Int?, resolves: Bool) {
+        let id = world?.player.currentTargetID
+        return (id, id.flatMap { world?.ship(id: $0) } != nil)
+    }
+
     /// The wing's shared standing order (nil if mixed / no escorts).
     var escortOrder: EscortOrder? { world?.playerEscortOrder }
 
@@ -1762,6 +1782,12 @@ final class GameScene: SKScene {
         world.addNPC(ship, arrival: .populate)
         world.recruitEscort(ship)
         tagEscort(entityID: ship.entityID, recordID: recordID)
+        // "escorting" AI state is shared with ambient NPC convoys (a düde's
+        // escorts flying formation on their own leader, unrelated to the
+        // player) — this line is the only reliable way to tell which live
+        // ship is actually YOUR roster escort vs. a coincidentally nearby
+        // convoy using the same formation-flying behavior.
+        Log.input.debug("spawnRosterEscort: YOUR escort entityID=\(ship.entityID, privacy: .public) name=\(ship.name, privacy: .public) recordID=\(recordID, privacy: .public)")
         return true
     }
 
@@ -1919,8 +1945,15 @@ final class GameScene: SKScene {
         }
         let playerPos = world.player.position
         Log.input.debug("selectAt scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public)) playerPos=(\(playerPos.x, privacy: .public),\(playerPos.y, privacy: .public)) nearestShipDist=\(nearestShipDist, privacy: .public) nearestPlanetDist=\(nearestPlanetDist, privacy: .public)")
-        if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + 10 })
+        // Tolerance beyond the hull's own radius, so a click that's merely
+        // close (not pixel-perfect on the sprite) still connects — escorts in
+        // particular now sit in a tight formation cluster (see
+        // `AIBrain.formationStation`), so a stingy tolerance made them an easy
+        // miss even when the click was visibly "on" the ship.
+        let hitTolerance = 24.0
+        if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + hitTolerance })
             .min(by: { ($0.position - p).length < ($1.position - p).length }) {
+            Log.input.debug("selectAt hit ship entityID=\(ship.entityID, privacy: .public) name=\(ship.name, privacy: .public) dist=\((ship.position - p).length, privacy: .public) radius=\(ship.radius, privacy: .public)")
             selectShip(ship.entityID)
             return true
         }
@@ -1938,6 +1971,7 @@ final class GameScene: SKScene {
             if planet.isGate { handleGateClick(planet.id) }
             return true
         }
+        Log.input.debug("selectAt missed everything (nearestShipDist=\(nearestShipDist, privacy: .public) > its radius+\(hitTolerance, privacy: .public)) — clearing selection")
         clearTarget()
         return false
     }
