@@ -123,7 +123,7 @@ struct AuthenticHUDView: View {
             // The placed box is `targetArea` design-units × layout.scale tall;
             // the stacked silhouette takes a fraction of that height so it scales
             // in lockstep with the HUD without crowding the text rows.
-            let boxSide = CGFloat(style.intf.targetArea.height) * layout.scale * 0.42
+            let boxSide = CGFloat(style.intf.targetArea.height) * layout.scale * 0.55
             VStack(spacing: 2) {
                 Text(model.targetName)
                     .novaFont(.hud, weight: .bold, size: statusSize)
@@ -143,27 +143,30 @@ struct AuthenticHUDView: View {
                         .frame(width: boxSide, height: boxSide)
                 }
                 Spacer(minLength: 2)
+                // EV Nova packs the whole status line into a single row beneath the
+                // ship picture: a status word on the left, the government/class label
+                // on the right. "Disabled" takes precedence over the shield/armor
+                // readout (a disabled hulk can't threaten you regardless of its
+                // government); when the shield/armor line is hidden a hostile lock
+                // falls back to the "Hostile" word so the state is never lost.
+                // Hostility for a live ship is otherwise carried by the red name.
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    if !model.targetHidesShieldArmorLine {
+                    if model.targetDisabled {
+                        Text("Disabled").novaFont(.hud, weight: .bold, size: subtitleSize)
+                            .foregroundStyle(color(style.intf.dimText))
+                    } else if !model.targetHidesShieldArmorLine {
                         Text(targetShieldArmorLine)
                             .novaFont(.hud, weight: .semibold, size: subtitleSize).monospacedDigit()
                             .foregroundStyle(color(style.intf.brightText))
+                    } else if model.targetHostile {
+                        Text("Hostile").novaFont(.hud, weight: .bold, size: subtitleSize)
+                            .foregroundStyle(color(style.intf.brightRadar))
                     }
                     Spacer(minLength: 0)
                     if !model.targetGovtLabel.isEmpty {
                         Text(model.targetGovtLabel).novaFont(.hud, size: subtitleSize)
                             .foregroundStyle(color(style.intf.dimText))
                     }
-                }
-                // Status word at the bottom of the readout — disabled takes
-                // precedence (a disabled hulk can't threaten you regardless of
-                // its government).
-                if model.targetDisabled {
-                    Text("Disabled").novaFont(.hud, weight: .bold, size: subtitleSize)
-                        .foregroundStyle(color(style.intf.dimText))
-                } else if model.targetHostile {
-                    Text("Hostile").novaFont(.hud, weight: .bold, size: subtitleSize)
-                        .foregroundStyle(color(style.intf.brightRadar))
                 }
             }
             .padding(.horizontal, 6).padding(.vertical, 4)
@@ -364,7 +367,8 @@ private struct RadarContactsView: View {
                         // Stellar objects: hollow ring outlines (EV Nova draws worlds
                         // as circles, distinct from the small filled ship dots).
                         for b in model.planetBlips {
-                            let r = CGRect(x: cx + b.x * radius - 3, y: cy + b.y * radius - 3, width: 6, height: 6)
+                            let d = radarPlanetBlipDiameter(worldRadius: b.worldRadius)
+                            let r = CGRect(x: cx + b.x * radius - d / 2, y: cy + b.y * radius - d / 2, width: d, height: d)
                             ctx.stroke(Path(ellipseIn: r), with: .color(radarColor(b.relationship)), lineWidth: 1)
                             if b.isTarget && blinkOn {
                                 let ring = r.insetBy(dx: -2.5, dy: -2.5)
@@ -383,7 +387,7 @@ private struct RadarContactsView: View {
                                 }
                                 continue
                             }
-                            let r = CGRect(x: cx + b.x * radius - 1.5, y: cy + b.y * radius - 1.5, width: 3, height: 3)
+                            let r = CGRect(x: cx + b.x * radius - 0.75, y: cy + b.y * radius - 0.75, width: 1.5, height: 1.5)
                             ctx.fill(Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
                             if b.isTarget && blinkOn {
                                 let ring = r.insetBy(dx: -2.5, dy: -2.5)

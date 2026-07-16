@@ -332,8 +332,9 @@ final class GameScene: SKScene {
     private var moveDiagClock: TimeInterval = 0
     // Radar scope radius in world units. Stellar objects sit within ~900 units
     // of the system centre (p90 across the base data) and combat happens within
-    // a couple of thousand, so 3000 keeps the scope readable edge to edge.
-    private let radarRange: CGFloat = 3000
+    // a couple of thousand; 6000 zooms the scope out so a whole system reads at
+    // once, with planets sized by their radius and ships as small dots.
+    private let radarRange: CGFloat = 6000
     // The original never scaled its camera at all — 1 world pixel = 1 screen
     // point (SpriteKit's own default scale) is the faithful, native zoom, and
     // is now the default (`GameSettings.cameraZoom = 1.0`; the in-flight
@@ -4146,7 +4147,7 @@ final class GameScene: SKScene {
             let dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
             guard dx * dx + dy * dy <= 1 else { return nil }
             return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv),
-                                isTarget: pv.id == selectedPlanetID)
+                                isTarget: pv.id == selectedPlanetID, worldRadius: pv.radius)
         }
         // A cloaked ship drops off the player's radar entirely unless its own
         // device flags it "visible on radar" regardless (oütf ModType 17

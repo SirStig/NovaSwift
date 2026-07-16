@@ -2058,7 +2058,6 @@ struct GameContainerView: View {
                 onTakeAmmo: { plunderTakeAmmo(scene, shipID: m.shipID) },
                 onTakeEnergy: { plunderTakeFuel(scene, shipID: m.shipID) },
                 onCaptureShip: { plunderCapture(scene, shipID: m.shipID) },
-                onDemandTribute: { plunderTakeCredits(scene, shipID: m.shipID) },
                 onDismiss: {
                     // Forcing entry dooms the hulk unless it was saved by
                     // capturing — a no-op if `plunderCapture` already

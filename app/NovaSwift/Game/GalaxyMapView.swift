@@ -92,8 +92,6 @@ struct GalaxyMapView: View {
 
     @Environment(\.novaTheme) private var theme
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
-    /// EV Nova's mission-destination marker colour — a saturated orange arrow.
-    private let missionOrange = Color(red: 1.0, green: 0.52, blue: 0.0)
     private let routeGreen = Color(red: 0.3, green: 0.95, blue: 0.4)
     private let routeWarn = Color(red: 1.0, green: 0.4, blue: 0.32)
     private let adjacentGrey = Color(white: 0.42)
@@ -302,8 +300,22 @@ struct GalaxyMapView: View {
         do {
             var tctx = ctx
             tctx.blendMode = .plusLighter
-            let glowR = min(max(24 * zoom, 12), 260)
+            let glowR = min(max(30 * zoom, 16), 320)
             let glowRect = visibleRect.insetBy(dx: -glowR, dy: -glowR)
+            // A filled-in sphere, not a faint wash: a bright, mostly-flat core
+            // that only falls off near the rim, so a single system reads as a
+            // clear coloured region and clusters of one government merge into
+            // saturated territory (matching EV Nova's map). Government colours
+            // are low-red/green blues/reds, so additive overlap deepens the hue
+            // instead of washing to white.
+            func glowShading(_ col: Color, at center: CGPoint) -> GraphicsContext.Shading {
+                .radialGradient(Gradient(stops: [
+                    .init(color: col.opacity(0.36), location: 0.0),
+                    .init(color: col.opacity(0.30), location: 0.42),
+                    .init(color: col.opacity(0.14), location: 0.74),
+                    .init(color: .clear, location: 1.0),
+                ]), center: center, startRadius: 0, endRadius: glowR)
+            }
             for s in systems {
                 let vis = visibility[s.id] ?? .unknown
                 guard vis == .explored || vis == .chartered, s.government >= 0 else { continue }
@@ -311,8 +323,7 @@ struct GalaxyMapView: View {
                 guard glowRect.contains(p) else { continue }
                 let col = govtMapColor(s.government, game: game)
                 tctx.fill(Path(ellipseIn: CGRect(x: p.x - glowR, y: p.y - glowR, width: glowR * 2, height: glowR * 2)),
-                          with: .radialGradient(Gradient(colors: [col.opacity(0.22), .clear]),
-                                                center: p, startRadius: 0, endRadius: glowR))
+                          with: glowShading(col, at: p))
             }
         }
 
@@ -417,13 +428,15 @@ struct GalaxyMapView: View {
             let isKnownDetail = vis == .explored || vis == .chartered
             let hopAffordable = hopIndex.map { $0 < nav.availableJumps } ?? true
 
-            // The system marker: a hollow ring (EV Nova draws systems as circle
-            // outlines, not solid discs), coloured by state — current is amber,
-            // on-route hops are green/red by affordability, otherwise the
-            // player's *relationship* to the system's government (blue friendly /
-            // yellow neutral / red wanted / grey pirate·uninhabited), dim grey if
-            // only seen-as-adjacent (unconfirmed allegiance). The current system
-            // also gets a solid centre pip so "you are here" still reads at a
+            // The system marker: a filled dark disc inside a coloured ring —
+            // EV Nova draws each system as a near-black centre with a bright
+            // government/relationship border, not a see-through hoop. The ring
+            // colour is set by state — current is amber, on-route hops are
+            // green/red by affordability, otherwise the player's *relationship*
+            // to the system's government (blue friendly / yellow neutral / red
+            // wanted / grey pirate·uninhabited), dim grey if only
+            // seen-as-adjacent (unconfirmed allegiance). The current system is
+            // filled solid in amber (not dark) so "you are here" reads at a
             // glance under the blinking crosshair.
             let markColor: Color = isCurrent ? amber
                 : onRoute ? (hopAffordable ? routeGreen : routeWarn)
@@ -431,12 +444,8 @@ struct GalaxyMapView: View {
                 : adjacentGrey
             let r: CGFloat = isCurrent || isDestination ? 5 : 4
             let ring = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+            ctx.fill(ring, with: .color(isCurrent ? amber : Color(white: 0.03)))
             ctx.stroke(ring, with: .color(markColor), lineWidth: 1.4)
-            if isCurrent {
-                let pipR: CGFloat = 1.8
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - pipR, y: p.y - pipR, width: pipR * 2, height: pipR * 2)),
-                         with: .color(amber))
-            }
 
             // Destination ring: green if the whole course is affordable right
             // now, red if fuel will run out before you get there.
@@ -461,10 +470,12 @@ struct GalaxyMapView: View {
                     : isKnownDetail ? (neighborIDs.contains(s.id) ? .white.opacity(0.9) : .white.opacity(0.7))
                     : .white.opacity(0.4)
                 let weight: Font.Weight = isCurrent || isDestination ? .bold : .regular
+                // EV Nova prints the system name to the right of its dot,
+                // vertically centred — not below it.
                 ctx.draw(
                     Text(name).font(.custom(NovaFontRole.hud.family, size: labelSize).weight(weight))
                         .foregroundStyle(color),
-                    at: CGPoint(x: p.x, y: p.y + r + 9)
+                    at: CGPoint(x: p.x + r + 5, y: p.y), anchor: .leading
                 )
             }
         }
@@ -495,30 +506,35 @@ struct GalaxyMapView: View {
         }
     }
 
-    /// A downward-pointing orange arrow hovering just above a system, the EV Nova
-    /// "your mission wants you here" marker. Anchored so its tip sits a few points
-    /// above the star dot; `bob` nudges it up/down for a subtle pulse.
+    /// EV Nova's "your mission wants you here" marker: a small solid triangle
+    /// hovering off a system's upper-left, its tip pointing down-right into the
+    /// dot, filled with a bright-orange-tip → red-base gradient (no long shaft).
+    /// `bob` nudges it for a subtle pulse.
     private func drawMissionArrow(ctx: inout GraphicsContext, at p: CGPoint, bob: CGFloat) {
-        let tipY = p.y - 12 + bob          // arrow tip, above the dot
-        let headW: CGFloat = 7             // half-width of the arrowhead
-        let headH: CGFloat = 9             // arrowhead height
-        let shaftH: CGFloat = 9            // shaft length above the head
-        let shaftW: CGFloat = 2.4          // half-width of the shaft
+        // Tip just above-left of the dot; base further up-left, so the arrow
+        // slants down toward the system exactly as in the original map.
+        let tip = CGPoint(x: p.x - 3, y: p.y - 6 + bob)
+        let base = CGPoint(x: tip.x - 7, y: tip.y - 9)
+        let dx = base.x - tip.x, dy = base.y - tip.y
+        let len = max(hypot(dx, dy), 0.001)
+        let nx = -dy / len, ny = dx / len          // unit normal to the axis
+        let hw: CGFloat = 4.6                       // half-width at the base
+        let b1 = CGPoint(x: base.x + nx * hw, y: base.y + ny * hw)
+        let b2 = CGPoint(x: base.x - nx * hw, y: base.y - ny * hw)
 
-        var head = Path()
-        head.move(to: CGPoint(x: p.x, y: tipY))                       // tip
-        head.addLine(to: CGPoint(x: p.x - headW, y: tipY - headH))    // upper-left
-        head.addLine(to: CGPoint(x: p.x + headW, y: tipY - headH))    // upper-right
-        head.closeSubpath()
+        var tri = Path()
+        tri.move(to: tip)
+        tri.addLine(to: b1)
+        tri.addLine(to: b2)
+        tri.closeSubpath()
 
-        let shaft = Path(CGRect(x: p.x - shaftW, y: tipY - headH - shaftH,
-                                width: shaftW * 2, height: shaftH + 1))
-
-        // A soft dark outline first so the arrow reads over bright nebulae/dots.
-        ctx.stroke(head, with: .color(.black.opacity(0.6)), lineWidth: 2.4)
-        ctx.stroke(shaft, with: .color(.black.opacity(0.6)), lineWidth: 2.4)
-        ctx.fill(head, with: .color(missionOrange))
-        ctx.fill(shaft, with: .color(missionOrange))
+        // Dark halo first for contrast over bright nebulae/territory, then the
+        // orange→red fill (bright at the tip, deep red at the base).
+        ctx.stroke(tri, with: .color(.black.opacity(0.55)), lineWidth: 1.8)
+        ctx.fill(tri, with: .linearGradient(
+            Gradient(colors: [Color(red: 1.0, green: 0.72, blue: 0.16),
+                              Color(red: 0.86, green: 0.13, blue: 0.05)]),
+            startPoint: tip, endPoint: base))
     }
 
     /// A stack of coloured pips + names to the right of a system, one per player

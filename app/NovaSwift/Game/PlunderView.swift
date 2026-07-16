@@ -28,20 +28,25 @@ struct PlunderLine: Identifiable {
 /// non-interactive readout, not a list you pick rows from — consistent with
 /// there being no per-row "Take" control anywhere in the DITL.
 ///
-/// **Button-label mapping is inferred, not stored in the resource fork.**
-/// Every item here is a custom-drawn `userItem`; the original engine chose
-/// labels at runtime and the DITL only records rects. The one block of
-/// exactly six adjacent `STR# 150` entries that thematically fits a
-/// plunder/boarding action list is indices 40-45: "Cargo", "Credits",
-/// "Ammo", "Energy", "Capture Ship", "Demand Tribute" (confirmed via
-/// `novaswift-extract raw "data/EV Nova" 'STR#' 150`) — six labels for six
-/// buttons. The two long labels ("Capture Ship", "Demand Tribute") land on
-/// this dialog's two widest slots (126px, 146px); the four short resource
-/// names fill the four 89px slots. Which of the four short names sits in
-/// which 89px slot is arbitrary (all four fit any of the four slots) — assigned
-/// here in DITL reading order (top row left-to-right, then row 2) purely for
-/// a stable, legible default. Callers needing a different assignment can
-/// still reuse this view; the labels are all parameters.
+/// **Button-label mapping confirmed against a real gameplay screenshot and
+/// the EVN wiki's Boarding article.** The wiki lists this dialog's actions
+/// as: Energy, Cargo, Ammo, Credits, Capture Ship, Abort — six actions for
+/// six buttons, with no "Demand Tribute" (that's a planet-tribute action,
+/// unrelated to ship boarding — see [[novaswift-domination]]). A screenshot
+/// of the original game confirms:
+///   - Item [5] (top row, left, 89px) is "Energy".
+///   - The isolated bottom item [0] (126px) is the short label "Abort", not
+///     "Capture Ship" — it's a real, always-enabled dismiss button, not just
+///     tap-outside-to-close.
+///   - The wide item [6] (146px) fits "Capture Ship" — the only other
+///     multi-word label besides "Abort"'s neighbor-block cousin "Demand
+///     Tribute" (`STR# 150`, confirmed via
+///     `novaswift-extract raw "data/EV Nova" 'STR#' 150`), which the
+///     screenshot rules out for this dialog.
+/// The remaining three 89px slots ([1], [3], [2]) take Cargo/Credits/Ammo;
+/// their relative order among themselves is not resolvable from a single
+/// screenshot (all three were disabled — empty hold/no ammo/no credits — in
+/// the reference image) and is assigned here in DITL reading order.
 struct PlunderView: View {
     /// Nil in the no-game-data path — falls back to plain chrome, same
     /// degrade-gracefully behavior as `HailDialogView`.
@@ -60,7 +65,6 @@ struct PlunderView: View {
     var onTakeAmmo: () -> Void
     var onTakeEnergy: () -> Void
     var onCaptureShip: () -> Void
-    var onDemandTribute: () -> Void
     var onDismiss: () -> Void
 
     /// PICT #8515 "Plunder" (`Nova Graphics 3.rez`) — not added to
@@ -80,20 +84,20 @@ struct PlunderView: View {
             if let graphics, let frame = graphics.pict(Self.framePictID) {
                 NovaMenu(frame: frame, overlay: true) { space in
                     manifest.ditlPlace(space, left: 11, top: 7)
-                    // Row 1: Cargo / Credits / Ammo
-                    button(graphics, "Cargo", width: 63, enabled: hasCargo, action: onTakeCargo)
-                        .ditlPlace(space, left: 16, top: 110)
-                    button(graphics, "Credits", width: 63, enabled: creditsAboard > 0, action: onTakeCredits)
-                        .ditlPlace(space, left: 110, top: 110)
-                    button(graphics, "Ammo", width: 63, enabled: ammoAboard > 0, action: onTakeAmmo)
-                        .ditlPlace(space, left: 204, top: 110)
-                    // Row 2: Energy / Demand Tribute
+                    // Row 1: Energy / Cargo / Credits
                     button(graphics, "Energy", width: 63, enabled: energyAboard > 0, action: onTakeEnergy)
+                        .ditlPlace(space, left: 16, top: 110)
+                    button(graphics, "Cargo", width: 63, enabled: hasCargo, action: onTakeCargo)
+                        .ditlPlace(space, left: 110, top: 110)
+                    button(graphics, "Credits", width: 63, enabled: creditsAboard > 0, action: onTakeCredits)
+                        .ditlPlace(space, left: 204, top: 110)
+                    // Row 2: Ammo / Capture Ship
+                    button(graphics, "Ammo", width: 63, enabled: ammoAboard > 0, action: onTakeAmmo)
                         .ditlPlace(space, left: 35, top: 138)
-                    button(graphics, "Demand Tribute", width: 120, enabled: true, action: onDemandTribute)
+                    button(graphics, "Capture Ship", width: 120, enabled: captureChance != nil, action: onCaptureShip)
                         .ditlPlace(space, left: 129, top: 138)
-                    // Row 3: Capture Ship (isolated, bottom-centered)
-                    button(graphics, "Capture Ship", width: 100, enabled: captureChance != nil, action: onCaptureShip)
+                    // Row 3: Abort (isolated, bottom-centered)
+                    button(graphics, "Abort", width: 100, enabled: true, action: onDismiss)
                         .ditlPlace(space, left: 91, top: 166)
                 }
             } else {
@@ -155,12 +159,12 @@ struct PlunderView: View {
                 .novaFont(.caption).foregroundStyle(Color(white: 0.65))
             let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
             LazyVGrid(columns: cols, spacing: 8) {
+                fallbackButton("Energy", enabled: energyAboard > 0, action: onTakeEnergy)
                 fallbackButton("Cargo", enabled: hasCargo, action: onTakeCargo)
                 fallbackButton("Credits", enabled: creditsAboard > 0, action: onTakeCredits)
                 fallbackButton("Ammo", enabled: ammoAboard > 0, action: onTakeAmmo)
-                fallbackButton("Energy", enabled: energyAboard > 0, action: onTakeEnergy)
-                fallbackButton("Demand Tribute", enabled: true, action: onDemandTribute)
                 fallbackButton("Capture Ship", enabled: captureChance != nil, action: onCaptureShip)
+                fallbackButton("Abort", enabled: true, action: onDismiss)
             }
         }
         .padding(20)
@@ -205,7 +209,7 @@ private extension View {
         creditsAboard: 1250, ammoAboard: 6, energyAboard: 40,
         captureChance: 35,
         onTakeCargo: {}, onTakeCredits: {}, onTakeAmmo: {}, onTakeEnergy: {},
-        onCaptureShip: {}, onDemandTribute: {}, onDismiss: {})
+        onCaptureShip: {}, onDismiss: {})
     .frame(width: 900, height: 650)
     .preferredColorScheme(.dark)
 }
@@ -218,7 +222,7 @@ private extension View {
         creditsAboard: 0, ammoAboard: 0, energyAboard: 0,
         captureChance: nil,
         onTakeCargo: {}, onTakeCredits: {}, onTakeAmmo: {}, onTakeEnergy: {},
-        onCaptureShip: {}, onDemandTribute: {}, onDismiss: {})
+        onCaptureShip: {}, onDismiss: {})
     .frame(width: 900, height: 650)
     .preferredColorScheme(.dark)
 }

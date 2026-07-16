@@ -167,6 +167,18 @@ struct RadarContact {
     /// selected nav/landing target — drawn with a bright white blinking ring
     /// so the selected dot is unmistakable among same-colour neighbours.
     var isTarget: Bool = false
+    /// World-space visual radius of a stellar contact, used to size its radar
+    /// blip so bigger planets read as bigger dots. 0 for ships, which draw at a
+    /// fixed small size.
+    var worldRadius: CGFloat = 0
+}
+
+/// Maps a stellar object's world-space visual radius to its radar blip diameter
+/// in points, so a gas giant reads bigger than an asteroid on the scope while
+/// staying legible regardless of the underlying sprite size.
+func radarPlanetBlipDiameter(worldRadius: CGFloat) -> CGFloat {
+    guard worldRadius > 0 else { return 4 }
+    return min(11, max(3.5, 2 + worldRadius * 0.14))
 }
 
 /// The player marker at the centre of the radar: a slim needle arrow pointing
@@ -409,7 +421,8 @@ struct GameHUDView: View {
                     let c = CGPoint(x: size.width / 2, y: size.height / 2)
                     let r = min(size.width, size.height) / 2 - 5
                     for b in model.planetBlips {
-                        let rect = CGRect(x: c.x + b.x * r - 2.5, y: c.y + b.y * r - 2.5, width: 5, height: 5)
+                        let d = radarPlanetBlipDiameter(worldRadius: b.worldRadius)
+                        let rect = CGRect(x: c.x + b.x * r - d / 2, y: c.y + b.y * r - d / 2, width: d, height: d)
                         ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                         if b.isTarget && blinkOn {
                             let ring = rect.insetBy(dx: -3, dy: -3)
@@ -428,7 +441,7 @@ struct GameHUDView: View {
                             }
                             continue
                         }
-                        let rect = CGRect(x: c.x + b.x * r - 1.5, y: c.y + b.y * r - 1.5, width: 3, height: 3)
+                        let rect = CGRect(x: c.x + b.x * r - 0.75, y: c.y + b.y * r - 0.75, width: 1.5, height: 1.5)
                         ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                         if b.isTarget && blinkOn {
                             let ring = rect.insetBy(dx: -3, dy: -3)
