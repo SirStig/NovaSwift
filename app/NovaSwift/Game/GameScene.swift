@@ -352,10 +352,11 @@ final class GameScene: SKScene {
     private let radarRange: CGFloat = 4500
     // The original never scaled its camera at all — 1 world pixel = 1 screen
     // point (SpriteKit's own default scale) is the faithful, native zoom, and
-    // is now the default (`GameSettings.cameraZoom = 1.0`; the in-flight
-    // design canvas is verified 1024×768 via PICT #8000, not the 640×480 this
-    // used to assume). User-adjustable in Settings for anyone who wants more
-    // of the system visible per window.
+    // is the default on Mac/iPad (`GameSettings.defaultCameraZoom`; the
+    // in-flight design canvas is verified 1024×768 via PICT #8000, not the
+    // 640×480 this used to assume). iPhone defaults a bit further out, since
+    // its point-space is much smaller than a Mac window or iPad. User-
+    // adjustable in Settings for anyone who wants more of the system visible.
     private var cameraZoom: CGFloat { CGFloat(settings.cameraZoom) }
 
     // Landing: the nearest landable stellar object, and whether the player is

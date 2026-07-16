@@ -1382,15 +1382,26 @@ public final class World {
     /// `systemContext`/`galaxy` are set. Each rock picks a uniformly-random
     /// enabled type — the Bible's `AstTypes` only says which types are
     /// enabled, not a weighting — and looks up its real stats/sprite geometry.
+    /// Candidate spots that land too close to a planet/station are re-rolled
+    /// (`asteroidPlanetClearance`) so rocks never spawn on top of a body a
+    /// player is trying to land on.
     public func populateAsteroids(typeIDs: [Int], count: Int) {
         guard count > 0, !typeIDs.isEmpty, let game = galaxy?.game else { return }
         let minRadius = 300.0
         let maxRadius = max(minRadius + 1, systemContext.jumpRadius * 0.6)
+        let clearance = 600.0
         for _ in 0..<count {
             let typeID = typeIDs[rng.int(in: 0...(typeIDs.count - 1))]
-            let bearing = rng.double(in: 0...(2 * Double.pi))
-            let dist = rng.double(in: minRadius...maxRadius)
-            let position = systemContext.center + Vec2.heading(bearing) * dist
+            var position = Vec2()
+            for attempt in 0..<20 {
+                let bearing = rng.double(in: 0...(2 * Double.pi))
+                let dist = rng.double(in: minRadius...maxRadius)
+                position = systemContext.center + Vec2.heading(bearing) * dist
+                let tooClose = systemContext.bodies.contains {
+                    (position - $0.position).length < $0.radius + clearance
+                }
+                if !tooClose || attempt == 19 { break }
+            }
             if let a = spawnAsteroid(typeID: typeID, at: position, game: game) {
                 asteroids.append(a)
             }

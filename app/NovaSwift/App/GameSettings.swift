@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 /// User-facing settings, persisted to `UserDefaults` as JSON. Read by the engine,
 /// renderer and audio system at scene start (and live for volumes). Covers EV
@@ -217,7 +220,21 @@ struct GameSettings: Codable, Equatable {
     /// point) — the original's own zoom, since it never scaled the camera at
     /// all. Higher values zoom out (show more world, everything reads smaller
     /// and slower-moving); lower values zoom in.
-    var cameraZoom: Double = 1.0
+    var cameraZoom: Double = Self.defaultCameraZoom
+
+    /// 1.0 (the original's native scale) everywhere except iPhone. Zoom is a
+    /// fixed world-units-per-*point* multiplier, and an iPhone's screen is far
+    /// fewer points across than a Mac window or an iPad — at the same 1.0
+    /// zoom that shows a much smaller slice of the world, reading as "way more
+    /// zoomed in" than desktop even though the math is identical. iPad's point
+    /// space is close enough to a typical desktop window that it keeps 1.0.
+    static var defaultCameraZoom: Double {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone ? 1.75 : 1.0
+        #else
+        1.0
+        #endif
+    }
 
     // MARK: Audio
 

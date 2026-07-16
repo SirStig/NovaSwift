@@ -264,7 +264,7 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Graphics", icon: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Camera zoom defaults to 1.0, the original's own native scale (1 world pixel = 1 screen point); higher shows more of the system at once. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
         }
     }
 

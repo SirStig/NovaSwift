@@ -183,6 +183,11 @@ public final class AIBrain {
     /// exploit the no-drift model (a driftless hull brakes by cutting throttle,
     /// with no need to rotate to retrograde first). Refreshed every frame.
     private var inertialessNow = false
+    /// This frame's tick length, cached at the top of `think` so `stoppingPoint`
+    /// can add a physically-real one-tick correction instead of a flat
+    /// percentage margin. Defaults to the sim's fixed step in case anything
+    /// ever reads it before a `think()` call sets it for real.
+    private var currentDt: Double = 1.0 / 30.0
     /// Slow rotation used to walk an interceptor's holding-pattern orbit.
     var orbitAngle: Double = 0
     /// The ship this authority vessel is currently flying over to scan.
@@ -492,6 +497,7 @@ public final class AIBrain {
         repathClock -= dt
         scanCooldown -= dt
         inertialessNow = me.fliesInertialess(world.tuning)
+        currentDt = dt
 
         // Validate / refresh combat target.
         if let tid = targetID, let t = world.ship(id: tid), t.isAlive,
@@ -1096,8 +1102,20 @@ public final class AIBrain {
     /// `formationHeading` smoothing, which chases this at a bounded turn rate.
     /// Also the first-frame fallback used to place a freshly spawned escort
     /// directly on station (no prior `formationHeading` to smooth from yet).
+    ///
+    /// Eases between nose and course over a band around 15% of top speed
+    /// rather than hard-flipping there: a leader accelerating away from or
+    /// braking to a stop crosses that speed every launch/landing, and a hard
+    /// ternary yanked the whole wedge's target heading in one frame right when
+    /// escorts are also settling onto station — exactly the kind of snap this
+    /// is meant to avoid.
     public static func wingHeading(for leader: Ship) -> Double {
-        leader.velocity.length > leader.stats.maxSpeed * 0.15 ? leader.velocity.angle : leader.angle
+        let speedFrac = leader.velocity.length / max(leader.stats.maxSpeed, 1)
+        let lo = 0.08, hi = 0.22   // band centered on the old 0.15 cutoff
+        let raw = min(1, max(0, (speedFrac - lo) / (hi - lo)))
+        let t = raw * raw * (3 - 2 * raw)
+        let delta = angleDelta(from: leader.angle, to: leader.velocity.angle)
+        return leader.angle + t * delta
     }
 
     /// World-space station point for formation `slot` off `leaderPosition`,
@@ -1228,11 +1246,26 @@ public final class AIBrain {
         // Parked on station (stopped leader, sitting on the mark): `desiredVel`
         // is near zero, whose angle is pure noise — chasing it is what makes a
         // parked escort's nose twitch. Square up to the wedge heading and coast.
+        // Below `parkThreshold` this fully takes over (no thrust needed at all);
+        // through a band above it, the *heading* eases from `desiredVel.angle`
+        // onto the wedge heading while the ordinary thrust logic below keeps
+        // running unmodified — a hard cutoff right at `parkThreshold` used to
+        // snap the nose over in one frame the instant a cruising leader slowed
+        // near a stop (docking, launch, disengaging) while the escort was still
+        // closing in.
         let parkThreshold = max(6, me.stats.maxSpeed * 0.04)
-        if desiredSpeed < parkThreshold {
-            intent.desiredHeading = wedgeHeading
-            me.formationBoost = 1.0
-            return intent
+        let parkBand = parkThreshold * 4
+        var parkedHeadingOverride: Double?
+        if desiredSpeed < parkBand {
+            let raw = min(1, max(0, (parkBand - desiredSpeed) / (parkBand - parkThreshold)))
+            let t = raw * raw * (3 - 2 * raw)
+            let aimAngle = desiredSpeed > 1e-6 ? desiredVel.angle : wedgeHeading
+            parkedHeadingOverride = blendedHeading(from: aimAngle, toward: wedgeHeading, weight: t)
+            if desiredSpeed < parkThreshold {
+                intent.desiredHeading = parkedHeadingOverride!
+                me.formationBoost = 1.0
+                return intent
+            }
         }
 
         if inertialessNow {
@@ -1251,27 +1284,23 @@ public final class AIBrain {
             // orbits forever (the residual formation wobble). Reuse the proven
             // flip-and-burn arrival primitive instead: `moveTo` brakes onto the
             // station point accounting for the turn time a sluggish hull needs to
-            // swing retrograde, and matches the slot's velocity (the leader's own
-            // velocity plus the acceleration feed-forward) so it converges on a
-            // moving formation too. Once parked it reports `arrived`, and we square
-            // up to the wedge heading and coast rather than chase a noisy aim.
-            // The "arrived" band is deliberately a little loose: a bang-bang
-            // thruster changes speed by `accel·dt` each tick (a few px/s), so an
-            // arrive-speed tighter than that can never be *held* — `arrived`
-            // flickers and the nose swings between the flip-and-burn aim and the
-            // wedge heading every frame (the "constantly correcting" jitter). A
-            // deadband wider than one tick lets a matched escort latch onto "hold
-            // station" and stop hunting; it stays far inside the formation
-            // tightness the settle/keep-up behaviour needs.
+            // swing retrograde, matches the slot's velocity (the leader's own
+            // velocity plus the acceleration feed-forward), and eases the nose
+            // onto the wedge heading as it converges — no separate arrived-snap
+            // needed, `moveTo` owns the whole heading story now.
             let slotVel = leader.velocity + leaderAccelFF
-            let (cmd, arrived) = moveTo(me, toward: station, matching: slotVel,
-                                        arriveRadius: max(40, me.radius + 20),
-                                        arriveSpeed: max(12, me.stats.maxSpeed * 0.08))
-            if arrived {
-                intent.desiredHeading = wedgeHeading
-            } else {
-                intent = cmd
-            }
+            let (cmd, _) = moveTo(me, toward: station, matching: slotVel,
+                                  arriveRadius: max(40, me.radius + 20),
+                                  arriveSpeed: max(12, me.stats.maxSpeed * 0.08),
+                                  finalHeading: wedgeHeading)
+            intent = cmd
+        }
+        // Above `parkThreshold` but still inside the ease band: let the heading
+        // override win over whatever the thrust branches above computed — their
+        // alignment/thrust *decisions* (which already reasonably key off
+        // `desiredVel`) stay as computed, only the reported heading changes.
+        if let parkedHeadingOverride {
+            intent.desiredHeading = parkedHeadingOverride
         }
         // Lift the hull's caps enough to actually reach `desiredSpeed`
         // (`World.step` applies `topSpeed *= 1 + boost`), scaled to the demand
@@ -1383,6 +1412,22 @@ public final class AIBrain {
     /// ships rotate to face, then accelerate). ~35°.
     private var cosThrustCone: Double { 0.819 }
 
+    /// Ease a heading from `a` toward `b` by weight `t` (0 = stay at `a`, 1 =
+    /// land exactly on `b`), always turning the short way around. Shared by
+    /// `moveTo`'s final-heading blend and `wingHeading`'s course/nose ease so
+    /// the two don't drift out of sync on technique.
+    private func blendedHeading(from a: Double, toward b: Double, weight t: Double) -> Double {
+        a + t * angleDelta(from: a, to: b)
+    }
+
+    /// How far out (as a multiple of `arriveRadius`/`arriveSpeed`) `moveTo`
+    /// starts easing onto a caller-supplied `finalHeading` — wide enough that
+    /// the nose is already close to aligned by the time position/velocity
+    /// actually converge, so there's no visible last-tick snap. Tunable by
+    /// feel if formation approaches still read as snapping late or wandering
+    /// early.
+    private var headingBlendApproachFactor: Double { 3.0 }
+
     /// Rotate-to-face + flip-and-burn steering — EV Nova's actual flight feel, and
     /// the fix for heavy hulls that used to drift past a mark and orbit it. The core
     /// is the **stopping point**: where this ship would coast to rest relative to a
@@ -1396,16 +1441,37 @@ public final class AIBrain {
     /// early enough to settle onto the mark. Returns the intent and whether the ship
     /// has arrived (within `arriveRadius` and slower than `arriveSpeed` relative to
     /// the target) so a caller can e.g. square up its heading once parked.
+    ///
+    /// `finalHeading`, when supplied, is the heading this ship should be facing
+    /// once it arrives (e.g. a formation's wedge heading). Rather than leaving
+    /// the caller to snap the nose over once `arrived` flips true — which reads
+    /// as a last-frame jerk even though position/velocity converged smoothly —
+    /// `moveTo` eases the commanded heading from the kinematic burn/brake aim
+    /// onto `finalHeading` continuously as both position and relative-speed
+    /// error shrink, so the ship is already close to its final facing by the
+    /// time it actually settles.
     private func moveTo(_ me: Ship, toward targetPos: Vec2, matching targetVel: Vec2,
-                        arriveRadius: Double, arriveSpeed: Double) -> (intent: ControlIntent, arrived: Bool) {
+                        arriveRadius: Double, arriveSpeed: Double,
+                        finalHeading: Double? = nil) -> (intent: ControlIntent, arrived: Bool) {
         var cmd = ControlIntent()
         let relPos = targetPos - me.position
         let relVel = me.velocity - targetVel
         let dist = relPos.length
         let relSpeed = relVel.length
+
+        // Command the caller's final heading (through the usual deadzone) once
+        // arrived; a no-op when the caller didn't supply one.
+        func squareUp() {
+            guard let finalHeading else { return }
+            if abs(angleDelta(from: me.angle, to: finalHeading)) > 0.03 {
+                cmd.desiredHeading = finalHeading
+            }
+        }
+
         // Parked: close to the target and nearly matching its velocity. Under
         // Newtonian flight, coasting now holds station — no thrust needed.
         if dist < arriveRadius, relSpeed < arriveSpeed {
+            squareUp()
             return (cmd, true)
         }
         // Driftless (inertialess) hull: don't do a flip-and-burn. Its velocity
@@ -1416,7 +1482,7 @@ public final class AIBrain {
         // target (a formation slot on a cruising leader) is handled too; the
         // ship only stops thrusting when it's actually closing on the target.
         if inertialessNow {
-            guard dist > 0.0001 else { return (cmd, true) }
+            guard dist > 0.0001 else { squareUp(); return (cmd, true) }
             let dir = relPos * (1 / dist)
             cmd.desiredHeading = dir.angle
             let closingSpeed = relVel.dot(dir)          // >0 when moving toward the target
@@ -1433,6 +1499,7 @@ public final class AIBrain {
         // a near-parked ship twitch its nose every frame. Below a floor, hold
         // heading and don't thrust; treat it as arrived.
         if aim.length < max(6, arriveRadius * 0.5) {
+            squareUp()
             return (cmd, true)
         }
         // Near the mark with only a mild overshoot: don't wheel ~180° to retrograde
@@ -1442,14 +1509,31 @@ public final class AIBrain {
         // arrived checks above catch it next frames. Only a genuine sail-well-past
         // (fast, or far beyond the mark) still earns the flip-and-burn below.
         // `aim · relPos < 0` means the projected stop overshoots the target.
-        if aim.dot(relPos) < 0, dist < arriveRadius * 2.5, relSpeed < arriveSpeed * 2.5 {
+        // Only needed when there's no `finalHeading` to ease onto below — with
+        // one, the blend already absorbs a mild overshoot's flip into the ease,
+        // so this early-out would just delay converging onto the target facing.
+        if finalHeading == nil, aim.dot(relPos) < 0, dist < arriveRadius * 2.5, relSpeed < arriveSpeed * 2.5 {
             return (cmd, false)
         }
         let aimDir = aim.normalized
+        var targetHeadingAngle = aimDir.angle
+        if let finalHeading {
+            // Continuous ease from the kinematic burn/brake aim onto the target
+            // facing as both position and relative-speed error shrink through a
+            // band `headingBlendApproachFactor`x wider than the arrival
+            // tolerances — smoothstep so the ease itself has no kink at the
+            // band edges.
+            let approach = headingBlendApproachFactor
+            let distFrac = 1 - min(1, max(0, (dist - arriveRadius) / (arriveRadius * (approach - 1))))
+            let speedFrac = 1 - min(1, max(0, (relSpeed - arriveSpeed) / (arriveSpeed * (approach - 1))))
+            let raw = min(distFrac, speedFrac)
+            let t = raw * raw * (3 - 2 * raw)
+            targetHeadingAngle = blendedHeading(from: aimDir.angle, toward: finalHeading, weight: t)
+        }
         // Heading deadzone: only issue a turn when the nose is off by more than a
         // hair, so micro-errors don't drive a constant stream of tiny corrections.
-        if abs(angleDelta(from: me.angle, to: aimDir.angle)) > 0.03 {
-            cmd.desiredHeading = aimDir.angle
+        if abs(angleDelta(from: me.angle, to: targetHeadingAngle)) > 0.03 {
+            cmd.desiredHeading = targetHeadingAngle
         }
         if aimDir.dot(facing) > cosThrustCone { cmd.thrust = true }
         return (cmd, false)
@@ -1469,13 +1553,17 @@ public final class AIBrain {
         let turnAngle = acos(dot)                       // radians to swing round to retrograde
         let turnTime = turnAngle / max(me.stats.turnRate, 0.05)
         let brakeDist = 0.5 * v * v / max(me.stats.acceleration, 1)
-        // Small margin (12%) on the projected runway: discretised bang-bang thrust
-        // can't stop mid-tick and the ship keeps a little forward speed while its
-        // nose is still swinging toward retrograde, so an exact estimate brakes a
-        // beat too late — the ship sails just past the mark, flips 180° to claw
-        // back, overshoots that, and hunts. Braking a hair early instead lets it
-        // settle short and coast cleanly onto the mark: no overshoot, no spin.
-        return me.position + vHat * (v * turnTime + brakeDist) * 1.12
+        // One tick of continued closing at the current relative speed: `think`
+        // only re-evaluates this once per fixed tick, so there's an unavoidable
+        // one-tick lag between "the stop is now exact" and thrust actually
+        // changing to reflect it — without it, the ship sails a beat past the
+        // mark, flips 180° to claw back, overshoots that, and hunts. Anchored to
+        // this tick's own length rather than a flat percentage of the whole
+        // projected distance, so it doesn't over-correct a short hop or
+        // under-correct a long one (the old flat 12% scaled with `turnTime`,
+        // which has no real reason to affect how big the tick-lag margin is).
+        let tickMargin = v * currentDt
+        return me.position + vHat * (v * turnTime + brakeDist + tickMargin)
     }
 
     /// Head for a point at cruise (no arrival slowdown), steering momentum so we
