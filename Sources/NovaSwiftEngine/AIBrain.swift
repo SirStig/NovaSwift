@@ -1122,32 +1122,32 @@ public final class AIBrain {
             formationHeading = wedgeTarget
         }
         let wedgeHeading = formationHeading ?? wedgeTarget
-        // Slot → (row, column): row r (1-based) holds r ships, centered behind
-        // the leader and spread evenly across the row — row 1 is one ship dead
-        // astern, row 2 flanks it left/right, row 3 adds a centered ship plus two
-        // more flanks, etc. Triangular numbering (row = smallest r whose triangle
-        // number r(r+1)/2 exceeds the slot) fills the wedge's interior instead of
-        // only ever placing ships along its two trailing edges.
+        // Slot → (row, column). EV Nova escorts don't fan out into an ever-widening
+        // wedge — they stack into a tight, narrow column directly astern of the
+        // leader, at most a couple of hulls wide (the original game's trailing
+        // double-column). Rows alternate one ship (centred) / two ships (flanking) —
+        // a hex-packed column — so the wing reads as a compact trailing block, not a
+        // triangle that grows without bound as more escorts join.
         var remaining = formationSlot
-        var row = 1
-        while remaining >= row {
-            remaining -= row
+        var row = 0
+        while true {
+            let cap = row % 2 == 0 ? 1 : 2      // ships per row: 1,2,1,2,…
+            if remaining < cap { break }
+            remaining -= cap
             row += 1
         }
-        let col = remaining   // 0..<row within this row
-        // Slot spacing scales purely with the hulls actually involved: just enough
-        // to clear both hulls (`leader.radius + me.radius`) plus a small gap, so
-        // small fighters pack into a tight wing while a big leader (or a big escort)
-        // still gets real clearance — tighter or wider *dynamically* with ship size,
-        // never a loose one-size fixed gap. The tiny floor only guards degenerate
-        // zero-radius data. `behind` uses a slightly larger step than `lateral` so
-        // the wedge reads as a crisp pyramid trailing the leader (its tip) rather
-        // than a squat blob.
-        let hullGap = leader.radius + me.radius
-        let lateralSpacing = max(24, hullGap + 12)
-        let depthSpacing = max(30, hullGap + 22)
-        let lateral = (Double(col) - Double(row - 1) / 2.0) * lateralSpacing  // right of the leader (+) / left (−)
-        let behind = -depthSpacing * Double(row)                              // trailing the leader
+        let rowCap = row % 2 == 0 ? 1 : 2
+        let col = remaining   // 0..<rowCap within this row
+        // Spacing is escort-to-escort — pairs sit side by side, rows stack close —
+        // so it keys off the *escort's* own hull, not the leader's; only the first
+        // row's distance clears the (possibly big) leader. Tight, but scaling with
+        // ship size, so a wing of freighters packs proportionally looser than a
+        // wing of fighters. Floors guard degenerate zero-radius data.
+        let lateralSpacing = max(20, me.radius * 2 + 6)
+        let depthSpacing = max(24, me.radius * 2 + 8)
+        let firstRowGap = leader.radius + me.radius + 10
+        let lateral = (Double(col) - Double(rowCap - 1) / 2.0) * lateralSpacing  // right of the leader (+) / left (−)
+        let behind = -(firstRowGap + depthSpacing * Double(row))                 // trailing the leader
         // Wedge frame: forward = (sin a, cos a); right = (cos a, −sin a) — built
         // from the smoothed `wedgeHeading`, not the leader's raw (possibly
         // combat-swinging) nose angle; see `formationHeading` above.
