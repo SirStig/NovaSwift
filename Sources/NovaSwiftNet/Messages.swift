@@ -304,6 +304,9 @@ public enum NetMessage: Codable, Equatable, Sendable {
     case kick(String)
     /// Peer-to-peer trade handshake (invite / offer / accept / cancel).
     case trade(TradeSignal)
+    /// Sent on connect: the sender's enabled-plug-in set, so host and joiner can
+    /// verify they're running the same content before playing together.
+    case pluginManifest(PluginManifest)
 }
 
 /// Serialization boundary for `NetMessage`. JSON for the P0 spine — readable and

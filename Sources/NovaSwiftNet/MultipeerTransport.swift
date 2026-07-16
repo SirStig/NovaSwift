@@ -38,13 +38,21 @@ public final class MultipeerTransport: NSObject, Transport {
     /// count refresh so we don't begin advertising before the host is ready.
     private var advertising = false
 
+    /// Host mode: the plug-in set advertised in discovery info so browsers can show
+    /// the count and hint compatibility before connecting.
+    private let pluginCount: Int
+    private let pluginSignature: String
+
     public init(playerID: PeerID, mode: Mode,
                 serviceType: String = "novaswift-mp",
+                pluginCount: Int = 0, pluginSignature: String = "",
                 callbackQueue: DispatchQueue = .main) {
         self.localPeerID = playerID
         self.mode = mode
         self.myPeer = MCPeerID(displayName: playerID)
         self.serviceType = serviceType
+        self.pluginCount = pluginCount
+        self.pluginSignature = pluginSignature
         self.session = MCSession(peer: myPeer, securityIdentity: nil, encryptionPreference: .required)
         switch mode {
         case .host:
@@ -80,6 +88,8 @@ public final class MultipeerTransport: NSObject, Transport {
             DiscoveryKey.lobby: lobbyName,
             DiscoveryKey.host: hostName,
             DiscoveryKey.count: String(advertisedCount),
+            DiscoveryKey.pluginCount: String(pluginCount),
+            DiscoveryKey.pluginSig: pluginSignature,
         ]
         let next = MCNearbyServiceAdvertiser(peer: myPeer, discoveryInfo: info, serviceType: serviceType)
         next.delegate = self
@@ -117,6 +127,8 @@ enum DiscoveryKey {
     static let lobby = "lobby"
     static let host = "host"
     static let count = "n"      // current player count (host + joiners)
+    static let pluginCount = "pc"   // enabled plug-in count
+    static let pluginSig = "ps"     // plug-in-set signature (compat hint)
 }
 
 extension MultipeerTransport: MCSessionDelegate {
@@ -211,8 +223,11 @@ extension MultipeerLobbyBrowser: MCNearbyServiceBrowserDelegate {
         let name = info?[DiscoveryKey.lobby] ?? "Lobby"
         let host = info?[DiscoveryKey.host] ?? peerID.displayName
         let count = info?[DiscoveryKey.count].flatMap(Int.init) ?? 1
+        let pluginCount = info?[DiscoveryKey.pluginCount].flatMap(Int.init) ?? 0
+        let pluginSig = info?[DiscoveryKey.pluginSig] ?? ""
         found[peerID.displayName] = LobbyDescriptor(id: peerID.displayName, name: name,
-                                                    hostName: host, playerCount: max(1, count))
+                                                    hostName: host, playerCount: max(1, count),
+                                                    pluginCount: pluginCount, pluginSignature: pluginSig)
         publish()
     }
 

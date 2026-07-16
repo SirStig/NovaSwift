@@ -25,19 +25,20 @@ final class CombatTests: XCTestCase {
 
     func testShieldsAbsorbFullyThenHullTakesDamage() {
         let s = makeShip("x", govt: 1, at: Vec2())
-        // First hit: shields absorb it, so armor is spared.
+        // First hit: shields absorb it (still up afterward), so armor is spared.
         XCTAssertFalse(s.applyDamage(shield: 60, armor: 40))
         XCTAssertEqual(s.shield, 40, accuracy: 1e-9)
         XCTAssertEqual(s.armor, 100, accuracy: 1e-9)
-        // Second hit empties the shields — but the hull stays pristine: there is
-        // no bleed-through on the shield-depleting shot.
-        XCTAssertFalse(s.applyDamage(shield: 60, armor: 30))
-        XCTAssertEqual(s.shield, 0, accuracy: 1e-9)
-        XCTAssertEqual(s.armor, 100, accuracy: 1e-9)
-        // Only now, with shields already at zero, does armor take damage.
+        // Second hit empties the shields — and because they're down *after* the
+        // shot, that same shot's armor damage lands (no infinite grace shot; this
+        // is what keeps a ship from being immortal once its shields are pinned).
         XCTAssertFalse(s.applyDamage(shield: 60, armor: 30))
         XCTAssertEqual(s.shield, 0, accuracy: 1e-9)
         XCTAssertEqual(s.armor, 70, accuracy: 1e-9)
+        // With shields already at zero, further hits keep chewing the hull.
+        XCTAssertFalse(s.applyDamage(shield: 60, armor: 30))
+        XCTAssertEqual(s.shield, 0, accuracy: 1e-9)
+        XCTAssertEqual(s.armor, 40, accuracy: 1e-9)
     }
 
     /// `wëap` Flags 0x0020 — a shield-penetrating weapon damages the hull even
@@ -126,6 +127,34 @@ final class CombatTests: XCTestCase {
 
         world.step(1.0 / 30.0)
         XCTAssertFalse(world.events.contains { if case .playerDestroyed = $0 { return true } else { return false } })
+    }
+
+    func testPlayerUnderSustainedFireDiesDespiteShieldRegen() {
+        // Regression for the reported "zero hull/shields but still alive under
+        // attack" bug. A player pinned at zero shields by continuous fire used to
+        // be immortal: shield regen runs before damage each frame, so a hull gate
+        // keyed on "shields were up *before* this shot" read as up every frame
+        // (the regen sliver), and the incoming fire never bled into armor. With the
+        // gate keyed on shields *after* the shot, the hull takes damage and the
+        // player dies. The per-frame `applyDamage` here stands in for the beam; the
+        // brisk regen inside `world.step` is exactly what previously hid the hull.
+        let player = makeShip("Player", govt: 0, at: Vec2())
+        player.shieldRechargePerSec = 40   // brisk regen — the sliver that hid the bug
+        let world = World(player: player)
+
+        var died = false
+        var sawHullLoss = false
+        for _ in 0..<900 {                                             // up to 30s
+            player.applyDamage(shield: 20, armor: 20)                  // this frame's incoming fire
+            if player.armor < player.maxArmor { sawHullLoss = true }
+            world.step(1.0 / 30.0)                                     // regen + death check
+            if world.drainEvents().contains(where: { if case .playerDestroyed = $0 { return true } else { return false } }) {
+                died = true; break
+            }
+        }
+        XCTAssertTrue(sawHullLoss, "sustained fire must eat into the hull even with shields regenerating")
+        XCTAssertTrue(died, "a player held at zero shields under continuous fire should eventually be destroyed")
+        XCTAssertLessThanOrEqual(player.armor, 0, "the player is dead with no armor left")
     }
 
     func testHitCrossingArmorThresholdDisablesNotDestroys() {

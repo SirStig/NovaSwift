@@ -37,6 +37,14 @@ final class MultiplayerSession: ObservableObject {
     @Published private(set) var localLobbies: [LobbyDescriptor] = []
     /// Set true briefly when the host kicked us, so the UI can explain the exit.
     @Published var wasKicked = false
+    /// Non-nil when the last join attempt was refused because our enabled plug-ins
+    /// don't match the host's — the UI shows what to install/disable, then clears it.
+    @Published var pluginMismatch: PluginMismatch?
+    /// The lobby name the `pluginMismatch` was for (for the explaining sheet).
+    @Published private(set) var pluginMismatchLobbyName = ""
+    /// Our own enabled-plug-in signature, published while browsing local lobbies so
+    /// the list can flag compatibility before you try to join.
+    @Published private(set) var localPluginSignature = ""
 
     // MARK: - Trade
 
@@ -109,6 +117,11 @@ final class MultiplayerSession: ObservableObject {
     /// each frame to find bits its storyline just set and shares them with
     /// co-located participants. Set by `AppModel`.
     var playerBitsProvider: (() -> Set<Int>)?
+    /// The app supplies the local enabled-plug-in manifest so the session can
+    /// advertise it and verify a joiner runs the same content. Set by `AppModel`.
+    var pluginManifestProvider: (() -> PluginManifest)?
+    /// The manifest captured at session start, diffed against a peer's on join.
+    private var localManifest: PluginManifest = .empty
     /// The app unions bits earned in a partner's shared storyline into the local
     /// pilot (non-destructive). Set by `AppModel`.
     var onRemoteBitsEarned: ((Set<Int>) -> Void)?
@@ -131,10 +144,13 @@ final class MultiplayerSession: ObservableObject {
     func hostLocalLobby(lobbyName: String, displayName: String, systemID: Int,
                         shipTypeID: Int? = nil, rules: SessionRules = .fullStakes) {
         stop()
+        pluginMismatch = nil
         #if canImport(MultipeerConnectivity)
         let name = lobbyName.isEmpty ? "\(displayName)'s Lobby" : lobbyName
+        let manifest = pluginManifestProvider?() ?? .empty
         let mp = MultipeerTransport(playerID: localPlayerID,
-                                    mode: .host(lobbyName: name, hostName: displayName))
+                                    mode: .host(lobbyName: name, hostName: displayName),
+                                    pluginCount: manifest.count, pluginSignature: manifest.signature)
         self.lobbyName = name
         isHost = true
         activate(transport: mp, displayName: displayName, systemID: systemID,
@@ -147,6 +163,7 @@ final class MultiplayerSession: ObservableObject {
     func joinLocalLobby(_ lobby: LobbyDescriptor, displayName: String, systemID: Int,
                         shipTypeID: Int? = nil) {
         stop()
+        pluginMismatch = nil
         #if canImport(MultipeerConnectivity)
         let mp = MultipeerTransport(playerID: localPlayerID, mode: .join(hostID: lobby.id))
         lobbyName = lobby.name
@@ -163,6 +180,9 @@ final class MultiplayerSession: ObservableObject {
     func startBrowsingLocalLobbies() {
         #if canImport(MultipeerConnectivity)
         stopBrowsingLocalLobbies()
+        // Publish our own plug-in signature so the list can flag which lobbies are
+        // compatible before you connect.
+        localPluginSignature = (pluginManifestProvider?() ?? .empty).signature
         let browser = MultipeerLobbyBrowser(playerID: localPlayerID)
         browser.onLobbiesChanged = { [weak self] lobbies in self?.localLobbies = lobbies }
         lobbyBrowser = browser
@@ -206,6 +226,9 @@ final class MultiplayerSession: ObservableObject {
         // later, or a joiner keeps its seed `.safe` rules (no real PvP damage) even
         // when it becomes a system's sync authority. Guests never push rules.
         session.providesRules = broadcastRules
+        // Plug-in compatibility: announce our set so host/joiner can verify a match.
+        localManifest = pluginManifestProvider?() ?? .empty
+        session.localPluginManifest = localManifest
         localPlayerID = session.localPlayerID     // the transport owns the peer id
         wire(session)
         self.transport = transport
@@ -432,6 +455,31 @@ final class MultiplayerSession: ObservableObject {
         }
         // Trade handshakes from a partner.
         session.onTrade = { [weak self] signal, peer in self?.handleTrade(signal, from: peer) }
+        // Plug-in compatibility: verify a peer's enabled-plug-in set on connect.
+        session.onPluginManifest = { [weak self] manifest, peer in
+            self?.handlePeerPluginManifest(manifest, from: peer)
+        }
+    }
+
+    /// Enforce plug-in compatibility when a peer announces its set. As the **host**
+    /// we drop a joiner whose plug-ins don't match (integrity — a mismatch would
+    /// desync the shared world); as a **guest** we block ourselves against the host
+    /// and surface exactly what to install/disable. Our own client always self-gates,
+    /// so the host's kick is only a backstop for a modified client.
+    private func handlePeerPluginManifest(_ manifest: PluginManifest, from peer: String) {
+        if isHost {
+            if !manifest.isCompatible(with: localManifest) {
+                net?.kick(peer)
+                syncPresence()
+            }
+        } else if peer == joinedHostID {
+            let mismatch = localManifest.mismatch(against: manifest)
+            if !mismatch.isCompatible {
+                pluginMismatchLobbyName = lobbyName
+                pluginMismatch = mismatch     // drives the explaining sheet
+                stop()                        // leave — we can't play here as-is
+            }
+        }
     }
 
     private func syncPresence() {

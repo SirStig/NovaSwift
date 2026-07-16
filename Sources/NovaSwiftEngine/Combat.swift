@@ -129,6 +129,10 @@ public struct WeaponSpec {
     /// "The amount of ionization energy to add to the ship that gets hit by
     /// this weapon" (Bible) — added to the victim's `Ship.ionCharge` on hit.
     public let ionization: Double
+    /// `wëap.IonizeColor` as 0–1 RGB: the hue a target glows once "sufficiently
+    /// ionized" by this weapon (e.g. the Polaris Pulse Laser's magenta). Nil →
+    /// the engine's default bluish ionization tint (Bible: `IonizeColor == 0`).
+    public let ionizeColor: (r: Double, g: Double, b: Double)?
     /// Seeker 0x0020: this (guided) weapon refuses to fire while its own ship
     /// is ionized.
     public let cantFireWhileIonized: Bool
@@ -217,7 +221,8 @@ public struct WeaponSpec {
                 pulseBeamLifeSeconds: Double = 0.08,
                 fireSoundID: Int? = nil, explosionBoomID: Int? = nil, loopSound: Bool = false,
                 isPointDefense: Bool = false, vulnerableToPD: Bool = true,
-                ionization: Double = 0, cantFireWhileIonized: Bool = false,
+                ionization: Double = 0, ionizeColor: (r: Double, g: Double, b: Double)? = nil,
+                cantFireWhileIonized: Bool = false,
                 confusedByInterference: Bool = false, turnsAwayIfJammed: Bool = false,
                 guidance: WeaponGuidance = .unguided, isTurret: Bool = false,
                 proxRadius: Double = 0, proxHitAll: Bool = true,
@@ -245,7 +250,8 @@ public struct WeaponSpec {
         self.fireSoundID = fireSoundID; self.explosionBoomID = explosionBoomID
         self.loopSound = loopSound
         self.isPointDefense = isPointDefense; self.vulnerableToPD = vulnerableToPD
-        self.ionization = ionization; self.cantFireWhileIonized = cantFireWhileIonized
+        self.ionization = ionization; self.ionizeColor = ionizeColor
+        self.cantFireWhileIonized = cantFireWhileIonized
         self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
         self.guidance = guidance; self.isTurret = isTurret
         self.proxRadius = proxRadius; self.proxHitAll = proxHitAll
@@ -383,6 +389,10 @@ public struct WeaponSpec {
         isPointDefense = w.isPointDefense
         vulnerableToPD = w.vulnerableToPD
         ionization = Double(w.ionization)
+        // Per-weapon ionization flash tint (Bible `IonizeColor`); nil leaves the
+        // renderer's default bluish glow. Kept regardless of `isBeam` since ion
+        // projectiles (not just beams) carry it too.
+        ionizeColor = w.ionizeColor.map { (Double($0.r) / 255.0, Double($0.g) / 255.0, Double($0.b) / 255.0) }
         cantFireWhileIonized = w.cantFireWhileIonized
         confusedByInterference = w.confusedByInterference
         turnsAwayIfJammed = w.turnsAwayIfJammed
@@ -501,6 +511,11 @@ public final class Projectile {
     public var facing: Double             // heading, for rendering the shot sprite
     public var targetID: Int?            // for guided/homing munitions
     public var alive = true
+    /// Per-weapon ionization flash tint carried from the firing `WeaponSpec`, so
+    /// an ion projectile's victim glows the same hue a beam's would. Nil → the
+    /// engine's default bluish ionization glow. Set post-construction in
+    /// `spawnProjectile` to avoid threading it through the big designated init.
+    public var ionizeColor: (r: Double, g: Double, b: Double)?
     /// Co-op client-side echo of an authority's shot: it flies straight and
     /// expires purely for show — no collision, no damage, no submunitions (damage
     /// is authoritative via ship-health sync). Set by `World.spawnVisualProjectile`;

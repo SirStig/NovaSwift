@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import NovaSwiftKit
 import NovaSwiftStory
+import NovaSwiftNet
 
 /// Top-level app state: current screen, settings, and the game data library
 /// (base data + plug-in catalog with enabled state).
@@ -120,6 +121,9 @@ final class AppModel: ObservableObject {
         // share bits we earn in a shared storyline, and union bits a partner earns
         // into ours — strictly non-destructive (see `MultiplayerSession`).
         session.playerBitsProvider = { [weak self] in self?.pilot.state.setBits ?? [] }
+        // Plug-in compatibility: the session verifies a joiner runs the same
+        // enabled plug-ins as the host (a mismatch would desync the shared galaxy).
+        session.pluginManifestProvider = { [weak self] in self?.currentPluginManifest() ?? .empty }
         session.onRemoteBitsEarned = { [weak self] bits in
             guard let self else { return }
             let before = pilot.state.setBits
@@ -161,6 +165,40 @@ final class AppModel: ObservableObject {
         audio.apply(settings: settings)
     }
     func commitBindings() { bindings.save() }
+
+    // MARK: Multiplayer plug-in compatibility
+
+    /// Content hashes cached by a per-file stamp (id + size + mtime), so building
+    /// the manifest only rehashes plug-ins whose files actually changed.
+    private var pluginHashCache: [String: String] = [:]
+
+    /// The local player's enabled-plug-in manifest, used to verify two players run
+    /// the same content before playing together. Cheap after the first call (hashes
+    /// are cached until a plug-in's files change).
+    func currentPluginManifest() -> PluginManifest {
+        let requirements = data.plugins.filter(\.isEnabled).map { bundle -> PluginRequirement in
+            let stamp = pluginStamp(bundle)
+            let hash = pluginHashCache[stamp] ?? {
+                let h = GameLibrary.contentHash(of: bundle)
+                pluginHashCache[stamp] = h
+                return h
+            }()
+            return PluginRequirement(id: bundle.id, name: bundle.name, contentHash: hash)
+        }
+        return PluginManifest(requirements)
+    }
+
+    private func pluginStamp(_ bundle: PluginBundle) -> String {
+        let fm = FileManager.default
+        var parts = [bundle.id]
+        for url in bundle.fileURLs.sorted(by: { $0.path < $1.path }) {
+            let attrs = try? fm.attributesOfItem(atPath: url.path)
+            let size = (attrs?[.size] as? NSNumber)?.intValue ?? -1
+            let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
+            parts.append("\(url.lastPathComponent)|\(size)|\(Int(mtime))")
+        }
+        return parts.joined(separator: ";")
+    }
 
     /// Make sure data is loaded and the audio system is wired to it (music track +
     /// decoded SFX). Safe to call repeatedly.

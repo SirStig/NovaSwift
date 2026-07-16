@@ -12,9 +12,18 @@ public struct LobbyDescriptor: Identifiable, Equatable, Sendable {
     /// advertised by the host. At least 1 (the host). Live-ish: the host
     /// re-advertises it as peers connect/leave, so a browser sees it change.
     public var playerCount: Int
-    public init(id: String, name: String, hostName: String, playerCount: Int = 1) {
+    /// How many plug-ins the host has enabled — shown in the lobby list.
+    public var pluginCount: Int
+    /// A short fingerprint of the host's enabled-plug-in set (`PluginManifest.
+    /// signature`). A browser compares it to its own to hint "compatible?" before
+    /// connecting; the authoritative check happens over the full manifest on join.
+    public var pluginSignature: String
+    public init(id: String, name: String, hostName: String, playerCount: Int = 1,
+                pluginCount: Int = 0, pluginSignature: String = "") {
         self.id = id; self.name = name; self.hostName = hostName
         self.playerCount = playerCount
+        self.pluginCount = pluginCount
+        self.pluginSignature = pluginSignature
     }
 }
 

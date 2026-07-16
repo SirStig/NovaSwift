@@ -47,11 +47,15 @@ enum GameCenterPresenter {
     #endif
 }
 
-/// A default 2–4 player request for a friends/auto co-op match.
-private func makeMatchRequest() -> GKMatchRequest {
+/// A default 2–4 player request for a friends/auto co-op match. `playerGroup`
+/// buckets auto-matchmaking by the enabled-plug-in set (`PluginManifest.groupID`)
+/// so only players with the same plug-ins are auto-matched — invites still get the
+/// full manifest handshake, since `playerGroup` doesn't gate them.
+private func makeMatchRequest(playerGroup: Int) -> GKMatchRequest {
     let request = GKMatchRequest()
     request.minPlayers = 2
     request.maxPlayers = 4
+    request.playerGroup = playerGroup
     return request
 }
 
@@ -60,6 +64,8 @@ private func makeMatchRequest() -> GKMatchRequest {
 /// `MultiplayerSession.startGameCenter`), or `onCancel` if the user backs out.
 #if os(iOS)
 struct GameCenterMatchmakerView: UIViewControllerRepresentable {
+    /// Plug-in-set bucket for auto-match (see `makeMatchRequest`).
+    var playerGroup: Int = 0
     var onMatch: (GKMatch) -> Void
     var onCancel: () -> Void
     var onError: (String) -> Void
@@ -67,7 +73,7 @@ struct GameCenterMatchmakerView: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIViewController(context: Context) -> GKMatchmakerViewController {
-        let vc = GKMatchmakerViewController(matchRequest: makeMatchRequest())
+        let vc = GKMatchmakerViewController(matchRequest: makeMatchRequest(playerGroup: playerGroup))
             ?? GKMatchmakerViewController()
         vc.matchmakerDelegate = context.coordinator
         return vc
@@ -89,6 +95,8 @@ struct GameCenterMatchmakerView: UIViewControllerRepresentable {
 }
 #elseif os(macOS)
 struct GameCenterMatchmakerView: NSViewControllerRepresentable {
+    /// Plug-in-set bucket for auto-match (see `makeMatchRequest`).
+    var playerGroup: Int = 0
     var onMatch: (GKMatch) -> Void
     var onCancel: () -> Void
     var onError: (String) -> Void
@@ -96,7 +104,7 @@ struct GameCenterMatchmakerView: NSViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSViewController(context: Context) -> GKMatchmakerViewController {
-        let vc = GKMatchmakerViewController(matchRequest: makeMatchRequest())
+        let vc = GKMatchmakerViewController(matchRequest: makeMatchRequest(playerGroup: playerGroup))
             ?? GKMatchmakerViewController()
         vc.matchmakerDelegate = context.coordinator
         return vc

@@ -31,6 +31,14 @@ struct MultiplayerHubView: View {
             .frame(maxWidth: .infinity)
             .background(backdrop)
         }
+        .sheet(isPresented: Binding(
+            get: { model.session.pluginMismatch != nil },
+            set: { if !$0 { model.session.pluginMismatch = nil } })) {
+            if let mismatch = model.session.pluginMismatch {
+                PluginMismatchView(lobbyName: model.session.pluginMismatchLobbyName,
+                                   mismatch: mismatch)
+            }
+        }
         .novaResponsive()
         .preferredColorScheme(.dark)
         #if os(iOS)
@@ -115,7 +123,8 @@ private struct LocalLobbySection: View {
                         .padding(.vertical, 10)
                 } else {
                     ForEach(model.session.localLobbies) { lobby in
-                        LobbyRow(lobby: lobby) { join(lobby) }
+                        LobbyRow(lobby: lobby,
+                                 compatible: isCompatible(lobby)) { join(lobby) }
                     }
                 }
             }
@@ -150,26 +159,49 @@ private struct LocalLobbySection: View {
         return name
     }
 
+    /// Whether our enabled plug-ins look compatible with a lobby, from the
+    /// advertised signature (the authoritative check is the full manifest exchange
+    /// on connect). Unknown (host advertised no signature) is treated as compatible.
+    private func isCompatible(_ lobby: LobbyDescriptor) -> Bool {
+        lobby.pluginSignature.isEmpty || lobby.pluginSignature == model.session.localPluginSignature
+    }
+
     private func join(_ lobby: LobbyDescriptor) {
-        model.session.stopBrowsingLocalLobbies()
+        let compatible = isCompatible(lobby)
         model.session.joinLocalLobby(
             lobby, displayName: hostDisplayName,
             systemID: model.pilot.state.currentSystem,
             shipTypeID: model.pilot.state.shipType)
-        onEnterFlight()
+        // Only drop into flight when compatible. If not, we still connect briefly so
+        // the host's full manifest arrives — that populates `pluginMismatch` and the
+        // hub shows exactly what to install/disable, without ever entering flight.
+        if compatible {
+            model.session.stopBrowsingLocalLobbies()
+            onEnterFlight()
+        }
     }
 }
 
 private struct LobbyRow: View {
     let lobby: LobbyDescriptor
+    /// Whether our enabled plug-ins match the lobby's advertised set.
+    var compatible: Bool
     var onJoin: () -> Void
     private var color: Color { GalaxyMapView.playerColor(for: lobby.id) }
+
+    private var pluginText: String {
+        switch lobby.pluginCount {
+        case 0: return "No plug-ins"
+        case 1: return "1 plug-in"
+        default: return "\(lobby.pluginCount) plug-ins"
+        }
+    }
 
     var body: some View {
         Button(action: onJoin) {
             HStack(spacing: 12) {
                 Circle().fill(color).frame(width: 10, height: 10)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(lobby.name).novaFont(.button, weight: .medium).foregroundStyle(.white)
                     HStack(spacing: 6) {
                         Text("Host: \(lobby.hostName)").novaFont(.caption).foregroundStyle(.secondary)
@@ -179,12 +211,19 @@ private struct LobbyRow: View {
                             .novaFont(.caption, weight: .medium)
                             .foregroundStyle(color)
                     }
+                    HStack(spacing: 5) {
+                        Image(systemName: compatible ? "puzzlepiece.extension.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                        Text(compatible ? pluginText : "Plug-ins don't match")
+                            .novaFont(.caption)
+                    }
+                    .foregroundStyle(compatible ? Color.secondary : Color(red: 1, green: 0.6, blue: 0.2))
                 }
                 Spacer()
-                Text("Join").novaFont(.caption, weight: .bold)
+                Text(compatible ? "Join" : "Details").novaFont(.caption, weight: .bold)
                     .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Capsule().fill(color.opacity(0.25)))
-                    .foregroundStyle(color)
+                    .background(Capsule().fill((compatible ? color : Color(red: 1, green: 0.6, blue: 0.2)).opacity(0.25)))
+                    .foregroundStyle(compatible ? color : Color(red: 1, green: 0.6, blue: 0.2))
             }
             .padding(.vertical, 8).padding(.horizontal, 10)
             .contentShape(Rectangle())
@@ -231,6 +270,7 @@ private struct OnlineLobbySection: View {
         #if canImport(GameKit)
         .sheet(isPresented: $showMatchmaker) {
             GameCenterMatchmakerView(
+                playerGroup: model.currentPluginManifest().groupID,
                 onMatch: { match in
                     showMatchmaker = false
                     model.session.startGameCenter(
@@ -254,6 +294,93 @@ private struct OnlineLobbySection: View {
         return name.isEmpty ? "Captain" : name
     }
     #endif
+}
+
+// MARK: - Plug-in mismatch
+
+/// Explains why a join was refused and exactly what to change: which plug-ins to
+/// install + enable, which to disable, and which are the wrong version. Shown when
+/// a joiner's enabled-plug-in set doesn't match the host's.
+private struct PluginMismatchView: View {
+    @Environment(\.dismiss) private var dismiss
+    let lobbyName: String
+    let mismatch: PluginMismatch
+
+    private var amber: Color { Color(red: 1.0, green: 0.7, blue: 0.28) }
+    private var warn: Color { Color(red: 1.0, green: 0.6, blue: 0.2) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "puzzlepiece.extension.fill")
+                            .font(.system(size: 34)).foregroundStyle(warn)
+                        Text("Plug-ins don't match")
+                            .novaFont(.heading).foregroundStyle(.white)
+                        Text("To join \(lobbyName.isEmpty ? "this lobby" : "“\(lobbyName)”") you need the same enabled plug-ins as the host.")
+                            .novaFont(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    section("Install & enable", systemImage: "arrow.down.circle.fill",
+                            color: .green, plugins: mismatch.missing,
+                            note: "The host has these — get them from the Plug-ins screen and enable them.")
+                    section("Disable", systemImage: "minus.circle.fill",
+                            color: warn, plugins: mismatch.extra,
+                            note: "The host isn't running these — turn them off in the Plug-ins screen.")
+                    section("Update to the host's version", systemImage: "arrow.triangle.2.circlepath",
+                            color: amber, plugins: mismatch.wrongVersion,
+                            note: "You have these, but a different version. Reinstall the host's copy.")
+
+                    Text("Change plug-ins from the main menu’s Plug-ins screen, then reopen Multiplayer.")
+                        .novaFont(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding()
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Can't Join")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("OK") { dismiss() } } }
+        }
+        .novaResponsive()
+        .preferredColorScheme(.dark)
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        #else
+        .frame(minWidth: 460, minHeight: 480)
+        #endif
+    }
+
+    @ViewBuilder
+    private func section(_ title: String, systemImage: String, color: Color,
+                         plugins: [PluginRequirement], note: String) -> some View {
+        if !plugins.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(title, systemImage: systemImage)
+                    .novaFont(.button, weight: .medium).foregroundStyle(color)
+                ForEach(plugins, id: \.id) { p in
+                    HStack(spacing: 8) {
+                        Circle().fill(color).frame(width: 6, height: 6)
+                        Text(p.name.isEmpty ? p.id : p.name)
+                            .novaFont(.caption, weight: .medium).foregroundStyle(.white)
+                    }
+                }
+                Text(note).novaFont(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
+        }
+    }
 }
 
 // MARK: - Shared bits

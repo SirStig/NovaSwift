@@ -743,6 +743,12 @@ public struct WeapRes {
     public let lightningDensity: Int
     /// `LiAmplitude` (@112): the amplitude in px of each lightning zig-zag (Bible).
     public let lightningAmplitude: Int
+    /// `IonizeColor` (@114, a 4-byte `0x00RRGGBB` LCOL): the tint a ship hit by
+    /// this weapon glows once it's "sufficiently ionized" (Bible). Nil when the
+    /// field is 0 — the Bible's stated "default bluish color" — so a downstream
+    /// default applies instead of flashing the hull black. Offset verified
+    /// against novaparse `WeapResource.ts` (`ionizeColor = getColor32(114)`).
+    public let ionizeColor: NovaColor?
 
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
     /// `Flags` 0x0200 / 0x0400: this weapon generates small / big smoke as its
@@ -894,6 +900,9 @@ public struct WeapRes {
                                           color: acolor(d, 82))
         lightningDensity = ai16(d, 110)
         lightningAmplitude = ai16(d, 112)
+        // IonizeColor (@114): 0 → the Bible's "default bluish color", surfaced as
+        // nil so a downstream default applies rather than a black hull flash.
+        ionizeColor = ai32(d, 114) == 0 ? nil : acolor(d, 114)
     }
 }
 

@@ -62,6 +62,16 @@ public final class NetSession: TransportDelegate {
     /// their own seed. Set by the app when it hosts.
     public var providesRules = false
 
+    /// This node's enabled-plug-in manifest, sent to each peer on connect so both
+    /// sides can verify they share the same content. `nil` (or `.empty`) = stock
+    /// game. Set by the app before the session starts.
+    public var localPluginManifest: PluginManifest?
+    /// Every peer's received plug-in manifest, keyed by player id. The app diffs a
+    /// joiner against the host to decide whether they can play together.
+    public private(set) var peerManifests: [String: PluginManifest] = [:]
+    /// Fired when a peer's plug-in manifest arrives (peer == its player id).
+    public var onPluginManifest: ((PluginManifest, PeerID) -> Void)?
+
     public init(transport: Transport, rules: SessionRules = .fullStakes) {
         self.localPlayerID = transport.localPeerID
         self.transport = transport
@@ -235,6 +245,10 @@ public final class NetSession: TransportDelegate {
         case .trade(let signal):
             onTrade?(signal, peer)
 
+        case .pluginManifest(let manifest):
+            peerManifests[peer] = manifest
+            onPluginManifest?(manifest, peer)
+
         case .input(let frame):
             onInput?(frame, peer)
 
@@ -254,9 +268,14 @@ public final class NetSession: TransportDelegate {
         if providesRules {
             send(.sessionRules(sessionRules), to: peer)
         }
+        // Announce our plug-in set so the newcomer (and we) can verify compatibility.
+        if let manifest = localPluginManifest {
+            send(.pluginManifest(manifest), to: peer)
+        }
     }
 
     public func transport(_ transport: Transport, peerDidDisconnect peer: PeerID) {
+        peerManifests.removeValue(forKey: peer)
         // peer id == player id, so drop that player's presence.
         if presence.removeValue(forKey: peer) != nil {
             onPresenceChanged?(self)

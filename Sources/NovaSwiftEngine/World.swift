@@ -287,6 +287,11 @@ public final class Ship {
     public var ionizeMax: Double = 0
     public var deionizePerSec: Double = 0
     public var isIonized: Bool { ionizeMax > 0 && ionCharge >= ionizeMax }
+    /// The tint the hull glows while ionized, set from the `IonizeColor` of
+    /// whatever last landed ion charge on it (Bible: "the color that a ship hit
+    /// by this weapon will appear after being sufficiently ionized"). Nil → the
+    /// renderer's default bluish glow. Reset to nil once the charge dissipates.
+    public var ionizeColor: (r: Double, g: Double, b: Double)?
     /// Ship-level jamming strength summed from fitted jammer outfits (`oütf`
     /// ModTypes 33-36). Stacks with the pilot government's inherent `InhJam1-4`
     /// when an incoming "turns away if jammed" guided shot rolls to keep lock.
@@ -625,13 +630,16 @@ public final class Ship {
         // never reports a kill. Kept as the very first check so no damage math or
         // side effect runs for an invulnerable ship.
         if invulnerable { return false }
-        // Whether shields were up *before* this shot lands decides hull exposure:
-        // the very shot that empties the shields does NOT also bleed into armor —
-        // only a later hit, arriving with shields already at zero, damages the
-        // hull. A shield-penetrating weapon ignores that gate for its armor damage.
-        let shieldsWereUp = shield > 0
+        // Apply the shield damage first, then expose the hull based on whether the
+        // shields are down *after* this shot. The shot that empties the shields
+        // therefore also lands its armor damage — there is no infinite "grace shot."
+        // This matters under sustained fire: shield regen tops the shields up by a
+        // sliver every frame (regen runs before damage), so a gate keyed on
+        // "shields were up *before* this shot" would read as up every frame and a
+        // continuous beam could pin the shields at zero yet never touch the hull —
+        // an immortal target. A shield-penetrating weapon bypasses the gate outright.
         if dmgShield > 0 { shield = max(0, shield - dmgShield) }
-        if dmgArmor > 0, piercing || !shieldsWereUp {
+        if dmgArmor > 0, piercing || shield <= 0 {
             armor = max(0, armor - dmgArmor)
         }
         return armor <= 0
@@ -645,7 +653,10 @@ public final class Ship {
         if fuel < maxFuel && fuelRegenPerSec > 0 {
             fuel = min(maxFuel, fuel + fuelRegenPerSec * dt)
         }
-        if ionCharge > 0 { ionCharge = max(0, ionCharge - deionizePerSec * dt) }
+        if ionCharge > 0 {
+            ionCharge = max(0, ionCharge - deionizePerSec * dt)
+            if ionCharge == 0 { ionizeColor = nil }   // glow fades with the charge
+        }
         logFuelTransitions()
     }
 
@@ -1855,6 +1866,7 @@ public final class World {
                            penetratesShields: spec.penetratesShields,
                            weaponID: spec.id, pdDurability: spec.durability,
                            translucentShots: spec.translucentShots)
+        p.ionizeColor = spec.ionizeColor
         projectiles.append(p)
         return p
     }
@@ -1946,7 +1958,8 @@ public final class World {
         let cast = beamCast(from: origin, dir: dir, range: spec.range, owner: ship)
         if let h = cast.hitShip {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
-                     ionization: spec.ionization, piercing: spec.penetratesShields, weaponID: spec.id)
+                     ionization: spec.ionization, ionizeColor: spec.ionizeColor,
+                     piercing: spec.penetratesShields, weaponID: spec.id)
             // Tractor beam (negative Impact): pull the target toward the firing
             // ship each time the beam connects, more strongly on lighter hulls.
             if spec.isTractorBeam {
@@ -2225,7 +2238,8 @@ public final class World {
                           spawned: inout [Projectile]) {
         if let h = directHit {
             applyHit(to: h, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
-                     ionization: p.ionization, piercing: p.penetratesShields, weaponID: p.weaponID)
+                     ionization: p.ionization, ionizeColor: p.ionizeColor,
+                     piercing: p.penetratesShields, weaponID: p.weaponID)
             if p.impact > 0 {
                 // Knockback along the shot's travel, inversely ∝ target size
                 // (a proxy for mass — heavier hulls barely budge).
@@ -2243,7 +2257,7 @@ public final class World {
                 if ownerIsPlayer, splash.isPlayerControlled, !friendlyFireAllowed { continue }
                 if (splash.position - pos).length <= p.blastRadius {
                     applyHit(to: splash, shield: p.shieldDamage * 0.5, armor: p.armorDamage * 0.5,
-                             ownerID: p.ownerID, ionization: p.ionization * 0.5,
+                             ownerID: p.ownerID, ionization: p.ionization * 0.5, ionizeColor: p.ionizeColor,
                              piercing: p.penetratesShields, weaponID: p.weaponID)
                 }
             }
@@ -2304,7 +2318,8 @@ public final class World {
     }
 
     private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
-                          ionization: Double = 0, piercing: Bool = false, weaponID: Int = -1) {
+                          ionization: Double = 0, ionizeColor: (r: Double, g: Double, b: Double)? = nil,
+                          piercing: Bool = false, weaponID: Int = -1) {
         // Difficulty: scale only the damage the *player* takes (Easy softens,
         // Hard sharpens); NPC-vs-NPC combat is untouched.
         var shield = shield, armor = armor
@@ -2334,6 +2349,9 @@ public final class World {
         if ship.cloakEngaged, ship.cloakDropsOnDamage { ship.cloakEngaged = false }
         if ionization > 0, ship.ionizeMax > 0 {
             ship.ionCharge = min(ship.ionizeMax, ship.ionCharge + ionization)
+            // Remember the hue to glow: this weapon's IonizeColor, or keep any
+            // prior tint if this shot doesn't specify one (0 = "default bluish").
+            ship.ionizeColor = ionizeColor ?? ship.ionizeColor
         }
         events.append(hadShield ? .shieldHit(at: ship.position, weaponID: weaponID)
                                  : .armorHit(at: ship.position, weaponID: weaponID))

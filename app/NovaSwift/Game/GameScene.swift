@@ -164,6 +164,9 @@ final class GameScene: SKScene {
     private var weaponGlowTextures: [SKTexture] = []
     private var weaponGlowNode: SKSpriteNode?
     private var weaponGlowFlare: CGFloat = 0
+    /// Additive overlay tinting the player hull toward its ionization colour as
+    /// ion charge builds (mirrors `NPCNode.ionizeTint`).
+    private var shipIonizeTint: SKSpriteNode?
     /// Base-image multi-set animation config (banking / animation / frames-per-
     /// rotation) for the player hull, plus the per-ship clocks that drive it.
     private var hullAnim = HullAnim()
@@ -611,6 +614,9 @@ final class GameScene: SKScene {
         var weaponGlow: SKSpriteNode?
         var weaponGlowTextures: [SKTexture] = []
         var weaponGlowFlare: CGFloat = 0
+        /// Additive overlay that tints the hull toward its ionization colour as
+        /// ion charge builds — the Bible's "the ship will appear [IonizeColor]".
+        var ionizeTint: SKSpriteNode?
         var hullAnim = HullAnim()
         var animClock: Double = 0
         var blinkClock: Double = 0
@@ -944,6 +950,9 @@ final class GameScene: SKScene {
             node.addChild(sprite)
             shipSprite = sprite
             shipRadius = max(first.size().width, first.size().height) / 2
+            let tint = makeIonizeTint(texture: first)
+            node.addChild(tint)
+            shipIonizeTint = tint
         } else {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 0, y: 16))
@@ -1365,6 +1374,7 @@ final class GameScene: SKScene {
         } else if let tri = placeholder {
             tri.zRotation = -CGFloat(p.angle)
         }
+        updateIonizeTint(shipIonizeTint, hullTexture: shipSprite?.texture, ship: p)
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
             glow.texture = engineGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: engineGlowTextures.count)]
         }
@@ -2313,8 +2323,13 @@ final class GameScene: SKScene {
                     // `beamColor` core fading to `coronaColor` at the edges IS
                     // their authored art. Baked into the texture (not tinted
                     // via colorBlendFactor) since two independent colors can't
-                    // be expressed with a single tint.
+                    // be expressed with a single tint. Render taller than the
+                    // core so the corona actually blooms around it rather than
+                    // collapsing to a hard thin line.
                     node.texture = corona
+                    node.size = CGSize(width: length,
+                                       height: beamEnvelope(coreWidth: width, falloff: b.coronaFalloff,
+                                                            coreless: isCoronaOnly).height)
                     node.colorBlendFactor = 0
                     node.blendMode = .add
                     node.alpha = alpha
@@ -2428,10 +2443,12 @@ final class GameScene: SKScene {
         if let core = beam.color, let corona = beam.coronaColor {
             let coreColor = SKColor(red: CGFloat(core.r), green: CGFloat(core.g), blue: CGFloat(core.b), alpha: 1)
             let coronaColor = SKColor(red: CGFloat(corona.r), green: CGFloat(corona.g), blue: CGFloat(corona.b), alpha: 1)
-            // `coronaFalloff` has no documented exact curve; higher values read
-            // as "pinch the bright core tighter" in-game, so this maps it to a
-            // core-width fraction rather than reproducing an unverified formula.
-            let coreStart = CGFloat(max(0.05, min(0.45, 0.45 - beam.coronaFalloff / 200.0)))
+            // Map the beam's real core diameter into the taller glow envelope so
+            // the bright core stays thin while the corona blooms around it (see
+            // `beamEnvelope`) — instead of the whole gradient squished into the
+            // core's few px, which made every beam a hard thin line.
+            let cw: CGFloat = coreless ? 8 : CGFloat(beam.width)
+            let coreStart = beamEnvelope(coreWidth: cw, falloff: beam.coronaFalloff, coreless: coreless).coreStart
             texture = GameScene.makeCoronaTexture(core: coreColor, corona: coronaColor,
                                                   coreStart: coreStart, coreless: coreless)
         }
@@ -2441,6 +2458,25 @@ final class GameScene: SKScene {
         // including ones with correct data, to "no corona" for the rest of the run.
         if let texture { weaponCoronaTextureCache[cacheKey] = texture }
         return texture
+    }
+
+    /// The rendered glow envelope for a beam: how tall to draw the sprite, and
+    /// where the bright core sits inside that height (`coreStart`, matching
+    /// `makeCoronaTexture`'s stop). Real EV Nova beams are a thin bright core
+    /// inside a much wider soft corona; the old code squished the whole gradient
+    /// into the core's few px, so every beam read as the same hard thin line.
+    /// Lower `coronaFalloff` → a wider, softer glow (Bible: higher falloff =
+    /// tighter). `coreWidth` is the already-effective core diameter in px.
+    private func beamEnvelope(coreWidth: CGFloat, falloff: Double,
+                              coreless: Bool) -> (height: CGFloat, coreStart: CGFloat) {
+        let cw = max(1, coreWidth)
+        let f = CGFloat(max(2, min(16, falloff)))
+        // Per-side glow reaching well beyond the core: falloff 2 → ~2.5×cw,
+        // falloff 16 → ~0.75×cw. A coreless beam is all glow.
+        let glowHalf = cw * (0.5 + 4.0 / f)
+        let height = cw + glowHalf * 2
+        let coreFraction = coreless ? 0.12 : cw / height
+        return (height, max(0.03, 0.5 - coreFraction / 2))
     }
 
     /// A vertical 5-stop gradient bar: transparent corona → soft corona glow →
@@ -2576,6 +2612,7 @@ final class GameScene: SKScene {
             } else if let tri = node.placeholder {
                 tri.zRotation = -CGFloat(npc.angle)
             }
+            updateIonizeTint(node.ionizeTint, hullTexture: node.sprite?.texture, ship: npc)
             if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {
                 glow.texture = node.engineGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.engineGlowTextures.count)]
             }
@@ -2650,6 +2687,9 @@ final class GameScene: SKScene {
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
+            let tint = makeIonizeTint(texture: first)
+            n.container.addChild(tint)
+            n.ionizeTint = tint
         } else {
             // Faction-tinted arrowhead when we can't resolve the hull sprite.
             let path = CGMutablePath()
@@ -3615,6 +3655,49 @@ final class GameScene: SKScene {
         sprite.color = SKColor(red: CGFloat(sc.r) / 255, green: CGFloat(sc.g) / 255,
                                blue: CGFloat(sc.b) / 255, alpha: 1)
         sprite.colorBlendFactor = 0.3
+    }
+
+    /// An additive, texture-shaped overlay used to glow a hull its ionization
+    /// colour. `colorBlendFactor = 1` renders it as a solid-colour silhouette of
+    /// whatever hull texture it wears; `.add` blends that glow over the ship.
+    private func makeIonizeTint(texture: SKTexture) -> SKSpriteNode {
+        let t = SKSpriteNode(texture: texture)
+        t.texture?.filteringMode = spriteFilter
+        t.blendMode = .add
+        t.colorBlendFactor = 1
+        t.zPosition = 0.7   // above the hull + running lights, below the shield bubble
+        t.isHidden = true
+        return t
+    }
+
+    /// Tint a hull toward its ionization colour as ion charge builds, wearing the
+    /// same texture as the hull this frame so the whole silhouette glows. Ramps
+    /// with charge and adds a slow pulse once fully ionized — EV Nova's "the ship
+    /// will appear [IonizeColor] after being sufficiently ionized" (Bible).
+    private func updateIonizeTint(_ tint: SKSpriteNode?, hullTexture: SKTexture?, ship: Ship) {
+        guard let tint else { return }
+        let frac = ship.ionizeMax > 0 ? min(1, ship.ionCharge / ship.ionizeMax) : 0
+        guard frac > 0.02 else { tint.isHidden = true; return }
+        if let tex = hullTexture { tint.texture = tex; tint.size = tex.size() }
+        // The weapon's own IonizeColor, or the Bible's default bluish when it
+        // specified none (`IonizeColor == 0`). Brighten it so even a dim colour
+        // reads vividly under additive blending — push the strongest channel to
+        // full so the hull clearly takes on the hue instead of a muddy wash.
+        var c = ship.ionizeColor ?? (r: 0.4, g: 0.6, b: 1.0)
+        let peak = max(c.r, c.g, c.b, 0.001)
+        c = (c.r / peak, c.g / peak, c.b / peak)
+        tint.color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)
+        // Strong glow that ramps with charge and pulses hard once fully ionized.
+        let base = 0.6 + 0.4 * CGFloat(frac)
+        let pulse = ship.isIonized ? 0.25 * CGFloat(sin(effectClock * 7)) : 0
+        tint.alpha = max(0, min(1, base + pulse))
+        // Over-scale the additive silhouette so its glow bleeds past the hull as
+        // a coloured rim halo — an ionized ship visibly lights up, not just
+        // re-tints. Grows with charge, breathes a little once fully ionized.
+        let halo: CGFloat = ship.isIonized ? 1.22 + 0.05 * CGFloat(sin(effectClock * 7))
+                                           : 1.06 + 0.12 * CGFloat(frac)
+        tint.setScale(halo)
+        tint.isHidden = false
     }
 
     private func factionColor(for npc: Ship) -> SKColor {

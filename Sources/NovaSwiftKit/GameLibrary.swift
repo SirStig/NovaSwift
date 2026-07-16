@@ -183,6 +183,33 @@ public enum GameLibrary {
         return results.compactMap { $0 }
     }
 
+    // MARK: Plug-in content hash (multiplayer compatibility)
+
+    /// A content hash of a plug-in's resource bytes — its *version* identity, for
+    /// verifying two players run the same plug-in in multiplayer. Unlike
+    /// `fingerprint` (which keys on size/mtime for a per-machine cache name), this
+    /// hashes the actual file contents so it's identical across devices for the
+    /// same plug-in build. Files are streamed, so a large container doesn't blow up
+    /// memory. Order-stable (files sorted by path).
+    public static func contentHash(of bundle: PluginBundle) -> String {
+        var hasher = SHA256()
+        for url in bundle.fileURLs.sorted(by: { $0.path < $1.path }) {
+            // Fold the filename in too, so identical bytes under different names
+            // (e.g. load-order-significant containers) don't collide.
+            hasher.update(data: Data(url.lastPathComponent.utf8))
+            guard let stream = InputStream(url: url) else { continue }
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+            while true {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                hasher.update(data: Data(buffer[0..<read]))
+            }
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     // MARK: Data-set fingerprint
 
     /// A stable hash of the exact set of container files (base + enabled plug-ins)
