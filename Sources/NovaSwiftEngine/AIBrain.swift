@@ -1163,7 +1163,22 @@ public final class AIBrain {
         // correction term is allowed to demand well above the hull's own top
         // speed; `formationBoost` is scaled to whatever `desiredVel` needs so
         // the limit lift actually delivers it.
-        let desiredVel = leader.velocity + posErr * formationPullGain
+        //
+        // Acceleration feed-forward: anticipate the leader's velocity *change*,
+        // not just its current velocity. Without it the controller is purely
+        // reactive — the leader thrusts, the escort lags a frame, then snatches a
+        // correction: the residual station-keeping wobble the driftless-AI
+        // shortcut used to paper over. Derive the leader's acceleration from its
+        // per-frame velocity delta and bias the target velocity forward over a
+        // short reaction horizon, so the wing moves *with* the leader the instant
+        // it thrusts or turns. `prevLeaderVel` is nil on the first escorting frame
+        // and after the leader is lost, so the term is simply skipped then.
+        var leaderAccelFF = Vec2()
+        if let prev = prevLeaderVel, dt > 0 {
+            leaderAccelFF = (leader.velocity - prev) * (formationAccelLookahead / dt)
+        }
+        prevLeaderVel = leader.velocity
+        let desiredVel = leader.velocity + leaderAccelFF + posErr * formationPullGain
         let desiredSpeed = desiredVel.length
         var intent = ControlIntent()
 
@@ -1177,15 +1192,43 @@ public final class AIBrain {
             return intent
         }
 
-        // Point the nose along the desired velocity and throttle up toward its
-        // magnitude — an inertialess hull realises a target velocity by facing
-        // it and ramping speed. Bang-bang on speed (thrust while under the
-        // target), gated on rough alignment so it never accelerates off-axis
-        // while still swinging onto heading.
-        intent.desiredHeading = desiredVel.angle
-        if me.velocity.length < desiredSpeed,
-           Vec2.heading(me.angle).dot(desiredVel.normalized) > cosThrustCone {
-            intent.thrust = true
+        if inertialessNow {
+            // Inertialess hull: velocity tracks the nose, so it realises a target
+            // velocity by facing it and ramping speed. Bang-bang on magnitude
+            // (thrust while under the target), gated on rough alignment so it
+            // never accelerates off-axis while still swinging onto heading.
+            intent.desiredHeading = desiredVel.angle
+            if me.velocity.length < desiredSpeed,
+               Vec2.heading(me.angle).dot(desiredVel.normalized) > cosThrustCone {
+                intent.thrust = true
+            }
+        } else {
+            // Newtonian hull: pointing at `desiredVel` and only ever *adding* speed
+            // can't slow a ship carrying momentum, so it overshoots its slot and
+            // orbits forever (the residual formation wobble). Reuse the proven
+            // flip-and-burn arrival primitive instead: `moveTo` brakes onto the
+            // station point accounting for the turn time a sluggish hull needs to
+            // swing retrograde, and matches the slot's velocity (the leader's own
+            // velocity plus the acceleration feed-forward) so it converges on a
+            // moving formation too. Once parked it reports `arrived`, and we square
+            // up to the wedge heading and coast rather than chase a noisy aim.
+            // The "arrived" band is deliberately a little loose: a bang-bang
+            // thruster changes speed by `accel·dt` each tick (a few px/s), so an
+            // arrive-speed tighter than that can never be *held* — `arrived`
+            // flickers and the nose swings between the flip-and-burn aim and the
+            // wedge heading every frame (the "constantly correcting" jitter). A
+            // deadband wider than one tick lets a matched escort latch onto "hold
+            // station" and stop hunting; it stays far inside the formation
+            // tightness the settle/keep-up behaviour needs.
+            let slotVel = leader.velocity + leaderAccelFF
+            let (cmd, arrived) = moveTo(me, toward: station, matching: slotVel,
+                                        arriveRadius: max(40, me.radius + 20),
+                                        arriveSpeed: max(12, me.stats.maxSpeed * 0.08))
+            if arrived {
+                intent.desiredHeading = wedgeHeading
+            } else {
+                intent = cmd
+            }
         }
         // Lift the hull's caps enough to actually reach `desiredSpeed`
         // (`World.step` applies `topSpeed *= 1 + boost`), scaled to the demand
@@ -1201,6 +1244,13 @@ public final class AIBrain {
     /// of matching the leader's velocity. High enough to hold a tight wing
     /// through hard turns, low enough not to overshoot into oscillation.
     private var formationPullGain: Double { 2.5 }
+
+    /// Reaction horizon (seconds) for the formation acceleration feed-forward:
+    /// the leader's measured acceleration is projected this far ahead and added to
+    /// the escort's target velocity, so the wing anticipates the leader's course
+    /// change instead of chasing the gap it opens. Long enough to kill the lag
+    /// wobble, short enough not to over-anticipate into an oscillation of its own.
+    private var formationAccelLookahead: Double { 0.25 }
 
     /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
     /// applied once via `World.deliverAssistance`). After delivering: if the

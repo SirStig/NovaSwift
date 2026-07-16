@@ -99,15 +99,16 @@ final class FlightTests: XCTestCase {
         XCTAssertEqual(ship.velocity.y, 0, accuracy: 5, "no leftover drift in the old direction")
     }
 
-    /// EV Nova's NPC AI flies driftless: every AI-brained ship flies the
-    /// inertialess model by default (`FlightTuning.aiInertialess == .all`), while
-    /// the player keeps authentic Newtonian flight unless their own hull sets the
-    /// flag — the player/AI asymmetry the original had.
-    func testAIShipsFlyInertialessByDefaultAndPlayerDoesNot() {
+    /// Real EV Nova NPCs fly Newtonian: with the default `.off` scope neither an
+    /// AI ship nor the player flies driftless unless its own hull carries the
+    /// `shïp` Flags2 0x0040 flag — every ship wrestles the same momentum, which is
+    /// what makes the reverse-and-fire "Monty Python" maneuver possible at all.
+    func testAIShipsFlyNewtonianByDefaultLikeThePlayer() {
         let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
         let npc = Ship(name: "NPC", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
         npc.brain = AIBrain(aiType: .warship, govt: 500)
-        XCTAssertTrue(npc.fliesInertialess(world.tuning), "an AI ship flies driftless by default")
+        XCTAssertEqual(world.tuning.aiInertialess, .off, "AI-inertialess is off by default")
+        XCTAssertFalse(npc.fliesInertialess(world.tuning), "an unflagged AI ship flies Newtonian by default")
         XCTAssertFalse(world.player.fliesInertialess(world.tuning), "the player keeps Newtonian flight")
     }
 
