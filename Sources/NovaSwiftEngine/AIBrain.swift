@@ -811,10 +811,22 @@ public final class AIBrain {
         // the standoff radius and overlap the target. Folding in closing speed
         // (relative, so a moving target is handled too) makes the ship start
         // coasting early enough to actually settle at the bubble's edge.
-        let closingSpeed = max(0, (me.velocity - target.velocity).dot(toTarget.normalized))
-        let brakeDist = 0.5 * closingSpeed * closingSpeed / max(me.stats.acceleration, 1)
+        let rel = me.velocity - target.velocity
+        let closingSpeed = rel.dot(toTarget.normalized)     // >0 closing in, <0 opening out
+        // Room needed to bleed the closing speed before the bubble, with a margin
+        // and a turn-in allowance: a Newtonian hull must first swing its nose off
+        // the target and round to retrograde before it can decelerate at all, so it
+        // has to commit to braking earlier than the pure `v²/2a` distance.
+        let accel = max(me.stats.acceleration, 1)
+        let brakeDist = closingSpeed > 0
+            ? (0.5 * closingSpeed * closingSpeed / accel + closingSpeed * (1.2 / max(me.stats.turnRate, 0.4))) * 1.1
+            : 0
+        // Below this closing speed the range is effectively held — stop braking and
+        // let the guns bear rather than fighting a few px/s of drift forever.
+        let brakeReleaseSpeed = me.stats.maxSpeed * 0.08 + 8
         if dist > standoff + brakeDist {
-            // Thrust when roughly pointed the right way, so we actually close.
+            // Outside the bubble (with room to stop): press in, nose already on the
+            // lead point so the guns bear as we close.
             if aimError < .pi / 2 {
                 intent.thrust = true
                 // Interceptors light the afterburner to run a fleeing quarry down
@@ -822,33 +834,31 @@ public final class AIBrain {
                 if aiType == .interceptor && dist > range * 1.5
                     && aimError < 0.5 && canBurn(me) { intent.afterburner = true }
             }
+        } else if closingSpeed > brakeReleaseSpeed {
+            // Inside the braking line and still barreling in. Coasting here — the old
+            // driftless assumption — just sails a Newtonian hull straight through the
+            // bubble into the target's face, where it wheels 180° and bounces back
+            // out: the combat "spin". Instead bleed the closing speed with a real
+            // flip-and-burn: swing to retrograde and thrust against the approach.
+            // This is the reverse-and-fire posture — the hull ends up facing roughly
+            // away while its momentum still carries it, turrets/beam-turrets firing
+            // through it (they aim independently) and the fixed guns re-bearing the
+            // instant the closing speed is spent and it snaps back to aiming below.
+            intent.desiredHeading = (rel * -1).angle
+            if Vec2.heading(me.angle).dot((rel * -1).normalized) > cosThrustCone {
+                intent.thrust = true
+            }
         } else if dist < hullFloor {
-            // Genuinely about to overlap the target's hull — back off rather
-            // than merely coast. This can still happen even with the braking
-            // margin above (a target that itself closes in, a spawn that
-            // starts too close) and previously left the ship just sitting
-            // there overlapping the target's hull until distance happened to
-            // open back up on its own. Turn tail and thrust away — overriding
-            // the aim-at-target heading set above — until clear; turreted/
-            // beam-turreted weapons keep firing through the retreat below
-            // (they aim independent of hull heading), fixed mounts simply
-            // hold fire until back at range, exactly like closing in from
-            // outside the bubble in reverse.
-            //
-            // Deliberately gated on `hullFloor`, not the full `standoff`: a
-            // ship anywhere inside its *preferred* standoff but still well
-            // clear of the target's hull has a perfectly good shot — e.g. two
-            // warships that spawn well inside standoff but far outside hull
-            // range should just trade fire in place, not both turn tail. Only
-            // near-overlap actually needs an active retreat.
+            // Genuinely about to overlap the target's hull — open the range: nose
+            // away, thrust out. Only near-overlap forces this active retreat; a ship
+            // merely inside its *preferred* standoff but clear of the hull just
+            // trades fire in place. Turrets keep firing through it; fixed mounts hold.
             intent.desiredHeading = (me.position - target.position).angle
             intent.thrust = true
         }
-        // Else: between the hull floor and the standoff/braking line — coast
-        // (no thrust, the `ControlIntent()` default). Inside standoff but
-        // clear of the hull, that's a stable engagement distance, not
-        // something to correct; just outside it, momentum bleeds off before
-        // the ship ever needs to cross the standoff line in the first place.
+        // Else: in the standoff band, closing slowly — hold the nose on the target
+        // and trade fire. Its own residual drift and the target's motion keep the
+        // engagement moving instead of two ships parked nose to nose.
         // Fire when the target is within reach and in the firing arc — except
         // turrets/beam-turrets, which `World.fireAngle` already aims straight at
         // the target regardless of hull heading, so gating the *intent* to fire

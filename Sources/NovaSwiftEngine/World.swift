@@ -740,7 +740,14 @@ public final class Ship {
         guard let brain = brain else { return false }
         switch tuning.aiInertialess {
         case .off:        return false
-        case .formations: return brain.leaderID != nil || brain.isFleetMember
+        case .formations:
+            // A ship actively fighting flies Newtonian so it can brake, kite and
+            // reverse-and-fire (see `attack()`); the driftless glue is only for
+            // *holding formation*. So a fleet flagship or an escort that peels off to
+            // engage wrestles momentum like any lone combatant, and reverts to the
+            // glued formation model only once it falls back into station.
+            if brain.state == .attacking { return false }
+            return brain.leaderID != nil || brain.isFleetMember
         case .all:        return true
         }
     }
