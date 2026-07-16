@@ -99,17 +99,22 @@ final class FlightTests: XCTestCase {
         XCTAssertEqual(ship.velocity.y, 0, accuracy: 5, "no leftover drift in the old direction")
     }
 
-    /// Real EV Nova NPCs fly Newtonian: with the default `.off` scope neither an
-    /// AI ship nor the player flies driftless unless its own hull carries the
-    /// `shïp` Flags2 0x0040 flag — every ship wrestles the same momentum, which is
-    /// what makes the reverse-and-fire "Monty Python" maneuver possible at all.
-    func testAIShipsFlyNewtonianByDefaultLikeThePlayer() {
+    /// Default `.formations` scope: a *lone* AI ship (and the player) wrestles
+    /// Newtonian momentum — what makes the reverse-and-fire "Monty Python" maneuver
+    /// possible — while a ship holding formation flies driftless so it glues to its
+    /// slot (the EV Nova escort behavior). Only the hull flag overrides otherwise.
+    func testDefaultScopeFliesLoneShipsNewtonianButFormationsDriftless() {
         let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
         let npc = Ship(name: "NPC", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
         npc.brain = AIBrain(aiType: .warship, govt: 500)
-        XCTAssertEqual(world.tuning.aiInertialess, .off, "AI-inertialess is off by default")
-        XCTAssertFalse(npc.fliesInertialess(world.tuning), "an unflagged AI ship flies Newtonian by default")
+        XCTAssertEqual(world.tuning.aiInertialess, .formations, "formation-flyers driftless by default")
+        XCTAssertFalse(npc.fliesInertialess(world.tuning), "a lone AI ship flies Newtonian by default")
         XCTAssertFalse(world.player.fliesInertialess(world.tuning), "the player keeps Newtonian flight")
+
+        let escort = Ship(name: "Escort", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
+        let eb = AIBrain(aiType: .interceptor, govt: 500); eb.leaderID = World.playerEntityID
+        escort.brain = eb
+        XCTAssertTrue(escort.fliesInertialess(world.tuning), "an escort holding formation flies driftless")
     }
 
     /// `.formations` scope: only ships flying in formation (a leader-following

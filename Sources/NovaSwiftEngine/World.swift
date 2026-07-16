@@ -93,12 +93,17 @@ public struct FlightTuning {
     public var turnScale: Double       // stat → deg/sec
     public var dragPerSecond: Double   // gentle space drag so ships settle (0 = pure Newtonian)
     /// How broadly AI ships fly the engine's driftless (inertialess) model
-    /// beyond their own hull flag — see `AIInertialessScope`. Defaults to `.off`:
-    /// real EV Nova NPCs *do* wrestle Newtonian momentum (the reverse-and-fire
-    /// "Monty Python" maneuver is a signature of the original), so ambient traffic
-    /// and combatants alike flip-and-burn like the player. Only hulls/outfits
-    /// carrying the real `shïp` Flags2 0x0040 flag fly driftless.
-    public var aiInertialess: AIInertialessScope = .off
+    /// beyond their own hull flag — see `AIInertialessScope`. Defaults to
+    /// `.formations`: lone traffic and lone combatants wrestle Newtonian momentum
+    /// (the reverse-and-fire "Monty Python" maneuver is a signature of the
+    /// original), while ships *holding formation* — escorts and fleet members —
+    /// fly driftless so they glue to their slots. The EV Nova Bible describes
+    /// escorts as "ignoring their own speed and maneuverability to hold formation,"
+    /// which is exactly a driftless hold; making them Newtonian instead produces
+    /// a scattered, twitchy, lagging wing (finite turn/thrust can't chase a moving
+    /// slot cleanly). This keeps the momentum feel where the player perceives it
+    /// (ambient flight, combat) and precise formations where they expect them.
+    public var aiInertialess: AIInertialessScope = .formations
 
     // The Bible states an explicit real-time ratio for Maneuver ("10 ≈ 30°/sec",
     // giving turnScale=3.0 exactly) but gives Speed/Accel no units at all — no
