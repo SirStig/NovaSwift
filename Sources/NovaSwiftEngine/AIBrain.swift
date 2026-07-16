@@ -1101,20 +1101,27 @@ public final class AIBrain {
             enter(defaultIdleState(me, world))
             return ControlIntent()
         }
-        // Snap straight to the leader's heading the first frame (nothing to
-        // smooth from yet), then chase it at a bounded turn rate — fast enough
-        // to follow an ordinary course change, far too slow to track a
-        // dogfight's rapid re-aiming. `angleDelta` gives the shortest signed
-        // turn so this always closes the short way around, never the long way.
-        let maxWedgeTurnPerSec = 1.2   // ~69°/sec
+        // Orient the wedge along the leader's actual *course* (velocity direction)
+        // while it's moving, not its raw nose angle. A leader's heading can snap
+        // around as it dogfights (aiming) without going anywhere; chasing that
+        // swings every slot point and the whole wing loops after them. Its course
+        // only turns as fast as it physically maneuvers, so tracking that lets the
+        // wedge follow a hard turn promptly — a tight wing through the turn — while
+        // ignoring stationary nose-swing. Fall back to the nose angle when nearly
+        // stopped (course is meaningless there). Then chase the target at a bounded
+        // rate; `angleDelta` gives the shortest signed turn so it always closes the
+        // short way around.
+        let movingFast = leader.velocity.length > leader.stats.maxSpeed * 0.15
+        let wedgeTarget = movingFast ? leader.velocity.angle : leader.angle
+        let maxWedgeTurnPerSec = 3.0   // ~172°/sec — follows real course changes tightly
         if let h = formationHeading {
-            let delta = angleDelta(from: h, to: leader.angle)
+            let delta = angleDelta(from: h, to: wedgeTarget)
             let step = max(-maxWedgeTurnPerSec * dt, min(maxWedgeTurnPerSec * dt, delta))
             formationHeading = h + step
         } else {
-            formationHeading = leader.angle
+            formationHeading = wedgeTarget
         }
-        let wedgeHeading = formationHeading ?? leader.angle
+        let wedgeHeading = formationHeading ?? wedgeTarget
         // Slot → (row, column): row r (1-based) holds r ships, centered behind
         // the leader and spread evenly across the row — row 1 is one ship dead
         // astern, row 2 flanks it left/right, row 3 adds a centered ship plus two
@@ -1128,14 +1135,19 @@ public final class AIBrain {
             row += 1
         }
         let col = remaining   // 0..<row within this row
-        // Slot spacing scales with the hulls actually involved — a fixed 64/72pt
-        // offset was tuned for small-ship wings and left almost no clearance
-        // behind a big leader (e.g. a Raven): row 1 landed inside/overlapping its
-        // stern instead of trailing it. Mirrors the padding `attack()` uses for
-        // its combat standoff bubble (`me.radius + target.radius`, plus a gap).
-        let slotSpacing = max(64, leader.radius + me.radius + 40)
-        let lateral = (Double(col) - Double(row - 1) / 2.0) * slotSpacing  // right of the leader (+) / left (−)
-        let behind = -slotSpacing * Double(row)                           // trailing the leader
+        // Slot spacing scales purely with the hulls actually involved: just enough
+        // to clear both hulls (`leader.radius + me.radius`) plus a small gap, so
+        // small fighters pack into a tight wing while a big leader (or a big escort)
+        // still gets real clearance — tighter or wider *dynamically* with ship size,
+        // never a loose one-size fixed gap. The tiny floor only guards degenerate
+        // zero-radius data. `behind` uses a slightly larger step than `lateral` so
+        // the wedge reads as a crisp pyramid trailing the leader (its tip) rather
+        // than a squat blob.
+        let hullGap = leader.radius + me.radius
+        let lateralSpacing = max(24, hullGap + 12)
+        let depthSpacing = max(30, hullGap + 22)
+        let lateral = (Double(col) - Double(row - 1) / 2.0) * lateralSpacing  // right of the leader (+) / left (−)
+        let behind = -depthSpacing * Double(row)                              // trailing the leader
         // Wedge frame: forward = (sin a, cos a); right = (cos a, −sin a) — built
         // from the smoothed `wedgeHeading`, not the leader's raw (possibly
         // combat-swinging) nose angle; see `formationHeading` above.

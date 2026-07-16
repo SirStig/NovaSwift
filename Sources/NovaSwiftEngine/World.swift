@@ -171,6 +171,16 @@ public final class Ship {
     public let stats: ShipStats
     public let name: String
 
+    /// Render-interpolation snapshot: this ship's `position`/`angle` as of the end
+    /// of the *previous* fixed sim tick. The renderer draws the ship at
+    /// `lerp(renderPrevPosition, position, alpha)` where `alpha` is how far the
+    /// current display frame sits into the next tick — so with a fixed 30 Hz sim,
+    /// a 60/120 Hz display shows smooth, gliding motion instead of 30 Hz steps.
+    /// Seeded to the spawn pose so a brand-new ship never lerps in from the origin.
+    /// Purely presentational; the simulation never reads these.
+    public var renderPrevPosition: Vec2
+    public var renderPrevAngle: Double
+
     /// Unique per-instance id assigned by the world (player == 0). Distinct from
     /// `shipTypeID`, which is the `shïp` resource id used for the sprite.
     public var entityID: Int = 0
@@ -611,6 +621,8 @@ public final class Ship {
         self.velocity = Vec2()
         self.angle = angle
         self.lastFinitePosition = position
+        self.renderPrevPosition = position
+        self.renderPrevAngle = angle
     }
 
     /// The sprite frame index (0..<rotationFrames) for the current heading.
@@ -1019,6 +1031,20 @@ public final class World {
     /// several hot per-frame sites: AI target validation, fire-weapons target
     /// lookup, guided-projectile steering).
     public func ship(id: Int) -> Ship? { shipByID[id] }
+
+    /// Snapshot every ship's current pose into its render-interpolation `prev`
+    /// slot. The renderer calls this immediately before each fixed `step(_:)` so
+    /// it can later draw ships at `lerp(renderPrevPosition, position, alpha)` and
+    /// glide smoothly between 30 Hz sim ticks on a faster display. Presentational
+    /// only — the sim never reads the snapshot. See `Ship.renderPrevPosition`.
+    public func snapshotRenderState() {
+        player.renderPrevPosition = player.position
+        player.renderPrevAngle = player.angle
+        for npc in npcs {
+            npc.renderPrevPosition = npc.position
+            npc.renderPrevAngle = npc.angle
+        }
+    }
 
     /// How a new NPC came into being, so the renderer can play the right effect:
     /// a mid-system populate (no effect), a hyperspace jump-in (warp streak at the
