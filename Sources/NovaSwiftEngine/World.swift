@@ -1044,6 +1044,9 @@ public final class World {
             npc.renderPrevPosition = npc.position
             npc.renderPrevAngle = npc.angle
         }
+        for shot in projectiles {
+            shot.renderPrevPosition = shot.position
+        }
     }
 
     /// How a new NPC came into being, so the renderer can play the right effect:

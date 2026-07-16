@@ -2184,7 +2184,7 @@ final class GameScene: SKScene {
         for (i, node) in projectileNodes.enumerated() {
             guard i < shots.count else { node.isHidden = true; continue }
             let s = shots[i]
-            node.position = CGPoint(x: s.position.x, y: s.position.y)
+            node.position = renderLerp(s.renderPrevPosition, s.position)
             node.isHidden = false
 
             let frames = s.graphicSpinID.map { weaponGraphicTextures($0) } ?? []
@@ -2311,8 +2311,19 @@ final class GameScene: SKScene {
                     node.weaponGlowFlare = 1
                 }
             }
-            let from = CGPoint(x: b.from.x, y: b.from.y)
-            let to = CGPoint(x: b.to.x, y: b.to.y)
+            // Weld the beam to the shooter's *interpolated* sprite: shift the whole
+            // segment by however far render interpolation has moved the shooter off
+            // its sim-tick position, so a continuous beam's muzzle stays glued to the
+            // barrel between 30 Hz ticks instead of trailing it. Length/angle are
+            // unchanged (rigid translation), so `dx`/`dy` still come off the raw pts.
+            var bx = CGFloat(0), by = CGFloat(0)
+            if let shooter = world.ship(id: b.shooterID) {
+                let interp = renderPoint(shooter)
+                bx = interp.x - CGFloat(shooter.position.x)
+                by = interp.y - CGFloat(shooter.position.y)
+            }
+            let from = CGPoint(x: CGFloat(b.from.x) + bx, y: CGFloat(b.from.y) + by)
+            let to = CGPoint(x: CGFloat(b.to.x) + bx, y: CGFloat(b.to.y) + by)
             let dx = b.to.x - b.from.x, dy = b.to.y - b.from.y
             let length = max(1, CGFloat((dx * dx + dy * dy).squareRoot()))
             // BeamWidth == 0 is a deliberate authoring choice (Bible: "no center
@@ -2635,15 +2646,16 @@ final class GameScene: SKScene {
         return n
     }
 
-    /// Render-interpolated world position for a ship: its pose blended `renderAlpha`
-    /// of the way from the previous fixed-tick pose to the current one, so it glides
-    /// between 30 Hz sim ticks instead of stepping. See `Ship.renderPrevPosition`.
-    private func renderPoint(_ s: Ship) -> CGPoint {
+    /// Blend a previous-tick position toward a current one by `renderAlpha`, so a
+    /// thing gliding between 30 Hz sim ticks draws smoothly on a faster display.
+    private func renderLerp(_ prev: Vec2, _ curr: Vec2) -> CGPoint {
         let a = CGFloat(renderAlpha)
-        let px = CGFloat(s.renderPrevPosition.x), py = CGFloat(s.renderPrevPosition.y)
-        return CGPoint(x: px + (CGFloat(s.position.x) - px) * a,
-                       y: py + (CGFloat(s.position.y) - py) * a)
+        let px = CGFloat(prev.x), py = CGFloat(prev.y)
+        return CGPoint(x: px + (CGFloat(curr.x) - px) * a,
+                       y: py + (CGFloat(curr.y) - py) * a)
     }
+    /// Render-interpolated world position for a ship. See `Ship.renderPrevPosition`.
+    private func renderPoint(_ s: Ship) -> CGPoint { renderLerp(s.renderPrevPosition, s.position) }
     /// Render-interpolated heading (shortest-path), for smooth sprite-frame changes.
     private func renderHeading(_ s: Ship) -> Double {
         var d = (s.angle - s.renderPrevAngle).truncatingRemainder(dividingBy: 2 * .pi)
