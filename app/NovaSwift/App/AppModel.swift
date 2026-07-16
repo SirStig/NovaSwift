@@ -162,8 +162,8 @@ final class AppModel: ObservableObject {
         // from the Game Center app — so the session starts from here rather than
         // from whichever screen happens to be up. `hostID` is the inviter (nil when
         // we initiated, i.e. we host).
-        gameCenter.onMatch = { [weak self] match, hostID in
-            self?.startOnlineSession(match: match, hostID: hostID)
+        gameCenter.onMatch = { [weak self] match, role in
+            self?.startOnlineSession(match: match, role: role)
         }
         gameCenter.playerGroupProvider = { [weak self] in
             self?.currentPluginManifest().groupID ?? 0
@@ -229,11 +229,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Approve a knock: invite them in, then clear the request so they stop waiting.
-    /// The invite is what actually admits them — accepting in the directory alone
-    /// does nothing, which is what keeps a lobby gated.
+    /// Approve a knock: invite them in, then clear it so they stop waiting.
+    ///
+    /// The invite is what actually admits them — approving in the directory alone
+    /// does nothing, which is what keeps a lobby gated. Only clear the knock if the
+    /// invite really went out: dismissing a failed one drops the player from the
+    /// host's list having never been sent anything, and they'd wait for an invite
+    /// that doesn't exist.
     func acceptJoinRequest(_ request: OnlineJoinRequest) async {
-        await gameCenter.invite(playerID: request.playerID, into: session.gameCenterMatch)
+        guard await gameCenter.invite(playerID: request.playerID,
+                                      into: session.gameCenterMatch) else { return }
         await lobbyDirectory.resolveJoinRequest(request)
     }
 
@@ -241,19 +246,24 @@ final class AppModel: ObservableObject {
         await lobbyDirectory.resolveJoinRequest(request)
     }
 
-    /// Advertise the session we're hosting, once it exists and we know its name.
-    private func publishLobbyIfHosting() async {
-        guard session.isActive, session.isHost, session.gameCenterMatch != nil else { return }
+    /// Advertise a lobby the player just opened publicly.
+    ///
+    /// Deliberately independent of `session`: `minPlayers = 2` means a host alone
+    /// has no `GKMatch` and therefore no session at all, so anything that waited for
+    /// one could never advertise an empty lobby — the only kind worth advertising.
+    /// The advert names `GKLocalPlayer.local.gamePlayerID`, which is the same id the
+    /// session will adopt as its peer id once a match does form.
+    func publishOnlineLobby(_ config: OnlineHostConfig) async {
         let manifest = currentPluginManifest()
         await lobbyDirectory.publish(OnlineLobby(
-            hostPlayerID: session.localPlayerID,
-            name: session.lobbyName,
+            hostPlayerID: GKLocalPlayer.local.gamePlayerID,
+            name: config.lobbyName.isEmpty ? "\(multiplayerDisplayName)'s Lobby" : config.lobbyName,
             hostName: multiplayerDisplayName,
             playerCount: max(session.players.count, 1),
             maxPlayers: 4,
             pluginCount: manifest.count,
             pluginSignature: manifest.signature,
-            allowPvP: session.rules.allowPvP))
+            allowPvP: config.rules.allowPvP))
     }
     #endif
 
@@ -264,27 +274,27 @@ final class AppModel: ObservableObject {
     /// Entering the game has to happen *before* the session starts: `startGameCenter`
     /// reads the pilot's current system, and `finishLoadingIntoGame` is what
     /// guarantees a pilot is started to read it from.
-    func startOnlineSession(match: GKMatch, hostID: String?) {
+    func startOnlineSession(match: GKMatch, role: OnlineRole) {
         guard data.hasBaseData else {
             gameCenter.lastError = "Add your EV Nova data files before playing online."
             return
         }
         if screen != .game { finishLoadingIntoGame() }
-        let config = hostID == nil ? onlineHostConfig : nil
+        // Only a host's own config applies; a guest takes the host's rules over the
+        // wire. `.autoMatch` has no config either — nobody set one up.
+        let config = role == .hosting ? onlineHostConfig : nil
         session.startGameCenter(
             match: match, displayName: multiplayerDisplayName,
             systemID: pilot.state.currentSystem,
             shipTypeID: pilot.state.shipType,
-            hostID: hostID,
+            role: role,
             lobbyName: config?.lobbyName ?? "",
             rules: config?.rules ?? .fullStakes)
         onlineHostConfig = nil
         #if canImport(CloudKit)
-        if config?.listPublicly == true {
-            Task { await publishLobbyIfHosting() }
-        } else if hostID != nil {
-            // We're in — stop waiting and take our knock back down. (Nothing to do
-            // when we came from an invite we never asked for; it no-ops.)
+        if case .guest = role {
+            // We're in — stop waiting and take our own knock back down. No-ops when
+            // we came from an invite we never asked for.
             Task { await lobbyDirectory.clearMyJoinRequest(playerID: session.localPlayerID) }
         }
         #endif

@@ -244,6 +244,9 @@ private struct OnlineLobbySection: View {
     #if canImport(GameKit)
     @State private var showHostSetup = false
     @State private var showMatchmaker = false
+    /// Which button opened the matchmaker. Hosting means we own the lobby; Quick
+    /// Match means nobody invited anybody and both peers resolve a host by id.
+    @State private var pendingRole: OnlineRole = .autoMatch
     /// Nil until the activity query answers; drives honest quick-match copy.
     @State private var playersSearching: Int?
     #endif
@@ -280,9 +283,7 @@ private struct OnlineLobbySection: View {
                 playerGroup: model.currentPluginManifest().groupID,
                 onMatch: { match in
                     showMatchmaker = false
-                    // `hostID: nil` — we opened this matchmaker, so we host (an
-                    // auto-match with no invite resolves a host by lowest id).
-                    model.startOnlineSession(match: match, hostID: nil)
+                    model.startOnlineSession(match: match, role: pendingRole)
                     onEnterFlight()
                 },
                 onCancel: { showMatchmaker = false; model.onlineHostConfig = nil },
@@ -306,6 +307,7 @@ private struct OnlineLobbySection: View {
         Button {
             model.onlineHostConfig = nil        // joining, not hosting
             model.gameCenter.lastError = nil
+            pendingRole = .autoMatch
             showMatchmaker = true
         } label: {
             HubActionLabel(icon: "bolt.horizontal.circle.fill", title: "Quick Match",
@@ -348,8 +350,18 @@ private struct OnlineLobbySection: View {
         rules.gameSpeedMultiplier = model.settings.gameSpeed.multiplier
         // Stashed until the match forms — matchmaking is slow and the invite may
         // even be accepted from outside the app.
-        model.onlineHostConfig = .init(lobbyName: name, rules: rules, listPublicly: listPublicly)
+        let config = AppModel.OnlineHostConfig(lobbyName: name, rules: rules,
+                                               listPublicly: listPublicly)
+        model.onlineHostConfig = config
         model.gameCenter.lastError = nil
+        pendingRole = .hosting
+        #if canImport(CloudKit)
+        // Advertise now, not after a match forms: an empty lobby is precisely the
+        // one worth listing, and there's no match until someone has joined.
+        if listPublicly {
+            Task { await model.publishOnlineLobby(config) }
+        }
+        #endif
         showMatchmaker = true
     }
 
@@ -396,6 +408,11 @@ private struct PublicLobbyList: View {
                 }
             }
 
+            if case .failed(let why) = directory.outgoingRequest {
+                Text(why).novaFont(.caption).foregroundStyle(warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             switch directory.status {
             case .unavailable(let why):
                 Text(why).novaFont(.caption).foregroundStyle(.secondary)
@@ -416,7 +433,7 @@ private struct PublicLobbyList: View {
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 14).fill(.white.opacity(0.05)))
-        .task { directory.startBrowsing(pluginSignature: mySignature) }
+        .task { directory.startBrowsing() }
         .onDisappear { directory.stopBrowsing() }
     }
 

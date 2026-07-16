@@ -90,11 +90,19 @@ Quick Match keep working and only the browsable list degrades.
   can't pull themselves in, and all they ever learn is a `gamePlayerID`.
 - **Opt-in.** Hosting is invite-only unless the player ticks "List this lobby
   publicly", since publishing exposes their pilot name to everyone.
-- **Host is explicit.** A `GKMatch` has no host. `startGameCenter` resolves one:
-  the inviter, or (for auto-match, where nobody invited anybody) the lowest
-  `gamePlayerID`. Exactly one peer must be host — two hosts broadcast conflicting
-  rules and mutually kick each other over plug-ins. This is separate from per-system
-  sim **authority**, which stays id-based.
+- **Host is explicit.** A `GKMatch` has no host, so `OnlineRole` establishes one,
+  and the rule must be one **both peers compute the same answer with**. An invite
+  supplies that shared fact (the inviter hosts; each side knows which it was);
+  auto-match has no invite, so both fall back to lowest `gamePlayerID`. Getting
+  this wrong is silent: two hosts broadcast conflicting rules and mutually kick
+  over plug-ins, while *zero* hosts means nobody broadcasts and everyone quietly
+  keeps seeded `.safe` rules — the host's chosen stakes vanish with no error.
+  Separate from per-system sim **authority**, which stays id-based.
+- **Adverts are published before the match exists.** `minPlayers = 2`, so a host
+  flying alone has no `GKMatch` and no session at all. Publishing therefore hangs
+  off opening the lobby, not off session start — anything gated on a match could
+  only advertise a lobby *after* someone had joined it, so nobody could ever find
+  it to join. `publishOnlineLobby` is deliberately independent of `session`.
 
 #### CloudKit setup this depends on (not doable from code)
 
@@ -111,11 +119,24 @@ Development schema is created by first write; **Production needs the schema
 promoted in the Dashboard** or release builds see nothing.
 
 **The security model shapes the code.** The public database gives `_world` read but
-reserves write to a record's `_creator`. So a host **cannot** delete a guest's
-`JoinRequest`. Answering a knock is therefore local (`dismissedRequestIDs`), the
-guest deletes its own record once it's in or cancels, and anything orphaned ages
-out after `requestExpiry`. Stale `Lobby` adverts (host crashed mid-heartbeat) are
-filtered by `updatedAt` rather than deleted, for the same reason.
+reserves write to a record's `_creator`. Consequences, all load-bearing:
+
+- A host **cannot** delete or modify a guest's `JoinRequest`. Answering a knock is
+  therefore local (`dismissedRequests`), the guest deletes its own record once it's
+  in or cancels, and orphans age out after `requestExpiry`.
+- `dismissedRequests` maps id → the `createdAt` it answered, **not** a bare id set.
+  A knock's record name is deterministic per (lobby, player), so a declined player
+  reuses it when they knock again; remembering the id alone would filter the new
+  knock too and blacklist them from that lobby permanently.
+- There is **no rejection signal** — the host can't write anything the guest can
+  read. A guest's `.waiting` therefore times out (`requestExpiry`) rather than
+  waiting forever; it can't distinguish declined from ignored, and says so.
+- `Lobby` record names are **random UUIDs**, never the host's `gamePlayerID`, with
+  the id in a field. Record names are public and only the creator can write them,
+  so an id-derived name is squattable: anyone could create it first and lock that
+  player out of publishing forever.
+- Stale `Lobby` adverts (host crashed mid-heartbeat) are filtered by `updatedAt`
+  rather than deleted, for the same reason.
 
 ## The two sync layers
 

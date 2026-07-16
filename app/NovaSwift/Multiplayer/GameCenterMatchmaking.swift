@@ -2,6 +2,25 @@
 import SwiftUI
 import GameKit
 
+/// Who owns a forming online session's lobby.
+///
+/// A `GKMatch` has no host, so we establish one — and the rule has to be something
+/// **both peers independently reach the same answer with**, or the session ends up
+/// with two hosts (conflicting rules, mutual plug-in kicks) or none (nobody
+/// broadcasts rules, so the host's chosen stakes are silently dropped).
+///
+/// An invite gives both sides the same fact to key off: the inviter hosts, and each
+/// side knows which one it was. Auto-match has no invite and no intent to appeal
+/// to, so both sides fall back to the same arbitrary-but-identical rule instead.
+enum OnlineRole: Equatable {
+    /// We sent the invite, so we host.
+    case hosting
+    /// We accepted an invite; the sender hosts.
+    case guest(hostID: String)
+    /// Nobody invited anybody (Quick Match): lowest `gamePlayerID` hosts.
+    case autoMatch
+}
+
 /// Game Center sign-in **and invite delivery** for online co-op. Authenticating is
 /// a launch-time concern (`RootView` kicks it off); the result gates the "Online"
 /// entry.
@@ -24,14 +43,15 @@ final class GameCenterManager: NSObject, ObservableObject {
 
     /// Called with a connected match whenever one forms out-of-band — i.e. the
     /// player accepted an invite, or started a match from the Game Center app.
-    /// `hostID` is the `gamePlayerID` of the player who invited us (nil when we
-    /// are the one who initiated, meaning we host). `AppModel` wires this to
-    /// `MultiplayerSession.startGameCenter`.
-    var onMatch: ((GKMatch, _ hostID: String?) -> Void)?
+    /// `AppModel` wires this to `MultiplayerSession.startGameCenter`.
+    var onMatch: ((GKMatch, OnlineRole) -> Void)?
 
-    /// Retained delegate for matchmaker controllers we present ourselves (invite
-    /// flows). GameKit holds its delegate weakly, so this must outlive the call.
-    private var inviteCoordinator: InviteMatchmakerCoordinator?
+    /// Retained delegates for matchmaker controllers we present ourselves (invite
+    /// flows). `matchmakerDelegate` is weak, so these must outlive the call — and
+    /// there can be more than one at a time (two friends invite you at once), so a
+    /// single slot would deallocate the first controller's delegate and leave its
+    /// sheet on screen with dead buttons.
+    private var inviteCoordinators: [ObjectIdentifier: InviteMatchmakerCoordinator] = [:]
 
     /// Plug-in bucket (`PluginManifest.groupID`) for invites that arrive
     /// out-of-band, where no screen is around to supply one. Pulled on demand so it
@@ -83,31 +103,39 @@ final class GameCenterManager: NSObject, ObservableObject {
     ///   addressed to them, which creates one when they accept. `GKMatch` has no
     ///   concept of a one-player match to pre-create here.
     ///
-    /// Either way we're the inviter, so we host and `onMatch` gets `hostID: nil`.
-    func invite(playerID: String, into match: GKMatch?) async {
+    /// Either way we're the inviter, so we host (`OnlineRole.hosting`).
+    ///
+    /// Returns whether the invite actually went out — the caller must not treat a
+    /// knock as answered when it didn't, or the player is dismissed from the host's
+    /// list having never been sent anything.
+    @discardableResult
+    func invite(playerID: String, into match: GKMatch?) async -> Bool {
         let players = await Self.loadPlayers(ids: [playerID])
         guard !players.isEmpty else {
             lastError = "Couldn't find that player on Game Center."
-            return
+            return false
         }
         let request = makeMatchRequest(playerGroup: playerGroupProvider?() ?? 0)
         request.recipients = players
         if let match {
             do {
                 try await GKMatchmaker.shared().addPlayers(to: match, matchRequest: request)
+                return true
             } catch {
                 lastError = error.localizedDescription
+                return false
             }
-        } else {
-            guard let vc = GKMatchmakerViewController(matchRequest: request) else {
-                lastError = "Couldn't start that match."
-                return
-            }
-            present(vc, hostID: nil)
         }
+        guard let vc = GKMatchmakerViewController(matchRequest: request) else {
+            lastError = "Couldn't start that match."
+            return false
+        }
+        present(vc, role: .hosting)
+        return true
     }
 
-    /// `GKPlayer.loadPlayers` is completion-handler only — no async overload.
+    /// `GKPlayer.loadPlayers` is completion-handler only — there is no async
+    /// overload, so `try await` on it resolves to `Void` rather than the players.
     private static func loadPlayers(ids: [String]) async -> [GKPlayer] {
         await withCheckedContinuation { continuation in
             GKPlayer.loadPlayers(forIdentifiers: ids) { players, _ in
@@ -124,12 +152,11 @@ final class GameCenterManager: NSObject, ObservableObject {
             lastError = "Couldn't open that invite."
             return
         }
-        present(vc, hostID: hostID)
+        present(vc, role: .guest(hostID: hostID))
     }
 
     /// Present the matchmaker pre-addressed to `recipients` — the player started a
-    /// match with us from the Game Center app, so we're the one initiating and we
-    /// host (`hostID` nil).
+    /// match with us from the Game Center app, so we're initiating and we host.
     private func presentMatchmaker(recipients: [GKPlayer], playerGroup: Int) {
         let request = makeMatchRequest(playerGroup: playerGroup)
         request.recipients = recipients
@@ -137,20 +164,21 @@ final class GameCenterManager: NSObject, ObservableObject {
             lastError = "Couldn't start that match."
             return
         }
-        present(vc, hostID: nil)
+        present(vc, role: .hosting)
     }
 
-    private func present(_ vc: GKMatchmakerViewController, hostID: String?) {
+    private func present(_ vc: GKMatchmakerViewController, role: OnlineRole) {
+        let key = ObjectIdentifier(vc)
         let coordinator = InviteMatchmakerCoordinator { [weak self] result in
             guard let self else { return }
-            self.inviteCoordinator = nil
+            self.inviteCoordinators[key] = nil      // only this one — others may still be up
             switch result {
-            case .matched(let match): self.onMatch?(match, hostID)
+            case .matched(let match): self.onMatch?(match, role)
             case .cancelled: break
             case .failed(let message): self.lastError = message
             }
         }
-        inviteCoordinator = coordinator
+        inviteCoordinators[key] = coordinator
         vc.matchmakerDelegate = coordinator
         GameCenterPresenter.present(vc)
     }
@@ -249,8 +277,6 @@ func makeMatchRequest(playerGroup: Int) -> GKMatchRequest {
 struct GameCenterMatchmakerView: UIViewControllerRepresentable {
     /// Plug-in-set bucket for auto-match (see `makeMatchRequest`).
     var playerGroup: Int = 0
-    /// Pre-address the invite to specific friends (empty = open auto-match).
-    var recipients: [GKPlayer] = []
     var onMatch: (GKMatch) -> Void
     var onCancel: () -> Void
     var onError: (String) -> Void
@@ -258,9 +284,8 @@ struct GameCenterMatchmakerView: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIViewController(context: Context) -> GKMatchmakerViewController {
-        let request = makeMatchRequest(playerGroup: playerGroup)
-        if !recipients.isEmpty { request.recipients = recipients }
-        let vc = GKMatchmakerViewController(matchRequest: request) ?? GKMatchmakerViewController()
+        let vc = GKMatchmakerViewController(matchRequest: makeMatchRequest(playerGroup: playerGroup))
+            ?? GKMatchmakerViewController()
         vc.matchmakerDelegate = context.coordinator
         return vc
     }
@@ -283,8 +308,6 @@ struct GameCenterMatchmakerView: UIViewControllerRepresentable {
 struct GameCenterMatchmakerView: NSViewControllerRepresentable {
     /// Plug-in-set bucket for auto-match (see `makeMatchRequest`).
     var playerGroup: Int = 0
-    /// Pre-address the invite to specific friends (empty = open auto-match).
-    var recipients: [GKPlayer] = []
     var onMatch: (GKMatch) -> Void
     var onCancel: () -> Void
     var onError: (String) -> Void
@@ -292,9 +315,8 @@ struct GameCenterMatchmakerView: NSViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSViewController(context: Context) -> GKMatchmakerViewController {
-        let request = makeMatchRequest(playerGroup: playerGroup)
-        if !recipients.isEmpty { request.recipients = recipients }
-        let vc = GKMatchmakerViewController(matchRequest: request) ?? GKMatchmakerViewController()
+        let vc = GKMatchmakerViewController(matchRequest: makeMatchRequest(playerGroup: playerGroup))
+            ?? GKMatchmakerViewController()
         vc.matchmakerDelegate = context.coordinator
         return vc
     }

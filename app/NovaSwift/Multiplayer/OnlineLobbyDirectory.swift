@@ -55,7 +55,7 @@ final class OnlineLobbyDirectory: ObservableObject {
         case sending
         /// Waiting on the host to accept; the invite arrives through GameKit.
         case waiting(lobbyID: String)
-        case rejected
+        /// Gave up waiting, or couldn't ask at all.
         case failed(String)
     }
 
@@ -77,25 +77,47 @@ final class OnlineLobbyDirectory: ObservableObject {
     private var heartbeatTask: Task<Void, Never>?
     private var browseTask: Task<Void, Never>?
     private var requestPollTask: Task<Void, Never>?
+    private var requestTimeoutTask: Task<Void, Never>?
     /// The lobby we currently host, so we can heartbeat and later withdraw it.
     private var publishedLobbyID: CKRecord.ID?
-    /// Knocks we've already answered. Needed because we can't delete a record we
-    /// didn't create, so an answered request keeps coming back from the query.
-    private var dismissedRequestIDs: Set<String> = []
+    /// Our own `gamePlayerID` while hosting — the record name is a random UUID, so
+    /// this is what identifies our advert as ours.
+    private var publishedHostID: String?
+    /// Knocks we've already answered, and *when the answered one was made*. Needed
+    /// because we can't delete a record we didn't create, so an answered request
+    /// keeps coming back from the query.
+    ///
+    /// Keyed by time, not just id: the record name is deterministic per (lobby,
+    /// player), so a player who is declined and knocks again reuses it. Remembering
+    /// the id alone would filter the new knock too and blacklist them from the
+    /// lobby forever — someone declined for a plug-in mismatch could never come
+    /// back after fixing it.
+    private var dismissedRequests: [String: Date] = [:]
 
     // MARK: - Hosting
 
     /// Advertise a lobby we're hosting and start watching for join requests.
-    /// Best-effort: a directory failure leaves the session perfectly playable by
+    ///
+    /// Called when the player opens the lobby, **before** any `GKMatch` exists —
+    /// `makeMatchRequest` sets `minPlayers = 2`, so a host flying alone has no match
+    /// at all. Waiting for one would mean a lobby could only be advertised after
+    /// someone had already joined it by other means, which is exactly backwards:
+    /// nobody could ever find it in order to join.
+    ///
+    /// Best-effort: a directory failure leaves the lobby perfectly playable by
     /// invite, so it reports status rather than throwing.
     func publish(_ lobby: OnlineLobby) async {
-        let recordID = CKRecord.ID(recordName: lobby.hostPlayerID)   // one lobby per host
+        await withdraw()        // never leave a previous advert of ours orphaned
+        // A random record name, *not* the host's `gamePlayerID`. Record names are
+        // public and a record can only be written by its creator, so a name derived
+        // from a player's id is squattable: anyone could create it first and lock
+        // that player out of ever publishing. The id lives in a field instead.
+        let recordID = CKRecord.ID(recordName: UUID().uuidString)
         let record = CKRecord(recordType: "Lobby", recordID: recordID)
         lobby.apply(to: record)
         publishedLobbyID = recordID
+        publishedHostID = lobby.hostPlayerID
         do {
-            // .allKeys replaces our own previous advert (same host, new lobby)
-            // instead of failing on a conflict.
             _ = try await database.modifyRecords(saving: [record], deleting: [],
                                                  savePolicy: .allKeys).saveResults
             status = .ready
@@ -103,6 +125,7 @@ final class OnlineLobbyDirectory: ObservableObject {
             startPollingJoinRequests(lobbyID: lobby.hostPlayerID)
         } catch {
             publishedLobbyID = nil
+            publishedHostID = nil
             status = .unavailable(Self.explain(error))
         }
     }
@@ -129,8 +152,10 @@ final class OnlineLobbyDirectory: ObservableObject {
         heartbeatTask?.cancel(); heartbeatTask = nil
         requestPollTask?.cancel(); requestPollTask = nil
         joinRequests = []
+        dismissedRequests = [:]
         guard let recordID = publishedLobbyID else { return }
         publishedLobbyID = nil
+        publishedHostID = nil
         _ = try? await database.modifyRecords(saving: [], deleting: [recordID])
     }
 
@@ -150,12 +175,16 @@ final class OnlineLobbyDirectory: ObservableObject {
 
     /// Start listing open lobbies. Polls, because CloudKit push subscriptions would
     /// need APNs plumbing for something a lobby list refreshes fine without.
-    func startBrowsing(pluginSignature: String) {
+    ///
+    /// Incompatible lobbies are listed, not filtered: "these people are playing
+    /// with plug-ins you don't have" is useful, and the row says so. The full
+    /// manifest handshake on connect stays the authoritative check.
+    func startBrowsing() {
         browseTask?.cancel()
         status = .loading
         browseTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refreshLobbies(pluginSignature: pluginSignature)
+                await self?.refreshLobbies()
                 try? await Task.sleep(for: .seconds(6))
             }
         }
@@ -166,7 +195,7 @@ final class OnlineLobbyDirectory: ObservableObject {
         lobbies = []
     }
 
-    private func refreshLobbies(pluginSignature: String) async {
+    private func refreshLobbies() async {
         let cutoff = Date().addingTimeInterval(-Self.staleAfter)
         let predicate = NSPredicate(format: "isOpen == 1 AND updatedAt > %@", cutoff as NSDate)
         let query = CKQuery(recordType: "Lobby", predicate: predicate)
@@ -175,8 +204,7 @@ final class OnlineLobbyDirectory: ObservableObject {
             let (results, _) = try await database.records(matching: query, resultsLimit: 50)
             let found = results.compactMap { try? $0.1.get() }.compactMap(OnlineLobby.init(record:))
             // Never list our own advert back to us.
-            let mine = publishedLobbyID?.recordName
-            lobbies = found.filter { $0.hostPlayerID != mine }
+            lobbies = found.filter { $0.hostPlayerID != publishedHostID }
             status = .ready
         } catch {
             status = .unavailable(Self.explain(error))
@@ -191,8 +219,8 @@ final class OnlineLobbyDirectory: ObservableObject {
     func requestJoin(lobby: OnlineLobby, playerID: String, playerName: String,
                      pluginSignature: String) async {
         outgoingRequest = .sending
-        let record = CKRecord(recordType: "JoinRequest",
-                              recordID: CKRecord.ID(recordName: "\(lobby.hostPlayerID)-\(playerID)"))
+        let name = Self.requestRecordName(lobbyID: lobby.hostPlayerID, playerID: playerID)
+        let record = CKRecord(recordType: "JoinRequest", recordID: CKRecord.ID(recordName: name))
         record["lobbyID"] = lobby.hostPlayerID as CKRecordValue
         record["playerID"] = playerID as CKRecordValue
         record["playerName"] = playerName as CKRecordValue
@@ -202,16 +230,47 @@ final class OnlineLobbyDirectory: ObservableObject {
             _ = try await database.modifyRecords(saving: [record], deleting: [],
                                                  savePolicy: .allKeys).saveResults
             outgoingRequest = .waiting(lobbyID: lobby.hostPlayerID)
+            startRequestTimeout(lobbyID: lobby.hostPlayerID, playerID: playerID)
         } catch {
             outgoingRequest = .failed(Self.explain(error))
         }
     }
 
+    /// Stop waiting eventually. A host's decline is deliberately local (they can't
+    /// write to our records, we can't write to theirs), so there is no rejection
+    /// signal to wait for — without this the row reads "Waiting for the host to let
+    /// you in" forever whether they declined, quit, or never looked. Timing out and
+    /// saying so is the honest version, even though it can't tell those apart.
+    private func startRequestTimeout(lobbyID: String, playerID: String) {
+        requestTimeoutTask?.cancel()
+        requestTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.requestExpiry))
+            guard let self, !Task.isCancelled,
+                  self.outgoingRequest == .waiting(lobbyID: lobbyID) else { return }
+            await self.deleteMyRequest(lobbyID: lobbyID, playerID: playerID)
+            self.outgoingRequest = .failed("No answer from the host. Try again, or ask them for an invite.")
+        }
+    }
+
+    /// Record name for a knock — deterministic per (lobby, player), so a player
+    /// can only ever have one pending knock per lobby and spamming Join can't
+    /// flood a host.
+    private static func requestRecordName(lobbyID: String, playerID: String) -> String {
+        "\(lobbyID)-\(playerID)"
+    }
+
+    /// Delete our own knock. We're its creator, which is the one direction
+    /// CloudKit's public database allows.
+    private func deleteMyRequest(lobbyID: String, playerID: String) async {
+        let id = CKRecord.ID(recordName: Self.requestRecordName(lobbyID: lobbyID, playerID: playerID))
+        _ = try? await database.modifyRecords(saving: [], deleting: [id])
+    }
+
     /// Give up on a pending knock.
     func cancelJoinRequest(lobbyID: String, playerID: String) async {
+        requestTimeoutTask?.cancel(); requestTimeoutTask = nil
         outgoingRequest = .none
-        let id = CKRecord.ID(recordName: "\(lobbyID)-\(playerID)")
-        _ = try? await database.modifyRecords(saving: [], deleting: [id])
+        await deleteMyRequest(lobbyID: lobbyID, playerID: playerID)
     }
 
     private func startPollingJoinRequests(lobbyID: String) {
@@ -237,7 +296,12 @@ final class OnlineLobbyDirectory: ObservableObject {
         else { return }
         joinRequests = results.compactMap { try? $0.1.get() }
             .compactMap(OnlineJoinRequest.init(record:))
-            .filter { !dismissedRequestIDs.contains($0.id) }
+            // Hide only the exact knock we answered; a fresh one from the same
+            // player (newer `createdAt`, same record name) comes through.
+            .filter { request in
+                guard let answeredAt = dismissedRequests[request.id] else { return true }
+                return request.createdAt > answeredAt
+            }
     }
 
     /// Answer a knock (accepted or declined) so it stops showing.
@@ -248,7 +312,7 @@ final class OnlineLobbyDirectory: ObservableObject {
     /// remember it, the guest deletes its own record once it's in (or cancels), and
     /// anything orphaned by a guest that quit ages out of `refreshJoinRequests`.
     func resolveJoinRequest(_ request: OnlineJoinRequest) async {
-        dismissedRequestIDs.insert(request.id)
+        dismissedRequests[request.id] = request.createdAt
         joinRequests.removeAll { $0.id == request.id }
     }
 

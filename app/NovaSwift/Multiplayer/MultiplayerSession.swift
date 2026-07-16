@@ -213,24 +213,28 @@ final class MultiplayerSession: ObservableObject {
     /// Layer-2 sim authority stays per-system and id-based (`currentAuthorityID`),
     /// independent of this. What "host" decides here is lobby ownership: who owns
     /// the rules, who moderates, and which side of the plug-in gate you take. A
-    /// `GKMatch` doesn't distinguish a host, so we establish one:
-    ///
-    /// - `hostID` given (an invite — the inviter hosts, or a directory lobby whose
-    ///   record names the host).
-    /// - `hostID` nil for auto-match, where nobody invited anybody: fall back to
-    ///   the lowest `gamePlayerID` in the match. Deterministic and agreed on by
-    ///   every peer without negotiation, matching `currentAuthorityID`'s rule.
+    /// `GKMatch` doesn't distinguish a host, so `OnlineRole` establishes one — see
+    /// its docs for why the rule must be one both peers compute identically.
     ///
     /// Exactly one peer must end up host: two hosts broadcast conflicting rules and
-    /// mutually kick each other over plug-ins.
+    /// mutually kick each other over plug-ins, while zero hosts means nobody
+    /// broadcasts at all and everyone silently stays on seeded `.safe` rules.
     func startGameCenter(match: GKMatch, displayName: String, systemID: Int,
-                         shipTypeID: Int? = nil, hostID: String? = nil,
+                         shipTypeID: Int? = nil, role: OnlineRole = .autoMatch,
                          lobbyName: String = "", rules: SessionRules = .fullStakes) {
         stop()
         pluginMismatch = nil
         let gk = GameKitTransport(match: match)
         let localID = gk.localPeerID
-        let resolvedHostID = hostID ?? ([localID] + match.players.map(\.gamePlayerID)).min() ?? localID
+        let resolvedHostID: String
+        switch role {
+        case .hosting:
+            resolvedHostID = localID
+        case .guest(let hostID):
+            resolvedHostID = hostID
+        case .autoMatch:
+            resolvedHostID = ([localID] + match.players.map(\.gamePlayerID)).min() ?? localID
+        }
         let iAmHost = resolvedHostID == localID
 
         self.lobbyName = lobbyName.isEmpty ? "Online Lobby" : lobbyName
