@@ -1133,14 +1133,14 @@ public final class AIBrain {
         }
         let wedgeHeading = formationHeading ?? wedgeTarget
         // Slot → (row, column). EV Nova's escort wing is a filled wedge/triangle
-        // with the leader at the tip: row 0 is one ship dead astern, row 1 has two
-        // flanking it, row 2 three, and so on — each row one wider and one step
-        // further back, fanning out behind the leader. Triangular numbering: row r
-        // (0-based) holds r+1 ships, so slot s falls in the row whose running total
-        // first exceeds it.
+        // whose tip is the *leader itself*: the leader is the lone apex (row 0), so
+        // the escorts start at row 1 — the first two flank behind the leader, row 2
+        // has three, row 3 four, and so on, each row one wider and one step further
+        // back. Triangular numbering: escort row r (starting at 1) holds r+1 ships,
+        // so slot s falls in the row whose running total first exceeds it.
         var remaining = formationSlot
-        var row = 0
-        while remaining > row {          // row r holds r+1 ships
+        var row = 1                      // leader is the tip (row 0); escorts begin at row 1
+        while remaining > row {          // row r holds r+1 ships (row 1 = 2, row 2 = 3, …)
             remaining -= (row + 1)
             row += 1
         }
@@ -1156,7 +1156,7 @@ public final class AIBrain {
         let depthSpacing = max(24, me.radius * 2 + 8)
         let firstRowGap = leader.radius + me.radius + 10
         let lateral = (Double(col) - Double(rowCap - 1) / 2.0) * lateralSpacing  // right of the leader (+) / left (−)
-        let behind = -(firstRowGap + depthSpacing * Double(row))                 // trailing the leader
+        let behind = -(firstRowGap + depthSpacing * Double(row - 1))             // trailing the leader (row 1 sits one clearance back)
         // Wedge frame: forward = (sin a, cos a); right = (cos a, −sin a) — built
         // from the smoothed `wedgeHeading`, not the leader's raw (possibly
         // combat-swinging) nose angle; see `formationHeading` above.
