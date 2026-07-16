@@ -47,12 +47,28 @@ and `NovaAIModels.swift`. Confirmed by reading the current code and running
   note added there.
 - **`flët.AppearOn`/`Quote`(now `hailQuote`)/`Flags`(now
   `freightersHaveRandomCargo`) are decoded on `FleetRes`** (real byte offsets,
-  confirmed earlier against TMPL #506). **Two of the three are now wired:**
-  `appearOn` gates ambient fleet spawns (`Spawner.fleetAppearOnAllowed` →
-  `world.fleetSpawnEligible`), and `freightersHaveRandomCargo` fills a fleet's
-  freighters (InherentAI ≤ 2) with random cargo at spawn
-  (`Spawner.rollRandomFreighterCargo`, 2026-07-12). **Only `hailQuote` remains
-  unread** — no fleet-arrival text event exists to surface it yet.
+  confirmed earlier against TMPL #506). **One of the three is fully wired,
+  one is plumbed at the engine layer but never given a real evaluator by the
+  app, and one remains unread:**
+  - `freightersHaveRandomCargo` fills a fleet's freighters (InherentAI ≤ 2)
+    with random cargo at spawn (`Spawner.rollRandomFreighterCargo`,
+    2026-07-12) — genuinely wired, no caveats.
+  - `appearOn`'s *Spawner*-side plumbing is real: `Spawner.fleetAppearOnAllowed`
+    (`Spawner.swift:348-351`) calls `world.fleetSpawnEligible(fleetID)` for
+    every fleet with a non-blank `AppearOn`, and that gate is applied on every
+    ambient/reinforcement draw (`applyAppearOnGate`, `Spawner.swift:341-343`).
+    But `World.fleetSpawnEligible` (`World.swift:2661`) is a host-supplied
+    closure the engine can't evaluate itself, and — unlike its sibling
+    `persSpawnEligible`, which the app *does* wire to a real closure over live
+    pilot control bits (`GameContainerView.swift:293`) — **nothing in `app/`
+    ever assigns `fleetSpawnEligible`**, so it stays at its documented default,
+    `{ _ in false }`. Net effect in live play today: every fleet with a
+    non-blank `AppearOn` is unconditionally *rejected*, not evaluated against
+    real NCB state — the opposite failure mode from "always eligible," and
+    still a gap, just a different one than "nothing reads it at all." See §4
+    and §7's corrected rows below.
+  - `hailQuote` remains unread — no fleet-arrival text event exists to
+    surface it yet.
 
 The updated §7 table below reflects all three. The Bible quotes, byte-offset
 findings, and open questions elsewhere in this doc are unchanged from the
@@ -152,7 +168,7 @@ re-rolled — see §7.
 | `Max` (×4) | "The maximum number of each type of escort to put in the fleet" | ✅ `escorts[].max` @18,20,22,24 |
 | `Govt` | "ID of the fleet's government, or -1 for none" | ✅ `govt` @26 |
 | `LinkSyst` | "Which systems the fleet can be created in" (ranges — see §3) | ✅ decoded as `linkSystem` @28 **and now read** by `Spawner.isFleetEligible` — see §7 (updated) |
-| `AppearOn` | "A control bit test field that will cause a given fleet to appear only when the expression evaluates to true. If this field is left blank it will be ignored" | ✅ decoded as `appearOn` (`FleetRes.swift`/`NovaAIModels.swift:425,453`), offset `@30`, a 256-byte NCB test string — **still never read anywhere in `Spawner` or elsewhere**, see §7 (updated) |
+| `AppearOn` | "A control bit test field that will cause a given fleet to appear only when the expression evaluates to true. If this field is left blank it will be ignored" | ✅ decoded as `appearOn` (`NovaAIModels.swift:582,610`), offset `@30`, a 256-byte NCB test string — **`Spawner` reads and gates on it, but the app never wires the host hook it defers to a real evaluator**, see §4/§7 (updated) |
 | `Quote` | "Show a random string from the STR# resource with this ID when the fleet enters from hyperspace. Any occurrences of the character '#'… will be replaced with a random digit (0-9)" | ✅ decoded as `hailQuote` @286 (`RSID`, 2 bytes) — **still never read anywhere**, no arrival-text event exists, see §7 (updated) |
 | `Flags` | `0x0001`: "Freighters (`InherentAI <= 2`) in this fleet will have random cargo when boarded" | ✅ decoded as `flags` @288 (`WORV`, 2 bytes) with `freightersHaveRandomCargo`, and **now wired (2026-07-12)**: `Spawner.spawnFleet` rolls random standard-commodity cargo into a fleet's freighters (InherentAI ≤ 2) via `rollRandomFreighterCargo`, so boarding a convoy hauler yields loot. See §7 |
 
@@ -240,11 +256,25 @@ resolves this today — `linkSystem` is decoded and then never read (§7).
   `bNNN`, `&`/`|`/`!`/parens, evaluated against an `NCBTestContext`). It's
   blank-means-always-eligible ("If this field is left blank it will be
   ignored"), not blank-means-never. The parser/evaluator for this grammar
-  already exists in `NovaSwiftStory`, and the **decode half is now done**
-  (`FleetRes.appearOn`, §2) — but the **plumbing half is still outstanding**:
-  nothing calls `NCBTest` on it or gates `Spawner.isFleetEligible`/spawn
-  selection with the result, so a fleet with a non-blank `AppearOn` would
-  spawn exactly as freely as one without today.
+  already exists in `NovaSwiftStory`, the **decode half is done**
+  (`FleetRes.appearOn`, §2), and the **`Spawner`-side plumbing is also done**:
+  `Spawner.fleetAppearOnAllowed`/`applyAppearOnGate`
+  (`Sources/NovaSwiftEngine/Spawner.swift:341-351`) gate every ambient and
+  reinforcement fleet draw on `world.fleetSpawnEligible(fleetID)` for any
+  fleet with a non-blank `AppearOn`. What's still outstanding is one layer up:
+  `World.fleetSpawnEligible` (`Sources/NovaSwiftEngine/World.swift:2661`) is a
+  host-supplied closure — the engine itself can't evaluate `NCBTest` — and no
+  code anywhere in `app/` ever assigns it a real evaluator (unlike its
+  sibling `persSpawnEligible`, which the app does wire to a live closure over
+  pilot control bits, `app/NovaSwift/Game/GameContainerView.swift:293`). So the
+  hook sits at its documented default, `{ _ in false }`
+  (`World.swift:2661`'s own doc comment: "a fresh game with no story layer
+  wired must not spawn story/late-campaign fleets... that gate on bits no one
+  has set yet"): every fleet with a non-blank `AppearOn` is unconditionally
+  *rejected* in live play today, never actually evaluated against the
+  player's real control-bit state — the opposite of "spawns as freely as one
+  without `AppearOn`," and still a gap, just narrower than "nothing reads it
+  at all."
 - **`Quote`** (now decoded as `FleetRes.hailQuote`, §2) fires once, at the
   moment the fleet "enters from hyperspace" — i.e. only for edge/jump-in
   arrivals, not for `.interior` (initial system fill) or `.planet` (launch)
@@ -354,7 +384,7 @@ than a `flët` reference.
 | Lead ship flies its own hull's inherent AI, not a fixed disposition | ✅ implemented, and *better* than a naive reading — Bible doesn't say this explicitly but it's consistent with `düde.AIType 0` "use the ship's own inherent AI" | `Spawner.swift:142-143` |
 | Escorts fly their own hull's inherent AI + hold formation slot | ✅ implemented (not Bible-specified either way) | `Spawner.swift:159-166`; formation math in `AIBrain.escort` (`AIBrain.swift:452-473`) |
 | `LinkSyst` (which systems a fleet may spawn in) | ✅ **implemented and wired** — `FleetRes.linkSystem` is decoded and now read by `Spawner.isFleetEligible` (`Spawner.swift:158-193`), evaluated for every ambient fleet draw (`spawnOne`, `Spawner.swift:130`) and for the reinforcement fleet before it's summoned (`updateReinforcements`, `Spawner.swift:210`). All five documented bands (`-1`, specific-system, govt, ally, enemy) are handled; the ally/enemy bands reuse `Diplomacy.areAllied`/`.areEnemies` per §3's own analysis. Note: the engine resolved §8 open question 2 as "second validity check on top of a system's own `DudeTypes` reference," not as an independent sweep for unlisted `LinkSyst = -1` fleets — see updated §8 | `NovaAIModels.swift:425` (decode); `Spawner.swift:158-193` (consult) — confirm via `grep -rn linkSystem Sources/`, no longer zero call sites |
-| `AppearOn` control-bit gate | ⚠️ **decoded but not wired** — `FleetRes.appearOn` now reads the real 256-byte NCB test string (§2), but nothing evaluates it. The `NCBTest` evaluator it needs already exists (`NCBExpression.swift`) and would slot into `Spawner.isFleetEligible` alongside the `LinkSyst` check, but no call site does that yet — every fleet is treated as always-eligible regardless of `appearOn`'s contents. **Offset confirmed: `@30`, 256-byte NCB string** — see §2 | `NovaAIModels.swift:425,453` (decode); zero consult call sites |
+| `AppearOn` control-bit gate | ⚠️ **decoded and consulted by `Spawner`, but the host hook it defers to has no real evaluator wired in the app** — `FleetRes.appearOn` reads the real 256-byte NCB test string (§2), and `Spawner.fleetAppearOnAllowed`/`applyAppearOnGate` (`Spawner.swift:341-351`) do gate every ambient/reinforcement fleet draw on it — but they do so by calling `world.fleetSpawnEligible(fleetID)`, a host-supplied closure the engine can't itself evaluate `NCBTest` against, and no code in `app/` ever assigns that closure a real implementation (contrast `persSpawnEligible`, which the app *does* wire, `GameContainerView.swift:293`). It sits at its coded default, `{ _ in false }` (`World.swift:2661`), so today every fleet with a non-blank `AppearOn` is unconditionally rejected — not "always eligible" as an earlier draft of this table said, but the opposite: always ineligible, regardless of the player's actual control-bit state. **Offset confirmed: `@30`, 256-byte NCB string** — see §2 | `NovaAIModels.swift:582,610` (decode); `Spawner.swift:341-351` (consult, calls the stubbed hook); `World.swift:2661` (the unwired hook itself) |
 | `Quote` (hyperspace-arrival STR# text, `#`→digit) | ⚠️ **decoded but not wired** — `FleetRes.hailQuote` now reads the real `RSID`, but there is still no arrival-text event anywhere in `Spawner`/`World` for *any* spawn origin, fleet or dude, to read it into. **Offset confirmed: `@286`, `RSID`** — see §2 | `NovaAIModels.swift:429,454` (decode); `Spawner.spawnPose` (`Spawner.swift:346-367`) returns an `ArrivalMode` (`.hyperspace`/`.launch`/`.populate`) that only drives visual/audio arrival *effects*, no text — zero consult call sites |
 | `Flags 0x0001` (random cargo on freighters when boarded) | ✅ **decoded and wired (2026-07-12)** — `Spawner.spawnFleet` rolls random standard-commodity cargo into a fleet's freighters (InherentAI ≤ 2) via `rollRandomFreighterCargo` at spawn, so the boarding/plunder path finds loot. **Offset confirmed: `@288`, `WORV`** — see §2 | `NovaAIModels.swift:432,436,455` (decode); `Spawner.swift` `spawnFleet`/`rollRandomFreighterCargo` (consumers) |
 | `sÿst.AvgShips` "+/- 50%" live variance | ⚠️ partially implemented — `targetPopulation` derives once from `averageShips` (`min(maxPopulation, avg+2)`) but is a fixed number for the system's lifetime, not re-rolled per Bible's "+/- 50%" phrasing, and the `+2`/`maxPopulation=18` constants are the engine's own invention, not from the Bible | `Spawner.swift:87-88` |

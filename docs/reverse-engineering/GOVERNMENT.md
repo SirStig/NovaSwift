@@ -19,10 +19,18 @@ that §5 originally listed as gaps:
 - `GovtRes` gained six previously-undecoded fields: `require`, `jamming`
   (`InhJam1-4`), `mediumName`, `mapColor`, `shipColor`, `interface`,
   `newsPic` — closing the byte-verified "six fields genuinely missing from
-  the struct" gap noted in the "Correction" entry further down. `require`
-  is decoded but still has no landing-gate consumer; the other five have no
-  reader anywhere yet either (they're cosmetic/UI fields with no matching UI
-  code yet).
+  the struct" gap noted in the "Correction" entry further down. **All six now
+  have real readers** (added in a later pass than when this note was first
+  written): `require` gates landing
+  (`GameContainerView.landingRefusalReason`, `GameContainerView.swift:1284-1302`);
+  `jamming` feeds guided-weapon lock-loss odds (`World.swift:2200-2203`);
+  `mapColor`/`shipColor`/`interface`/`newsPic` each have a live UI consumer
+  (`GovernmentPalette.color(for:)`, `app/NovaSwift/UI/GovernmentPalette.swift:53-61`;
+  `GameScene.applyGovernmentShipColor`, `app/NovaSwift/Game/GameScene.swift:3769-3776`;
+  the HUD interface lookup, `GameContainerView.swift:555-570`; the Holovid
+  news backdrop, `app/NovaSwift/Spaceport/SpaceportScreens.swift:936-939`).
+  `mediumName` remains the one field of the six with no reader anywhere yet
+  (no "reinforcement fleet approaching" text event exists).
 - `RankRes.contribute` and `MissionRes.require` are now decoded (both were
   previously flagged as "offset known, not yet read into the struct").
   Both are now also **wired**: `StoryEngine.activeContributeBits()` folds
@@ -463,7 +471,12 @@ evaluates either.
   `0x0001`; salary payment with `SalaryCap` gating runs in
   `StoryEngine.swift:398-402`. `Kxxx`/`Lxxx` parse correctly
   (`NCBExpression.swift:299-300`).
-- **Combat-rating title ladder exists** but see mismatch below.
+- ✅ **Implemented and wired: combat-rating title ladder matches Appendix I
+  exactly.** `CombatRating` (`Sources/NovaSwiftStory/PilotSave.swift:141-153`)
+  now has all 11 titles at the Bible's 11 thresholds
+  (`[0,1,100,200,400,800,1600,3200,6400,12800,25600]`), including the
+  `1 → "Little Ability"` and `25600 → "Frightening"` tiers a prior draft of
+  this doc found missing — see the corrected gap entry below.
 - **Legal record as a mission gate** — `StoryEngine.isEligible`
   (`StoryEngine.swift:135-138`) checks `combatRating`/`legalRecord` against a
   mission's `availRating`/`availRecord`.
@@ -534,13 +547,14 @@ evaluates either.
   `PlayerState.combatRating` — the bridge this entry originally said didn't
   exist. A pilot's combat rating now moves through play, not just from their
   starting scenario's seed.
-- **Combat-rating title ladder doesn't match Appendix I.**
-  `CombatRating` (`PilotSave.swift:131-142`) has 9 titles at thresholds
-  `[0,100,200,400,800,1600,3200,6400,12800]`. The Bible's table has 11 rows
-  including a `1 → "Little Ability"` tier and a `25600 → "Frightening"` tier
-  that this ladder omits entirely — anything at or above 12,800 kills reads
-  as the top ("Ultimate", itself a non-Bible label) with no further tier, and
-  a rating of exactly 1 reads the same as 0 ("Harmless").
+- **Combat-rating title ladder — resolved, see "Correctly modeled" above.**
+  (Kept as a removed-item marker.) This entry originally flagged
+  `CombatRating` as a 9-title ladder at thresholds
+  `[0,100,200,400,800,1600,3200,6400,12800]`, missing the Bible's `1` and
+  `25600` tiers. `CombatRating.titles`/`.thresholds`
+  (`Sources/NovaSwiftStory/PilotSave.swift:142-147`) now carry all 11 Bible
+  titles at all 11 Bible thresholds verbatim, and the doc comment immediately
+  above the type cites this doc's §3 as its source.
 - **No legal-status tier-title function at all.** Unlike combat rating,
   there is no equivalent of `CombatRating.title(forRating:)` for the
   Appendix II good/evil ladder anywhere in the codebase — the ratio-to-tier
@@ -601,20 +615,20 @@ evaluates either.
   in ~190 sampled real missions contradicts it — high confidence this offset
   is correct. Mission availability now checks both `AvailBits` (NCB test)
   *and* `Require` (`StoryEngine.isEligible`, `StoryEngine.swift:140,147-149`).
-- ⚠️ **Implemented but not wired: `gövt.Require`.** `GovtRes.require`
-  (`NovaAIModels.swift:275`, `@84`, `QB64`) is now decoded — closing the
+- ✅ **Implemented and wired: `gövt.Require` landing gate.** `GovtRes.require`
+  (`NovaAIModels.swift:275`, `@84`, `QB64`) is decoded — closing the
   byte-offset gap this bullet originally described (no `require1`/`require2`
   field existed at all; now there's one 64-bit `require` field, matching the
-  TMPL-verified layout in the "Correction" entry below). It has **no
-  consumer anywhere**: a repo-wide grep for landing/`canLand` logic
-  (`Galaxy.swift`, `AIBrain.swift`, `GameScene.swift`) finds no code that
-  reads `gov.require`, so the "travel permit" gate §1.1/§4.4 describe
+  TMPL-verified layout in the "Correction" entry below) — and now has a real
+  consumer: `GameContainerView.landingRefusalReason`
+  (`app/NovaSwift/Game/GameContainerView.swift:1284-1302`) checks
+  `govt.require != 0 && (govt.require & game.contributedBits(pilot:)) != govt.require`
+  and refuses landing ("You lack a travel permit for `\(govt.commName)`
+  space") when unmet — exactly the "travel permit" gate §1.1/§4.4 describe
   ("you won't be allowed to visit any planets or stations owned by this
-  govt") still doesn't exist — landing today is gated purely by a spöb's own
-  landable flag/pict, never by government permit bits. Closing this needs a
-  new check at the landing call site(s), analogous to
-  `ItemLocking.requireGovtApplies` but for `gövt.require` itself rather than
-  an outfit's `RequireGovt`-scoped `require`.
+  govt"). A held rank whose `canAlwaysLand` (`ränk.Flags 0x0200`) covers the
+  govt or an ally of it, or having dominated the stellar outright, both
+  bypass this check earlier in the same function.
 - ⚠️ **Implemented but not wired for ship/outfit purchases in one direction,
   wired in the other — see above for the precise split.** This entry
   originally read "the whole Contribute/Require chain is inert even where
@@ -630,18 +644,27 @@ evaluates either.
   Contribute (matching `StoryEngine.activeContributeBits()`; see the
   `ränk.Contribute` entry above). What's still missing: `gövt.require`
   (previous bullet) has no consumer at all.
-- **Most `ränk.Flags` bits are unmodeled.** Only `0x0001` is checked
-  (`StoryEngine.activateRank`, `StoryEngine.swift:115`). `0x0002`, `0x0004`,
-  `0x0008` (permanent), `0x0010`, `0x0020`, `0x0040` have no decoded property
-  or check anywhere — e.g. a "permanent" rank can currently be removed by a
-  plain `Lxxx` exactly like a non-permanent one, since nothing distinguishes
-  them. `0x0100` (`govtWontAttack`), `0x0200` (`canAlwaysLand`), `0x0800`
-  (`freeRepairRefuel`) *are* decoded as computed properties
-  (`MissionModels.swift:372-374`) but are never read by
-  `Diplomacy.isHostileToPlayer`, any landing/`MinStatus` gate, or
-  `GameServices` — three more dead properties. `PriceMod`
-  (`priceModifier`, `MissionModels.swift:364/382`) is decoded but never
-  applied to shipyard/outfitter pricing anywhere.
+- **Most rank-exclusivity/revocation `ränk.Flags` bits are still unmodeled;
+  `0x0100`/`0x0200`/`PriceMod` are now wired, `0x0800` is not.** Only `0x0001`
+  is checked for activation-time exclusivity (`StoryEngine.activateRank`,
+  `StoryEngine.swift:115`). `0x0002`, `0x0004`, `0x0008` (permanent), `0x0010`,
+  `0x0020`, `0x0040` still have no decoded property or check anywhere — e.g. a
+  "permanent" rank can currently be removed by a plain `Lxxx` exactly like a
+  non-permanent one, since nothing distinguishes them. Corrected from an
+  earlier draft of this doc: `0x0100` (`govtWontAttack`) and `0x0200`
+  (`canAlwaysLand`) are no longer dead — `govtWontAttack` feeds
+  `Diplomacy.rankProtectedGovts` (`GameContainerView.swift:122-127`), which
+  shields the player from that government's ships for as long as the rank is
+  held, and `canAlwaysLand` is checked directly in
+  `GameContainerView.landingRefusalReason` (`GameContainerView.swift:1290-1296`)
+  to bypass every landing gate below it, including the `gövt.Require` check
+  above. `0x0800` (`freeRepairRefuel`) remains the one holdout: still decoded
+  (`MissionModels.swift:397`) but with no reader anywhere. `PriceMod`
+  (`priceModifier`, `MissionModels.swift:382`) is likewise no longer dead:
+  `PilotStore.rankPriceMultiplier(govt:game:)`
+  (`app/NovaSwift/Game/PilotStore.swift:298-310`) returns the best (lowest)
+  active-rank discount for a govt, applied at the commodity market, outfitter,
+  and shipyard alike (`app/NovaSwift/Spaceport/SpaceportScreens.swift:75,307,545`).
 - **Correction (superseding an earlier draft of this doc): `GovtRes`'s
   offsets 0–84 are byte-verified correct, not "suspect."** An earlier pass
   flagged `shipSpeedFactor` at offset 48 as a "mystery field with no Bible
@@ -681,12 +704,17 @@ evaluates either.
   `Interface`/`NewsPic` — six fields genuinely missing from the struct at
   the time, not a misalignment; all six are now decoded (`require`,
   `jamming`, `mediumName`, `mapColor`, `shipColor`, `interface`, `newsPic`
-  in `NovaAIModels.swift`), though only `require` has any documented
-  gameplay meaning to wire up (§4.4's travel-permit gate — still unwired,
-  see §5) — the other five (`jamming`, `mediumName`, `mapColor`/
-  `shipColor`, `interface`, `newsPic`) are cosmetic/UI/AI-interaction fields
-  with no reader anywhere yet either, which is expected since there's no
-  matching UI/jamming-consumer code for them yet. `SkillMult` remains separately confirmed
+  in `NovaAIModels.swift`), and — updating an earlier draft of this entry,
+  which said only `require` had a documented gameplay meaning to wire up —
+  five of the six now have real readers too: `require` gates landing
+  (§5's `gövt.Require` entry), `jamming` feeds guided-weapon lock-loss odds
+  (`World.swift:2200-2203`), and `mapColor`/`shipColor`/`interface`/`newsPic`
+  each drive a live UI consumer (galaxy-map/territory color, ship-paint
+  tinting, the HUD interface lookup, and the Holovid news backdrop
+  respectively — see §5's "Implementation status" note at the top of this
+  doc for citations). Only `mediumName` remains a decoded-but-unread
+  cosmetic field, since no "reinforcement fleet approaching" text event
+  exists yet to consume it. `SkillMult` remains separately confirmed
   missing/unguessable in [AI_GROUND_TRUTH.md §4.6](../AI_GROUND_TRUTH.md)
   (no `GovtResource.ts` in novaparse to verify against). A dedicated re-check
   of the full TMPL #507 field list above (every `DWRD`/`WORV`/`CASE`/`CASR`
@@ -715,17 +743,27 @@ evaluates either.
   (which gets this right, see above) and `NovaSwiftStory` are two separate
   modules that never talk to each other. Already flagged from the story side
   in [MISSIONS.md's "Not yet wired" section](../MISSIONS.md#not-yet-wired-needs-the-other-systems).
-- **`flët` (fleet) resource is decoded but never spawns anything.**
-  `FleetRes.linkSystem` (`NovaAIModels.swift:355-378`) includes the
-  govt-scoped `LinkSyst` ranges from the Bible, but no `Spawner`/`Galaxy` code
-  references `FleetRes` at all — random/reinforcement fleet population from
-  `flët` is entirely unimplemented (tangential to the `sÿst.ReinfFleet`
-  gap already noted in
-  [AI_GROUND_TRUTH.md §2](../AI_GROUND_TRUTH.md)).
-- **`oütf` ModType 21 ("clean legal record") is decoded but inert.**
-  `OutfitModType.cleanRecord` (`NovaAIModels.swift:96`) has no reader
-  anywhere — an IFF-scrambler-style item that's supposed to reset/clean the
-  player's legal record currently does nothing if equipped.
+- ✅ **Implemented and wired: `flët` (fleet) resource spawns real fleets.**
+  This entry originally said no `Spawner`/`Galaxy` code referenced `FleetRes`
+  at all; that's no longer true. `Spawner.isFleetEligible`/`systemMatchesLink`
+  (`Sources/NovaSwiftEngine/Spawner.swift:363-397`) evaluate `LinkSyst`'s five
+  bands (`-1`/specific-system/govt/ally/enemy) against
+  `Diplomacy.areAllied`/`.areEnemies`, and `Spawner.fleetPool`/`spawnFleet`
+  (`Spawner.swift:304-332`) draw eligible fleets into ambient and
+  reinforcement spawns alike. See
+  [FLEETS.md](FLEETS.md) §7 for the full implementation table — this doc
+  doesn't re-derive fleet-spawning mechanics, only notes that the gap this
+  bullet described is closed.
+- ✅ **Implemented and wired: `oütf` ModType 21 ("clean legal record").**
+  `OutfitModType.cleanRecord`/`OutfRes.cleanRecordGovts`
+  (`NovaAIModels.swift:104,254-255`) now has a real reader:
+  `PlayerState.applyOutfitAcquisition`
+  (`Sources/NovaSwiftStory/OutfitAcquisition.swift:22-32`) calls
+  `clearLegalRecord(govt:)` (`PlayerState.swift:491-499`) for each govt (or
+  every govt, if the outfit's value is `-1`) the moment the item is
+  acquired — whether bought (`PilotStore.buyOutfit`) or mission-granted — and
+  a matching amnesty path exists for `StoryEngine`-driven grants
+  (`StoryEngine.swift:1026,1058,1069`).
 - **Bribery and "roadside assistance" flags are decoded/partially exposed
   but never acted on.** `GovtRes.warshipsTakeBribes`/`cantBeHailed`/
   `plundersBeforeKilling` (`NovaAIModels.swift:253-258`) expose only a subset

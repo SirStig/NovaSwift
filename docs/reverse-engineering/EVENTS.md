@@ -5,16 +5,23 @@
 > engine) and the `StoryEngine`/`GameServices` wiring status. This doc does not
 > restate those offset tables — it goes one level deeper: what a cron is *for*
 > in the real game, the exact behavioral contract of its fields, and how that
-> contract compares to what `StoryEngine.swift` actually does today. Per
-> [STATUS.md](../STATUS.md) / MISSIONS.md's banner, the story module is
-> **BUILT, NOT WIRED** — everything below that says "the engine does X" means
-> "X happens in `NovaSwiftStory` unit tests and the `novaswift-extract story` CLI
-> path," not "the player has ever seen it," since no live `GameServices`
-> conformer exists and the app never instantiates `StoryEngine` for play.
+> contract compares to what `StoryEngine.swift` actually does today. **This
+> note is now stale and kept only for history — see the "Implementation
+> status" callout immediately below, which supersedes it.** Per
+> [STATUS.md](../STATUS.md) / MISSIONS.md's original banner, the story module
+> used to be **BUILT, NOT WIRED**; that is no longer true for crons (or
+> missions). A real `GameServices` conformer exists
+> (`app/NovaSwift/Story/AppGameServices.swift`), the app instantiates a real
+> `StoryEngine` for actual play, and — as of this update — the galaxy-clock day
+> genuinely advances during live play, running `evaluateCrons()` with it. "The
+> engine does X" below now means the player can observe X too, unless a row
+> explicitly says otherwise.
 
 > **Implementation status (as of this update).** Since this doc was first
-> written, a follow-up pass implemented several of §5's gaps in real Swift,
-> verified against live data:
+> written, two follow-up passes have landed: one implemented several of §5's
+> gaps inside `StoryEngine` itself, and a second — decisive for this doc's
+> central claim — wired the galaxy-clock day and a real news dialog into live
+> play. Both are verified against live data and the current app code:
 > - **Fixed** the `CronRes` byte-layout bug this doc had flagged: `OnEnd` is
 >   now correctly decoded as 256 bytes, not 255 (matching the `crön` TMPL's
 >   `n100`, one byte longer than `EnableOn`/`OnStart`'s `n0FF`). Re-confirmed
@@ -33,22 +40,45 @@
 >   `StoryEngine.announceNews(for:)`, invoked from inside `evaluateCrons()`
 >   exactly when a cron starts — it resolves both local (`NewsGovt`/
 >   `GovtNewsStr`) and independent (`IndNewsStr`) news.
-> - **Separately discovered while verifying this** (pre-dates the cron work
->   above, not part of it, but changes this doc's foundational assumption):
->   the app now has a real `GameServices` conformer
->   (`app/NovaSwift/Story/AppGameServices.swift`) and a real live `StoryEngine`
->   instantiation (`app/NovaSwift/Story/MissionBoardView.swift`) — mission
->   offer/accept/decline is genuinely wired and persists to the pilot save
->   today. That conformer's `showNews`, however, is only a logging stub (no
->   news UI yet), and — decisive for this doc — **nothing in `app/` ever
->   calls `advanceOneDay()`/`advanceDays()`/`evaluateCrons()`**, so the
->   galaxy-clock day never advances during live play and cron background
->   events (news included) still never fire for a real player. See the
->   updated §5 table and the corresponding note added to `docs/MISSIONS.md`.
+> - **The app now has a real `GameServices` conformer**
+>   (`app/NovaSwift/Story/AppGameServices.swift`) and instantiates a real
+>   `StoryEngine` for actual play, both for missions
+>   (`app/NovaSwift/Story/MissionBoardView.swift`) and for the day-clock tick
+>   (below) — mission offer/accept/decline is genuinely wired and persists to
+>   the pilot save today.
+> - **This doc's central stale claim is now corrected: the galaxy-clock day
+>   genuinely advances during live play, and crons genuinely fire.**
+>   `GameContainerView.advanceGameDay()`
+>   (`app/NovaSwift/Game/GameContainerView.swift:1556-1573`) builds a real
+>   `StoryEngine` over the live pilot state and calls `engine.advanceOneDay()`
+>   — which runs `evaluateCrons()`, `evaluateDisasters()`, `checkDeadlines()`,
+>   and the daily salary/tribute/escort-fee payouts (`StoryEngine.swift:635-649`)
+>   — from **three** real call sites: landing→depart
+>   (`GameContainerView.swift:1062`), hypergate travel
+>   (`GameContainerView.swift:1382`), and every hyperjump
+>   (`GameContainerView.swift:1916`), each advancing the calendar by exactly
+>   one day per the Bible's own day-granularity model (§3 above). A cron's
+>   `OnStart`/`OnEnd` control-bit effects, its `Contribute`/`Require` gating,
+>   and its news now all genuinely run for a real player, not just in tests.
+> - **A real news dialog exists too.** `HolovidView`
+>   (`app/NovaSwift/Spaceport/SpaceportScreens.swift:914-983`), reached via the
+>   spaceport bar's "Holovid" button, reads
+>   `StoryEngine.stationNews(forGovt:)` (`StoryEngine.swift:892-...`) on
+>   demand — a **pull** model, not the push-based `showNews`/`announceNews`
+>   pair above: `stationNews` scans `player.cronRuntime` for currently-active
+>   crons directly and resolves local-vs-independent news fresh at the
+>   station being visited, which is also how the Bible's "local news always
+>   takes precedence over independent news" precedence rule (§2) ends up
+>   applied — at render time, by the one place that actually knows which
+>   government's turf the player is standing on, rather than by the cron's
+>   own `announceNews` push (which doesn't know that). Consequently
+>   `AppGameServices.showNews` (`app/NovaSwift/Story/AppGameServices.swift:125-127`)
+>   really is still just a logging stub — but that no longer means "no news
+>   UI," since the player-visible news path doesn't go through it at all.
 >
-> Net effect on §5: several rows move from "not implemented" to "implemented
-> in the engine, verified correct" — but the one row that most affects a
-> player, "does anyone ever see this," is unchanged: still no.
+> Net effect on §5: every row that previously read "implemented in the engine
+> but never seen by a player" is now player-visible. See the updated table
+> below.
 
 Primary source: `data/EV Nova/Documentation/Nova Bible.txt` — the official
 Ambrosia/Matt Burch "Resource Bible." The `crön` resource is documented at
@@ -287,10 +317,10 @@ all 125 real crons, IDs matching MISSIONS.md's count):
 | Date-window activation, `PreHoldoff`/`PostHoldoff`, `Duration` (incl. same-day start/end at 0), `EnableOn` test, `Random` per-day roll, `OnStart`/`OnEnd` | ✅ Implemented | `StoryEngine.evaluateCrons` / `dateInWindow`, `StoryEngine.swift:416-466` |
 | `0` **and** `-1` both wildcard a date field | ⚠️ Partial | `dateInWindow` (`StoryEngine.swift:453,459`) only special-cases `c.firstYear != 0` / `c.lastYear != 0`, and `firstDay/lastDay/firstMonth/lastMonth == 0` for their own defaults — a field set to `-1` is taken as a literal date component instead of a wildcard. Empirically **inert against the base game**: a sweep of all 125 real crons' header fields found zero uses of `-1` (only `0` is used as the wildcard sentinel in practice) — but a plugin author following the Bible's documented "0 or -1" convention literally (e.g. `LastYear = -1` for "never expires") would have that cron permanently fail its window check once the campaign clock passes year ~-1's Julian Day equivalent, i.e. from the very first day — the opposite of the intended "no upper bound." |
 | Flags `0x0001`/`0x0002` (continuous iterative OnStart/OnEnd re-evaluation while `EnableOn`/`Require` hold) | ❌ Not implemented | `CronRes.flags`/`loopStartUntilFalse`/`loopEndUntilFalse` are decoded (`MissionModels.swift:276,282-283`) but never read in `StoryEngine` — `evaluateCrons` always treats `OnStart`/`OnEnd` as a one-shot call regardless of these bits. |
-| `Contribute`/`Require` cross-resource gating (cron feeds `oütf.Require`/`mïsn.Require` while active; cron's own `Require` can gate its activation on ship/outfit `Contribute`) | Mixed: `mïsn.Require` half ✅ Implemented and wired; `crön.Require`/`Contribute` half ⚠️ Implemented but not wired | `CronRes.contribute`/`.require` (`MissionModels.swift:309,313,343-344`) and `MissionRes.require` (`MissionModels.swift:181,263` — no longer read-and-discarded) are now decoded. `StoryEngine.activeContributeBits()` (`StoryEngine.swift:401-411`) pools ship/outfit/rank/active-cron `Contribute` bits; `isEligible` gates on `mission.require` (`StoryEngine.swift:147`); `evaluateCrons()` gates on `c.require` (`StoryEngine.swift:482`). The **mission** half is genuinely player-visible today: `MissionBoardView.buildEngine()` (`app/NovaSwift/Story/MissionBoardView.swift:81-83`) drives the real `StoryEngine.missionsOffered`, so ship/outfit/rank `Contribute` bits now do gate real mission offers in the live app. The **cron** half is not player-visible: `evaluateCrons()` never runs live (see the wiring row below), so a cron's own `Require` gate and its `Contribute` bits while active are exercised only in `NovaSwiftStoryTests`/`novaswift-extract story`. No test in `StoryEngineTests.swift` exercises `Contribute`/`Require` directly (grepped, none found) — coverage is incidental, via the pre-existing mission-eligibility tests only. |
-| `NewsGovt1-4`/`GovtNewsStr1-4` (per-government local news) | ⚠️ Implemented and correctly wired in `StoryEngine`, but not wired into live play | Byte layout bug fixed and fields decoded (`CronRes.newsGovts`/`.govtNewsStrs`, `MissionModels.swift:316-319,345-346`) — the `crön` TMPL (`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, TMPL #503) types the three NCB strings `n0FF`/`n0FF`/`n100` = 255/255/**256** bytes, not 255 each; the old 789-byte, all-255 assumption undercounted `OnEnd` by one byte. Full layout: 24-byte header, `enableOn@24`(255B), `onStart@279`(255B), `onEnd@534`(**256B**) → 790, `contribute@790`(8B), `require@798`(8B) → 806, `newsGovt1-4@806`(4×2B), `govtNewsStr1-4@814`(4×2B) → 822 total. **Re-confirmed for this update** (`swift run novaswift-extract raw "data/EV Nova" crön 128`): cron #128 "Wraith Change" is exactly 822 bytes, `newsGovts[0] == 130` (real govt id) and `govtNewsStrs[0] == 15000` (real `STR#` id) at the predicted offsets — the fix is correct. `GameServices` gained `showNews(text:govt:)` (`GameServices.swift:60`), and `StoryEngine.evaluateCrons()` now calls `announceNews(for:)` (`StoryEngine.swift:490`) exactly when a cron starts, resolving local news per `newsGovts`/`govtNewsStrs` slot with an `independentNewsStrID` fallback (`StoryEngine.swift:511-521`). But crons never activate during live play (nothing in `app/` calls `advanceOneDay`/`advanceDays`/`evaluateCrons` — grepped, zero hits), so `announceNews` never fires for a real player; and even if it did, `AppGameServices.showNews` (`app/NovaSwift/Story/AppGameServices.swift:69-71`) is an explicit logging stub — there is still no news dialog in the app. This row is correct end-to-end in code with zero player-visible effect today. |
-| `IndNewsStr` (independent/fallback news) | ⚠️ Implemented and correctly wired in `StoryEngine`, but not wired into live play | `CronRes.independentNewsStrID` is now consumed: `announceNews(for:)` calls `services?.showNews(text:govt: nil)` when `c.independentNewsStrID > 0` (`StoryEngine.swift:518-519`). Same live-play caveat as the row above — never reached because crons don't tick live, and the app's `showNews` conformer is a no-op stub. Note the Bible's local-beats-independent *precedence* is still explicitly left to the eventual UI layer, by design: the engine can't know which station the player is looking at news from (see the doc comment at `StoryEngine.swift:497-510`), so it hands the conformer one `showNews` call per configured local slot plus one for independent fallback, and expects whatever renders the news dialog to apply the precedence rule — that renderer doesn't exist yet either. |
-| Player ever seeing any cron effect | ❌ Not implemented (crons never evaluate during live play) | Correction to this doc's original reasoning: a live `GameServices` conformer **does** now exist (`AppGameServices`) and the app **does** instantiate a real `StoryEngine` for actual play — `MissionBoardView.swift:81` builds one, and mission offer/accept/decline round-trips to the saved pilot for real (see the `Contribute`/`Require` row above). `docs/MISSIONS.md`'s original "no app type conforms to `GameServices`... app never instantiates `StoryEngine` for play" banner is now stale for the *mission* half of the module; a small correction note has been added there. That doesn't help crons specifically, though: cron evaluation only happens inside `StoryEngine.advanceDays`/`.advanceOneDay` (`StoryEngine.swift:419-431`), and grepping `app/` for `advanceOneDay`/`advanceDays`/`evaluateCrons` finds **zero call sites**. Every `StoryEngine` the app builds today (`MissionBoardView`) is constructed fresh per mission-offer location purely to query/accept/decline missions there; none of them live long enough or get ticked to ever ask "has any cron's date window opened." So: bit flips via cron `OnStart`/`OnEnd`, cron-gated mission/outfit/rank availability, and all cron news remain exercised only in `NovaSwiftStoryTests` (e.g. `testCronStartsAndEnds`, `testCronBlockedByEnableTest`) and the `novaswift-extract story` CLI replay. A player running the live game today still experiences **no background events whatsoever** — same bottom line as before this update, now for a more precise, verified reason. |
+| `Contribute`/`Require` cross-resource gating (cron feeds `oütf.Require`/`mïsn.Require` while active; cron's own `Require` can gate its activation on ship/outfit `Contribute`) | ✅ Implemented and wired, both halves player-visible | `CronRes.contribute`/`.require` (`MissionModels.swift:309,313,343-344`) and `MissionRes.require` (`MissionModels.swift:181,263` — no longer read-and-discarded) are decoded. `StoryEngine.activeContributeBits()` (`StoryEngine.swift:401-411`) pools ship/outfit/rank/active-cron `Contribute` bits; `isEligible` gates on `mission.require` (`StoryEngine.swift:147`); `evaluateCrons()` gates on `c.require` (`StoryEngine.swift:482`). The **mission** half is player-visible via `MissionBoardView.buildEngine()` (`app/NovaSwift/Story/MissionBoardView.swift:81-83`), which drives the real `StoryEngine.missionsOffered`. The **cron** half is now also player-visible: `GameContainerView.advanceGameDay()` (`app/NovaSwift/Game/GameContainerView.swift:1562-1573`) calls a real `StoryEngine.advanceOneDay()` on landing, gate travel, and every hyperjump (three call sites, `GameContainerView.swift:1062,1382,1916`), which runs `evaluateCrons()` for real — so a cron's own `Require` gate and its `Contribute` bits while active are exercised in live play, not just in `NovaSwiftStoryTests`/`novaswift-extract story`. |
+| `NewsGovt1-4`/`GovtNewsStr1-4` (per-government local news) | ✅ Implemented, wired, and player-visible | Byte layout bug fixed and fields decoded (`CronRes.newsGovts`/`.govtNewsStrs`, `MissionModels.swift:316-319,345-346`) — the `crön` TMPL (`third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, TMPL #503) types the three NCB strings `n0FF`/`n0FF`/`n100` = 255/255/**256** bytes, not 255 each; the old 789-byte, all-255 assumption undercounted `OnEnd` by one byte. Full layout: 24-byte header, `enableOn@24`(255B), `onStart@279`(255B), `onEnd@534`(**256B**) → 790, `contribute@790`(8B), `require@798`(8B) → 806, `newsGovt1-4@806`(4×2B), `govtNewsStr1-4@814`(4×2B) → 822 total. **Re-confirmed for this update** (`swift run novaswift-extract raw "data/EV Nova" crön 128`): cron #128 "Wraith Change" is exactly 822 bytes, `newsGovts[0] == 130` (real govt id) and `govtNewsStrs[0] == 15000` (real `STR#` id) at the predicted offsets — the fix is correct. `GameServices` gained `showNews(text:govt:)` (`GameServices.swift:60`), and `StoryEngine.evaluateCrons()` calls `announceNews(for:)` (`StoryEngine.swift:490`) exactly when a cron starts, resolving local news per `newsGovts`/`govtNewsStrs` slot with an `independentNewsStrID` fallback (`StoryEngine.swift:511-521`). **Crons now do activate during live play** (see the row above and the "Implementation status" callout at the top of this doc), so `announceNews` fires for real. `AppGameServices.showNews` (`app/NovaSwift/Story/AppGameServices.swift:125-127`) is still just a logging stub, but that push path is no longer the only way the player sees this news: `HolovidView` (`app/NovaSwift/Spaceport/SpaceportScreens.swift:914-983`) independently **pulls** the same data via `StoryEngine.stationNews(forGovt:)`, scanning `player.cronRuntime` for currently-active crons and resolving their `NewsGovt`/`GovtNewsStr` slots fresh whenever the player opens the bar's Holovid screen. |
+| `IndNewsStr` (independent/fallback news) | ✅ Implemented, wired, and player-visible | `CronRes.independentNewsStrID` is consumed both ways: `announceNews(for:)` calls `services?.showNews(text:govt: nil)` when `c.independentNewsStrID > 0` (`StoryEngine.swift:518-519`, push, logged only), and `stationNews(forGovt:)` (`StoryEngine.swift:892-...`) falls back to the independent pool when a station's government has no applicable local news (pull, player-visible via `HolovidView`). The Bible's local-beats-independent *precedence* (§2) is applied at the pull layer, at render time, by the one place that actually knows which station's news the player is reading — exactly the design the engine's doc comment anticipates (`StoryEngine.swift:497-510`). |
+| Player ever seeing any cron effect | ✅ Implemented and player-visible (corrected from this doc's original "still no") | A live `GameServices` conformer exists (`AppGameServices`) and the app instantiates a real `StoryEngine` both for missions (`MissionBoardView.swift:81`) and for the day-clock (`GameContainerView.advanceGameDay()`, `GameContainerView.swift:1562-1573`). Cron evaluation happens inside `StoryEngine.advanceDays`/`.advanceOneDay` (`StoryEngine.swift:635,639-649`), and `GameContainerView.swift` calls it from three real call sites — landing→depart (`:1062`), hypergate travel (`:1382`), and every hyperjump (`:1916`) — each advancing the calendar by one day. So: bit flips via cron `OnStart`/`OnEnd`, cron-gated mission/outfit/rank availability, and cron news (via `HolovidView`'s pull-based `stationNews`) all now run and are observable for a real player, not just in `NovaSwiftStoryTests`/`novaswift-extract story`. What remains unimplemented is narrower than "no background events whatsoever": the `-1`-wildcard date bug and the `0x0001`/`0x0002` continuous-iteration flags above are still open, and `AppGameServices.showNews`'s push path is still an inert stub (harmless, since `HolovidView` doesn't need it). |
 
 ### Open questions not resolvable from the Bible text alone
 
@@ -324,8 +354,13 @@ all 125 real crons, IDs matching MISSIONS.md's count):
   touch the flags handling at all (confirmed by grep: `loopStartUntilFalse`/
   `loopEndUntilFalse` are still decoded-but-unread).
 - ~~Whether `Contribute`/`Require` and cron-sourced news are player-visible
-  yet~~ — **resolved by this update**, and not a Bible-ambiguity question but
-  an engineering one: no. `Contribute`/`Require`'s mission half is now wired
-  and player-visible (see §5), but the cron-activation half, and all cron
-  news, are not — the live app never advances the galaxy-clock day, so
-  `evaluateCrons()` never runs outside tests/CLI. See §5's last three rows.
+  yet~~ — **resolved, and updated again in this pass**: yes, both halves. An
+  earlier draft of this doc found the mission half of `Contribute`/`Require`
+  wired and player-visible but the cron-activation half (and all cron news)
+  not, because the live app never advanced the galaxy-clock day. That's no
+  longer true: `GameContainerView.advanceGameDay()`
+  (`app/NovaSwift/Game/GameContainerView.swift:1562-1573`) now calls a real
+  `StoryEngine.advanceOneDay()` from three call sites (landing, gate travel,
+  hyperjump), so `evaluateCrons()` runs in live play, and `HolovidView`
+  (`app/NovaSwift/Spaceport/SpaceportScreens.swift:914-983`) gives the player
+  a real dialog to read the resulting news from. See §5's last three rows.

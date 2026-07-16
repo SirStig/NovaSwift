@@ -24,12 +24,15 @@ where the port still *feels* least like the original. The known weak points:
   original's precise arrival rhythm and ship mix.
 - **Flight handling.** The steering is hand-tuned heuristics ("thrust when
   roughly pointed the right way," turn-limit lifts through hard turns, escort
-  heading-hold hacks). To match the original's *precise* AI flight — and to kill
-  the momentum overshoot, wrong-direction turn drift, and constant escort
-  micro-correction — AI-controlled ships now fly the engine's **driftless
-  (inertialess) model** by default (`FlightTuning.aiInertialess`, see below),
-  the way EV Nova's own AI flew tighter than the player on the same hull. That
-  removes the biggest wobble source; the residual heuristics are what's left.
+  heading-hold hacks). To match the original's *precise* AI flight for the case
+  that matters most — fleets and escorts holding a slot — ships **holding
+  formation** now fly the engine's **driftless (inertialess) model** by default
+  (`FlightTuning.aiInertialess`, see below), the way EV Nova's own AI flew
+  tighter than the player on the same hull. Lone traffic and lone combatants
+  still wrestle Newtonian momentum (the reverse-and-fire "Monty Python"
+  maneuver is a deliberate signature of the original, not a bug). That removes
+  the formation-wobble source; the residual heuristics are what's left for
+  ambient/combat flight.
 - **Behavior edge cases.** One mission `ShipBehav` case falls through to normal
   AI; ships with no brain drift; some engagement/disengagement transitions
   approximate timing the Bible never documented.
@@ -46,23 +49,26 @@ Every ship — player or NPC — is a `Ship`. The simulation only ever reads a
 produce one; an NPC's `AIBrain` produces the *same struct*. That symmetry means
 one flight model, one combat model, one collision model drives everything.
 
-**One deliberate asymmetry — inertialess AI flight.** EV Nova's NPC AI doesn't
-wrestle the same Newtonian momentum the player does: its ships turn and their
-velocity tracks the nose far more tightly than a human flying the identical
-hull, which is exactly why AI traffic reads as *precise* rather than drifty.
-We reproduce that by flying AI-controlled ships on the engine's driftless
+**One deliberate asymmetry — inertialess AI flight, scoped to formations.**
+EV Nova's escorts "ignore their own speed and maneuverability to hold
+formation" (Nova Bible) — a fleet member glues to its slot far more tightly
+than finite turn/thrust could otherwise manage. We reproduce that by flying
+formation-holding ships (fleet members and escorts) on the engine's driftless
 (inertialess) flight model — the same `Ship.step` path a hull with the real
 `shïp` Flags2 0x0040 flag uses — regardless of whether their hull carries the
-flag. The player still flies authentic Newtonian flight (with inertia) unless
-*their own* hull/outfits set the flag. This is controlled by
-`FlightTuning.aiInertialess` (`AIInertialessScope`): `.all` (the default —
-every NPC), `.formations` (only fleet members and escorts, to steady a wing's
-station-keeping), or `.off` (strict "identical physics for player and AI,"
-only the real hull flag counts). `Ship.fliesInertialess(_:)` is the single
-predicate both `Ship.step` and the `AIBrain` steering primitives read. Driving
-NPCs driftless is what removes the momentum overshoot, wrong-direction drift on
-turns, and the constant escort micro-correction a from-source flight AI wouldn't
-have.
+flag. Lone AI ships (no formation to hold) and the player still fly authentic
+Newtonian flight (with inertia) unless *their own* hull/outfits set the flag —
+that's what preserves the reverse-and-fire "Monty Python" maneuver as a
+signature of ambient traffic and combat. This is controlled by
+`FlightTuning.aiInertialess` (`AIInertialessScope`): `.formations` (the
+default — only ships currently holding formation fly driftless), `.all`
+(every NPC, formation or not), or `.off` (strict "identical physics for
+player and AI," only the real hull flag counts). `Ship.fliesInertialess(_:)`
+is the single predicate both `Ship.step` and the `AIBrain` steering
+primitives read. Driving formation-holders driftless is what removes the
+momentum overshoot, wrong-direction drift on turns, and the constant escort
+micro-correction a from-source flight AI wouldn't have — while leaving lone
+traffic and combat feeling Newtonian, as the original does.
 
 ```
 perceive world ─▶ AIBrain.think() ─▶ ControlIntent ─▶ Ship.step() ─▶ physics
@@ -127,8 +133,9 @@ flees or docks once every *ammo-using* weapon mount is dry (`AIBrain.outOfAmmo`)
 — ships that only carry unlimited-ammo guns/beams never trigger this.
 
 See `docs/AI_GROUND_TRUTH.md` for the full Bible-sourced field-by-field
-reference and what's still explicitly deferred (cloak-triggered AI, bribery,
-mission `ShipBehav` overrides, `gövt.SkillMult`) and why.
+reference and what's still explicitly deferred (six of the seven cloak
+triggers — only "cloak when running away" is wired so far, see
+`AIBrain.think`/`me.hasCloak` — bribery, and `gövt.SkillMult`) and why.
 
 ## Behavior state machine
 

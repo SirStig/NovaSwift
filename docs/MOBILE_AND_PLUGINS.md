@@ -43,34 +43,61 @@ A native SwiftUI launcher shown before/around the game scene:
 Settings and the enabled-plug-in set are persisted and read by the engine at
 scene start (and hot-reapplied where cheap).
 
-## 3. Plug-ins on mobile: prebundle + toggle (+ import)
+## 3. Plug-ins on mobile: browsable store + on-demand install (+ import)
 
 **Problem:** desktop EV Nova users drop plug-in files into a folder. iOS sandboxes
 the filesystem, so we can't rely on that as the primary mechanism.
 
-**Decision:**
-1. **Prebundle a curated catalog** of freely-distributable community plug-ins and
-   total conversions inside the app, each **individually toggleable** in the
-   launcher. This is the primary mobile mechanism.
-2. **Also support user import** (iOS *does* allow this): `UIDocumentPicker` /
-   share-sheet / Files "Open in" / AirDrop can bring a `.rez`/`.ndat`/`.zip`
-   plug-in into the app's container. So power users aren't limited to the bundle.
-3. A **`PluginManifest`** describes each catalog entry (id, display name, author,
-   kind = totalConversion | patch | gameplay, requires-base flag, description,
-   file list). The launcher renders this; the engine loads the enabled set as an
+**As shipped today:**
+1. **A bundled, metadata-only store.** `PluginCatalog.json` (~23 entries) plus
+   their screenshots ship inside the app bundle and load from `Bundle.module`
+   (`PluginCatalog.swift`), so **browsing** the store — names, authors,
+   descriptions, screenshots — works fully offline. Every entry currently has
+   `prebundled: false` (`PluginCatalogEntry.prebundled`): no plug-in's actual
+   game data ships in the bundle, only its catalog listing.
+2. **On-demand streamed install.** Tapping Install (`PluginStoreView.swift`)
+   streams the archive directly from the original third-party host —
+   `andrews05`'s EV Stuff mirror or `download.escape-velocity.games` — via
+   `PluginDownloader`, straight into the app's plug-ins directory
+   (`PluginInstaller`). The app never mirrors or redistributes the file itself;
+   nothing beyond JSON + screenshots is bundled. This needs network and is the
+   primary mechanism for actually playing a catalog plug-in.
+3. **User import** (iOS *does* allow this): `UIDocumentPicker` / share-sheet /
+   Files "Open in" / AirDrop can bring a `.rez`/`.ndat`/`.zip` plug-in into the
+   app's container, so power users aren't limited to the catalog.
+4. A **`PluginCatalogEntry`** (`PluginCatalogEntry.swift`) describes each catalog
+   entry: id, name, author, kind, requiresBase, description, sourceURL,
+   screenshotNames, etc. The launcher/store renders this; once a plug-in is
+   installed (by download or import), the engine loads the enabled set as an
    **override chain** over the base data (via `ResourceCollection.overlay`, in a
-   defined order — base first, then enabled plug-ins).
+   defined order — base first, then enabled plug-ins). *Not* to be confused with
+   `NovaSwiftNet.PluginManifest`, an unrelated type: the set of enabled-plugin
+   `(id, contentHash)` pairs exchanged at multiplayer session join to detect
+   desync (see `docs/MULTIPLAYER.md`).
+
+**True prebundling — a real plug-in's data shipped read-only in the app,
+enable/disable-only, no download needed — is a still-unbuilt option.**
+`GameDataController` already has the hook for it (a `bundledPluginsDir` that
+checks `Bundle.main` for a `Plugins/` resource folder, plus `isPrebundled(_:)`
+to mark such plug-ins non-deletable), but no `Plugins/` folder exists anywhere
+in the app target today, so the hook is currently a no-op. That's a direct
+consequence of the redistribution caveat below, not an oversight: we can't ship
+a plug-in's bytes in the bundle until its author has cleared that, so for now
+every catalog entry stays `prebundled: false` and is fetched on demand instead.
 
 **Load order & conflicts:** base → gameplay patches → (at most one) total
 conversion, applied in a deterministic order; later layers override by
 `(type, id)`. Total conversions are treated as mutually exclusive "scenarios"
 (you play *one* TC at a time); small gameplay plug-ins can stack.
 
-**⚠ Redistribution caveat (must resolve before App Store):** community plug-ins
-are free to *download and play*, but *bundling* them in a shipped app needs each
-author's permission. For development we gather the free catalog; for release we
-either (a) obtain per-author permission, or (b) fall back to import-only for any
-plug-in we can't clear. Base game data is **never** bundled (copyright).
+**⚠ Redistribution caveat (why we don't prebundle today):** community plug-ins
+are free to *download and play*, but *bundling* their data in a shipped app
+needs each author's permission — which is exactly why the catalog above ships
+as metadata + on-demand download rather than prebundled content. For any given
+plug-in we either (a) obtain per-author permission and flip it to
+`prebundled: true` in a real `Plugins/` bundle folder, or (b) leave it
+download/import-only, which is the default and current state for the whole
+catalog. Base game data is **never** bundled (copyright).
 
 ## 4. The base-data problem on mobile (important)
 
@@ -82,10 +109,12 @@ once:
   their `Nova Files` folder / `.ndat` / the game archive (or receive via
   AirDrop / Files / iTunes file sharing). We copy it into the app's
   Application Support container and index it.
-- After import, the bundled plug-ins "light up" (they have a base to override).
-- Until import, only content that ships with full permission (if any) is
-  playable; the UI clearly explains the BYO-data requirement.
+- After import, any installed or imported plug-ins "light up" (they have a base
+  to override); the store catalog is browsable even before import, but
+  installing a `requiresBase` entry is gated on it.
+- Until import, nothing is playable (no prebundled content ships, per §3); the
+  UI clearly explains the BYO-data requirement.
 - macOS: same importer, plus the option to point at an existing install.
 
 This keeps us on clean legal footing (BYO base data) while giving mobile users a
-rich, toggle-able plug-in library out of the box.
+rich, browsable plug-in store to install from on demand.

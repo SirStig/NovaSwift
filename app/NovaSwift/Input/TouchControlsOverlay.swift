@@ -10,10 +10,12 @@ enum MobilePanel { case missions, pilotInfo }
 
 /// The on-screen "virtual cockpit" for touch play. Deliberately sparse: only the
 /// controls you hold constantly are always visible — **turn on the left, thrust
-/// on the right**, so one thumb steers while the other drives — with fire and a
-/// couple of combat holds tucked beside thrust. Everything occasional (targeting,
-/// map, jump, land, hail, board, missions, escorts, pilot, menu) lives behind a
-/// single expandable Actions button, so the screen stays uncluttered.
+/// on the right**, so one thumb steers while the other drives — with target/next/
+/// afterburner/fire-2nd and fire tucked beside thrust. Everything occasional
+/// (map, jump, hail, board, missions, escorts, pilot, cloak, recall) lives
+/// behind a single expandable Actions button, so the screen stays uncluttered;
+/// the pause menu (top-left) and the amber Land pill (bottom-centre, when
+/// cleared to land) are separate always-on controls, not grid entries.
 ///
 /// The whole thing is one `VStack` with transparent `Spacer`s, not a stack of
 /// full-screen layers — so only the buttons themselves capture touches and the
@@ -23,9 +25,11 @@ enum MobilePanel { case missions, pilotInfo }
 /// near a button's edge still counts.
 ///
 /// Sizes scale with the smaller screen edge (`Metrics`): compact-but-tappable on
-/// a small iPhone, larger on an iPad, ≥60pt on the load-bearing controls. Styling
-/// is the EV Nova HUD idiom — dark caps with a thin amber bevel, amber glyphs on
-/// the action controls, white on the neutral ones.
+/// a small iPhone, a bit larger on an iPad — deliberately sized so the whole
+/// drive cluster fits a landscape iPhone's short (~375–430pt) edge with room
+/// to spare, rather than "as big as comfortably tappable." Styling is the EV
+/// Nova HUD idiom — dark caps with a thin amber bevel, amber glyphs on the
+/// action controls, white on the neutral ones.
 struct TouchControlsOverlay: View {
     let input: InputController
     @ObservedObject var hud: GameHUDModel
@@ -38,19 +42,23 @@ struct TouchControlsOverlay: View {
     @State private var menuOpen = false
 
     /// Button/spacing sizes from the smaller screen edge: 1× on a small iPhone,
-    /// up to 1.4× on an iPad, so controls read the same relative size everywhere.
+    /// up to 1.35× on an iPad, so controls read the same relative size
+    /// everywhere. Sized to stay clear on a landscape iPhone's short (~375–430pt)
+    /// edge — the whole cockpit (toggle + drive cluster) has to fit in that
+    /// height alongside the open middle, so every control is deliberately
+    /// compact rather than "as big as comfortably tappable."
     private struct Metrics {
         let s: CGFloat
         init(_ size: CGSize) {
             let minEdge = min(size.width == 0 ? 430 : size.width, size.height == 0 ? 430 : size.height)
-            s = min(max(minEdge / 430, 1), 1.4)
+            s = min(max(minEdge / 430, 0.86), 1.35)
         }
-        var big: CGFloat { 72 * s }     // turn / thrust / fire
-        var small: CGFloat { 50 * s }   // afterburner / secondary
-        var toggle: CGFloat { 52 * s }  // actions open/close
-        var tile: CGFloat { 66 * s }    // action-grid tile
-        var gap: CGFloat { 15 * s }
-        var edge: CGFloat { 18 * s }
+        var big: CGFloat { 58 * s }     // fire / thrust / turn
+        var small: CGFloat { 40 * s }   // target / next / afterburner / fire-2nd
+        var toggle: CGFloat { 44 * s }  // actions open/close
+        var tile: CGFloat { 56 * s }    // action-grid tile
+        var gap: CGFloat { 10 * s }
+        var edge: CGFloat { 14 * s }
     }
 
     private var m: Metrics { Metrics(viewportSize) }
@@ -113,12 +121,17 @@ struct TouchControlsOverlay: View {
 
     // MARK: Drive + fire (bottom-right; thrust is the rightmost, outer button)
 
+    /// Two rows, not four: the four secondary holds (target/next/afterburn/
+    /// fire-2nd) sit in one row so the whole cluster fits the short edge of a
+    /// landscape iPhone alongside the open middle and the Actions toggle above
+    /// it — a stack of four rows ran taller than the screen on small phones.
     private var driveCluster: some View {
         VStack(alignment: .trailing, spacing: m.gap) {
             weaponChip
-            // Combat targeting, always visible: locking an enemy (and cycling to
-            // the next) must never mean opening the Actions menu mid-dogfight.
-            HStack(alignment: .bottom, spacing: m.gap) {
+            // Combat targeting + holds, always visible: locking an enemy,
+            // cycling to the next, burning or firing the secondary must never
+            // mean opening the Actions menu mid-dogfight.
+            HStack(alignment: .bottom, spacing: m.gap * 0.7) {
                 labeled("Target") {
                     TapButton(size: m.small, onTap: { onDiscrete(.targetNearest) }) {
                         NovaControlCap(system: "scope", size: m.small, accent: true)
@@ -129,8 +142,6 @@ struct TouchControlsOverlay: View {
                         NovaControlCap(system: "arrow.triangle.2.circlepath", size: m.small)
                     }
                 }
-            }
-            HStack(alignment: .bottom, spacing: m.gap) {
                 labeled("Afterburn") {
                     HoldButton(size: m.small, onChange: { input.touch.afterburner = $0 }) {
                         NovaControlCap(system: "flame.fill", size: m.small, accent: true)
@@ -226,11 +237,12 @@ struct TouchControlsOverlay: View {
 
     /// The action tiles, in reading order. Kept as data so the grid can lay all
     /// of them out at a definite height (row count derives from `.count`).
+    /// Target/Next and Menu are deliberately *not* repeated here — they're
+    /// already always-on controls (`driveCluster`, `topLeftMenuButton`), and
+    /// duplicating them just made the grid taller for no reason.
     private var actionItems: [(icon: String, label: String, run: () -> Void, enabled: Bool)] {
         [
-            ("scope", "Target", { onDiscrete(.targetNearest) }, true),
             ("exclamationmark.triangle.fill", "Hostile", { onDiscrete(.nearestHostile) }, true),
-            ("arrow.triangle.2.circlepath", "Next", { onDiscrete(.targetNext) }, true),
             ("xmark.circle", "Untarget", { onDiscrete(.clearTarget) }, true),
             ("antenna.radiowaves.left.and.right", "Hail", { onDiscrete(.hailTarget) }, true),
             ("person.3.fill", "Escorts", { onDiscrete(.openEscorts) }, true),
@@ -246,7 +258,6 @@ struct TouchControlsOverlay: View {
             ("arrow.down.to.line", "Land", { onDiscrete(.land) }, hud.landReady),
             ("list.bullet.clipboard", "Missions", { onOpenPanel(.missions) }, true),
             ("person.crop.circle", "Pilot", { onOpenPanel(.pilotInfo) }, true),
-            ("line.3.horizontal", "Menu", { onDiscrete(.openMenu) }, true),
         ]
     }
 

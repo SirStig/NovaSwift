@@ -211,7 +211,20 @@ struct GameHUDView: View {
     var highContrast: Bool = false
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
-    private let sidebarW: CGFloat = 196
+    private let sidebarW: CGFloat = Self.baseSidebarWidth
+
+    private static let baseSidebarWidth: CGFloat = 196
+
+    /// Width this HUD's own top-right info stack (system/radar/status/nav/
+    /// target panels) reserves, incl. the "Larger HUD" scale-up and its edge
+    /// padding. In Modern/Nova Swift HUD mode there's no authentic sidebar
+    /// reserving screen width (`GameContainerView.sidebarWidth` returns 0), so
+    /// other top-right/right-edge screen UI — the touch-controls Actions
+    /// cluster, the land prompt — must inset by this instead, or they paint
+    /// directly over the target/landing readouts this stack shows.
+    static func reservedRightWidth(largerHUD: Bool) -> CGFloat {
+        baseSidebarWidth * (largerHUD ? 1.28 : 1) + 12
+    }
 
     private var panel: Color { Color.black.opacity(highContrast ? 0.75 : 0.42) }
     private var edge: Color { .white.opacity(highContrast ? 0.4 : 0.12) }

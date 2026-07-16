@@ -838,7 +838,7 @@ struct GameContainerView: View {
                             input: host.input, hud: host.hud,
                             viewportSize: geo.size,
                             tapToFly: model.settings.controlScheme == .tapToTurn,
-                            rightInset: Self.sidebarWidth(in: geo.size, style: activeHUDStyle(host)),
+                            rightInset: touchRightInset(host, in: geo.size),
                             onDiscrete: handleDiscrete,
                             onOpenPanel: openMobilePanel)
                     }
@@ -851,7 +851,7 @@ struct GameContainerView: View {
                 // viewport, not the full window (see `Self.sidebarWidth`).
                 GeometryReader { geo in
                     LandPromptView(hud: host.hud, onLand: { handleDiscrete(.land) },
-                                    rightInset: Self.sidebarWidth(in: geo.size, style: activeHUDStyle(host)))
+                                    rightInset: touchRightInset(host, in: geo.size))
                 }
 
                 if let state = hailDialogState {
@@ -1944,6 +1944,19 @@ struct GameContainerView: View {
         return min(natural, size.width * 0.35)
     }
 
+    /// The right-edge clearance touch-only UI (the on-screen controls, the
+    /// land prompt) must keep so it never paints over the HUD. In authentic
+    /// mode that's the reserved sidebar; in Modern/Nova Swift mode there's no
+    /// reserved sidebar (the scene fills the width), but `GameHUDView` still
+    /// floats its own info stack in the top-right corner, so touch UI insets
+    /// by that instead — without this both claim the same corner.
+    private func touchRightInset(_ host: GameHost, in size: CGSize) -> CGFloat {
+        if let style = activeHUDStyle(host) {
+            return Self.sidebarWidth(in: size, style: style)
+        }
+        return GameHUDView.reservedRightWidth(largerHUD: model.settings.largerHUD)
+    }
+
     /// The authentic status-bar style to actually render, or nil to fall back to
     /// the port's own modern `GameHUDView`. Nil whenever the player is in the
     /// Nova Swift / "Modern interface" mode — even when the data ships an `ïntf`
@@ -2816,11 +2829,17 @@ struct GameContainerView: View {
         VStack {
             HStack {
                 Button { showMenu = true } label: {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.title3.weight(.semibold))
-                        .padding(11)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(.white.opacity(0.15)))
+                    VStack(spacing: 2) {
+                        Image(systemName: "line.3.horizontal")
+                            .font(.title3.weight(.semibold))
+                            .padding(11)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(.white.opacity(0.15)))
+                        Text("Menu")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .shadow(color: .black.opacity(0.85), radius: 1.5, y: 0.5)
+                    }
                 }
                 .buttonStyle(.plain)
                 .padding(.leading, 14)

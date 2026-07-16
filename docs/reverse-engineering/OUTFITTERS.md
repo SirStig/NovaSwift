@@ -190,10 +190,10 @@ there regardless of what the player owns).
 Implemented: `Sources/NovaSwiftKit/NovaAIModels.swift` decodes `contribute` (`@30`),
 `require` (`@38`), `requireGovt` (`@1010`) on `OutfRes`. Logic in
 `app/NovaSwift/Spaceport/ItemLocking.swift`:
-- `contributedBits(pilot:)` (lines 24-30) ORs the current ship's `contribute`
+- `contributedBits(pilot:)` (lines 29-41) ORs the current ship's `contribute`
   with every owned outfit's `contribute`.
-- `requireGovtApplies` (lines 37-49) implements the four range cases above.
-- `lockState(for:pilot:at:diplomacy:)` (lines 52-59) combines Availability +
+- `requireGovtApplies` (lines 48-60) implements the four range cases above.
+- `lockState(for:pilot:at:diplomacy:)` (lines 63-70) combines Availability +
   Require-if-in-scope into the final available/locked/hidden state.
 
 ### 3.3a `OnPurchase`/`OnSell` — side-effect control-bit sets

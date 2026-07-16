@@ -11,9 +11,12 @@
 > fire; and **mission ships spawn into the live world** and report
 > disable/board/destroy back to the engine (`spawnActiveMissionShips` →
 > `World.spawnMissionShips` → `.missionShipGoalReached`). Remaining follow-ups
-> are narrow: `ShipSyst` −1/−2/−5 selectors are partly unresolved, in-flight
-> hull-swap/relocate lean on the takeoff rebuild for full visuals, and news has
-> no per-station local/independent precedence yet. See [STATUS.md](STATUS.md),
+> are narrow: govt allies/enemies stellar selectors resolve as plain govt
+> matches until the government-relations table is queried at those call sites;
+> a *landed* player's hull-swap/relocate takes effect on the next takeoff
+> rebuild rather than instantly (in-flight, both rebuild the live scene
+> immediately); and `dësc` PICT/movie art in offers is still unrendered. See
+> [STATUS.md](STATUS.md),
 > [ROADMAP.md](ROADMAP.md), and
 > [reverse-engineering/EVENTS.md](reverse-engineering/EVENTS.md) §5. "Done"
 > below now means both "the library works" *and* "the player experiences it."
@@ -223,14 +226,29 @@ browsable immediately.
 - ✅ **`përs`** captains offering their linked missions in space — the `përs`
   system places named NPCs with hail quotes, link-missions, and grudges into
   the live world.
+- ✅ `ShipSyst` **−1/−2/−5/−6 mission-ship selectors** — the full selector
+  table (initial system, random-but-frozen-per-mission, adjacent-to-initial,
+  follow-the-player, plus travel/return spöb systems and specific system ids)
+  is implemented in `missionSystemMatches`
+  (`app/NovaSwift/Game/GameContainerView.swift:1695`).
+- ✅ Background **news** local/independent precedence per station —
+  `StoryEngine.stationNews(forGovt:)`
+  (`Sources/NovaSwiftStory/StoryEngine.swift:892`) collects local news tagged
+  for the requesting station's govt (or a govt allied with it) and falls back
+  to the shared independent pool only when no local news applies; wired into
+  `HolovidView` (`app/NovaSwift/Spaceport/SpaceportScreens.swift:944`).
+- ✅ A destroyed stellar renders its **wreck** graphic
+  (`spöb.DestroyedGraphic` → `spïn` → `rlëD`, decoded by
+  `NovaGame.spobDestroyedSprite`, `Sources/NovaSwiftKit/NovaModels.swift:1241`)
+  when wreck art exists for it; it only vanishes from the system when there's
+  no wreck art at all (`app/NovaSwift/Game/GameContainerView.swift:159`).
 
 ## Still not fully wired (low-value polish)
 
 - Govt **allies/enemies** stellar selectors resolve as plain govt matches until
   the government-relations table is fully queried at those call sites.
-- Background **news** has no per-station local/independent precedence yet.
-- A destroyed stellar renders as absent, not a wreck/asteroid variant.
+- A *landed* player's hull-swap/relocate takes effect on the next takeoff
+  rebuild rather than instantly; in-flight, both `onChangePlayerShip` (via
+  `rebuildFlightHost`) and `onMovePlayer` (via `movePlayerToSystem`) rebuild
+  the live scene immediately (`app/NovaSwift/Game/GameContainerView.swift:1492`).
 - Rendering of `dësc` **PICT**/movie art in offers (needs the UI + PICT decoder).
-
-(The `ShipSyst` −1/−2/−5 mission-ship selectors and in-place mid-flight ship
-swap, previously listed here, are now done — see the status banner above.)

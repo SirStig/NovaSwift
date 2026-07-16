@@ -1,18 +1,48 @@
 # Junk & Öops — implementation design (design-first)
 
-Status: **DESIGN ONLY — not implemented.** This is the "design first" step for
-wiring the two decoded-but-inert trade resources into the running game. The
+Status: **Implemented.** This was the "design first" step for wiring the two
+decoded resources into the running game, and the plan below shipped. The
 reverse-engineering ground truth (byte layouts, field meanings, verified real
-records, the resolved `öops.Commodity`-range question) already lives in
-[`ECONOMY.md`](ECONOMY.md) §3 (`jünk`), §4 (`öops`) and §5 (implemented-vs-missing).
-This document does not re-derive any of that; it turns ECONOMY.md §5's two
-"to wire this up would need" sketches into a concrete, buildable plan so the
-implementation can proceed without re-litigating the shape.
+records, the resolved `öops.Commodity`-range question) lives in
+[`ECONOMY.md`](ECONOMY.md) §3 (`jünk`), §4 (`öops`) and §5
+(implemented-vs-missing, now up to date). This document is kept as design
+rationale — it explains *why* the shape below was chosen — but treat
+ECONOMY.md as the current source of truth for what's actually built and
+wired; where the two disagree, ECONOMY.md wins.
 
-Decoders in place today: `Sources/NovaSwiftKit/JunkModels.swift` (`JunkRes`,
+## Implementation status
+
+Both Part A (junk trading) and Part B (öops disasters) are implemented and
+wired into gameplay, matching the plan below with two notable deviations
+(called out inline at §B.3 and §B.5):
+
+- **Junk trading**: `TradeCenterView.market`
+  (`app/NovaSwift/Spaceport/SpaceportScreens.swift:29-101`) surfaces buy/sell
+  rows from `game.junks()`, gated by `BuyOn`/`SellOn` NCB tests and the
+  `SoldAt`/`BoughtAt` stellar lists, exactly as sketched in Part A.
+- **Shared cargo capacity**: junk tonnage lives in the same `state.cargo`
+  dictionary as standard commodities
+  (`app/NovaSwift/Game/PilotStore.swift:210-262`), so capacity accounting is
+  unified rather than needing a separate combined-total helper.
+- **Tribbles/Perishable**: `PilotStore.tickJunkCargo`
+  (`app/NovaSwift/Game/PilotStore.swift:246-265`) grows/decays held junk
+  tonnage per day, as Part A.5 describes.
+- **Contraband hook**: `Sources/NovaSwiftKit/Contraband.swift:55-57`
+  (`isCargoContraband`) is consumed by
+  `Sources/NovaSwiftStory/ContrabandScan.swift:49`.
+- **Öops daily roll + expiry**: `Sources/NovaSwiftStory/StoryEngine.swift:658-676`
+  (`evaluateDisasters`, called from `advanceDays` next to
+  `payDailyTribute()`), tracking active disasters in `player.activeDisasters`.
+- **Öops pricing**: `Sources/NovaSwiftKit/OopsModels.swift:112-118`
+  (`disasterPriceDelta`) applies the additive `PriceDelta`, consumed at
+  `app/NovaSwift/Spaceport/SpaceportScreens.swift:78-83`.
+
+See ECONOMY.md's "Implementation status" blurb and §5 table for the
+up-to-date, per-field wiring picture.
+
+Decoders: `Sources/NovaSwiftKit/JunkModels.swift` (`JunkRes`,
 `NovaGame.junk(_:)`/`junks()`) and `Sources/NovaSwiftKit/OopsModels.swift`
-(`OopsRes`, `NovaGame.oops(_:)`/`oopses()`). Neither has a single caller outside
-its own model/tests.
+(`OopsRes`, `NovaGame.oops(_:)`/`oopses()`).
 
 ---
 
@@ -25,6 +55,19 @@ its own model/tests.
    Öops activation must use the **same** hash pattern so a market shows the same
    prices whether you relaunch, revisit, or reload a save on the same in-game
    day. No stored RNG state, no per-frame rolls.
+
+   > **As shipped, this principle was not followed.** `StoryEngine.evaluateDisasters`
+   > (`Sources/NovaSwiftStory/StoryEngine.swift:669`) calls
+   > `rng.chance(percent: o.freq)`, where `rng` is a stateful `StoryRNG`
+   > (SplitMix64, `Sources/NovaSwiftStory/StellarMatching.swift:85-107`) shared
+   > across missions, bar rumors, and cron evaluation — the same generator
+   > advances every time any of those systems rolls, not a pure function of
+   > `(day, oopsID)`. This means the öops roll is *not* guaranteed to reproduce
+   > identically across a relaunch/reload on the same in-game day the way the
+   > `BuyRandom` stocking hash is — the original determinism/relaunch-stability
+   > goal in this principle was not preserved as specified. It hasn't caused a
+   > known bug, but it's a real deviation from the design if strict same-day
+   > reproducibility is ever relied upon (e.g. by a future save/replay test).
 2. **BYO-data, no hardcoding.** Everything is driven from the player's own
    `jünk`/`öops` resources; the only constants are the six standard-commodity
    ids (0-5) already defined by `Commodity`.
@@ -185,6 +228,12 @@ The **only** place a live commodity price is computed is
 `TradeCenterView` shows the active disaster's `name` as a "what's happening here"
 banner when any `öops` is active for the current stellar/commodity, per the
 Bible. The price rows already reflect the delta via B.4, so this is label-only.
+
+> **Remaining gap, not built.** `OopsModels.swift`'s `activeDisasterNames(spobID:activeOops:)`
+> (~line 118-122) exists for exactly this purpose but has no callers anywhere
+> in `app/` or `Sources/` (confirmed by grep) — `TradeCenterView` applies the
+> price delta (B.4) but never surfaces the disaster's name. The banner
+> described in this section is still a to-do, not something that shipped.
 
 ---
 

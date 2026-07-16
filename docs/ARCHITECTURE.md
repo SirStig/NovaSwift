@@ -29,27 +29,57 @@ dormant-codebase-revival tax.
 
 ## Layers
 
+The package is `Package.swift` at the repo root, with seven `Sources/` targets
+plus the app. Actual layout (`find Sources -maxdepth 1 -type d`):
+`NovaSwiftKit`, `NovaSwiftEngine`, `NovaSwiftStory`, `NovaSwiftNet`,
+`NovaSwiftSync`, `NovaSwiftPluginStore`, `novaswift-extract`.
+
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  apps/  (SwiftUI shells)                                       │
-│    iOS/iPadOS  ·  macOS      → host a SpriteKit scene,          │
-│                                per-platform input adapters      │
-├──────────────────────────────────────────────────────────────┤
-│  NovaSwiftEngine   (Swift)                                         │
-│    deterministic simulation: Newtonian flight, AI, weapons,     │
-│    missions, economy, galaxy/jump, save games                   │
-│    rendering via SpriteKit (sprites, HUD, starfield) over Metal │
-├──────────────────────────────────────────────────────────────┤
+┌──────────────────────────────────────────────────────────────────┐
+│  app/NovaSwift/  (SwiftUI shells + feature UI)                     │
+│    iOS/iPadOS · macOS  → host a SpriteKit scene, per-platform      │
+│    input adapters. Feature dirs include Multiplayer/ (lobby/       │
+│    session UI over NovaSwiftSync+NovaSwiftNet) and Store/ (plug-in │
+│    browser/download UI over NovaSwiftPluginStore).                 │
+├────────────────────────────────────────────────────────────────────┤
+│  NovaSwiftSync  (Swift) — depends on NovaSwiftEngine + NovaSwiftNet │
+│    Bridges engine ↔ net: maps World/ControlIntent to/from wire     │
+│    types, drives per-system Layer-2 sync between host and guests.  │
+├───────────────────────────────┬────────────────────────────────────┤
+│  NovaSwiftNet   (Swift)       │  NovaSwiftEngine   (Swift)          │
+│    Multiplayer transport:     │    deterministic simulation:       │
+│    transport abstraction,     │    Newtonian flight, AI, weapons,  │
+│    presence, session wire     │    economy, galaxy/jump, save      │
+│    protocol. No engine dep.   │    games; renders via SpriteKit    │
+│                                │    (sprites, HUD, starfield)/Metal │
+├───────────────────────────────┴────────────────────────────────────┤
+│  NovaSwiftStory   (Swift) — depends on NovaSwiftKit                 │
+│    Mission/control-bit runtime: mïsn/crön decode, NCB control-bit   │
+│    engine, story state, mission spawning.                          │
+├──────────────────────────────────────────────────────────────────┤
+│  NovaSwiftPluginStore  (Swift) — depends on NovaSwiftKit + ZIPFoundation │
+│    Plug-in catalog metadata + download/install pipeline (unzips   │
+│    into the plug-in chain NovaSwiftKit resolves).                 │
+├──────────────────────────────────────────────────────────────────┤
 │  NovaSwiftKit      (Swift package — the reusable core)            │
 │    ResourceFork  parse resource-fork / .ndat container          │
 │    NovaTypes     decode shïp wëap oütf mïsn spöb sÿst gövt …     │
 │    Graphics      rlëD / rlë8 / PICT  → CGImage / texture         │
 │    Audio         snd  → PCM / CoreAudio                          │
 │    PluginChain   layer plug-ins over base by (type,id) override  │
-├──────────────────────────────────────────────────────────────┤
+├──────────────────────────────────────────────────────────────────┤
 │  data/ (git-ignored)   base game (user-supplied) + plug-ins     │
-└──────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+Dependency chain (from `Package.swift`): `NovaSwiftEngine` and `NovaSwiftStory`
+both depend only on `NovaSwiftKit`. `NovaSwiftNet` has no dependencies.
+`NovaSwiftSync` depends on both `NovaSwiftEngine` and `NovaSwiftNet`, and is
+the only thing that bridges simulation state onto the wire — neither Engine
+nor Net know about each other directly. `NovaSwiftPluginStore` depends on
+`NovaSwiftKit` plus the third-party `ZIPFoundation` package (the only
+non-Apple dependency in the graph). `novaswift-extract` depends on
+`NovaSwiftKit`, `NovaSwiftEngine`, and `NovaSwiftStory`.
 
 `tools/extractor/` (`novaswift-extract` CLI) is a thin front-end over `NovaSwiftKit`
 that converts a data set into an open **asset pack** (JSON + PNG + audio) for

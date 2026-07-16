@@ -54,6 +54,14 @@ outfit mass`. Cargo is a separate pool (`cargoCapacity` tons).
   respects capacity; weapons fire respecting reload & ammo, spawning projectiles.
 - HUD reflects all of it (shield/armor/fuel bars, jump count, cargo tonnage,
   active weapon + ammo, thrust vs. burn).
+- Outfitter buy/sell, persisted per pilot: `app/NovaSwift/Spaceport/SpaceportScreens.swift`
+  calls `pilot.buyOutfit(...)`/`pilot.sellOutfit(...)` (single-unit at lines 495/511,
+  bulk "buy N" quantity-prompt variants at lines 357/361). The underlying
+  `PilotStore` methods (`app/NovaSwift/Game/PilotStore.swift:356-432`) gate each
+  purchase on affordable effective cost (rank-scaled `priceMultiplier`), free mass,
+  the outfit's (expander-adjusted) max-installed cap, and free gun/turret mounts for
+  fixed-gun/turret items, then mutate `PilotState` and persist via `save()`; selling
+  refunds at the same effective price and blocks non-sellable items (`Flags 0x0008`).
 
 ## Hyperspace jumps
 
@@ -79,8 +87,6 @@ Jump behaviour is modified by the real jump `oütf` ModTypes, folded into the
 
 ## Not yet (future)
 
-- Buying/selling outfits at an outfitter and persisting them per pilot (needs the
-  spaceport + save system).
 - Ion/heat, cloak, jammers-vs-guidance, point-defense targeting (decoded as
   ModTypes; not yet simulated).
 - Per-weapon `snd ` and muzzle/impact art (uses a stock report today).

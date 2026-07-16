@@ -54,6 +54,12 @@ galaxy carries on around you.
   hire escorts who draw a daily wage, and throw some credits at the holovid races.
 - **Keep your progress** — your pilot is saved and backed up as you go; roll up
   several pilots from different starting scenarios and switch between them.
+- **Play together** — something the 2002 original never had: host or join a co-op
+  session over local Wi-Fi or Game Center, share a system with a friend to fly and
+  fight side by side (or against each other), trade cargo and credits, and chat in
+  real time. PvP stakes are yours to set, from safe sparring to full-stakes real
+  damage and death. See [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md) for the full
+  design and current status.
 
 ## Modern touches — classic at heart
 
@@ -91,9 +97,9 @@ from the original":
   hundred small behaviors so a pure *Classic* run feels exactly like 2002.
 - **Bugs, crashes & performance** — the usual hardening as more people play on
   more devices.
-- **Enhancements & new features** — things the 2002 original never had, like
-  multiplayer, controller support, and optional HD art (see
-  [What's coming](#whats-coming)).
+- **Enhancements & new features** — things the 2002 original never had.
+  Multiplayer is built and playable today (see above); controller support and
+  optional HD art are still ahead (see [What's coming](#whats-coming)).
 
 If you find something off, the
 [issue tracker](https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/issues) is
@@ -104,9 +110,14 @@ the best place to tell us.
 Fidelity comes first: a pure **Classic** run stays reproducible and behaves like
 the original. Everything modern is an opt-in layer on top, never a replacement.
 
-- **Multiplayer** — something the 2002 original never had. We're actively working
-  on letting players share the same galaxy to fly, trade, and fight together. It's
-  early, but it's happening.
+- **Multiplayer** — **the core system is built and working**, not just planned:
+  host-authoritative shared-system combat, presence on the galaxy map, chat,
+  trading, PvP stakes, lobbies with kick/ban, and both local Wi-Fi (Multipeer) and
+  internet (Game Center) transports are implemented, wired into the app, and
+  covered by tests. What's left is polish — wider multi-device testing, a couple
+  of finer PvP toggles, and smoother authority handoff when a host disconnects
+  mid-session. Full design and implementation status in
+  [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md).
 - **Smarter, opt-in AI** — better evasion, coordinated fleets, and ammo discipline,
   behind the same brain the base AI uses, so you can leave it Classic or turn it up.
 - **HD art & richer audio** — optional higher-resolution sprites and sound packs,

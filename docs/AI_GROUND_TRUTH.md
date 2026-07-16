@@ -237,12 +237,18 @@ systems showing combat/disable/kills/orbiting all still occur:
    when both are true the ship flees (threat present) or heads to `.traveling`
    to dock (idle) — reuses the existing travel/land pipeline for "dock."
    Test: `testAmmoExhaustedWarshipFleesOrDocksInsteadOfFighting`.
-8. **Deferred — cloak-triggered AI flags.** No cloak mechanic exists in this
-   engine at all yet (no `Ship.isCloaked`, no rendering/targeting-exclusion
-   support) — `OutfitModType.cloak` is decoded but inert. Implementing the 7
-   AI cloak-trigger flags meaningfully requires building the whole cloak
-   feature first (a real gameplay subsystem, not just an AI tweak); out of
-   scope for an AI-behavior pass. Do this once cloaking itself exists.
+8. **Partially done — cloak-triggered AI flags.** The cloak mechanic itself now
+   exists (`Ship.hasCloak`/`isCloaked`/`cloakEngaged`/`cloakLevel`, plus
+   fuel-and-shield drain — `World.swift`, "Phase 4: cloaking, cloak scanners,
+   interference & murk"), and one of the seven Bible-listed AI triggers is
+   wired: **cloak when running away** (`shïp.Flags2 0x0200`) —
+   `AIBrain.think` sets `me.cloakEngaged = (state == .fleeing)` for any
+   `me.hasCloak` ship. The other six per-ship-type triggers are still
+   unimplemented: cloak when weapon in burst reload (0x0100), cloak when
+   hyperspacing (0x0400), cloak when just flying around (0x0800), won't
+   uncloak until close to target (0x1000), cloak when docking (0x2000), cloak
+   when preemptively attacked (0x4000). See [`AI.md`](AI.md)'s fidelity note
+   for the current wiring.
 9. ✅ **Point defense as a second targeting loop**: `WeapRes.isPointDefense`
    (Guidance 9/10) + `vulnerableToPD` (Flags 0x0080 inverted, verified via
    novaparse) drive `World.runPointDefense`, which independently auto-targets
@@ -271,9 +277,17 @@ systems showing combat/disable/kills/orbiting all still occur:
     ionized. Tests: `testWeaponHitAddsIonizationCharge`,
     `testIonizedShipCannotThrustOrTurn`, `testIonizationDissipatesOverTime`,
     `testCantFireWhileIonizedWeaponIsBlocked`.
-12. **Deferred — mission ShipBehav overrides.** Needs mission-driven ship
-    spawning wired through `NovaSwiftStory` into `AIBrain`/`Spawner`, and per
-    [[novaswift-wiring-status]] the story runtime isn't wired to the game loop
-    at all yet (no `GameServices` conformer) — this is blocked on that larger,
-    separately-tracked wiring gap, not on anything AI-specific. Revisit once
-    missions can actually spawn special ships into a running `World`.
+12. ✅ **Mission ShipBehav overrides.** `AIBrain.behaviorOverride`
+    (`MissionShipBehavior`, `AIBrain.swift`) implements `mïsn.ShipBehav`:
+    `.attackPlayer` flips the player permanently hostile to that ship;
+    `.protectPlayer` wires the ship as a player escort (`leaderID =
+    World.playerEntityID`) so existing escort logic defends the player;
+    `.attackStellars` is an intentional fall-through to the ship's normal AI,
+    since no ship-vs-stellar combat exists in this engine yet (documented
+    stub, not silently equivalent to `.standard` — see `docs/STATUS.md`'s
+    note that "one mission ShipBehav case falls through to normal AI", and
+    [`AI.md`](AI.md) for the fidelity framing). Wired through
+    `World.spawnMissionShips`, which the story layer calls to place a
+    mission's special ships into the live system with the override already
+    set; also used directly by planetary defense fleets
+    (`Domination.swift`'s `.attackPlayer` defenders).
