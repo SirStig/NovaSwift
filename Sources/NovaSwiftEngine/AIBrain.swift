@@ -1358,9 +1358,11 @@ public final class AIBrain {
         var cmd = ControlIntent()
         let relPos = targetPos - me.position
         let relVel = me.velocity - targetVel
+        let dist = relPos.length
+        let relSpeed = relVel.length
         // Parked: close to the target and nearly matching its velocity. Under
         // Newtonian flight, coasting now holds station — no thrust needed.
-        if relPos.length < arriveRadius, relVel.length < arriveSpeed {
+        if dist < arriveRadius, relSpeed < arriveSpeed {
             return (cmd, true)
         }
         // Driftless (inertialess) hull: don't do a flip-and-burn. Its velocity
@@ -1371,7 +1373,6 @@ public final class AIBrain {
         // target (a formation slot on a cruising leader) is handled too; the
         // ship only stops thrusting when it's actually closing on the target.
         if inertialessNow {
-            let dist = relPos.length
             guard dist > 0.0001 else { return (cmd, true) }
             let dir = relPos * (1 / dist)
             cmd.desiredHeading = dir.angle
@@ -1390,6 +1391,16 @@ public final class AIBrain {
         // heading and don't thrust; treat it as arrived.
         if aim.length < max(6, arriveRadius * 0.5) {
             return (cmd, true)
+        }
+        // Near the mark with only a mild overshoot: don't wheel ~180° to retrograde
+        // to scrub off a few px/s — that hard flip *is* the "spins over and over to
+        // correct" wobble the player sees. Hold the current heading and coast the
+        // last stretch in; it's close and slow, so it bleeds onto the mark and the
+        // arrived checks above catch it next frames. Only a genuine sail-well-past
+        // (fast, or far beyond the mark) still earns the flip-and-burn below.
+        // `aim · relPos < 0` means the projected stop overshoots the target.
+        if aim.dot(relPos) < 0, dist < arriveRadius * 2.5, relSpeed < arriveSpeed * 2.5 {
+            return (cmd, false)
         }
         let aimDir = aim.normalized
         // Heading deadzone: only issue a turn when the nose is off by more than a
@@ -1415,7 +1426,13 @@ public final class AIBrain {
         let turnAngle = acos(dot)                       // radians to swing round to retrograde
         let turnTime = turnAngle / max(me.stats.turnRate, 0.05)
         let brakeDist = 0.5 * v * v / max(me.stats.acceleration, 1)
-        return me.position + vHat * (v * turnTime + brakeDist)
+        // Small margin (12%) on the projected runway: discretised bang-bang thrust
+        // can't stop mid-tick and the ship keeps a little forward speed while its
+        // nose is still swinging toward retrograde, so an exact estimate brakes a
+        // beat too late — the ship sails just past the mark, flips 180° to claw
+        // back, overshoots that, and hunts. Braking a hair early instead lets it
+        // settle short and coast cleanly onto the mark: no overshoot, no spin.
+        return me.position + vHat * (v * turnTime + brakeDist) * 1.12
     }
 
     /// Head for a point at cruise (no arrival slowdown), steering momentum so we
