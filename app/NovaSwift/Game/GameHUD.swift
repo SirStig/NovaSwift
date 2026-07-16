@@ -143,9 +143,10 @@ enum RadarRelationship {
     var color: Color {
         switch self {
         case .hostile: return Color(red: 0.95, green: 0.3, blue: 0.25)      // red
-        // Neutral contacts read grey on EV Nova's scope, not yellow — yellow
-        // over-signalled every independent ship/world as "notable".
-        case .neutral: return Color(white: 0.7)
+        // Neutral ships read blue on EV Nova's scope (the IFF Decoder colour
+        // code): green = friend/escort, red = hostile, blue = neutral, grey =
+        // disabled.
+        case .neutral: return Color(red: 0.35, green: 0.6, blue: 1.0)       // blue
         case .friendlyOrOwned: return Color(red: 0.4, green: 0.9, blue: 0.4) // green
         case .disabled: return Color(white: 0.4)
         }
@@ -442,7 +443,7 @@ struct GameHUDView: View {
                             }
                             continue
                         }
-                        let rect = CGRect(x: c.x + b.x * r - 0.75, y: c.y + b.y * r - 0.75, width: 1.5, height: 1.5)
+                        let rect = CGRect(x: c.x + b.x * r - 1, y: c.y + b.y * r - 1, width: 2, height: 2)
                         ctx.fill(Path(ellipseIn: rect), with: .color(b.relationship.color))
                         if b.isTarget && blinkOn {
                             let ring = rect.insetBy(dx: -3, dy: -3)

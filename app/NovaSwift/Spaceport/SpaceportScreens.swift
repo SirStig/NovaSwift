@@ -596,20 +596,9 @@ struct ShipyardView: View {
                 detail.frame(width: 190, height: 265, alignment: .topLeading)
                     .clipped().novaPlace(space, -28.5, -150.5)
                 // Ship picture — DITL #1004 item 7 (557,8)-(757,208), 200×200.
-                // Tappable: opens the full Ship Info card. The corner glyph
-                // advertises that the preview is more than decoration.
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
                         .frame(width: 200, height: 200).clipped()
-                        .overlay(alignment: .topTrailing) {
-                            Image(systemName: "info.circle.fill")
-                                .font(.system(size: 15))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .shadow(radius: 2)
-                                .padding(5)
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture { showInfo = true }
                         .novaPlace(space, 174.5, -152.5)
                 }
                 info(space)
@@ -732,6 +721,12 @@ struct ShipyardView: View {
             $0.id != pilot.state.shipType && pilot.state.credits >= pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult)
                 && lockState(for: $0) == .available
         } ?? false
+        // DITL #1004 item 9 (253,289)-(342,314), 89×25 — the "Info" button (STR#
+        // 150 index 48), which the original shipyard sits left of Buy Ship/Done to
+        // open the detailed ship-info dialog. cx = 253 − 382.5 = −129.5.
+        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.info, fallback: "Info"),
+                   width: 63, enabled: s != nil) { showInfo = true }
+            .novaPlace(space, -129.5, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
                    width: 83, enabled: canBuy) {
             guard let s else {

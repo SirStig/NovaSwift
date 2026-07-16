@@ -387,7 +387,7 @@ private struct RadarContactsView: View {
                                 }
                                 continue
                             }
-                            let r = CGRect(x: cx + b.x * radius - 0.75, y: cy + b.y * radius - 0.75, width: 1.5, height: 1.5)
+                            let r = CGRect(x: cx + b.x * radius - 1, y: cy + b.y * radius - 1, width: 2, height: 2)
                             ctx.fill(Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
                             if b.isTarget && blinkOn {
                                 let ring = r.insetBy(dx: -2.5, dy: -2.5)

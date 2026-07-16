@@ -347,9 +347,9 @@ final class GameScene: SKScene {
     private var moveDiagClock: TimeInterval = 0
     // Radar scope radius in world units. Stellar objects sit within ~900 units
     // of the system centre (p90 across the base data) and combat happens within
-    // a couple of thousand; 6000 zooms the scope out so a whole system reads at
+    // a couple of thousand; 4500 zooms the scope out so a whole system reads at
     // once, with planets sized by their radius and ships as small dots.
-    private let radarRange: CGFloat = 6000
+    private let radarRange: CGFloat = 4500
     // The original never scaled its camera at all — 1 world pixel = 1 screen
     // point (SpriteKit's own default scale) is the faithful, native zoom, and
     // is now the default (`GameSettings.cameraZoom = 1.0`; the in-flight
@@ -1736,21 +1736,30 @@ final class GameScene: SKScene {
         escortRecordByEntity[entityID] = recordID
     }
 
-    /// Spawn a ship of `shipType` next to the player, recruit it into the wing,
-    /// and tag it with persistent `recordID`. Used both for a fresh bar hire and
-    /// for respawning the saved wing on entering a system. Returns success.
+    /// Spawn a ship of `shipType` already on its formation station alongside the
+    /// player, recruit it into the wing, and tag it with persistent `recordID`.
+    /// Used both for a fresh bar hire and for respawning the saved wing on
+    /// entering a system. Per the EVN wiki, Formation is "the default command
+    /// when you gain a new escort, leave a planet, [or] jump into a new
+    /// system" — so the escort simply appears on station, it doesn't warp in
+    /// from a random bearing and fly over. Returns success.
     @discardableResult
     func spawnRosterEscort(shipType: Int, recordID: Int) -> Bool {
         guard let galaxy, world != nil else { return false }
         let player = world.player
-        let bearing = world.rng.double(in: 0...(2 * .pi))
-        let dist = world.rng.double(in: 300...600)
-        let pos = player.position + Vec2(sin(bearing), cos(bearing)) * dist
-        let ang = (player.position - pos).angle
+        // The slot `World.recruitEscort` will assign this ship below — computed
+        // now since `player.position`/`.angle` need *a* value to build the ship
+        // with before its real radius (needed for `formationStation`) is known.
+        let slot = world.playerEscorts.count
+        let heading = AIBrain.wingHeading(for: player)
         guard let ship = galaxy.makeLoadedShip(shipType, government: player.government,
-                                               at: pos, angle: ang,
+                                               at: player.position, angle: heading,
                                                skillRoll: world.rng.double(in: 0...1)) else { return false }
-        world.addNPC(ship, arrival: .hyperspace)
+        ship.position = AIBrain.formationStation(leaderPosition: player.position, leaderRadius: player.radius,
+                                                 heading: heading, slot: slot, escortRadius: ship.radius)
+        ship.angle = heading
+        ship.velocity = player.velocity
+        world.addNPC(ship, arrival: .populate)
         world.recruitEscort(ship)
         tagEscort(entityID: ship.entityID, recordID: recordID)
         return true
@@ -4248,11 +4257,12 @@ final class GameScene: SKScene {
                                     playerColor: GalaxyMapView.playerColor(for: info.peerID),
                                     playerName: info.name, isTarget: isTarget)
             }
-            // IFF gates allegiance coloring (EV Nova oütf ModType 14): with an IFF
-            // outfit, blips tint red/green/grey by relationship; without one, every
-            // ship contact is drawn in the single neutral radar color, so friend and
-            // foe are indistinguishable — you have to lock a target to identify it.
-            let rel = playerHasIFF ? relationship(for: npc) : .neutral
+            // Radar blips are always tinted by allegiance (red/green/blue/grey),
+            // no IFF outfit required — friend and foe are readable straight off a
+            // bare hull. (Stock EV Nova gates this behind the IFF Decoder outfit,
+            // but that outfit is so cheap/early it plays as always-on; we make it
+            // the default so the scope is useful without shopping first.)
+            let rel = relationship(for: npc)
             return RadarContact(x: dx, y: dy, relationship: rel, isTarget: isTarget)
         }
     }

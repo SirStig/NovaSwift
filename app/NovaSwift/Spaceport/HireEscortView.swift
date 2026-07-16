@@ -44,16 +44,25 @@ struct HireEscortView: View {
     /// offers no escorts (you can only hire hulls the port actually stocks). From
     /// that pool, only the hulls whose `HireRandom` roll passes today are on
     /// offer, so it's a random planet-specific subset that changes day to day —
-    /// never every ship. Grouped by escort category, then fee, the way the escort
-    /// menu clusters fighters/medium/warships/freighters. Passing `day: nil` uses
-    /// the shipyard's tech eligibility without its separate `BuyRandom` stock
-    /// roll — hire availability is the `HireRandom` roll's job.
+    /// never every ship. A hull the player hasn't unlocked for purchase
+    /// (mission/story-gated `Availability`/`Require` — same `lockState` the
+    /// Shipyard's own stock uses, see `ItemLocking.swift`) is dropped entirely
+    /// when it opts into full hiding, same as the Shipyard; otherwise it's still
+    /// listed but locked (see `buttons(_:)`'s `canHire`). Grouped by escort
+    /// category, then fee, the way the escort menu clusters
+    /// fighters/medium/warships/freighters. Passing `day: nil` uses the
+    /// shipyard's tech eligibility without its separate `BuyRandom` stock roll —
+    /// hire availability is the `HireRandom` roll's job.
     private var stock: [ShipRes] {
         game.shipsSold(at: spob, day: nil)
             .filter { $0.hireRandom > 0 && pilot.escortAvailableToday($0, at: spob, day: day) }
+            .filter { lockState(for: $0) != .hidden }
             .sorted { ($0.escortCategory, $0.escortHireFee) < ($1.escortCategory, $1.escortHireFee) }
     }
     private var selected: ShipRes? { stock.first { $0.id == selectedID } ?? stock.first }
+    private func lockState(for s: ShipRes) -> LockState {
+        game.lockState(for: s, pilot: pilot.state)
+    }
 
     private static func categoryLabel(_ c: Int) -> String {
         switch c {
@@ -109,15 +118,15 @@ struct HireEscortView: View {
             ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, s in
                 if let s {
                     let picture = shipPicture(s)
+                    // A hull hired out for the day, or one the player hasn't
+                    // unlocked for purchase yet, dims as "locked" rather than
+                    // vanishing or showing an exact remaining count — EV Nova
+                    // never surfaces a hire quantity to the player.
                     let remaining = pilot.escortHireRemaining(s, at: spob, day: day)
-                    // The quantity badge is this station's remaining daily stock
-                    // of the hull (1–5, varies by type); a hull hired out for the
-                    // day dims as "locked" (sold out) rather than vanishing.
                     ItemTile(name: s.displayName, image: picture?.image,
                              pixelated: picture?.isDedicated == false,
-                             quantity: remaining,
                              selected: (selectedID ?? stock.first?.id) == s.id,
-                             locked: remaining == 0)
+                             locked: remaining == 0 || lockState(for: s) != .available)
                         .onTapGesture { selectedID = s.id }
                 } else {
                     Color.clear.frame(width: hireGridTileSize.width, height: hireGridTileSize.height)
@@ -168,7 +177,6 @@ struct HireEscortView: View {
         return VStack(alignment: .leading, spacing: 8) {
             infoRow("Hire:", s.map { hireCreditString($0.escortHireFee) } ?? "—")
             infoRow("Per day:", s.map { hireCreditString($0.escortDailyFee) } ?? "—")
-            infoRow("Available:", s.map { "\(pilot.escortHireRemaining($0, at: spob, day: day))" } ?? "—")
             infoRow("You Have:", hireCreditString(pilot.state.credits))
         }
         .novaPlace(space, 232, 46)
@@ -184,7 +192,8 @@ struct HireEscortView: View {
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
         let remaining = s.map { pilot.escortHireRemaining($0, at: spob, day: day) } ?? 0
-        let canHire = (s.map { pilot.state.credits >= $0.escortHireFee } ?? false) && remaining > 0
+        let canHire = (s.map { pilot.state.credits >= $0.escortHireFee && lockState(for: $0) == .available } ?? false)
+            && remaining > 0 && pilot.state.escortWing.count < PilotStore.maxEscorts
         NovaButton(graphics: graphics,
                    title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
                    width: 83, enabled: canHire) {

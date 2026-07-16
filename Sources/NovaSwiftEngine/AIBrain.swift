@@ -1089,6 +1089,55 @@ public final class AIBrain {
         return arrive(me, to: target.position + lead, slowRadius: 200)
     }
 
+    /// The wing's raw (unsmoothed) facing target for a given leader: its course
+    /// (velocity direction) while moving at a meaningful clip, else its nose
+    /// angle. Orienting on course rather than raw heading keeps the wedge from
+    /// swinging with a leader's stationary aim-turning in combat; see `escort`'s
+    /// `formationHeading` smoothing, which chases this at a bounded turn rate.
+    /// Also the first-frame fallback used to place a freshly spawned escort
+    /// directly on station (no prior `formationHeading` to smooth from yet).
+    public static func wingHeading(for leader: Ship) -> Double {
+        leader.velocity.length > leader.stats.maxSpeed * 0.15 ? leader.velocity.angle : leader.angle
+    }
+
+    /// World-space station point for formation `slot` off `leaderPosition`,
+    /// facing `heading` — the pure math behind `escort`'s wedge formation,
+    /// factored out so spawn-time placement (`GameScene.spawnRosterEscort`) can
+    /// put a freshly joined escort directly on its slot instead of warping in
+    /// somewhere random and flying over.
+    public static func formationStation(leaderPosition: Vec2, leaderRadius: Double,
+                                        heading: Double, slot: Int, escortRadius: Double) -> Vec2 {
+        // Slot → (row, column). EV Nova's escort wing is a filled wedge/triangle
+        // whose tip is the *leader itself*: the leader is the lone apex (row 0), so
+        // the escorts start at row 1 — the first two flank behind the leader, row 2
+        // has three, row 3 four, and so on, each row one wider and one step further
+        // back. Triangular numbering: escort row r (starting at 1) holds r+1 ships,
+        // so slot s falls in the row whose running total first exceeds it.
+        var remaining = slot
+        var row = 1                      // leader is the tip (row 0); escorts begin at row 1
+        while remaining > row {          // row r holds r+1 ships (row 1 = 2, row 2 = 3, …)
+            remaining -= (row + 1)
+            row += 1
+        }
+        let rowCap = row + 1
+        let col = remaining              // 0..<rowCap within this row
+        // Spacing is escort-to-escort — neighbours in a row sit just clear of each
+        // other, rows stacked close — so it keys off the *escort's* own hull, not
+        // the leader's; only the first row's distance clears the (possibly big)
+        // leader. Tight, but scaling with ship size, so a wing of freighters packs
+        // proportionally looser than a wing of fighters. Floors guard degenerate
+        // zero-radius data.
+        let lateralSpacing = max(20, escortRadius * 2 + 6)
+        let depthSpacing = max(24, escortRadius * 2 + 8)
+        let firstRowGap = leaderRadius + escortRadius + 10
+        let lateral = (Double(col) - Double(rowCap - 1) / 2.0) * lateralSpacing  // right of the leader (+) / left (−)
+        let behind = -(firstRowGap + depthSpacing * Double(row - 1))             // trailing the leader (row 1 sits one clearance back)
+        // Wedge frame: forward = (sin a, cos a); right = (cos a, −sin a).
+        let fwd = Vec2(sin(heading), cos(heading))
+        let right = Vec2(cos(heading), -sin(heading))
+        return leaderPosition + fwd * behind + right * lateral
+    }
+
     /// Escort: hold a numbered slot in a tight triangle wing off the leader,
     /// rotated to the leader's heading. The leader flies the point; escorts fill
     /// the triangle's rows front-to-back — row 1 is a single ship dead astern,
@@ -1121,8 +1170,7 @@ public final class AIBrain {
         // stopped (course is meaningless there). Then chase the target at a bounded
         // rate; `angleDelta` gives the shortest signed turn so it always closes the
         // short way around.
-        let movingFast = leader.velocity.length > leader.stats.maxSpeed * 0.15
-        let wedgeTarget = movingFast ? leader.velocity.angle : leader.angle
+        let wedgeTarget = Self.wingHeading(for: leader)
         let maxWedgeTurnPerSec = 3.0   // ~172°/sec — follows real course changes tightly
         if let h = formationHeading {
             let delta = angleDelta(from: h, to: wedgeTarget)
@@ -1132,37 +1180,11 @@ public final class AIBrain {
             formationHeading = wedgeTarget
         }
         let wedgeHeading = formationHeading ?? wedgeTarget
-        // Slot → (row, column). EV Nova's escort wing is a filled wedge/triangle
-        // whose tip is the *leader itself*: the leader is the lone apex (row 0), so
-        // the escorts start at row 1 — the first two flank behind the leader, row 2
-        // has three, row 3 four, and so on, each row one wider and one step further
-        // back. Triangular numbering: escort row r (starting at 1) holds r+1 ships,
-        // so slot s falls in the row whose running total first exceeds it.
-        var remaining = formationSlot
-        var row = 1                      // leader is the tip (row 0); escorts begin at row 1
-        while remaining > row {          // row r holds r+1 ships (row 1 = 2, row 2 = 3, …)
-            remaining -= (row + 1)
-            row += 1
-        }
-        let rowCap = row + 1
-        let col = remaining              // 0..<rowCap within this row
-        // Spacing is escort-to-escort — neighbours in a row sit just clear of each
-        // other, rows stacked close — so it keys off the *escort's* own hull, not
-        // the leader's; only the first row's distance clears the (possibly big)
-        // leader. Tight, but scaling with ship size, so a wing of freighters packs
-        // proportionally looser than a wing of fighters. Floors guard degenerate
-        // zero-radius data.
-        let lateralSpacing = max(20, me.radius * 2 + 6)
-        let depthSpacing = max(24, me.radius * 2 + 8)
-        let firstRowGap = leader.radius + me.radius + 10
-        let lateral = (Double(col) - Double(rowCap - 1) / 2.0) * lateralSpacing  // right of the leader (+) / left (−)
-        let behind = -(firstRowGap + depthSpacing * Double(row - 1))             // trailing the leader (row 1 sits one clearance back)
-        // Wedge frame: forward = (sin a, cos a); right = (cos a, −sin a) — built
-        // from the smoothed `wedgeHeading`, not the leader's raw (possibly
-        // combat-swinging) nose angle; see `formationHeading` above.
-        let fwd = Vec2(sin(wedgeHeading), cos(wedgeHeading))
-        let right = Vec2(cos(wedgeHeading), -sin(wedgeHeading))
-        let station = leader.position + fwd * behind + right * lateral
+        // Slot → world-space station point (shared with spawn-time placement —
+        // see `formationStation` below, which a freshly spawned escort uses to
+        // appear already on station instead of having to fly here).
+        let station = Self.formationStation(leaderPosition: leader.position, leaderRadius: leader.radius,
+                                            heading: wedgeHeading, slot: formationSlot, escortRadius: me.radius)
         let posErr = station - me.position
 
         // Velocity-matching formation controller. The desired velocity is the

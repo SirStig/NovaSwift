@@ -45,8 +45,12 @@ struct EscortsView: View {
     /// Release / dismiss the escort with this `EscortRecord.id` — EV Nova's
     /// "Release from Servitude" hail action.
     var onRelease: (Int) -> Void = { _ in }
-    /// Upgrade the captured escort with this record id to its hull's `UpgradeTo`.
+    /// Queue an upgrade for the captured escort with this record id to its
+    /// hull's `UpgradeTo` — no charge yet; applied on the next shipyard
+    /// landing (see `PilotStore.applyPendingEscortUpgrades`).
     var onUpgrade: (Int) -> Void = { _ in }
+    /// Cancel a queued upgrade for the escort with this record id — free.
+    var onCancelUpgrade: (Int) -> Void = { _ in }
     /// Sell the captured escort with this record id for its `EscSellValue`.
     var onSell: (Int) -> Void = { _ in }
     var onClose: () -> Void = {}
@@ -279,6 +283,9 @@ struct EscortsView: View {
     /// costs — the detail the button verbs stay short by not repeating.
     private func hailStatus(_ sel: EscortRecord) -> some View {
         let detail: String = {
+            if let pendingID = sel.pendingUpgradeTo, let target = game?.ship(pendingID) {
+                return "Upgrade → \(target.displayName) queued · applies at next shipyard landing"
+            }
             guard sel.origin == .captured, let ship = game?.ship(sel.shipType) else {
                 return sel.origin == .hired ? "Hired · \(sel.dailyFee)cr/day" : "Under command"
             }
@@ -295,13 +302,16 @@ struct EscortsView: View {
     }
 
     /// The hail-menu actions for the selected escort. A captured ship can be
-    /// upgraded (`UpgradeTo`, applied when the wing next respawns) and sold
-    /// (`EscSellValue`); every escort can be released/dismissed.
+    /// upgraded (`UpgradeTo`, queued until the next shipyard landing — see
+    /// `onUpgrade`/`onCancelUpgrade`) and sold (`EscSellValue`); every escort
+    /// can be released/dismissed.
     @ViewBuilder
     private func hailActions(_ sel: EscortRecord) -> some View {
         let ship = game?.ship(sel.shipType)
         let canUpgrade = sel.origin == .captured && (ship?.escortUpgradesTo ?? 0) > 0
-        if canUpgrade {
+        if sel.pendingUpgradeTo != nil {
+            authButton("Cancel Upgrade", width: 90) { onCancelUpgrade(sel.id) }
+        } else if canUpgrade {
             authButton("Upgrade", width: 46) { onUpgrade(sel.id) }
         }
         if sel.origin == .captured {

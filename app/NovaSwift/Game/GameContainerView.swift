@@ -1066,6 +1066,7 @@ struct GameContainerView: View {
                     // NOT topped off here — refuelling is the paid "Recharge"
                     // service, per the Bible (free only via govt/rank flags).
                     repairOnLanding(spobID: id)
+                    applyPendingEscortUpgrades(spobID: id)
                     syncCombatStanding()
                     saveGame(reason: .land)               // EV Nova saves on every landing
                 }
@@ -1125,7 +1126,11 @@ struct GameContainerView: View {
                                                  set: { if !$0 { pendingCaptureChoice = nil } }),
                             presenting: pendingCaptureChoice) { cap in
             Button("Take Command") { takeCommandOfCapturedShip(cap) }
-            Button("Use as Escort") { recruitCapturedShipAsEscort(cap) }
+            // Only offered under the escort-wing cap — a full wing can still
+            // take command of the captured hull, just not add it as an escort.
+            if model.pilot.state.escortWing.count < PilotStore.maxEscorts {
+                Button("Use as Escort") { recruitCapturedShipAsEscort(cap) }
+            }
         } message: { cap in
             Text("\(cap.name.isEmpty ? "The ship" : cap.name) is yours. Fly it yourself, or add it to your escort wing?")
         }
@@ -1799,6 +1804,23 @@ struct GameContainerView: View {
         model.pilot.state.shield = ship.shield
     }
 
+    /// Charge and apply any escort upgrades queued via the "Upgrade" hail
+    /// action, now that the player has landed — upgrades are fitted at a
+    /// shipyard, so a spöb without one leaves them queued for later. Posts a
+    /// HUD line per escort, and syncs the open Escorts panel (if any) so an
+    /// upgraded hull shows immediately.
+    private func applyPendingEscortUpgrades(spobID: Int) {
+        guard let game = host?.game, let spob = game.spob(spobID) else { return }
+        let results = model.pilot.applyPendingEscortUpgrades(at: spob, game: game)
+        guard !results.isEmpty else { return }
+        for r in results {
+            host?.hud.post(r.applied
+                ? "\(r.escortName)'s upgrade to \(r.newShipName) is complete."
+                : "\(r.escortName)'s upgrade to \(r.newShipName) is still queued — not enough credits.")
+        }
+        escortRefresh += 1
+    }
+
     /// Free hull repair / refuel when the port's govt or your rank comps it — the
     /// Bible's "Roadside Assistance" (gövt `Flags2` 0x0010) or an allied rank (rank
     /// flags 0x0800), i.e. an allied/owned world. Mirrors `SpaceportView`'s
@@ -2046,6 +2068,7 @@ struct GameContainerView: View {
                         onCommand: { scene.commandEscorts($0); escortRefresh += 1 },
                         onRelease: { releaseEscort($0) },
                         onUpgrade: { upgradeEscort($0) },
+                        onCancelUpgrade: { cancelEscortUpgrade($0) },
                         onSell: { sellEscort($0) },
                         onClose: { showEscortsPanel = false })
                 .shrinkToFitViewport()
@@ -2362,19 +2385,27 @@ struct GameContainerView: View {
         if let released { host?.hud.post("\(released.name) leaves your command.") }
     }
 
-    /// Upgrade captured escort `recordID` to its hull's `UpgradeTo` (charging
-    /// `EscUpgrdCost`). The record's hull swaps now; the live ship takes the new
-    /// hull the next time the wing respawns (on takeoff / entering a system).
+    /// Queue captured escort `recordID` for an upgrade to its hull's
+    /// `UpgradeTo` — no charge yet. `EscUpgrdCost` is only actually charged
+    /// (and the hull swapped) the next time the player lands somewhere with a
+    /// shipyard (see `applyPendingEscortUpgrades` in the `landedSpobID`
+    /// handler below), and can be canceled free until then.
     private func upgradeEscort(_ recordID: Int) {
         guard let game = model.data.game else { return }
-        if let newHull = model.pilot.upgradeEscort(recordID: recordID, game: game) {
-            model.pilot.save()
+        if let newHull = model.pilot.requestEscortUpgrade(recordID: recordID, game: game) {
             escortRefresh += 1
             let name = game.ship(newHull)?.name ?? "a better ship"
-            host?.hud.post("Escort upgrade purchased — becomes \(name) on takeoff.")
+            host?.hud.post("Upgrade queued — becomes \(name) at the next shipyard landing.")
         } else {
-            host?.hud.post("Can't upgrade that escort — not upgradeable or too costly.")
+            host?.hud.post("Can't upgrade that escort — not upgradeable.")
         }
+    }
+
+    /// Cancel a queued escort upgrade — free, since nothing was charged yet.
+    private func cancelEscortUpgrade(_ recordID: Int) {
+        model.pilot.cancelEscortUpgrade(recordID: recordID)
+        escortRefresh += 1
+        host?.hud.post("Upgrade canceled.")
     }
 
     /// Sell captured escort `recordID` for its `EscSellValue` and remove it.

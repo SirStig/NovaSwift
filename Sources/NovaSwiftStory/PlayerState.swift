@@ -126,9 +126,16 @@ public struct EscortRecord: Codable, Hashable, Sendable, Identifiable {
     public var dailyFee: Int
     /// The mission this escort is tied to, when `origin == .mission`.
     public var missionID: Int?
+    /// A requested-but-not-yet-charged `UpgradeTo` hull. Set by the "Upgrade"
+    /// hail action; only actually applied (hull swap + `EscUpgrdCost` charge)
+    /// the next time the player lands somewhere with a shipyard — see
+    /// `PilotStore.applyPendingEscortUpgrades`. Free to cancel any time before
+    /// then. `nil` for old saves (no key present) via `Codable` synthesis.
+    public var pendingUpgradeTo: Int?
 
     public init(id: Int, shipType: Int, name: String, origin: EscortOrigin,
-                hireFee: Int = 0, dailyFee: Int = 0, missionID: Int? = nil) {
+                hireFee: Int = 0, dailyFee: Int = 0, missionID: Int? = nil,
+                pendingUpgradeTo: Int? = nil) {
         self.id = id
         self.shipType = shipType
         self.name = name
@@ -136,6 +143,7 @@ public struct EscortRecord: Codable, Hashable, Sendable, Identifiable {
         self.hireFee = hireFee
         self.dailyFee = dailyFee
         self.missionID = missionID
+        self.pendingUpgradeTo = pendingUpgradeTo
     }
 }
 
@@ -444,12 +452,25 @@ public struct PlayerState: Codable, Sendable {
     }
     /// Look up an escort record by its stable id.
     public func escort(id: Int) -> EscortRecord? { escortWing.first { $0.id == id } }
+    /// Queue `id` for an upgrade to `newShipType` — no charge yet; see
+    /// `EscortRecord.pendingUpgradeTo`.
+    public mutating func setPendingEscortUpgrade(id: Int, to newShipType: Int) {
+        guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return }
+        escorts?[idx].pendingUpgradeTo = newShipType
+    }
+    /// Cancel a requested-but-not-yet-charged upgrade — free, since nothing was
+    /// ever charged for it.
+    public mutating func clearPendingEscortUpgrade(id: Int) {
+        guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return }
+        escorts?[idx].pendingUpgradeTo = nil
+    }
     /// Swap escort `id` to hull `newShipType` (an `UpgradeTo`), refreshing its
     /// daily fee to the new hull's rate (`dailyFee` supplied by the caller, which
     /// has the `shïp` record). Hired escorts keep paying — at the new rate.
     public mutating func upgradeEscort(id: Int, to newShipType: Int, dailyFee newDaily: Int) {
         guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return }
         escorts?[idx].shipType = newShipType
+        escorts?[idx].pendingUpgradeTo = nil
         if escorts?[idx].origin == .hired { escorts?[idx].dailyFee = newDaily }
     }
 

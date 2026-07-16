@@ -14,6 +14,13 @@ import NovaSwiftStory
 /// classic pilot file is unresearched, so we persist `PlayerState` directly.
 @MainActor
 final class PilotStore: ObservableObject {
+    /// The cap on simultaneous hired/captured/mission escorts — `EscortRecord`s
+    /// in the roster, not bay-launched fighters (those aren't roster members;
+    /// see `PlayerState.escortWing`). Not a Bible-documented field — no `shïp`/
+    /// `flët` field or the EVN wiki describes a wing-size limit — this is a
+    /// deliberate house rule.
+    static let maxEscorts = 9
+
     /// The live pilot. Published so shopping and the HUD update in place.
     @Published var state: PlayerState
     /// True once a real pilot exists (loaded from disk or started from `chär`).
@@ -590,6 +597,7 @@ final class PilotStore: ObservableObject {
         guard escortAvailableToday(ship, at: spob, day: day) else { return false }
         // The station's daily stock of this hull is finite; don't over-hire.
         guard escortHireRemaining(ship, at: spob, day: day) > 0 else { return false }
+        guard state.escortWing.count < Self.maxEscorts else { return false }
         let fee = ship.escortHireFee
         guard state.credits >= fee else { return false }
         state.credits -= fee
@@ -600,22 +608,64 @@ final class PilotStore: ObservableObject {
         return true
     }
 
-    /// Upgrade escort record `recordID` to its hull's `UpgradeTo`, charging
-    /// `EscUpgrdCost`. Bible `UpgradeTo`/`EscUpgrdCost` (ESCORTS.md §2.2). Swaps
-    /// the record's hull (and, for a hired escort, its daily fee) to the more
-    /// advanced ship; the live ship takes the new hull the next time the wing is
-    /// respawned (on takeoff / entering a system), i.e. the upgrade "applies at
-    /// the next landing" as in EV Nova. Returns the new hull's id, or nil if the
-    /// escort can't upgrade or the cost is unaffordable.
+    /// Queue escort record `recordID` for an upgrade to its hull's `UpgradeTo`.
+    /// Bible `UpgradeTo`/`EscUpgrdCost` (ESCORTS.md §2.2). No charge yet — the
+    /// upgrade is only actually applied (hull swapped, `EscUpgrdCost` charged)
+    /// the next time the player lands somewhere with a shipyard (see
+    /// `applyPendingEscortUpgrades`), and can be canceled free any time before
+    /// then (`cancelEscortUpgrade`). Returns the target hull's id, or nil if
+    /// the escort can't upgrade.
     @discardableResult
-    func upgradeEscort(recordID: Int, game: NovaGame) -> Int? {
+    func requestEscortUpgrade(recordID: Int, game: NovaGame) -> Int? {
         guard let rec = state.escort(id: recordID), let ship = game.ship(rec.shipType),
               ship.escortUpgradesTo > 0, let target = game.ship(ship.escortUpgradesTo) else { return nil }
-        guard state.credits >= ship.escortUpgradeCost else { return nil }
-        state.credits -= ship.escortUpgradeCost
-        state.upgradeEscort(id: recordID, to: target.id, dailyFee: target.escortDailyFee)
+        state.setPendingEscortUpgrade(id: recordID, to: target.id)
         save()
         return target.id
+    }
+
+    /// Cancel a queued upgrade for escort `recordID` — free, since nothing was
+    /// charged when it was requested.
+    func cancelEscortUpgrade(recordID: Int) {
+        state.clearPendingEscortUpgrade(id: recordID)
+        save()
+    }
+
+    /// One escort's queued-upgrade outcome on landing, for the caller to post
+    /// to the HUD.
+    struct EscortUpgradeResult {
+        let recordID: Int
+        let escortName: String
+        let newShipName: String
+        /// False when the upgrade is still queued (unaffordable this landing).
+        let applied: Bool
+    }
+
+    /// Apply every queued escort upgrade that's now affordable — called on
+    /// landing at a spöb with a shipyard (upgrades, like the real ones, are
+    /// fitted at a shipyard, not just anywhere). Charges `EscUpgrdCost` and
+    /// swaps the hull (`PlayerState.upgradeEscort`) for each affordable
+    /// pending record; a record the player still can't afford stays queued for
+    /// a later landing. No-op (returns empty) when `spob` has no shipyard.
+    @discardableResult
+    func applyPendingEscortUpgrades(at spob: SpobRes, game: NovaGame) -> [EscortUpgradeResult] {
+        guard spob.hasShipyard else { return [] }
+        var results: [EscortUpgradeResult] = []
+        for rec in state.escortWing {
+            guard let pendingID = rec.pendingUpgradeTo, let ship = game.ship(rec.shipType),
+                  let target = game.ship(pendingID) else { continue }
+            guard state.credits >= ship.escortUpgradeCost else {
+                results.append(EscortUpgradeResult(recordID: rec.id, escortName: rec.name,
+                                                    newShipName: target.name, applied: false))
+                continue
+            }
+            state.credits -= ship.escortUpgradeCost
+            state.upgradeEscort(id: rec.id, to: target.id, dailyFee: target.escortDailyFee)
+            results.append(EscortUpgradeResult(recordID: rec.id, escortName: rec.name,
+                                                newShipName: target.name, applied: true))
+        }
+        if !results.isEmpty { save() }
+        return results
     }
 
     /// Credits refunded for selling off a captured/hired escort of hull
