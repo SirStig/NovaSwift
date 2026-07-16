@@ -1132,27 +1132,26 @@ public final class AIBrain {
             formationHeading = wedgeTarget
         }
         let wedgeHeading = formationHeading ?? wedgeTarget
-        // Slot → (row, column). EV Nova escorts don't fan out into an ever-widening
-        // wedge — they stack into a tight, narrow column directly astern of the
-        // leader, at most a couple of hulls wide (the original game's trailing
-        // double-column). Rows alternate one ship (centred) / two ships (flanking) —
-        // a hex-packed column — so the wing reads as a compact trailing block, not a
-        // triangle that grows without bound as more escorts join.
+        // Slot → (row, column). EV Nova's escort wing is a filled wedge/triangle
+        // with the leader at the tip: row 0 is one ship dead astern, row 1 has two
+        // flanking it, row 2 three, and so on — each row one wider and one step
+        // further back, fanning out behind the leader. Triangular numbering: row r
+        // (0-based) holds r+1 ships, so slot s falls in the row whose running total
+        // first exceeds it.
         var remaining = formationSlot
         var row = 0
-        while true {
-            let cap = row % 2 == 0 ? 1 : 2      // ships per row: 1,2,1,2,…
-            if remaining < cap { break }
-            remaining -= cap
+        while remaining > row {          // row r holds r+1 ships
+            remaining -= (row + 1)
             row += 1
         }
-        let rowCap = row % 2 == 0 ? 1 : 2
-        let col = remaining   // 0..<rowCap within this row
-        // Spacing is escort-to-escort — pairs sit side by side, rows stack close —
-        // so it keys off the *escort's* own hull, not the leader's; only the first
-        // row's distance clears the (possibly big) leader. Tight, but scaling with
-        // ship size, so a wing of freighters packs proportionally looser than a
-        // wing of fighters. Floors guard degenerate zero-radius data.
+        let rowCap = row + 1
+        let col = remaining              // 0..<rowCap within this row
+        // Spacing is escort-to-escort — neighbours in a row sit just clear of each
+        // other, rows stacked close — so it keys off the *escort's* own hull, not
+        // the leader's; only the first row's distance clears the (possibly big)
+        // leader. Tight, but scaling with ship size, so a wing of freighters packs
+        // proportionally looser than a wing of fighters. Floors guard degenerate
+        // zero-radius data.
         let lateralSpacing = max(20, me.radius * 2 + 6)
         let depthSpacing = max(24, me.radius * 2 + 8)
         let firstRowGap = leader.radius + me.radius + 10
