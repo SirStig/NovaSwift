@@ -93,9 +93,17 @@ public struct FlightTuning {
     public var turnScale: Double       // stat → deg/sec
     public var dragPerSecond: Double   // gentle space drag so ships settle (0 = pure Newtonian)
     /// How broadly AI ships fly the engine's driftless (inertialess) model
-    /// beyond their own hull flag — see `AIInertialessScope`. Defaults to `.all`
-    /// (every NPC), matching EV Nova's precise AI flight.
-    public var aiInertialess: AIInertialessScope = .all
+    /// beyond their own hull flag — see `AIInertialessScope`. Defaults to
+    /// `.formations`: lone traffic and lone combatants wrestle Newtonian momentum
+    /// (the reverse-and-fire "Monty Python" maneuver is a signature of the
+    /// original), while ships *holding formation* — escorts and fleet members —
+    /// fly driftless so they glue to their slots. The EV Nova Bible describes
+    /// escorts as "ignoring their own speed and maneuverability to hold formation,"
+    /// which is exactly a driftless hold; making them Newtonian instead produces
+    /// a scattered, twitchy, lagging wing (finite turn/thrust can't chase a moving
+    /// slot cleanly). This keeps the momentum feel where the player perceives it
+    /// (ambient flight, combat) and precise formations where they expect them.
+    public var aiInertialess: AIInertialessScope = .formations
 
     // The Bible states an explicit real-time ratio for Maneuver ("10 ≈ 30°/sec",
     // giving turnScale=3.0 exactly) but gives Speed/Accel no units at all — no
@@ -162,6 +170,16 @@ public final class Ship {
     public var angle: Double
     public let stats: ShipStats
     public let name: String
+
+    /// Render-interpolation snapshot: this ship's `position`/`angle` as of the end
+    /// of the *previous* fixed sim tick. The renderer draws the ship at
+    /// `lerp(renderPrevPosition, position, alpha)` where `alpha` is how far the
+    /// current display frame sits into the next tick — so with a fixed 30 Hz sim,
+    /// a 60/120 Hz display shows smooth, gliding motion instead of 30 Hz steps.
+    /// Seeded to the spawn pose so a brand-new ship never lerps in from the origin.
+    /// Purely presentational; the simulation never reads these.
+    public var renderPrevPosition: Vec2
+    public var renderPrevAngle: Double
 
     /// Unique per-instance id assigned by the world (player == 0). Distinct from
     /// `shipTypeID`, which is the `shïp` resource id used for the sprite.
@@ -603,6 +621,8 @@ public final class Ship {
         self.velocity = Vec2()
         self.angle = angle
         self.lastFinitePosition = position
+        self.renderPrevPosition = position
+        self.renderPrevAngle = angle
     }
 
     /// The sprite frame index (0..<rotationFrames) for the current heading.
@@ -720,7 +740,14 @@ public final class Ship {
         guard let brain = brain else { return false }
         switch tuning.aiInertialess {
         case .off:        return false
-        case .formations: return brain.leaderID != nil || brain.isFleetMember
+        case .formations:
+            // A ship actively fighting flies Newtonian so it can brake, kite and
+            // reverse-and-fire (see `attack()`); the driftless glue is only for
+            // *holding formation*. So a fleet flagship or an escort that peels off to
+            // engage wrestles momentum like any lone combatant, and reverts to the
+            // glued formation model only once it falls back into station.
+            if brain.state == .attacking { return false }
+            return brain.leaderID != nil || brain.isFleetMember
         case .all:        return true
         }
     }
@@ -1011,6 +1038,23 @@ public final class World {
     /// several hot per-frame sites: AI target validation, fire-weapons target
     /// lookup, guided-projectile steering).
     public func ship(id: Int) -> Ship? { shipByID[id] }
+
+    /// Snapshot every ship's current pose into its render-interpolation `prev`
+    /// slot. The renderer calls this immediately before each fixed `step(_:)` so
+    /// it can later draw ships at `lerp(renderPrevPosition, position, alpha)` and
+    /// glide smoothly between 30 Hz sim ticks on a faster display. Presentational
+    /// only — the sim never reads the snapshot. See `Ship.renderPrevPosition`.
+    public func snapshotRenderState() {
+        player.renderPrevPosition = player.position
+        player.renderPrevAngle = player.angle
+        for npc in npcs {
+            npc.renderPrevPosition = npc.position
+            npc.renderPrevAngle = npc.angle
+        }
+        for shot in projectiles {
+            shot.renderPrevPosition = shot.position
+        }
+    }
 
     /// How a new NPC came into being, so the renderer can play the right effect:
     /// a mid-system populate (no effect), a hyperspace jump-in (warp streak at the

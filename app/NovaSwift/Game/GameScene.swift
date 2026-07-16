@@ -328,6 +328,21 @@ final class GameScene: SKScene {
     private var murkFog: SKSpriteNode?
 
     private var lastUpdate: TimeInterval = 0
+    /// Banked simulation time (seconds) not yet consumed by a fixed sim tick. The
+    /// world advances only in whole `Self.simFixedStep` slices; whatever real time
+    /// is left over each frame is carried here into the next. See `update(_:)`.
+    private var simAccumulator: TimeInterval = 0
+    /// The simulation's fixed tick — EV Nova's native 30 Hz. Every rate-based stat
+    /// (accel, top speed, turn, reload, regen) was tuned against this cadence, so
+    /// the sim always steps by exactly this, independent of the display refresh.
+    private static let simFixedStep: TimeInterval = 1.0 / 30.0
+    /// Most sim ticks to run in one frame — a spiral-of-death guard so a hitch or
+    /// paused breakpoint drops the backlog instead of freezing to catch up.
+    private static let simMaxCatchupTicks = 5
+    /// Fraction (0..<1) the current display frame sits into the next fixed sim
+    /// tick — the blend factor for render interpolation. Set once per frame after
+    /// the accumulator loop; read by the sprite-sync helpers below.
+    private var renderAlpha: Double = 0
     private var hudClock: TimeInterval = 0
     private var moveDiagClock: TimeInterval = 0
     // Radar scope radius in world units. Stellar objects sit within ~900 units
@@ -1129,7 +1144,32 @@ final class GameScene: SKScene {
         }
 
         syncPreStep?(world)   // co-op: inject/feed friends' ships (authority) or apply snapshot (client)
-        world.step(simDT)     // sim sub-phases recorded via `world.profiler`
+        // Fixed-step accumulator. The entire simulation (flight, AI, weapons,
+        // reload/regen) was tuned against EV Nova's fixed 30 Hz tick, so advance it
+        // in whole `simFixedStep` slices regardless of whether the display runs at
+        // 60 or 120 Hz — banking the leftover real time for next frame. A variable
+        // per-frame `dt` silently re-tunes every rate-based stat with the refresh
+        // rate and loses the original's deterministic, "weighty" 30 fps cadence;
+        // stepping fixed restores it and makes physics/AI behave identically on any
+        // monitor. The game-speed multiplier still rides `simDT` into the bank, so
+        // faster settings simply spend more ticks per frame. `intent` is re-applied
+        // each tick since `World.step` may consume one-shot intent flags.
+        simAccumulator += simDT
+        let fixedStep = Self.simFixedStep
+        let catchupCap = fixedStep * Double(Self.simMaxCatchupTicks)
+        if simAccumulator > catchupCap { simAccumulator = catchupCap }
+        while simAccumulator >= fixedStep {
+            world.intent = intent
+            world.snapshotRenderState()   // capture each ship's pre-tick pose for render interpolation
+            world.step(fixedStep)         // sim sub-phases recorded via `world.profiler`
+            simAccumulator -= fixedStep
+        }
+        // How far the current display frame sits into the next (not-yet-run) tick.
+        // The renderer draws every ship at lerp(prevTickPose, currentPose, alpha)
+        // so motion glides smoothly between 30 Hz sim ticks on a 60/120 Hz display
+        // instead of stepping — the "seamless" part. 0 on a frame that ran no tick
+        // (nothing new to show yet); approaches 1 just before the next tick fires.
+        renderAlpha = fixedStep > 0 ? simAccumulator / fixedStep : 0
         syncPostStep?(world)  // co-op: broadcast snapshot (authority) or send input (client)
 
         let p = world.player
@@ -1164,7 +1204,10 @@ final class GameScene: SKScene {
                 maxSpeed=\(p.stats.maxSpeed, privacy: .public)
                 """)
         }
-        let scenePos = CGPoint(x: p.position.x, y: p.position.y)
+        // Render-interpolated so the camera (which follows this point) and the
+        // player sprite glide between 30 Hz sim ticks instead of stepping — the
+        // whole world's apparent motion rides on this being smooth.
+        let scenePos = renderPoint(p)
 
         // Start the scene-side phase timing here, so the cheats/heartbeat
         // diagnostics above aren't charged to a render phase.
@@ -1364,7 +1407,10 @@ final class GameScene: SKScene {
         // rotation set (banking → turn direction, animation → a clock) times
         // framesPerSet, plus the heading. The engine-glow, running-light and
         // weapon-glow sheets carry the same set/heading layout, so they reuse it.
-        let heading = hullAnim.heading(forAngle: p.angle)
+        // Interpolated heading for the *displayed* sprite frame (smooth rotation
+        // between ticks); the banking `turnSign` still reads the true sim angle so
+        // it senses the real turn direction, not the interpolation.
+        let heading = hullAnim.heading(forAngle: renderHeading(p))
         let turn = turnSign(fromAngle: lastPlayerAngle, toAngle: p.angle, dt: dt)
         lastPlayerAngle = p.angle
         animClock += dt
@@ -1373,7 +1419,7 @@ final class GameScene: SKScene {
         if let sprite = shipSprite, !rotationTextures.isEmpty {
             sprite.texture = rotationTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: rotationTextures.count)]
         } else if let tri = placeholder {
-            tri.zRotation = -CGFloat(p.angle)
+            tri.zRotation = -CGFloat(renderHeading(p))
         }
         updateIonizeTint(shipIonizeTint, hullTexture: shipSprite?.texture, ship: p)
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
@@ -1399,7 +1445,7 @@ final class GameScene: SKScene {
         }
         lastPlayerShield = p.shield
 
-        updateThruster(active: intent.thrust || p.afterburnerActive, angle: p.angle,
+        updateThruster(active: intent.thrust || p.afterburnerActive, angle: renderHeading(p),
                        boosted: p.afterburnerActive)
         lap("player.sprite")
 
@@ -2139,7 +2185,7 @@ final class GameScene: SKScene {
         for (i, node) in projectileNodes.enumerated() {
             guard i < shots.count else { node.isHidden = true; continue }
             let s = shots[i]
-            node.position = CGPoint(x: s.position.x, y: s.position.y)
+            node.position = renderLerp(s.renderPrevPosition, s.position)
             node.isHidden = false
 
             let frames = s.graphicSpinID.map { weaponGraphicTextures($0) } ?? []
@@ -2266,8 +2312,19 @@ final class GameScene: SKScene {
                     node.weaponGlowFlare = 1
                 }
             }
-            let from = CGPoint(x: b.from.x, y: b.from.y)
-            let to = CGPoint(x: b.to.x, y: b.to.y)
+            // Weld the beam to the shooter's *interpolated* sprite: shift the whole
+            // segment by however far render interpolation has moved the shooter off
+            // its sim-tick position, so a continuous beam's muzzle stays glued to the
+            // barrel between 30 Hz ticks instead of trailing it. Length/angle are
+            // unchanged (rigid translation), so `dx`/`dy` still come off the raw pts.
+            var bx = CGFloat(0), by = CGFloat(0)
+            if let shooter = world.ship(id: b.shooterID) {
+                let interp = renderPoint(shooter)
+                bx = interp.x - CGFloat(shooter.position.x)
+                by = interp.y - CGFloat(shooter.position.y)
+            }
+            let from = CGPoint(x: CGFloat(b.from.x) + bx, y: CGFloat(b.from.y) + by)
+            let to = CGPoint(x: CGFloat(b.to.x) + bx, y: CGFloat(b.to.y) + by)
             let dx = b.to.x - b.from.x, dy = b.to.y - b.from.y
             let length = max(1, CGFloat((dx * dx + dy * dy).squareRoot()))
             // BeamWidth == 0 is a deliberate authoring choice (Bible: "no center
@@ -2590,6 +2647,24 @@ final class GameScene: SKScene {
         return n
     }
 
+    /// Blend a previous-tick position toward a current one by `renderAlpha`, so a
+    /// thing gliding between 30 Hz sim ticks draws smoothly on a faster display.
+    private func renderLerp(_ prev: Vec2, _ curr: Vec2) -> CGPoint {
+        let a = CGFloat(renderAlpha)
+        let px = CGFloat(prev.x), py = CGFloat(prev.y)
+        return CGPoint(x: px + (CGFloat(curr.x) - px) * a,
+                       y: py + (CGFloat(curr.y) - py) * a)
+    }
+    /// Render-interpolated world position for a ship. See `Ship.renderPrevPosition`.
+    private func renderPoint(_ s: Ship) -> CGPoint { renderLerp(s.renderPrevPosition, s.position) }
+    /// Render-interpolated heading (shortest-path), for smooth sprite-frame changes.
+    private func renderHeading(_ s: Ship) -> Double {
+        var d = (s.angle - s.renderPrevAngle).truncatingRemainder(dividingBy: 2 * .pi)
+        if d > .pi { d -= 2 * .pi }
+        if d < -.pi { d += 2 * .pi }
+        return s.renderPrevAngle + d * renderAlpha
+    }
+
     private func syncNPCs() {
         var seen = Set<Int>()
         // A cloak scanner's 0x0002 bit ("reveal cloaked ships on the screen")
@@ -2600,18 +2675,18 @@ final class GameScene: SKScene {
         for npc in world.npcs {
             seen.insert(npc.entityID)
             let node = npcNodes[npc.entityID] ?? makeNPCNode(for: npc)
-            node.container.position = CGPoint(x: npc.position.x, y: npc.position.y)
+            node.container.position = renderPoint(npc)
             node.container.alpha = screenRevealsCloaked ? 1.0 : CGFloat(1 - npc.effectiveCloakLevel)
             node.animClock += frameDT
             node.blinkClock += frameDT
-            let heading = node.hullAnim.heading(forAngle: npc.angle)
+            let heading = node.hullAnim.heading(forAngle: renderHeading(npc))
             let turn = turnSign(fromAngle: node.lastAngle, toAngle: npc.angle, dt: frameDT)
             node.lastAngle = npc.angle
             let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock, disabled: npc.disabled)
             if let sprite = node.sprite, !node.textures.isEmpty {
                 sprite.texture = node.textures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.textures.count)]
             } else if let tri = node.placeholder {
-                tri.zRotation = -CGFloat(npc.angle)
+                tri.zRotation = -CGFloat(renderHeading(npc))
             }
             updateIonizeTint(node.ionizeTint, hullTexture: node.sprite?.texture, ship: npc)
             if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {

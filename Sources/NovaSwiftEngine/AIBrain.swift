@@ -811,10 +811,22 @@ public final class AIBrain {
         // the standoff radius and overlap the target. Folding in closing speed
         // (relative, so a moving target is handled too) makes the ship start
         // coasting early enough to actually settle at the bubble's edge.
-        let closingSpeed = max(0, (me.velocity - target.velocity).dot(toTarget.normalized))
-        let brakeDist = 0.5 * closingSpeed * closingSpeed / max(me.stats.acceleration, 1)
+        let rel = me.velocity - target.velocity
+        let closingSpeed = rel.dot(toTarget.normalized)     // >0 closing in, <0 opening out
+        // Room needed to bleed the closing speed before the bubble, with a margin
+        // and a turn-in allowance: a Newtonian hull must first swing its nose off
+        // the target and round to retrograde before it can decelerate at all, so it
+        // has to commit to braking earlier than the pure `v²/2a` distance.
+        let accel = max(me.stats.acceleration, 1)
+        let brakeDist = closingSpeed > 0
+            ? (0.5 * closingSpeed * closingSpeed / accel + closingSpeed * (1.2 / max(me.stats.turnRate, 0.4))) * 1.1
+            : 0
+        // Below this closing speed the range is effectively held — stop braking and
+        // let the guns bear rather than fighting a few px/s of drift forever.
+        let brakeReleaseSpeed = me.stats.maxSpeed * 0.08 + 8
         if dist > standoff + brakeDist {
-            // Thrust when roughly pointed the right way, so we actually close.
+            // Outside the bubble (with room to stop): press in, nose already on the
+            // lead point so the guns bear as we close.
             if aimError < .pi / 2 {
                 intent.thrust = true
                 // Interceptors light the afterburner to run a fleeing quarry down
@@ -822,33 +834,31 @@ public final class AIBrain {
                 if aiType == .interceptor && dist > range * 1.5
                     && aimError < 0.5 && canBurn(me) { intent.afterburner = true }
             }
+        } else if closingSpeed > brakeReleaseSpeed {
+            // Inside the braking line and still barreling in. Coasting here — the old
+            // driftless assumption — just sails a Newtonian hull straight through the
+            // bubble into the target's face, where it wheels 180° and bounces back
+            // out: the combat "spin". Instead bleed the closing speed with a real
+            // flip-and-burn: swing to retrograde and thrust against the approach.
+            // This is the reverse-and-fire posture — the hull ends up facing roughly
+            // away while its momentum still carries it, turrets/beam-turrets firing
+            // through it (they aim independently) and the fixed guns re-bearing the
+            // instant the closing speed is spent and it snaps back to aiming below.
+            intent.desiredHeading = (rel * -1).angle
+            if Vec2.heading(me.angle).dot((rel * -1).normalized) > cosThrustCone {
+                intent.thrust = true
+            }
         } else if dist < hullFloor {
-            // Genuinely about to overlap the target's hull — back off rather
-            // than merely coast. This can still happen even with the braking
-            // margin above (a target that itself closes in, a spawn that
-            // starts too close) and previously left the ship just sitting
-            // there overlapping the target's hull until distance happened to
-            // open back up on its own. Turn tail and thrust away — overriding
-            // the aim-at-target heading set above — until clear; turreted/
-            // beam-turreted weapons keep firing through the retreat below
-            // (they aim independent of hull heading), fixed mounts simply
-            // hold fire until back at range, exactly like closing in from
-            // outside the bubble in reverse.
-            //
-            // Deliberately gated on `hullFloor`, not the full `standoff`: a
-            // ship anywhere inside its *preferred* standoff but still well
-            // clear of the target's hull has a perfectly good shot — e.g. two
-            // warships that spawn well inside standoff but far outside hull
-            // range should just trade fire in place, not both turn tail. Only
-            // near-overlap actually needs an active retreat.
+            // Genuinely about to overlap the target's hull — open the range: nose
+            // away, thrust out. Only near-overlap forces this active retreat; a ship
+            // merely inside its *preferred* standoff but clear of the hull just
+            // trades fire in place. Turrets keep firing through it; fixed mounts hold.
             intent.desiredHeading = (me.position - target.position).angle
             intent.thrust = true
         }
-        // Else: between the hull floor and the standoff/braking line — coast
-        // (no thrust, the `ControlIntent()` default). Inside standoff but
-        // clear of the hull, that's a stable engagement distance, not
-        // something to correct; just outside it, momentum bleeds off before
-        // the ship ever needs to cross the standoff line in the first place.
+        // Else: in the standoff band, closing slowly — hold the nose on the target
+        // and trade fire. Its own residual drift and the target's motion keep the
+        // engagement moving instead of two ships parked nose to nose.
         // Fire when the target is within reach and in the firing arc — except
         // turrets/beam-turrets, which `World.fireAngle` already aims straight at
         // the target regardless of hull heading, so gating the *intent* to fire
@@ -1101,41 +1111,52 @@ public final class AIBrain {
             enter(defaultIdleState(me, world))
             return ControlIntent()
         }
-        // Snap straight to the leader's heading the first frame (nothing to
-        // smooth from yet), then chase it at a bounded turn rate — fast enough
-        // to follow an ordinary course change, far too slow to track a
-        // dogfight's rapid re-aiming. `angleDelta` gives the shortest signed
-        // turn so this always closes the short way around, never the long way.
-        let maxWedgeTurnPerSec = 1.2   // ~69°/sec
+        // Orient the wedge along the leader's actual *course* (velocity direction)
+        // while it's moving, not its raw nose angle. A leader's heading can snap
+        // around as it dogfights (aiming) without going anywhere; chasing that
+        // swings every slot point and the whole wing loops after them. Its course
+        // only turns as fast as it physically maneuvers, so tracking that lets the
+        // wedge follow a hard turn promptly — a tight wing through the turn — while
+        // ignoring stationary nose-swing. Fall back to the nose angle when nearly
+        // stopped (course is meaningless there). Then chase the target at a bounded
+        // rate; `angleDelta` gives the shortest signed turn so it always closes the
+        // short way around.
+        let movingFast = leader.velocity.length > leader.stats.maxSpeed * 0.15
+        let wedgeTarget = movingFast ? leader.velocity.angle : leader.angle
+        let maxWedgeTurnPerSec = 3.0   // ~172°/sec — follows real course changes tightly
         if let h = formationHeading {
-            let delta = angleDelta(from: h, to: leader.angle)
+            let delta = angleDelta(from: h, to: wedgeTarget)
             let step = max(-maxWedgeTurnPerSec * dt, min(maxWedgeTurnPerSec * dt, delta))
             formationHeading = h + step
         } else {
-            formationHeading = leader.angle
+            formationHeading = wedgeTarget
         }
-        let wedgeHeading = formationHeading ?? leader.angle
-        // Slot → (row, column): row r (1-based) holds r ships, centered behind
-        // the leader and spread evenly across the row — row 1 is one ship dead
-        // astern, row 2 flanks it left/right, row 3 adds a centered ship plus two
-        // more flanks, etc. Triangular numbering (row = smallest r whose triangle
-        // number r(r+1)/2 exceeds the slot) fills the wedge's interior instead of
-        // only ever placing ships along its two trailing edges.
+        let wedgeHeading = formationHeading ?? wedgeTarget
+        // Slot → (row, column). EV Nova's escort wing is a filled wedge/triangle
+        // whose tip is the *leader itself*: the leader is the lone apex (row 0), so
+        // the escorts start at row 1 — the first two flank behind the leader, row 2
+        // has three, row 3 four, and so on, each row one wider and one step further
+        // back. Triangular numbering: escort row r (starting at 1) holds r+1 ships,
+        // so slot s falls in the row whose running total first exceeds it.
         var remaining = formationSlot
-        var row = 1
-        while remaining >= row {
-            remaining -= row
+        var row = 1                      // leader is the tip (row 0); escorts begin at row 1
+        while remaining > row {          // row r holds r+1 ships (row 1 = 2, row 2 = 3, …)
+            remaining -= (row + 1)
             row += 1
         }
-        let col = remaining   // 0..<row within this row
-        // Slot spacing scales with the hulls actually involved — a fixed 64/72pt
-        // offset was tuned for small-ship wings and left almost no clearance
-        // behind a big leader (e.g. a Raven): row 1 landed inside/overlapping its
-        // stern instead of trailing it. Mirrors the padding `attack()` uses for
-        // its combat standoff bubble (`me.radius + target.radius`, plus a gap).
-        let slotSpacing = max(64, leader.radius + me.radius + 40)
-        let lateral = (Double(col) - Double(row - 1) / 2.0) * slotSpacing  // right of the leader (+) / left (−)
-        let behind = -slotSpacing * Double(row)                           // trailing the leader
+        let rowCap = row + 1
+        let col = remaining              // 0..<rowCap within this row
+        // Spacing is escort-to-escort — neighbours in a row sit just clear of each
+        // other, rows stacked close — so it keys off the *escort's* own hull, not
+        // the leader's; only the first row's distance clears the (possibly big)
+        // leader. Tight, but scaling with ship size, so a wing of freighters packs
+        // proportionally looser than a wing of fighters. Floors guard degenerate
+        // zero-radius data.
+        let lateralSpacing = max(20, me.radius * 2 + 6)
+        let depthSpacing = max(24, me.radius * 2 + 8)
+        let firstRowGap = leader.radius + me.radius + 10
+        let lateral = (Double(col) - Double(rowCap - 1) / 2.0) * lateralSpacing  // right of the leader (+) / left (−)
+        let behind = -(firstRowGap + depthSpacing * Double(row - 1))             // trailing the leader (row 1 sits one clearance back)
         // Wedge frame: forward = (sin a, cos a); right = (cos a, −sin a) — built
         // from the smoothed `wedgeHeading`, not the leader's raw (possibly
         // combat-swinging) nose angle; see `formationHeading` above.
@@ -1163,7 +1184,22 @@ public final class AIBrain {
         // correction term is allowed to demand well above the hull's own top
         // speed; `formationBoost` is scaled to whatever `desiredVel` needs so
         // the limit lift actually delivers it.
-        let desiredVel = leader.velocity + posErr * formationPullGain
+        //
+        // Acceleration feed-forward: anticipate the leader's velocity *change*,
+        // not just its current velocity. Without it the controller is purely
+        // reactive — the leader thrusts, the escort lags a frame, then snatches a
+        // correction: the residual station-keeping wobble the driftless-AI
+        // shortcut used to paper over. Derive the leader's acceleration from its
+        // per-frame velocity delta and bias the target velocity forward over a
+        // short reaction horizon, so the wing moves *with* the leader the instant
+        // it thrusts or turns. `prevLeaderVel` is nil on the first escorting frame
+        // and after the leader is lost, so the term is simply skipped then.
+        var leaderAccelFF = Vec2()
+        if let prev = prevLeaderVel, dt > 0 {
+            leaderAccelFF = (leader.velocity - prev) * (formationAccelLookahead / dt)
+        }
+        prevLeaderVel = leader.velocity
+        let desiredVel = leader.velocity + leaderAccelFF + posErr * formationPullGain
         let desiredSpeed = desiredVel.length
         var intent = ControlIntent()
 
@@ -1177,15 +1213,43 @@ public final class AIBrain {
             return intent
         }
 
-        // Point the nose along the desired velocity and throttle up toward its
-        // magnitude — an inertialess hull realises a target velocity by facing
-        // it and ramping speed. Bang-bang on speed (thrust while under the
-        // target), gated on rough alignment so it never accelerates off-axis
-        // while still swinging onto heading.
-        intent.desiredHeading = desiredVel.angle
-        if me.velocity.length < desiredSpeed,
-           Vec2.heading(me.angle).dot(desiredVel.normalized) > cosThrustCone {
-            intent.thrust = true
+        if inertialessNow {
+            // Inertialess hull: velocity tracks the nose, so it realises a target
+            // velocity by facing it and ramping speed. Bang-bang on magnitude
+            // (thrust while under the target), gated on rough alignment so it
+            // never accelerates off-axis while still swinging onto heading.
+            intent.desiredHeading = desiredVel.angle
+            if me.velocity.length < desiredSpeed,
+               Vec2.heading(me.angle).dot(desiredVel.normalized) > cosThrustCone {
+                intent.thrust = true
+            }
+        } else {
+            // Newtonian hull: pointing at `desiredVel` and only ever *adding* speed
+            // can't slow a ship carrying momentum, so it overshoots its slot and
+            // orbits forever (the residual formation wobble). Reuse the proven
+            // flip-and-burn arrival primitive instead: `moveTo` brakes onto the
+            // station point accounting for the turn time a sluggish hull needs to
+            // swing retrograde, and matches the slot's velocity (the leader's own
+            // velocity plus the acceleration feed-forward) so it converges on a
+            // moving formation too. Once parked it reports `arrived`, and we square
+            // up to the wedge heading and coast rather than chase a noisy aim.
+            // The "arrived" band is deliberately a little loose: a bang-bang
+            // thruster changes speed by `accel·dt` each tick (a few px/s), so an
+            // arrive-speed tighter than that can never be *held* — `arrived`
+            // flickers and the nose swings between the flip-and-burn aim and the
+            // wedge heading every frame (the "constantly correcting" jitter). A
+            // deadband wider than one tick lets a matched escort latch onto "hold
+            // station" and stop hunting; it stays far inside the formation
+            // tightness the settle/keep-up behaviour needs.
+            let slotVel = leader.velocity + leaderAccelFF
+            let (cmd, arrived) = moveTo(me, toward: station, matching: slotVel,
+                                        arriveRadius: max(40, me.radius + 20),
+                                        arriveSpeed: max(12, me.stats.maxSpeed * 0.08))
+            if arrived {
+                intent.desiredHeading = wedgeHeading
+            } else {
+                intent = cmd
+            }
         }
         // Lift the hull's caps enough to actually reach `desiredSpeed`
         // (`World.step` applies `topSpeed *= 1 + boost`), scaled to the demand
@@ -1201,6 +1265,13 @@ public final class AIBrain {
     /// of matching the leader's velocity. High enough to hold a tight wing
     /// through hard turns, low enough not to overshoot into oscillation.
     private var formationPullGain: Double { 2.5 }
+
+    /// Reaction horizon (seconds) for the formation acceleration feed-forward:
+    /// the leader's measured acceleration is projected this far ahead and added to
+    /// the escort's target velocity, so the wing anticipates the leader's course
+    /// change instead of chasing the gap it opens. Long enough to kill the lag
+    /// wobble, short enough not to over-anticipate into an oscillation of its own.
+    private var formationAccelLookahead: Double { 0.25 }
 
     /// Fly to the player and dock to deliver the paid assist (fuel/repairs,
     /// applied once via `World.deliverAssistance`). After delivering: if the
@@ -1308,9 +1379,11 @@ public final class AIBrain {
         var cmd = ControlIntent()
         let relPos = targetPos - me.position
         let relVel = me.velocity - targetVel
+        let dist = relPos.length
+        let relSpeed = relVel.length
         // Parked: close to the target and nearly matching its velocity. Under
         // Newtonian flight, coasting now holds station — no thrust needed.
-        if relPos.length < arriveRadius, relVel.length < arriveSpeed {
+        if dist < arriveRadius, relSpeed < arriveSpeed {
             return (cmd, true)
         }
         // Driftless (inertialess) hull: don't do a flip-and-burn. Its velocity
@@ -1321,7 +1394,6 @@ public final class AIBrain {
         // target (a formation slot on a cruising leader) is handled too; the
         // ship only stops thrusting when it's actually closing on the target.
         if inertialessNow {
-            let dist = relPos.length
             guard dist > 0.0001 else { return (cmd, true) }
             let dir = relPos * (1 / dist)
             cmd.desiredHeading = dir.angle
@@ -1340,6 +1412,16 @@ public final class AIBrain {
         // heading and don't thrust; treat it as arrived.
         if aim.length < max(6, arriveRadius * 0.5) {
             return (cmd, true)
+        }
+        // Near the mark with only a mild overshoot: don't wheel ~180° to retrograde
+        // to scrub off a few px/s — that hard flip *is* the "spins over and over to
+        // correct" wobble the player sees. Hold the current heading and coast the
+        // last stretch in; it's close and slow, so it bleeds onto the mark and the
+        // arrived checks above catch it next frames. Only a genuine sail-well-past
+        // (fast, or far beyond the mark) still earns the flip-and-burn below.
+        // `aim · relPos < 0` means the projected stop overshoots the target.
+        if aim.dot(relPos) < 0, dist < arriveRadius * 2.5, relSpeed < arriveSpeed * 2.5 {
+            return (cmd, false)
         }
         let aimDir = aim.normalized
         // Heading deadzone: only issue a turn when the nose is off by more than a
@@ -1365,7 +1447,13 @@ public final class AIBrain {
         let turnAngle = acos(dot)                       // radians to swing round to retrograde
         let turnTime = turnAngle / max(me.stats.turnRate, 0.05)
         let brakeDist = 0.5 * v * v / max(me.stats.acceleration, 1)
-        return me.position + vHat * (v * turnTime + brakeDist)
+        // Small margin (12%) on the projected runway: discretised bang-bang thrust
+        // can't stop mid-tick and the ship keeps a little forward speed while its
+        // nose is still swinging toward retrograde, so an exact estimate brakes a
+        // beat too late — the ship sails just past the mark, flips 180° to claw
+        // back, overshoots that, and hunts. Braking a hair early instead lets it
+        // settle short and coast cleanly onto the mark: no overshoot, no spin.
+        return me.position + vHat * (v * turnTime + brakeDist) * 1.12
     }
 
     /// Head for a point at cruise (no arrival slowdown), steering momentum so we

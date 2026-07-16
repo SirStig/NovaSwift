@@ -509,6 +509,10 @@ public final class Projectile {
     public let turnRate: Double
     public let speed: Double              // cruise / cap speed (px/sec)
     public var facing: Double             // heading, for rendering the shot sprite
+    /// Render-interpolation snapshot: `position` as of the end of the previous
+    /// fixed sim tick, so the renderer can draw a fast shot gliding between 30 Hz
+    /// ticks instead of jumping. Seeded to the spawn position. Presentational only.
+    public var renderPrevPosition: Vec2
     public var targetID: Int?            // for guided/homing munitions
     public var alive = true
     /// Per-weapon ionization flash tint carried from the firing `WeaponSpec`, so
@@ -567,7 +571,8 @@ public final class Projectile {
         self.weaponID = weaponID; self.pdDurability = pdDurability
         self.translucentShots = translucentShots
         self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
-        self.position = position; self.velocity = velocity; self.life = life
+        self.position = position; self.renderPrevPosition = position
+        self.velocity = velocity; self.life = life
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.penetratesShields = penetratesShields
         self.blastRadius = blastRadius; self.ownerID = ownerID; self.ownerGovt = ownerGovt

@@ -69,7 +69,9 @@ final class FighterFormationTests: XCTestCase {
 
         // The slot for row 0 sits ~one slot-spacing behind the leader; the wing
         // should hold within a small multiple of that, never run away to the
-        // hundreds-of-units lag orbit the bug produced (~550+).
+        // hundreds-of-units lag orbit the bug produced (~550+). Formation-flyers
+        // fly driftless by default (`aiInertialess == .formations`), gluing to the
+        // slot even through a continuous hard turn, so the tight bound holds.
         let slotSpacing = max(64, player.radius + fighter.radius + 40)
         let maxAllowed = slotSpacing * 2.2
 
