@@ -553,9 +553,15 @@ final class GameHost {
             return nil
         }
         let intfID: Int = {
-            guard let shipType,
-                  let govtID = game.ship(shipType)?.inherentGovt, govtID >= 128,
-                  let iid = game.govt(govtID)?.interface, iid >= 128 else { return 128 }
+            guard let shipType, let ship = game.ship(shipType) else { return 128 }
+            // Bible: the status bar matches the ship's inherent *attributes* govt
+            // or its inherent combat govt. `InherentGovt` is encoded (e.g. 1130 =
+            // attributes govt 130), so decode both rather than using the raw
+            // value — otherwise an encoded hull (like the Polaris Raven #310)
+            // fails to resolve and wrongly falls back to the Default interface.
+            let govtID = ship.inherentAttributesGovt >= 128 ? ship.inherentAttributesGovt
+                                                            : ship.inherentCombatGovt
+            guard govtID >= 128, let iid = game.govt(govtID)?.interface, iid >= 128 else { return 128 }
             return iid
         }()
         guard let intf = game.interface(intfID) ?? game.interface() else {

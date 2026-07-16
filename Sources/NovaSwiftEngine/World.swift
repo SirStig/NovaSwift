@@ -1898,20 +1898,44 @@ public final class World {
             // fitted-but-unselected secondary beam mount would start its loop
             // sound/visual (and read as "hitting") on the raw secondary trigger
             // alone, while `fireWeapons` correctly never fires it at all.
+            let spec = mount.spec
             let held: Bool
             if isAI {
                 held = primary || secondary
-            } else if mount.spec.isSecondary {
-                held = secondary && mount.spec.id == ship.effectiveSecondaryID
+            } else if spec.isSecondary {
+                held = secondary && spec.id == ship.effectiveSecondaryID
             } else {
                 held = primary
             }
             let looping = ship.activeBeamLoopMounts.contains(idx)
+            // A fuel-burning ("energy") beam only sustains a real beam while the
+            // ship has fuel for a shot. Out of energy but still holding the
+            // trigger, EV Nova doesn't fire a steady beam — the weapon coughs:
+            // it flickers on/off and the sound stutters, but deals no damage.
+            // We reproduce that by duty-cycling the real loop (below), which also
+            // stutters its sound; the fuel guard in `fireWeapons` already blocks
+            // the damage-dealing `fireBeam` while dry.
+            let hasFuel = spec.fuelPerShot <= 0 || ship.fuel >= spec.fuelPerShot
+            let wantOn: Bool
             if held && ship.isAlive {
+                if hasFuel {
+                    wantOn = true
+                } else if mount.cooldown <= 0 {
+                    // Phase elapsed: flip the flicker and hold the new phase for
+                    // a beat (short "on" flash, slightly longer "off" gap).
+                    wantOn = !looping
+                    mount.cooldown = wantOn ? Self.dryBeamFlickerOn : Self.dryBeamFlickerOff
+                } else {
+                    wantOn = looping   // mid-phase: hold until the cooldown drains
+                }
+            } else {
+                wantOn = false
+            }
+            if wantOn {
                 if !looping {
                     ship.activeBeamLoopMounts.insert(idx)
                     events.append(.beamLoopStart(shooterID: ship.entityID, mountIndex: idx,
-                                                 soundID: mount.spec.fireSoundID))
+                                                 soundID: spec.fireSoundID))
                     spawnActiveBeam(for: ship, mount: mount, mountIndex: idx, continuous: true)
                 }
             } else if looping {
@@ -1921,6 +1945,12 @@ public final class World {
             }
         }
     }
+
+    /// Duty cycle for an out-of-energy beam's flicker: a short bright "on" flash
+    /// then a slightly longer "off" gap (~6 stutters/sec). Only used while a
+    /// fuel-burning beam is held with too little fuel to actually fire.
+    private static let dryBeamFlickerOn: Double = 0.06
+    private static let dryBeamFlickerOff: Double = 0.10
 
     /// Stop any beam loops still active on `ship` — called wherever a ship
     /// stops being simulated (disabled, destroyed, landed, departed) since

@@ -550,7 +550,10 @@ extension Galaxy {
         ship.shipTypeID = shipID
         ship.explosionSoundID = shipRes.flatMap { game.deathExplosionSoundID($0) }
         ship.explosionBoomID = shipRes.flatMap { $0.finalExplosionBoomID ?? $0.breakupExplosionBoomID }
-        ship.government = govt ?? shipRes?.inherentGovt ?? independentGovt
+        // `inherentGovt` is encoded (e.g. 1130 = attributes-only govt 130, no
+        // combat govt); use the decoded combat govt so an encoded hull isn't
+        // assigned a nonexistent government id like 1130.
+        ship.government = govt ?? shipRes?.inherentCombatGovt ?? independentGovt
         ship.radius = radius
         ship.exitPoints = exitPoints(forShip: shipID)
         ship.combatStrength = Double(max(1, shipRes?.strength ?? 1))

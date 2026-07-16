@@ -291,8 +291,32 @@ public struct ShipRes {
     public let inherentAI: Int      // @66
     /// Combat rating — how tough this hull is, used for engagement odds/morale.
     public let strength: Int        // @70
-    /// Government this hull "belongs" to when spawned outside a `düde`.
+    /// Raw `InherentGovt` field (@72). **Encoded** (Nova Bible): -1 = none;
+    /// 128-383 = inherent of that govt for BOTH combat and attributes;
+    /// 1128-1383 = inherent *attributes* govt = value-1000 (no combat govt);
+    /// 2128-2383 = inherent *combat* govt = value-2000 (no attributes govt).
+    /// Use `inherentCombatGovt` / `inherentAttributesGovt` — a raw value like
+    /// 1130 is NOT a govt id (it means attributes govt 130).
     public let inherentGovt: Int    // @72
+    /// The inherent **combat** govt (AI like/hate) decoded from `inherentGovt`,
+    /// or -1 when the ship has none (the 1128-1383 attributes-only encoding).
+    public var inherentCombatGovt: Int {
+        switch inherentGovt {
+        case 128...383:   return inherentGovt
+        case 2128...2383: return inherentGovt - 2000
+        default:          return -1
+        }
+    }
+    /// The inherent **attributes** govt (voice, jamming, and — per the Bible —
+    /// the status-bar interface) decoded from `inherentGovt`, or -1 when none
+    /// (the 2128-2383 combat-only encoding).
+    public var inherentAttributesGovt: Int {
+        switch inherentGovt {
+        case 128...383:   return inherentGovt
+        case 1128...1383: return inherentGovt - 1000
+        default:          return -1
+        }
+    }
     public let flags: UInt16        // @74
     /// "Show % armor on target display instead of 'Shields Down'" (Nova Bible,
     /// `shïp.Flags` 0x0100) — only relevant once the target's shields are fully

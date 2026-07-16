@@ -241,7 +241,7 @@ public final class Galaxy {
             maxArmor: Double(max(1, s.armor)) * combatTuning.hpScale,
             shieldRechargePerSec: max(0, Double(s.shieldRecharge) * 0.03),
             armorRechargePerSec: Double(s.armorRecharge) * 0.03,
-            radius: radius, government: s.inherentGovt, strength: s.strength,
+            radius: radius, government: s.inherentCombatGovt, strength: s.strength,
             disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, skillVar: s.skillVar,
             fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo, inertialess: s.inertialess,
             ionizeMax: Double(max(0, s.ionizeMax)), deionizePerSec: Double(max(0, s.deionize)) * 0.3,
