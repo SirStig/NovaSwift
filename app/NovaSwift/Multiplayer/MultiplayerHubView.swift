@@ -135,7 +135,7 @@ private struct LocalLobbySection: View {
         .onAppear { model.session.startBrowsingLocalLobbies() }
         .onDisappear { model.session.stopBrowsingLocalLobbies() }
         .sheet(isPresented: $showHostSetup) {
-            HostSetupView { name, rules in
+            HostSetupView { name, rules, _ in
                 showHostSetup = false
                 // The host's own game-speed becomes the whole lobby's shared
                 // clock (see `SessionRules.gameSpeedMultiplier`) — guests adopt
@@ -235,31 +235,31 @@ private struct LobbyRow: View {
 
 // MARK: - Online lobbies (Game Center)
 
+/// Online is split into the two things a player actually wants to do — open a
+/// lobby of your own and invite people, or join someone. The old single "Play
+/// Online" button hid both behind one ambiguous tap into a bare GameKit sheet.
 private struct OnlineLobbySection: View {
     @EnvironmentObject private var model: AppModel
     var onEnterFlight: () -> Void
     #if canImport(GameKit)
+    @State private var showHostSetup = false
     @State private var showMatchmaker = false
-    @State private var errorText: String?
+    /// Nil until the activity query answers; drives honest quick-match copy.
+    @State private var playersSearching: Int?
     #endif
 
     var body: some View {
         VStack(spacing: 14) {
             #if canImport(GameKit)
             if model.gameCenter.isAuthenticated {
-                Button { showMatchmaker = true } label: {
-                    HubActionLabel(icon: "globe", title: "Play Online",
-                                   subtitle: "Invite friends or auto-match over the internet")
-                }
-                .buttonStyle(.plain)
-                if let errorText {
-                    Text(errorText).novaFont(.caption).foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
-                }
+                authenticatedActions
             } else {
                 HubActionLabel(icon: "globe.badge.chevron.backward", title: "Sign in to Game Center",
                                subtitle: "Online play needs Game Center. Sign in from the system Settings, then reopen this.")
                     .opacity(0.7)
+            }
+            if let errorText = model.gameCenter.lastError {
+                errorCard(errorText)
             }
             #else
             HubActionLabel(icon: "globe.slash", title: "Online unavailable",
@@ -268,19 +268,25 @@ private struct OnlineLobbySection: View {
         }
         .padding(.horizontal)
         #if canImport(GameKit)
+        .task { await refreshActivity() }
+        .sheet(isPresented: $showHostSetup) {
+            HostSetupView(showsPublicListing: true) { name, rules, listPublicly in
+                showHostSetup = false
+                beginHosting(name: name, rules: rules, listPublicly: listPublicly)
+            }
+        }
         .sheet(isPresented: $showMatchmaker) {
             GameCenterMatchmakerView(
                 playerGroup: model.currentPluginManifest().groupID,
                 onMatch: { match in
                     showMatchmaker = false
-                    model.session.startGameCenter(
-                        match: match, displayName: onlineDisplayName,
-                        systemID: model.pilot.state.currentSystem,
-                        shipTypeID: model.pilot.state.shipType)
+                    // `hostID: nil` — we opened this matchmaker, so we host (an
+                    // auto-match with no invite resolves a host by lowest id).
+                    model.startOnlineSession(match: match, hostID: nil)
                     onEnterFlight()
                 },
-                onCancel: { showMatchmaker = false },
-                onError: { showMatchmaker = false; errorText = $0 })
+                onCancel: { showMatchmaker = false; model.onlineHostConfig = nil },
+                onError: { showMatchmaker = false; model.gameCenter.lastError = $0 })
                 #if os(macOS)
                 .frame(minWidth: 520, minHeight: 620)   // the matchmaker needs real height
                 #endif
@@ -289,12 +295,206 @@ private struct OnlineLobbySection: View {
     }
 
     #if canImport(GameKit)
-    private var onlineDisplayName: String {
-        let name = model.pilot.state.pilotName
-        return name.isEmpty ? "Captain" : name
+    @ViewBuilder
+    private var authenticatedActions: some View {
+        Button { showHostSetup = true } label: {
+            HubActionLabel(icon: "plus.circle.fill", title: "Host a Lobby",
+                           subtitle: "Name it, set the stakes, then invite friends over Game Center")
+        }
+        .buttonStyle(.plain)
+
+        Button {
+            model.onlineHostConfig = nil        // joining, not hosting
+            model.gameCenter.lastError = nil
+            showMatchmaker = true
+        } label: {
+            HubActionLabel(icon: "bolt.horizontal.circle.fill", title: "Quick Match",
+                           subtitle: quickMatchSubtitle)
+        }
+        .buttonStyle(.plain)
+
+        Text("Invites from friends open automatically — you don't need this screen for them.")
+            .novaFont(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+
+        #if canImport(CloudKit)
+        PublicLobbyList(directory: model.lobbyDirectory)
+        #endif
+    }
+
+    /// Tells the player what the queue actually looks like. An empty queue is the
+    /// normal case for a small game, and it isn't an error — saying so beats a
+    /// spinner that looks broken.
+    private var quickMatchSubtitle: String {
+        switch playersSearching {
+        case .none: return "Match with anyone running your exact plug-in set"
+        case .some(0): return "Nobody's searching right now — you'd be first in the queue"
+        case .some(1): return "1 captain searching with your plug-in set"
+        case .some(let n): return "\(n) captains searching with your plug-in set"
+        }
+    }
+
+    private func refreshActivity() async {
+        playersSearching = await model.gameCenter.queryPlayerCount(
+            playerGroup: model.currentPluginManifest().groupID)
+    }
+
+    private func beginHosting(name: String, rules: SessionRules, listPublicly: Bool) {
+        var rules = rules
+        // The host's own game-speed becomes the lobby's shared clock, exactly as
+        // local hosting does (see `SessionRules.gameSpeedMultiplier`).
+        rules.gameSpeedMultiplier = model.settings.gameSpeed.multiplier
+        // Stashed until the match forms — matchmaking is slow and the invite may
+        // even be accepted from outside the app.
+        model.onlineHostConfig = .init(lobbyName: name, rules: rules, listPublicly: listPublicly)
+        model.gameCenter.lastError = nil
+        showMatchmaker = true
+    }
+
+    private func errorCard(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Game Center couldn't do that", systemImage: "exclamationmark.triangle.fill")
+                .novaFont(.caption, weight: .bold)
+                .foregroundStyle(Color(red: 1, green: 0.6, blue: 0.2))
+            Text(text).novaFont(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Dismiss") { model.gameCenter.lastError = nil }
+                .novaFont(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.white.opacity(0.05)))
     }
     #endif
 }
+
+// MARK: - Public lobby list
+
+#if canImport(CloudKit) && canImport(GameKit)
+/// Open lobbies other players have chosen to advertise. Joining is a *request* —
+/// the host approves it and their Game Center invite is what actually admits you,
+/// so this list can never pull you into a game (or anyone into yours).
+private struct PublicLobbyList: View {
+    @EnvironmentObject private var model: AppModel
+    /// Observed directly: the directory is its own `ObservableObject` and `AppModel`
+    /// doesn't forward its changes.
+    @ObservedObject var directory: OnlineLobbyDirectory
+
+    private var amber: Color { Color(red: 1.0, green: 0.7, blue: 0.28) }
+    private var warn: Color { Color(red: 1, green: 0.6, blue: 0.2) }
+    private var mySignature: String { model.currentPluginManifest().signature }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Public Lobbies").novaFont(.button, weight: .medium).foregroundStyle(.white)
+                Spacer()
+                if case .loading = directory.status {
+                    ProgressView().controlSize(.small).tint(amber)
+                }
+            }
+
+            switch directory.status {
+            case .unavailable(let why):
+                Text(why).novaFont(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 6)
+            default:
+                if directory.lobbies.isEmpty {
+                    Text("No public lobbies right now. Host one, or have a friend invite you.")
+                        .novaFont(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 6)
+                } else {
+                    ForEach(directory.lobbies) { lobby in
+                        row(lobby)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 14).fill(.white.opacity(0.05)))
+        .task { directory.startBrowsing(pluginSignature: mySignature) }
+        .onDisappear { directory.stopBrowsing() }
+    }
+
+    @ViewBuilder
+    private func row(_ lobby: OnlineLobby) -> some View {
+        let compatible = lobby.pluginSignature.isEmpty || lobby.pluginSignature == mySignature
+        let waiting = directory.outgoingRequest == .waiting(lobbyID: lobby.hostPlayerID)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Circle().fill(GalaxyMapView.playerColor(for: lobby.hostPlayerID))
+                    .frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(lobby.name).novaFont(.button, weight: .medium).foregroundStyle(.white)
+                    HStack(spacing: 6) {
+                        Text("Host: \(lobby.hostName)").novaFont(.caption).foregroundStyle(.secondary)
+                        Text("·").novaFont(.caption).foregroundStyle(.secondary)
+                        Text("\(lobby.playerCount)/\(lobby.maxPlayers)")
+                            .novaFont(.caption, weight: .medium).foregroundStyle(.secondary)
+                        if lobby.allowPvP {
+                            Text("· PvP").novaFont(.caption, weight: .medium).foregroundStyle(warn)
+                        }
+                    }
+                    if !compatible {
+                        Label("Plug-ins don't match", systemImage: "exclamationmark.triangle.fill")
+                            .novaFont(.caption).foregroundStyle(warn)
+                    }
+                }
+                Spacer(minLength: 0)
+                joinButton(lobby, compatible: compatible, waiting: waiting)
+            }
+            if waiting {
+                Text("Waiting for \(lobby.hostName) to let you in. The invite opens by itself.")
+                    .novaFont(.caption).foregroundStyle(amber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.04)))
+    }
+
+    @ViewBuilder
+    private func joinButton(_ lobby: OnlineLobby, compatible: Bool, waiting: Bool) -> some View {
+        if waiting {
+            Button("Cancel") {
+                Task {
+                    await directory.cancelJoinRequest(lobbyID: lobby.hostPlayerID,
+                                                      playerID: GKLocalPlayer.local.gamePlayerID)
+                }
+            }
+            .novaFont(.caption, weight: .bold).buttonStyle(.plain).foregroundStyle(.secondary)
+        } else if lobby.isFull {
+            pill("Full", .gray)
+        } else if !compatible {
+            pill("Can't join", warn)
+        } else {
+            Button {
+                Task {
+                    await directory.requestJoin(
+                        lobby: lobby,
+                        playerID: GKLocalPlayer.local.gamePlayerID,
+                        playerName: model.multiplayerDisplayName,
+                        pluginSignature: mySignature)
+                }
+            } label: {
+                pill("Ask to Join", amber)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func pill(_ text: String, _ color: Color) -> some View {
+        Text(text).novaFont(.caption, weight: .bold)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Capsule().fill(color.opacity(0.25)))
+            .foregroundStyle(color)
+    }
+}
+#endif
 
 // MARK: - Plug-in mismatch
 

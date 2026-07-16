@@ -43,6 +43,11 @@ public final class GameKitTransport: NSObject, Transport {
 
     public var connectedPeers: [PeerID] { match.players.map(\.gamePlayerID) }
 
+    /// The live match, for GameKit calls that must act on it directly — notably
+    /// `GKMatchmaker.addPlayers(to:matchRequest:)` when a host invites another
+    /// player into a session that's already running.
+    public var gkMatch: GKMatch { match }
+
     public func send(_ data: Data, to peer: PeerID, channel: NetChannel) {
         guard let player = playersByID[peer] ?? match.players.first(where: { $0.gamePlayerID == peer })
         else { return }

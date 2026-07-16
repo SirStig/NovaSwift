@@ -7,10 +7,17 @@ import NovaSwiftNet
 /// fits an iPhone and centres on larger screens.
 struct HostSetupView: View {
     @Environment(\.dismiss) private var dismiss
-    /// (lobbyName, rules) — start hosting.
-    var onHost: (String, SessionRules) -> Void
+    /// Offer the public-listing choice. Online only — a local lobby is already
+    /// only visible to the Wi-Fi network it's on, so there's nothing to opt into.
+    var showsPublicListing = false
+    /// (lobbyName, rules, listPublicly) — start hosting. `listPublicly` is always
+    /// false unless `showsPublicListing`.
+    var onHost: (String, SessionRules, Bool) -> Void
 
     @State private var lobbyName = ""
+    /// Off by default: publishing puts your pilot name and lobby name in a list
+    /// every player can read, and that should be a decision, not a surprise.
+    @State private var listPublicly = false
     @State private var preset: Preset = .fullStakes
     @State private var allowPvP = true
     @State private var friendlyFire = true
@@ -71,8 +78,21 @@ struct HostSetupView: View {
                     }
                     .tint(amber)
 
+                    if showsPublicListing {
+                        field(title: "Visibility") {
+                            Toggle("List this lobby publicly", isOn: $listPublicly)
+                            Text(listPublicly
+                                 ? "Anyone can see your lobby name and pilot name, and ask to join. You approve every request — nobody gets in without it."
+                                 : "Invite-only. Your lobby stays private and you invite friends through Game Center.")
+                                .novaFont(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .tint(amber)
+                    }
+
                     Button {
-                        onHost(lobbyName.trimmingCharacters(in: .whitespacesAndNewlines), rules)
+                        onHost(lobbyName.trimmingCharacters(in: .whitespacesAndNewlines), rules,
+                               showsPublicListing && listPublicly)
                     } label: {
                         Text("Open Lobby")
                             .novaFont(.button, weight: .medium)
@@ -169,6 +189,10 @@ struct LobbyRosterView: View {
                 .background(RoundedRectangle(cornerRadius: 14).fill(.white.opacity(0.05)))
                 .padding(.horizontal)
 
+                #if canImport(CloudKit) && canImport(GameKit)
+                JoinRequestsCard(directory: model.lobbyDirectory)
+                #endif
+
                 rulesCard
 
                 VStack(spacing: 10) {
@@ -223,6 +247,69 @@ struct LobbyRosterView: View {
         .padding(.horizontal)
     }
 }
+
+#if canImport(CloudKit) && canImport(GameKit)
+/// Knocks from the public lobby list, and the gate itself: nobody advertised-to
+/// gets in until the host taps Accept here, which sends the Game Center invite
+/// that actually forms the connection. Only ever populated while hosting a lobby
+/// the player chose to list publicly.
+private struct JoinRequestsCard: View {
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject var directory: OnlineLobbyDirectory
+
+    private var amber: Color { Color(red: 1.0, green: 0.7, blue: 0.28) }
+    private var warn: Color { Color(red: 1, green: 0.6, blue: 0.2) }
+
+    var body: some View {
+        if !directory.joinRequests.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Wants to Join").novaFont(.button, weight: .medium).foregroundStyle(.white)
+                ForEach(directory.joinRequests) { request in
+                    row(request)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14).fill(.white.opacity(0.05)))
+            .padding(.horizontal)
+        }
+    }
+
+    private func row(_ request: OnlineJoinRequest) -> some View {
+        let compatible = request.pluginSignature == model.currentPluginManifest().signature
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Circle().fill(GalaxyMapView.playerColor(for: request.playerID))
+                    .frame(width: 11, height: 11)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(request.playerName).novaFont(.button, weight: .medium).foregroundStyle(.white)
+                    if !compatible {
+                        Label("Different plug-ins — they'd be dropped on connect",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .novaFont(.caption).foregroundStyle(warn)
+                    }
+                }
+                Spacer(minLength: 0)
+                Button("Decline") { Task { await model.declineJoinRequest(request) } }
+                    .novaFont(.caption, weight: .bold)
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                Button {
+                    Task { await model.acceptJoinRequest(request) }
+                } label: {
+                    Text("Accept").novaFont(.caption, weight: .bold)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Capsule().fill(amber.opacity(compatible ? 0.3 : 0.15)))
+                        .foregroundStyle(compatible ? amber : .secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!compatible)
+            }
+        }
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.04)))
+    }
+}
+#endif
 
 private struct RulePill: View {
     let label: String, on: Bool

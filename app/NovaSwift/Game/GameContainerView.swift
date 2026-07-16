@@ -805,9 +805,16 @@ struct GameContainerView: View {
                 MessageLogView(hud: host.hud)
 
                 // Multiplayer session chat — only rendered while a session is
-                // live (started from the in-game menu). Passive bottom-leading
-                // cluster; empty regions don't block fly-to-tap.
+                // live (started from the in-game menu). Passive cluster; empty
+                // regions don't block fly-to-tap. It sits bottom-leading, but
+                // moves to the top-left while the touch controls are up, since
+                // their turn cluster claims that corner.
+                #if os(iOS)
+                MultiplayerChatCluster(session: model.session,
+                                       touchControlsVisible: flightControlsVisible)
+                #else
                 MultiplayerChatCluster(session: model.session)
+                #endif
 
                 // Trade / item hand-off — a live trade window, or an incoming
                 // invite prompt. Modal overlays, only while in a session.

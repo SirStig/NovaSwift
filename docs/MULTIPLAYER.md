@@ -19,7 +19,8 @@ help me": your friend jumps to your system and drops in.
 
 **We host no servers.** Internet play rides Apple's Game Center infrastructure
 (Apple runs matchmaking and the relay). Local play uses the LAN directly via
-Bonjour. There is no NovaSwift backend to run or pay for.
+Bonjour. The public lobby list rides CloudKit, which Apple also hosts. There is no
+NovaSwift backend to run or pay for.
 
 ## Core model
 
@@ -53,6 +54,68 @@ perfect fixed-tick sync, whereas our loop is variable-`dt` and frame-coupled to
 SpriteKit. Host-authoritative state-sync is simpler and more robust, and the client
 side is cheap because the renderer only reads world state and drains events — it
 never mutates the sim.
+
+### Finding a game online
+
+Three ways in, in order of how most people will actually use them:
+
+1. **Invite a friend** — the primary path. `GKMatchmakerViewController` sends it;
+   the friend's app receives it through `GKLocalPlayerListener`. Registering that
+   listener (`GameCenterManager.authenticate`) is what makes an accepted invite
+   reach the app *at all* — without it GameKit sends and accepts the invite
+   normally and simply never tells the app, so the invite appears to do nothing.
+   The listener is registered at authentication rather than from a screen, because
+   an invite can be accepted while the player is in flight or outside the app.
+2. **Public lobby list** — see below.
+3. **Quick Match** — auto-match, bucketed by `playerGroup` = `PluginManifest.groupID`
+   so only identical content auto-matches. An empty queue is normal for a game this
+   size and is reported as such (`queryPlayerGroupActivity`), not as an error.
+
+### The lobby directory, and why it isn't Game Center
+
+**GameKit cannot browse open matches over the internet.** There is no such API:
+`queryActivity` returns only a count, and `startBrowsingForNearbyPlayers` is local
+Wi-Fi only. So a browsable lobby list has to live somewhere else, and that is
+CloudKit's **public database** (`OnlineLobbyDirectory`) — Apple-hosted, so the
+"no servers" rule holds.
+
+CloudKit carries **discovery only** — an advert and a knock at the door. It never
+carries gameplay. A host accepting a knock sends a real Game Center invite, and the
+match, the transport, and every byte of simulation still ride `GKMatch`. The
+directory is therefore off the hot path: if CloudKit is unavailable, invites and
+Quick Match keep working and only the browsable list degrades.
+
+- **Accept-gated.** Listing a lobby doesn't admit anyone. A join writes a
+  `JoinRequest`; the host's invite is the only thing that forms a match. A stranger
+  can't pull themselves in, and all they ever learn is a `gamePlayerID`.
+- **Opt-in.** Hosting is invite-only unless the player ticks "List this lobby
+  publicly", since publishing exposes their pilot name to everyone.
+- **Host is explicit.** A `GKMatch` has no host. `startGameCenter` resolves one:
+  the inviter, or (for auto-match, where nobody invited anybody) the lowest
+  `gamePlayerID`. Exactly one peer must be host — two hosts broadcast conflicting
+  rules and mutually kick each other over plug-ins. This is separate from per-system
+  sim **authority**, which stays id-based.
+
+#### CloudKit setup this depends on (not doable from code)
+
+The container is `iCloud.com.houseofkac.novaswift`, and the entitlement needs
+`CloudKit` under `com.apple.developer.icloud-services` (alongside `CloudDocuments`).
+In the CloudKit Dashboard, the **public** database needs:
+
+| Record type | Fields | Indexes |
+|---|---|---|
+| `Lobby` | `name`, `hostName`, `hostPlayerID` (String), `playerCount`, `maxPlayers`, `pluginCount`, `allowPvP`, `isOpen` (Int64), `pluginSignature` (String), `updatedAt` (Date/Time) | `isOpen` queryable, `updatedAt` queryable + sortable |
+| `JoinRequest` | `lobbyID`, `playerID`, `playerName`, `pluginSignature` (String), `createdAt` (Date/Time) | `lobbyID` queryable, `createdAt` queryable + sortable |
+
+Development schema is created by first write; **Production needs the schema
+promoted in the Dashboard** or release builds see nothing.
+
+**The security model shapes the code.** The public database gives `_world` read but
+reserves write to a record's `_creator`. So a host **cannot** delete a guest's
+`JoinRequest`. Answering a knock is therefore local (`dismissedRequestIDs`), the
+guest deletes its own record once it's in or cancels, and anything orphaned ages
+out after `requestExpiry`. Stale `Lobby` adverts (host crashed mid-heartbeat) are
+filtered by `updatedAt` rather than deleted, for the same reason.
 
 ## The two sync layers
 

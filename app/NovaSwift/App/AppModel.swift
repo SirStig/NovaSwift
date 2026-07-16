@@ -3,6 +3,9 @@ import Combine
 import NovaSwiftKit
 import NovaSwiftStory
 import NovaSwiftNet
+#if canImport(GameKit)
+import GameKit
+#endif
 
 /// Top-level app state: current screen, settings, and the game data library
 /// (base data + plug-in catalog with enabled state).
@@ -88,6 +91,7 @@ final class AppModel: ObservableObject {
     private var sessionObserver: AnyCancellable?
     #if canImport(GameKit)
     private var gameCenterObserver: AnyCancellable?
+    private var sessionActiveObserver: AnyCancellable?
     #endif
 
     init() {
@@ -154,6 +158,28 @@ final class AppModel: ObservableObject {
         gameCenterObserver = gameCenter.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        // An accepted invite can arrive at any time — in flight, on the main menu,
+        // from the Game Center app — so the session starts from here rather than
+        // from whichever screen happens to be up. `hostID` is the inviter (nil when
+        // we initiated, i.e. we host).
+        gameCenter.onMatch = { [weak self] match, hostID in
+            self?.startOnlineSession(match: match, hostID: hostID)
+        }
+        gameCenter.playerGroupProvider = { [weak self] in
+            self?.currentPluginManifest().groupID ?? 0
+        }
+        #endif
+        #if canImport(CloudKit) && canImport(GameKit)
+        wireLobbyDirectory()
+        // Pull our advert the moment the session ends, however it ends — Leave, a
+        // dropped match, a quit. A listed lobby that nobody is hosting is worse
+        // than no listing: it's a join request that will never be answered.
+        sessionActiveObserver = session.$isActive
+            .removeDuplicates()
+            .sink { [weak self] active in
+                guard !active else { return }
+                Task { await self?.lobbyDirectory.withdraw() }
+            }
         #endif
         audio.apply(settings: settings)
         store.refresh(data: data)
@@ -165,6 +191,105 @@ final class AppModel: ObservableObject {
         audio.apply(settings: settings)
     }
     func commitBindings() { bindings.save() }
+
+    // MARK: Online sessions
+
+    /// Lobby name + stakes the player chose when hosting online. Held from the
+    /// host-setup sheet until a match actually forms: matchmaking can take a while,
+    /// and an invite accepted from outside the app has no sheet to read them from.
+    /// Cleared once consumed; ignored when we join as a guest (the host owns rules).
+    struct OnlineHostConfig: Equatable {
+        var lobbyName: String
+        var rules: SessionRules
+        /// Advertise in the public lobby list. Off = invite-only.
+        var listPublicly: Bool
+    }
+    @Published var onlineHostConfig: OnlineHostConfig?
+
+    /// The name other players see. Local lobbies additionally tag secondary dev
+    /// instances so two copies on one machine are tellable apart; online is always
+    /// a real person, so it stays clean.
+    var multiplayerDisplayName: String {
+        let name = pilot.state.pilotName
+        return name.isEmpty ? "Captain" : name
+    }
+
+    #if canImport(CloudKit) && canImport(GameKit)
+    /// The public lobby list. Discovery only — it advertises a lobby and carries
+    /// join requests; Game Center still forms and runs every match.
+    let lobbyDirectory = OnlineLobbyDirectory()
+
+    /// Keep our advert's roster count honest, and stop advertising a lobby that has
+    /// filled up (`GKMatchRequest` caps a match at 4).
+    private func wireLobbyDirectory() {
+        lobbyDirectory.liveStateProvider = { [weak self] in
+            guard let self else { return (playerCount: 1, isOpen: false) }
+            let count = max(self.session.players.count, 1)
+            return (playerCount: count, isOpen: self.session.isActive && count < 4)
+        }
+    }
+
+    /// Approve a knock: invite them in, then clear the request so they stop waiting.
+    /// The invite is what actually admits them — accepting in the directory alone
+    /// does nothing, which is what keeps a lobby gated.
+    func acceptJoinRequest(_ request: OnlineJoinRequest) async {
+        await gameCenter.invite(playerID: request.playerID, into: session.gameCenterMatch)
+        await lobbyDirectory.resolveJoinRequest(request)
+    }
+
+    func declineJoinRequest(_ request: OnlineJoinRequest) async {
+        await lobbyDirectory.resolveJoinRequest(request)
+    }
+
+    /// Advertise the session we're hosting, once it exists and we know its name.
+    private func publishLobbyIfHosting() async {
+        guard session.isActive, session.isHost, session.gameCenterMatch != nil else { return }
+        let manifest = currentPluginManifest()
+        await lobbyDirectory.publish(OnlineLobby(
+            hostPlayerID: session.localPlayerID,
+            name: session.lobbyName,
+            hostName: multiplayerDisplayName,
+            playerCount: max(session.players.count, 1),
+            maxPlayers: 4,
+            pluginCount: manifest.count,
+            pluginSignature: manifest.signature,
+            allowPvP: session.rules.allowPvP))
+    }
+    #endif
+
+    #if canImport(GameKit)
+    /// Bring up an online session around a connected match, from wherever the
+    /// player happens to be. `hostID` is the inviter, or nil when we initiated.
+    ///
+    /// Entering the game has to happen *before* the session starts: `startGameCenter`
+    /// reads the pilot's current system, and `finishLoadingIntoGame` is what
+    /// guarantees a pilot is started to read it from.
+    func startOnlineSession(match: GKMatch, hostID: String?) {
+        guard data.hasBaseData else {
+            gameCenter.lastError = "Add your EV Nova data files before playing online."
+            return
+        }
+        if screen != .game { finishLoadingIntoGame() }
+        let config = hostID == nil ? onlineHostConfig : nil
+        session.startGameCenter(
+            match: match, displayName: multiplayerDisplayName,
+            systemID: pilot.state.currentSystem,
+            shipTypeID: pilot.state.shipType,
+            hostID: hostID,
+            lobbyName: config?.lobbyName ?? "",
+            rules: config?.rules ?? .fullStakes)
+        onlineHostConfig = nil
+        #if canImport(CloudKit)
+        if config?.listPublicly == true {
+            Task { await publishLobbyIfHosting() }
+        } else if hostID != nil {
+            // We're in — stop waiting and take our knock back down. (Nothing to do
+            // when we came from an invite we never asked for; it no-ops.)
+            Task { await lobbyDirectory.clearMyJoinRequest(playerID: session.localPlayerID) }
+        }
+        #endif
+    }
+    #endif
 
     // MARK: Multiplayer plug-in compatibility
 

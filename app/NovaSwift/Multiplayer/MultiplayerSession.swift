@@ -87,6 +87,13 @@ final class MultiplayerSession: ObservableObject {
     private var net: NetSession?
     private var transport: Transport?
 
+    #if canImport(GameKit)
+    /// The live Game Center match when this session is online, nil when it's local.
+    /// Lets a host invite an approved player straight into the running session
+    /// (`GameCenterManager.invite(playerID:into:)`).
+    var gameCenterMatch: GKMatch? { (transport as? GameKitTransport)?.gkMatch }
+    #endif
+
     // MARK: - Layer 2 (per-system sim sync)
 
     /// Maps engine `World` state ⇄ wire snapshots/inputs and owns per-system sync
@@ -201,17 +208,39 @@ final class MultiplayerSession: ObservableObject {
 
     #if canImport(GameKit)
     /// Start an **internet** session over Game Center, wrapping an already-created
-    /// `GKMatch`. Same session/sync machinery; only the transport differs. The
-    /// Game Center match host isn't distinguished, so authority is by id (see
-    /// `currentAuthorityID`).
+    /// `GKMatch`. Same session/sync machinery; only the transport differs.
+    ///
+    /// Layer-2 sim authority stays per-system and id-based (`currentAuthorityID`),
+    /// independent of this. What "host" decides here is lobby ownership: who owns
+    /// the rules, who moderates, and which side of the plug-in gate you take. A
+    /// `GKMatch` doesn't distinguish a host, so we establish one:
+    ///
+    /// - `hostID` given (an invite — the inviter hosts, or a directory lobby whose
+    ///   record names the host).
+    /// - `hostID` nil for auto-match, where nobody invited anybody: fall back to
+    ///   the lowest `gamePlayerID` in the match. Deterministic and agreed on by
+    ///   every peer without negotiation, matching `currentAuthorityID`'s rule.
+    ///
+    /// Exactly one peer must end up host: two hosts broadcast conflicting rules and
+    /// mutually kick each other over plug-ins.
     func startGameCenter(match: GKMatch, displayName: String, systemID: Int,
-                         shipTypeID: Int? = nil, rules: SessionRules = .fullStakes) {
+                         shipTypeID: Int? = nil, hostID: String? = nil,
+                         lobbyName: String = "", rules: SessionRules = .fullStakes) {
         stop()
+        pluginMismatch = nil
         let gk = GameKitTransport(match: match)
-        lobbyName = "Game Center"
-        isHost = true
+        let localID = gk.localPeerID
+        let resolvedHostID = hostID ?? ([localID] + match.players.map(\.gamePlayerID)).min() ?? localID
+        let iAmHost = resolvedHostID == localID
+
+        self.lobbyName = lobbyName.isEmpty ? "Online Lobby" : lobbyName
+        isHost = iAmHost
+        joinedHostID = iAmHost ? nil : resolvedHostID
+        // Guests adopt the host's rules on receipt (`onRulesChanged`); seed safe so
+        // a guest never briefly plays under full-stakes rules the host didn't set.
         activate(transport: gk, displayName: displayName, systemID: systemID,
-                 shipTypeID: shipTypeID, rules: rules)
+                 shipTypeID: shipTypeID, rules: iAmHost ? rules : .safe,
+                 broadcastRules: iAmHost)
     }
     #endif
 

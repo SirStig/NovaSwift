@@ -1,7 +1,7 @@
 import SwiftUI
 import NovaSwiftNet
 
-/// Bottom-leading in-flight chat cluster — a chat button + collapsible panel.
+/// In-flight chat cluster — a chat button + collapsible panel.
 /// Shown **only while a multiplayer session is live**; renders nothing in
 /// single-player so no multiplayer chrome clutters the solo HUD. A session is
 /// started from the in-game menu ("Host Local Co-op"), not from here.
@@ -11,21 +11,43 @@ import NovaSwiftNet
 /// are hit-testable.
 struct MultiplayerChatCluster: View {
     @ObservedObject var session: MultiplayerSession
+    /// True while the on-screen touch controls own the bottom of the screen.
+    /// Their turn cluster sits bottom-left at the same inset this cluster
+    /// normally uses, so the chat moves up beside the Menu button instead.
+    var touchControlsVisible = false
     @State private var showChat = false
 
     var body: some View {
         if session.isActive {
-            VStack(alignment: .leading, spacing: 8) {
-                if showChat {
-                    ChatOverlayView(session: session, isPresented: $showChat)
+            if touchControlsVisible {
+                // Top-left, to the right of the hamburger Menu button; the panel
+                // hangs down from the button.
+                VStack(alignment: .leading, spacing: 8) {
+                    ChatButton(session: session, showChat: $showChat)
+                    if showChat {
+                        ChatOverlayView(session: session, isPresented: $showChat)
+                    }
                 }
-                ChatButton(session: session, showChat: $showChat)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.leading, Self.menuButtonClearance)
+                .padding(.top, 14)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    if showChat {
+                        ChatOverlayView(session: session, isPresented: $showChat)
+                    }
+                    ChatButton(session: session, showChat: $showChat)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.leading, 16)
+                .padding(.bottom, 16)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            .padding(.leading, 16)
-            .padding(.bottom, 16)
         }
     }
+
+    /// Leading inset that clears `GameContainerView`'s top-left menu button
+    /// (14pt leading + a ~44pt cap) plus a gap.
+    private static let menuButtonClearance: CGFloat = 68
 }
 
 /// Round chat toggle with an unread badge.
