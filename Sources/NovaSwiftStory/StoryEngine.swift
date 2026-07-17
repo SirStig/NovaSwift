@@ -387,8 +387,17 @@ public final class StoryEngine {
         if m.hasShipObjective { services?.spawnMissionShips(missionID: missionID, mission: m) }
 
         // A mission flagged "auto-abort when started" immediately completes/clears
-        // — it exists only to run its OnAccept bits.
-        if m.autoAbortWhenStarted { abortMission(missionID, silent: true) }
+        // — it exists only to run its OnAccept bits. That's only coherent for a
+        // mission with no real objective: one the player must actually go fly a
+        // ship-combat/cargo objective for was just told to spawn ships (above)
+        // and given an `ActiveMission` entry, so self-aborting it right back out
+        // would silently undo the accept — which read as "the same bar mission
+        // keeps getting re-offered no matter how many times I take it," since
+        // nothing ever marks it truly accepted. Respect the flag only when
+        // there's nothing to actually go do.
+        if m.autoAbortWhenStarted, shipObjectives == 0 {
+            abortMission(missionID, silent: true)
+        }
         return true
     }
 

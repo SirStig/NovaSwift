@@ -129,6 +129,8 @@ struct AuthenticHUDView: View {
                     // the normal bright text color.
                     .foregroundStyle(model.targetHostile ? color(style.intf.brightRadar) : color(style.intf.brightText))
                     .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
                 if !model.targetSubtitle.isEmpty {
                     Text(model.targetSubtitle).novaFont(.hud, size: subtitleSize)
                         .foregroundStyle(color(style.intf.dimText))
@@ -181,6 +183,8 @@ struct AuthenticHUDView: View {
                     .novaFont(.hud, weight: .bold, size: statusSize)
                     .foregroundStyle(color(style.intf.brightText))
                     .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
                 Text(model.navTargetLandable ? "Landable" : "No landing clearance")
                     .novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
@@ -218,10 +222,14 @@ struct AuthenticHUDView: View {
                 Text(weaponLabel).novaFont(.hud, weight: .semibold, size: statusSize)
                     .foregroundStyle(color(style.intf.brightText))
                     .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
             } else {
                 Text("No Secondary Weapon").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
                     .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -249,6 +257,8 @@ struct AuthenticHUDView: View {
                     .novaFont(.hud, weight: .semibold, size: statusSize)
                     .foregroundStyle(color(model.canJumpNow ? style.intf.brightText : style.intf.dimText))
                     .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
                 Text("\(model.navCourseJumps) jump\(model.navCourseJumps == 1 ? "" : "s")")
                     .novaFont(.hud, size: subtitleSize).monospacedDigit()
                     .foregroundStyle(color(style.intf.dimText))

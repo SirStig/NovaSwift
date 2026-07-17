@@ -388,9 +388,13 @@ final class GameScene: SKScene {
     /// Set by `reloadSystem` when the arrival is *out of a gate*, consumed by the
     /// gate open→close flourish once the new system's nodes are built.
     private var pendingGateArrivalID: Int?
-    /// A body the player can set down on: an inhabited port (`canLand`) OR any
-    /// gate — you land on a gate to use it, even one flagged uninhabited.
-    private func isPlayerLandTarget(_ body: StellarBody) -> Bool { body.canLand || body.isGate }
+    /// A body the player can set down on: anything with real landing art
+    /// (`isLandable` — inhabited port or bare/uninhabited rock alike) OR any
+    /// gate, which you land on to use even when flagged uninhabited. Unlike
+    /// `canLand` (which the AI uses and requires inhabited), the player is
+    /// allowed to touch down on an uninhabited body and get the bare,
+    /// services-less spaceport screen `SpaceportView` already renders for one.
+    private func isPlayerLandTarget(_ body: StellarBody) -> Bool { body.isLandable || body.isGate }
 
     /// Auto-landing autopilot target (a landable body id), or nil when not
     /// engaged. While set, the scene flies the ship to that body and calls

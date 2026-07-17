@@ -12,6 +12,14 @@ public struct StellarBody {
     public let position: Vec2
     public let radius: Double
     public let canLand: Bool
+    /// `spöb.isLandable`, *without* the inhabited requirement `canLand` adds —
+    /// true for any body with real landing art, including bare/uninhabited
+    /// rocks. This is what gates whether the *player* may approach and select
+    /// a body to land on (`GameScene.isPlayerLandTarget`): the player can set
+    /// down on an uninhabited body (getting the bare, services-less spaceport
+    /// screen `SpaceportView` already renders for one), even though the AI
+    /// never treats it as a travel destination.
+    public let isLandable: Bool
     /// The government that owns this stellar (`spöb.Govt`; < 128 = independent).
     /// Drives hypergate clearance and which government's ships emerge from a gate.
     public let government: Int
@@ -26,10 +34,13 @@ public struct StellarBody {
     public let gateEmergeAngle: Double?
     public var isGate: Bool { isHypergate || isWormhole }
 
-    public init(id: Int, position: Vec2, radius: Double, canLand: Bool,
+    public init(id: Int, position: Vec2, radius: Double, canLand: Bool, isLandable: Bool? = nil,
                 government: Int = independentGovt, isHypergate: Bool = false,
                 isWormhole: Bool = false, isDeadly: Bool = false, gateEmergeAngle: Double? = nil) {
         self.id = id; self.position = position; self.radius = radius; self.canLand = canLand
+        // Defaults to `canLand` when the caller doesn't distinguish the two
+        // (test fixtures, ad-hoc bodies) — `canLand` already implies landable.
+        self.isLandable = isLandable ?? canLand
         self.government = government; self.isHypergate = isHypergate
         self.isWormhole = isWormhole; self.isDeadly = isDeadly; self.gateEmergeAngle = gateEmergeAngle
     }
@@ -41,10 +52,16 @@ public struct StellarBody {
 public struct SystemContext {
     public var bodies: [StellarBody] = []
     public var center: Vec2 = Vec2()
-    /// Ships past this radius from `center` are at the hyperspace edge.
-    public var jumpRadius: Double = 4200
+    /// Ships past this radius from `center` are at the hyperspace edge. Default
+    /// matches the *smallest* end of `systemContext(for:)`'s normal clamped
+    /// range (1400...3200) rather than some larger guess — this value is what
+    /// a lookup-miss fallback (system id not found) hands back, and a small
+    /// safe default there reads as "somewhat quiet" instead of stranding the
+    /// player absurdly far from center in a system that was never actually
+    /// this size.
+    public var jumpRadius: Double = 1400
     /// Where arriving NPCs pop in (just inside the edge).
-    public var spawnRadius: Double = 3600
+    public var spawnRadius: Double = 1190
     /// Half-width of the wrap-around playfield, centred on `center`. EV Nova's
     /// systems are a fixed finite size that wraps toroidally: fly off one edge and
     /// you reappear on the opposite side (the player's "no walls, but you roll over
@@ -60,7 +77,7 @@ public struct SystemContext {
 
     public init() {}
     public init(bodies: [StellarBody], center: Vec2 = Vec2(),
-                jumpRadius: Double = 4200, spawnRadius: Double = 3600,
+                jumpRadius: Double = 1400, spawnRadius: Double = 1190,
                 wrapExtent: Double = 10000, systemGovt: Int = independentGovt) {
         self.bodies = bodies; self.center = center
         self.jumpRadius = jumpRadius; self.spawnRadius = spawnRadius
@@ -315,7 +332,7 @@ public final class Galaxy {
             // which matches this engine's `Vec2(sinθ, cosθ)` heading directly.
             bodies.append(StellarBody(
                 id: spobID, position: pos, radius: radius,
-                canLand: s.isLandable && !s.isUninhabited,
+                canLand: s.isLandable && !s.isUninhabited, isLandable: s.isLandable,
                 government: s.government, isHypergate: s.isHypergate, isWormhole: s.isWormhole,
                 isDeadly: s.isDeadly,
                 gateEmergeAngle: s.gateEmergeAngle.map { $0 * .pi / 180 }))
