@@ -1235,4 +1235,27 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertEqual(escort.brain?.state, .attacking,
                        "a defensive escort must fight back once actually attacked")
     }
+
+    /// A fighter that has lost its carrier (leaderless, but still a fighter — its
+    /// `carrierID` is set) must never flee. Fighters don't run for the hyperspace
+    /// edge; an orphaned one keeps fighting even on a disposition that would
+    /// otherwise bolt (a wimpy-trader hull) and even badly hurt.
+    func testOrphanedFighterNeverFlees() {
+        let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(0, 400))
+        player.maxShield = 100; player.shield = 100; player.maxArmor = 100; player.armor = 100
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(243, classes: [43], flags1: 0x0004)]) // always attacks player
+        let fighter = warship("Manta", govt: 243, at: Vec2())
+        fighter.maxShield = 0; fighter.shield = 0
+        fighter.armor = fighter.maxArmor * 0.05          // badly hurt
+        fighter.carrierID = 999                          // a fighter whose carrier isn't present
+        fighter.brain = AIBrain(aiType: .wimpyTrader, govt: 243)   // a disposition that would normally flee
+        world.addNPC(fighter)
+
+        for _ in 0..<20 { world.step(1.0 / 30.0) }
+        XCTAssertNotEqual(fighter.brain?.state, .fleeing, "an orphaned fighter must never flee")
+        XCTAssertNotEqual(fighter.brain?.state, .departing, "nor run for the hyperspace edge")
+        XCTAssertFalse(fighter.wantsToDepart, "nor try to leave the system")
+    }
 }

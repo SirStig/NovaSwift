@@ -1036,14 +1036,15 @@ case "tribute":
         for e in trWorld.events {
             if case .stellarDefendersLaunched(_, let c, _) = e { wavesLaunched += 1; defendersDefeated += 0; _ = c }
         }
-        // Destroy any live defenders this frame.
-        for npc in trWorld.npcs where npc.spobDefenderOf == trSpobID && npc.isAlive {
+        // Destroy any live defenders this frame (disabled hulks already count as
+        // down, so they need no further hits here).
+        for npc in trWorld.npcs where npc.spobDefenderOf == trSpobID && npc.isAlive && !npc.disabled {
             npc.armor = 0; defendersDefeated += 1
         }
         trWorld.step(trDt)
-        // Once the field is clear, try to dominate; if defenders remain (a fresh
-        // wave), keep fighting.
-        if trWorld.npcs.allSatisfy({ $0.spobDefenderOf != trSpobID || !$0.isAlive }) {
+        // Once the field is clear (every defender destroyed or disabled), try to
+        // dominate; if the trickle has replaced them, keep fighting.
+        if trWorld.npcs.allSatisfy({ $0.spobDefenderOf != trSpobID || !$0.isAlive || $0.disabled }) {
             let out = trWorld.demandTribute(spobID: trSpobID)
             if case .dominated = out { dominatedAt = i; break }
         }

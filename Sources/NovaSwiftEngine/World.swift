@@ -304,6 +304,22 @@ public final class Ship {
     /// considered ionized, rather than trivially "always ionized").
     public var ionizeMax: Double = 0
     public var deionizePerSec: Double = 0
+    /// Ionization always visibly fades over roughly this many seconds, even for a
+    /// hull whose `shïp.Deionize` is 0 (the majority of stock hulls). Without a
+    /// floor, `deionizePerSec` came out 0 for those hulls, so a fully-ionized ship
+    /// bled off *nothing* and the ionization glow stuck on forever — the reported
+    /// "the colour never goes away" bug. The rate a hull's own `Deionize` gives is
+    /// still honoured whenever it's faster than this baseline (see `Galaxy`/
+    /// `ShipLoadout`, which floor `deionizePerSec` to `ionizeMax / this`).
+    public static let ionizationBaselineFadeSeconds: Double = 12
+    /// The effective ion-dissipation rate for a hull: the rate its own data gives,
+    /// but never slower than draining a full charge over
+    /// `ionizationBaselineFadeSeconds`. Only applies to hulls that can actually be
+    /// ionized (`ionizeMax > 0`); a non-ionizable hull keeps whatever it had (0).
+    public static func flooredDeionize(rate: Double, ionizeMax: Double) -> Double {
+        guard ionizeMax > 0 else { return rate }
+        return max(rate, ionizeMax / ionizationBaselineFadeSeconds)
+    }
     public var isIonized: Bool { ionizeMax > 0 && ionCharge >= ionizeMax }
     /// The tint the hull glows while ionized, set from the `IonizeColor` of
     /// whatever last landed ion charge on it (Bible: "the color that a ship hit

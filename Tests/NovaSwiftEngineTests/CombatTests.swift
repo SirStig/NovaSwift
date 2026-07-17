@@ -484,6 +484,32 @@ final class CombatTests: XCTestCase {
         XCTAssertNil(hulk.ionizeColor, "the glow clears once the charge is gone")
     }
 
+    /// A hull whose data `Deionize` is 0 — the majority of stock hulls — must still
+    /// shed ion charge, or the ionization glow sticks on at full strength forever
+    /// (the reported "the colour never fades" bug). `flooredDeionize` guarantees a
+    /// baseline so a full charge fades over ~`ionizationBaselineFadeSeconds`.
+    func testIonizationFadesEvenWhenHullDeionizeIsZero() {
+        let rate = Ship.flooredDeionize(rate: 0, ionizeMax: 100)
+        XCTAssertGreaterThan(rate, 0, "a 0-Deionize but ionizable hull still gets a baseline rate")
+        XCTAssertEqual(rate, 100 / Ship.ionizationBaselineFadeSeconds, accuracy: 1e-9)
+
+        let s = makeShip("x", govt: 1, at: Vec2())
+        s.ionizeMax = 100
+        s.ionCharge = 100
+        s.deionizePerSec = rate
+        s.ionizeColor = (1, 0, 0)
+        s.deionize(Ship.ionizationBaselineFadeSeconds)
+        XCTAssertEqual(s.ionCharge, 0, accuracy: 1e-9, "a full charge fully fades within the baseline window")
+        XCTAssertNil(s.ionizeColor, "and the glow clears with it")
+    }
+
+    /// The floor only ever raises a too-slow (or zero) rate — a hull whose own
+    /// Deionize is already faster keeps it, and a non-ionizable hull gets no floor.
+    func testFlooredDeionizeKeepsAFasterHullRateAndSkipsNonIonizableHulls() {
+        XCTAssertEqual(Ship.flooredDeionize(rate: 50, ionizeMax: 100), 50, accuracy: 1e-9)
+        XCTAssertEqual(Ship.flooredDeionize(rate: 0, ionizeMax: 0), 0, accuracy: 1e-9)
+    }
+
     /// A hulk has no attitude control: it coasts on the momentum it had, on the
     /// heading it had. It must not steer itself.
     func testDisabledHulkDriftsWithoutTurning() {

@@ -244,7 +244,9 @@ public final class Galaxy {
             radius: radius, government: s.inherentCombatGovt, strength: s.strength,
             disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, skillVar: s.skillVar,
             fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo, inertialess: s.inertialess,
-            ionizeMax: Double(max(0, s.ionizeMax)), deionizePerSec: Double(max(0, s.deionize)) * 0.3,
+            ionizeMax: Double(max(0, s.ionizeMax)),
+            deionizePerSec: Ship.flooredDeionize(rate: Double(max(0, s.deionize)) * 0.3,
+                                                 ionizeMax: Double(max(0, s.ionizeMax))),
             mounts: mounts, explosionSoundID: game.deathExplosionSoundID(s),
             explosionBoomID: s.finalExplosionBoomID ?? s.breakupExplosionBoomID,
             exitPoints: exitPoints(forShip: id))
