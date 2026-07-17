@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import NovaSwiftKit
 
 /// Plug-in hub: an "Installed" manager (enable/disable/delete what's on
@@ -10,6 +11,8 @@ struct PluginsView: View {
     /// Closes this dialog (injected by the full-screen overlay presenter).
     var onClose: () -> Void = {}
     @State private var tab: Tab = .installed
+    @State private var showingImporter = false
+    @State private var importMessage: String?
 
     private enum Tab: String, CaseIterable, Identifiable {
         case installed = "Installed", store = "Store"
@@ -35,11 +38,49 @@ struct PluginsView: View {
 
                 switch tab {
                 case .installed:
-                    installedList.scrollContentBackground(.hidden)
+                    VStack(spacing: 0) {
+                        importBar
+                        installedList.scrollContentBackground(.hidden)
+                    }
                 case .store:
                     NavigationStack { PluginStoreView() }
                 }
             }
+        }
+        .fileImporter(isPresented: $showingImporter,
+                      allowedContentTypes: [.zip, .folder, .data],
+                      allowsMultipleSelection: false,
+                      onCompletion: handleImport)
+        .alert("Import Plug-in", isPresented: Binding(
+            get: { importMessage != nil },
+            set: { if !$0 { importMessage = nil } }
+        ), presenting: importMessage) { _ in
+            Button("OK") { importMessage = nil }
+        } message: { Text($0) }
+    }
+
+    /// A standing, obvious entry point for plug-ins that don't come from the
+    /// Store — a total conversion downloaded from a fan site, a `.zip` a
+    /// friend sent, or a loose `.rez`/`.ndat` dropped from the Finder.
+    private var importBar: some View {
+        Button {
+            showingImporter = true
+        } label: {
+            Label("Import Plug-in or .zip…", systemImage: "square.and.arrow.down.on.square")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .padding([.horizontal, .top])
+        .padding(.bottom, 4)
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        do {
+            guard let src = try result.get().first else { return }
+            let id = try model.data.importPlugin(from: src)
+            importMessage = "Imported \"\(id)\". Enable it below to use it."
+        } catch {
+            importMessage = "That didn't work — \(error.localizedDescription)"
         }
     }
 
@@ -48,7 +89,7 @@ struct PluginsView: View {
             if model.data.plugins.isEmpty {
                 ContentUnavailableViewCompat(
                     title: "No plug-ins installed",
-                    message: "Switch to Store to browse and install plug-ins, or import a .rez/.ndat file.")
+                    message: "Switch to Store to browse and install plug-ins, or use Import above for a .rez/.ndat/.zip you got elsewhere.")
             } else {
                 Section(footer: Text("Total conversions replace the base scenario; small plug-ins can stack. When two plug-ins define the same thing, the one lower in this list wins — use the arrows to reorder. Changes apply next time you start a game.")) {
                     let plugins = model.data.plugins

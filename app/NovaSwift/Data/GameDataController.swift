@@ -3,6 +3,7 @@ import SwiftUI
 import CoreText
 import NovaSwiftKit
 import NovaSwiftStory
+import NovaSwiftPluginStore
 
 /// Locates game data and the plug-in catalog, tracks which plug-ins are enabled,
 /// and produces a merged `NovaGame` for the engine.
@@ -403,6 +404,47 @@ final class GameDataController: ObservableObject {
             for url in plugin.fileURLs { try? fm.removeItem(at: url) }
         }
         reload()
+    }
+
+    /// Imports a user-picked plug-in — a `.zip` archive, a loose `.rez`/`.ndat`
+    /// container, or a folder of them — that didn't come through the Store
+    /// (e.g. a total conversion downloaded from a fan site). Lands in
+    /// `importedPluginsDir` under the same discovery/merge pipeline the Store
+    /// and prebundled plug-ins use, so it shows up in the Installed list,
+    /// participates in load order, and persists exactly like any other plug-in.
+    /// Returns the new plug-in's id (its folder/file name) for confirmation UI.
+    @discardableResult
+    func importPlugin(from src: URL) throws -> String {
+        let scoped = src.startAccessingSecurityScopedResource()
+        defer { if scoped { src.stopAccessingSecurityScopedResource() } }
+
+        let fm = FileManager.default
+        try fm.createDirectory(at: importedPluginsDir, withIntermediateDirectories: true)
+        let ext = src.pathExtension.lowercased()
+        let id: String
+
+        if ext == "zip" {
+            // `PluginInstaller.install` deletes the archive it's handed once
+            // extracted (appropriate for a throwaway downloaded temp file) —
+            // copy the user's picked file first so we never touch their original.
+            id = src.deletingPathExtension().lastPathComponent
+            let tmp = fm.temporaryDirectory.appendingPathComponent(src.lastPathComponent)
+            if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
+            try fm.copyItem(at: src, to: tmp)
+            _ = try PluginInstaller.install(archiveAt: tmp, id: id, into: importedPluginsDir)
+        } else {
+            var isDir: ObjCBool = false
+            fm.fileExists(atPath: src.path, isDirectory: &isDir)
+            guard isDir.boolValue || GameLibrary.resourceExtensions.contains(ext) else {
+                throw PluginInstallError.unsupportedArchive
+            }
+            id = src.lastPathComponent
+            let dest = importedPluginsDir.appendingPathComponent(id, isDirectory: isDir.boolValue)
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            try fm.copyItem(at: src, to: dest)
+        }
+        reload()
+        return id
     }
 
     /// Pick a reasonable player ship: the first ship the data defines (usually the
