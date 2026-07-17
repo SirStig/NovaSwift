@@ -176,10 +176,11 @@ struct SettingsView: View {
             Toggle("Modern dialog chrome", isOn: binding(\.modernDialogs))
             Toggle("Modern HUD", isOn: binding(\.modernHUD))
             Toggle("Sidebar pause menu", isOn: binding(\.sidebarPauseMenu))
+            Toggle("Show mission storyline tags", isOn: binding(\.showMissionStorylineTags))
         } header: {
             sectionHeader("Interface Options", icon: "slider.horizontal.3")
         } footer: {
-            Text("Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. With the sidebar pause menu off (the Classic default), pausing saves and drops straight to the main menu; on it opens the port's own menu. On mobile the sidebar is always available via the ☰ button.")
+            Text("Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. With the sidebar pause menu off (the Classic default), pausing saves and drops straight to the main menu; on it opens the port's own menu. On mobile the sidebar is always available via the ☰ button. Storyline tags mark missions that continue a reconstructed campaign and jump to it in the Story Guide — an aftermarket hint the original game never had.")
         }
     }
 
@@ -187,6 +188,10 @@ struct SettingsView: View {
         Section {
             NovaMenuPicker(title: "Difficulty", selection: binding(\.difficulty),
                            options: GameSettings.Difficulty.allCases) { $0.label }
+            NovaMenuPicker(title: "System Aliveness", selection: binding(\.systemAliveness),
+                           options: GameSettings.SystemAliveness.allCases) { $0.label }
+            Text(model.settings.systemAliveness.blurb)
+                .novaFont(.caption).foregroundStyle(.secondary)
             NovaSegmentedPicker(selection: binding(\.gameSpeed), options: GameSettings.GameSpeed.allCases) { $0.label }
                 .disabled(model.session.isActive)
             if model.session.isActive {
@@ -222,7 +227,7 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Gameplay", icon: "gamecontroller")
         } footer: {
-            Text("Difficulty scales the damage you take, from Very Easy for a mostly-story run up to Hard. Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
+            Text("Difficulty scales the damage you take, from Very Easy for a mostly-story run up to Hard. System Aliveness controls how much traffic systems carry and how often ships actually land — Authentic thins it out and sends most traders cruising through instead of docking, closer to the original game's pace; Bustling pushes past the default for even busier systems. Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
         }
     }
 

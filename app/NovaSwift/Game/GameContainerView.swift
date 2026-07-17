@@ -673,6 +673,8 @@ struct GameContainerView: View {
     @State private var reclaimingSceneFocus = false
     /// The open hail/communication dialog, if any (nil = closed).
     @State private var hailDialogState: HailDialogState?
+    @State private var showStoryGuide = false
+    @State private var storyGuideFocusKey: String?
     /// Backs the in-flight LinkMission offer a hailed/boarded `pêrs` makes —
     /// mirrors the bar's `services.pendingOffer` pattern (`SpaceportView`) so
     /// the same accept/decline panel works mid-flight.
@@ -887,8 +889,16 @@ struct GameContainerView: View {
                     MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
                                         onPage: { _ in },
                                         onAccept: { acceptFlightMissionOffer(offer) },
-                                        onDecline: { declineFlightMissionOffer(offer) })
+                                        onDecline: { declineFlightMissionOffer(offer) },
+                                        storylineTag: storylineTag(for: offer.mission.id, game: host.game),
+                                        onOpenStoryline: storylineTag(for: offer.mission.id, game: host.game).map { t in { openStoryline(t.key) } })
                         .transition(.opacity)
+                }
+
+                if let game = host.game {
+                    Color.clear
+                        .storylineGuideSheet(isPresented: $showStoryGuide, game: game,
+                                             player: { model.pilot.state }, storylineKey: storyGuideFocusKey)
                 }
 
                 // Mobile action-menu panels (opened from the on-screen controls).
@@ -2334,6 +2344,19 @@ struct GameContainerView: View {
         flightMissionPersonID = nil
     }
 
+    /// From the table prewarmed once per data set at load time
+    /// (`GameDataController.prewarm()`) — no per-call rescan. `game` param
+    /// kept only so callers don't need to unwrap `host.game` twice.
+    private func storylineTag(for missionID: Int, game: NovaGame?) -> MissionStorylineTag? {
+        guard model.settings.showMissionStorylineTags, game != nil else { return nil }
+        return model.data.storylineTags[missionID]
+    }
+
+    private func openStoryline(_ key: String) {
+        storyGuideFocusKey = key
+        showStoryGuide = true
+    }
+
     /// Roll a capture attempt. On success, closes the plunder dialog and hands
     /// off to `pendingCaptureChoice` so the player picks "use as escort" or
     /// "take command of it" — EV Nova offers both outcomes for a successful
@@ -2919,14 +2942,14 @@ struct LandPromptView: View {
     var rightInset: CGFloat = 0
 
     /// On iOS the safe area already clears the home indicator, and the touch
-    /// controls anchor only a few points beyond it — a bigger gap here read as
-    /// the prompt floating well above where the controls sit. On macOS there's
-    /// no safe area to lean on, so it keeps its own clearance from the window edge.
+    /// controls anchor only a few points beyond it. On macOS there's no safe
+    /// area to lean on, but it should still sit flush with the window's
+    /// bottom edge rather than floating well above it.
     private var bottomPadding: CGFloat {
         #if os(iOS)
-        14
+        6
         #else
-        30
+        8
         #endif
     }
 
@@ -2983,21 +3006,22 @@ struct LandPromptView: View {
     }
 }
 
-/// The rolling bottom-left message log: the calendar date on each jump/land,
-/// hail replies, mission notices and any other transient game message, as plain
-/// stacked text that fades out on its own timer (`GameHUDModel.post`). No panel
-/// or border — just the log, like the original.
+/// The bottom-left status line: the calendar date on each jump/land, hail
+/// replies, mission notices and any other transient game message — one line
+/// that fades out on its own timer (`GameHUDModel.post`), replaced by whatever
+/// posts next rather than stacking underneath it. No panel or border — just
+/// the line, like the original.
 struct MessageLogView: View {
     @ObservedObject var hud: GameHUDModel
 
-    /// Mirrors `LandPromptView.bottomPadding` — sits just above the safe area
-    /// (which already clears the home indicator) instead of floating a fixed
-    /// window-edge distance above it.
+    /// Mirrors `LandPromptView.bottomPadding` — sits flush with the true
+    /// bottom edge (just clearing the safe area on iOS, which already clears
+    /// the home indicator).
     private var bottomPadding: CGFloat {
         #if os(iOS)
-        14
+        6
         #else
-        24
+        8
         #endif
     }
 
@@ -3005,18 +3029,16 @@ struct MessageLogView: View {
         VStack {
             Spacer()
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(hud.messages) { m in
-                        Text(m.text)
-                            #if os(iOS)
-                            .novaFont(.hud, weight: .semibold, size: 12)
-                            #else
-                            .novaFont(.hud, weight: .semibold)
-                            #endif
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
-                            .transition(.opacity)
-                    }
+                if let m = hud.message {
+                    Text(m.text)
+                        #if os(iOS)
+                        .novaFont(.hud, weight: .semibold, size: 12)
+                        #else
+                        .novaFont(.hud, weight: .semibold)
+                        #endif
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                        .transition(.opacity)
                 }
                 Spacer()
             }

@@ -171,21 +171,24 @@ final class OutfitMechanicsTests: XCTestCase {
         XCTAssertEqual(short.onSell, "")
     }
 
-    // MARK: sell-anywhere tech bypass — Flags 0x0800
+    // MARK: 0x0800 is sell-side only — it must NOT bypass the buy-listing
+    // tech-level gate (Bible: "This item can be sold anywhere, regardless of
+    // tech level, requirements, or mission bits" describes selling an owned
+    // item back, not buy-listing visibility; see OUTFITTERS.md §3.5).
 
-    func testSellAnywhereBypassesTechLevel() {
+    func testSellAnywhereDoesNotBypassBuyTechLevel() {
         var col = ResourceCollection()
         // Outfitter present (flags 0x04), tech level 1.
         var s = [UInt8](repeating: 0, count: 60)
         put32(&s, 6, 0x04)     // hasOutfitter
         put16(&s, 12, 1)       // techLevel 1
         col.add(Resource(type: NovaType.spob, id: 400, name: "Port", data: Data(s)))
-        col.add(outfit(200, name: "Too Advanced", tech: 99))                 // gated out
-        col.add(outfit(201, name: "Sold Anywhere", flags: 0x0800, tech: 99)) // 0x0800 bypasses
+        col.add(outfit(200, name: "Too Advanced", tech: 99))                       // gated out
+        col.add(outfit(201, name: "NPC Only", flags: 0x0800, tech: 99))            // still gated out (buy side)
         let game = NovaGame(col)
         let spob = game.spob(400)!
         let ids = Set(game.outfitsSold(at: spob).map(\.id))
         XCTAssertFalse(ids.contains(200), "tech-99 item hidden at tech-1 port")
-        XCTAssertTrue(ids.contains(201), "0x0800 item sold regardless of tech level")
+        XCTAssertFalse(ids.contains(201), "0x0800 must not bypass the buy-listing tech-level gate")
     }
 }

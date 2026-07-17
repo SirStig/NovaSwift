@@ -19,6 +19,17 @@ public enum MissionStatus: String, Codable, Sendable {
     case locked         // prerequisites not yet met
 }
 
+/// A mission's storyline membership — which campaign it continues, for the
+/// "this mission continues the Vellos storyline" indicator. `Codable` so the
+/// whole-data-set table (`StorylineAnalyzer.storylineTags()`) can be prewarmed
+/// once at load time and disk-cached like the sprite decode cache, instead of
+/// every mission screen rebuilding it from scratch.
+public struct MissionStorylineTag: Codable, Sendable, Hashable {
+    public let key: String
+    public let title: String
+    public init(key: String, title: String) { self.key = key; self.title = title }
+}
+
 /// A bit that is currently preventing a step, plus what would flip it.
 public struct BlockingBit: Codable, Sendable, Hashable {
     public let bit: Int
@@ -272,6 +283,28 @@ public final class StorylineAnalyzer {
     /// The number of missions with no storyline tag (generic bar/computer jobs).
     public var untaggedMissionCount: Int {
         game.missions().filter { storyTag($0.name).key == nil }.count
+    }
+
+    /// Every tagged mission's storyline key/title, for missions that belong to
+    /// a real campaign (2+ tagged steps) — powers a "this mission continues
+    /// the Vellos storyline" indicator without resolving full per-pilot status.
+    /// Pure function of the loaded data set (no player state), so callers
+    /// should compute it once per data set (e.g. at load/prewarm time) and
+    /// cache the result rather than re-deriving it on every screen — see
+    /// `MissionStorylineTag`.
+    public func storylineTags() -> [Int: MissionStorylineTag] {
+        var out: [Int: MissionStorylineTag] = [:]
+        for (key, missions) in groupedByStoryline() {
+            for m in missions { out[m.id] = MissionStorylineTag(key: key, title: key) }
+        }
+        return out
+    }
+
+    /// The storyline (key/title) a single mission belongs to, if any — a
+    /// convenience over `storylineTags()` for a one-off lookup. Prefer a
+    /// cached `storylineTags()` table when checking many missions.
+    public func storylineTag(forMissionID id: Int) -> MissionStorylineTag? {
+        storylineTags()[id]
     }
 
     /// The whole campaign graph resolved for `player`: lanes (one per storyline),

@@ -356,6 +356,28 @@ backup for allies losing a fight); as of this update, **both** the "should
 this ship engage" gating half and the "should the system summon backup"
 reactive half are implemented.
 
+**Update: reinforcement eligibility is no longer gated solely on the
+player's legal record.** `governmentUnderAttackAndOutmatched`'s player-foe
+check used to read only `Diplomacy.isHostileToPlayer(govt)` — meaning a
+government's ships wouldn't call for backup against the player until the
+player's accumulated legal record (`CrimeTol`) for that government had
+actually crossed the hostile threshold, even after the player had just
+opened fire on one of its ships. That's now fixed: attacking any one ship of
+a government immediately adds that government to `World.provokedGovernments`
+(`World.applyHit`, `Sources/NovaSwiftEngine/World.swift`) and propagates
+`AIBrain.provokedByPlayer = true` to every OTHER ship of that government
+currently in the system — mirroring exactly what already happened to the
+directly-hit ship. `governmentUnderAttackAndOutmatched`'s `isFoe` check
+(`Spawner.swift`) now ORs `world.provokedGovernments.contains(govt)`
+alongside `dip.isHostileToPlayer(govt)`, so reinforcements can trigger from
+a single hit's provocation alone, independent of the legal-record gate.
+Rating/reputation penalties (`KillPenalty`/`DisabPenalty`/`BoardPenalty`) are
+untouched by this — those still only apply on an actual
+kill/disable/board via `Diplomacy.recordKill`/`recordDisable`/`recordBoard`,
+never on mere provocation. `provokedGovernments` lives on `World` (not
+`Diplomacy`), which is rebuilt fresh each system entry, so it resets
+naturally per visit with no explicit teardown needed.
+
 ## 6. Full "fleet" grep — cross-references outside `flët`/`sÿst`
 
 24 case-insensitive hits total (the Bible is stored as extended-ASCII with

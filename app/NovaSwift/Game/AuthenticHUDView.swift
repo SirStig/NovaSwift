@@ -242,9 +242,12 @@ struct AuthenticHUDView: View {
     private var navReadout: some View {
         VStack(spacing: 1) {
             if !model.navCourseSystemName.isEmpty {
+                // Grayed while too close to the system's centre to actually engage
+                // hyperspace right now — the same "fly further out" nudge the
+                // no-jump-zone distance gate enforces, given a visual cue here.
                 Text(model.navCourseSystemName)
                     .novaFont(.hud, weight: .semibold, size: statusSize)
-                    .foregroundStyle(color(style.intf.brightText))
+                    .foregroundStyle(color(model.canJumpNow ? style.intf.brightText : style.intf.dimText))
                     .multilineTextAlignment(.center)
                 Text("\(model.navCourseJumps) jump\(model.navCourseJumps == 1 ? "" : "s")")
                     .novaFont(.hud, size: subtitleSize).monospacedDigit()

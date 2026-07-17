@@ -90,6 +90,39 @@ combat/legal-record *machinery* itself had real gaps, now closed:
   (previously only "join as escort" existed) and a
   `novaswift-extract govt <baseDir> [id]` inspector subcommand.
 
+**2026-07-17 — combat hostility/reinforcement-eligibility decoupled from the
+legal-record gate.** Previously, attacking one ship of a government only
+made *that ship* (and, via the player-fleet-membership rule, the player's
+whole fleet) fight back — every OTHER ship of that same government in the
+system stayed unaware and non-hostile until the player's accumulated legal
+record (`CrimeTol`) crossed that government's hostile threshold
+(`Diplomacy.isHostileToPlayer`), and `Spawner`'s reactive reinforcement
+trigger (§1.2/FLEETS.md §5) was gated on that same threshold. That's the
+real game's behavior too (shoot one of a faction's ships and the whole
+faction reacts, immediately, whether or not you've built up a "criminal"
+legal record with them yet) but wasn't modeled: now fixed. `World.applyHit`
+adds the hit ship's government to a new `World.provokedGovernments: Set<Int>`
+(system-scoped — `World` is rebuilt fresh per system entry, so this resets
+naturally) and propagates `AIBrain.provokedByPlayer = true` to every other
+same-government ship currently in the system, mirroring exactly what already
+happened to the directly-hit ship. Only real resource-defined governments
+(id `>= 128`, the same convention `Spawner.governmentUnderAttackAndOutmatched`
+already used) are eligible — `independentGovt` has no organized "side" to
+provoke. `Spawner.governmentUnderAttackAndOutmatched`'s player-foe check now
+ORs `world.provokedGovernments.contains(govt)` alongside
+`dip.isHostileToPlayer(govt)`, so a government can call in reinforcements
+from a single hit's provocation alone. **Rating/reputation penalties are
+untouched** — `KillPenalty`/`DisabPenalty`/`BoardPenalty` still only apply on
+an actual kill/disable/board via `recordKill`/`recordDisable`/`recordBoard`
+(§2.1's "ShootPenalty is ignored" finding still holds: mere provocation,
+like a mere hit, dents nothing). See
+`Tests/NovaSwiftEngineTests/CombatTests.swift`
+(`testHittingOneGovernmentShipProvokesAllOthersInSystem`,
+`testIndependentGovernmentIsNeverMarkedProvoked`) and
+`Tests/NovaSwiftEngineTests/MissionAndFleetSpawnTests.swift`
+(`testReinforcementTriggersFromProvocationAloneWithoutLegalRecordThreshold`).
+Further detail in [FLEETS.md §5](FLEETS.md#5-relationship-to-reinforcement-fleets).
+
 This doc does **not** re-derive:
 - `gövt.MaxOdds` combat-odds gating — see [AI_GROUND_TRUTH.md](../AI_GROUND_TRUTH.md#2-combat-odds-gating-gövtmaxodds--completely-missing-from-our-sim),
   referenced briefly below where legal status interacts with it.

@@ -18,8 +18,19 @@ struct MissionInfoView: View {
     @ObservedObject var pilot: PilotStore
     var onClose: () -> Void
 
+    @EnvironmentObject private var appModel: AppModel
+
     @State private var summaries: [StoryEngine.MissionSummary] = []
     @State private var selectedID: Int?
+    @State private var showStoryGuide = false
+    @State private var storyGuideFocusKey: String?
+
+    /// Storyline tag per mission id, from the table prewarmed once per data
+    /// set at load time (`GameDataController.prewarm()`) — powers the
+    /// "continues the X storyline" badge next to each list row.
+    private var storylineTags: [Int: MissionStorylineTag] {
+        appModel.settings.showMissionStorylineTags ? appModel.data.storylineTags : [:]
+    }
 
     private static let frameID = 8517
 
@@ -47,6 +58,8 @@ struct MissionInfoView: View {
         }
         .novaResponsive()
         .onAppear(perform: rebuild)
+        .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
+                             storylineKey: storyGuideFocusKey)
     }
 
     private var selected: StoryEngine.MissionSummary? {
@@ -59,6 +72,11 @@ struct MissionInfoView: View {
         if selectedID == nil || !summaries.contains(where: { $0.id == selectedID }) {
             selectedID = summaries.first?.id
         }
+    }
+
+    private func openStoryline(_ key: String) {
+        storyGuideFocusKey = key
+        showStoryGuide = true
     }
 
     private func abortSelected() {
@@ -123,16 +141,22 @@ struct MissionInfoView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(summaries) { m in
-                        Button { selectedID = m.id } label: {
-                            NovaText(m.name, size: 11,
-                                     color: m.id == selectedID ? .white : Color(white: 0.78),
-                                     width: CGFloat(Item.list.w) - 10, align: .leading)
-                                .padding(.vertical, 3).padding(.horizontal, 5)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(m.id == selectedID ? amber.opacity(0.28) : .clear)
-                                .contentShape(Rectangle())
+                        HStack(spacing: 3) {
+                            Button { selectedID = m.id } label: {
+                                NovaText(m.name, size: 11,
+                                         color: m.id == selectedID ? .white : Color(white: 0.78),
+                                         width: CGFloat(Item.list.w) - 24, align: .leading)
+                                    .padding(.vertical, 3).padding(.leading, 5)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if let tag = storylineTags[m.id] {
+                                StorylineTagBadge(title: tag.title) { openStoryline(tag.key) }
+                                    .padding(.trailing, 4)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .background(m.id == selectedID ? amber.opacity(0.28) : .clear)
                     }
                 }
             }

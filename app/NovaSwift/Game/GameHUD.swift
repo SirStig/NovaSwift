@@ -64,22 +64,24 @@ final class GameHUDModel: ObservableObject {
     /// no landable stellar in reach.
     @Published var landName = ""
     @Published var landReady = false   // in range AND slow enough to set down now
-    /// The rolling bottom-left message log — the calendar date on each jump/land,
-    /// hail replies, mission notices, etc. Each entry fades out on its own timer,
-    /// exactly like EV Nova's on-screen message strip.
-    @Published var messages: [HUDMessage] = []
+    /// The bottom-left status line — the calendar date on each jump/land, hail
+    /// replies, mission notices, etc. A single current message that fades out
+    /// on its own timer, exactly like EV Nova's one-line on-screen message
+    /// strip; posting a new one replaces whatever's showing instead of
+    /// stacking underneath it.
+    @Published var message: HUDMessage?
 
-    /// Post a transient message to the bottom-left log. It appears immediately
-    /// and fades away after a few seconds; the log keeps only the most recent
-    /// few so it never grows without bound.
+    /// Post a transient message to the bottom-left status line, replacing
+    /// whatever's currently shown. It appears immediately and fades away after
+    /// a few seconds unless superseded first.
     func post(_ text: String) {
         guard !text.isEmpty else { return }
         let msg = HUDMessage(text: text)
-        withAnimation(.easeOut(duration: 0.2)) { messages.append(msg) }
-        if messages.count > 6 { messages.removeFirst(messages.count - 6) }
+        withAnimation(.easeOut(duration: 0.2)) { message = msg }
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
-            withAnimation(.easeIn(duration: 0.6)) { self?.messages.removeAll { $0.id == msg.id } }
+            guard self?.message?.id == msg.id else { return }
+            withAnimation(.easeIn(duration: 0.6)) { self?.message = nil }
         }
     }
     /// The player's locked target, if any (empty name = no target locked).
@@ -117,6 +119,12 @@ final class GameHUDModel: ObservableObject {
     /// planet/station selection for landing, not a hyperspace destination).
     @Published var navCourseSystemName = ""
     @Published var navCourseJumps = 0
+    /// True when the player is clear of the system's no-jump zone and could
+    /// actually engage hyperspace right now — updated every frame from
+    /// `GameScene.isClearOfNoJumpZone`. Grays the destination name in the nav
+    /// readout while too close to the system centre to jump, the same visual
+    /// nudge the distance gate itself enforces.
+    @Published var canJumpNow = true
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
@@ -336,8 +344,11 @@ struct GameHUDView: View {
             box {
                 VStack(alignment: .leading, spacing: 2) {
                     sectionLabel("COURSE")
+                    // Grayed while too close to the system's centre to actually
+                    // engage hyperspace right now.
                     Text(model.navCourseSystemName.uppercased())
                         .font(.system(size: 11, design: .monospaced).weight(.semibold)).lineLimit(1)
+                        .foregroundStyle(model.canJumpNow ? Color.primary : Color.secondary)
                     Text("\(model.navCourseJumps) JUMP\(model.navCourseJumps == 1 ? "" : "S")")
                         .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
                 }

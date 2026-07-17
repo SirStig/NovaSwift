@@ -22,8 +22,12 @@ struct SpaceportView: View {
     /// hints (the welcome-to-the-spaceport banner, the Mission BBS how-to, …).
     var showHints: Bool = false
 
+    @EnvironmentObject private var appModel: AppModel
+
     @State private var screen: Screen = .hub
     @State private var landingHintDismissed = false
+    @State private var showStoryGuide = false
+    @State private var storyGuideFocusKey: String?
     enum Screen { case hub, trade, outfit, shipyard, bar, missions }
 
     // Story runtime for the location-triggered offers this view owns —
@@ -74,10 +78,14 @@ struct SpaceportView: View {
                 Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
                 MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
                                     onPage: { _ in },
-                                    onAccept: { acceptOffer(offer) }, onDecline: { declineOffer(offer) })
+                                    onAccept: { acceptOffer(offer) }, onDecline: { declineOffer(offer) },
+                                    storylineTag: storylineTag(for: offer.mission.id),
+                                    onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
                     .transition(.opacity)
             }
         }
+        .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
+                             storylineKey: storyGuideFocusKey)
         // First landing: a quiet banner pointing the player at the Mission BBS,
         // Bar and shops. Only on the hub (hidden while a shop dialog is open) and
         // only until dismissed once.
@@ -146,6 +154,18 @@ struct SpaceportView: View {
         pilot.state = engine.player
         pilot.save()
         services.pendingOffer = nil
+    }
+
+    /// From the table prewarmed once per data set at load time
+    /// (`GameDataController.prewarm()`) — no per-call rescan.
+    private func storylineTag(for missionID: Int) -> MissionStorylineTag? {
+        guard appModel.settings.showMissionStorylineTags else { return nil }
+        return appModel.data.storylineTags[missionID]
+    }
+
+    private func openStoryline(_ key: String) {
+        storyGuideFocusKey = key
+        showStoryGuide = true
     }
 
     // MARK: Hub (frame 8500)

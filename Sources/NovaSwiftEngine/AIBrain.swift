@@ -140,6 +140,13 @@ public final class AIBrain {
     /// heads for the edge and jumps out — the visible outbound half of planet
     /// traffic. Only meaningful for trader dispositions.
     var spawnOutbound = false
+    /// Odds (0...1) that this trader skips landing entirely the first time it
+    /// would pick a planet destination, instead cruising straight across the
+    /// system and departing — set by `Spawner` from the "System Aliveness"
+    /// setting so a lower-aliveness system reads as mostly through-traffic.
+    /// Rolled once per spawn (`passThroughRolled`), not re-rolled on later legs.
+    var passThroughChance: Double = 0
+    private var passThroughRolled = false
     /// The pad this ship launched from, for a ship spawned via the `.planet`
     /// origin — consumed the first time `pickPlanetBody` resolves a travel
     /// destination, so it never re-selects the body it just left as its very
@@ -982,8 +989,20 @@ public final class AIBrain {
 
     /// Trader travel: pick a planet and cruise toward it, then hand off to a
     /// landing approach. With nowhere to land, just cross the system and leave.
+    /// `passThroughChance` (set by `Spawner` from the "System Aliveness" setting)
+    /// lets a fraction of ambient traders skip landing entirely and instead
+    /// cruise across the system to the edge/a gate, same as a system with no
+    /// landable body — this is what puts believable through-traffic back into
+    /// a system instead of every ambient ship making a beeline for a pad.
     private func travel(_ me: Ship, _ world: World) -> ControlIntent {
         if destination == nil {
+            if passThroughChance > 0, !passThroughRolled {
+                passThroughRolled = true
+                if world.rng.double(in: 0...1) < passThroughChance {
+                    enter(.departing)
+                    return depart(me, world)
+                }
+            }
             if let body = pickPlanetBody(me, world) {
                 destSpob = body.id
                 destination = body.position

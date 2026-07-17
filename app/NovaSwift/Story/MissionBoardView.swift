@@ -25,10 +25,21 @@ struct MissionBoardView: View {
     let location: MissionOfferLocation
     var width: CGFloat = 300
 
+    @EnvironmentObject private var appModel: AppModel
+
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var offered: [MissionRes] = []
     @State private var graphics: SpaceportGraphics?
+    @State private var showStoryGuide = false
+    @State private var storyGuideFocusKey: String?
+
+    /// Storyline tag per mission id, from the table prewarmed once per data
+    /// set at load time (`GameDataController.prewarm()`) — powers the
+    /// "continues the X storyline" badge on offer rows and the offer dialog.
+    private var storylineTags: [Int: MissionStorylineTag] {
+        appModel.settings.showMissionStorylineTags ? appModel.data.storylineTags : [:]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -37,33 +48,43 @@ struct MissionBoardView: View {
                           width: width, align: .leading)
             } else {
                 ForEach(offered, id: \.id) { mission in
-                    Button { engine?.present(mission) } label: {
-                        HStack(spacing: 6) {
-                            NovaText(engine?.resolvedName(for: mission) ?? mission.displayName, size: 11, width: width - 65, align: .leading)
-                            Spacer(minLength: 0)
-                            NovaText(mission.pay.creditsAbbreviated, size: 11,
-                                     color: Color(red: 1, green: 0.85, blue: 0.4), width: 60, align: .trailing)
+                    HStack(spacing: 4) {
+                        Button { engine?.present(mission) } label: {
+                            HStack(spacing: 6) {
+                                NovaText(engine?.resolvedName(for: mission) ?? mission.displayName, size: 11, width: width - 65, align: .leading)
+                                Spacer(minLength: 0)
+                                NovaText(mission.pay.creditsAbbreviated, size: 11,
+                                         color: Color(red: 1, green: 0.85, blue: 0.4), width: 60, align: .trailing)
+                            }
+                            .padding(.vertical, 2.5)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 2.5)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        if let tag = storylineTags[mission.id] {
+                            StorylineTagBadge(title: tag.title) { openStoryline(tag.key) }
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
         .onAppear(perform: buildEngine)
+        .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
+                             storylineKey: storyGuideFocusKey)
         .sheet(isPresented: Binding(get: { services.pendingOffer != nil },
                                     set: { if !$0 { services.pendingOffer = nil } })) {
             if let offer = services.pendingOffer, let graphics {
+                let tag = storylineTags[offer.mission.id]
                 switch location {
                 case .missionComputer:
                     MissionInfoSheet(graphics: graphics, offer: offer, offered: offered,
                                       onSelect: { engine?.present($0) },
-                                      onAccept: { accept(offer) }, onDecline: { decline(offer) })
+                                      onAccept: { accept(offer) }, onDecline: { decline(offer) },
+                                      storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } })
                 case .bar:
                     MissionSingleDialog(graphics: graphics, offer: offer, offered: offered,
                                         onPage: { engine?.present($0) },
-                                        onAccept: { accept(offer) }, onDecline: { decline(offer) })
+                                        onAccept: { accept(offer) }, onDecline: { decline(offer) },
+                                        storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } })
                 // persShip/mainSpaceport/tradeCenter/shipyard/outfitter/unknown: no dedicated
                 // authentic sheet yet (this view only ever gets instantiated at .missionComputer
                 // or .bar today) — fall back to the mission-computer style so an offer is never
@@ -71,7 +92,8 @@ struct MissionBoardView: View {
                 default:
                     MissionInfoSheet(graphics: graphics, offer: offer, offered: offered,
                                       onSelect: { engine?.present($0) },
-                                      onAccept: { accept(offer) }, onDecline: { decline(offer) })
+                                      onAccept: { accept(offer) }, onDecline: { decline(offer) },
+                                      storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } })
                 }
             }
         }
@@ -83,6 +105,11 @@ struct MissionBoardView: View {
         engine = e
         offered = e.missionsOffered(at: location, spob: spob.id)
         if graphics == nil { graphics = SpaceportGraphics(game: game) }
+    }
+
+    private func openStoryline(_ key: String) {
+        storyGuideFocusKey = key
+        showStoryGuide = true
     }
 
     private func accept(_ offer: MissionOffer) {
@@ -183,6 +210,8 @@ private struct MissionInfoSheet: View {
     let onSelect: (MissionRes) -> Void
     let onAccept: () -> Void
     let onDecline: () -> Void
+    var storylineTag: MissionStorylineTag? = nil
+    var onOpenStoryline: (() -> Void)? = nil
 
     /// PICT #8517 "Mission Info" — 471×155, matches the DLOG bounds exactly.
     private static let pictID = 8517
@@ -192,8 +221,14 @@ private struct MissionInfoSheet: View {
             if let image = graphics.pict(Self.pictID) {
                 MissionPictFrame(image: image) { space in
                     // item 2: (13,1)-(206,13) 193x12 — selected mission's title
-                    NovaText(offer.title, size: 11, width: 193, align: .leading, weight: .bold)
-                        .novaPlace(space, -222.5, -76.5)
+                    HStack(spacing: 4) {
+                        NovaText(offer.title, size: 11, width: 175, align: .leading, weight: .bold)
+                        if let storylineTag, let onOpenStoryline {
+                            StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
+                        }
+                    }
+                    .frame(width: 193, alignment: .leading)
+                    .novaPlace(space, -222.5, -76.5)
                     // item 6: (343,4)-(465,16) 122x12 — its reward
                     NovaText(offer.mission.pay.creditsAbbreviated, size: 11,
                              color: Color(red: 1, green: 0.85, blue: 0.4), width: 122, align: .trailing)
@@ -243,7 +278,12 @@ private struct MissionInfoSheet: View {
     /// Nova Graphics 3) — a plain fallback so the flow still works.
     private var fallback: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(offer.title).novaFont(.heading)
+            HStack(spacing: 6) {
+                Text(offer.title).novaFont(.heading)
+                if let storylineTag, let onOpenStoryline {
+                    StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
+                }
+            }
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
@@ -282,6 +322,8 @@ struct MissionSingleDialog: View {
     let onPage: (MissionRes) -> Void
     let onAccept: () -> Void
     let onDecline: () -> Void
+    var storylineTag: MissionStorylineTag? = nil
+    var onOpenStoryline: (() -> Void)? = nil
 
     private static let upperID = 8521, middleID = 8522, lowerID = 8523
     private static let frameWidth: CGFloat = 441
@@ -314,7 +356,12 @@ struct MissionSingleDialog: View {
                     // item 2: (12,9)-(427,276) 415x267 — briefing pane
                     ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 5) {
-                            NovaText(offer.title, size: 11, width: 411, align: .leading, weight: .bold)
+                            HStack(spacing: 6) {
+                                NovaText(offer.title, size: 11, width: 380, align: .leading, weight: .bold)
+                                if let storylineTag, let onOpenStoryline {
+                                    StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
+                                }
+                            }
                             NovaText(offer.briefingText, size: 10, width: 411, align: .leading)
                         }
                         .padding(.top, 2).padding(.leading, 2)
@@ -368,7 +415,12 @@ struct MissionSingleDialog: View {
 
     private var fallback: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(offer.title).novaFont(.heading)
+            HStack(spacing: 6) {
+                Text(offer.title).novaFont(.heading)
+                if let storylineTag, let onOpenStoryline {
+                    StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
+                }
+            }
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }

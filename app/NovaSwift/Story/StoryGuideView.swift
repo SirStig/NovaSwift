@@ -33,10 +33,16 @@ struct StoryGuideView: View {
     private var isCompact: Bool { false }
     #endif
 
-    init(model: StoryGuideModel, onClose: (() -> Void)? = nil, onAbort: ((Int) -> Void)? = nil) {
+    /// - Parameter initialStorylineKey: pre-select this storyline on open (e.g.
+    ///   when a mission's storyline badge opened the guide) instead of the
+    ///   default "first in-progress lane" — `selectDefaultLane()` still runs
+    ///   as a fallback if the key doesn't match any lane once the map loads.
+    init(model: StoryGuideModel, onClose: (() -> Void)? = nil, onAbort: ((Int) -> Void)? = nil,
+         initialStorylineKey: String? = nil) {
         self.model = model
         self.onClose = onClose
         self.onAbort = onAbort
+        _selectedKey = State(initialValue: initialStorylineKey)
     }
 
     private var lanes: [StoryMapLane] { model.storyMap.lanes }
@@ -66,6 +72,13 @@ struct StoryGuideView: View {
     }
 
     private func selectDefaultLane() {
+        // Lanes are still empty while the background build is in flight (the
+        // common case right on `.onAppear`, since `StoryGuideModel` kicks off
+        // its rebuild in `init`) — bailing out here, rather than falling
+        // through to `lanes.first?.key` (`nil`), keeps a caller-supplied
+        // `initialStorylineKey` intact until the real lanes land; the
+        // `onChange` below re-validates it once they do.
+        guard !lanes.isEmpty else { return }
         if selectedKey == nil || !(lanes.contains { $0.key == selectedKey }) {
             selectedKey = lanes.first?.key
         }

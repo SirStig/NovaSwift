@@ -51,6 +51,51 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
+    /// How densely populated/landed-on systems feel — separate from combat
+    /// `Difficulty`. The engine's untuned defaults (`normal`) already read as
+    /// "alive"; `authentic` dials that back toward the original game's
+    /// quieter, more-passing-through traffic, and `bustling` pushes further
+    /// past `normal` for players who want even busier systems.
+    enum SystemAliveness: String, Codable, CaseIterable, Identifiable {
+        case authentic, normal, bustling
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .authentic: return "Authentic"
+            case .normal: return "Normal"
+            case .bustling: return "Bustling"
+            }
+        }
+        var blurb: String {
+            switch self {
+            case .authentic: return "Fewer ships, more passing through — closer to the original game's pace."
+            case .normal: return "The port's default: a lively mix of traffic and landings."
+            case .bustling: return "Even busier systems, with fleets and traffic on top of Normal."
+            }
+        }
+        /// Multiplies `Spawner.targetPopulation`/`maxPopulation`/
+        /// `maxConcurrentFleets`, and inversely scales `spawnInterval`/
+        /// `fleetInterval` (so a lower population also arrives more slowly).
+        var populationScale: Double {
+            switch self {
+            case .authentic: return 0.55
+            case .normal: return 1.0
+            case .bustling: return 1.35
+            }
+        }
+        /// Odds (0...1) an ambient trader skips landing and just cruises
+        /// through the system instead — this is the main lever against
+        /// planets feeling crowded, since every landing trader used to dock
+        /// unconditionally.
+        var passThroughChance: Double {
+            switch self {
+            case .authentic: return 0.55
+            case .normal: return 0.0
+            case .bustling: return 0.0
+            }
+        }
+    }
+
     enum FrameRateCap: String, Codable, CaseIterable, Identifiable {
         case fps30, fps60, fps120, unlimited
         var id: String { rawValue }
@@ -185,6 +230,8 @@ struct GameSettings: Codable, Equatable {
     // MARK: Gameplay
 
     var difficulty: Difficulty = .normal
+    /// System traffic density/landing frequency (see `SystemAliveness`).
+    var systemAliveness: SystemAliveness = .normal
     /// Overall simulation speed (see `GameSpeed`). Default `x1` — real time,
     /// the faithful pace.
     var gameSpeed: GameSpeed = .x1
@@ -282,6 +329,13 @@ struct GameSettings: Codable, Equatable {
     /// the authentic main menu. On by default; independent of the presentation
     /// presets. Always available on mobile via the ☰ button regardless of this.
     var sidebarPauseMenu: Bool = true
+    /// Show a small storyline badge on missions (mission menu, Missions BBS,
+    /// and offer dialogs) that belong to a reconstructed campaign, and let
+    /// tapping it jump straight to that storyline in the Story Guide/Map.
+    /// On by default — it's a pure "aftermarket" convenience the original
+    /// game never had, so players who don't want the spoiler-y hint can
+    /// switch it off.
+    var showMissionStorylineTags: Bool = true
 
     /// Stamp the four presentation toggles from a preset. `.custom` is a no-op (a
     /// display-only state, not a stampable template). `sidebarPauseMenu` is *not*
@@ -396,6 +450,7 @@ struct GameSettings: Codable, Equatable {
             (try? c.decodeIfPresent(T.self, forKey: key)) ?? nil ?? fallback
         }
         difficulty            = v(.difficulty, d.difficulty)
+        systemAliveness       = v(.systemAliveness, d.systemAliveness)
         gameSpeed             = v(.gameSpeed, d.gameSpeed)
         autoTargetAfterFiring = v(.autoTargetAfterFiring, d.autoTargetAfterFiring)
         confirmLanding        = v(.confirmLanding, d.confirmLanding)
@@ -429,6 +484,7 @@ struct GameSettings: Codable, Equatable {
         modernDialogs         = v(.modernDialogs, d.modernDialogs)
         modernHUD             = v(.modernHUD, d.modernHUD)
         sidebarPauseMenu      = v(.sidebarPauseMenu, d.sidebarPauseMenu)
+        showMissionStorylineTags = v(.showMissionStorylineTags, d.showMissionStorylineTags)
         // Migration: a pre-split blob has no `modernHUD` key but may carry the old
         // single `uiMode` preset. Stamp the toggles from it so existing pilots keep
         // their exact look (Classic→Classic, Nova Swift→modern menu/dialogs/HUD).

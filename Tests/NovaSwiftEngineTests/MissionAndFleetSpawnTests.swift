@@ -134,6 +134,67 @@ final class MissionAndFleetSpawnTests: XCTestCase {
                              "single ships should be the bulk of traffic, not fleets (singles \(singles) vs fleet ships \(fleetShips))")
     }
 
+    /// A `gövt` with `MaxOdds` set (@22, needed for the reinforcement-outmatched
+    /// check) in addition to the plain class list `govt(_:)` above provides.
+    private func govtWithMaxOdds(_ id: Int, classes: [Int] = [1], maxOdds: Int) -> Resource {
+        var b = [UInt8](repeating: 0, count: 200)
+        put16(&b, 22, maxOdds)
+        for i in 0..<4 { put16(&b, 24 + i * 2, i < classes.count ? classes[i] : -1) }
+        for i in 0..<4 { put16(&b, 32 + i * 2, -1) }
+        for i in 0..<4 { put16(&b, 40 + i * 2, -1) }
+        return Resource(type: NovaType.govt, id: id, name: "Govt\(id)", data: Data(b))
+    }
+
+    // MARK: Reactive reinforcement provocation (independent of legal-record threshold)
+
+    /// Attacking one ship of a government must make reinforcement calls
+    /// eligible immediately, purely from `World.provokedGovernments` — no
+    /// `Diplomacy.isHostileToPlayer` legal-record threshold need be crossed.
+    /// This exercises `Spawner.governmentUnderAttackAndOutmatched`'s
+    /// `isFoe` OR against `world.provokedGovernments`, wired alongside
+    /// `World.applyHit`'s propagation (covered directly in `CombatTests`).
+    func testReinforcementTriggersFromProvocationAloneWithoutLegalRecordThreshold() {
+        var col = ResourceCollection()
+        col.add(ship(128, name: "Hull"))
+        col.add(govtWithMaxOdds(128, maxOdds: 10))     // low tolerance: outmatched easily
+        col.add(fleet(200, lead: 128, govt: 128, linkSyst: -1))
+        let galaxy = Galaxy(game: NovaGame(col))
+
+        let table = SpawnTable(dudes: [], fleets: [], averageShips: 4,
+                               systemGovt: 128, systemID: 500,
+                               reinforcementFleet: 200, reinforcementDelay: 0, reinforcementRegen: 999)
+        let spawner = Spawner(galaxy: galaxy, table: table)
+
+        let player = Ship(name: "P", stats: stats())
+        player.combatStrength = 1000                  // heavily outmatches the lone patrol
+        let world = World(player: player)
+        world.galaxy = galaxy
+        world.diplomacy = galaxy.makeDiplomacy()
+        spawner.maxPopulation = 0                      // block ambient/fleet trickle noise
+
+        let patrol = Ship(name: "Patrol", stats: stats())
+        patrol.maxShield = 10; patrol.shield = 10; patrol.maxArmor = 10; patrol.armor = 10
+        patrol.combatStrength = 1
+        patrol.government = 128
+        let patrolID = world.addNPC(patrol)
+
+        // Not legally hostile: no legal record accumulated, and the govt's
+        // own diplomacy check agrees.
+        XCTAssertFalse(world.diplomacy!.isHostileToPlayer(128))
+
+        // Player targets the patrol (a real fight, not a bare UI selection —
+        // `friendUnderFire` requires the foe's `currentTargetID` to point at
+        // the friend) and the world marks the government provoked, exactly as
+        // `World.applyHit` does on a landed hit.
+        player.currentTargetID = patrolID
+        world.provokedGovernments.insert(128)
+
+        for _ in 0..<3 { spawner.update(1.0 / 30.0, world: world) }
+
+        XCTAssertTrue(world.npcs.contains { $0.shipTypeID == 128 && $0.entityID != patrolID },
+                      "a reinforcement should have been summoned from provocation alone")
+    }
+
     // MARK: Phase 2 — AppearOn NCB gate
 
     func testAppearOnGatedFleetSuppressedByDefaultAndEnabledByHost() {

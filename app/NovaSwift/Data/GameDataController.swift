@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import CoreText
 import NovaSwiftKit
+import NovaSwiftStory
 
 /// Locates game data and the plug-in catalog, tracks which plug-ins are enabled,
 /// and produces a merged `NovaGame` for the engine.
@@ -27,6 +28,12 @@ final class GameDataController: ObservableObject {
     /// The resolved game, once base data is available.
     private(set) var game: NovaGame?
     private var loaded = false
+
+    /// Every tagged mission's storyline key/title (`StorylineAnalyzer.storylineTags()`),
+    /// prewarmed once per data set — see `prewarm()`. Mission-offer screens read
+    /// this instead of each re-scanning the whole mission/cron control-bit graph.
+    private(set) var storylineTags: [Int: MissionStorylineTag] = [:]
+    private var storylineTagCache: StorylineTagCache?
 
     init() {
         // So titles/chrome look intentional (not system-font-default) even
@@ -202,6 +209,31 @@ final class GameDataController: ObservableObject {
             prewarmProgress = report
             prewarmFraction = max(prewarmFraction, report.fraction)
         }
+        await prewarmStorylineTags(game: game)
+    }
+
+    /// Loads the mission→storyline table from disk cache, or (on a miss)
+    /// rebuilds it off-main from the loaded data and writes it back — so a
+    /// warm cache costs a JSON read and a cold one costs it exactly once per
+    /// data set, not once per mission screen. Reported through the same
+    /// `prewarmProgress`/`prewarmFraction` the sprite prewarm uses, so the
+    /// loading screen shows it as one more phase.
+    private func prewarmStorylineTags(game: NovaGame) async {
+        prewarmProgress = PrewarmProgress(phase: "Charting storylines", completed: 0, total: 1)
+        if let cached = storylineTagCache?.load() {
+            storylineTags = cached
+            prewarmProgress = PrewarmProgress(phase: "Charting storylines", completed: 1, total: 1)
+            prewarmFraction = max(prewarmFraction, 1)
+            return
+        }
+        let cache = storylineTagCache
+        let tags = await Task.detached(priority: .userInitiated) {
+            StorylineAnalyzer(game: game).storylineTags()
+        }.value
+        storylineTags = tags
+        prewarmProgress = PrewarmProgress(phase: "Charting storylines", completed: 1, total: 1)
+        prewarmFraction = max(prewarmFraction, 1)
+        cache?.store(tags)
     }
 
     func reload() {
@@ -269,6 +301,8 @@ final class GameDataController: ObservableObject {
         let fingerprint = GameLibrary.fingerprint(baseFiles: baseFiles, plugins: plugins)
         let spriteCache = SpriteDiskCache(fingerprint: fingerprint)
         game = NovaGame(merged, spriteCache: spriteCache)
+        storylineTagCache = StorylineTagCache(fingerprint: fingerprint)
+        storylineTags = [:]   // stale from any previous data set until `prewarm()` recomputes
         hasBaseData = true
         status = "Loaded \(merged.totalCount) resources from base + \(plugins.filter(\.isEnabled).count) plug-in(s)."
         let byType = merged.typeCounts.map { "\($0.type)=\($0.count)" }.joined(separator: ", ")

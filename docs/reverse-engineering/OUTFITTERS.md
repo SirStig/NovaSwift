@@ -231,20 +231,34 @@ owning ≥1 already forces it visible. Implemented: `OutfRes.hidesWhenLocked`
 `ItemLocking.swift` (`.available` / `.locked` / `.hidden`) and filtered in
 `OutfitterView.stock` (`app/NovaSwift/Spaceport/SpaceportScreens.swift:163`).
 
-### 3.5 The "ignore everything" escape hatch
+### 3.5 The "sell anywhere" escape hatch (sell-side only)
 
 > "0x0800 This item can be sold anywhere, regardless of tech level,
 > requirements, or mission bits."
 
-Implemented as `OutfRes.ignoresRequirements`, checked first in
-`lockState(for:pilot:at:spob:diplomacy:)` — but note it's only wired into the
-`Require`/`Availability` check, not into the **tech-level** filter upstream in
-`NovaGame.outfitsSold` (`NovaEconomy.swift`). **Fixed in the outfitter wiring
-audit**: `outfitsSold` now passes an item through when
-`sells(techLevel:at:)` **or** `ignoresRequirements` (0x0800) is true, so an
-0x0800 item shows up even where the tech level is too low — matching the
-Bible's "regardless of tech level..." wording. (The `hasOutfitter` guard still
-applies: a spaceport with no outfitter at all shows nothing.)
+This bit is documented under **selling**, not buying: it means a *player who
+already owns* one of these can sell it back at any outfitter, without that
+port needing to stock the item (i.e. it waives the normal
+same-tech-level/stock check a sell-back would otherwise be subject to). It is
+not a buy-listing bypass — the Bible's own worked example for this class of
+item, ARPIA2's "Frandall Laser" (`techLevel` 9999, an NPC-only `Require`
+combo), would otherwise show up as purchasable in every outfitter in the
+galaxy if 0x0800 were treated as a buy-side escape hatch.
+
+Implemented as `OutfRes.ignoresRequirements` (`flags & 0x0800`). It is **not**
+consulted by `NovaGame.outfitsSold`'s tech-level filter (`sells(techLevel:at:)`
+in `NovaEconomy.swift`) nor by `lockState(for:pilot:at:spob:diplomacy:)` in
+`ItemLocking.swift` — both buy-side gates apply normally regardless of this
+flag. (Earlier revisions of this doc and the code incorrectly OR'd
+`ignoresRequirements` into both the tech-level filter and the lock-state
+check; this has been reverted — see the outfit buy-listing tech-gate fix.)
+
+There is currently no stock/tech-level restriction on the *sell-back* path
+itself (`PilotStore.sellOutfitUnit`) to waive: any owned, sellable
+(`flags & 0x0008 == 0`) outfit can be sold back at any outfitter today, so
+0x0800 has no further effect there in this build. If a sell-back stock
+restriction is ever added, it should OR in `ignoresRequirements` to match the
+Bible's "sold anywhere" wording.
 
 ### 3.6 The "suppress a rival item" flag
 

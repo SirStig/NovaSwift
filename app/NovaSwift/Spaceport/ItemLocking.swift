@@ -61,7 +61,11 @@ extension NovaGame {
 
     /// Lock state for an outfit at a given spöb (needs `RequireGovt` scoping).
     func lockState(for item: OutfRes, pilot: PlayerState, at spob: SpobRes, diplomacy: Diplomacy) -> LockState {
-        if item.ignoresRequirements || pilot.hasOutfit(item.id) { return .available }
+        // Note: `ignoresRequirements` (Bible `Flags` 0x0800) is sell-side only
+        // ("can be sold anywhere, regardless of tech level, requirements, or
+        // mission bits") — it does not waive the buy-side Require/Availability
+        // gate here. See OUTFITTERS.md §3.5.
+        if pilot.hasOutfit(item.id) { return .available }
         let availOK = NCBTest(item.availBits).evaluate(pilot)
         let requireOK = !requireGovtApplies(item.requireGovt, at: spob, diplomacy: diplomacy)
             || (item.require & contributedBits(pilot: pilot)) == item.require

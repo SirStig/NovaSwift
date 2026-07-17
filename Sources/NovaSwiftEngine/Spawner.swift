@@ -59,6 +59,19 @@ public final class Spawner {
     /// population. Fleets arrive on top of this as an occasional accent.
     public var targetPopulation: Int
     public var maxPopulation = 18
+    /// "System Aliveness" tuning, set by the app from `GameSettings` right after
+    /// construction (mirrors `CombatTuning`'s pattern of a scalar set post-init).
+    /// Lower than 1 thins ambient/fleet population and cadence; higher than 1
+    /// busies it up. 1.0 (the default) reproduces the engine's original,
+    /// untuned density exactly, so an untouched `Spawner` behaves as before.
+    public var populationScale: Double = 1.0 {
+        didSet { rescaleForPopulationChange() }
+    }
+    /// Odds (0...1) that an ambient trader skips landing and just cruises
+    /// through the system — threaded onto each spawned trader's `AIBrain` as
+    /// `passThroughChance`. 0 (the default) reproduces "every trader lands"
+    /// exactly as before.
+    public var passThroughChance: Double = 0.0
     /// How many spawned fleets may share a system at once. Fleets are an accent
     /// on top of the single-ship backbone, not the backbone itself, so this
     /// stays low; a busy system (high `AvgShips`) tolerates a second. Keeping it
@@ -112,6 +125,18 @@ public final class Spawner {
     /// spirit as `maxPopulation`/`spawnInterval` above (see FLEETS.md §7).
     private let secondsPerReinforcementDay: Double = 60
 
+    /// Unscaled figures `rescaleForPopulationChange` multiplies by
+    /// `populationScale` to derive the working `targetPopulation`/
+    /// `maxPopulation`/`maxConcurrentFleets`/`spawnInterval`/`fleetInterval`
+    /// above — kept separately so `applyHabitation`'s one-time thinning and a
+    /// later `populationScale` change compose instead of one clobbering the
+    /// other.
+    private var baseTargetPopulation: Int
+    private var baseMaxPopulation = 18
+    private var baseMaxConcurrentFleets: Int
+    private let baseSpawnInterval: Double = 6.0
+    private let baseFleetInterval: Double = 26
+
     public init(galaxy: Galaxy, table: SpawnTable) {
         self.galaxy = galaxy
         self.table = table
@@ -126,6 +151,21 @@ public final class Spawner {
         // Small systems get one fleet at most; a busy system (target ~16+)
         // tolerates two so a large hub doesn't feel starved of formations.
         self.maxConcurrentFleets = max(1, self.targetPopulation / 8)
+        self.baseTargetPopulation = self.targetPopulation
+        self.baseMaxConcurrentFleets = self.maxConcurrentFleets
+    }
+
+    /// Recompute the working population/cadence figures from the unscaled
+    /// bases and `populationScale`. Called whenever either changes; at the
+    /// default `populationScale == 1.0` every figure equals its base exactly.
+    private func rescaleForPopulationChange() {
+        let scale = max(0.1, populationScale)
+        targetPopulation = max(1, Int((Double(baseTargetPopulation) * scale).rounded()))
+        maxPopulation = max(targetPopulation, Int((Double(baseMaxPopulation) * scale).rounded()))
+        maxConcurrentFleets = max(0, Int((Double(baseMaxConcurrentFleets) * scale).rounded()))
+        // A busier system fills/refills faster; a sparser one trickles slower.
+        spawnInterval = baseSpawnInterval / scale
+        fleetInterval = baseFleetInterval / scale
     }
 
     /// Where a spawn comes from: mid-system (initial fill), the hyperspace edge
@@ -180,11 +220,12 @@ public final class Spawner {
         guard !inhabited else { return }
         // No port to sustain a population — just a few ships passing through.
         // Truly empty systems (no stellars at all) are the quietest.
-        targetPopulation = min(targetPopulation, world.systemContext.bodies.isEmpty ? 2 : 3)
+        baseTargetPopulation = min(baseTargetPopulation, world.systemContext.bodies.isEmpty ? 2 : 3)
         // Nothing to patrol or base a formation at: no fleets. The concurrent-
         // fleet gate in `update` reads `< maxConcurrentFleets`, so 0 disables
         // both the up-front placement and the ongoing cadence.
-        maxConcurrentFleets = 0
+        baseMaxConcurrentFleets = 0
+        rescaleForPopulationChange()
     }
 
     /// Called every step by the world.
@@ -477,7 +518,14 @@ public final class Spawner {
 
         func isFriend(_ s: Ship) -> Bool { s.government == govt || dip.areAllied(govt, s.government) }
         func isFoe(_ s: Ship) -> Bool {
-            s.isPlayer ? dip.isHostileToPlayer(govt) : dip.areEnemies(govt, s.government)
+            // Legal-record hostility (`isHostileToPlayer`) is one path; the
+            // other is a fresh combat provocation this system visit — the
+            // player's fleet hit one of `govt`'s ships, which per
+            // `World.applyHit` immediately makes the whole government
+            // reinforcement-eligible, independent of whether CrimeTol has
+            // actually been crossed yet.
+            s.isPlayer ? (dip.isHostileToPlayer(govt) || world.provokedGovernments.contains(govt))
+                       : dip.areEnemies(govt, s.government)
         }
         func power(_ s: Ship) -> Double { s.combatStrength * (0.3 + 0.7 * s.shieldFraction) }
 
@@ -565,6 +613,10 @@ public final class Spawner {
         if case .planet = effectiveOrigin, leaderID == nil, dude.aiType.isTrader,
            world.rng.double(in: 0...1) < 0.65 {
             brain.spawnOutbound = true
+        } else if leaderID == nil, dude.aiType.isTrader, passThroughChance > 0 {
+            // Not already outbound from a planet — give it the "System
+            // Aliveness" odds of skipping landing and just crossing the system.
+            brain.passThroughChance = passThroughChance
         }
         ship.brain = brain
         rollDudeCargo(dude, into: ship, world: world)

@@ -248,11 +248,11 @@ extension NovaGame {
         guard spob.hasOutfitter else { return [] }
         return outfits()
             // Bible `Flags 0x0800`: "This item can be sold anywhere, regardless
-            // of tech level, requirements, or mission bits" — so a 0x0800 outfit
-            // bypasses the tech-level gate entirely (OUTFITTERS.md §3.5). The
-            // Require/Availability half of "regardless" is handled downstream in
-            // `ItemLocking`; this closes the upstream tech-level half.
-            .filter { sells(techLevel: $0.techLevel, at: spob) || $0.ignoresRequirements }
+            // of tech level, requirements, or mission bits" — sell-side only
+            // (waives the outfitter-stock restriction when selling an owned
+            // item back; see the sell-back path). It does NOT bypass the
+            // buy-listing tech-level gate — see OUTFITTERS.md §3.5.
+            .filter { sells(techLevel: $0.techLevel, at: spob) }
             .filter { outfit in
                 guard let day else { return true }
                 return onOfferToday(buyRandom: outfit.buyRandom, neverIfZero: false,

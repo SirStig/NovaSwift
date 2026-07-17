@@ -759,12 +759,16 @@ struct BarView: View {
     @ObservedObject var pilot: PilotStore
     var onDone: () -> Void
 
+    @EnvironmentObject private var appModel: AppModel
+
     @State private var showGambling = false
     @State private var showHire = false
     @State private var showHolovid = false
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var rolledPatron = false
+    @State private var showStoryGuide = false
+    @State private var storyGuideFocusKey: String?
     private var game: NovaGame { graphics.game }
     /// EV Nova's bar description lives at `dësc` (spöb id + 9872).
     private var barText: String {
@@ -830,7 +834,9 @@ struct BarView: View {
                 Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
                 MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
                                     onPage: { _ in },
-                                    onAccept: { accept(offer) }, onDecline: { decline(offer) })
+                                    onAccept: { accept(offer) }, onDecline: { decline(offer) },
+                                    storylineTag: storylineTag(for: offer.mission.id),
+                                    onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
             }
 
             if showGambling {
@@ -857,6 +863,8 @@ struct BarView: View {
             }
         }
         .onAppear(perform: rollPatron)
+        .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
+                             storylineKey: storyGuideFocusKey)
     }
 
     /// One roll per bar visit: build the engine, gather the bar's real offers
@@ -908,6 +916,18 @@ struct BarView: View {
         pilot.state = engine.player
         pilot.save()
         services.pendingOffer = nil
+    }
+
+    /// From the table prewarmed once per data set at load time
+    /// (`GameDataController.prewarm()`) — no per-call rescan.
+    private func storylineTag(for missionID: Int) -> MissionStorylineTag? {
+        guard appModel.settings.showMissionStorylineTags else { return nil }
+        return appModel.data.storylineTags[missionID]
+    }
+
+    private func openStoryline(_ key: String) {
+        storyGuideFocusKey = key
+        showStoryGuide = true
     }
 }
 

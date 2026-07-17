@@ -702,6 +702,82 @@ final class CombatTests: XCTestCase {
         XCTAssertEqual(world.diplomacy?.combatRating, 55, "combat rating credited with the destroyed ship's strength")
     }
 
+    // MARK: whole-government provocation (independent of legal-record threshold)
+
+    /// Hitting one ship of a government must immediately provoke every OTHER
+    /// same-government ship present in the system too, and mark the
+    /// government reinforcement-eligible via `World.provokedGovernments` —
+    /// without needing to cross `Diplomacy.isHostileToPlayer`'s legal-record
+    /// (CrimeTol) threshold at all. Ratings/penalties (covered by the
+    /// `testDisabling.../testDestroying...` tests above) must stay untouched
+    /// by mere provocation.
+    func testHittingOneGovernmentShipProvokesAllOthersInSystem() {
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        // A govt with a sky-high CrimeTolerance: shooting one ship can never
+        // cross the legal-record threshold on its own.
+        // Real resource-defined governments are id >= 128 (the same
+        // convention `Spawner.governmentUnderAttackAndOutmatched`'s `>= 128`
+        // guard uses) — use one here so the propagation guard doesn't reject it.
+        world.diplomacy = Diplomacy(govts: [govtWithPenalties(id: 128, disablePenalty: 1,
+                                                               killPenalty: 1, shootPenalty: 0)])
+        let hit = makeShip("Hit", govt: 128, at: Vec2(0, 300))
+        hit.government = 128
+        hit.brain = AIBrain(aiType: .warship, govt: 128)
+        let bystander = makeShip("Bystander", govt: 128, at: Vec2(500, 500))
+        bystander.government = 128
+        bystander.brain = AIBrain(aiType: .warship, govt: 128)
+        _ = world.addNPC(hit)
+        _ = world.addNPC(bystander)
+
+        // A single, non-disabling, non-lethal graze — well short of any
+        // rating-affecting outcome.
+        attacker.weapons = [WeaponMount(spec: gun(shield: 1, armor: 0))]
+        attacker.currentTargetID = hit.entityID
+        world.intent.firePrimary = true
+        for _ in 0..<60 where !world.events.contains(where: { if case .shieldHit = $0 { return true }; return false }) {
+            world.step(1.0 / 30.0)
+        }
+
+        XCTAssertFalse(world.diplomacy!.isHostileToPlayer(128),
+                       "legal-record threshold must not have been crossed by a mere graze")
+        XCTAssertTrue(world.provokedGovernments.contains(128),
+                      "the government is provoked immediately, independent of the legal-record gate")
+        XCTAssertEqual(hit.brain?.provokedByPlayer, true, "the directly-hit ship is provoked")
+        XCTAssertEqual(bystander.brain?.provokedByPlayer, true,
+                       "every OTHER same-government ship in the system becomes hostile immediately too")
+        XCTAssertNil(world.diplomacy?.playerRecord[128],
+                     "mere provocation must not dent the legal record — only disable/kill/board do")
+    }
+
+    /// `independentGovt` (-1) and any below-128 placeholder government id
+    /// aren't real organized "sides" — mirroring the same `>= 128` guard
+    /// `Spawner.governmentUnderAttackAndOutmatched` already uses for
+    /// reinforcement eligibility, a hit against such a ship must not be
+    /// recorded as a provoked government (there's nothing coherent to
+    /// reinforce or rally).
+    func testIndependentGovernmentIsNeverMarkedProvoked() {
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        let target = makeShip("B", govt: independentGovt, at: Vec2(0, 300))
+        target.government = independentGovt
+        target.brain = AIBrain(aiType: .warship, govt: independentGovt)
+        _ = world.addNPC(target)
+
+        attacker.weapons = [WeaponMount(spec: gun(shield: 1, armor: 0))]
+        attacker.currentTargetID = target.entityID
+        world.intent.firePrimary = true
+        for _ in 0..<60 where !world.events.contains(where: { if case .shieldHit = $0 { return true }; return false }) {
+            world.step(1.0 / 30.0)
+        }
+
+        XCTAssertTrue(target.brain?.provokedByPlayer == true,
+                     "the directly-hit ship itself is still provoked (existing per-ship behavior)")
+        XCTAssertFalse(world.provokedGovernments.contains(independentGovt),
+                       "independentGovt has no organized side to add to provokedGovernments")
+        XCTAssertTrue(world.provokedGovernments.isEmpty)
+    }
+
     func testDeadPlayerFreezesStopsAndReleasesBeamLoop() {
         // On death the wreck must stop dead (not fly on under live input, looking
         // alive) and its own continuous-fire beam loop must be released (else it

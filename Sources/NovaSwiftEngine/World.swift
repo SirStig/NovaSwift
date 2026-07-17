@@ -1073,6 +1073,20 @@ public final class World {
     /// re-scan you every minute you loiter. Checked by `AIBrain.pickScanTarget`.
     public var playerScanned = false
 
+    /// Governments with at least one ship the player's fleet has hit THIS
+    /// system visit. Combat hostility/reinforcement-eligibility only —
+    /// distinct from `Diplomacy.isHostileToPlayer`, which gates on the
+    /// player's accumulated legal record (`CrimeTol`) instead. Attacking any
+    /// one ship of a government immediately turns the whole government
+    /// hostile in the system and reinforcement-eligible, independent of
+    /// whether the legal-record threshold has been crossed — see
+    /// `applyHit` (sets this + propagates `provokedByPlayer` to every other
+    /// same-government ship present) and `Spawner.governmentUnderAttackAndOutmatched`
+    /// (ORs this into its foe check). A fresh `World` is built on each system
+    /// entry (see `allShips`/`refreshRoster` above), so this resets naturally
+    /// per visit — no explicit reset needed.
+    public var provokedGovernments: Set<Int> = []
+
     public init(player: Ship, tuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
         self.player = player
@@ -2519,6 +2533,25 @@ public final class World {
         // do (`recordDisable`/`recordKill`, `Diplomacy.swift`).
         if !isPlayerFleetMember(ship.entityID), isPlayerFleetMember(ownerID) {
             ship.brain?.provokedByPlayer = true
+            // Attacking any one ship of a government turns the WHOLE
+            // government hostile in this system immediately, not just the
+            // ship actually hit — matches the real game's "you shot one of
+            // ours" reaction and is independent of whether the player's
+            // legal record has crossed that government's CrimeTol yet (that
+            // gate, `Diplomacy.isHostileToPlayer`, is untouched — this is a
+            // separate, purely combat-hostility/reinforcement trigger). Only
+            // real resource-defined governments (id >= 128, matching the
+            // convention `Spawner.governmentUnderAttackAndOutmatched` already
+            // uses) qualify — `independentGovt` (-1) has no organized "side"
+            // to provoke.
+            if ship.government >= 128 {
+                provokedGovernments.insert(ship.government)
+                for other in allShips
+                where other.entityID != ship.entityID && other.government == ship.government
+                    && !isPlayerFleetMember(other.entityID) {
+                    other.brain?.provokedByPlayer = true
+                }
+            }
         }
         // The reverse: something that shoots a player-fleet member becomes
         // provoked (hostile) toward the whole fleet too — an escort fighting

@@ -691,6 +691,9 @@ final class GameScene: SKScene {
             let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID,
                                                 player: ship, galaxy: galaxy, combatTuning: tuning,
                                                 seed: currentWorldSeed(systemID: systemID))
+            // System Aliveness setting scales ambient traffic density/pass-through behavior.
+            w.spawner?.populationScale = settings.systemAliveness.populationScale
+            w.spawner?.passThroughChance = settings.systemAliveness.passThroughChance
             self.world = w
             self.galaxy = gx
         } else {
@@ -3176,6 +3179,9 @@ final class GameScene: SKScene {
         var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
         let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning,
                                             seed: currentWorldSeed(systemID: systemID))
+        // System Aliveness setting scales ambient traffic density/pass-through behavior.
+        w.spawner?.populationScale = settings.systemAliveness.populationScale
+        w.spawner?.passThroughChance = settings.systemAliveness.passThroughChance
 
         let ctx = w.systemContext
         var arrivalGate: StellarBody?
@@ -3283,6 +3289,9 @@ final class GameScene: SKScene {
         var tuning = CombatTuning.default; tuning.playerDamageScale = settings.difficulty.playerDamageScale
         let (w, gx) = GameSession.makeWorld(game: game, systemID: systemID, player: player, galaxy: galaxy, combatTuning: tuning,
                                             seed: currentWorldSeed(systemID: systemID))
+        // System Aliveness setting scales ambient traffic density/pass-through behavior.
+        w.spawner?.populationScale = settings.systemAliveness.populationScale
+        w.spawner?.passThroughChance = settings.systemAliveness.passThroughChance
 
         // Lift off from the departed body: sit just clear of its surface, nose
         // pointed away from the system centre, at rest — EV Nova doesn't give
@@ -3678,10 +3687,11 @@ final class GameScene: SKScene {
     /// stock 1000 until that first sync.
     var hyperspaceNoJumpRadius: Double = 1000
 
-    /// True when the player is clear of the no-jump zone and may jump. Too close,
-    /// it posts the original's "fly further out" nudge and returns false so the
-    /// caller refuses the jump.
-    func canEnterHyperspace() -> Bool {
+    /// True when the player is clear of the no-jump zone and may jump — the
+    /// pure query, no side effects. Used both by `canEnterHyperspace()` (which
+    /// adds the player-facing nudge) and by the HUD each tick to gray out the
+    /// destination readout while the player is still too close to fly.
+    var isClearOfNoJumpZone: Bool {
         guard let w = world else { return true }
         // The no-jump zone exists to stop you jumping while parked over a
         // system's populated core (its planets/stations cluster at the centre).
@@ -3690,11 +3700,16 @@ final class GameScene: SKScene {
         // from anywhere. `canLand` is true only for landable, inhabited bodies.
         guard w.systemContext.bodies.contains(where: { $0.canLand }) else { return true }
         let dist = (w.player.position - w.systemContext.center).length
-        if dist < hyperspaceNoJumpRadius {
-            hud?.post("You are too close to the system's center to enter hyperspace.")
-            return false
-        }
-        return true
+        return dist >= hyperspaceNoJumpRadius
+    }
+
+    /// True when the player is clear of the no-jump zone and may jump. Too close,
+    /// it posts the original's "fly further out" nudge and returns false so the
+    /// caller refuses the jump.
+    func canEnterHyperspace() -> Bool {
+        if isClearOfNoJumpZone { return true }
+        hud?.post("You are too close to the system's center to enter hyperspace.")
+        return false
     }
 
     /// The rotation textures for a `röid` type, decoded once and cached (a
@@ -4286,6 +4301,7 @@ final class GameScene: SKScene {
         hud.jumps = Int((p.fuel / 100).rounded(.down))
         hud.ionization = p.ionizeMax > 0 ? min(1, p.ionCharge / p.ionizeMax) : 0
         hud.ionized = p.isIonized
+        hud.canJumpNow = isClearOfNoJumpZone
         updateWarnings(shieldFraction: hud.shield, armorFraction: hud.armor)
         updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
         updateNavTargetHUD()
@@ -4505,6 +4521,9 @@ final class GameScene: SKScene {
         world.removeAllNPCs()
         if let sys = galaxy.game.system(systemID) {
             let spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
+            // System Aliveness setting scales ambient traffic density/pass-through behavior.
+            spawner.populationScale = settings.systemAliveness.populationScale
+            spawner.passThroughChance = settings.systemAliveness.passThroughChance
             world.spawner = spawner
             spawner.populate(world)
         }

@@ -35,15 +35,22 @@ extension StoryGuideModel {
 extension View {
     /// Present the Pilot / Story Guide window: a true full-screen cover on iPhone
     /// (the Story Map wants the whole screen), a centred sheet on macOS.
-    func storyGuideSheet(isPresented: Binding<Bool>, model: StoryGuideModel) -> some View {
+    ///
+    /// - Parameter initialStorylineKey: pre-select this storyline on open — set
+    ///   from a mission's storyline badge so tapping it jumps straight to that
+    ///   campaign instead of the default "first in-progress lane".
+    func storyGuideSheet(isPresented: Binding<Bool>, model: StoryGuideModel,
+                         initialStorylineKey: String? = nil) -> some View {
         #if os(iOS)
         return fullScreenCover(isPresented: isPresented) {
-            StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false })
+            StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false },
+                          initialStorylineKey: initialStorylineKey)
                 .preferredColorScheme(.dark)
         }
         #else
         return sheet(isPresented: isPresented) {
-            StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false })
+            StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false },
+                          initialStorylineKey: initialStorylineKey)
                 .frame(minWidth: 900, minHeight: 620)
         }
         #endif
