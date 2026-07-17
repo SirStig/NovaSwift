@@ -560,7 +560,9 @@ extension Galaxy {
         ship.disableArmorFraction = (shipRes.map { $0.flags & 0x0010 != 0 } ?? false) ? 0.10 : 0.33
         ship.fleeWhenOutOfAmmo = shipRes?.fleeWhenOutOfAmmo ?? false
         ship.ionizeMax = Double(max(0, shipRes?.ionizeMax ?? 0) + lo.ionCapacityBonus)
-        ship.deionizePerSec = Double(max(0, shipRes?.deionize ?? 0) + lo.deionizeBonus) * 0.3
+        ship.deionizePerSec = Ship.flooredDeionize(
+            rate: Double(max(0, shipRes?.deionize ?? 0) + lo.deionizeBonus) * 0.3,
+            ionizeMax: ship.ionizeMax)
         ship.jamming = lo.jamming
         ship.hasMiningScoop = lo.hasMiningScoop
         ship.maxShield = lo.maxShield; ship.shield = lo.maxShield

@@ -520,6 +520,23 @@ public final class AIBrain {
             targetID = nil
         }
 
+        // A fighter recalled to its carrier — hurt, dry on ammo, or ordered to dock
+        // with the rest of the wing — breaks off and flies straight home to its
+        // bay, where `World.updateFighterBays` docks and (re-launch aside) repairs
+        // it. Without this the recall flag steered nothing: a hurt fighter kept
+        // dogfighting at range and only ever docked if it happened to drift back
+        // over the carrier, which read as fighters wandering off and never coming
+        // home. This is a beeline for the bay, never a flee to the hyperspace edge —
+        // a fighter always heads for its carrier, and only when it can dock (the
+        // carrier is alive and not itself a disabled hulk).
+        if let cid = me.carrierID, me.recallToCarrier,
+           let carrier = world.ship(id: cid), carrier.isAlive, !carrier.disabled {
+            targetID = nil
+            me.currentTargetID = nil
+            if state != .escorting { enter(.escorting) }
+            return arrive(me, to: carrier.position, slowRadius: carrier.radius + 60)
+        }
+
         let threat = world.ship(id: targetID ?? -999) ?? nearestHostile(me, world)
         let armed = weaponRange(me) > 0
 
@@ -548,7 +565,15 @@ public final class AIBrain {
         // them is what made a "defensive" escort autonomously pick fights with
         // any government-enemy in sight and, worse, break off and run for the
         // hyperspace edge on its own. Escorts don't do either in EV Nova.
-        if leaderID == nil {
+        if leaderID == nil, me.carrierID != nil {
+            // An orphaned fighter — its carrier was disabled or destroyed, so it has
+            // no leader right now — still never flees; fighters don't run for the
+            // hyperspace edge. It fights on like the interceptor it is: engage the
+            // nearest hostile, else fall through to its idle pattern below. Without
+            // this, a fighter on a trader-hull disposition would bolt the moment its
+            // carrier went down.
+            if let th = threat, armed { targetID = th.entityID; enter(.attacking) }
+        } else if leaderID == nil {
             switch aiType {
             case .wimpyTrader:
                 if threat != nil { enter(.fleeing) }

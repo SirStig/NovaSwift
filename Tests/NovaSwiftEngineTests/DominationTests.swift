@@ -137,6 +137,58 @@ final class DominationTests: XCTestCase {
         XCTAssertNil(world.demandTribute(spobID: spobID).launchedCountForTest,
                      "a dominated planet no longer fights")
     }
+
+    func testTrickleReplacesIndividualLossesOneForOne() {
+        let (world, _, spobID) = makeWorld(defenseCount: 1082)   // total 8, up to 2 at a time
+        world.playerCombatRating = 1000
+        XCTAssertEqual(world.demandTribute(spobID: spobID), .defending(launched: 2))
+        XCTAssertEqual(world.liveDefenders(of: spobID), 2)
+
+        // Destroy exactly ONE defender, not the whole field. The old wave logic
+        // only refilled once the field was fully cleared; the trickle sends a
+        // single replacement the very next tick, holding the concurrent count.
+        world.npcs.first { $0.spobDefenderOf == spobID && $0.isAlive }!.armor = 0
+        XCTAssertEqual(world.liveDefenders(of: spobID), 1, "one down, one still up")
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.liveDefenders(of: spobID), 2,
+                       "the single loss draws exactly one replacement, back up to the wave size")
+    }
+
+    func testDisabledDefenderCountsAsDownAndDrawsAReplacement() {
+        let (world, _, spobID) = makeWorld(defenseCount: 1082)   // total 8, up to 2 at a time
+        world.playerCombatRating = 1000
+        XCTAssertEqual(world.demandTribute(spobID: spobID), .defending(launched: 2))
+
+        // Disable (don't destroy) one defender. A disabled hulk is still technically
+        // alive, but it must not count as an active defender — it frees a slot for a
+        // replacement, so the player never has to hunt disabled hulks down.
+        let victim = world.npcs.first { $0.spobDefenderOf == spobID && $0.isAlive }!
+        victim.disabled = true
+        XCTAssertTrue(victim.isAlive, "a disabled ship is still technically alive")
+        XCTAssertEqual(world.liveDefenders(of: spobID), 1, "the disabled hulk no longer counts")
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.liveDefenders(of: spobID), 2, "a replacement is scrambled for the disabled one")
+    }
+
+    func testDominatesWhenPoolSpentAndSurvivorsAreOnlyDisabledHulks() {
+        let (world, _, spobID) = makeWorld(defenseCount: 8)   // total 8, all 8 at once (≤1000)
+        world.playerCombatRating = 1000
+        XCTAssertEqual(world.demandTribute(spobID: spobID), .defending(launched: 8),
+                       "a small fleet scrambles its whole count at once")
+
+        // Pool is now spent (all eight are out). Disable every defender rather than
+        // destroying it. With the pool empty there are no replacements.
+        for npc in world.npcs where npc.spobDefenderOf == spobID { npc.disabled = true }
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.liveDefenders(of: spobID), 0, "a field of disabled hulks counts as cleared")
+
+        // Re-demand: pool spent and nothing left standing → the planet yields,
+        // without the player having to finish off the disabled hulks.
+        guard case .dominated = world.demandTribute(spobID: spobID) else {
+            return XCTFail("a field of disabled hulks with the pool spent should surrender")
+        }
+        XCTAssertTrue(world.dominatedStellars.contains(spobID))
+    }
 }
 
 private extension TributeOutcome {

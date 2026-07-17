@@ -62,13 +62,16 @@ disagree, and the Bible's decimal rule is the authoritative engine behavior
    `.refused(.combatRatingTooLow)`. This gate is an **engine addition** — stock
    EV Nova has no combat-rating threshold; its only gate is defeating the defense
    fleet. Set `World.tributeRatingPerDefender = 0` to disable it (fully faithful).
-6. Otherwise open a contest and scramble the first wave (`.defending(launched:)`).
-   `World.updateStellarDefenses()` (called each `step`) relaunches the next wave
-   from the remaining pool whenever the current wave is wiped out, until the pool
-   is spent.
+6. Otherwise open a contest and scramble the opening group up to the concurrent
+   `waveSize` (`.defending(launched:)`). `World.updateStellarDefenses()` (called
+   each `step`) then keeps the field **topped up** to `waveSize`: it launches one
+   replacement for every defender that falls — destroyed *or disabled* — as a
+   continuous trickle, not a wave that only refills once the field is empty. Only
+   the opening scramble posts a HUD line; the trickle replacements are silent.
 7. Re-demanding while defenders remain → `.stillDefending`. Re-demanding once the
-   pool is exhausted and no defenders are alive → `.dominated` (emits
-   `WorldEvent.stellarDominated`).
+   pool is exhausted and no defenders are still up (a *disabled* defender counts as
+   down, so a field of disabled hulks with an empty pool surrenders) → `.dominated`
+   (emits `WorldEvent.stellarDominated`).
 
 Defenders are spawned from `DefenseDude` with `AIBrain.behaviorOverride =
 .attackPlayer` and tagged `Ship.spobDefenderOf`, reusing the mission/fleet spawn
@@ -89,8 +92,9 @@ infrastructure.
 
 - The **combat-rating gate** and its `tributeRatingPerDefender` scaling — stock
   Nova has none; added at the user's request as the "laughs at you" gate.
-- Waves relaunch by keeping the field clear→refill cadence; the Bible specifies
-  wave *size* and *total* but not the exact relaunch timing.
+- Reinforcement is a per-loss trickle that holds the field at `waveSize`; the
+  Bible specifies wave *size* and *total* but not the exact relaunch timing, and
+  the original keeps a set number attacking and replaces losses one at a time.
 - A contest resets when the player leaves the system (the `World` is rebuilt per
   visit), matching the transient nature of the defense fight.
 
@@ -110,8 +114,8 @@ which syncs the player's live combat rating and already-dominated set into the
 `World` and runs `World.demandTribute`. The returned `TributeOutcome` drives the
 dialog reply (defending / still-defending / dominated / refused-with-reason). The
 `stellarDefendersLaunched` and `stellarDominated` `WorldEvent`s are drained in
-`GameScene` and routed to `GameContainerView` closures: each defense wave posts a
-HUD line (fires on the first wave and every relaunch), and a surrender calls
+`GameScene` and routed to `GameContainerView` closures: the opening scramble posts
+a HUD line (the silent per-loss trickle does not), and a surrender calls
 `GameContainerView.handleStellarDominated` → `StoryEngine.dominateStellar` (fires
 `OnDominate`, persists to `PlayerState.dominatedStellars`, enrolls the stellar for
 daily tribute) and flips the hail dialog to friendly/landable. The full loop —

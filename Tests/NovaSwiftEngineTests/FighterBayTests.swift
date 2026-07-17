@@ -194,6 +194,39 @@ final class FighterBayTests: XCTestCase {
         XCTAssertEqual(carrier.fighterBays.first?.docked, 3, "bay restored on dock")
     }
 
+    func testBadlyHurtFighterFliesHomeToDockFromRange() throws {
+        // Previously the recall flag steered nothing — a hurt fighter far from its
+        // carrier kept dogfighting and only ever docked if it happened to drift back
+        // over the bay, which read as fighters wandering off and never coming home.
+        // Now the brain flies a recalled fighter straight home.
+        let galaxy = Galaxy(game: game())
+        let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))
+        carrier.brain = nil   // brainless → sits still, so the carrier doesn't move under the test
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        world.galaxy = galaxy
+        world.diplomacy = galaxy.makeDiplomacy()
+        _ = world.addNPC(carrier)
+        let enemyID = world.addNPC(Ship(name: "E", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        carrier.currentTargetID = enemyID
+        world.step(1.0 / 30.0)
+        let fighter = try XCTUnwrap(world.npcs.first { $0.carrierID == carrier.entityID })
+
+        // Teleport the fighter far away and badly hurt it (below the 30% recall
+        // threshold), so it will be flagged to return.
+        fighter.position = carrier.position + Vec2(4000, 0)
+        fighter.armor = fighter.maxArmor * 0.1
+        fighter.shield = 0
+        let startDist = (fighter.position - carrier.position).length
+
+        for _ in 0..<120 { world.step(1.0 / 30.0) }   // ~4s to fly home
+        if let f = world.npcs.first(where: { $0.entityID == fighter.entityID }) {
+            XCTAssertTrue(f.recallToCarrier, "a badly hurt fighter is flagged to return")
+            XCTAssertLessThan((f.position - carrier.position).length, startDist,
+                              "a recalled fighter closes on its carrier instead of loitering at range")
+        }
+        // (If it already docked and despawned, that's the fully-correct outcome too.)
+    }
+
     // MARK: a live, brain-driven (not manually-targeted) NPC carrier
 
     private func govtData(classes: [Int], enemies: [Int] = []) -> Data {
