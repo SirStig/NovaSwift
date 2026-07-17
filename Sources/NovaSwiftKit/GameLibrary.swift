@@ -214,9 +214,10 @@ public enum GameLibrary {
 
     /// A stable hash of the exact set of container files (base + enabled plug-ins)
     /// and their size/mtime. Two launches over the same data set produce the same
-    /// fingerprint; importing new data, toggling a plug-in, or a file changing on
-    /// disk produces a different one. Used to name the decoded-sprite disk cache
-    /// so a stale cache is never read (see `SpriteDiskCache`).
+    /// fingerprint; importing new data, toggling a plug-in, reordering plug-ins
+    /// (load order changes which one wins an override — see `merge`), or a file
+    /// changing on disk produces a different one. Used to name the decoded-sprite
+    /// disk cache so a stale cache is never read (see `SpriteDiskCache`).
     ///
     /// `SHA256` (not `Hasher`) because `Hasher` is seeded randomly per process —
     /// its output would differ every launch, defeating a cross-launch cache.
@@ -230,7 +231,9 @@ public enum GameLibrary {
         }
         var parts: [String] = []
         for url in baseFiles.sorted(by: { $0.path < $1.path }) { parts.append("B|" + stamp(url)) }
-        for plugin in plugins.filter(\.isEnabled).sorted(by: { $0.id < $1.id }) {
+        // NOT sorted by id: `plugins`' array order is load order, and load order
+        // changes which plug-in wins an override, so it must be part of the key.
+        for plugin in plugins.filter(\.isEnabled) {
             for url in plugin.fileURLs.sorted(by: { $0.path < $1.path }) {
                 parts.append("P|\(plugin.id)|" + stamp(url))
             }

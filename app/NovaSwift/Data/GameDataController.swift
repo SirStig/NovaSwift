@@ -275,10 +275,27 @@ final class GameDataController: ObservableObject {
         for dir in resolvePluginDirs() {
             discovered.append(contentsOf: GameLibrary.discoverPlugins(in: dir))
         }
-        // Preserve enabled state across reloads.
+        // Preserve enabled state and load order across reloads (in-memory) and
+        // app launches (persisted — see `pluginStateKey`). Persisted state wins
+        // for order (it's the only durable record of a user's drag/reorder);
+        // in-memory state is folded into "enabled" too so a toggle earlier this
+        // launch survives a reload that races the save.
+        let persisted = Self.loadPluginState()
+        let persistedOrder = Dictionary(uniqueKeysWithValues: persisted.enumerated().map { ($1.id, $0) })
         let previouslyEnabled = Set(plugins.filter(\.isEnabled).map(\.id))
+            .union(persisted.filter(\.isEnabled).map(\.id))
         for i in discovered.indices where previouslyEnabled.contains(discovered[i].id) {
             discovered[i].isEnabled = true
+        }
+        // Known IDs sort by their persisted position; newly-discovered plug-ins
+        // (never seen before) fall after all known ones, alphabetically among themselves.
+        discovered.sort { a, b in
+            switch (persistedOrder[a.id], persistedOrder[b.id]) {
+            case let (ai?, bi?): return ai < bi
+            case (nil, nil): return a.id < b.id
+            case (nil, _): return false
+            case (_, nil): return true
+            }
         }
         plugins = discovered
         Log.data.debug("reload: \(discovered.count, privacy: .public) plug-in(s) discovered, \(discovered.filter(\.isEnabled).count, privacy: .public) enabled")
@@ -319,7 +336,47 @@ final class GameDataController: ObservableObject {
     func setPlugin(_ id: String, enabled: Bool) {
         guard let i = plugins.firstIndex(where: { $0.id == id }) else { return }
         plugins[i].isEnabled = enabled
+        Self.savePluginState(plugins)
         reload()
+    }
+
+    /// Moves the plug-in at `id` `offset` places within the load-order list
+    /// (negative = earlier/lower priority, positive = later/higher priority —
+    /// see `GameLibrary.merge`, which applies enabled plug-ins in array order
+    /// and lets a later one override an earlier one's same `(type,id)`
+    /// resource). No-op if the move would run off either end.
+    func movePlugin(id: String, by offset: Int) {
+        guard let i = plugins.firstIndex(where: { $0.id == id }) else { return }
+        let j = i + offset
+        guard plugins.indices.contains(j) else { return }
+        plugins.swapAt(i, j)
+        Self.savePluginState(plugins)
+        reload()
+    }
+
+    /// One plug-in's persisted enabled flag + position, keyed by
+    /// `PluginBundle.id` (stable folder/file name). Array order *is* the
+    /// persisted load order.
+    private struct PersistedPluginState: Codable {
+        let id: String
+        let isEnabled: Bool
+    }
+
+    /// Persisted across app launches. v2 folds load order in alongside the
+    /// enabled flag (v1 only remembered which IDs were enabled).
+    private static let pluginStateKey = "com.novaswift.plugins.state.v2"
+
+    private static func loadPluginState() -> [PersistedPluginState] {
+        guard let data = UserDefaults.standard.data(forKey: pluginStateKey),
+              let s = try? JSONDecoder().decode([PersistedPluginState].self, from: data) else { return [] }
+        return s
+    }
+
+    private static func savePluginState(_ plugins: [PluginBundle]) {
+        let s = plugins.map { PersistedPluginState(id: $0.id, isEnabled: $0.isEnabled) }
+        if let data = try? JSONEncoder().encode(s) {
+            UserDefaults.standard.set(data, forKey: pluginStateKey)
+        }
     }
 
     /// Whether `plugin` lives in the app-bundled `Plugins/` dir (shipped with

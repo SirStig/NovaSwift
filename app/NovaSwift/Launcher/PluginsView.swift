@@ -50,19 +50,43 @@ struct PluginsView: View {
                     title: "No plug-ins installed",
                     message: "Switch to Store to browse and install plug-ins, or import a .rez/.ndat file.")
             } else {
-                Section(footer: Text("Total conversions replace the base scenario; small plug-ins can stack. Changes apply next time you start a game.")) {
-                    ForEach(model.data.plugins) { plugin in
-                        row(plugin)
+                Section(footer: Text("Total conversions replace the base scenario; small plug-ins can stack. When two plug-ins define the same thing, the one lower in this list wins — use the arrows to reorder. Changes apply next time you start a game.")) {
+                    let plugins = model.data.plugins
+                    ForEach(Array(plugins.enumerated()), id: \.element.id) { index, plugin in
+                        row(plugin, index: index, count: plugins.count)
                     }
                 }
             }
         }
     }
 
-    private func row(_ plugin: PluginBundle) -> some View {
+    private func row(_ plugin: PluginBundle, index: Int, count: Int) -> some View {
         let kind = plugin.kind == .unknown ? GameLibrary.classify(plugin) : plugin.kind
         let prebundled = model.data.isPrebundled(plugin)
         return HStack {
+            // Load-order priority: lower in the list = applied later = wins a
+            // same-resource conflict. Reordering is only meaningful between
+            // enabled plug-ins, but we don't restrict the arrows to those —
+            // disabled plug-ins keep a place in the persisted order too, so
+            // re-enabling one later doesn't silently reset its priority.
+            VStack(spacing: 2) {
+                Button {
+                    model.data.movePlugin(id: plugin.id, by: -1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .disabled(index == 0)
+                Button {
+                    model.data.movePlugin(id: plugin.id, by: 1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .disabled(index == count - 1)
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(plugin.name).novaFont(.heading)
                 Text(kind.label).novaFont(.caption).foregroundStyle(.secondary)
