@@ -72,7 +72,7 @@ struct GalaxyMapView: View {
     /// Systems that hold an active mission's destination — the galaxy map draws
     /// EV Nova's orange "go here" arrow over each. Rebuilt from the story engine
     /// when the map opens (accepted missions don't change while it's up).
-    @State private var missionDestinations: [Int] = []
+    @State private var missionDestinations: [(systemID: Int, names: [String])] = []
     /// Systems the story currently hides (`sÿst.Visibility` NCB evaluates false
     /// against the pilot's control bits) — not drawn and not selectable, EV
     /// Nova's mechanism for systems appearing/disappearing mid-campaign.
@@ -220,7 +220,7 @@ struct GalaxyMapView: View {
     private func rebuildMissionDestinations() {
         guard let game = nav.game else { return }
         let engine = StoryEngine(game: game, player: pilot.state)
-        missionDestinations = engine.missionDestinationSystemIDs()
+        missionDestinations = engine.missionDestinations()
         hiddenSystems = engine.hiddenSystemIDs()
     }
 
@@ -486,18 +486,19 @@ struct GalaxyMapView: View {
         // marked regardless of fog of war — the game reveals where a mission
         // sends you so you can navigate there. The arrow bobs with the blink tick.
         let bob: CGFloat = blinkOn ? 0 : 3
-        for destID in missionDestinations {
-            guard let s = byID[destID] else { continue }
+        for dest in missionDestinations {
+            guard let s = byID[dest.systemID] else { continue }
             let p = plot(s.x, s.y)
             guard visibleRect.contains(p) else { continue }
             drawMissionArrow(ctx: &ctx, at: p, bob: bob)
+            drawMissionLabel(ctx: &ctx, at: p, names: dest.names)
         }
 
         // Multiplayer presence markers — drawn last (over the dots/labels/arrows),
         // like a mission destination. A friend's system is always marked, even
         // through fog of war, so you can see where they are (same rationale as the
-        // mission arrow). Offset to the right so the mission arrow (above) and the
-        // system label (below) stay clear.
+        // mission arrow). Stacked above the dot so they stay clear of the system
+        // name (to the right) and the mission arrow (upper-left).
         for (sysID, players) in playerMarkers {
             guard let s = byID[sysID] else { continue }
             let p = plot(s.x, s.y)
@@ -537,17 +538,32 @@ struct GalaxyMapView: View {
             startPoint: tip, endPoint: base))
     }
 
-    /// A stack of coloured pips + names to the right of a system, one per player
-    /// present there. Each name gets a cheap dark drop-shadow so it reads over
-    /// bright nebulae and territory glow.
+    /// The mission name(s) targeting this system, printed just above the
+    /// arrow — EV Nova's map dialog names the mission next to its pointer
+    /// rather than leaving the arrow unlabeled.
+    private func drawMissionLabel(ctx: inout GraphicsContext, at p: CGPoint, names: [String]) {
+        guard !names.isEmpty else { return }
+        let text = names.joined(separator: ", ")
+        ctx.draw(
+            Text(text).font(.custom(NovaFontRole.hud.family, size: 9).weight(.semibold))
+                .foregroundStyle(Color(red: 1.0, green: 0.72, blue: 0.16)),
+            at: CGPoint(x: p.x - 10, y: p.y - 22), anchor: .bottomLeading
+        )
+    }
+
+    /// A stack of coloured pips + names above a system, one per player present
+    /// there, growing upward off the dot so they never collide with the system
+    /// name (which sits to the right, vertically centered on the dot) or the
+    /// mission arrow (which hovers off the upper-left). Each name gets a cheap
+    /// dark drop-shadow so it reads over bright nebulae and territory glow.
     private func drawPlayerMarkers(ctx: inout GraphicsContext, at p: CGPoint,
                                    players: [PlayerMapMarker]) {
         let dotR: CGFloat = 3
         let rowH: CGFloat = 12
-        let startY = p.y - CGFloat(players.count - 1) * rowH / 2
+        let baseY = p.y - 10   // clear of the dot itself and the mission arrow's tip
         for (i, player) in players.enumerated() {
-            let cy = startY + CGFloat(i) * rowH
-            let cx = p.x + 9
+            let cy = baseY - CGFloat(players.count - 1 - i) * rowH
+            let cx = p.x
             let color = Self.playerColor(for: player.id)
 
             let dot = Path(ellipseIn: CGRect(x: cx - dotR, y: cy - dotR,

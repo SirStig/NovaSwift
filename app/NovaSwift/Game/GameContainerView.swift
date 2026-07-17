@@ -1648,12 +1648,15 @@ struct GameContainerView: View {
             // mission is active; kill/disable/board objectives don't respawn once
             // met (`shipObjectivesRemaining == 0`).
             let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe
-            if m.hasShipObjective, (passiveGoal || am.shipObjectivesRemaining > 0),
-               missionSystemMatches(code: m.shipSystem, active: am, currentSystem: currentSys, game: game) {
+            let goalEligible = m.hasShipObjective && (passiveGoal || am.shipObjectivesRemaining > 0)
+            let goalSystemMatches = missionSystemMatches(code: m.shipSystem, active: am, currentSystem: currentSys, game: game)
+            if goalEligible, goalSystemMatches {
                 scene.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
                                         count: max(1, m.shipCount), goal: m.shipGoal,
                                         behavior: m.shipBehaviorMode, government: nil,
                                         arrival: arrivalMode(forShipStart: m.shipStart))
+            } else if m.hasShipObjective {
+                Log.story.debug("spawnActiveMissionShips: mission \(m.id) goal ships not spawned (eligible=\(goalEligible), systemMatches=\(goalSystemMatches), shipSystem=\(m.shipSystem), currentSys=\(currentSys), remaining=\(am.shipObjectivesRemaining))")
             }
 
             // Auxiliary (flavor) ships — no goal, standard AI.

@@ -24,6 +24,19 @@ struct NovaDialog<Content: View>: View {
 
     private var graphics: SpaceportGraphics? { model.uiGraphics }
 
+    /// Footer-button scale for the device's width: 1× on a desktop/iPad-width
+    /// window, shrinking toward `0.78` on a narrow phone. Unlike `DialogChrome`
+    /// (which `scaleEffect`s its whole fixed-size card, buttons included), this
+    /// panel hugs its content and never shrinks the footer strip itself, so the
+    /// modern fallback buttons rendered fixed-size regardless of screen width.
+    private var footerScale: CGFloat {
+        #if os(iOS)
+        min(max(UIScreen.main.bounds.width / 430, 0.78), 1.0)
+        #else
+        1.0
+        #endif
+    }
+
     var body: some View {
         ZStack {
             // Scrim over the existing UI — this is a dialog floating over the
@@ -90,10 +103,10 @@ struct NovaDialog<Content: View>: View {
         } else {
             Button { model.audio.play(.uiSelect); b.action() } label: {
                 Text(b.title)
-                    .novaFont(.button)
+                    .novaFont(.button, size: 15 * footerScale)
                     .foregroundStyle(!b.enabled ? Color(white: 0.45)
                                      : (b.isDefault ? .black : .white))
-                    .padding(.horizontal, 18).padding(.vertical, 7)
+                    .padding(.horizontal, 18 * footerScale).padding(.vertical, 7 * footerScale)
                     .background(
                         Capsule().fill(
                             b.isDefault

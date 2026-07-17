@@ -1218,6 +1218,20 @@ public final class StoryEngine {
         Array(Set(activeMissionSummaries().compactMap(\.destinationSystemID))).sorted()
     }
 
+    /// Mission destinations with names attached, for the galaxy map's "go here"
+    /// arrow label. One entry per destination system; when several accepted
+    /// missions share a destination, their names are joined so the label still
+    /// reads as one line (mirrors EV Nova's map dialog, which lists mission
+    /// names next to the pointer).
+    public func missionDestinations() -> [(systemID: Int, names: [String])] {
+        var bySystem: [Int: [String]] = [:]
+        for s in activeMissionSummaries() {
+            guard let sys = s.destinationSystemID else { continue }
+            bySystem[sys, default: []].append(s.name)
+        }
+        return bySystem.map { (systemID: $0.key, names: $0.value) }.sorted { $0.systemID < $1.systemID }
+    }
+
     /// The text shown in the **offer** dialog: EV Nova's initial mission
     /// description (dësc 4000-4255, by convention `offerTextID` = 3872 + id) —
     /// the pitch. NOT `BriefText`, which the Bible defines as "the desc to show
@@ -1280,8 +1294,10 @@ public final class StoryEngine {
         // in mission text instead of the real, randomly-chosen world.
         if (128...2175).contains(code) { return code }
         if code == -1 { return nil }
+        let initialSystem = initialSpob.flatMap { game.systemContaining(spob: $0) }
         let candidates = game.spobs()
             .filter { $0.id != (initialSpob ?? -1) }   // not where the mission is offered
+            .filter { game.systemContaining(spob: $0.id) != initialSystem }   // not the system the player is already in
             .filter { StellarMatch.spob(code: code, spobID: $0.id, game: game, initialSpob: initialSpob) }
             .map { $0.id }
             .sorted()

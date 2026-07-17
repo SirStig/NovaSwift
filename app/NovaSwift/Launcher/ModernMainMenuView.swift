@@ -19,7 +19,21 @@ struct ModernMainMenuView: View {
     /// The hero image's dominant red, reused as the menu accent.
     private let accent = Color(red: 0.86, green: 0.18, blue: 0.16)
 
+    /// Menu-button scale for the device's width: 1× on a desktop/iPad-width
+    /// window, shrinking toward `0.8` on a narrow phone. `menuButton`/
+    /// `smallButton` were sized against a desktop-class window and read as
+    /// oversized capsules on a phone screen — this is a straight width ratio
+    /// rather than `novaResponsive()`, which by design never goes below 1×
+    /// (it exists to nudge *chrome text* up on large displays, not to shrink
+    /// whole buttons down on small ones).
+    private func buttonScale(_ width: CGFloat) -> CGFloat {
+        let reference: CGFloat = 430
+        return min(max(width / reference, 0.8), 1.0)
+    }
+
     var body: some View {
+        GeometryReader { geo in
+        let scale = buttonScale(geo.size.width)
         ZStack {
             // Hero background, scaled to cover the whole screen (aspect-fill).
             Image("NovaSwiftMenuBackground")
@@ -40,18 +54,18 @@ struct ModernMainMenuView: View {
 
                 pilotStatus
 
-                VStack(spacing: 8) {
+                VStack(spacing: 8 * scale) {
                     if !model.roster.isEmpty {
-                        menuButton("Enter Ship", icon: "airplane.departure", prominent: true) {
+                        menuButton("Enter Ship", icon: "airplane.departure", prominent: true, scale: scale) {
                             // Resume the loaded pilot; open the picker when there's
                             // no unambiguous one (rather than auto-picking newest).
                             if !model.enterShip() { sheet = .openPilot }
                         }
                     }
-                    menuButton("New Pilot", icon: "person.crop.circle.badge.plus") { sheet = .newPilot }
-                    menuButton("Open Pilot", icon: "folder") { sheet = .openPilot }
-                    menuButton("Settings", icon: "gearshape") { sheet = .settings }
-                    menuButton("About Nova Swift", icon: "info.circle") { sheet = .about }
+                    menuButton("New Pilot", icon: "person.crop.circle.badge.plus", scale: scale) { sheet = .newPilot }
+                    menuButton("Open Pilot", icon: "folder", scale: scale) { sheet = .openPilot }
+                    menuButton("Settings", icon: "gearshape", scale: scale) { sheet = .settings }
+                    menuButton("About Nova Swift", icon: "info.circle", scale: scale) { sheet = .about }
                 }
                 .frame(maxWidth: 288)
                 .padding(.bottom, 14)
@@ -59,9 +73,9 @@ struct ModernMainMenuView: View {
                 HStack(spacing: 10) {
                     // Flight Training and Import Data moved into Settings (this menu
                     // only appears once base data is present).
-                    smallButton("Plug-ins", "puzzlepiece.extension.fill") { sheet = .plugins }
+                    smallButton("Plug-ins", "puzzlepiece.extension.fill", scale: scale) { sheet = .plugins }
                     #if os(macOS)
-                    smallButton("Quit", "power") { NSApplication.shared.terminate(nil) }
+                    smallButton("Quit", "power", scale: scale) { NSApplication.shared.terminate(nil) }
                     #endif
                 }
                 .padding(.bottom, 34)
@@ -77,6 +91,7 @@ struct ModernMainMenuView: View {
             withAnimation { appeared = true }
             model.audio.play(.uiSelect)
             model.prepareAudioAndData()   // ensure menu music is playing
+        }
         }
     }
 
@@ -98,17 +113,17 @@ struct ModernMainMenuView: View {
 
     /// A primary menu button. `prominent` fills with the accent (used for the
     /// resume/Enter-Ship action); the rest are glassy outlined rows.
-    private func menuButton(_ title: String, icon: String, prominent: Bool = false,
+    private func menuButton(_ title: String, icon: String, prominent: Bool = false, scale: CGFloat = 1,
                             action: @escaping () -> Void) -> some View {
         Button {
             model.audio.play(.uiSelect); action()
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon).font(.callout.weight(.semibold)).frame(width: 18)
-                Text(title).novaFont(.body, weight: .semibold, size: 14)
+            HStack(spacing: 10 * scale) {
+                Image(systemName: icon).font(.callout.weight(.semibold)).frame(width: 18 * scale)
+                Text(title).novaFont(.body, weight: .semibold, size: 14 * scale)
                 Spacer()
             }
-            .padding(.horizontal, 15).padding(.vertical, 9)
+            .padding(.horizontal, 15 * scale).padding(.vertical, 9 * scale)
             .foregroundStyle(prominent ? Color.white : Color.white.opacity(0.92))
             .background {
                 if prominent {
@@ -124,15 +139,15 @@ struct ModernMainMenuView: View {
     }
 
     /// A compact secondary button (Plug-ins / Import / Quit).
-    private func smallButton(_ label: String, _ icon: String, action: @escaping () -> Void) -> some View {
+    private func smallButton(_ label: String, _ icon: String, scale: CGFloat = 1, action: @escaping () -> Void) -> some View {
         Button {
             model.audio.play(.uiSelect); action()
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 7 * scale) {
                 Image(systemName: icon)
                 Text(label).font(.caption.weight(.semibold))
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
+            .padding(.horizontal, 12 * scale).padding(.vertical, 8 * scale)
             .foregroundStyle(.white.opacity(0.85))
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
