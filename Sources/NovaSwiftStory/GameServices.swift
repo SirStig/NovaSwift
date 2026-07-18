@@ -68,6 +68,9 @@ public struct MissionOffer: Sendable {
     /// `mission.displayName`, which still holds the raw `<DST>` etc.
     public let title: String
     public let briefingText: String
+    /// The PICT resource id attached to the briefing's `dësc` record, if any —
+    /// see `DescRes.pictureID`. `nil` for the (common) text-only case.
+    public let pictureID: Int?
     public let acceptButton: String
     public let refuseButton: String
     public let canRefuse: Bool
@@ -76,11 +79,12 @@ public struct MissionOffer: Sendable {
     /// not acceptable right now. See `StoryEngine.canAccept(_:)`.
     public let canAccept: Bool
 
-    public init(mission: MissionRes, title: String, briefingText: String,
+    public init(mission: MissionRes, title: String, briefingText: String, pictureID: Int? = nil,
                 acceptButton: String, refuseButton: String, canRefuse: Bool, canAccept: Bool = true) {
         self.mission = mission
         self.title = title
         self.briefingText = briefingText
+        self.pictureID = pictureID
         self.acceptButton = acceptButton
         self.refuseButton = refuseButton
         self.canRefuse = canRefuse

@@ -92,6 +92,7 @@ struct ModernMainMenuView: View {
             model.audio.play(.uiSelect)
             model.prepareAudioAndData()   // ensure menu music is playing
         }
+        .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 

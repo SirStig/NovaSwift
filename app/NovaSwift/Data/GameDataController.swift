@@ -470,11 +470,24 @@ final class GameDataController: ObservableObject {
     /// Bar's authentic Gambling screen (`STR# 150` #11/14/15: Gamble/Bet 1000/
     /// Bet 5000).
     func raceVideoURL(index: Int) -> URL? {
-        guard let baseDir = resolveBaseDir() else { return nil }
-        let name = "Race \(index).mov"
-        let direct = baseDir.appendingPathComponent(name)
-        if FileManager.default.fileExists(atPath: direct.path) { return direct }
-        guard let e = FileManager.default.enumerator(at: baseDir, includingPropertiesForKeys: nil) else { return nil }
-        return e.compactMap { $0 as? URL }.first { $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame }
+        videoURL(named: "Race \(index).mov")
+    }
+
+    /// Any holovid clip shipped alongside the base data OR a plugin, by exact
+    /// filename — e.g. a `dësc` record's `movieFilename` (`DescRes.movieFilename`),
+    /// which a plugin like ARPIA2 ships as its own `.mov` next to its `.rez`
+    /// files rather than in the base install. Searches the base data directory
+    /// first, then every discovered plugin directory, each the same
+    /// direct-hit-then-recursive-search way `raceVideoURL` always has.
+    func videoURL(named name: String) -> URL? {
+        for dir in ([resolveBaseDir()] + resolvePluginDirs()).compactMap({ $0 }) {
+            let direct = dir.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: direct.path) { return direct }
+            guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil) else { continue }
+            if let hit = e.compactMap({ $0 as? URL }).first(where: { $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame }) {
+                return hit
+            }
+        }
+        return nil
     }
 }

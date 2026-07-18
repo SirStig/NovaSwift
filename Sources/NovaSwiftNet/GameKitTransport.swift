@@ -51,12 +51,20 @@ public final class GameKitTransport: NSObject, Transport {
     public func send(_ data: Data, to peer: PeerID, channel: NetChannel) {
         guard let player = playersByID[peer] ?? match.players.first(where: { $0.gamePlayerID == peer })
         else { return }
-        try? match.send(data, to: [player], dataMode: sendMode(channel))
+        do {
+            try match.send(data, to: [player], dataMode: sendMode(channel))
+        } catch {
+            NSLog("GameKitTransport.send to \(peer) failed: \(error)")
+        }
     }
 
     public func broadcast(_ data: Data, channel: NetChannel) {
         guard !match.players.isEmpty else { return }
-        try? match.sendData(toAllPlayers: data, with: sendMode(channel))
+        do {
+            try match.sendData(toAllPlayers: data, with: sendMode(channel))
+        } catch {
+            NSLog("GameKitTransport.broadcast failed: \(error)")
+        }
     }
 
     public func disconnect() {
@@ -64,8 +72,15 @@ public final class GameKitTransport: NSObject, Transport {
         match.disconnect()
     }
 
+    /// `GKMatch`'s `.unreliable` mode is unreliable in practice over the
+    /// Game Center relay: unlike `MultipeerTransport` (real UDP on the LAN
+    /// link), it can silently stop delivering packets after the initial
+    /// burst, which manifested as "sync once, then never again" over
+    /// internet play. Route everything through `.reliable` here; the
+    /// bandwidth/latency cost is worth the correctness.
     private func sendMode(_ channel: NetChannel) -> GKMatch.SendDataMode {
-        channel == .reliable ? .reliable : .unreliable
+        _ = channel
+        return .reliable
     }
 }
 

@@ -199,6 +199,27 @@ case "list":
         }
     }
 
+case "dump":
+    // novaswift-extract dump <file> <TYPE> <id>   Hex dump one resource's raw bytes.
+    guard args.count == 4 else { usage() }
+    let (collection, _) = loadCollection(args[1])
+    guard let type = FourCharCode(args[2]) else {
+        FileHandle.standardError.write(Data("error: TYPE must be exactly four Mac Roman characters\n".utf8))
+        exit(1)
+    }
+    guard let id = Int(args[3]) else { usage() }
+    guard let r = collection.resource(type, id) else {
+        print("no \(type.stringValue) #\(id)"); break
+    }
+    let bytes = [UInt8](r.data)
+    print("\(type.stringValue) #\(r.id) \"\(r.name)\"  \(bytes.count) bytes")
+    for row in stride(from: 0, to: bytes.count, by: 16) {
+        let chunk = bytes[row..<min(row + 16, bytes.count)]
+        let hex = chunk.map { String(format: "%02x", $0) }.joined(separator: " ").padding(toLength: 47, withPad: " ", startingAt: 0)
+        let ascii = chunk.map { (0x20...0x7e).contains($0) ? String(UnicodeScalar($0)) : "." }.joined()
+        print(String(format: "  %04x  %@ %@", row, hex, ascii))
+    }
+
 case "sprites":
     guard args.count == 2 || args.count == 3 else { usage() }
     let (collection, _) = loadCollection(args[1])
@@ -1072,6 +1093,18 @@ case "mission":
     catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
     guard let m = mGame.mission(id) else {
         FileHandle.standardError.write(Data("error: no mission #\(id)\n".utf8)); exit(1)
+    }
+    if let raw = mBase.first.flatMap({ _ in try? GameLibrary.merge(baseFiles: mBase) }),
+       let res = raw.resources(of: FourCharCode("mïsn")!).first(where: { $0.id == id }) {
+        let d = res.data
+        print("DEBUG raw bytes: total=\(d.count)")
+        var s = "  "
+        for off in stride(from: 60, to: 92, by: 2) {
+            let lo = Int(d[d.startIndex + off]); let hi = Int(d[d.startIndex + off + 1])
+            let v = lo | (hi << 8)
+            s += "@\(off)=\(v)(0x\(String(v, radix: 16)))  "
+        }
+        print(s)
     }
     func nz(_ s: String) -> String { s.isEmpty ? "—" : s }
     print("""

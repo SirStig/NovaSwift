@@ -229,11 +229,10 @@ The **only** place a live commodity price is computed is
 banner when any `öops` is active for the current stellar/commodity, per the
 Bible. The price rows already reflect the delta via B.4, so this is label-only.
 
-> **Remaining gap, not built.** `OopsModels.swift`'s `activeDisasterNames(spobID:activeOops:)`
-> (~line 118-122) exists for exactly this purpose but has no callers anywhere
-> in `app/` or `Sources/` (confirmed by grep) — `TradeCenterView` applies the
-> price delta (B.4) but never surfaces the disaster's name. The banner
-> described in this section is still a to-do, not something that shipped.
+> **Shipped.** `TradeCenterView.statusLine` (`SpaceportScreens.swift`) now calls
+> `activeDisasterNames(spobID:activeOops:)` via `disasterBanner` and shows the
+> joined name(s) in the status strip between the list and the buy/sell buttons
+> when any `öops` is active at the current stellar.
 
 ---
 

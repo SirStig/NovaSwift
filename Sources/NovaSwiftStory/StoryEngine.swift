@@ -292,6 +292,7 @@ public final class StoryEngine {
             mission: mission,
             title: resolvedName(for: mission),
             briefingText: brief,
+            pictureID: game.desc(mission.offerTextID)?.pictureID,
             acceptButton: mission.acceptButton.isEmpty ? "Accept" : mission.acceptButton,
             refuseButton: mission.refuseButton.isEmpty ? "Decline" : mission.refuseButton,
             canRefuse: !mission.cannotBeRefused, canAccept: canAccept(mission))

@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 import NovaSwiftKit
 import NovaSwiftStory
 
@@ -325,6 +326,13 @@ struct MissionSingleDialog: View {
     var storylineTag: MissionStorylineTag? = nil
     var onOpenStoryline: (() -> Void)? = nil
 
+    @EnvironmentObject private var model: AppModel
+    /// Set while the briefing's `dësc` movie (`offer's` `MissionOffer.mission`
+    /// → `game.desc(offerTextID)?.movieFilename`) is playing full-screen over
+    /// the dialog — dismissed by Skip or when the clip ends/fails, same pattern
+    /// as `GamblingView`'s racing holovid.
+    @State private var moviePlayer: AVPlayer?
+
     private static let upperID = 8521, middleID = 8522, lowerID = 8523
     private static let frameWidth: CGFloat = 441
     private static let frameHeight: CGFloat = 317
@@ -332,6 +340,10 @@ struct MissionSingleDialog: View {
     private static let bottomHeight: CGFloat = 40
 
     private var index: Int? { offered.firstIndex { $0.id == offer.mission.id } }
+
+    private var movieFilename: String? {
+        model.data.game?.desc(offer.mission.offerTextID)?.movieFilename
+    }
 
     // Rendered as a full-screen overlay at the shared 1024×768 reference scale
     // (like every NovaMenu dialog), so the patron's offer stacks over the bar
@@ -344,6 +356,42 @@ struct MissionSingleDialog: View {
                 .scaleEffect(scale)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
+        .overlay { if moviePlayer != nil { moviePlayerOverlay } }
+    }
+
+    /// The briefing's holovid, full-screen over the whole dialog — mirrors
+    /// `GamblingView.racingView`'s player + Skip + end/fail-dismiss pattern.
+    @ViewBuilder private var moviePlayerOverlay: some View {
+        if let moviePlayer {
+            ZStack {
+                Color.black.opacity(0.92).ignoresSafeArea()
+                VStack(spacing: 14) {
+                    VideoPlayer(player: moviePlayer)
+                        .frame(maxWidth: 640, maxHeight: 400)
+                        .onReceive(NotificationCenter.default.publisher(
+                            for: .AVPlayerItemDidPlayToEndTime, object: moviePlayer.currentItem)) { _ in
+                            dismissMovie()
+                        }
+                        .onReceive(NotificationCenter.default.publisher(
+                            for: .AVPlayerItemFailedToPlayToEndTime, object: moviePlayer.currentItem)) { _ in
+                            dismissMovie()
+                        }
+                    NovaButton(graphics: graphics, title: "Skip", width: 42, action: dismissMovie)
+                }
+            }
+        }
+    }
+
+    private func playMovie() {
+        guard let filename = movieFilename, let url = model.data.videoURL(named: filename) else { return }
+        let player = AVPlayer(url: url)
+        moviePlayer = player
+        player.play()
+    }
+
+    private func dismissMovie() {
+        moviePlayer?.pause()
+        moviePlayer = nil
     }
 
     @ViewBuilder private var frameBody: some View {
@@ -361,6 +409,28 @@ struct MissionSingleDialog: View {
                                 if let storylineTag, let onOpenStoryline {
                                     StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
                                 }
+                            }
+                            // The dësc record's own picture, when it has one (e.g. a
+                            // patron's portrait or a new-territory establishing shot)
+                            // — sits above the text, matching the original's briefing
+                            // layout, capped so a large PICT doesn't push the buttons
+                            // off-screen inside the scrolling pane.
+                            if let pid = offer.pictureID, let cg = graphics.pict(pid) {
+                                Image(decorative: cg, scale: 1)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 407, maxHeight: 140)
+                            }
+                            // A holovid clip attached to this briefing (e.g. ARPIA2's
+                            // gas-miner intro) — the player chooses to watch it rather
+                            // than it auto-playing over the text they're trying to read.
+                            if movieFilename != nil {
+                                Button(action: playMovie) {
+                                    Label("Play Clip", systemImage: "play.circle.fill")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(novaAmber)
                             }
                             NovaText(offer.briefingText, size: 10, width: 411, align: .leading)
                         }

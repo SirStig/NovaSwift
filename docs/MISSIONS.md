@@ -15,7 +15,12 @@
 > matches until the government-relations table is queried at those call sites;
 > a *landed* player's hull-swap/relocate takes effect on the next takeoff
 > rebuild rather than instantly (in-flight, both rebuild the live scene
-> immediately); and `dësc` PICT/movie art in offers is still unrendered. See
+> immediately). `dësc` **PICT/movie** art in offers is now decoded and
+> rendered (`DescRes.pictureID`/`movieFilename`, `MissionOffer.pictureID`,
+> `MissionSingleDialog`'s briefing pane + "Play Clip" holovid overlay, backed
+> by `GameDataController.videoURL(named:)` — searches the base data dir and
+> every plugin dir, so a plugin-shipped clip like ARPIA2's `gasminer.mov`
+> resolves the same way its base-install `Race N.mov` clips already did). See
 > [STATUS.md](STATUS.md),
 > [ROADMAP.md](ROADMAP.md), and
 > [reverse-engineering/EVENTS.md](reverse-engineering/EVENTS.md) §5. "Done"
@@ -251,4 +256,3 @@ browsable immediately.
   rebuild rather than instantly; in-flight, both `onChangePlayerShip` (via
   `rebuildFlightHost`) and `onMovePlayer` (via `movePlayerToSystem`) rebuild
   the live scene immediately (`app/NovaSwift/Game/GameContainerView.swift:1492`).
-- Rendering of `dësc` **PICT**/movie art in offers (needs the UI + PICT decoder).

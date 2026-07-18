@@ -185,8 +185,10 @@ struct TradeCenterView: View {
     }
 
     /// DITL #1001 item 14 — the narrow strip between list and buttons. The
-    /// game shows status text here; this port uses it for the credits readout
-    /// and the tap-to-edit transaction quantity (real DITL #1003 "qty" prompt).
+    /// game shows status text here; this port uses it for the credits readout,
+    /// the tap-to-edit transaction quantity (real DITL #1003 "qty" prompt), and
+    /// — when an `öops` disaster is active at this stellar — its name, per the
+    /// Bible's "what's happening here" trade banner (`JUNK_OOPS_DESIGN.md` §B.5).
     private var statusLine: some View {
         HStack(spacing: 0) {
             Button { showQtyPrompt = true } label: {
@@ -194,11 +196,22 @@ struct TradeCenterView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if let banner = disasterBanner {
+                NovaText(banner, size: 10, color: Color(red: 1, green: 0.55, blue: 0.3), width: 126)
+            }
             Spacer(minLength: 0)
             NovaText(pilot.state.credits.creditsAbbreviated, size: 10,
                      color: Color(red: 1, green: 0.85, blue: 0.4), width: 130, align: .trailing)
         }
         .frame(width: 346, height: 24)
+    }
+
+    /// Active `öops` disaster names for this stellar, joined for display, or
+    /// `nil` when none are active here right now.
+    private var disasterBanner: String? {
+        let activeOops = pilot.state.activeDisasters.map { Array($0.keys) } ?? []
+        let names = game.activeDisasterNames(spobID: spob.id, activeOops: activeOops)
+        return names.isEmpty ? nil : names.joined(separator: ", ")
     }
 
     private var current: TradeRow? {

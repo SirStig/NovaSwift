@@ -414,17 +414,39 @@ public struct RankRes: Sendable {
 
 // MARK: dësc — description text
 
-/// A decoded `dësc` resource: a block of narrative text (with an optional
-/// picture / movie). The description string is a leading NUL-terminated C-string
-/// at offset 0; the picture id / movie / flags follow it (skipped here — the
-/// story layer only needs the text).
+/// A decoded `dësc` resource: a block of narrative text with an optional
+/// picture / movie. The description string is a leading NUL-terminated C-string
+/// at offset 0, followed by a fixed 36-byte trailer: a big-endian `u16` PICT
+/// resource id (0 = none) then an up-to-34-byte NUL-terminated Mac Roman movie
+/// filename (e.g. "Race 1.mov", zero-padded when absent or shorter). Verified
+/// against the base game's `dësc` records — e.g. #6094/#6309 ("Summer Bloom" /
+/// "Armor Repair Droids") are real referenced PICTs, and #32760-32763's trailers
+/// spell out "Race 1.mov".."Race 4.mov", the gambling holovid clips `GamblingView`
+/// already plays by that exact filename convention.
 public struct DescRes: Sendable {
     public let id: Int
     public let text: String
+    /// The PICT resource id to show alongside this text in an offer/briefing
+    /// dialog, or `nil` when this description has no picture.
+    public let pictureID: Int?
+    /// The movie filename (e.g. "Race 1.mov") this description points to, or
+    /// `nil` when it has none. Movie playback itself is out of scope here.
+    public let movieFilename: String?
 
     public init(_ r: Resource) {
         id = r.id
-        text = cstr(r.data, 0, r.data.count)
+        let d = r.data
+        let stringEnd = d.firstIndex(of: 0) ?? d.endIndex
+        text = cstr(d, 0, d.count)
+        let trailerStart = min(stringEnd + 1, d.endIndex)
+        guard d.distance(from: trailerStart, to: d.endIndex) >= 2 else {
+            pictureID = nil; movieFilename = nil; return
+        }
+        let pid = (Int(d[trailerStart]) << 8) | Int(d[trailerStart + 1])
+        pictureID = pid != 0 ? pid : nil
+        let movieStart = trailerStart + 2
+        let name = cstr(d, d.distance(from: d.startIndex, to: movieStart), d.distance(from: movieStart, to: d.endIndex))
+        movieFilename = name.isEmpty ? nil : name
     }
 }
 
