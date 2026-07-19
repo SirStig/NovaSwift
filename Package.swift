@@ -31,7 +31,7 @@ let package = Package(
     targets: [
         .target(name: "NovaSwiftKit", path: "Sources/NovaSwiftKit"),
         .target(name: "NovaSwiftEngine", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftEngine"),
-        .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftStory"),
+        .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit", "NovaSwiftEngine"], path: "Sources/NovaSwiftStory"),
         .target(name: "NovaSwiftNet", path: "Sources/NovaSwiftNet"),
         .target(
             name: "NovaSwiftSync",

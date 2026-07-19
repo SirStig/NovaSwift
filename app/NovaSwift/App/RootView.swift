@@ -4,6 +4,18 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @State private var menuAssets: MainMenuAssets?
+    #if os(tvOS)
+    /// Drives the controller-required gate: shows/hides live with pairing.
+    @ObservedObject private var padState = PadState.shared
+    /// Dev/automation escape hatch — the simulator has no way to pair a pad.
+    static let padGateDisabled: Bool = {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["NOVASWIFT_NO_PAD_GATE"] != nil
+        #else
+        false
+        #endif
+    }()
+    #endif
 
     var body: some View {
         ZStack {
@@ -81,6 +93,19 @@ struct RootView: View {
             // click into any screen. Inert on tvOS / without a pad.
             ControllerCursorOverlay()
                 .zIndex(50)
+
+            #if os(tvOS)
+            // NovaSwift is controller-required on Apple TV (the Siri Remote
+            // can't fly a ship, and the whole UI is cursor-driven). Gate the
+            // app until an extended gamepad pairs; lifts itself the moment
+            // one connects. Matches the GCSupportedGameControllers Info.plist
+            // declaration (ExtendedGamepad only).
+            if !padState.isConnected, !Self.padGateDisabled {
+                ControllerRequiredView()
+                    .zIndex(60)
+                    .transition(.opacity)
+            }
+            #endif
         }
         .environment(\.novaDebugEnabled, model.settings.uiDebugOverlay)
         .environment(\.novaUIScale, model.settings.uiScale)   // "Overall UI scale"
@@ -190,3 +215,39 @@ struct RootView: View {
         model.commitSettings()
     }
 }
+#if os(tvOS)
+/// Full-screen "pair a controller" gate shown on Apple TV until an extended
+/// gamepad connects. NovaSwift is a twin-stick game with a cursor-driven UI —
+/// the Siri Remote genuinely can't play it, so this is shown up front rather
+/// than letting the player wander into an unusable menu.
+private struct ControllerRequiredView: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.92).ignoresSafeArea()
+            VStack(spacing: 26) {
+                Image(systemName: "gamecontroller.fill")
+                    .font(.system(size: 96))
+                    .foregroundStyle(LinearGradient(colors: [.white, novaAmber],
+                                                    startPoint: .top, endPoint: .bottom))
+                Text("Connect a Game Controller")
+                    .novaFont(.title, weight: .bold, size: 34)
+                    .foregroundStyle(.white)
+                Text("NovaSwift needs a game controller — an Xbox, PlayStation, or other Bluetooth pad. The Siri Remote can't fly a starship.")
+                    .novaFont(.body, size: 20)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 760)
+                    .fixedSize(horizontal: false, vertical: true)
+                Label("Pair one in Settings → Remotes & Devices → Bluetooth", systemImage: "dot.radiowaves.left.and.right")
+                    .novaFont(.caption, size: 17)
+                    .foregroundStyle(novaAmber)
+                ProgressView()
+                    .tint(novaAmber)
+                    .padding(.top, 6)
+            }
+            .padding(60)
+        }
+    }
+}
+#endif
+

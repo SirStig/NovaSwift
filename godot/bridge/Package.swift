@@ -39,6 +39,7 @@ let package = Package(
             dependencies: [
                 .product(name: "NovaSwiftEngine", package: "NovaSwift"),
                 .product(name: "NovaSwiftKit", package: "NovaSwift"),
+                .product(name: "NovaSwiftStory", package: "NovaSwift"),
                 .product(name: "SwiftGodot", package: "SwiftGodot"),
             ],
             path: "Sources/NovaSwiftGodot"

@@ -24,6 +24,7 @@ import Foundation
 import SwiftGodot
 import NovaSwiftEngine
 import NovaSwiftKit
+import NovaSwiftStory
 
 @Godot
 class NovaWorld: Node2D {
@@ -39,6 +40,14 @@ class NovaWorld: Node2D {
     private var currentSystemID: Int?
     /// The `spöb` id the player is currently docked at, or nil while flying.
     private var dockedSpobID: Int?
+    /// The persistent pilot (credits, cargo, outfits, ship) — the same
+    /// `PlayerState` schema the Apple app's `PilotStore` autosaves. Trade/
+    /// outfit/shipyard transactions run through the portable `PilotEconomy`
+    /// (Sources/NovaSwiftStory/PilotEconomy.swift) so this bridge doesn't
+    /// reimplement pricing/mass-budget/trade-in rules. No disk save yet — see
+    /// docs/GODOT_LAYER.md's pilot-save-load milestone item.
+    private var pilot = PlayerState()
+    private var pilotStarted = false
 
     // MARK: World setup
 
@@ -102,15 +111,27 @@ class NovaWorld: Node2D {
         let galaxy = self.galaxy ?? Galaxy(game: game)
         self.galaxy = galaxy
 
-        let sysID = systemID >= 0 ? systemID : (game.startingSystem()?.id ?? 128)
-        let player = galaxy.makeShip(128, government: independentGovt, at: Vec2())
+        // Bootstrap the pilot from the scenario's `chär` exactly once — the
+        // same authoritative bootstrap `PilotStore.newGame` uses on the Apple
+        // side (random start system among candidates, starting hull/credits/
+        // calendar/standings/OnStart script). A later `makeWorld` call (e.g.
+        // traveling to a new system) reuses the live pilot instead of rerolling.
+        if !pilotStarted {
+            pilot = PilotFactory.makeDefault(name: "Captain", isMale: true, game: game)
+            pilotStarted = true
+        }
+
+        let sysID = systemID >= 0 ? systemID : pilot.currentSystem
+        let player = galaxy.makeLoadedShip(pilot.shipType, extraOutfits: pilot.outfits, at: Vec2())
             ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
+        player.cargo = pilot.cargo
 
         let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
         self.world = w
         self.intent = ControlIntent()
         self.currentSystemID = sysID
         self.dockedSpobID = nil
+        pilot.currentSystem = sysID
         return true
     }
 
@@ -409,8 +430,15 @@ class NovaWorld: Node2D {
     /// `GameScene.reloadForDeparture`). No-op (returns false) if not landed.
     @Callable(autoSnakeCase: true) func launch() -> Bool {
         guard let spobID = dockedSpobID, let game = self.game, let galaxy = self.galaxy,
-              let sysID = currentSystemID, let world = self.world else { return false }
-        let player = world.player
+              let sysID = currentSystemID else { return false }
+        // Rebuild from the pilot's current loadout, not the old flight `Ship` —
+        // trade/outfit/shipyard transactions while docked only mutate `pilot`
+        // (see the trade section below), matching the Apple app's
+        // `buildPlayerShip` (a fresh loaded ship each landing/launch, cargo
+        // carried in from `pilot.cargo`).
+        let player = galaxy.makeLoadedShip(pilot.shipType, extraOutfits: pilot.outfits, at: Vec2())
+            ?? world?.player ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
+        player.cargo = pilot.cargo
         let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
         let ctx = w.systemContext
         if let body = ctx.bodies.first(where: { $0.id == spobID }) {
@@ -425,6 +453,83 @@ class NovaWorld: Node2D {
         self.world = w
         dockedSpobID = nil
         return true
+    }
+
+    // MARK: Trade (Commodity Exchange)
+    //
+    // All pricing/mass/affordability math is `PilotEconomy`'s (see that type's
+    // doc comment) — this section only resolves the docked `spöb` and marshals
+    // its commodity rows. Only the standard 6 `Commodity` goods are exposed
+    // here, matching the Apple app's `TradeCenterView`; `jünk` (contraband)
+    // trading is a separate, not-yet-bridged screen.
+
+    private var dockedSpob: SpobRes? {
+        guard let id = dockedSpobID else { return nil }
+        return game?.spob(id)
+    }
+
+    /// The docked spöb's tradable commodities, in `Commodity` raw-value order
+    /// (food/industrial/medical/luxury/metal/equipment) — empty if not docked
+    /// or the port has no commodity exchange.
+    private func market() -> [(commodity: Commodity, level: PriceLevel, price: Int)] {
+        guard let game = self.game, let spob = dockedSpob else { return [] }
+        return game.commodityMarket(at: spob)
+    }
+
+    @Callable(autoSnakeCase: true) func playerCredits() -> Int { pilot.credits }
+    @Callable(autoSnakeCase: true) func cargoFreeTons() -> Int {
+        guard let galaxy = self.galaxy else { return 0 }
+        return PilotEconomy.cargoFree(pilot, galaxy: galaxy)
+    }
+    @Callable(autoSnakeCase: true) func cargoCapacityTons() -> Int {
+        guard let galaxy = self.galaxy else { return 0 }
+        return PilotEconomy.cargoCapacity(pilot, galaxy: galaxy)
+    }
+
+    /// Number of tradable commodity rows at the docked spöb (0 if not docked
+    /// or no exchange). The frontend indexes the other `commodity*`/`buy`/`sell`
+    /// calls by row 0..<this.
+    @Callable(autoSnakeCase: true) func commodityCount() -> Int { market().count }
+
+    @Callable(autoSnakeCase: true) func commodityName(index: Int) -> String {
+        let m = market()
+        guard index >= 0, index < m.count else { return "" }
+        return game?.commodityName(m[index].commodity) ?? m[index].commodity.fallbackName
+    }
+
+    @Callable(autoSnakeCase: true) func commodityPrice(index: Int) -> Int {
+        let m = market()
+        guard index >= 0, index < m.count else { return 0 }
+        return m[index].price
+    }
+
+    /// Tons of this commodity currently in the pilot's hold (persists across
+    /// landings — the same figure the flight HUD's cargo readout carries once
+    /// `launch()` seeds the ship from it).
+    @Callable(autoSnakeCase: true) func commodityHeld(index: Int) -> Int {
+        let m = market()
+        guard index >= 0, index < m.count else { return 0 }
+        return PilotEconomy.held(pilot, cargo: m[index].commodity.cargoID)
+    }
+
+    /// Buy up to `tons` of commodity row `index` at its current price, capped by
+    /// affordability and free cargo space. Returns the tonnage actually bought.
+    @discardableResult
+    @Callable(autoSnakeCase: true) func buyCommodity(index: Int, tons: Int) -> Int {
+        guard let galaxy = self.galaxy else { return 0 }
+        let m = market()
+        guard index >= 0, index < m.count else { return 0 }
+        let free = PilotEconomy.cargoFree(pilot, galaxy: galaxy)
+        return PilotEconomy.buyCommodity(&pilot, m[index].commodity, tons: tons, unitPrice: m[index].price, cargoFree: free)
+    }
+
+    /// Sell up to `tons` of commodity row `index` at its current price. Returns
+    /// the tonnage actually sold.
+    @discardableResult
+    @Callable(autoSnakeCase: true) func sellCommodity(index: Int, tons: Int) -> Int {
+        let m = market()
+        guard index >= 0, index < m.count else { return 0 }
+        return PilotEconomy.sellCommodity(&pilot, m[index].commodity, tons: tons, unitPrice: m[index].price)
     }
 
     /// One string per `WorldEvent` produced this step (the case name, e.g.

@@ -21,26 +21,17 @@ struct LauncherView: View {
     var body: some View {
         ZStack {
             StarfieldBackground()
-            ScrollView {
-                VStack(spacing: 18) {
-                    hero
-                    if model.data.hasBaseData {
-                        dataFoundCard
-                    } else {
-                        guideCard
-                    }
-                    bottomRow
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 28)
-                .frame(maxWidth: 480)
-                .frame(maxWidth: .infinity)
-            }
             #if os(tvOS)
             // Room-distance readability: the phone-sized column is far too
-            // small on a TV. Everything fits on screen at 1.5×, so the scaled
-            // scroll viewport never actually needs to scroll.
-            .scaleEffect(1.5)
+            // small on a TV. The content fits a TV screen at 1.5×, so skip the
+            // ScrollView (scaling inside one clips the top — the scroll
+            // geometry doesn't know about the visual transform) and centre
+            // the scaled column directly.
+            column
+                .scaleEffect(1.5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #else
+            ScrollView { column }
             #endif
         }
         .novaResponsive()
@@ -73,6 +64,24 @@ struct LauncherView: View {
         }
     }
 
+    /// The launcher's single content column, shared by the scrolling (phone/
+    /// desktop) and fixed 1.5×-scaled (tvOS) presentations.
+    private var column: some View {
+        VStack(spacing: 18) {
+            hero
+            if model.data.hasBaseData {
+                dataFoundCard
+            } else {
+                guideCard
+            }
+            bottomRow
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 28)
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity)
+    }
+
     private var hero: some View {
         VStack(spacing: 6) {
             AppLogo().frame(width: 68, height: 68)
@@ -103,6 +112,9 @@ struct LauncherView: View {
             Text("NovaSwift runs your own legally-obtained EV Nova — nothing copyrighted is bundled in. The setup guide walks you through it step by step, whatever device you're on.")
                 .novaFont(.caption)
                 .foregroundStyle(.secondary)
+                // Wrap fully rather than truncate: at tvOS's larger text scale
+                // the proposed height comes up short and clipped to "…".
+                .fixedSize(horizontal: false, vertical: true)
 
             setUpButton
 
