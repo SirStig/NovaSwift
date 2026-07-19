@@ -9,6 +9,9 @@ import SwiftUI
 struct LauncherView: View {
     @EnvironmentObject private var model: AppModel
     @State private var sheet: Sheet?
+    /// Dev/automation only (see the DEBUG onAppear): open the wizard directly
+    /// on its Import step. Always false in normal use.
+    @State private var devStartAtImport = false
 
     private enum Sheet: String, Identifiable {
         case importData, about
@@ -33,9 +36,25 @@ struct LauncherView: View {
                 .frame(maxWidth: 480)
                 .frame(maxWidth: .infinity)
             }
+            #if os(tvOS)
+            // Room-distance readability: the phone-sized column is far too
+            // small on a TV. Everything fits on screen at 1.5×, so the scaled
+            // scroll viewport never actually needs to scroll.
+            .scaleEffect(1.5)
+            #endif
         }
         .novaResponsive()
         .overlay { dialogOverlay }
+        #if DEBUG
+        // Dev/automation: open the import wizard immediately so scripted
+        // simulator runs can screenshot it without navigating.
+        .onAppear {
+            if let mode = ProcessInfo.processInfo.environment["NOVASWIFT_OPEN_IMPORT"] {
+                devStartAtImport = (mode == "import")
+                sheet = .importData
+            }
+        }
+        #endif
     }
 
     /// Full-screen dialog overlay (not a macOS `.sheet`, whose fixed card would
@@ -44,7 +63,8 @@ struct LauncherView: View {
         if let which = sheet {
             Group {
                 switch which {
-                case .importData: DataSetupWizard(onClose: { sheet = nil })
+                case .importData: DataSetupWizard(onClose: { sheet = nil },
+                                                  startAtImport: devStartAtImport)
                 case .about:      AboutView(onClose: { sheet = nil })
                 }
             }

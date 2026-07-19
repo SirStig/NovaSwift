@@ -261,6 +261,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = NovaSwift/NovaSwift.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 366;
 				DEAD_CODE_STRIPPING = YES;
@@ -319,6 +321,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = NovaSwift/NovaSwift.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 366;
 				DEAD_CODE_STRIPPING = YES;

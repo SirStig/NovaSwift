@@ -121,7 +121,11 @@ struct RootView: View {
             // and their data ships a track). Music carries through into the game.
             model.prepareAudioAndData()
             #if canImport(GameKit)
-            model.gameCenter.authenticate()   // sign in for online co-op (safe if already signed in)
+            // Skippable via env for automated/dev runs: the sign-in sheet is
+            // system UI that would otherwise block scripted screenshots.
+            if ProcessInfo.processInfo.environment["NOVASWIFT_NO_GAMECENTER"] == nil {
+                model.gameCenter.authenticate()   // sign in for online co-op (safe if already signed in)
+            }
             #endif
             #if canImport(CloudKit)
             // Game-data iCloud pass: upload this device's import if the cloud

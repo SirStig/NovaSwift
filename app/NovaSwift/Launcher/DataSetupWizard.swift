@@ -474,6 +474,8 @@ struct DataSetupWizard: View {
                 CursorButton { model.audio.play(.uiSelect); setDevice(d) } label: {
                     Label(d.label, systemImage: d.icon)
                         .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .fixedSize()
                         .novaFont(.caption, weight: d == device ? .bold : .regular)
                         .foregroundStyle(d == device ? .black : .secondary)
                         .padding(.horizontal, 10).padding(.vertical, 5)

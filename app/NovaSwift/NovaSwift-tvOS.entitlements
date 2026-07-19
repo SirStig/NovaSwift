@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- tvOS variant of NovaSwift.entitlements. Differences, all deliberate:
+	     - aps-environment: required by App Store validation for any tvOS app
+	       carrying icloud-services (CloudKit change notifications ride APNs).
+	       Xcode rewrites "development" to "production" for distribution.
+	     - No CloudDocuments / ubiquity containers: iCloud Documents does not
+	       exist on tvOS (CloudKit + KVS only); shipping those keys fails
+	       validation. PilotArchive.iCloudRoot already falls back to local.
+	     - No com.apple.security.* keys: those are macOS App Sandbox settings. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.developer.game-center</key>
+	<true/>
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.houseofkac.novaswift</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+</dict>
+</plist>

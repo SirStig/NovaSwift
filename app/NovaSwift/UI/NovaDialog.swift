@@ -56,6 +56,13 @@ struct NovaDialog<Content: View>: View {
             }
             .frame(maxWidth: width)
             .padding(12)
+            #if os(tvOS)
+            // TV is viewed from across a room: a phone/desktop-sized 460–500pt
+            // card reads as a postage stamp on a 1920pt screen. Scale the whole
+            // panel up (the controller cursor's hit frames follow transforms,
+            // so clicks stay aligned).
+            .scaleEffect(1.5)
+            #endif
         }
     }
 
