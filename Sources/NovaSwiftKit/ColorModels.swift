@@ -1,5 +1,10 @@
-import CoreGraphics
 import Foundation
+// `CGPoint`/`CGFloat` come from CoreGraphics on Apple platforms and from
+// Foundation (swift-corelib-foundation) on Linux/Windows, so this file — which
+// only needs those geometry types — compiles cross-platform for the Godot layer.
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 // The `cölr` (colors) resource is EV Nova's game-wide interface color/layout
 // resource — main menu button text colors, main menu font + bright/dim colors,

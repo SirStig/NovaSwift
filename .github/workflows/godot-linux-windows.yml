@@ -1,0 +1,80 @@
+name: Godot layer (Linux/Windows)
+
+# Guards the cross-platform Swift core and the SwiftGodot bridge that make up the
+# desktop Linux/Windows frontend. See docs/GODOT_LAYER.md.
+#
+# The Apple app (app/NovaSwift, Xcode) is untouched by this workflow — it builds
+# only the SwiftPM packages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "godot/**"
+      - "Package.swift"
+      - "scripts/build-gdextension.sh"
+      - ".github/workflows/godot-linux-windows.yml"
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "godot/**"
+      - "Package.swift"
+      - "scripts/build-gdextension.sh"
+      - ".github/workflows/godot-linux-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Required signal: the libraries the Godot layer depends on compile on Linux.
+  # These were audited clean of Apple-only frameworks (docs/GODOT_LAYER.md).
+  core-linux:
+    name: Core builds on Linux
+    runs-on: ubuntu-latest
+    container: swift:5.10-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build NovaSwiftEngine (+ NovaSwiftKit)
+        run: swift build --target NovaSwiftEngine
+
+  # Informational: the entire root package on Linux (extractor, story, net with
+  # its Apple transports compiled out, plugin store). Surfaces any remaining
+  # portability gaps without blocking the required check.
+  full-core-linux:
+    name: Full package on Linux (informational)
+    runs-on: ubuntu-latest
+    container: swift:5.10-jammy
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build whole package
+        run: swift build
+
+  # Informational: the same core on Windows, where Foundation has its own edges.
+  core-windows:
+    name: Core builds on Windows (informational)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Swift toolchain
+        uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-5.10-release
+          tag: 5.10-RELEASE
+      - name: Build NovaSwiftEngine (+ NovaSwiftKit)
+        run: swift build --target NovaSwiftEngine
+
+  # Informational: the SwiftGodot GDExtension bridge (fetches SwiftGodot, links
+  # the native library). Promote to required once verified on a real toolchain.
+  bridge-linux:
+    name: GDExtension bridge on Linux (informational)
+    runs-on: ubuntu-latest
+    container: swift:5.10-jammy
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the NovaSwiftGodot bridge
+        run: scripts/build-gdextension.sh release

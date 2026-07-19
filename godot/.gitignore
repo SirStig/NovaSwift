@@ -1,0 +1,16 @@
+# Godot editor cache / imported assets — regenerated on open.
+.godot/
+
+# Built native GDExtension libraries — produced by scripts/build-gdextension.sh,
+# not committed (platform-specific, large). bin/ itself is kept via .gitkeep.
+bin/*.so
+bin/*.dll
+bin/*.dylib
+bin/*.dSYM/
+bin/*.pdb
+bin/*.lib
+bin/*.exp
+
+# Godot export output.
+export/
+*.import

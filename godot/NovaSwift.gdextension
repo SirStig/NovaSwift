@@ -1,0 +1,22 @@
+; GDExtension config — tells Godot which native library to load per platform
+; and which entry symbol to call. The libraries are produced by
+; scripts/build-gdextension.sh (which copies them into godot/bin/).
+;
+; `swift_entry_point` matches #initSwiftExtension(cdecl:) in
+; godot/bridge/Sources/NovaSwiftGodot/NovaSwiftGodot.swift.
+
+[configuration]
+
+entry_symbol = "swift_entry_point"
+compatibility_minimum = "4.2"
+
+[libraries]
+
+linux.debug.x86_64 = "res://bin/libNovaSwiftGodot.so"
+linux.release.x86_64 = "res://bin/libNovaSwiftGodot.so"
+
+windows.debug.x86_64 = "res://bin/NovaSwiftGodot.dll"
+windows.release.x86_64 = "res://bin/NovaSwiftGodot.dll"
+
+macos.debug = "res://bin/libNovaSwiftGodot.dylib"
+macos.release = "res://bin/libNovaSwiftGodot.dylib"
