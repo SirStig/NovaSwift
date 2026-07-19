@@ -183,12 +183,12 @@ Full status, architecture, and milestone tracking in
 
 ## Beta / TestFlight
 
-Native builds for **macOS, iPad, and iPhone** are live on **TestFlight** — no
-build step required. Join the public beta here:
+Native builds for **macOS, iPad, iPhone, and Apple TV** are live on
+**TestFlight** — no build step required. Join the public beta here:
 
 **→ [testflight.apple.com/join/3FBzwwq1](https://testflight.apple.com/join/3FBzwwq1)**
 
-The same link works for macOS and iOS/iPadOS. You'll still need to supply your own
+The same link covers all four platforms. You'll still need to supply your own
 legally-owned EV Nova data (see [The one rule](#the-one-rule-you-bring-the-game)).
 
 ## The one rule: you bring the game

@@ -84,5 +84,6 @@ next time tvOS purges the cache — restores automatically.
 
 - Wider real-hardware testing (different Apple TV generations, different
   third-party controllers) beyond the initial bring-up.
-- tvOS is not yet on TestFlight — the public beta currently covers macOS,
-  iPadOS, and iOS only.
+
+tvOS is on TestFlight today, on the same public link as macOS/iPadOS/iOS —
+see the README's [Beta / TestFlight](../README.md#beta--testflight) section.
