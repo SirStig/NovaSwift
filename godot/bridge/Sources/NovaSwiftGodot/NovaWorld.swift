@@ -34,6 +34,11 @@ class NovaWorld: Node2D {
     private var galaxy: Galaxy?
     private var game: NovaGame?
     private var intent = ControlIntent()
+    /// The system id `makeWorld` last built, so `launch()` can rebuild the same
+    /// system after a docked visit — landing never changes system.
+    private var currentSystemID: Int?
+    /// The `spöb` id the player is currently docked at, or nil while flying.
+    private var dockedSpobID: Int?
 
     // MARK: World setup
 
@@ -104,6 +109,8 @@ class NovaWorld: Node2D {
         let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
         self.world = w
         self.intent = ControlIntent()
+        self.currentSystemID = sysID
+        self.dockedSpobID = nil
         return true
     }
 
@@ -337,6 +344,87 @@ class NovaWorld: Node2D {
     @Callable(autoSnakeCase: true) func playerJumpsRemaining() -> Int {
         guard let p = world?.player else { return 0 }
         return Int((p.fuel / ShipFuel.perJump).rounded(.down))
+    }
+
+    // MARK: Landing
+
+    /// The nearest body the player could conceivably land on right now, in
+    /// reach regardless of speed — mirrors `GameScene.updateLanding`'s
+    /// distance/reach test (`body.radius + 70`, not `+55`: matches where
+    /// takeoff/dock-load placement actually sets the ship down). Only
+    /// `isLandable` bodies count, not hypergates/wormholes — gate travel is a
+    /// separate flow (see docs/GODOT_LAYER.md's hypergate section).
+    private func nearestReachableLandTarget() -> (id: Int, name: String)? {
+        guard let world = self.world else { return nil }
+        var bestID: Int?
+        var bestDist = Double.greatestFiniteMagnitude
+        var bestReach = 0.0
+        for body in world.systemContext.bodies where body.isLandable {
+            let d = (body.position - world.player.position).length
+            if d < bestDist { bestDist = d; bestID = body.id; bestReach = body.radius + 70 }
+        }
+        guard let id = bestID, bestDist <= bestReach else { return nil }
+        return (id, game?.spob(id)?.name ?? "")
+    }
+
+    /// True once the player is close enough AND slow enough to land — mirrors
+    /// `GameScene.canLandNow`'s 130 u/s speed limit (`landingSpeedLimit`).
+    @Callable(autoSnakeCase: true) func canLandNow() -> Bool {
+        guard let world = self.world, nearestReachableLandTarget() != nil else { return false }
+        return world.player.velocity.length <= 130
+    }
+
+    /// The `spöb` id of the nearest body in reach, or -1 if nothing's close
+    /// enough — set even when too fast to land yet, so the frontend can show
+    /// "slow down to land on X" like the Apple app does.
+    @Callable(autoSnakeCase: true) func nearestLandableSpobID() -> Int {
+        nearestReachableLandTarget()?.id ?? -1
+    }
+
+    /// Display name of the nearest body in reach, or "" if none.
+    @Callable(autoSnakeCase: true) func nearestLandableName() -> String {
+        nearestReachableLandTarget()?.name ?? ""
+    }
+
+    /// True while docked at a spöb (spaceport screens should be showing).
+    @Callable(autoSnakeCase: true) func isLanded() -> Bool { dockedSpobID != nil }
+
+    /// The `spöb` id the player is docked at, or -1 while flying.
+    @Callable(autoSnakeCase: true) func landedSpobID() -> Int { dockedSpobID ?? -1 }
+
+    /// Attempt to land on the nearest body in reach. Fails (returns false) if
+    /// out of reach or moving too fast, exactly like pressing the Land key does
+    /// in the Apple app. On success the frontend should stop calling `step()`
+    /// and show spaceport screens until `launch()`.
+    @Callable(autoSnakeCase: true) func attemptLand() -> Bool {
+        guard canLandNow(), let target = nearestReachableLandTarget() else { return false }
+        dockedSpobID = target.id
+        return true
+    }
+
+    /// Take off from the current dock: rebuilds the system (fresh NPC spawn,
+    /// same as any `makeWorld`) and places the player just clear of the body's
+    /// surface, nose pointed away from the system centre, at rest — EV Nova
+    /// gives no outbound momentum on takeoff (mirrors
+    /// `GameScene.reloadForDeparture`). No-op (returns false) if not landed.
+    @Callable(autoSnakeCase: true) func launch() -> Bool {
+        guard let spobID = dockedSpobID, let game = self.game, let galaxy = self.galaxy,
+              let sysID = currentSystemID, let world = self.world else { return false }
+        let player = world.player
+        let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)
+        let ctx = w.systemContext
+        if let body = ctx.bodies.first(where: { $0.id == spobID }) {
+            var outward = body.position - ctx.center
+            if outward.length < 1 { outward = Vec2(0, -1) }
+            let dir = outward.normalized
+            player.position = body.position + dir * (body.radius + 60)
+            player.angle = dir.angle
+            player.velocity = Vec2()
+        }
+        player.currentTargetID = nil
+        self.world = w
+        dockedSpobID = nil
+        return true
     }
 
     /// One string per `WorldEvent` produced this step (the case name, e.g.

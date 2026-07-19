@@ -130,6 +130,15 @@ func _process(delta: float) -> void:
 	if nova == null:
 		return
 
+	if nova.is_landed():
+		# Docked: the flight sim is paused (no set_intent/step) — only the
+		# launch hotkey and the message-log fade run. Mirrors the Apple app's
+		# spaceport screens owning the frame while landed.
+		_on_key_pressed(KEY_L, func(): _on_launch())
+		_drain_events_to_log(delta)
+		queue_redraw()
+		return
+
 	var left := Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A)
 	var right := Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D)
 	var thrust := Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W)
@@ -147,6 +156,11 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+func _on_launch() -> void:
+	if nova.launch():
+		_push_log("Launched")
+
+
 func _update_top_label() -> void:
 	var hud: Label = $HUD
 	var mode := "real data" if _has_data else "demo world (no data)"
@@ -156,7 +170,7 @@ func _update_top_label() -> void:
 	hud.text = "NOVA Swift — Godot slice · %s%s · ships %d\n" % [
 			mode, ("  ·  " + ship_name) if ship_name != "" else "", nova.ship_count(),
 		] \
-		+ "arrows/WASD fly · Shift burn · Space fire · Ctrl secondary · Tab target · Q/E switch weapon"
+		+ "arrows/WASD fly · Shift burn · Space fire · Ctrl secondary · Tab target · Q/E switch weapon · L land"
 
 
 # Tab / Backspace / Q / E fire once per keypress, not once per held frame — poll
@@ -166,6 +180,13 @@ func _process_hotkeys() -> void:
 	_on_key_pressed(KEY_BACKSPACE, func(): nova.clear_player_target())
 	_on_key_pressed(KEY_Q, func(): _log_weapon_switch(nova.cycle_secondary_weapon(false)))
 	_on_key_pressed(KEY_E, func(): _log_weapon_switch(nova.cycle_secondary_weapon(true)))
+	_on_key_pressed(KEY_L, func(): _on_land())
+
+
+func _on_land() -> void:
+	var name: String = nova.nearest_landable_name()
+	if nova.attempt_land():
+		_push_log("Docked at " + name)
 
 
 func _on_key_pressed(key: Key, action: Callable) -> void:
@@ -202,6 +223,12 @@ func _draw() -> void:
 		return
 
 	var vp := get_viewport_rect().size
+
+	if nova.is_landed():
+		_draw_spaceport_placeholder(vp)
+		_draw_message_log(vp)
+		return
+
 	var center := vp * 0.5
 	var pw: Vector2 = nova.player_position()
 
@@ -216,6 +243,7 @@ func _draw() -> void:
 	_draw_status_bars(vp)
 	_draw_weapon_readout(vp)
 	_draw_target_panel(vp, target_id)
+	_draw_land_prompt(vp)
 	_draw_radar(vp, pw)
 	_draw_message_log(vp)
 
@@ -451,3 +479,32 @@ func _draw_message_log(vp: Vector2) -> void:
 		draw_string(ThemeDB.fallback_font, pos, str(entry["text"]),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 1, Color(0.9, 0.9, 0.85, alpha))
 		pos.y -= 18
+
+
+# In flight: prompt to land once a landable body is in reach, matching the
+# Apple app's "Press L to land on X" / "Slow down to land on X" HUD text.
+func _draw_land_prompt(vp: Vector2) -> void:
+	var name: String = nova.nearest_landable_name()
+	if name == "":
+		return
+	var ready: bool = nova.can_land_now()
+	var text: String = ("Press L to land on " + name) if ready else ("Slow down to land on " + name)
+	var col := Color(0.6, 1.0, 0.7, 0.95) if ready else Color(0.9, 0.8, 0.4, 0.9)
+	var pos := Vector2(vp.x * 0.5, vp.y - 70)
+	var w := ThemeDB.fallback_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE).x
+	draw_string(ThemeDB.fallback_font, pos - Vector2(w * 0.5, 0), text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, col)
+
+
+# Milestone-4 placeholder: docked screen with no trade/outfitter/shipyard yet
+# (those need pilot-economy state the bridge doesn't expose so far — see
+# docs/GODOT_LAYER.md). Confirms the land/launch loop end-to-end in the
+# meantime; a real spaceport UI replaces this.
+func _draw_spaceport_placeholder(vp: Vector2) -> void:
+	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.05, 0.05, 0.08, 1.0))
+	var title := "Docked"
+	var pos := vp * 0.5 - Vector2(80, 0)
+	draw_string(ThemeDB.fallback_font, pos, title,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.85, 0.9, 1.0, 1.0))
+	draw_string(ThemeDB.fallback_font, pos + Vector2(0, 30), "Press L to launch",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.7, 0.75, 0.8, 0.9))

@@ -197,7 +197,21 @@ is a follow-up once the frontend is fleshed out.
    message log implemented; weapon FX and sound still open.*
 4. **Screens** — galaxy map, landing, spaceport (trade/outfit/shipyard), pilot
    save/load — GDScript `Control` UI over the same engine/story calls the Apple
-   app makes.
+   app makes. **Landing/launch done and confirmed on-toolchain** (`canLandNow`/
+   `nearestLandableSpobID`/`attemptLand`/`launch`, mirroring
+   `GameScene.updateLanding`/`reloadForDeparture`); docked state currently shows
+   a placeholder screen, not real trade/outfit/shipyard. **Blocked on an
+   architecture gap**: those three screens' transaction math (`buyCargo`,
+   `sellCargo`, `cargoFree`, outfit/ship pricing) lives in `PilotStore`
+   (`app/NovaSwift/Game/PilotStore.swift`), an Apple-app file (imports SwiftUI,
+   `ObservableObject`) — not in the portable core. Reproducing it in the bridge
+   would duplicate business logic outside the engine, which is exactly what
+   this bridge's own header comment forbids. The fix is to extract that
+   transaction logic into a portable, non-SwiftUI type (`NovaSwiftStory`
+   already owns the portable `PlayerState` save schema these calls mutate) so
+   `PilotStore` becomes a thin `ObservableObject` wrapper and the Godot bridge
+   calls the same code. Not yet done — next work item before trade/outfit/
+   shipyard screens can start for real.
 5. **Story runtime** — bring `NovaSwiftStory` across for missions/crons/NCB.
 6. **Packaging** — Godot export presets + CD for Linux/Windows artifacts.
 
