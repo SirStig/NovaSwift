@@ -1,7 +1,8 @@
 # Roadmap — faithful full port
 
 **Goal:** reproduce EV Nova as closely as possible on a modern engine for
-iOS / iPadOS / macOS — driven entirely by the player's own game data. See the
+iOS / iPadOS / macOS / tvOS (and, via a parallel Godot port, Linux / Windows) —
+driven entirely by the player's own game data. See the
 authoritative **[CHARTER.md](CHARTER.md)** for the full statement, and
 **[STATUS.md](STATUS.md)** for the verified wired-vs-built-vs-missing map that
 this roadmap is sequenced from.
@@ -35,10 +36,10 @@ exist for the player.* So we prioritize **wiring what's already built** and
 ## Where we are now
 
 **NOVA Swift is now a near-complete (~90%), faithful full port of EV Nova — the
-whole game is playable start to finish on macOS / iPadOS / iOS.** What's left is
-polish & fidelity fine-tuning, bug/crash/performance hardening, and enhancements
-the 2002 original never had (multiplayer, controller support, optional HD art) —
-not missing core systems.
+whole game is playable start to finish on macOS / iPadOS / iOS / tvOS.** What's
+left is polish & fidelity fine-tuning, bug/crash/performance hardening, and
+optional HD art — not missing core systems. Multiplayer, controller support,
+tvOS, and iCloud game-data sync are all built and playable today.
 
 A lot has come together since the last time this roadmap was written — most of
 the "it's built, we just need to hook it up" work is done and playable. Here's
@@ -57,6 +58,20 @@ what's live today (see [STATUS.md](STATUS.md) for the wiring details):
   gun/turret slot limits (`freeGunSlots`/`freeTurretSlots`), and government
   legal-record penalties (`recordKill`/`recordDisable` in the combat loop).
 - ✅ **`përs` named captains** and an **in-game Story Map**.
+- ✅ **tvOS** — a real, playable platform target (`.tvOS(.v16)`), controller-
+  required by design, with its own 10-foot UI and two ways to get game data
+  onto it (iCloud auto-restore, local web importer). See [TVOS.md](TVOS.md).
+- ✅ **Game controller support** — twin-stick flight + a fully rebindable
+  button map, on every platform, not just tvOS. See [CONTROLS.md](CONTROLS.md).
+- ✅ **iCloud syncing for game data** — import once, sync your base data
+  through your own private iCloud, restore automatically on other devices
+  (and automatically on tvOS). See [ICLOUD_SYNC.md](ICLOUD_SYNC.md).
+- 🚧 **Godot port (Linux/Windows)** — a second frontend on Godot 4, bridged to
+  the same portable Swift engine, in progress in `godot/`. Flight, HUD, and
+  landing/launch are wired; galaxy map, spaceport screens, and the story
+  runtime are next. See [GODOT_LAYER.md](GODOT_LAYER.md) for full milestone
+  tracking — this is developed as a parallel effort, not gating the Apple
+  roadmap below.
 
 The remaining work, in priority order:
 
@@ -115,7 +130,8 @@ demand → waves → surrender → tribute loop is playable end-to-end. See
 
 ### P4 — Authentic UI fidelity pass
 - Full rebindable **keybindings** matching EV Nova; mouse used as the original
-  does; controller + touch parity. → `docs/CONTROLS.md` *(to be written)*.
+  does. Controller rebinding + touch parity are done — see
+  [CONTROLS.md](CONTROLS.md).
 - ✅ **Ionization HUD indicator** — *now wired*: the flight HUD status panel
   shows a purple ION bar (labelled "IONIZED" at the threshold) driven from
   `Ship.ionCharge`/`isIonized` via `GameScene.updateHUD`.

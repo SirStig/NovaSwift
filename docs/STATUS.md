@@ -12,12 +12,13 @@ because the library compiles. The three words we use, straight from
   loop calls it. As far as the player is concerned, it isn't in the game.
 - **Missing** — not built, or just a UI shell / "coming soon" placeholder.
 
-*Last walked through: 2026-07-14.*
+*Last walked through: 2026-07-19.*
 
 ## Where things stand
 
 The short version: **NovaSwift is now a near-complete (~90%), faithful full port
-— the whole game is playable start to finish on macOS / iPadOS / iOS.** Almost
+— the whole game is playable start to finish on macOS / iPadOS / iOS / tvOS.**
+Almost
 everything older versions of this doc filed under "built but not wired" is now
 genuinely wired, and the app builds and tests green. What's left is polish &
 fidelity fine-tuning, bug/crash/performance hardening, and enhancements the 2002
@@ -50,6 +51,24 @@ pipeline** is real: explosions are no longer a single orange flash but proper
 `bööm` sprites, backed by a particle/smoke system with weapon smoke/spark
 trails, hit-spray on shield and armor hits, asteroid debris bursts, and jagged
 lightning beams. The tables below reflect all of this.
+
+Since then, the platform surface grew: **tvOS is a real, playable target now**,
+not just an idea — controller-required by design, with its own 10-foot UI and
+two ways to get your game data onto an Apple TV with no Files app in sight
+(iCloud auto-restore, or a local web-browser importer). **Game controller
+support landed alongside it** and isn't tvOS-only — twin-stick flight and a
+fully rebindable action map work on every platform. And **iCloud syncing for
+imported game data** means importing once and having every other device
+restore automatically. None of these touch a pure Classic run; see
+[CONTROLS.md](CONTROLS.md), [TVOS.md](TVOS.md), and
+[ICLOUD_SYNC.md](ICLOUD_SYNC.md).
+
+Separately, a **Godot 4 frontend for Linux and Windows** is underway in
+`godot/` — a parallel build on the same portable Swift engine, not a fork of
+it. It's early (flight, HUD, and landing/launch are wired; galaxy map,
+spaceport screens, and story runtime are next) and doesn't change anything
+about the Apple app tracked in the rest of this document. Full status in
+[GODOT_LAYER.md](GODOT_LAYER.md).
 
 ## The one thing that still feels off: how ships fly and spawn
 
@@ -109,6 +128,10 @@ Everything else in this doc holds up well by comparison.
 | **Plug-in store** | In-app catalog browse + download/install via `NovaSwiftPluginStore` | `Launcher/PluginsView.swift` → `Store/PluginStoreView.swift` |
 | **Pilot save history** | `PilotArchive` backups + `PilotRoster` history; "Load Earlier Save" restores a prior snapshot | `PilotListView.swift` |
 | **Main menu + data layer** | Authentic PICT/rlëD assets; full resource-fork/`.ndat`/`.rez` parsing, plug-in override chain, typed decoders, sprite decode | `AuthenticMainMenuView.swift`, `NovaSwiftKit` |
+| **tvOS build** | `.tvOS(.v16)` platform target; controller-required gate (`ControllerRequiredView`) that lifts itself the moment a gamepad pairs; 10-foot UI layout pass; caches-only sandbox handling with iCloud self-heal | `Package.swift`, `App/RootView.swift`, `App/NovaStorage.swift` — see [TVOS.md](TVOS.md) |
+| **Game controller support** | Twin-stick flight (fixed steer/thrust + absolute-aim sticks) and a fully rebindable button map, on macOS/iPad/iPhone and required on tvOS; any MFi/Xbox/PlayStation pad, real controller-name display labels | `Input/GameControllerInput.swift`, `Input/PadBindings.swift`, `Input/ControllerCursor.swift` — see [CONTROLS.md](CONTROLS.md) |
+| **iCloud game-data sync** | Imported base game data zips + uploads to the player's private CloudKit database (fingerprint-guarded); other devices detect and restore it; tvOS restores automatically | `Data/GameDataCloudSync.swift`, `Sources/NovaSwiftPluginStore/GameDataArchiver.swift` — see [ICLOUD_SYNC.md](ICLOUD_SYNC.md) |
+| **tvOS local web importer** | A tiny local HTTP server on the Apple TV (port 8017) serves a drag-and-drop upload page for any browser on the same network, so a Files-app-less Apple TV can receive Nova Files directly | `Data/WebImportServer.swift`, `Launcher/DataSetupWizard.swift` (`TVWebImportPanel`) — see [TVOS.md](TVOS.md) |
 
 ## Built, not wired 🟡 (the code's there, but nothing calls it yet)
 
