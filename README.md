@@ -21,7 +21,9 @@ not an emulator. You point it at a copy of EV Nova you already own, and it reads
 your data and plays the game natively, with touch controls built for a screen you
 hold.
 
-It runs today on **macOS, iPadOS, and iOS**, all tested on real devices.
+It runs today on **macOS, iPadOS, iOS, and tvOS**, all tested on real devices.
+A native **Godot port for Linux and Windows** is also underway — see
+[Beyond Apple](#beyond-apple-the-godot-port).
 
 ## Screenshots
 
@@ -103,7 +105,7 @@ them.
 ## Where it's at — honestly
 
 **NOVA Swift is a near-complete, faithful port of EV Nova — you can play the
-whole game today, start to finish, on macOS, iPadOS, and iOS.** Flight and
+whole game today, start to finish, on macOS, iPadOS, iOS, and tvOS.** Flight and
 combat, the economy, the missions and their branching campaigns, boarding and
 capture, planetary domination, named captains, hired escorts, real explosion
 sprites and particle effects — the systems that make EV Nova *EV Nova* are all in
@@ -117,8 +119,9 @@ from the original":
 - **Bugs, crashes & performance** — the usual hardening as more people play on
   more devices.
 - **Enhancements & new features** — things the 2002 original never had.
-  Multiplayer is built and playable today (see above); controller support and
-  optional HD art are still ahead (see [What's coming](#whats-coming)).
+  Multiplayer, full controller support, a tvOS build, and iCloud syncing for
+  your imported game data are all built and playable today (see above and
+  below); optional HD art is still ahead (see [What's coming](#whats-coming)).
 
 If you find something off, the
 [issue tracker](https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/issues) is
@@ -137,26 +140,55 @@ the original. Everything modern is an opt-in layer on top, never a replacement.
   of finer PvP toggles, and smoother authority handoff when a host disconnects
   mid-session. Full design and implementation status in
   [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md).
+- **Game controller support** — **built and wired**: full gamepad play with
+  twin-stick flight and fully remappable buttons, on macOS, iPad, iPhone, and
+  Apple TV (any MFi / Xbox / PlayStation controller). Full detail in
+  [docs/CONTROLS.md](docs/CONTROLS.md).
+- **Apple TV** — **live**, not just planned: a tvOS build with its own 10-foot
+  UI, controller-required by design (the Siri Remote can't fly a ship), plus
+  two ways to get your game data onto it with no Files app in sight — iCloud
+  auto-restore or a local web-browser importer. Full detail in
+  [docs/TVOS.md](docs/TVOS.md).
+- **iCloud syncing for game data** — **built and wired**: import your EV Nova
+  data once, and NOVA Swift can sync it through your own private iCloud so
+  every other device you own — including a freshly-set-up Apple TV — restores
+  it automatically instead of re-importing. Full detail in
+  [docs/ICLOUD_SYNC.md](docs/ICLOUD_SYNC.md).
 - **Smarter, opt-in AI** — better evasion, coordinated fleets, and ammo discipline,
   behind the same brain the base AI uses, so you can leave it Classic or turn it up.
 - **HD art & richer audio** — optional higher-resolution sprites and sound packs,
   layered over the originals rather than replacing them.
-- **Game controller support** — full gamepad play with remappable controls, on
-  macOS and iPad.
-- **Apple TV** — we want NOVA Swift on the big screen too; a tvOS build is on the
-  list once controller support lands.
 
 The plans live in **[docs/MODERNIZATION.md](docs/MODERNIZATION.md)** and
 **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
+## Beyond Apple: the Godot port
+
+NOVA Swift's simulation, data layer, and story runtime are plain, portable
+Swift with almost no Apple-framework coupling — only the app's UI and
+rendering are SwiftUI/SpriteKit. That means a second frontend on **Godot 4**,
+bridged to the same Swift engine through a
+[SwiftGodot](https://github.com/migueldeicaza/SwiftGodot) GDExtension, can
+bring NOVA Swift to **Linux and Windows** without forking or reimplementing
+any of the game logic — the Apple app and the Godot build run the exact same
+`World.step`.
+
+This is in progress, not finished: a real Godot project (`godot/`) already
+flies a ship with the engine's actual Newtonian flight, renders real ships
+and planets decoded straight from the player's own data, and has a working
+HUD, radar, target lock, and weapons readout. Landing and launch are wired;
+the galaxy map, spaceport screens, and the story/mission runtime are next.
+Full status, architecture, and milestone tracking in
+**[docs/GODOT_LAYER.md](docs/GODOT_LAYER.md)**.
+
 ## Beta / TestFlight
 
-Native builds for **macOS, iPad, and iPhone** are live on **TestFlight** — no
-build step required. Join the public beta here:
+Native builds for **macOS, iPad, iPhone, and Apple TV** are live on
+**TestFlight** — no build step required. Join the public beta here:
 
 **→ [testflight.apple.com/join/3FBzwwq1](https://testflight.apple.com/join/3FBzwwq1)**
 
-The same link works for macOS and iOS/iPadOS. You'll still need to supply your own
+The same link covers all four platforms. You'll still need to supply your own
 legally-owned EV Nova data (see [The one rule](#the-one-rule-you-bring-the-game)).
 
 ## The one rule: you bring the game
@@ -219,6 +251,7 @@ Sources/
   novaswift-extract/     CLI inspector/harness that drives the libraries end-to-end
 Tests/                 Unit tests per library
 app/NovaSwift/           The multiplatform SwiftUI/SpriteKit app (the game itself)
+godot/                 Godot 4 frontend + SwiftGodot bridge (Linux/Windows port, in progress)
 data/base/             ⬅ your legally-owned EV Nova data goes here (git-ignored)
 ```
 
@@ -230,7 +263,10 @@ data/base/             ⬅ your legally-owned EV Nova data goes here (git-ignore
 - **[Architecture](docs/ARCHITECTURE.md)** · **[Data format](docs/DATA_FORMAT.md)** — how it's built.
 - Deep dives: [AI](docs/AI.md), [ship system](docs/SHIP_SYSTEM.md),
   [missions & story](docs/MISSIONS.md),
-  [mobile & plug-ins](docs/MOBILE_AND_PLUGINS.md).
+  [mobile & plug-ins](docs/MOBILE_AND_PLUGINS.md),
+  [controller support](docs/CONTROLS.md), [tvOS](docs/TVOS.md),
+  [iCloud game-data sync](docs/ICLOUD_SYNC.md),
+  [the Godot port](docs/GODOT_LAYER.md).
 
 > Some of the deeper docs (e.g. status write-ups) lag behind the code — this
 > README and the roadmap are the best current picture.
