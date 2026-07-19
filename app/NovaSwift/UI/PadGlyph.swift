@@ -28,7 +28,6 @@ final class PadState: ObservableObject {
     private func refresh() {
         pad = GCController.current?.extendedGamepad
         vendorName = GCController.current?.vendorName
-        print("PadState: current=\(GCController.current?.vendorName ?? "none") extended=\(pad != nil) all=\(GCController.controllers().map { $0.vendorName ?? "?" }.joined(separator: ","))")
     }
 
     /// "Ⓐ"-style hint text for an action on the current pad — the connected

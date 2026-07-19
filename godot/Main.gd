@@ -19,13 +19,17 @@
 # own game logic.
 #
 # Controls: arrows/WASD fly, Shift burn, Space fire primary, Ctrl fire secondary,
-# Tab nearest-hostile target, Backspace clear target, Q/E cycle secondary weapon.
+# Tab nearest-hostile target, Backspace clear target, Q/E cycle secondary weapon,
+# L land/launch. Docked: up/down select a commodity row, B buy 1 ton, S sell 1 ton.
 # See docs/GODOT_LAYER.md.
 
 extends Node2D
 
 var nova                     # NovaWorld (from the NovaSwiftGodot GDExtension)
 var _has_data := false
+
+# Trade Center: selected commodity row while docked.
+var _trade_selected := 0
 
 # Texture caches keyed by resource id: { id: { tex, fw, fh, cols, frames } }.
 var _ship_tex := {}
@@ -132,8 +136,9 @@ func _process(delta: float) -> void:
 
 	if nova.is_landed():
 		# Docked: the flight sim is paused (no set_intent/step) — only the
-		# launch hotkey and the message-log fade run. Mirrors the Apple app's
-		# spaceport screens owning the frame while landed.
+		# Trade Center + launch hotkeys and the message-log fade run. Mirrors
+		# the Apple app's spaceport screens owning the frame while landed.
+		_process_trade_hotkeys()
 		_on_key_pressed(KEY_L, func(): _on_launch())
 		_drain_events_to_log(delta)
 		queue_redraw()
@@ -186,7 +191,33 @@ func _process_hotkeys() -> void:
 func _on_land() -> void:
 	var name: String = nova.nearest_landable_name()
 	if nova.attempt_land():
+		_trade_selected = 0
 		_push_log("Docked at " + name)
+
+
+func _process_trade_hotkeys() -> void:
+	var n: int = nova.commodity_count()
+	if n <= 0:
+		return
+	_trade_selected = clampi(_trade_selected, 0, n - 1)
+	_on_key_pressed(KEY_UP, func(): _trade_selected = clampi(_trade_selected - 1, 0, n - 1))
+	_on_key_pressed(KEY_DOWN, func(): _trade_selected = clampi(_trade_selected + 1, 0, n - 1))
+	_on_key_pressed(KEY_B, func(): _on_trade_buy())
+	_on_key_pressed(KEY_S, func(): _on_trade_sell())
+
+
+func _on_trade_buy() -> void:
+	var name: String = nova.commodity_name(_trade_selected)
+	var bought: int = nova.buy_commodity(_trade_selected, 1)
+	if bought > 0:
+		_push_log("Bought 1 ton " + name)
+
+
+func _on_trade_sell() -> void:
+	var name: String = nova.commodity_name(_trade_selected)
+	var sold: int = nova.sell_commodity(_trade_selected, 1)
+	if sold > 0:
+		_push_log("Sold 1 ton " + name)
 
 
 func _on_key_pressed(key: Key, action: Callable) -> void:
@@ -496,15 +527,40 @@ func _draw_land_prompt(vp: Vector2) -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, col)
 
 
-# Milestone-4 placeholder: docked screen with no trade/outfitter/shipyard yet
-# (those need pilot-economy state the bridge doesn't expose so far — see
-# docs/GODOT_LAYER.md). Confirms the land/launch loop end-to-end in the
-# meantime; a real spaceport UI replaces this.
+# Docked screen: a bare-bones Trade Center (real prices/credits/cargo via the
+# bridge's PilotEconomy-backed calls) — the first working spaceport screen.
+# Outfitter/shipyard/bar/mission-BBS are still open milestone-4 work; see
+# docs/GODOT_LAYER.md.
 func _draw_spaceport_placeholder(vp: Vector2) -> void:
 	draw_rect(Rect2(Vector2.ZERO, vp), Color(0.05, 0.05, 0.08, 1.0))
-	var title := "Docked"
-	var pos := vp * 0.5 - Vector2(80, 0)
-	draw_string(ThemeDB.fallback_font, pos, title,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.85, 0.9, 1.0, 1.0))
-	draw_string(ThemeDB.fallback_font, pos + Vector2(0, 30), "Press L to launch",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.7, 0.75, 0.8, 0.9))
+	var origin := Vector2(60, 70)
+	draw_string(ThemeDB.fallback_font, origin, "Trade Center",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0.85, 0.9, 1.0, 1.0))
+
+	var credits: int = nova.player_credits()
+	var free: int = nova.cargo_free_tons()
+	var cap: int = nova.cargo_capacity_tons()
+	draw_string(ThemeDB.fallback_font, origin + Vector2(0, 28),
+		"%d credits · cargo %d/%d tons free" % [credits, free, cap],
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.75, 0.8, 0.85, 0.9))
+
+	var n: int = nova.commodity_count()
+	var row_y := origin.y + 70
+	if n <= 0:
+		draw_string(ThemeDB.fallback_font, Vector2(origin.x, row_y), "No commodity exchange here.",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.6, 0.6, 0.65, 0.9))
+	for i in n:
+		var name: String = nova.commodity_name(i)
+		var price: int = nova.commodity_price(i)
+		var held: int = nova.commodity_held(i)
+		var selected := i == _trade_selected
+		var col := Color(1.0, 0.95, 0.7, 1.0) if selected else Color(0.8, 0.85, 0.9, 0.85)
+		var prefix := "> " if selected else "  "
+		draw_string(ThemeDB.fallback_font, Vector2(origin.x, row_y),
+			"%s%-16s %5d cr/ton   held %d" % [prefix, name, price, held],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, col)
+		row_y += 22
+
+	draw_string(ThemeDB.fallback_font, Vector2(origin.x, row_y + 20),
+		"up/down select · B buy 1 ton · S sell 1 ton · L launch",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 1, Color(0.6, 0.65, 0.7, 0.85))
