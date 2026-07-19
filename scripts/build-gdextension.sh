@@ -49,4 +49,20 @@ if [ "$copied" -eq 0 ]; then
   exit 1
 fi
 
+# The bridge links SwiftGodot as a dynamic library too (an @loader_path /
+# $ORIGIN rpath entry, not a static link), so it has to sit next to
+# libNovaSwiftGodot in godot/bin/ or the extension fails to dlopen at runtime.
+for f in \
+  "$BIN_PATH/libSwiftGodot.so" \
+  "$BIN_PATH/libSwiftGodot.dylib" \
+  "$BIN_PATH/SwiftGodot.dll" \
+  "$BIN_PATH/libSwiftGodot.dll"; do
+  if [ -f "$f" ]; then
+    base="$(basename "$f")"
+    [ "$base" = "libSwiftGodot.dll" ] && base="SwiftGodot.dll"
+    cp -f "$f" "$OUT_DIR/$base"
+    echo "✓ copied $base → $OUT_DIR/"
+  fi
+done
+
 echo "Done. Open godot/ in Godot 4.2+ (or run the exported build) to play the slice."

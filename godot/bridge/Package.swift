@@ -15,14 +15,19 @@ import PackageDescription
 let package = Package(
     name: "NovaSwiftGodot",
     platforms: [
-        .macOS(.v13),
+        // Must be >= SwiftGodot's own minimum (macOS 14) even though the
+        // root NovaSwift package (and the Apple SpriteKit app) target 13.
+        .macOS(.v14),
     ],
     products: [
         .library(name: "NovaSwiftGodot", type: .dynamic, targets: ["NovaSwiftGodot"]),
     ],
     dependencies: [
         // The reusable Swift core (engine + data layer + story), by path.
-        .package(path: "../.."),
+        // NB: SwiftPM resolves a local path dependency's identity from its
+        // manifest `name:` (here "NovaSwift"), not the checkout directory
+        // name — but only if `name:` is passed explicitly here too.
+        .package(name: "NovaSwift", path: "../.."),
         // SwiftGodot — the maintained Swift binding for Godot 4 GDExtensions.
         // Pinned to a branch because SwiftGodot tracks Godot releases on `main`;
         // pin to a tagged version once the frontend stabilises.

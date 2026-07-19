@@ -21,6 +21,7 @@
 //
 // See docs/GODOT_LAYER.md.
 
+import Foundation
 import SwiftGodot
 import NovaSwiftEngine
 import NovaSwiftKit
