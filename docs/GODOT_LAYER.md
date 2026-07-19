@@ -102,6 +102,25 @@ every frame. Its surface (see `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swi
     ships from one array.
   - `drain_events() -> PackedStringArray` — one string per `WorldEvent` this
     step (weaponFired, shipDestroyed, …) for sound/FX hooks.
+- **Real-data render queries** (empty/sentinel in the demo world, so the frontend
+  calls them unconditionally)
+  - `has_game() -> bool`, `player_ship_type() -> int`,
+    `ship_type_name(ship_type) -> String`.
+  - `ship_sprite_frames() -> PackedInt32Array` — `[shipType, spriteFrame]` per
+    live ship, same order as `ship_transforms()`, so the frontend picks the right
+    pre-rotated sprite frame.
+  - `jump_radius() -> float`, `body_transforms() -> PackedFloat32Array`
+    (`[x, y, radius, kind]` per stellar body) and `body_spob_ids() ->
+    PackedInt32Array` for the system's planets/stations/gates.
+- **Sprite export** (raw RGBA — the decoders are pure Swift, no CoreGraphics, so
+  this is fully cross-platform; GDScript builds an `Image`/`ImageTexture` once per
+  resource and caches it)
+  - `ship_sprite_info(ship_type)` / `spob_sprite_info(spob_id) ->
+    PackedInt32Array` = `[frameW, frameH, frameCount, columns, rows, surfaceW,
+    surfaceH]`.
+  - `ship_sprite_rgba(ship_type)` / `spob_sprite_rgba(spob_id) ->
+    PackedByteArray` = the RGBA8 surface (6-wide frame grid; frame *i* is at cell
+    `(i % 6, i / 6)`).
 
 The bridge is **stateless glue**: no game logic lives here. Anything the bridge
 does that isn't marshalling is a bug — new behavior belongs in the engine, where
@@ -109,18 +128,27 @@ the Apple app gets it too.
 
 ## Vertical slice (what runs today)
 
-`godot/` is a minimal but real Godot project:
+`godot/` is a minimal but real Godot project. `Main.tscn` / `Main.gd`
+instantiates a `NovaWorld`, feeds keyboard input into `set_intent` each frame,
+calls `step(delta)`, and renders the result. It picks one of two modes at
+startup:
 
-- `Main.tscn` / `Main.gd` — instantiates a `NovaWorld`, calls `make_demo_world()`,
-  reads keyboard input each frame into `set_intent`, calls `step(delta)`, and
-  draws a parallax starfield plus every ship from `ship_transforms()`.
-- Arrow keys / WASD fly the ship with the engine's real Newtonian momentum — you
-  swing the nose and keep drifting, exactly like the Apple build, because it *is*
-  the same `World.step`.
+- **Real data** — if EV Nova data is found (`NOVA_DATA_DIR` env var, else the
+  repo's git-ignored `data/base/`), it `load_game` + `make_world(-1)`s a real
+  system and draws **actual hull and planet sprites** decoded by `NovaSwiftKit`,
+  plus the jump-radius ring. Sprites are the engine's own RGBA decode uploaded as
+  Godot textures (cached per resource).
+- **Demo** — otherwise a data-free physics world: a ship you fly plus drifting
+  hulls, drawn as primitives. Always runs, no data required.
+
+Either way, arrow keys / WASD fly the ship with the engine's real Newtonian
+momentum — you swing the nose and keep drifting, exactly like the Apple build,
+because it *is* the same `World.step`.
 
 This proves the full loop — **Godot input → Swift `ControlIntent` → `World.step`
-→ Swift readback → Godot rendering** — works on Linux and Windows. It is not the
-finished game; it is the foundation the real UI is built on next.
+→ Swift readback → Godot rendering** — works on Linux and Windows, over both a
+synthetic world and the player's real data. It is not the finished game; it is
+the foundation the real UI is built on next.
 
 ## Cross-platform status of the core
 
@@ -155,10 +183,11 @@ is a follow-up once the frontend is fleshed out.
 
 ## Milestones
 
-1. **Foundation + slice** (this change) — bridge target, `NovaWorld`, demo world,
-   flyable slice, build script, CI. ✅
+1. **Foundation + slice** — bridge target, `NovaWorld`, demo world, flyable
+   slice, build script, CI. ✅
 2. **Real data path** — sprite upload from `NovaSwiftKit` decode into Godot
    textures; render real ships/planets from the player's data via `make_world`.
+   ✅ *implemented; pending first on-toolchain compile.*
 3. **HUD & flight** — radar, status bar, target lock, weapons firing/FX, sound
    from `drain_events`.
 4. **Screens** — galaxy map, landing, spaceport (trade/outfit/shipyard), pilot

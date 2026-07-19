@@ -37,8 +37,16 @@ scripts/build-gdextension.sh          # from the repo root (debug; add 'release'
 godot --path godot
 ```
 
-The slice builds a **data-free demo world** — a ship you fly with real Newtonian
-momentum plus a ring of drifting hulls — so it runs with no EV Nova data.
+### Two modes (chosen automatically)
+
+- **Real data** — point it at your own EV Nova data and it renders **actual hull
+  and planet sprites** in a real system:
+  ```bash
+  NOVA_DATA_DIR=/path/to/your/EVNova/data godot --path godot
+  ```
+  If `NOVA_DATA_DIR` is unset it also checks the repo's git-ignored `data/base/`.
+- **Demo** — with no data found, it builds a **data-free demo world** (a ship you
+  fly plus a ring of drifting hulls, drawn as primitives). Always runs.
 
 Controls: **arrows / WASD** fly (you swing the nose and keep drifting — that's
 the engine's real physics), **Shift** afterburner, **Space** fire primary.
