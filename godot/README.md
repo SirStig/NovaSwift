@@ -66,9 +66,9 @@ milestones in [`../docs/GODOT_LAYER.md`](../docs/GODOT_LAYER.md).
 
 ## Note on the current status
 
-The Swift core was audited as cross-platform-clean and the bridge is written
-against the engine's real API, but it has **not yet been compiled on a Swift
-toolchain** (the authoring environment had none). Expect to shake out a few
-SwiftGodot/toolchain details on first build; CI
+Confirmed on-toolchain 2026-07-18: the bridge builds clean with
+`scripts/build-gdextension.sh` (Swift 6.3) and a headless `godot --path godot`
+run loads real EV Nova data, builds a system, and steps the simulation with no
+errors, on macOS. Linux/Windows are not yet verified locally — CI
 (`.github/workflows/godot-linux-windows.yml`) tracks the core's Linux/Windows
-compilation and the bridge build.
+compilation and the bridge build there.

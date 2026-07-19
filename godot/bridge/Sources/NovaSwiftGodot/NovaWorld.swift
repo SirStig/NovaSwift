@@ -6,18 +6,17 @@
 // can render cheaply. NO game logic lives here — anything past marshalling is a
 // bug and belongs in the engine, where the Apple app inherits it too.
 //
-// Method names below are camelCase in Swift; SwiftGodot exposes them to GDScript
-// in snake_case (`makeDemoWorld` → `make_demo_world`). The vertical-slice script
-// godot/Main.gd calls the snake_case names.
+// Method names below are camelCase in Swift; every `@Callable` is declared
+// `autoSnakeCase: true` so SwiftGodot exposes it to GDScript in snake_case
+// (`makeDemoWorld` → `make_demo_world`), matching what godot/Main.gd calls.
+// Confirmed on-toolchain: SwiftGodot's default (no `autoSnakeCase`) registers
+// the literal camelCase Swift name instead — GDScript does not snake_case
+// GDExtension methods for you, unlike its own built-in classes.
 //
-// SwiftGodot version assumptions to confirm on the first on-toolchain build
-// (see godot/README.md — this has not yet been compiled):
-//   1. Packed arrays construct from their Swift element arrays in one bulk copy —
-//      `PackedFloat32Array([Float])`, `PackedInt32Array([Int32])`,
-//      `PackedByteArray([UInt8])`, `PackedStringArray([String])`.
-//   2. `@Callable` methods are exposed to GDScript in snake_case.
-// Both are current SwiftGodot behaviour; if a pinned version differs, the fixes
-// are mechanical and local to this file.
+// Packed arrays construct from their Swift element arrays in one bulk copy —
+// `PackedFloat32Array([Float])`, `PackedInt32Array([Int32])`,
+// `PackedByteArray([UInt8])`, `PackedStringArray([String])` — confirmed
+// on-toolchain too.
 //
 // See docs/GODOT_LAYER.md.
 
@@ -41,7 +40,7 @@ class NovaWorld: Node2D {
     /// Build a bare physics world with a synthetic player ship and a few drifting
     /// NPCs. Runs with **no EV Nova data**, so the slice is playable immediately
     /// and proves the whole bridge end-to-end.
-    @Callable
+    @Callable(autoSnakeCase: true)
     func makeDemoWorld() {
         let player = Ship(
             name: "Player",
@@ -76,10 +75,13 @@ class NovaWorld: Node2D {
 
     /// Discover + merge the player's own EV Nova data (BYO-data, same as the
     /// Apple app). Returns false if the directory holds no readable game data.
-    @Callable
+    @Callable(autoSnakeCase: true)
     func loadGame(baseDir: String) -> Bool {
         let base = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: baseDir))
-        guard let collection = try? GameLibrary.merge(baseFiles: base) else { return false }
+        // `merge` never throws on an empty file list (it just yields an empty
+        // collection), so a missing/empty directory has to be rejected explicitly
+        // here rather than relying on `try?` to catch it.
+        guard !base.isEmpty, let collection = try? GameLibrary.merge(baseFiles: base) else { return false }
         let g = NovaGame(collection)
         self.game = g
         self.galaxy = Galaxy(game: g)
@@ -89,7 +91,7 @@ class NovaWorld: Node2D {
     /// After `loadGame`, populate a real system with NPCs from its `düde`/`flët`
     /// spawn table via `GameSession.makeWorld`. Pass a negative id to use the
     /// data's starting system. Returns false if no game is loaded.
-    @Callable
+    @Callable(autoSnakeCase: true)
     func makeWorld(systemID: Int) -> Bool {
         guard let game = self.game else { return false }
         let galaxy = self.galaxy ?? Galaxy(game: game)
@@ -109,7 +111,7 @@ class NovaWorld: Node2D {
 
     /// Map one frame of Godot input onto the engine's `ControlIntent`. Applied to
     /// the world at the next `step`.
-    @Callable
+    @Callable(autoSnakeCase: true)
     func setIntent(turnLeft: Bool, turnRight: Bool, thrust: Bool, reverse: Bool,
                    afterburner: Bool, firePrimary: Bool, fireSecondary: Bool) {
         var i = ControlIntent()
@@ -127,7 +129,7 @@ class NovaWorld: Node2D {
 
     /// Advance the simulation by `dt` seconds — the same `World.step` the Apple
     /// app and the headless `novaswift-extract ai` harness drive.
-    @Callable
+    @Callable(autoSnakeCase: true)
     func step(dt: Double) {
         guard let world = self.world else { return }
         world.intent = self.intent
@@ -136,39 +138,39 @@ class NovaWorld: Node2D {
 
     // MARK: Player readback
 
-    @Callable func playerPosition() -> Vector2 {
+    @Callable(autoSnakeCase: true) func playerPosition() -> Vector2 {
         guard let p = world?.player else { return Vector2(x: 0, y: 0) }
         return Vector2(x: Float(p.position.x), y: Float(p.position.y))
     }
 
-    @Callable func playerVelocity() -> Vector2 {
+    @Callable(autoSnakeCase: true) func playerVelocity() -> Vector2 {
         guard let p = world?.player else { return Vector2(x: 0, y: 0) }
         return Vector2(x: Float(p.velocity.x), y: Float(p.velocity.y))
     }
 
     /// Engine heading in radians (0 = up / north, increasing clockwise).
-    @Callable func playerAngle() -> Double {
+    @Callable(autoSnakeCase: true) func playerAngle() -> Double {
         world?.player.angle ?? 0
     }
 
-    @Callable func playerShieldFraction() -> Double {
+    @Callable(autoSnakeCase: true) func playerShieldFraction() -> Double {
         guard let p = world?.player, p.maxShield > 0 else { return 0 }
         return max(0, min(1, p.shield / p.maxShield))
     }
 
-    @Callable func playerArmorFraction() -> Double {
+    @Callable(autoSnakeCase: true) func playerArmorFraction() -> Double {
         guard let p = world?.player, p.maxArmor > 0 else { return 0 }
         return max(0, min(1, p.armor / p.maxArmor))
     }
 
-    @Callable func playerIsAlive() -> Bool {
+    @Callable(autoSnakeCase: true) func playerIsAlive() -> Bool {
         world?.player.isAlive ?? false
     }
 
     // MARK: All-ship readback
 
     /// Number of live ships this frame (player + living NPCs).
-    @Callable func shipCount() -> Int {
+    @Callable(autoSnakeCase: true) func shipCount() -> Int {
         guard let world = self.world else { return 0 }
         return 1 + world.npcs.filter { $0.isAlive }.count
     }
@@ -176,7 +178,7 @@ class NovaWorld: Node2D {
     /// Every live ship packed as `[x, y, angle, kind]` per ship, player first.
     /// `kind`: 0 = player, 1 = NPC, 2 = disabled NPC hulk. One flat array keeps
     /// the per-frame crossing cheap — GDScript strides it by 4.
-    @Callable func shipTransforms() -> PackedFloat32Array {
+    @Callable(autoSnakeCase: true) func shipTransforms() -> PackedFloat32Array {
         guard let world = self.world else { return PackedFloat32Array() }
         var flat: [Float] = []
 
@@ -192,11 +194,156 @@ class NovaWorld: Node2D {
         return PackedFloat32Array(flat)
     }
 
+    /// Entity id per live ship, SAME order as `shipTransforms()` (player first,
+    /// `Ship.entityID`). Lets the frontend map a radar blip or click back to a
+    /// concrete ship for `selectTarget`.
+    // autoSnakeCase mis-splits the "IDs" acronym as "i_ds" (see bodySpobIDs below).
+    @Callable(explicitName: "ship_ids") func shipIDs() -> PackedInt32Array {
+        guard let world = self.world else { return PackedInt32Array() }
+        var flat: [Int32] = [Int32(world.player.entityID)]
+        for npc in world.npcs where npc.isAlive { flat.append(Int32(npc.entityID)) }
+        return PackedInt32Array(flat)
+    }
+
+    /// Per live ship, SAME order as `shipTransforms()`: a radar/IFF category —
+    /// 0 hostile (red), 1 neutral (blue), 2 friendly/escort (green), 3 disabled
+    /// hulk (grey), 4 self (the player entry — the frontend already colors this
+    /// distinctly and shouldn't need to special-case index 0). Delegates to the
+    /// engine's own `Diplomacy`/brain hostility rules rather than re-deriving
+    /// them client-side.
+    @Callable(autoSnakeCase: true) func shipRelationships() -> PackedInt32Array {
+        guard let world = self.world else { return PackedInt32Array() }
+        var flat: [Int32] = [4]
+        for npc in world.npcs where npc.isAlive {
+            flat.append(relationship(of: npc, in: world))
+        }
+        return PackedInt32Array(flat)
+    }
+
+    private func relationship(of npc: Ship, in world: World) -> Int32 {
+        if npc.disabled { return 3 }
+        if world.isPlayerEscort(npc) { return 2 }
+        if world.isEffectivelyHostileToPlayer(npc) { return 0 }
+        return 1
+    }
+
+    // MARK: Targeting
+
+    /// Lock the nearest eligible ship in `World.targetLockRange` (excludes the
+    /// player's own fleet). `hostileOnly` narrows to ships that would actually
+    /// fight the player — the "nearest enemy" hotkey. Returns the locked ship's
+    /// entity id, or -1 if nothing was in range.
+    @Callable(autoSnakeCase: true) func selectNearestTarget(hostileOnly: Bool) -> Int {
+        world?.selectNearestTarget(hostileOnly: hostileOnly)?.entityID ?? -1
+    }
+
+    /// Lock a specific ship by id (click-to-select). Unlike
+    /// `selectNearestTarget`, allows disabled hulks and has no range gate.
+    @Callable(autoSnakeCase: true) func selectTarget(id: Int) -> Bool {
+        world?.selectTarget(id: id) != nil
+    }
+
+    /// Drop the player's current target lock, if any.
+    @Callable(autoSnakeCase: true) func clearPlayerTarget() {
+        world?.clearPlayerTarget()
+    }
+
+    /// The player's locked target's entity id, or -1 if none/no longer alive.
+    @Callable(autoSnakeCase: true) func playerTargetID() -> Int {
+        guard let world = self.world, let tid = world.player.currentTargetID,
+              let t = world.ship(id: tid), t.isAlive else { return -1 }
+        return tid
+    }
+
+    private var lockedTarget: Ship? {
+        guard let world = self.world, let tid = world.player.currentTargetID,
+              let t = world.ship(id: tid), t.isAlive else { return nil }
+        return t
+    }
+
+    @Callable(autoSnakeCase: true) func targetName() -> String { lockedTarget?.name ?? "" }
+
+    @Callable(autoSnakeCase: true) func targetShieldFraction() -> Double {
+        guard let t = lockedTarget, t.maxShield > 0 else { return 0 }
+        return max(0, min(1, t.shield / t.maxShield))
+    }
+
+    @Callable(autoSnakeCase: true) func targetArmorFraction() -> Double {
+        guard let t = lockedTarget, t.maxArmor > 0 else { return 0 }
+        return max(0, min(1, t.armor / t.maxArmor))
+    }
+
+    @Callable(autoSnakeCase: true) func targetIsHostile() -> Bool {
+        guard let world = self.world, let t = lockedTarget else { return false }
+        return world.isEffectivelyHostileToPlayer(t)
+    }
+
+    /// Distance from the player to the locked target, in px — 0 if no target.
+    @Callable(autoSnakeCase: true) func targetDistance() -> Double {
+        guard let world = self.world, let t = lockedTarget else { return 0 }
+        return (t.position - world.player.position).length
+    }
+
+    // MARK: Weapons
+
+    /// The EV Nova flight HUD's weapon readout tracks the selected *secondary*
+    /// (guns/primaries are "always available" and never occupy it) — a
+    /// guns-only ship correctly reports `hasSecondaryWeapon() == false`.
+    @Callable(autoSnakeCase: true) func hasSecondaryWeapon() -> Bool {
+        !(world?.player.secondaryWeaponIDs.isEmpty ?? true)
+    }
+
+    @Callable(autoSnakeCase: true) func secondaryWeaponName() -> String {
+        world?.player.effectiveSecondaryMount?.spec.name ?? ""
+    }
+
+    /// Remaining ammo for the effective secondary; -1 = unlimited, 0 if none fitted.
+    @Callable(autoSnakeCase: true) func secondaryWeaponAmmo() -> Int {
+        world?.player.effectiveSecondaryMount?.ammo ?? 0
+    }
+
+    /// 0 = ready to fire, 1 = just fired (full reload wait).
+    @Callable(autoSnakeCase: true) func secondaryWeaponCooldownFraction() -> Double {
+        guard let mount = world?.player.effectiveSecondaryMount, mount.spec.reloadSeconds > 0 else { return 0 }
+        return max(0, min(1, mount.cooldown / mount.spec.reloadSeconds))
+    }
+
+    /// Step the selected secondary to the next/previous fitted secondary.
+    /// Returns the new weapon's display name, or "" with no secondaries fitted.
+    @Callable(autoSnakeCase: true) func cycleSecondaryWeapon(forward: Bool) -> String {
+        guard let player = world?.player, !player.secondaryWeaponIDs.isEmpty else { return "" }
+        player.cycleSecondary(forward: forward)
+        return player.effectiveSecondaryMount?.spec.name ?? ""
+    }
+
+    // MARK: Sensors
+
+    /// `baseRange` (frontend's own radar-circle radius, e.g. 4500) shrunk by the
+    /// system's interference/jamming outfits for the player — mirrors the
+    /// Apple app's `World.effectiveSensorRange(_:for:)` call.
+    @Callable(autoSnakeCase: true) func effectiveSensorRange(baseRange: Double) -> Double {
+        guard let world = self.world else { return baseRange }
+        return world.effectiveSensorRange(baseRange, for: world.player)
+    }
+
+    // MARK: Fuel
+
+    @Callable(autoSnakeCase: true) func playerFuelFraction() -> Double {
+        guard let p = world?.player, p.maxFuel > 0 else { return 0 }
+        return max(0, min(1, p.fuel / p.maxFuel))
+    }
+
+    /// Whole hyperjumps left on the current fuel (`ShipFuel.perJump` each).
+    @Callable(autoSnakeCase: true) func playerJumpsRemaining() -> Int {
+        guard let p = world?.player else { return 0 }
+        return Int((p.fuel / ShipFuel.perJump).rounded(.down))
+    }
+
     /// One string per `WorldEvent` produced this step (the case name, e.g.
     /// `weaponFired`, `shipDestroyed`), for sound/FX hooks. Uses the case-name
     /// prefix of the reflected value so new engine event kinds surface without a
     /// bridge change.
-    @Callable func drainEvents() -> PackedStringArray {
+    @Callable(autoSnakeCase: true) func drainEvents() -> PackedStringArray {
         guard let world = self.world else { return PackedStringArray() }
         let names = world.events.map { String(String(describing: $0).prefix { $0 != "(" }) }
         return PackedStringArray(names)
@@ -208,20 +355,20 @@ class NovaWorld: Node2D {
     // so the frontend can call them unconditionally and fall back to primitives.
 
     /// True once real EV Nova data is loaded (vs the data-free demo world).
-    @Callable func hasGame() -> Bool { game != nil }
+    @Callable(autoSnakeCase: true) func hasGame() -> Bool { game != nil }
 
     /// The player hull's `shïp` id, or -1 (demo ship has no sprite).
-    @Callable func playerShipType() -> Int { world?.player.shipTypeID ?? -1 }
+    @Callable(autoSnakeCase: true) func playerShipType() -> Int { world?.player.shipTypeID ?? -1 }
 
     /// A hull's display name, or "" if unknown / no data.
-    @Callable func shipTypeName(shipType: Int) -> String {
+    @Callable(autoSnakeCase: true) func shipTypeName(shipType: Int) -> String {
         game?.ship(shipType)?.name ?? ""
     }
 
     /// Per live ship: `[shipType, spriteFrame]`, player first — SAME order and
     /// count as `shipTransforms()`, so the frontend zips the two. `shipType` is
     /// -1 for the synthetic demo ship (draw a primitive instead of a sprite).
-    @Callable func shipSpriteFrames() -> PackedInt32Array {
+    @Callable(autoSnakeCase: true) func shipSpriteFrames() -> PackedInt32Array {
         guard let world = self.world else { return PackedInt32Array() }
         var flat: [Int32] = [Int32(world.player.shipTypeID), Int32(world.player.spriteFrame)]
         for npc in world.npcs where npc.isAlive {
@@ -233,11 +380,11 @@ class NovaWorld: Node2D {
     // MARK: System geometry (stellar bodies)
 
     /// The system's hyperspace-jump radius (0 in the demo world).
-    @Callable func jumpRadius() -> Double { world?.systemContext.jumpRadius ?? 0 }
+    @Callable(autoSnakeCase: true) func jumpRadius() -> Double { world?.systemContext.jumpRadius ?? 0 }
 
     /// Per stellar body: `[x, y, radius, kind]`. `kind`: 0 landable planet,
     /// 1 non-landable planet, 2 hypergate, 3 wormhole, 4 deadly.
-    @Callable func bodyTransforms() -> PackedFloat32Array {
+    @Callable(autoSnakeCase: true) func bodyTransforms() -> PackedFloat32Array {
         guard let world = self.world else { return PackedFloat32Array() }
         var flat: [Float] = []
         for b in world.systemContext.bodies {
@@ -256,7 +403,8 @@ class NovaWorld: Node2D {
 
     /// Per stellar body: its `spöb` id (for sprite lookup), SAME order as
     /// `bodyTransforms()`.
-    @Callable func bodySpobIDs() -> PackedInt32Array {
+    // autoSnakeCase mis-splits the "IDs" acronym as "i_ds"; pin the name explicitly.
+    @Callable(explicitName: "body_spob_ids") func bodySpobIDs() -> PackedInt32Array {
         guard let world = self.world else { return PackedInt32Array() }
         return PackedInt32Array(world.systemContext.bodies.map { Int32($0.id) })
     }
@@ -269,22 +417,22 @@ class NovaWorld: Node2D {
 
     /// `[frameWidth, frameHeight, frameCount, columns, rows, surfaceWidth,
     /// surfaceHeight]` for a hull's rotation sheet, or empty if it has no sprite.
-    @Callable func shipSpriteInfo(shipType: Int) -> PackedInt32Array {
+    @Callable(autoSnakeCase: true) func shipSpriteInfo(shipType: Int) -> PackedInt32Array {
         spriteInfo(game?.shipSprite(shipType))
     }
 
     /// The RGBA8 surface bytes (`surfaceWidth*surfaceHeight*4`) for a hull's sheet.
-    @Callable func shipSpriteRGBA(shipType: Int) -> PackedByteArray {
+    @Callable(autoSnakeCase: true) func shipSpriteRGBA(shipType: Int) -> PackedByteArray {
         spriteRGBA(game?.shipSprite(shipType))
     }
 
     /// Same as `shipSpriteInfo`, for a planet/station's `spöb` sprite.
-    @Callable func spobSpriteInfo(spobID: Int) -> PackedInt32Array {
+    @Callable(autoSnakeCase: true) func spobSpriteInfo(spobID: Int) -> PackedInt32Array {
         spriteInfo(game?.spobSprite(spobID))
     }
 
     /// Same as `shipSpriteRGBA`, for a planet/station's `spöb` sprite.
-    @Callable func spobSpriteRGBA(spobID: Int) -> PackedByteArray {
+    @Callable(autoSnakeCase: true) func spobSpriteRGBA(spobID: Int) -> PackedByteArray {
         spriteRGBA(game?.spobSprite(spobID))
     }
 

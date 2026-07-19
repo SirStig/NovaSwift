@@ -1,4 +1,4 @@
-# NOVA Swift — Godot frontend (vertical slice, milestone 2).
+# NOVA Swift — Godot frontend (vertical slice, milestone 3: HUD & flight).
 #
 # Drives the Swift engine through the NovaSwiftGodot GDExtension and renders the
 # result. Two modes, chosen automatically at startup:
@@ -12,7 +12,14 @@
 # Either way the loop is the same and it's the real engine:
 #   Godot input -> Swift ControlIntent -> World.step -> Swift readback -> render.
 #
-# Controls: arrows / WASD fly (real Newtonian momentum), Shift burn, Space fire.
+# Swift is the single source of truth for game state: targeting, hostility,
+# weapon readiness, fuel, sensor range are all engine calls (mirroring the
+# Apple app's GameScene/GameHUDModel split) — this script only lays out pixels
+# and does small numeric formatting over whatever the bridge returns, never its
+# own game logic.
+#
+# Controls: arrows/WASD fly, Shift burn, Space fire primary, Ctrl fire secondary,
+# Tab nearest-hostile target, Backspace clear target, Q/E cycle secondary weapon.
 # See docs/GODOT_LAYER.md.
 
 extends Node2D
@@ -27,6 +34,14 @@ var _spob_tex := {}
 var _stars_near: PackedVector2Array
 var _stars_far: PackedVector2Array
 var _field := Vector2(4096, 4096)
+
+# Edge-triggered keys (Tab/Q/E/Backspace act once per press, not held).
+var _keys_down_last := {}
+
+# Rolling message log: [{text, age}], newest first, oldest fades out.
+var _log: Array = []
+const LOG_MAX_LINES := 6
+const LOG_LIFETIME := 6.0
 
 const SHIP_SIZE := 14.0
 const COLOR_PLAYER := Color(0.55, 0.85, 1.0)
@@ -43,6 +58,35 @@ const BODY_COLORS := [
 	Color(0.8, 0.5, 1.0),
 	Color(0.9, 0.35, 0.3),
 ]
+# Radar/IFF relationship code (from NovaWorld.shipRelationships) -> blip color.
+# 0 hostile, 1 neutral, 2 friendly/escort, 3 disabled, 4 self.
+const RELATIONSHIP_COLORS := [
+	Color(0.95, 0.25, 0.25),
+	Color(0.35, 0.55, 0.95),
+	Color(0.35, 0.9, 0.45),
+	Color(0.55, 0.55, 0.6),
+	COLOR_PLAYER,
+]
+
+const RADAR_CENTER_MARGIN := Vector2(120, 120)
+const RADAR_PIXEL_RADIUS := 90.0
+const RADAR_WORLD_RANGE := 4500.0   # matches the Apple app's own client-side radarRange
+
+# WorldEvent case name -> message-log phrase. Only the narratively-interesting
+# events surface here (matches GameHUDModel.post() on the Apple side); the
+# per-frame combat/FX ones (weaponFired, shieldHit, explosion, ...) are left for
+# a future sound/particle hookup, not this text log.
+const EVENT_MESSAGES := {
+	"shipDestroyed": "Target destroyed",
+	"shipDisabled": "Target disabled",
+	"shipScanned": "Cargo scanned",
+	"shipBoarded": "Boarding complete",
+	"assistanceDelivered": "Assistance delivered",
+	"shipLanded": "Docked",
+	"shipLaunched": "Launched",
+	"shipDepartedViaGate": "Ship departed via hypergate",
+	"shipEmergedFromGate": "Ship emerged from hypergate",
+}
 
 
 func _ready() -> void:
@@ -91,30 +135,66 @@ func _process(delta: float) -> void:
 	var thrust := Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W)
 	var reverse := Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S)
 	var afterburner := Input.is_key_pressed(KEY_SHIFT)
-	var fire := Input.is_key_pressed(KEY_SPACE)
+	var fire_primary := Input.is_key_pressed(KEY_SPACE)
+	var fire_secondary := Input.is_key_pressed(KEY_CTRL)
 
-	nova.set_intent(left, right, thrust, reverse, afterburner, fire, false)
+	nova.set_intent(left, right, thrust, reverse, afterburner, fire_primary, fire_secondary)
 	nova.step(delta)
 
-	_update_hud()
+	_process_hotkeys()
+	_drain_events_to_log(delta)
+	_update_top_label()
 	queue_redraw()
 
 
-func _update_hud() -> void:
+func _update_top_label() -> void:
 	var hud: Label = $HUD
-	var vel: Vector2 = nova.player_velocity()
 	var mode := "real data" if _has_data else "demo world (no data)"
 	var ship_name := ""
 	if _has_data:
 		ship_name = nova.ship_type_name(nova.player_ship_type())
-	hud.text = "NOVA Swift — Godot slice · %s%s\n" % [mode, ("  ·  " + ship_name) if ship_name != "" else ""] \
-		+ "shield %d%%   armor %d%%   speed %d px/s   ships %d\n" % [
-			int(round(nova.player_shield_fraction() * 100.0)),
-			int(round(nova.player_armor_fraction() * 100.0)),
-			int(round(vel.length())),
-			nova.ship_count(),
+	hud.text = "NOVA Swift — Godot slice · %s%s · ships %d\n" % [
+			mode, ("  ·  " + ship_name) if ship_name != "" else "", nova.ship_count(),
 		] \
-		+ "arrows/WASD fly · Shift burn · Space fire"
+		+ "arrows/WASD fly · Shift burn · Space fire · Ctrl secondary · Tab target · Q/E switch weapon"
+
+
+# Tab / Backspace / Q / E fire once per keypress, not once per held frame — poll
+# manually since the project has no InputMap actions defined for them.
+func _process_hotkeys() -> void:
+	_on_key_pressed(KEY_TAB, func(): nova.select_nearest_target(true))
+	_on_key_pressed(KEY_BACKSPACE, func(): nova.clear_player_target())
+	_on_key_pressed(KEY_Q, func(): _log_weapon_switch(nova.cycle_secondary_weapon(false)))
+	_on_key_pressed(KEY_E, func(): _log_weapon_switch(nova.cycle_secondary_weapon(true)))
+
+
+func _on_key_pressed(key: Key, action: Callable) -> void:
+	var down := Input.is_key_pressed(key)
+	if down and not _keys_down_last.get(key, false):
+		action.call()
+	_keys_down_last[key] = down
+
+
+func _log_weapon_switch(new_name: String) -> void:
+	if new_name != "":
+		_push_log("Secondary: " + new_name)
+
+
+func _push_log(text: String) -> void:
+	_log.push_front({"text": text, "age": 0.0})
+	if _log.size() > LOG_MAX_LINES:
+		_log.resize(LOG_MAX_LINES)
+
+
+func _drain_events_to_log(delta: float) -> void:
+	for entry in _log:
+		entry["age"] += delta
+	_log = _log.filter(func(e): return e["age"] < LOG_LIFETIME)
+
+	for event_name in nova.drain_events():
+		var msg: String = EVENT_MESSAGES.get(event_name, "")
+		if msg != "":
+			_push_log(msg)
 
 
 func _draw() -> void:
@@ -131,7 +211,13 @@ func _draw() -> void:
 	if _has_data:
 		_draw_bodies(center, pw)
 
-	_draw_ships(center, pw)
+	var target_id: int = nova.player_target_id()
+	_draw_ships(center, pw, target_id)
+	_draw_status_bars(vp)
+	_draw_weapon_readout(vp)
+	_draw_target_panel(vp, target_id)
+	_draw_radar(vp, pw)
+	_draw_message_log(vp)
 
 
 func _to_screen(world_pos: Vector2, center: Vector2, pw: Vector2) -> Vector2:
@@ -165,9 +251,10 @@ func _draw_bodies(center: Vector2, pw: Vector2) -> void:
 		n += 1
 
 
-func _draw_ships(center: Vector2, pw: Vector2) -> void:
+func _draw_ships(center: Vector2, pw: Vector2, target_id: int) -> void:
 	var xf: PackedFloat32Array = nova.ship_transforms()          # [x, y, angle, kind] * N
 	var sf: PackedInt32Array = nova.ship_sprite_frames()          # [shipType, frame] * N
+	var ids: PackedInt32Array = nova.ship_ids()                   # entity id * N
 	var i := 0
 	var n := 0
 	while i + 3 < xf.size():
@@ -182,6 +269,8 @@ func _draw_ships(center: Vector2, pw: Vector2) -> void:
 			_draw_sprite(entry, pos, frame)
 		else:
 			_draw_ship_primitive(pos, angle, kind)
+		if target_id >= 0 and n < ids.size() and ids[n] == target_id:
+			draw_arc(pos, SHIP_SIZE * 1.8, 0.0, TAU, 24, Color(1.0, 0.35, 0.3, 0.85), 1.5, true)
 		i += 4
 		n += 1
 
@@ -256,3 +345,109 @@ func _draw_ship_primitive(pos: Vector2, angle: float, kind: int) -> void:
 	elif kind == 2:
 		col = COLOR_DISABLED
 	draw_colored_polygon(PackedVector2Array([nose, tail_l, tail_r]), col)
+
+
+# MARK: HUD — status bars, weapon readout, target panel, radar, message log.
+# All values below come straight from bridge Callables (Swift's World/Ship
+# state); this function only picks colors/positions and formats numbers.
+
+const BAR_W := 170.0
+const BAR_H := 14.0
+const BAR_GAP := 6.0
+const HUD_FONT_SIZE := 14
+
+func _bar(pos: Vector2, frac: float, fill: Color, label: String) -> void:
+	var bg := Color(0.15, 0.15, 0.18, 0.85)
+	draw_rect(Rect2(pos, Vector2(BAR_W, BAR_H)), bg)
+	draw_rect(Rect2(pos, Vector2(BAR_W * clampf(frac, 0.0, 1.0), BAR_H)), fill)
+	draw_rect(Rect2(pos, Vector2(BAR_W, BAR_H)), Color(1, 1, 1, 0.25), false, 1.0)
+	draw_string(ThemeDB.fallback_font, pos + Vector2(6, BAR_H - 3), label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 2, Color(1, 1, 1, 0.9))
+
+
+func _draw_status_bars(vp: Vector2) -> void:
+	var origin := Vector2(20, vp.y - 96)
+	var shield: float = nova.player_shield_fraction()
+	var armor: float = nova.player_armor_fraction()
+	var fuel: float = nova.player_fuel_fraction()
+	var jumps: int = nova.player_jumps_remaining()
+
+	_bar(origin, shield, Color(0.35, 0.65, 1.0), "Shield %d%%" % int(round(shield * 100)))
+	_bar(origin + Vector2(0, BAR_H + BAR_GAP), armor, Color(0.85, 0.65, 0.25), "Armor %d%%" % int(round(armor * 100)))
+	_bar(origin + Vector2(0, (BAR_H + BAR_GAP) * 2), fuel, Color(0.4, 0.85, 0.5), "Fuel · %d jump%s" % [jumps, "" if jumps == 1 else "s"])
+
+
+func _draw_weapon_readout(vp: Vector2) -> void:
+	var pos := Vector2(vp.x * 0.5 - BAR_W * 0.5, vp.y - 40)
+	if not nova.has_secondary_weapon():
+		draw_string(ThemeDB.fallback_font, pos, "No Secondary Weapon",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(0.7, 0.7, 0.75, 0.8))
+		return
+
+	var name: String = nova.secondary_weapon_name()
+	var ammo: int = nova.secondary_weapon_ammo()
+	var cooldown: float = nova.secondary_weapon_cooldown_fraction()
+	var label := "%s - %d" % [name, ammo] if ammo >= 0 else name
+	draw_string(ThemeDB.fallback_font, pos, label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, Color(1, 0.9, 0.75, 0.95))
+	# Ready/reload bar — full when ready to fire, drains as it just fired.
+	var bar_pos := pos + Vector2(0, 6)
+	draw_rect(Rect2(bar_pos, Vector2(BAR_W, 4)), Color(0.15, 0.15, 0.18, 0.85))
+	draw_rect(Rect2(bar_pos, Vector2(BAR_W * (1.0 - cooldown), 4)), Color(1.0, 0.7, 0.3))
+
+
+func _draw_target_panel(vp: Vector2, target_id: int) -> void:
+	if target_id < 0:
+		return
+	var pos := Vector2(vp.x - BAR_W - 20, 130)
+	var name: String = nova.target_name()
+	var hostile: bool = nova.target_is_hostile()
+	var shield: float = nova.target_shield_fraction()
+	var armor: float = nova.target_armor_fraction()
+	var dist: float = nova.target_distance()
+
+	var name_col := Color(0.95, 0.35, 0.3) if hostile else Color(0.55, 0.8, 1.0)
+	draw_string(ThemeDB.fallback_font, pos, name,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE, name_col)
+	draw_string(ThemeDB.fallback_font, pos + Vector2(0, 16), "%d m" % int(dist),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 2, Color(0.8, 0.8, 0.85, 0.8))
+	_bar(pos + Vector2(0, 24), shield, Color(0.35, 0.65, 1.0), "Shield %d%%" % int(round(shield * 100)))
+	_bar(pos + Vector2(0, 24 + BAR_H + BAR_GAP), armor, Color(0.85, 0.65, 0.25), "Armor %d%%" % int(round(armor * 100)))
+
+
+func _draw_radar(vp: Vector2, pw: Vector2) -> void:
+	var rc := Vector2(vp.x - RADAR_CENTER_MARGIN.x, RADAR_CENTER_MARGIN.y)
+	var sensor_range: float = nova.effective_sensor_range(RADAR_WORLD_RANGE)
+	if sensor_range <= 0.0:
+		sensor_range = RADAR_WORLD_RANGE
+
+	draw_circle(rc, RADAR_PIXEL_RADIUS, Color(0.08, 0.12, 0.1, 0.55))
+	draw_arc(rc, RADAR_PIXEL_RADIUS, 0.0, TAU, 48, Color(0.4, 0.9, 0.5, 0.5), 1.0, true)
+
+	var xf: PackedFloat32Array = nova.ship_transforms()
+	var rel: PackedInt32Array = nova.ship_relationships()
+	var i := 0
+	var n := 0
+	while i + 3 < xf.size():
+		if n > 0:  # index 0 is the player; drawn as the fixed center dot below.
+			var world_offset := Vector2(xf[i], xf[i + 1]) - pw
+			var d := world_offset.length()
+			if d <= sensor_range:
+				var blip_offset := Vector2(world_offset.x, -world_offset.y) * (RADAR_PIXEL_RADIUS / sensor_range)
+				var code: int = rel[n] if n < rel.size() else 1
+				var col: Color = RELATIONSHIP_COLORS[code] if code < RELATIONSHIP_COLORS.size() else RELATIONSHIP_COLORS[1]
+				draw_circle(rc + blip_offset, 2.5, col)
+		i += 4
+		n += 1
+
+	draw_circle(rc, 3.0, COLOR_PLAYER)
+
+
+func _draw_message_log(vp: Vector2) -> void:
+	var pos := Vector2(20, vp.y - 220)
+	for entry in _log:
+		var t: float = entry["age"]
+		var alpha := clampf(1.0 - (t / LOG_LIFETIME), 0.0, 1.0)
+		draw_string(ThemeDB.fallback_font, pos, str(entry["text"]),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, HUD_FONT_SIZE - 1, Color(0.9, 0.9, 0.85, alpha))
+		pos.y -= 18
