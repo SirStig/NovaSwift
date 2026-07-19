@@ -356,7 +356,7 @@ struct SpaceportView: View {
                 if spob.hasOutfitter { Button("Outfitter") { screen = .outfit } }
                 if spob.hasCommodityExchange { Button("Trade Center") { screen = .trade } }
                 if spob.hasBar { Button("Bar") { screen = .bar } }
-                Button("Leave", action: onDepart).buttonStyle(.borderedProminent)
+                Button("Leave", action: onDepart).novaProminentButton()
             }
         }
         .padding(40)
@@ -457,7 +457,7 @@ struct MissionBBSView: View {
                             .background(isSelected ? Color.white.opacity(0.14) : .clear)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                 }
             }
         }

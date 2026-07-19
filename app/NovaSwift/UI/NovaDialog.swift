@@ -61,7 +61,7 @@ struct NovaDialog<Content: View>: View {
             // card reads as a postage stamp on a 1920pt screen. Scale the whole
             // panel up (the controller cursor's hit frames follow transforms,
             // so clicks stay aligned).
-            .scaleEffect(1.5)
+            .cursorScaleEffect(1.5)
             #endif
         }
     }
@@ -81,8 +81,10 @@ struct NovaDialog<Content: View>: View {
             HStack(spacing: 10) {
                 Spacer()
                 ForEach(buttons) { b in
+                    // Both faces register their own cursor target (NovaButton
+                    // internally; the pill via CursorButton) — no outer
+                    // registration, or Ⓐ would have two overlapping targets.
                     footerButton(b)
-                        .cursorClickable { if b.enabled { model.audio.play(.uiSelect); b.action() } }
                 }
             }
             .padding(.horizontal, 16)
@@ -111,7 +113,7 @@ struct NovaDialog<Content: View>: View {
                 b.action()
             }
         } else {
-            Button { model.audio.play(.uiSelect); b.action() } label: {
+            CursorButton { model.audio.play(.uiSelect); b.action() } label: {
                 Text(b.title)
                     .novaFont(.button, size: 15 * footerScale)
                     .foregroundStyle(!b.enabled ? Color(white: 0.45)
@@ -127,7 +129,6 @@ struct NovaDialog<Content: View>: View {
                     )
                     .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
             }
-            .buttonStyle(.plain)
             .disabled(!b.enabled)
         }
     }
@@ -172,7 +173,7 @@ struct DialogChrome<Content: View>: View {
                 card
                     .frame(width: designW, height: designH)
                     .background(NovaPanelBackground(graphics: model.uiGraphics, modern: model.settings.modernDialogs))
-                    .scaleEffect(scale)
+                    .cursorScaleEffect(scale)
                     .frame(width: geo.size.width, height: geo.size.height)
             }
         }
@@ -215,14 +216,12 @@ struct DialogChrome<Content: View>: View {
         if let graphics = model.uiGraphics, !model.settings.modernDialogs {
             NovaButton(graphics: graphics, title: "Done", width: 60) { onClose() }
         } else {
-            Button { onClose() } label: {
+            CursorButton { onClose() } label: {
                 Text("Done").novaFont(.button, weight: .semibold)
                     .foregroundStyle(.black)
                     .padding(.horizontal, 22).padding(.vertical, 7)
                     .background(Capsule().fill(novaAmber))
             }
-            .buttonStyle(.plain)
-            .cursorClickable(onClose)
         }
     }
 }
@@ -353,7 +352,7 @@ struct NovaSelectRow<Detail: View>: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        CursorButton(action: action) {
             HStack(spacing: 10) {
                 if let systemImage {
                     Image(systemName: systemImage)
@@ -370,7 +369,5 @@ struct NovaSelectRow<Detail: View>: View {
             .background(selected ? novaAmber : Color(white: 0.14),
                         in: RoundedRectangle(cornerRadius: 5))
         }
-        .buttonStyle(.plain)
-        .cursorClickable(action)
     }
 }

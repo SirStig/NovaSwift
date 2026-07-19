@@ -203,7 +203,7 @@ struct TouchControlsOverlay: View {
                     .frame(width: 18 * m.s, height: 20 * m.s)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .disabled(!hud.hasSecondary)
 
             Button { onDiscrete(.selectSecondaryNext) } label: {
@@ -217,7 +217,7 @@ struct TouchControlsOverlay: View {
                 .padding(.horizontal, 10 * m.s).padding(.vertical, 5 * m.s)
                 .frame(maxWidth: 140 * m.s)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
         }
         .padding(.leading, 2 * m.s)
         .novaControlPanel(corner: 7 * m.s)
@@ -302,7 +302,7 @@ struct TouchControlsOverlay: View {
             .overlay(RoundedRectangle(cornerRadius: 10 * m.s)
                 .strokeBorder(novaAmber.opacity(enabled ? 0.22 : 0.08)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .disabled(!enabled)
     }
 }

@@ -60,7 +60,7 @@ struct MissionBoardView: View {
                             .padding(.vertical, 2.5)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.novaPlain)
                         if let tag = storylineTags[mission.id] {
                             StorylineTagBadge(title: tag.title) { openStoryline(tag.key) }
                         }
@@ -268,7 +268,7 @@ private struct MissionInfoSheet: View {
                                  width: 191, align: .leading)
                             .padding(.vertical, 1)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                 }
             }
         }
@@ -289,7 +289,7 @@ private struct MissionInfoSheet: View {
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()
-                Button(offer.acceptButton, action: onAccept).buttonStyle(.borderedProminent)
+                Button(offer.acceptButton, action: onAccept).novaProminentButton()
                     .disabled(!offer.canAccept)
             }
         }
@@ -353,7 +353,7 @@ struct MissionSingleDialog: View {
             let scale = novaFrameScale(frame: CGSize(width: Self.frameWidth, height: Self.frameHeight),
                                        viewport: geo.size)
             frameBody
-                .scaleEffect(scale)
+                .cursorScaleEffect(scale)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .overlay { if moviePlayer != nil { moviePlayerOverlay } }
@@ -429,7 +429,7 @@ struct MissionSingleDialog: View {
                                     Label("Play Clip", systemImage: "play.circle.fill")
                                         .font(.system(size: 11, weight: .semibold))
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.novaPlain)
                                 .foregroundStyle(novaAmber)
                             }
                             NovaText(offer.briefingText, size: 10, width: 411, align: .leading)
@@ -479,7 +479,7 @@ struct MissionSingleDialog: View {
                 .foregroundStyle(enabled ? .white : Color(white: 0.35))
                 .frame(width: 23, height: 23)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .disabled(!enabled)
     }
 
@@ -495,7 +495,7 @@ struct MissionSingleDialog: View {
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()
-                Button(offer.acceptButton, action: onAccept).buttonStyle(.borderedProminent)
+                Button(offer.acceptButton, action: onAccept).novaProminentButton()
                     .disabled(!offer.canAccept)
             }
         }

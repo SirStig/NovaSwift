@@ -348,7 +348,7 @@ struct EscortsView: View {
                     .background(Color(white: 0.18))
                     .overlay(Rectangle().strokeBorder(Color(white: 0.3)))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .disabled(!enabled)
         }
     }

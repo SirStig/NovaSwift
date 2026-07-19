@@ -73,7 +73,7 @@ struct ChatButton: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 }
 
@@ -113,7 +113,7 @@ struct ChatOverlayView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.white.opacity(0.8))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .padding(.leading, 6)
         }
         .padding(10)
@@ -168,7 +168,7 @@ struct ChatOverlayView: View {
                     .foregroundStyle(draft.trimmingCharacters(in: .whitespaces).isEmpty
                                      ? .white.opacity(0.3) : .white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(10)

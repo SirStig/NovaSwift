@@ -150,7 +150,7 @@ struct StoryGuideView: View {
                         Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
-                .buttonStyle(.plain).foregroundStyle(EVTheme.text)
+                .buttonStyle(.novaPlain).foregroundStyle(EVTheme.text)
             } else {
                 Text("Story Guide").novaFont(.heading, weight: .bold)
             }
@@ -172,7 +172,7 @@ struct StoryGuideView: View {
     @ViewBuilder private var closeButton: some View {
         if let onClose {
             Button(action: onClose) { Image(systemName: "xmark.circle.fill").font(.title2) }
-                .buttonStyle(.plain).foregroundStyle(EVTheme.text.opacity(0.6))
+                .buttonStyle(.novaPlain).foregroundStyle(EVTheme.text.opacity(0.6))
         }
     }
 
@@ -342,7 +342,7 @@ private struct StorylineSidebar: View {
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.06)))
             }
-            .buttonStyle(.plain).padding(10)
+            .buttonStyle(.novaPlain).padding(10)
         }
     }
 
@@ -368,7 +368,7 @@ private struct StorylineSidebar: View {
             .background(RoundedRectangle(cornerRadius: 8)
                 .fill(lane.key == selectedKey ? EVTheme.accent.opacity(0.18) : Color.clear))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 }
 

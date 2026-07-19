@@ -104,7 +104,7 @@ struct SettingsView: View {
                 Label("Reset All Settings", systemImage: "arrow.counterclockwise")
                     .novaFont(.caption)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .foregroundStyle(.red)
             .padding(.horizontal, 10).padding(.vertical, 6)
         }
@@ -312,7 +312,7 @@ struct SettingsView: View {
                     Label("Test Beep", systemImage: "speaker.wave.2")
                 }
             }
-            .buttonStyle(.bordered)
+            .novaBorderedButton()
         }
     }
 

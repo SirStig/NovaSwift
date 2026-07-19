@@ -195,7 +195,7 @@ struct TradeCenterView: View {
                 NovaText("×\(pendingQty) per tap", size: 10, color: .gray, width: 90)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             if let banner = disasterBanner {
                 NovaText(banner, size: 10, color: Color(red: 1, green: 0.55, blue: 0.3), width: 126)
             }

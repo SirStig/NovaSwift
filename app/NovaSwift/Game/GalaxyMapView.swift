@@ -797,7 +797,7 @@ struct GalaxyMapView: View {
                                CGFloat(Item.canvas.top + Item.canvas.h) - 120 - nh / 2)
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
-            .scaleEffect(scale)
+            .cursorScaleEffect(scale)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
     }
@@ -923,7 +923,7 @@ struct GalaxyMapView: View {
                         .background((canGo ? routeGreen : routeWarn).opacity(0.18), in: Capsule())
                         .overlay(Capsule().strokeBorder((canGo ? routeGreen : routeWarn).opacity(0.6)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
                 .disabled(!canGo)
             } else {
                 NovaText("Click a system to plot a course · drag to pan · pinch or +/− to zoom",
@@ -979,7 +979,7 @@ struct GalaxyMapView: View {
                 Button(action: onClose) {
                     Image(systemName: "xmark").font(.subheadline.weight(.bold))
                         .padding(8).background(.ultraThinMaterial, in: Circle())
-                }.buttonStyle(.plain)
+                }.buttonStyle(.novaPlain)
             }
             Spacer()
             // No backdrop art in this fallback, so `routeBar` gets its own
@@ -998,7 +998,7 @@ struct GalaxyMapView: View {
         Button(action: action) {
             Image(systemName: icon).font(.subheadline)
                 .padding(8).background(.ultraThinMaterial, in: Circle())
-        }.buttonStyle(.plain)
+        }.buttonStyle(.novaPlain)
     }
 
     // MARK: Chrome — full-screen (Enhanced / Nova Swift)
@@ -1083,7 +1083,7 @@ struct GalaxyMapView: View {
                 .padding(.horizontal, 14).padding(.vertical, 7)
                 .background(c.opacity(0.14), in: Capsule())
                 .overlay(Capsule().strokeBorder(c.opacity(0.5)))
-        }.buttonStyle(.plain)
+        }.buttonStyle(.novaPlain)
     }
 
     /// A round icon button (zoom −/+, recenter) matching `overlayButton`'s look.
@@ -1093,6 +1093,6 @@ struct GalaxyMapView: View {
                 .frame(width: 34, height: 34)
                 .background(amber.opacity(0.14), in: Circle())
                 .overlay(Circle().strokeBorder(amber.opacity(0.5)))
-        }.buttonStyle(.plain)
+        }.buttonStyle(.novaPlain)
     }
 }

@@ -384,7 +384,7 @@ struct AuthenticMainMenuView: View {
     }
 
     private func extraButton(_ label: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
-        Button { model.audio.play(.uiSelect); action() } label: {
+        CursorButton { model.audio.play(.uiSelect); action() } label: {
             HStack(spacing: 7) {
                 Image(systemName: icon)
                 Text(label).font(.caption.weight(.semibold))
@@ -393,7 +393,6 @@ struct AuthenticMainMenuView: View {
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
         }
-        .buttonStyle(.plain)
         .foregroundStyle(.white.opacity(0.85))
     }
 

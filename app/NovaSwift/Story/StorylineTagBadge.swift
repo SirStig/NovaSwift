@@ -24,7 +24,7 @@ struct StorylineTagBadge: View {
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(Color(red: 0.98, green: 0.75, blue: 0.35))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .accessibilityLabel("Continues the \(title) storyline")
         .help("Continues the \(title) storyline — open in Story Guide")
     }

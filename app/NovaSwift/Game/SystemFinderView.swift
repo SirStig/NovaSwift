@@ -53,7 +53,7 @@ struct SystemFinderView: View {
                         }
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             }
             .overlay {
                 if filtered.isEmpty {

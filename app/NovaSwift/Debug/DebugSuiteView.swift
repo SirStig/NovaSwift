@@ -111,7 +111,7 @@ struct DebugSuiteView: View {
             .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(green.opacity(0.6)))
             .foregroundStyle(green)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     /// A compact green-tinted toggle row for the suite's own switches.
@@ -155,7 +155,7 @@ struct DebugSuiteView: View {
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(green.opacity(0.6)))
                 .foregroundStyle(green)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
 
             // At-a-glance quick actions for the most common tweaks.
             HStack(spacing: 8) {
@@ -190,7 +190,7 @@ struct DebugSuiteView: View {
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.12)))
                 .foregroundStyle(.white)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     private var panel: some View {
@@ -230,7 +230,7 @@ struct DebugSuiteView: View {
                 Image(systemName: "xmark").font(.subheadline.weight(.bold))
                     .padding(8).background(.ultraThinMaterial, in: Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
         }
         .padding(16)
     }
@@ -409,7 +409,7 @@ struct DebugSuiteView: View {
                 )
                 .foregroundStyle(debug.perfTestActive ? Color(red: 0.95, green: 0.45, blue: 0.4) : green)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
 
             if debug.perfTestActive {
                 Text("Test running — \(debug.shipCount) ships live. Fly in and watch the numbers above.")
@@ -541,7 +541,7 @@ struct DebugMetricsChip: View {
             .overlay(Capsule().strokeBorder(green.opacity(0.4)))
             .foregroundStyle(.white)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     private var fpsColor: Color {

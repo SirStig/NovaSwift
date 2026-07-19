@@ -136,7 +136,7 @@ struct ModernMainMenuView: View {
             .overlay(Capsule().strokeBorder((prominent ? Color.white.opacity(0.3) : accent.opacity(0.35)), lineWidth: 1))
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     /// A compact secondary button (Plug-ins / Import / Quit).
@@ -153,7 +153,7 @@ struct ModernMainMenuView: View {
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     /// Dialogs presented full-screen over the menu, matching the authentic menu's

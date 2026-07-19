@@ -89,7 +89,7 @@ struct NovaMenu<Content: View>: View {
                 if novaDebug { NovaDebugGrid.forSpace(space) }
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
-            .scaleEffect(scale)
+            .cursorScaleEffect(scale)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .background((overlay ? Color.clear : Color.black).ignoresSafeArea())
@@ -159,6 +159,17 @@ struct NovaButton: View {
     @State private var longPressFired = false
 
     var body: some View {
+        #if os(tvOS)
+        // No real `Button` on tvOS — buttons are always focusable there and
+        // the focus engine would paint its huge white platter over the art
+        // (see CursorButton). The cursor is the pointer; the face + a cursor
+        // target is the whole control. No long-press either: tvOS has no
+        // touch, so the quantity prompt stays a macOS/iOS affordance.
+        NovaButtonFace(graphics: graphics, title: title, width: width,
+                       state: enabled ? .normal : .grey, theme: theme)
+            .contentShape(Rectangle())
+            .cursorClickable { if enabled { action() } }
+        #else
         Button(action: {
             guard enabled else { return }
             #if os(macOS)
@@ -179,6 +190,7 @@ struct NovaButton: View {
             )
             // Every authentic button is pressable by the controller cursor.
             .cursorClickable { if enabled { action() } }
+        #endif
     }
 }
 
@@ -196,11 +208,19 @@ struct NovaIconButton: View {
     @Environment(\.novaTheme) private var theme
 
     var body: some View {
+        #if os(tvOS)
+        // Same as NovaButton: face + cursor target, no focusable Button.
+        NovaIconButtonFace(graphics: graphics, systemName: systemName,
+                           state: enabled ? .normal : .grey, enabled: enabled, theme: theme)
+            .contentShape(Rectangle())
+            .cursorClickable { if enabled { action() } }
+        #else
         Button(action: { if enabled { action() } }) { Color.clear }
             .buttonStyle(NovaIconButtonStyle(graphics: graphics, systemName: systemName,
                                              enabled: enabled, theme: theme))
             .disabled(!enabled)
             .cursorClickable { if enabled { action() } }
+        #endif
     }
 }
 
@@ -211,8 +231,23 @@ struct NovaIconButtonStyle: ButtonStyle {
     var theme: NovaUITheme = .fallback
 
     func makeBody(configuration: Configuration) -> some View {
-        let state: SpaceportGraphics.ButtonState =
-            !enabled ? .grey : (configuration.isPressed ? .clicked : .normal)
+        NovaIconButtonFace(graphics: graphics, systemName: systemName,
+                           state: !enabled ? .grey : (configuration.isPressed ? .clicked : .normal),
+                           enabled: enabled, theme: theme)
+            .contentShape(Rectangle())
+    }
+}
+
+/// The square icon button's visual, independent of `Button` machinery so the
+/// tvOS cursor path can draw it directly (see `NovaIconButton.body`).
+struct NovaIconButtonFace: View {
+    let graphics: SpaceportGraphics
+    let systemName: String
+    let state: SpaceportGraphics.ButtonState
+    let enabled: Bool
+    var theme: NovaUITheme = .fallback
+
+    var body: some View {
         let slices = graphics.buttonSlices(state)
         HStack(spacing: 0) {
             slice(slices.left)
@@ -224,7 +259,6 @@ struct NovaIconButtonStyle: ButtonStyle {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(enabled ? theme.buttonUp : theme.buttonGrey)
         )
-        .contentShape(Rectangle())
     }
 
     @ViewBuilder private func slice(_ image: CGImage?) -> some View {
@@ -247,8 +281,23 @@ struct NovaButtonStyle: ButtonStyle {
     var theme: NovaUITheme = .fallback
 
     func makeBody(configuration: Configuration) -> some View {
-        let state: SpaceportGraphics.ButtonState =
-            !enabled ? .grey : (configuration.isPressed ? .clicked : .normal)
+        NovaButtonFace(graphics: graphics, title: title, width: width,
+                       state: !enabled ? .grey : (configuration.isPressed ? .clicked : .normal),
+                       theme: theme)
+            .contentShape(Rectangle())
+    }
+}
+
+/// The three-slice button's visual, independent of `Button` machinery so the
+/// tvOS cursor path can draw it directly (see `NovaButton.body`).
+struct NovaButtonFace: View {
+    let graphics: SpaceportGraphics
+    let title: String
+    let width: CGFloat
+    let state: SpaceportGraphics.ButtonState
+    var theme: NovaUITheme = .fallback
+
+    var body: some View {
         let slices = graphics.buttonSlices(state)
         HStack(spacing: 0) {
             slice(slices.left, 13)
@@ -266,7 +315,6 @@ struct NovaButtonStyle: ButtonStyle {
                 .font(.custom(theme.buttonFont ?? NovaFontRole.button.family, size: 12))
                 .foregroundStyle(labelColor(state))
         )
-        .contentShape(Rectangle())
     }
 
     @ViewBuilder private func slice(_ image: CGImage?, _ w: CGFloat) -> some View {

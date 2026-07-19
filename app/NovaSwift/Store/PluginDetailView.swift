@@ -77,7 +77,7 @@ struct PluginDetailView: View {
             .padding(12)
             .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     private var metadataSection: some View {
@@ -101,7 +101,7 @@ struct PluginDetailView: View {
             } label: {
                 Label("Get", systemImage: "arrow.down.circle.fill").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .novaProminentButton()
 
         case .downloading(let progress):
             VStack(spacing: 8) {
@@ -133,7 +133,7 @@ struct PluginDetailView: View {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .novaFont(.caption).foregroundStyle(.orange)
                 Button("Retry") { model.store.install(entry, data: model.data) }
-                    .buttonStyle(.borderedProminent)
+                    .novaProminentButton()
                     .frame(maxWidth: .infinity)
             }
         }

@@ -14,12 +14,22 @@ final class CursorTargets: ObservableObject {
     /// `GameContainerView`; false outside the game, so menus are cursorable.
     @Published var suppressed = false
 
+    /// The target currently under the visible cursor / being pressed by Ⓐ.
+    /// Published so each `CursorClickable` can render its own hover-grow and
+    /// press-squish (the pointer affordances a mouse gets for free). Written
+    /// by the overlay's poll loop, only on actual change — not per tick.
+    @Published private(set) var hoveredID: UUID?
+    @Published private(set) var pressedID: UUID?
+
     struct Target {
         var frame: CGRect
         var action: () -> Void
         /// Optional point-aware press (cursor position in the target's own
         /// coordinates) — lets a slider jump its thumb to where Ⓐ landed.
         var actionAt: ((CGPoint) -> Void)?
+        /// False for track-like targets (sliders) where a whole-view
+        /// hover-grow would look wrong; buttons leave it true.
+        var hoverEffect = true
     }
 
     /// Deliberately NOT `@Published`: frames refresh on every layout pass and
@@ -27,20 +37,112 @@ final class CursorTargets: ObservableObject {
     private(set) var targets: [UUID: Target] = [:]
 
     func update(_ id: UUID, frame: CGRect, action: @escaping () -> Void,
-                actionAt: ((CGPoint) -> Void)? = nil) {
-        targets[id] = Target(frame: frame, action: action, actionAt: actionAt)
+                actionAt: ((CGPoint) -> Void)? = nil, hoverEffect: Bool = true) {
+        // Global frames include render transforms, so the hover-grow/press-
+        // squish animation would feed back into this very frame on the next
+        // layout pass. Freeze the hit frame while its own effect is showing —
+        // the action closure still refreshes.
+        let frozen = (id == hoveredID || id == pressedID) ? targets[id]?.frame : nil
+        targets[id] = Target(frame: frozen ?? frame, action: action, actionAt: actionAt,
+                             hoverEffect: hoverEffect)
     }
 
     func remove(_ id: UUID) {
         targets.removeValue(forKey: id)
+        if hoveredID == id { hoveredID = nil }
+        if pressedID == id { pressedID = nil }
     }
 
     /// The target under a point. Smallest containing frame wins, so a button
     /// always beats the sheet or panel registered behind it.
-    func target(at point: CGPoint) -> Target? {
-        targets.values
-            .filter { $0.frame.contains(point) }
-            .min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+    func hit(at point: CGPoint) -> (id: UUID, target: Target)? {
+        targets
+            .filter { $0.value.frame.contains(point) }
+            .min { $0.value.frame.width * $0.value.frame.height
+                 < $1.value.frame.width * $1.value.frame.height }
+            .map { (id: $0.key, target: $0.value) }
+    }
+
+    /// Hover/press bookkeeping for the overlay's ~60 Hz loop: assigns only on
+    /// real change so the published state doesn't re-render the UI per tick.
+    func setHovered(_ id: UUID?) {
+        if hoveredID != id { hoveredID = id }
+    }
+
+    func setPressed(_ id: UUID?) {
+        if pressedID != id { pressedID = id }
+    }
+}
+
+/// Maps layout-space rects (what `GeometryReader` reports) to drawn/screen
+/// rects under ancestor `scaleEffect`s — a draw-time transform the layout
+/// system can't see (verified: the debug overlay shows unscaled hit frames
+/// compressed toward the scale anchor without this).
+struct CursorFrameTransform: Equatable {
+    var scale: CGFloat = 1
+    /// The scale anchor in global layout coordinates (the point that doesn't
+    /// move when the container scales about its centre). `nil` while the
+    /// container hasn't been measured yet — see `ready`.
+    var anchor: CGPoint?
+
+    /// False only in the not-yet-measured window right after a scaled
+    /// container appears; targets wait it out rather than register skewed.
+    var ready: Bool { scale == 1 || anchor != nil }
+
+    func apply(_ rect: CGRect) -> CGRect {
+        guard scale != 1, let anchor else { return rect }
+        return CGRect(x: anchor.x + (rect.minX - anchor.x) * scale,
+                      y: anchor.y + (rect.minY - anchor.y) * scale,
+                      width: rect.width * scale,
+                      height: rect.height * scale)
+    }
+}
+
+private struct CursorFrameTransformKey: EnvironmentKey {
+    static let defaultValue = CursorFrameTransform()
+}
+
+extension EnvironmentValues {
+    var cursorFrameTransform: CursorFrameTransform {
+        get { self[CursorFrameTransformKey.self] }
+        set { self[CursorFrameTransformKey.self] = newValue }
+    }
+}
+
+private struct CursorScaleEffect: ViewModifier {
+    let scale: CGFloat
+    /// The scale anchor (this view's centre) in global layout coordinates.
+    /// `nil` until the first geometry callback — descendants don't register
+    /// at all until then, so a not-yet-measured anchor can't skew targets.
+    @State private var anchor: CGPoint?
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(scale)
+            // Layout-neutral geometry observation (a bare GeometryReader here
+            // would be greedy and break the content-hugging dialogs). Fires on
+            // appear and on every geometry change.
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { frame in
+                #if DEBUG
+                print("[cursor] scale container ×\(scale) layout frame \(frame)")
+                #endif
+                anchor = CGPoint(x: frame.midX, y: frame.midY)
+            }
+            .environment(\.cursorFrameTransform,
+                         CursorFrameTransform(scale: scale, anchor: anchor))
+    }
+}
+
+extension View {
+    /// `scaleEffect(_:)` for containers holding cursor-clickable controls:
+    /// applies the visual scale AND tells descendant `cursorClickable`s about
+    /// it so their hit frames land where the controls are drawn. Note: wraps
+    /// the content in a `GeometryReader`, so the container must be sized by
+    /// its parent (all current sites are full-viewport or explicitly framed).
+    func cursorScaleEffect(_ scale: CGFloat) -> some View {
+        modifier(CursorScaleEffect(scale: scale))
     }
 }
 
@@ -48,16 +150,52 @@ private struct CursorClickable: ViewModifier {
     let action: () -> Void
     var actionAt: ((CGPoint) -> Void)?
     @State private var id = UUID()
+    /// Ambient `.disabled()` must gate the cursor exactly like it gates taps —
+    /// a disabled control's frame is deregistered so Ⓐ can't fire its action.
+    @Environment(\.isEnabled) private var isEnabled
+    /// Ancestor `cursorScaleEffect` — hit frames must be registered where the
+    /// control is *drawn*; global layout frames don't include render scales.
+    @Environment(\.cursorFrameTransform) private var frameTransform
+    /// Re-renders this target when the cursor's hover/press target changes
+    /// (an occasional event, not a per-tick one — see `setHovered`).
+    @ObservedObject private var registry = CursorTargets.shared
+
+    /// Track-like targets (the point-aware slider variant) skip the whole-view
+    /// hover-grow; a stretched track bouncing under the cursor looks wrong.
+    private var hoverEffect: Bool { actionAt == nil }
 
     func body(content: Content) -> some View {
+        let hovered = hoverEffect && registry.hoveredID == id
+        let pressed = hoverEffect && registry.pressedID == id
         content
+            // The pointer affordances a mouse gets for free: grow a touch
+            // under the cursor, squish while Ⓐ is held.
+            .scaleEffect(pressed ? 0.92 : (hovered ? 1.07 : 1))
+            .animation(.spring(response: 0.22, dampingFraction: 0.65), value: hovered)
+            .animation(.spring(response: 0.18, dampingFraction: 0.6), value: pressed)
             .background(
                 GeometryReader { geo in
                     // Runs on every layout pass, keeping both the frame and the
                     // captured action fresh. Safe during view updates because the
-                    // registry publishes nothing on mutation.
-                    let _ = CursorTargets.shared.update(id, frame: geo.frame(in: .global),
-                                                        action: action, actionAt: actionAt)
+                    // registry publishes nothing on target mutation.
+                    let _ = {
+                        if isEnabled, frameTransform.ready {
+                            let t = frameTransform
+                            // actionAt receives the hit point in this view's
+                            // own layout coordinates — divide the ancestor's
+                            // visual scale back out of the drawn-space offset.
+                            let mappedActionAt = actionAt.map { f in
+                                { (p: CGPoint) in
+                                    f(CGPoint(x: p.x / t.scale, y: p.y / t.scale))
+                                }
+                            }
+                            CursorTargets.shared.update(id, frame: t.apply(geo.frame(in: .global)),
+                                                        action: action, actionAt: mappedActionAt,
+                                                        hoverEffect: hoverEffect)
+                        } else {
+                            CursorTargets.shared.remove(id)
+                        }
+                    }()
                     Color.clear
                         .onDisappear { CursorTargets.shared.remove(id) }
                 }
@@ -98,10 +236,44 @@ struct CursorButton<Label: View>: View {
     }
 
     var body: some View {
+        #if os(tvOS)
+        // No real `Button` on tvOS: buttons there are ALWAYS focusable — the
+        // focus engine ignores `.focusable(false)` for them — so the moment a
+        // controller moves focus, the system paints its huge white focused
+        // platter over the label. The cursor is the only pointer on tvOS, so
+        // the label + a cursor target is the whole control.
+        label()
+            .contentShape(Rectangle())
+            .cursorClickable(action)
+        #else
         Button(action: action, label: label)
             .buttonStyle(.plain)
             .cursorClickable(action)
+        #endif
     }
+}
+
+/// Drop-in for `.buttonStyle(.plain)` that also makes the button a controller
+/// cursor target — `.buttonStyle(.novaPlain)`. Off-tvOS it renders exactly a
+/// plain button (re-wrapped via `Button(configuration)`); on tvOS it skips the
+/// `Button` machinery entirely, keeping the control out of the focus engine
+/// (see `CursorButton` — buttons there ignore `.focusable(false)`).
+struct NovaPlainButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        #if os(tvOS)
+        configuration.label
+            .contentShape(Rectangle())
+            .cursorClickable { configuration.trigger() }
+        #else
+        Button(configuration)
+            .buttonStyle(.plain)
+            .cursorClickable { configuration.trigger() }
+        #endif
+    }
+}
+
+extension PrimitiveButtonStyle where Self == NovaPlainButtonStyle {
+    static var novaPlain: NovaPlainButtonStyle { NovaPlainButtonStyle() }
 }
 
 /// The circle cursor itself, mounted once over the whole UI (`RootView`).
@@ -117,10 +289,34 @@ struct ControllerCursorOverlay: View {
     @State private var position: CGPoint?
     @State private var visible = false
     @State private var clickPulse = false
+    @State private var hovering = false
+
+    @Environment(\.novaDebugEnabled) private var novaDebug
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
+                if novaDebug {
+                    // UI-debug: outline every registered hit frame, so a
+                    // misaligned target is visible without a controller (the
+                    // rects should sit exactly on the drawn controls).
+                    TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                        Canvas { ctx, _ in
+                            #if DEBUG
+                            print("[cursor] \(CursorTargets.shared.targets.count) targets: " +
+                                  CursorTargets.shared.targets.values
+                                      .map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))×\(Int($0.frame.height))" }
+                                      .joined(separator: " | "))
+                            #endif
+                            for target in CursorTargets.shared.targets.values {
+                                ctx.stroke(Path(target.frame),
+                                           with: .color(target.hoverEffect ? .green : .cyan),
+                                           lineWidth: 1)
+                            }
+                        }
+                    }
+                    .ignoresSafeArea()
+                }
                 if active, visible, let position {
                     cursorShape
                         .position(position)
@@ -142,20 +338,23 @@ struct ControllerCursorOverlay: View {
         padState.isConnected && !registry.suppressed
     }
 
-    /// The special circle icon: a soft ring + centre dot that squeezes on Ⓐ.
+    /// The special circle icon: a soft ring + centre dot that squeezes on Ⓐ
+    /// and swells slightly over a clickable target (mirroring the target's
+    /// own hover-grow, so "this is pressable" reads from both sides).
     private var cursorShape: some View {
         ZStack {
             Circle()
                 .strokeBorder(novaAmber, lineWidth: 2.5)
-                .background(Circle().fill(novaAmber.opacity(0.15)))
+                .background(Circle().fill(novaAmber.opacity(hovering ? 0.3 : 0.15)))
             Circle()
                 .fill(novaAmber)
                 .frame(width: 5, height: 5)
         }
         .frame(width: 30, height: 30)
-        .scaleEffect(clickPulse ? 0.72 : 1)
+        .scaleEffect(clickPulse ? 0.72 : (hovering ? 1.15 : 1))
         .shadow(color: .black.opacity(0.6), radius: 3)
         .animation(.spring(response: 0.18, dampingFraction: 0.6), value: clickPulse)
+        .animation(.spring(response: 0.22, dampingFraction: 0.65), value: hovering)
     }
 
     /// ~60 Hz stick poll while active: move, show/auto-hide, and click on the
@@ -163,10 +362,16 @@ struct ControllerCursorOverlay: View {
     /// disconnects or flight takes the sticks back.
     private func loop(in bounds: CGSize) async {
         guard active else { return }
+        defer {
+            // Leave no stale hover/press behind when a pad disconnects or
+            // flight takes the sticks back mid-hover.
+            CursorTargets.shared.setHovered(nil)
+            CursorTargets.shared.setPressed(nil)
+            hovering = false
+        }
         var wasPressed = false
         var idleTicks = 0
         while !Task.isCancelled {
-            defer {}
             if let pad = GCController.current?.extendedGamepad {
                 // Either stick steers the cursor — use whichever is deflected more.
                 let l = (x: Double(pad.leftThumbstick.xAxis.value), y: Double(pad.leftThumbstick.yAxis.value))
@@ -191,10 +396,19 @@ struct ControllerCursorOverlay: View {
                     if idleTicks > 240 { visible = false }   // ~4 s idle → fade out
                 }
 
+                // Hover: whatever's under the visible cursor. `setHovered`
+                // publishes only on change, so this is cheap per tick.
+                let hit = (visible && !clickPulse) ? position.flatMap { CursorTargets.shared.hit(at: $0) } : nil
+                if !clickPulse {
+                    CursorTargets.shared.setHovered(hit?.target.hoverEffect == true ? hit?.id : nil)
+                    hovering = hit?.target.hoverEffect == true
+                }
+
                 let pressed = pad.buttonA.isPressed
                 if pressed, !wasPressed, visible, let p = position {
                     clickPulse = true
-                    if let target = CursorTargets.shared.target(at: p) {
+                    if let (id, target) = CursorTargets.shared.hit(at: p) {
+                        CursorTargets.shared.setPressed(id)
                         Haptics.play(.selection)
                         if let actionAt = target.actionAt {
                             actionAt(CGPoint(x: p.x - target.frame.minX, y: p.y - target.frame.minY))
@@ -204,6 +418,7 @@ struct ControllerCursorOverlay: View {
                     }
                 } else if !pressed, wasPressed {
                     clickPulse = false
+                    CursorTargets.shared.setPressed(nil)
                 }
                 wasPressed = pressed
             }

@@ -100,7 +100,7 @@ struct HostSetupView: View {
                             .background(RoundedRectangle(cornerRadius: 12).fill(amber))
                             .foregroundStyle(.black)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                     .padding(.top, 4)
                 }
                 .padding()
@@ -205,7 +205,7 @@ struct LobbyRosterView: View {
                             .background(RoundedRectangle(cornerRadius: 12).fill(amber))
                             .foregroundStyle(.black)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
 
                     Button {
                         session.stop()
@@ -217,7 +217,7 @@ struct LobbyRosterView: View {
                             .background(RoundedRectangle(cornerRadius: 12).strokeBorder(.red.opacity(0.6)))
                             .foregroundStyle(.red)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                 }
                 .padding(.horizontal)
             }
@@ -292,7 +292,7 @@ private struct JoinRequestsCard: View {
                 Spacer(minLength: 0)
                 Button("Decline") { Task { await model.declineJoinRequest(request) } }
                     .novaFont(.caption, weight: .bold)
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .buttonStyle(.novaPlain).foregroundStyle(.secondary)
                 Button {
                     Task { await model.acceptJoinRequest(request) }
                 } label: {
@@ -301,7 +301,7 @@ private struct JoinRequestsCard: View {
                         .background(Capsule().fill(amber.opacity(compatible ? 0.3 : 0.15)))
                         .foregroundStyle(compatible ? amber : .secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
                 .disabled(!compatible)
             }
         }
@@ -352,7 +352,7 @@ private struct PlayerRosterRow: View {
                         .labelStyle(.iconOnly).font(.title3)
                         .foregroundStyle(Color(red: 1, green: 0.7, blue: 0.28))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             }
             if canModerate {
                 Menu {

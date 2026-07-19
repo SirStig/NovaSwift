@@ -194,12 +194,10 @@ struct GameMenuView: View {
                 }
             }
             Spacer()
-            Button(action: onResume) {
+            CursorButton(action: onResume) {
                 Image(systemName: "xmark").font(.subheadline.weight(.bold))
                     .padding(8).background(.ultraThinMaterial, in: Circle())
             }
-            .cursorClickable(onResume)
-            .buttonStyle(.plain)
         }
         .padding(16)
     }
@@ -258,7 +256,7 @@ struct GameMenuView: View {
             .padding(.horizontal, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.05)))
     }
 }

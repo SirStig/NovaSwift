@@ -27,7 +27,7 @@ struct TutorialCoachView: View {
                         .background(Color.black.opacity(0.55), in: Capsule())
                         .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             }
             .padding(.top, 10)
             .padding(.trailing, 14)
@@ -105,7 +105,7 @@ struct TutorialCoachView: View {
                         .padding(.horizontal, 22).padding(.vertical, 9)
                         .background(Capsule().fill(novaAmber))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             } else {
                 // Objective steps complete on their own; the hint reassures the
                 // player the game is watching, and the skip is an escape hatch if
@@ -121,7 +121,7 @@ struct TutorialCoachView: View {
                         .novaFont(.caption, weight: .semibold)
                         .foregroundStyle(.white.opacity(0.7))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             }
         }
     }

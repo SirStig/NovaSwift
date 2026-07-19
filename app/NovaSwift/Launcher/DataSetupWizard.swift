@@ -417,7 +417,7 @@ struct DataSetupWizard: View {
             .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(novaAmber.opacity(0.3)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     #if canImport(CloudKit)
@@ -463,7 +463,7 @@ struct DataSetupWizard: View {
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(Capsule().fill(novaAmber))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .padding(.top, 2)
     }
 
@@ -482,7 +482,7 @@ struct DataSetupWizard: View {
                         .background(Capsule().fill(d == device ? novaAmber : Color.white.opacity(0.05)))
                         .overlay(Capsule().strokeBorder(.white.opacity(0.1)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             }
             Spacer()
         }

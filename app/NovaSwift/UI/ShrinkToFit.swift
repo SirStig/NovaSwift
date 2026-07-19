@@ -37,7 +37,7 @@ private struct ShrinkToFitViewport: ViewModifier {
                 .background(GeometryReader { inner in
                     Color.clear.preference(key: DialogSizeKey.self, value: inner.size)
                 })
-                .scaleEffect(scale)
+                .cursorScaleEffect(scale)
                 // Fill the container and centre — matches the enclosing dialog
                 // ZStack's own centring, so nothing shifts when scale == 1.
                 .frame(width: geo.size.width, height: geo.size.height)

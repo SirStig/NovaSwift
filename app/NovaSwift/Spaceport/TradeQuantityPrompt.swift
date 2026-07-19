@@ -78,7 +78,7 @@ struct TradeQuantityPrompt: View {
                 )
                 .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .disabled(!enabled)
     }
 }

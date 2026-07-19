@@ -106,13 +106,12 @@ struct ControlsView: View {
         HStack {
             Text(action.title).novaFont(.body)
             Spacer()
-            Button {
+            CursorButton {
                 capturing = (capturing == action) ? nil : action
             } label: {
                 bindingChip(capturing == action ? "Press a key…" : KeyToken.label(model.bindings.token(for: action)),
                             highlighted: capturing == action)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -134,7 +133,7 @@ struct ControlsView: View {
         HStack {
             Text(action.title).novaFont(.body)
             Spacer()
-            Button {
+            CursorButton {
                 padCapturing == action ? endPadCapture() : beginPadCapture(action)
             } label: {
                 HStack(spacing: 5) {
@@ -145,7 +144,6 @@ struct ControlsView: View {
                     bindingChip(padLabel(action), highlighted: padCapturing == action)
                 }
             }
-            .buttonStyle(.plain)
             .disabled(pad == nil)
             .contextMenu {
                 Button("Unbind", role: .destructive) {

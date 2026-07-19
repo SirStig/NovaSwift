@@ -1277,7 +1277,7 @@ struct GameContainerView: View {
                         .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(novaAmber.opacity(0.18), in: Capsule())
                         .overlay(Capsule().strokeBorder(novaAmber.opacity(0.5)))
-                }.buttonStyle(.plain)
+                }.buttonStyle(.novaPlain)
             }
             ForEach(tips, id: \.self) { tip in
                 HStack(alignment: .top, spacing: 6) {
@@ -2866,7 +2866,7 @@ struct GameContainerView: View {
                             .overlay(Circle().strokeBorder(Color(red: 0.35, green: 0.95, blue: 0.5).opacity(0.5)))
                             .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.5))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                     DebugMetricsChip(debug: debug) { showDebugSuite = true }
                 }
                 Spacer()
@@ -2898,7 +2898,7 @@ struct GameContainerView: View {
                             .shadow(color: .black.opacity(0.85), radius: 1.5, y: 0.5)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
                 .padding(.leading, 14)
                 .padding(.top, 12)
                 .opacity(showMenu ? 0 : 1)
@@ -3013,7 +3013,7 @@ struct LandPromptView: View {
                 .background(Capsule().fill(novaAmber))
                 .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .transition(.opacity)
         } else if !hud.landName.isEmpty {
             hint("Slow down to land on \(hud.landName)").allowsHitTesting(false)

@@ -108,7 +108,7 @@ private struct LocalLobbySection: View {
                 HubActionLabel(icon: "plus.circle.fill", title: "Host a Lobby",
                                subtitle: "Create a lobby on this Wi-Fi network")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -228,7 +228,7 @@ private struct LobbyRow: View {
             .padding(.vertical, 8).padding(.horizontal, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.04)))
     }
 }
@@ -302,7 +302,7 @@ private struct OnlineLobbySection: View {
             HubActionLabel(icon: "plus.circle.fill", title: "Host a Lobby",
                            subtitle: "Name it, set the stakes, then invite friends over Game Center")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
 
         Button {
             model.onlineHostConfig = nil        // joining, not hosting
@@ -313,7 +313,7 @@ private struct OnlineLobbySection: View {
             HubActionLabel(icon: "bolt.horizontal.circle.fill", title: "Quick Match",
                            subtitle: quickMatchSubtitle)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
 
         Text("Invites from friends open automatically — you don't need this screen for them.")
             .novaFont(.caption).foregroundStyle(.secondary)
@@ -373,7 +373,7 @@ private struct OnlineLobbySection: View {
             Text(text).novaFont(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Dismiss") { model.gameCenter.lastError = nil }
-                .novaFont(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                .novaFont(.caption).buttonStyle(.novaPlain).foregroundStyle(.secondary)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -483,7 +483,7 @@ private struct PublicLobbyList: View {
                                                       playerID: GKLocalPlayer.local.gamePlayerID)
                 }
             }
-            .novaFont(.caption, weight: .bold).buttonStyle(.plain).foregroundStyle(.secondary)
+            .novaFont(.caption, weight: .bold).buttonStyle(.novaPlain).foregroundStyle(.secondary)
         } else if lobby.isFull {
             pill("Full", .gray)
         } else if !compatible {
@@ -500,7 +500,7 @@ private struct PublicLobbyList: View {
             } label: {
                 pill("Ask to Join", amber)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
         }
     }
 

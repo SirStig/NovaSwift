@@ -101,7 +101,7 @@ struct PilotListView: View {
             .background(Color(white: 0.06), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(white: 0.26)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .contextMenu {
             Button {
                 Log.pilot.debug("PilotListView: duplicate pilot \(save.id, privacy: .public)")

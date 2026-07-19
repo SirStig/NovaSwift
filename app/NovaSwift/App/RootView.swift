@@ -119,6 +119,12 @@ struct RootView: View {
         // via the TV/Home button.
         .focusable()
         .onExitCommand { }
+        // Default button style: the system automatic style renders every
+        // un-styled Button as a huge white focus card that overflows the
+        // game's fixed-size panels. The compact style keeps buttons
+        // label-sized and makes them controller-cursor clickable. Explicit
+        // styles (`.plain`, NovaButtonStyle, …) still win where set.
+        .buttonStyle(TVCompactButtonStyle())
         #endif
 
         .animation(.easeInOut(duration: 0.25), value: model.screen)
@@ -159,6 +165,11 @@ struct RootView: View {
             Task { await model.syncGameDataWithCloud() }
             #endif
             #if DEBUG
+            // Dev/automation: start with the UI debug (measurement) overlay on —
+            // includes the cursor-target outlines in ControllerCursorOverlay.
+            if ProcessInfo.processInfo.environment["NOVASWIFT_UI_DEBUG"] != nil {
+                model.settings.uiDebugOverlay = true
+            }
             if ProcessInfo.processInfo.environment["NOVASWIFT_AUTOPLAY"] != nil,
                model.data.hasBaseData {
                 // Dev-only: jump straight into the game scene, skipping the main
@@ -184,7 +195,7 @@ struct RootView: View {
         // Hidden keyboard-shortcut catcher (macOS / hardware keyboard).
         // tvOS has no keyboard shortcuts; the badge below still works there.
         Button(action: toggleDebug) { Color.clear }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain)   // not .novaPlain: 0×0 and hidden, nothing to cursor-click
             .frame(width: 0, height: 0)
             .opacity(0)
             .accessibilityHidden(true)
@@ -193,7 +204,7 @@ struct RootView: View {
 
         if model.settings.uiDebugOverlay {
             VStack {
-                Button(action: toggleDebug) {
+                CursorButton(action: toggleDebug) {
                     Label("UI DEBUG · ⇧⌘D to exit", systemImage: "ruler")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -201,7 +212,6 @@ struct RootView: View {
                         .foregroundStyle(.green)
                         .overlay(Capsule().strokeBorder(.green.opacity(0.5)))
                 }
-                .buttonStyle(.plain)
                 .padding(.top, 8)
                 Spacer()
             }

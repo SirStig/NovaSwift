@@ -75,7 +75,7 @@ struct PilotGroupDetailView: View {
             Button { renamingText = pilotName } label: {
                 Label("Rename", systemImage: "pencil").font(.caption)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .foregroundStyle(novaAmber)
         }
     }
@@ -104,7 +104,7 @@ struct PilotGroupDetailView: View {
                     Button { pendingDeleteSlot = save } label: {
                         Image(systemName: "trash").foregroundStyle(.red.opacity(0.8))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                 }
                 Image(systemName: "play.circle.fill").foregroundStyle(novaAmber)
             }
@@ -113,7 +113,7 @@ struct PilotGroupDetailView: View {
             .background(Color(white: 0.06), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(white: 0.24)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     private var newSlotButton: some View {
@@ -124,7 +124,7 @@ struct PilotGroupDetailView: View {
             Label("New Save Slot (\(slots.count)/\(PilotRoster.maxSlotsPerPilot))", systemImage: "plus.square.on.square")
                 .font(.caption).foregroundStyle(novaAmber)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     private var backupsButton: some View {
@@ -134,7 +134,7 @@ struct PilotGroupDetailView: View {
             Label("View All Backups", systemImage: "clock.arrow.circlepath")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     private func play(_ save: PilotSave) {

@@ -15,7 +15,7 @@ struct NovaToggleStyle: ToggleStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        Button {
+        CursorButton {
             configuration.isOn.toggle()
         } label: {
             HStack(spacing: 10) {
@@ -40,11 +40,8 @@ struct NovaToggleStyle: ToggleStyle {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
-        // Every restyled Toggle app-wide is flippable by the controller cursor.
-        .cursorClickable { if isEnabled { configuration.isOn.toggle() } }
     }
 }
 
@@ -135,16 +132,14 @@ struct NovaSlider: View {
             let stepSize = (range.upperBound - range.lowerBound) / 20
             value = min(max(value + direction * stepSize, range.lowerBound), range.upperBound)
         }
-        return Button(action: step) {
+        return CursorButton(action: step) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(novaAmber)
                 .frame(width: 30, height: 24)
                 .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 5))
         }
-        .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .cursorClickable(step)
     }
     #endif
 }
@@ -163,8 +158,8 @@ struct NovaSegmentedPicker<T: Hashable>: View {
         HStack(spacing: 4) {
             ForEach(options, id: \.self) { option in
                 let isSelected = option == selection
-                Button {
-                    selection = option
+                CursorButton {
+                    if isEnabled { selection = option }
                 } label: {
                     Text(label(option))
                         .novaFont(.caption, weight: .semibold)
@@ -174,8 +169,6 @@ struct NovaSegmentedPicker<T: Hashable>: View {
                         .background(isSelected ? novaAmber : Color(white: 0.14),
                                     in: RoundedRectangle(cornerRadius: 5))
                 }
-                .buttonStyle(.plain)
-                .cursorClickable { if isEnabled { selection = option } }
             }
         }
         .opacity(isEnabled ? 1 : 0.5)
@@ -198,6 +191,14 @@ struct NovaMenuPicker<T: Hashable>: View {
         HStack {
             Text(title).novaFont(.body).foregroundStyle(.white)
             Spacer()
+            #if os(tvOS)
+            // No native `Menu` on tvOS — it's a focusable control the focus
+            // engine would inflate (see CursorButton), and its popup can't be
+            // driven by the cursor anyway. Ⓐ on the chip cycles the value.
+            chip
+                .cursorClickable(cycleSelection)
+                .disabled(!isEnabled)
+            #else
             Menu {
                 ForEach(options, id: \.self) { option in
                     Button {
@@ -211,25 +212,32 @@ struct NovaMenuPicker<T: Hashable>: View {
                     }
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Text(label(selection)).novaFont(.body).foregroundStyle(.white)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(novaAmber)
-                }
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(white: 0.35)))
+                chip
             }
             .menuStyle(.borderlessButton)
             .disabled(!isEnabled)
             // The cursor can't open a native Menu popup, so Ⓐ cycles to the
             // next option instead — every value stays reachable on a pad.
-            .cursorClickable {
-                guard isEnabled, let i = options.firstIndex(of: selection) else { return }
-                selection = options[(i + 1) % options.count]
-            }
+            .cursorClickable(cycleSelection)
+            #endif
         }
         .opacity(isEnabled ? 1 : 0.5)
+    }
+
+    private var chip: some View {
+        HStack(spacing: 6) {
+            Text(label(selection)).novaFont(.body).foregroundStyle(.white)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(novaAmber)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(white: 0.35)))
+    }
+
+    private func cycleSelection() {
+        guard isEnabled, let i = options.firstIndex(of: selection) else { return }
+        selection = options[(i + 1) % options.count]
     }
 }

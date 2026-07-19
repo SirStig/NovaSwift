@@ -64,6 +64,6 @@ struct PilotBackupsView: View {
             .background(Color(white: 0.06), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(white: 0.24)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 }

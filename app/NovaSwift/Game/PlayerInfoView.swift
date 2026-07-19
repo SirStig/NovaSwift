@@ -34,7 +34,7 @@ struct PlayerInfoView: View {
         GeometryReader { geo in
             let scale = novaFrameScale(frame: Self.frameSize, viewport: geo.size)
             frameBody
-                .scaleEffect(scale)
+                .cursorScaleEffect(scale)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
     }
@@ -204,7 +204,7 @@ private struct InfoTabButton: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     @ViewBuilder private func slice(_ image: CGImage?, _ w: CGFloat) -> some View {

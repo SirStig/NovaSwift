@@ -28,7 +28,7 @@ struct LauncherView: View {
             // geometry doesn't know about the visual transform) and centre
             // the scaled column directly.
             column
-                .scaleEffect(1.5)
+                .cursorScaleEffect(1.5)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             #else
             ScrollView { column }
@@ -142,7 +142,7 @@ struct LauncherView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .foregroundStyle(.black)
         .background(
             LinearGradient(colors: [novaAmber, novaAmber.opacity(0.82)],
@@ -180,10 +180,15 @@ struct LauncherView: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 linkPill("About", "info.circle") { sheet = .about }
+                // Not on tvOS: `Link` is a focusable system button (the focus
+                // engine would inflate it — see CursorButton) and there's no
+                // browser to open the URL in anyway.
+                #if !os(tvOS)
                 Link(destination: NovaLinks.repo) {
                     linkPillLabel("GitHub", "chevron.left.forwardslash.chevron.right")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
+                #endif
             }
             Text("Unaffiliated with Ambrosia Software / ATMOS. Bring your own game data.")
                 .novaFont(.caption)

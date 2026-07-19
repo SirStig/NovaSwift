@@ -161,7 +161,7 @@ struct ShipInfoView: View {
                     RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.06))
                         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(novaAmber.opacity(0.4)))
                 )
-                .scaleEffect(scale)
+                .cursorScaleEffect(scale)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
     }

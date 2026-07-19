@@ -273,7 +273,7 @@ struct DebugGameStateView: View {
                         Button(role: .destructive) {
                             pilot.state.clearBit(bit); pilot.save()
                         } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.red)
+                        .buttonStyle(.novaPlain).foregroundStyle(.red)
                     }
                 }
             }
@@ -391,7 +391,7 @@ struct DebugGameStateView: View {
             Text(title).font(.caption.weight(.semibold))
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .novaBorderedButton()
     }
 }
 
@@ -513,7 +513,7 @@ private struct DebugFleetSpawnPicker: View {
         } label: {
             Text(title).font(.caption.weight(.semibold)).frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .novaBorderedButton()
     }
 }
 
@@ -544,14 +544,14 @@ private struct DebugOutfitsView: View {
                         Label("Grant one of each", systemImage: "square.stack.3d.up.fill")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .novaBorderedButton()
                     Button(role: .destructive) {
                         pilot.state.outfits = [:]; pilot.save()
                     } label: {
                         Label("Strip all", systemImage: "trash")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .novaBorderedButton()
                 }
             } footer: {
                 Text("Bulk changes apply on the next ship rebuild (takeoff, jump, or departure).")
@@ -625,6 +625,6 @@ private struct DebugRelationsView: View {
         } label: {
             Text(title).font(.caption.weight(.semibold)).frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .novaBorderedButton()
     }
 }

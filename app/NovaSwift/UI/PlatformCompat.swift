@@ -44,14 +44,12 @@ struct Stepper<V: Strideable>: View {
     }
 
     private func button(_ symbol: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        CursorButton(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .bold))
                 .frame(width: 34, height: 26)
                 .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 5))
         }
-        .buttonStyle(.plain)
-        .cursorClickable(action)
     }
 
     fileprivate init(_ titleKey: LocalizedStringKey, value: Binding<V>,
@@ -72,6 +70,36 @@ extension Stepper where V == Int {
          onIncrement: (() -> Void)?, onDecrement: (() -> Void)?) {
         self.init(titleKey, value: .constant(0), range: nil, step: 1,
                   onIncrement: onIncrement, onDecrement: onDecrement)
+    }
+}
+
+/// Compact button chrome for tvOS. The system `automatic`/`bordered` styles
+/// there are huge white focus-engine cards that overflow the game's
+/// fixed-size panels — and focus isn't the interaction model anyway (the
+/// controller cursor is; see ControllerCursor.swift). This style keeps
+/// buttons label-sized, out of the focus engine, and registers them as
+/// cursor targets so Ⓐ can press them.
+struct TVCompactButtonStyle: PrimitiveButtonStyle {
+    var prominent = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    @ViewBuilder
+    func makeBody(configuration: Configuration) -> some View {
+        let label = configuration.label
+            .font(.system(size: 20, weight: .semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .foregroundStyle(prominent ? AnyShapeStyle(.black) : AnyShapeStyle(.tint))
+            .background(prominent ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(white: 0.14)),
+                        in: RoundedRectangle(cornerRadius: 6))
+            .opacity(isEnabled ? 1 : 0.4)
+        if isEnabled {
+            label.cursorClickable { configuration.trigger() }
+        } else {
+            // Disabled: no cursor target (Ⓐ must not fire the action), but
+            // still kept out of the focus engine like every cursor target.
+            label.focusable(false)
+        }
     }
 }
 
@@ -97,6 +125,29 @@ struct Slider: View {
 #endif
 
 extension View {
+    /// `.buttonStyle(.bordered)` where the system style is reasonably sized;
+    /// on tvOS, the compact cursor-clickable chrome instead (system bordered
+    /// buttons there are huge focus cards that overflow the game's panels).
+    @ViewBuilder
+    func novaBorderedButton() -> some View {
+        #if os(tvOS)
+        self.buttonStyle(TVCompactButtonStyle())
+        #else
+        self.buttonStyle(.bordered)
+        #endif
+    }
+
+    /// `.buttonStyle(.borderedProminent)` — same tvOS substitution as
+    /// `novaBorderedButton()`, filled with the tint colour.
+    @ViewBuilder
+    func novaProminentButton() -> some View {
+        #if os(tvOS)
+        self.buttonStyle(TVCompactButtonStyle(prominent: true))
+        #else
+        self.buttonStyle(.borderedProminent)
+        #endif
+    }
+
     /// `.scrollContentBackground(.hidden)` where available; no-op on tvOS.
     @ViewBuilder
     func novaHiddenScrollContentBackground() -> some View {

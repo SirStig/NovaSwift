@@ -68,7 +68,7 @@ struct TradeView: View {
                 Image(systemName: "xmark").font(.subheadline.weight(.bold))
                     .padding(8).background(.ultraThinMaterial, in: Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
         }
         .padding(16)
     }
@@ -169,7 +169,7 @@ struct TradeView: View {
                         .fill(trade.myAccepted ? Color.gray.opacity(0.3) : Color.green))
                     .foregroundStyle(trade.myAccepted ? .white : .black)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .disabled(!trade.partnerJoined)
         }
         .padding(16)
@@ -244,7 +244,7 @@ struct TradeView: View {
             Image(systemName: icon).font(.caption.weight(.bold)).frame(width: 26, height: 26)
                 .background(Circle().fill(.white.opacity(0.1))).foregroundStyle(.white)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 
     private func statusChip(name: String, accepted: Bool) -> some View {
@@ -303,14 +303,14 @@ struct TradeInvitePromptView: View {
                         .background(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.3)))
                         .foregroundStyle(.white)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
                 Button { model.session.acceptTradeInvite() } label: {
                     Text("Trade").novaFont(.button, weight: .medium)
                         .frame(maxWidth: .infinity).padding(.vertical, 12)
                         .background(RoundedRectangle(cornerRadius: 12).fill(amber))
                         .foregroundStyle(.black)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             }
         }
         .padding(20)

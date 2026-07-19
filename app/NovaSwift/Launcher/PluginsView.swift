@@ -69,7 +69,7 @@ struct PluginsView: View {
             Label("Import Plug-in or .zip…", systemImage: "square.and.arrow.down.on.square")
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .novaBorderedButton()
         .padding([.horizontal, .top])
         .padding(.bottom, 4)
     }
@@ -124,7 +124,7 @@ struct PluginsView: View {
                 }
                 .disabled(index == count - 1)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
             .font(.caption)
             .foregroundStyle(.secondary)
 
@@ -139,7 +139,7 @@ struct PluginsView: View {
                 } label: {
                     Image(systemName: "trash").foregroundStyle(.red)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
             }
             Toggle("", isOn: Binding(
                 get: { plugin.isEnabled },

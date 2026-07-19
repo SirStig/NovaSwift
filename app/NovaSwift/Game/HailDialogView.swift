@@ -223,7 +223,7 @@ struct HailDialogView: View {
                 .frame(width: 26 + width, height: 25)
                 .background(Color(white: 0.25), in: RoundedRectangle(cornerRadius: 4))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .disabled(!enabled)
     }
 }

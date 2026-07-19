@@ -81,7 +81,7 @@ struct IntroSequenceView: View {
                 Button(isLastPage ? "Begin" : "Skip") {
                     model.audio.play(.uiSelect); onFinish()
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.novaPlain)
                 .novaFont(.button)
                 .foregroundStyle(isLastPage ? .black : .white)
                 .padding(.horizontal, 20).padding(.vertical, 9)

@@ -221,7 +221,7 @@ private struct StoryFlowRowView: View {
                 Button(role: .destructive) { onAbort(row.id) } label: {
                     Label("Abort mission", systemImage: "xmark.octagon.fill").novaFont(.caption, weight: .bold)
                 }
-                .buttonStyle(.plain).foregroundStyle(.red).padding(.top, 4)
+                .buttonStyle(.novaPlain).foregroundStyle(.red).padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -292,7 +292,7 @@ private struct StoryFlowRowView: View {
                 .background(Capsule().fill(tint.opacity(0.14)))
                 .overlay(Capsule().strokeBorder(tint.opacity(0.35), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 }
 

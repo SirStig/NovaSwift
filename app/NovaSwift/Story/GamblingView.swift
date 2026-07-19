@@ -133,7 +133,7 @@ struct GamblingView: View {
             .overlay(RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(clicked ? Color.yellow.opacity(0.85) : Color.clear, lineWidth: 3))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
         .novaPlace(space, Self.colorBoxCX[color] ?? 0, -27)
     }
 
@@ -151,20 +151,20 @@ struct GamblingView: View {
             HStack(spacing: 10) {
                 ForEach(RaceColor.allCases, id: \.rawValue) { color in
                     Button(color.name) { selectedColor = color }
-                        .buttonStyle(.bordered)
+                        .novaBorderedButton()
                         .tint(selectedColor == color ? .yellow : nil)
                 }
             }
             HStack(spacing: 10) {
                 Button(graphics.buttonLabel(SpaceportLabel.bet1000, fallback: "Bet 1000")) { placeBet(1000) }
-                    .buttonStyle(.borderedProminent)
+                    .novaProminentButton()
                     .disabled(selectedColor == nil || pilot.state.credits < 1000)
                 Button(graphics.buttonLabel(SpaceportLabel.bet5000, fallback: "Bet 5000")) { placeBet(5000) }
-                    .buttonStyle(.borderedProminent)
+                    .novaProminentButton()
                     .disabled(selectedColor == nil || pilot.state.credits < 5000)
             }
             Text("You Have: \(pilot.state.credits.creditsAbbreviated)").foregroundStyle(Color(red: 1, green: 0.85, blue: 0.4))
-            Button(graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), action: onDone).buttonStyle(.bordered)
+            Button(graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), action: onDone).novaBorderedButton()
         }
         .padding(24)
         .frame(width: 480)
@@ -337,7 +337,7 @@ private struct BareNovaPanel<Content: View>: View {
                 if novaDebug { NovaDebugGrid.forSpace(space) }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
-            .scaleEffect(scale)
+            .cursorScaleEffect(scale)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         // No opaque background — this panel overlays the bar screen, which

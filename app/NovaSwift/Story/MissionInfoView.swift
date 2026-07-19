@@ -123,7 +123,7 @@ struct MissionInfoView: View {
                     .novaPlace(space, cx(Item.done, nw), cy(Item.done, nh))
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
-            .scaleEffect(scale)
+            .cursorScaleEffect(scale)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
     }
@@ -150,7 +150,7 @@ struct MissionInfoView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.novaPlain)
                             if let tag = storylineTags[m.id] {
                                 StorylineTagBadge(title: tag.title) { openStoryline(tag.key) }
                                     .padding(.trailing, 4)

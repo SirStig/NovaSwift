@@ -77,7 +77,7 @@ struct HintBanner: View {
                     .padding(6)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.novaPlain)
         }
         .padding(14)
         .frame(maxWidth: 460, alignment: .leading)
