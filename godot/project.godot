@@ -1,0 +1,25 @@
+; Godot 4 project — NOVA Swift desktop (Linux/Windows/macOS) frontend.
+; This hosts the vertical slice that drives the Swift engine through the
+; NovaSwiftGodot GDExtension. See docs/GODOT_LAYER.md.
+
+config_version=5
+
+[application]
+
+config/name="NOVA Swift (Godot)"
+config/description="Cross-platform desktop frontend for NOVA Swift, driving the Swift engine via a SwiftGodot GDExtension."
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.2", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+; Compatibility (OpenGL) renderer for the widest Linux/Windows GPU coverage.
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

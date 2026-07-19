@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3 uid="uid://bnovaswiftslice0"]
+
+[ext_resource type="Script" path="res://Main.gd" id="1_main"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="HUD" type="Label" parent="."]
+offset_left = 12.0
+offset_top = 8.0
+offset_right = 640.0
+offset_bottom = 80.0
+text = "NOVA Swift — Godot slice"
