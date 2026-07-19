@@ -116,7 +116,7 @@ struct ModernMainMenuView: View {
     /// resume/Enter-Ship action); the rest are glassy outlined rows.
     private func menuButton(_ title: String, icon: String, prominent: Bool = false, scale: CGFloat = 1,
                             action: @escaping () -> Void) -> some View {
-        Button {
+        CursorButton {
             model.audio.play(.uiSelect); action()
         } label: {
             HStack(spacing: 10 * scale) {
@@ -141,7 +141,7 @@ struct ModernMainMenuView: View {
 
     /// A compact secondary button (Plug-ins / Import / Quit).
     private func smallButton(_ label: String, _ icon: String, scale: CGFloat = 1, action: @escaping () -> Void) -> some View {
-        Button {
+        CursorButton {
             model.audio.play(.uiSelect); action()
         } label: {
             HStack(spacing: 7 * scale) {

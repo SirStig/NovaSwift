@@ -33,6 +33,7 @@ final class AppModel: ObservableObject {
 
     @Published var settings: GameSettings = .load()
     @Published var bindings: KeyBindings = .load()
+    @Published var padBindings: PadBindings = .load()
     @Published var data = GameDataController()
 
     /// Catalog browse/install state for the plug-in store (see `Store/`).
@@ -62,6 +63,12 @@ final class AppModel: ObservableObject {
     /// `init` (after `settings`) so it can honour that toggle from launch.
     let roster: PilotRoster
 
+    #if canImport(CloudKit)
+    /// Cross-device game-data sync through the player's private iCloud —
+    /// "import once, play everywhere". See `GameDataCloudSync`.
+    let gameDataSync = GameDataCloudSync()
+    #endif
+
     /// Why a save is being written — drives whether a rotating backup is taken.
     enum SaveReason { case manual, land, jump, timer, periodic
         var wantsBackup: Bool { self == .land || self == .manual || self == .periodic }
@@ -89,6 +96,9 @@ final class AppModel: ObservableObject {
     private var dataObserver: AnyCancellable?
     private var rosterObserver: AnyCancellable?
     private var sessionObserver: AnyCancellable?
+    #if canImport(CloudKit)
+    private var gameDataSyncObserver: AnyCancellable?
+    #endif
     #if canImport(GameKit)
     private var gameCenterObserver: AnyCancellable?
     private var sessionActiveObserver: AnyCancellable?
@@ -121,6 +131,13 @@ final class AppModel: ObservableObject {
         sessionObserver = session.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        #if canImport(CloudKit)
+        // Forward game-data sync state (remote availability, phase) the same way
+        // so the setup wizard's restore card appears/updates live.
+        gameDataSyncObserver = gameDataSync.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        #endif
         // Co-op story (NCB) sync: let the session read our control-bit vector to
         // share bits we earn in a shared storyline, and union bits a partner earns
         // into ours — strictly non-destructive (see `MultiplayerSession`).
@@ -191,6 +208,8 @@ final class AppModel: ObservableObject {
         audio.apply(settings: settings)
     }
     func commitBindings() { bindings.save() }
+
+    func commitPadBindings() { padBindings.save() }
 
     // MARK: Online sessions
 
@@ -444,6 +463,51 @@ final class AppModel: ObservableObject {
         commitSettings()
         roster.useICloud(on)
     }
+
+    #if canImport(CloudKit)
+    // MARK: Game-data iCloud sync ("import once, play everywhere")
+
+    /// The launch-time sync pass (`RootView.onAppear`). With data present,
+    /// make sure the player's private iCloud holds this data set (fingerprint-
+    /// guarded, so it's one cheap metadata fetch on every launch after the
+    /// first). Without data, learn whether iCloud has a set to restore — the
+    /// setup wizard offers it; tvOS just takes it, because a missing data dir
+    /// there usually means the system purged the caches sandbox and silent
+    /// self-heal beats making the player fetch their computer.
+    func syncGameDataWithCloud() async {
+        guard settings.iCloudGameData else { return }
+        if data.hasBaseData {
+            await gameDataSync.uploadIfNeeded(baseDir: data.importedBaseDir)
+        } else {
+            await gameDataSync.refreshRemoteStatus()
+            #if os(tvOS)
+            if gameDataSync.remote != nil { await restoreGameDataFromCloud() }
+            #endif
+        }
+    }
+
+    /// Fire-and-forget upload after a successful import (wizard file pick,
+    /// tvOS Wi-Fi receiver). No-op when the toggle is off or nothing changed.
+    func uploadGameDataToCloud() {
+        guard settings.iCloudGameData else { return }
+        let dir = data.importedBaseDir
+        Task { await gameDataSync.uploadIfNeeded(baseDir: dir) }
+    }
+
+    /// Download the archived data set from the player's iCloud and load it.
+    /// Returns whether playable data resulted; failure details are on
+    /// `gameDataSync.lastError` for the wizard to show.
+    @discardableResult
+    func restoreGameDataFromCloud() async -> Bool {
+        do {
+            try await gameDataSync.restore(into: data.importedBaseDir)
+            await data.reloadAsync()
+            return data.hasBaseData
+        } catch {
+            return false
+        }
+    }
+    #endif
 
     /// Persist the live pilot into its durable roster file (+ backup on land /
     /// manual save). A session that never went through `createPilot`/`play`

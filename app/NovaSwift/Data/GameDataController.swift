@@ -45,10 +45,7 @@ final class GameDataController: ObservableObject {
     // MARK: Locations
 
     private var appSupport: URL {
-        let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
-                                                 in: .userDomainMask, appropriateFor: nil, create: true))
-            ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("NovaSwift", isDirectory: true)
+        NovaStorage.root.appendingPathComponent("NovaSwift", isDirectory: true)
     }
 
     /// Where imported base data lives on device.

@@ -67,7 +67,11 @@ struct NovaDebugGrid: View {
             // overlay off to interact with the screen again.
             Color.white.opacity(0.001)
                 .contentShape(Rectangle())
+            #if !os(tvOS)
+                // No drag gestures on tvOS — the grid still draws, only the
+                // point-and-read probe is absent there (it's a dev tool).
                 .gesture(DragGesture(minimumDistance: 0).onChanged { probe = $0.location })
+            #endif
 
             header
             if let p = probe { crosshair(p) }

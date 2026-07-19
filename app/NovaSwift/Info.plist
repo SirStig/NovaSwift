@@ -2,18 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	  Base Info.plist merged UNDER the keys Xcode generates from the
-	  INFOPLIST_KEY_* build settings (GENERATE_INFOPLIST_FILE = YES).
-
-	  NSBonjourServices lives here, not in an INFOPLIST_KEY_ setting, because
-	  it is an ARRAY: the INFOPLIST_KEY_ shortcut only reliably emits scalar
-	  strings, so INFOPLIST_KEY_NSBonjourServices was silently dropped and the
-	  app never declared its service — which made MultipeerConnectivity
-	  discovery fail on iOS 14+ / macOS 15+ (the phone couldn't find the Mac's
-	  LAN lobby). These two entries must match the `serviceType` in
-	  MultipeerTransport ("novaswift-mp").
-	-->
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_novaswift-mp._tcp</string>

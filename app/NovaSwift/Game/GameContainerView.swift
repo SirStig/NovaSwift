@@ -77,6 +77,7 @@ final class GameHost {
 
     init(model: AppModel, systemID: Int? = nil, arrivedViaJump: Bool = false) {
         controller = GameControllerInput(input: input)
+        controller.bindings = model.padBindings
         hudStyle = GameHost.makeHUDStyle(model.data.game, shipType: model.pilot.state.shipType)
         hud.credits = model.pilot.state.credits
         scene.scaleMode = .resizeFill
@@ -416,6 +417,7 @@ final class GameHost {
          engineTextures: [SKTexture], shipName: String, systemID: Int,
          planets: [PlanetVisual], systemName: String, game: NovaGame?, galaxy: Galaxy?) {
         controller = GameControllerInput(input: input)
+        controller.bindings = model.padBindings
         self.game = game
         self.galaxy = galaxy
         self.graphics = game.map { SpaceportGraphics(game: $0) }
@@ -1155,6 +1157,8 @@ struct GameContainerView: View {
 
     var body: some View {
         gameStackWithMidLifecycle
+        // Leaving the game unsuppresses the UI cursor so it works on the menus.
+        .onDisappear { CursorTargets.shared.suppressed = false }
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
         // Push any settings change into the live scene's own copy so display
         // options (ship bars, planet labels, smooth sprites, engine glow, screen
@@ -2028,6 +2032,13 @@ struct GameContainerView: View {
         .ignoresSafeArea()
         .focusable()
         .focusEffectDisabled()
+        // Game controller: hand it the same discrete-action sink and "flight
+        // owns input" gate the keyboard paths below use, plus the live button
+        // map. Re-wired when the host is rebuilt (depart swaps the scene) and
+        // when the player rebinds buttons in Settings → Controls.
+        .onAppear { wirePadController(host) }
+        .onChange(of: ObjectIdentifier(host.scene)) { wirePadController(host) }
+        .onChange(of: model.padBindings) { wirePadController(host) }
         #if os(macOS)
         // On macOS the flight scene owns the keyboard through one AppKit event
         // monitor rather than SwiftUI focus. It drives every binding — including
@@ -2057,6 +2068,19 @@ struct GameContainerView: View {
     /// while landed or whenever a modal (map, menu, hail, a mobile panel, the
     /// plunder dialog, the debug suite) owns the screen, so they neither draw
     /// over nor steal touches from it.
+    /// Points the pad at the container's discrete-action handler and gates it
+    /// on the same "flight owns the screen" rule as the keyboard. Idempotent —
+    /// safe to call from onAppear and every re-wire trigger.
+    private func wirePadController(_ host: GameHost) {
+        host.controller.bindings = model.padBindings
+        host.controller.onDiscrete = handleDiscrete
+        host.controller.isActive = { flightControlsVisible }
+        // While flight owns the sticks (and Ⓐ fires weapons), the UI cursor
+        // must stay hidden and inert; it takes over the moment a modal/landing
+        // screen opens. Tracks the same gate as the controller's flight input.
+        CursorTargets.shared.suppressed = flightControlsVisible
+    }
+
     private var flightControlsVisible: Bool {
         landedSpobID == nil && !nav.showingMap && !showMenu && hailDialogState == nil
             && !showMissionsPanel && !showPilotInfoPanel && !showEscortsPanel
@@ -2979,6 +3003,9 @@ struct LandPromptView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.down.to.line")
                     Text("Land on \(hud.landName)").lineLimit(1)
+                    // Pad players see which physical button lands, right on
+                    // the pill (renders nothing without a controller).
+                    PadGlyph(.land, size: 13, tint: .black)
                 }
                 .novaFont(.hud, weight: .semibold, size: 12)
                 .foregroundStyle(.black)

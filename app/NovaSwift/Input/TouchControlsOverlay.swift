@@ -400,6 +400,10 @@ private struct PressHandling: ViewModifier {
     func body(content: Content) -> some View {
         #if os(iOS)
         content.overlay(PressCatcher(onPressChange: onPressChange, onTap: onTap))
+        #elseif os(tvOS)
+        // No touch/drag on tvOS and the overlay never shows there (controller
+        // or remote drive flight) — the type just needs to compile.
+        content
         #else
         content
             .simultaneousGesture(

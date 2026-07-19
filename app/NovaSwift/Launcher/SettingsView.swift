@@ -138,7 +138,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
+        .novaHiddenScrollContentBackground()
         .toggleStyle(NovaToggleStyle())
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -245,6 +245,7 @@ struct SettingsView: View {
                 sliderRow("Tilt sensitivity", binding(\.tiltSensitivity), 0.4...2.0)
             }
             sliderRow("Stick dead zone", binding(\.stickDeadzone), 0...0.5)
+            sliderRow("Controller cursor speed", binding(\.cursorSensitivity), 0.4...2.0)
             Toggle("Invert turn direction", isOn: binding(\.invertTurn))
             Toggle("Haptic feedback", isOn: binding(\.hapticsEnabled))
             #if os(macOS)
@@ -347,6 +348,17 @@ struct SettingsView: View {
                 Text(model.roster.isCloudBacked ? "iCloud" : "This device")
                     .foregroundStyle(.secondary)
             }
+            #if canImport(CloudKit)
+            Toggle("iCloud game data sync", isOn: Binding(
+                get: { model.settings.iCloudGameData },
+                set: { on in
+                    model.settings.iCloudGameData = on
+                    model.commitSettings()
+                    // Turning it on should take effect now, not next launch.
+                    if on { Task { await model.syncGameDataWithCloud() } }
+                }
+            ))
+            #endif
             // Re-import or update game data. Only offered once data is already
             // present — the first-run import lives on the pre-data launcher.
             if model.data.hasBaseData {
@@ -362,7 +374,7 @@ struct SettingsView: View {
         } footer: {
             Text(model.settings.iCloudSaves && !model.roster.isCloudBacked
                  ? "iCloud is enabled but not available right now (sign in to iCloud on this device). Pilots are saved on this device and will sync once iCloud is reachable."
-                 : "Keeps your pilots — all save slots and their auto-backups — in sync across your devices. Turning this off moves them back onto this device. Your saves are never deleted by switching.")
+                 : "Keeps your pilots — all save slots and their auto-backups — in sync across your devices. Turning this off moves them back onto this device. Your saves are never deleted by switching. Game data sync keeps a copy of your imported Nova Files in your private iCloud, so other devices set themselves up without re-importing.")
         }
     }
 

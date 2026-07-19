@@ -40,17 +40,17 @@ struct PluginsView: View {
                 case .installed:
                     VStack(spacing: 0) {
                         importBar
-                        installedList.scrollContentBackground(.hidden)
+                        installedList.novaHiddenScrollContentBackground()
                     }
                 case .store:
                     NavigationStack { PluginStoreView() }
                 }
             }
         }
-        .fileImporter(isPresented: $showingImporter,
-                      allowedContentTypes: [.zip, .folder, .data],
-                      allowsMultipleSelection: false,
-                      onCompletion: handleImport)
+        .novaFileImporter(isPresented: $showingImporter,
+                          allowedContentTypes: [.zip, .folder, .data],
+                          allowsMultipleSelection: false,
+                          onCompletion: handleImport)
         .alert("Import Plug-in", isPresented: Binding(
             get: { importMessage != nil },
             set: { if !$0 { importMessage = nil } }

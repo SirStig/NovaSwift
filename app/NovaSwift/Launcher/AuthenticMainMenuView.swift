@@ -454,6 +454,10 @@ private struct MenuSpriteButton: View {
             .scaleEffect(pressing ? 0.96 : 1)
             .animation(.easeOut(duration: 0.1), value: highlighted)
             .contentShape(Rectangle())
+            // Controller cursor presses these on every platform — on tvOS
+            // it's the only pointer there is.
+            .cursorClickable(action)
+            #if !os(tvOS)
             .onHover { h in
                 hovering = h
                 onHoverChange(h)
@@ -463,5 +467,6 @@ private struct MenuSpriteButton: View {
                     .onChanged { _ in pressing = true }
                     .onEnded { _ in pressing = false; action() }
             )
+            #endif
     }
 }

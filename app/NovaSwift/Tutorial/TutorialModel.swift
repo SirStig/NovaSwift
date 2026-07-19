@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import GameController
 
 /// The live signals the flight-training tutorial watches for. Each `.objective`
 /// step completes when the container observes its goal in the sandbox scene.
@@ -93,11 +94,24 @@ enum TutorialCourse {
 
     // MARK: Control-aware instruction text
 
+    /// The label to name a control with in instruction text. A connected game
+    /// controller wins (the pad's own button name — "A", "Cross", "R2"), since
+    /// someone holding a pad should be told pad buttons; otherwise the bound key.
     private static func key(_ action: GameAction, _ b: KeyBindings) -> String {
-        KeyToken.label(b.token(for: action))
+        if let pad = GCController.current?.extendedGamepad,
+           let button = PadBindings.load().button(for: action) {
+            return button.displayName(on: pad)
+        }
+        return KeyToken.label(b.token(for: action))
     }
 
+    /// True when instructions should speak "controller" (a pad is connected).
+    private static var padConnected: Bool { GCController.current?.extendedGamepad != nil }
+
     private static func flyText(_ s: GameSettings, _ b: KeyBindings) -> String {
+        if padConnected {
+            return "Push the left stick up to thrust and sideways to steer — or hold \(key(.accelerate, b)) to throttle up. Get moving and build up some speed."
+        }
         #if os(iOS)
         switch s.controlScheme {
         case .virtualCockpit:
@@ -113,6 +127,9 @@ enum TutorialCourse {
     }
 
     private static func turnText(_ s: GameSettings, _ b: KeyBindings) -> String {
+        if padConnected {
+            return "Steer with the left stick — or snap your bow straight to a heading with the right stick. In space you keep drifting the old way until you thrust after the new one."
+        }
         #if os(iOS)
         switch s.controlScheme {
         case .virtualCockpit:
@@ -128,6 +145,9 @@ enum TutorialCourse {
     }
 
     private static func afterburnerText(_ s: GameSettings, _ b: KeyBindings) -> String {
+        if padConnected {
+            return "Hold \(key(.afterburner, b)) on the controller for a burst of speed. It burns fuel fast, so save it for escapes and intercepts."
+        }
         #if os(iOS)
         return "Tap and hold the AFTERBURNER control for a burst of speed. It burns fuel fast, so save it for escapes and intercepts."
         #else
@@ -136,6 +156,9 @@ enum TutorialCourse {
     }
 
     private static func targetText(_ s: GameSettings, _ b: KeyBindings) -> String {
+        if padConnected {
+            return "Press \(key(.targetNext, b)) on the controller to cycle targets, or \(key(.nearestHostile, b)) to lock the nearest hostile. Its details appear on your status panel."
+        }
         #if os(iOS)
         return "Tap a ship out in space to lock it as your target — or open Actions and tap Target Nearest. Its details appear on your status panel."
         #else
@@ -144,6 +167,9 @@ enum TutorialCourse {
     }
 
     private static func fireText(_ s: GameSettings, _ b: KeyBindings) -> String {
+        if padConnected {
+            return "Press \(key(.firePrimary, b)) on the controller to fire your primary weapon. Give it a few shots."
+        }
         #if os(iOS)
         return "Tap the FIRE control to shoot your primary weapon. Give it a few shots."
         #else
@@ -152,6 +178,9 @@ enum TutorialCourse {
     }
 
     private static func weaponText(_ s: GameSettings, _ b: KeyBindings) -> String {
+        if padConnected {
+            return "Press \(key(.selectSecondaryNext, b)) (or \(key(.selectSecondaryPrev, b))) on the controller to cycle your secondary weapons. The selected one shows on your status panel."
+        }
         #if os(iOS)
         return "Open Actions and tap Next Weapon to cycle your secondary weapons — missiles, bombs and the like. The selected one shows on your status panel."
         #else
@@ -160,6 +189,9 @@ enum TutorialCourse {
     }
 
     private static func landText(_ s: GameSettings, _ b: KeyBindings) -> String {
+        if padConnected {
+            return "Fly close to the planet and slow right down, then press \(key(.land, b)) on the controller when the prompt appears. Landing is how you trade, refuel, outfit and take on missions."
+        }
         #if os(iOS)
         return "Fly close to the planet and slow right down, then tap LAND when the prompt appears. Landing is how you trade, refuel, outfit and take on missions."
         #else

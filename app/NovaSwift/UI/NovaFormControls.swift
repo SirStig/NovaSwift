@@ -43,6 +43,8 @@ struct NovaToggleStyle: ToggleStyle {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
+        // Every restyled Toggle app-wide is flippable by the controller cursor.
+        .cursorClickable { if isEnabled { configuration.isOn.toggle() } }
     }
 }
 
@@ -68,6 +70,22 @@ struct NovaSlider: View {
     }
 
     var body: some View {
+        #if os(tvOS)
+        // tvOS has no drag gestures — flank the same amber track with
+        // focusable −/+ buttons that step the value (20 steps per range).
+        HStack(spacing: 10) {
+            stepButton("minus", direction: -1)
+            track
+            stepButton("plus", direction: +1)
+        }
+        .frame(height: 28)
+        #else
+        track
+            .frame(height: thumbDiameter)
+        #endif
+    }
+
+    private var track: some View {
         GeometryReader { geo in
             let inset = thumbDiameter / 2
             let travel = max(0, geo.size.width - thumbDiameter)
@@ -89,6 +107,14 @@ struct NovaSlider: View {
                     .position(x: thumbCenterX, y: geo.size.height / 2)
             }
             .contentShape(Rectangle())
+            // Controller cursor: Ⓐ on the track jumps the thumb there.
+            .cursorClickable(at: { local in
+                guard isEnabled else { return }
+                let x = min(max(local.x - inset, 0), travel)
+                let f = travel > 0 ? x / travel : 0
+                value = range.lowerBound + f * (range.upperBound - range.lowerBound)
+            })
+            #if !os(tvOS)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
@@ -98,9 +124,29 @@ struct NovaSlider: View {
                         value = range.lowerBound + f * (range.upperBound - range.lowerBound)
                     }
             )
+            #endif
         }
-        .frame(height: thumbDiameter)
     }
+
+    #if os(tvOS)
+    private func stepButton(_ symbol: String, direction: Double) -> some View {
+        let step = {
+            guard isEnabled else { return }
+            let stepSize = (range.upperBound - range.lowerBound) / 20
+            value = min(max(value + direction * stepSize, range.lowerBound), range.upperBound)
+        }
+        return Button(action: step) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(novaAmber)
+                .frame(width: 30, height: 24)
+                .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 5))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .cursorClickable(step)
+    }
+    #endif
 }
 
 /// A manual row of tappable segments — amber-filled + black text when
@@ -129,6 +175,7 @@ struct NovaSegmentedPicker<T: Hashable>: View {
                                     in: RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
+                .cursorClickable { if isEnabled { selection = option } }
             }
         }
         .opacity(isEnabled ? 1 : 0.5)
@@ -176,6 +223,12 @@ struct NovaMenuPicker<T: Hashable>: View {
             }
             .menuStyle(.borderlessButton)
             .disabled(!isEnabled)
+            // The cursor can't open a native Menu popup, so Ⓐ cycles to the
+            // next option instead — every value stays reachable on a pad.
+            .cursorClickable {
+                guard isEnabled, let i = options.firstIndex(of: selection) else { return }
+                selection = options[(i + 1) % options.count]
+            }
         }
         .opacity(isEnabled ? 1 : 0.5)
     }

@@ -6,6 +6,7 @@ let package = Package(
     platforms: [
         .macOS(.v13),
         .iOS(.v16),
+        .tvOS(.v16),
     ],
     products: [
         // Data layer: containers, resource model, typed decoders, graphics.

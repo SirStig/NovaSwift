@@ -21,10 +21,13 @@ struct GridPagingModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             #if os(macOS)
-            .background(ScrollWheelCatcher { delta in
-                if delta < -2 { step(1) } else if delta > 2 { step(-1) }
-            })
+            // The catcher already resolves a raw scroll into whole-row steps
+            // (a wheel detent = one row, a trackpad swipe accumulates), so we
+            // just apply however many rows it reports for this event.
+            .background(ScrollWheelCatcher { rows in step(rows) })
             #endif
+            #if !os(tvOS)
+            // No touch swipes on tvOS — the controller/d-pad poll below pages.
             .gesture(
                 DragGesture(minimumDistance: 16)
                     .onEnded { value in
@@ -34,6 +37,7 @@ struct GridPagingModifier: ViewModifier {
                         else if value.translation.height > 40 { step(-1) }
                     }
             )
+            #endif
             .focusable()
             // Suppress the macOS default focus ring — it draws a yellow border around
             // the grid that lingers past the panel during the dismiss transition. Same
@@ -81,22 +85,51 @@ extension View {
 /// isn't told which event it's routing) — so it can sit behind the grid and
 /// catch trackpad/mouse-wheel scrolling without ever stealing a tile tap.
 private struct ScrollWheelCatcher: NSViewRepresentable {
-    let onScroll: (CGFloat) -> Void
+    /// Called with the number of ROWS to move for this scroll event (negative
+    /// = up, positive = down). Zero-row events are never emitted.
+    let onStep: (Int) -> Void
 
     func makeNSView(context: Context) -> CatcherView {
         let view = CatcherView()
-        view.onScroll = onScroll
+        view.onStep = onStep
         return view
     }
     func updateNSView(_ nsView: CatcherView, context: Context) {
-        nsView.onScroll = onScroll
+        nsView.onStep = onStep
     }
 
     final class CatcherView: NSView {
-        var onScroll: ((CGFloat) -> Void)?
+        var onStep: ((Int) -> Void)?
+
+        // Trackpad scrolling arrives as a stream of small precise deltas; we
+        // accumulate them and emit one row per `pointsPerRow` crossed so a
+        // gentle two-finger swipe moves a predictable number of rows instead
+        // of flinging through the whole grid.
+        private var accumulated: CGFloat = 0
+        private let pointsPerRow: CGFloat = 24
+
         override func scrollWheel(with event: NSEvent) {
-            onScroll?(event.scrollingDeltaY)
+            // Ignore the inertial tail of a trackpad flick — otherwise the grid
+            // keeps paging after the fingers lift. One deliberate swipe only.
+            guard event.momentumPhase == [] else { return }
+
+            if event.hasPreciseScrollingDeltas {
+                accumulated += event.scrollingDeltaY
+                var rows = 0
+                while accumulated <= -pointsPerRow { rows += 1; accumulated += pointsPerRow }
+                while accumulated >= pointsPerRow { rows -= 1; accumulated -= pointsPerRow }
+                if rows != 0 { onStep?(rows) }
+                // Drop any leftover fraction once the gesture finishes so it
+                // can't carry into the next, unrelated swipe.
+                if event.phase == .ended || event.phase == .cancelled { accumulated = 0 }
+            } else {
+                // Physical mouse wheel: each detent is a discrete event — one
+                // notch scrolls exactly one row.
+                if event.scrollingDeltaY < 0 { onStep?(1) }
+                else if event.scrollingDeltaY > 0 { onStep?(-1) }
+            }
         }
+
         override func hitTest(_ point: NSPoint) -> NSView? {
             NSApp.currentEvent?.type == .scrollWheel ? self : nil
         }

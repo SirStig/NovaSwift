@@ -198,6 +198,7 @@ struct GameMenuView: View {
                 Image(systemName: "xmark").font(.subheadline.weight(.bold))
                     .padding(8).background(.ultraThinMaterial, in: Circle())
             }
+            .cursorClickable(onResume)
             .buttonStyle(.plain)
         }
         .padding(16)
@@ -241,7 +242,7 @@ struct GameMenuView: View {
 
     private func row(_ title: String, _ icon: String, tint: Color = .white,
                      _ action: @escaping () -> Void) -> some View {
-        Button {
+        CursorButton {
             model.audio.play(.uiSelect)
             action()
         } label: {

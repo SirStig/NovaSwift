@@ -15,8 +15,10 @@ struct NovaSwiftApp: App {
                 #endif
                 .preferredColorScheme(.dark)
         }
+        #if !os(tvOS)
         // Keep the standard title bar on macOS so the window's close / minimize /
         // zoom controls live in the title bar and never overlay the game or HUD.
         .windowResizability(.contentMinSize)
+        #endif
     }
 }

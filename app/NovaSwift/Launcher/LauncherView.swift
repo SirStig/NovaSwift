@@ -98,7 +98,7 @@ struct LauncherView: View {
     }
 
     private var setUpButton: some View {
-        Button {
+        CursorButton {
             model.audio.play(.uiSelect)
             sheet = .importData
         } label: {
@@ -161,10 +161,9 @@ struct LauncherView: View {
     }
 
     private func linkPill(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
-        Button { model.audio.play(.uiSelect); action() } label: {
+        CursorButton { model.audio.play(.uiSelect); action() } label: {
             linkPillLabel(title, icon)
         }
-        .buttonStyle(.plain)
     }
 
     private func linkPillLabel(_ title: String, _ icon: String) -> some View {

@@ -74,7 +74,7 @@ struct PilotListView: View {
 
     private func pilotRow(_ group: PilotRoster.PilotGroup) -> some View {
         let save = group.mostRecent
-        return Button {
+        return CursorButton {
             Log.pilot.debug("PilotListView: open pilot group \(group.id, privacy: .public) \"\(save.displayName, privacy: .public)\"")
             model.audio.play(.uiSelect); openGroupID = group.id
         } label: {

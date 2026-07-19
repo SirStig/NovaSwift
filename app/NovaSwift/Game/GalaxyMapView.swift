@@ -1,4 +1,5 @@
 import SwiftUI
+import GameController
 import NovaSwiftKit
 import NovaSwiftStory
 
@@ -144,6 +145,12 @@ struct GalaxyMapView: View {
                 }
             }
             .contentShape(Rectangle())
+            #if os(tvOS)
+            // No touch/pointer gestures on tvOS: the connected controller's
+            // left stick pans the chart and the triggers zoom, via a
+            // lifetime-scoped poll (same pattern as `GridPagingModifier`).
+            .task(id: "map-controller-pan") { await pollControllerPan() }
+            #else
             .gesture(
                 DragGesture()
                     .onChanged { g in
@@ -165,8 +172,32 @@ struct GalaxyMapView: View {
             .onTapGesture { location in
                 handleTap(at: location, viewSize: geo.size)
             }
+            #endif
         }
     }
+
+    #if os(tvOS)
+    /// Controller-driven chart navigation for tvOS: left stick pans, the
+    /// triggers zoom out/in. ~30 Hz for smooth motion while the map is up.
+    private func pollControllerPan() async {
+        while !Task.isCancelled {
+            if let padDevice = GCController.current?.extendedGamepad {
+                let x = Double(padDevice.leftThumbstick.xAxis.value)
+                let y = Double(padDevice.leftThumbstick.yAxis.value)
+                if abs(x) > 0.15 || abs(y) > 0.15 {
+                    pan.width -= CGFloat(x * 14)
+                    pan.height += CGFloat(y * 14)   // stick up moves the view up
+                }
+                let zoomIn = Double(padDevice.rightTrigger.value)
+                let zoomOut = Double(padDevice.leftTrigger.value)
+                if zoomIn > 0.1 || zoomOut > 0.1 {
+                    setZoom(zoom * (1 + (zoomIn - zoomOut) * 0.03))
+                }
+            }
+            try? await Task.sleep(nanoseconds: 33_000_000)
+        }
+    }
+    #endif
 
     /// Build the shared government color palette for the loaded game.
     private func rebuildGovtColors() {

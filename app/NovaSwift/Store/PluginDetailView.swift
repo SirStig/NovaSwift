@@ -27,7 +27,7 @@ struct PluginDetailView: View {
             }
             .padding()
         }
-        .scrollContentBackground(.hidden)
+        .novaHiddenScrollContentBackground()
         .navigationTitle(entry.name)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)

@@ -256,6 +256,8 @@ struct GameSettings: Codable, Equatable {
     var tiltSensitivity: Double = 1.0
     /// Analog-stick / touch dead zone (0…0.5).
     var stickDeadzone: Double = 0.15
+    /// Speed of the controller-driven UI cursor (0.4…2, ×~900 pt/s).
+    var cursorSensitivity: Double = 1.0
     /// Haptic feedback on touch devices / controllers.
     var hapticsEnabled: Bool = true
     /// Aim toward the mouse cursor (macOS) — off keeps the original no-auto-follow feel.
@@ -396,6 +398,12 @@ struct GameSettings: Codable, Equatable {
     /// player's pilots follow them from Mac to iPad without any setup.
     var iCloudSaves: Bool = true
 
+    /// Keep a copy of the imported game data in the player's **private**
+    /// iCloud so their other devices can restore it without re-importing
+    /// (and tvOS can self-heal after a cache purge). Like `iCloudSaves`,
+    /// unavailability is a transparent no-op — nothing depends on it.
+    var iCloudGameData: Bool = true
+
     // MARK: Accessibility
 
     var largerHUD: Bool = false
@@ -462,6 +470,7 @@ struct GameSettings: Codable, Equatable {
         invertTurn            = v(.invertTurn, d.invertTurn)
         tiltSensitivity       = v(.tiltSensitivity, d.tiltSensitivity)
         stickDeadzone         = v(.stickDeadzone, d.stickDeadzone)
+        cursorSensitivity     = v(.cursorSensitivity, d.cursorSensitivity)
         hapticsEnabled        = v(.hapticsEnabled, d.hapticsEnabled)
         mouseAiming           = v(.mouseAiming, d.mouseAiming)
         starfieldDensity      = v(.starfieldDensity, d.starfieldDensity)
@@ -499,6 +508,7 @@ struct GameSettings: Codable, Equatable {
         debugModeEnabled      = v(.debugModeEnabled, d.debugModeEnabled)
         uiDebugOverlay        = v(.uiDebugOverlay, d.uiDebugOverlay)
         iCloudSaves           = v(.iCloudSaves, d.iCloudSaves)
+        iCloudGameData        = v(.iCloudGameData, d.iCloudGameData)
         largerHUD             = v(.largerHUD, d.largerHUD)
         highContrastHUD       = v(.highContrastHUD, d.highContrastHUD)
         colorblindMode        = v(.colorblindMode, d.colorblindMode)

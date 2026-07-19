@@ -177,6 +177,8 @@ struct NovaButton: View {
                     onQuantity()
                 }
             )
+            // Every authentic button is pressable by the controller cursor.
+            .cursorClickable { if enabled { action() } }
     }
 }
 
@@ -198,6 +200,7 @@ struct NovaIconButton: View {
             .buttonStyle(NovaIconButtonStyle(graphics: graphics, systemName: systemName,
                                              enabled: enabled, theme: theme))
             .disabled(!enabled)
+            .cursorClickable { if enabled { action() } }
     }
 }
 

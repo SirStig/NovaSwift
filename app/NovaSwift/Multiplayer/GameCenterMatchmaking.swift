@@ -242,7 +242,7 @@ private final class InviteMatchmakerCoordinator: NSObject, GKMatchmakerViewContr
 
 /// Presents (and dismisses) a GameKit-supplied view controller on either platform.
 enum GameCenterPresenter {
-    #if os(iOS)
+    #if os(iOS) || os(tvOS)
     static func present(_ vc: UIViewController) {
         guard let root = UIApplication.shared.connectedScenes
             .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
@@ -281,7 +281,7 @@ func makeMatchRequest(playerGroup: Int) -> GKMatchRequest {
 /// calls `onMatch` with a connected `GKMatch` (hand it to
 /// `MultiplayerSession.startGameCenter`), or `onCancel` if the user backs out.
 /// Used for player-initiated matchmaking; invites come through `GameCenterManager`.
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 struct GameCenterMatchmakerView: UIViewControllerRepresentable {
     /// Plug-in-set bucket for auto-match (see `makeMatchRequest`).
     var playerGroup: Int = 0

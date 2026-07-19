@@ -1,5 +1,6 @@
 import SpriteKit
 import CoreImage
+import GameController
 import NovaSwiftKit
 import NovaSwiftEngine
 #if os(macOS)
@@ -365,6 +366,21 @@ final class GameScene: SKScene {
     // allowed; the HUD shows `landPrompt` while a pad is in reach.
     private(set) var nearestLandableID: Int?
     private(set) var canLandNow = false
+
+    /// The bound Land key's label, cached once (UserDefaults + JSON decode is
+    /// too heavy for the per-frame landing check that builds the prompt).
+    private lazy var landKeyLabel = KeyToken.label(KeyBindings.load().token(for: .land))
+
+    /// What to call the Land control in the HUD prompt: the connected pad's
+    /// button for it when someone is playing on a controller, else the key.
+    private func landControlLabel() -> String {
+        if let ci = controllerInput, ci.isConnected,
+           let button = ci.bindings.button(for: .land),
+           let pad = GCController.current?.extendedGamepad {
+            return button.displayName(on: pad)
+        }
+        return landKeyLabel
+    }
     /// The click/hotkey-selected nav destination (planet/station) —
     /// independent of `nearestLandableID`, which stays proximity-only and
     /// keeps driving the land prompt. Mutually exclusive with
@@ -1504,7 +1520,7 @@ final class GameScene: SKScene {
         if let id = bestID, inReach {
             let name = world.systemContext.bodies.first { $0.id == id }
                 .flatMap { _ in planetVisuals.first { $0.id == id }?.name } ?? "the spaceport"
-            hud?.landPrompt = canLandNow ? "Press L to land on \(name)"
+            hud?.landPrompt = canLandNow ? "Press \(landControlLabel()) to land on \(name)"
                                          : "Slow down to land on \(name)"
             hud?.landName = name
             hud?.landReady = canLandNow

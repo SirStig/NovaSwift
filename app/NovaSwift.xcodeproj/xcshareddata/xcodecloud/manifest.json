@@ -1,0 +1,9 @@
+{
+  "id" : "18af048b-39da-4b4c-ae18-78b10087e96e",
+  "targets" : [
+    {
+      "id" : "d691eb23-87d5-41d7-a04a-f682f568b3a0",
+      "name" : "NovaSwift"
+    }
+  ]
+}

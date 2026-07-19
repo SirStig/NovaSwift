@@ -58,9 +58,19 @@ public final class PilotArchive {
     /// instance so two copies on one machine keep separate rosters; see
     /// `AppInstance`.
     public static func defaultLocalRoot() -> URL {
+        // tvOS's sandbox only permits writing inside Caches — Application
+        // Support exists but isn't creatable, which used to drop this into
+        // `tmp` (gone every relaunch). Caches survives relaunches; iCloud is
+        // the durable copy since tvOS may purge Caches under space pressure.
+        #if os(tvOS)
+        let base = (try? FileManager.default.url(for: .cachesDirectory,
+                                                 in: .userDomainMask, appropriateFor: nil, create: true))
+            ?? FileManager.default.temporaryDirectory
+        #else
         let base = (try? FileManager.default.url(for: .applicationSupportDirectory,
                                                  in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
+        #endif
         return base.appendingPathComponent("\(AppInstance.saveFolderName)/Pilots", isDirectory: true)
     }
 

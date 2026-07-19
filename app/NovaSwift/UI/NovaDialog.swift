@@ -73,7 +73,10 @@ struct NovaDialog<Content: View>: View {
             // Footer buttons live on the panel art's own grey control strip.
             HStack(spacing: 10) {
                 Spacer()
-                ForEach(buttons) { b in footerButton(b) }
+                ForEach(buttons) { b in
+                    footerButton(b)
+                        .cursorClickable { if b.enabled { model.audio.play(.uiSelect); b.action() } }
+                }
             }
             .padding(.horizontal, 16)
             .frame(height: 40)
@@ -212,6 +215,7 @@ struct DialogChrome<Content: View>: View {
                     .background(Capsule().fill(novaAmber))
             }
             .buttonStyle(.plain)
+            .cursorClickable(onClose)
         }
     }
 }
@@ -360,5 +364,6 @@ struct NovaSelectRow<Detail: View>: View {
                         in: RoundedRectangle(cornerRadius: 5))
         }
         .buttonStyle(.plain)
+        .cursorClickable(action)
     }
 }

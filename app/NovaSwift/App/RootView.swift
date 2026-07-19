@@ -76,10 +76,25 @@ struct RootView: View {
             // coordinate-space container (see NovaDebug.swift) from the ambient
             // flag injected below.
             debugControls
+
+            // The controller-driven UI cursor, above everything so it can
+            // click into any screen. Inert on tvOS / without a pad.
+            ControllerCursorOverlay()
+                .zIndex(50)
         }
         .environment(\.novaDebugEnabled, model.settings.uiDebugOverlay)
         .environment(\.novaUIScale, model.settings.uiScale)   // "Overall UI scale"
         .environment(\.novaTheme, model.uiTheme)              // cölr interface theme
+        #if os(tvOS)
+        // Keep the focus engine parked here (the controller cursor is the real
+        // pointer; cursor targets are focusable(false)) and swallow Menu/B
+        // presses — otherwise tvOS treats an unhandled Menu as "suspend the
+        // app", which would quit to the home screen the moment a player
+        // pressed their bound Menu button. Exiting the app remains available
+        // via the TV/Home button.
+        .focusable()
+        .onExitCommand { }
+        #endif
 
         .animation(.easeInOut(duration: 0.25), value: model.screen)
         .animation(.easeInOut(duration: 0.3), value: model.pendingIntro != nil)
@@ -108,6 +123,12 @@ struct RootView: View {
             #if canImport(GameKit)
             model.gameCenter.authenticate()   // sign in for online co-op (safe if already signed in)
             #endif
+            #if canImport(CloudKit)
+            // Game-data iCloud pass: upload this device's import if the cloud
+            // doesn't have it yet; with no data, check for (and on tvOS,
+            // restore) a set imported on another device. Best-effort.
+            Task { await model.syncGameDataWithCloud() }
+            #endif
             #if DEBUG
             if ProcessInfo.processInfo.environment["NOVASWIFT_AUTOPLAY"] != nil,
                model.data.hasBaseData {
@@ -130,13 +151,16 @@ struct RootView: View {
     /// Always-mounted so the ⇧⌘D shortcut works everywhere; the badge only shows
     /// while the overlay is on (a persistent reminder + one-tap exit on touch).
     @ViewBuilder private var debugControls: some View {
+        #if !os(tvOS)
         // Hidden keyboard-shortcut catcher (macOS / hardware keyboard).
+        // tvOS has no keyboard shortcuts; the badge below still works there.
         Button(action: toggleDebug) { Color.clear }
             .buttonStyle(.plain)
             .frame(width: 0, height: 0)
             .opacity(0)
             .accessibilityHidden(true)
             .keyboardShortcut("d", modifiers: [.command, .shift])
+        #endif
 
         if model.settings.uiDebugOverlay {
             VStack {
