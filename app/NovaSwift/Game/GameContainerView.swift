@@ -812,13 +812,18 @@ struct GameContainerView: View {
                 // live (started from the in-game menu). Passive cluster; empty
                 // regions don't block fly-to-tap. It sits bottom-leading, but
                 // moves to the top-left while the touch controls are up, since
-                // their turn cluster claims that corner.
-                #if os(iOS)
-                MultiplayerChatCluster(session: model.session,
-                                       touchControlsVisible: flightControlsVisible)
-                #else
-                MultiplayerChatCluster(session: model.session)
-                #endif
+                // their turn cluster claims that corner. Hidden while the galaxy
+                // map (or gate destination map) owns the screen — its bottom-left
+                // corner holds the map's own buttons, which the chat button would
+                // otherwise cover.
+                if !nav.showingMap && gateMapOrigin == nil {
+                    #if os(iOS)
+                    MultiplayerChatCluster(session: model.session,
+                                           touchControlsVisible: flightControlsVisible)
+                    #else
+                    MultiplayerChatCluster(session: model.session)
+                    #endif
+                }
 
                 // Trade / item hand-off — a live trade window, or an incoming
                 // invite prompt. Modal overlays, only while in a session.
@@ -860,9 +865,14 @@ struct GameContainerView: View {
                 // pill that lands you (replacing the desktop "Press L" hint).
                 // Inset by the HUD sidebar width so it centres on the actual play
                 // viewport, not the full window (see `Self.sidebarWidth`).
-                GeometryReader { geo in
-                    LandPromptView(hud: host.hud, onLand: { handleDiscrete(.land) },
-                                    rightInset: touchRightInset(host, in: geo.size))
+                // Only while flight actually owns the screen — same gate as the
+                // touch controls, plus the gate destination map — so it never
+                // floats over the galaxy map or another fullscreen dialog.
+                if flightControlsVisible && gateMapOrigin == nil {
+                    GeometryReader { geo in
+                        LandPromptView(hud: host.hud, onLand: { handleDiscrete(.land) },
+                                        rightInset: touchRightInset(host, in: geo.size))
+                    }
                 }
 
                 if let state = hailDialogState {
