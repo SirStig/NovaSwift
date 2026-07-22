@@ -451,6 +451,7 @@ struct OutfitterView: View {
                     .padding(.top, 3).padding(.leading, 3)
             }
         }
+        .cursorScrollable()
     }
 
     private func info(_ space: NovaSpace) -> some View {
@@ -698,6 +699,7 @@ struct ShipyardView: View {
             .padding(.top, 3).padding(.leading, 3)
             .frame(width: 190, alignment: .leading)
         }
+        .cursorScrollable()
     }
 
     private func info(_ space: NovaSpace) -> some View {
@@ -815,6 +817,7 @@ struct BarView: View {
                         ScrollView(showsIndicators: false) {
                             NovaText(barText, size: 10, width: 230, align: .leading)
                         }
+                        .cursorScrollable()
                         .frame(width: 230, height: 106)
                         .novaPlace(space, -115.5, -82.5)
                         // Escorts are hired from the port's shipyard stock, so the
@@ -992,6 +995,7 @@ struct HolovidView: View {
                 ScrollView(showsIndicators: false) {
                     NovaText(bodyText, size: 11, width: textW, align: .leading)
                 }
+                .cursorScrollable()
                 .frame(width: textW, height: fh * 0.58, alignment: .topLeading)
                 .novaPlace(space, -textW / 2, -fh / 2 + 20)
                 NovaButton(graphics: graphics,
@@ -1006,6 +1010,7 @@ struct HolovidView: View {
                 ScrollView(showsIndicators: false) {
                     NovaText(bodyText, size: 11, width: 300, align: .leading)
                 }
+                .cursorScrollable()
                 .frame(width: 300, height: 200)
                 NovaButton(graphics: graphics,
                            title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),

@@ -69,6 +69,7 @@ struct PilotListView: View {
             }
             .padding(.vertical, 2)
         }
+        .cursorScrollable()
         .frame(height: min(CGFloat(model.roster.groups.count) * 68 + 8, 320))
     }
 

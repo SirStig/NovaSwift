@@ -56,6 +56,24 @@ public enum GameDataArchiver {
         return regularFiles(under: destDir).count
     }
 
+    /// Unzips `archive` into a fresh temporary directory and returns it. The
+    /// caller owns the directory and should delete it once consumed. Used by
+    /// the import paths that accept a .zip (a zipped "Nova Files" folder or
+    /// the Windows build's download) instead of a live folder.
+    public static func unzipToTemporary(archive: URL) throws -> URL {
+        let fm = FileManager()
+        let dest = fm.temporaryDirectory
+            .appendingPathComponent("novaswift-unzip-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+        do {
+            try fm.unzipItem(at: archive, to: dest)
+        } catch {
+            try? fm.removeItem(at: dest)
+            throw error
+        }
+        return dest
+    }
+
     private static func regularFiles(under directory: URL) -> [URL] {
         let fm = FileManager()
         guard let e = fm.enumerator(at: directory,

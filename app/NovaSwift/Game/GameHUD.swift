@@ -42,6 +42,13 @@ final class GameHUDModel: ObservableObject {
     /// Whether the ship has at least one fighter bay fitted — gates the touch
     /// launch/recall controls (both are no-ops on a hull with none).
     @Published var hasFighterBays = false
+    /// Whether the player currently has any live escorts/fighters in the wing —
+    /// gates the contextual escort-command pill (`ContextualActionsView`).
+    @Published var hasEscorts = false
+    /// True while any ship is actively attacking the player. Lingers a few
+    /// seconds past the last attack run (see `GameScene.updateHUD`) so the
+    /// contextual escort controls don't strobe between an attacker's passes.
+    @Published var underAttack = false
     @Published var cargoUsed = 0
     @Published var cargoCapacity = 0
     /// The player's credit balance, shown in the status bar's bottom readout

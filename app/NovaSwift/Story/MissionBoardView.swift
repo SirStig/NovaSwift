@@ -240,6 +240,7 @@ private struct MissionInfoSheet: View {
                     ScrollView(showsIndicators: false) {
                         NovaText(offer.briefingText, size: 10, width: 242, align: .leading)
                     }
+                    .cursorScrollable()
                     .frame(width: 242, height: 91)
                     .novaPlace(space, -17.5, -51.5)
                     // item 4: (57,125)-(156,150) 99x25 — refuse
@@ -272,6 +273,7 @@ private struct MissionInfoSheet: View {
                 }
             }
         }
+        .cursorScrollable()
         .frame(width: 195, height: 84)
     }
 
@@ -286,6 +288,7 @@ private struct MissionInfoSheet: View {
                 }
             }
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
+                .cursorScrollable()
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()
@@ -436,6 +439,7 @@ struct MissionSingleDialog: View {
                         }
                         .padding(.top, 2).padding(.leading, 2)
                     }
+                    .cursorScrollable()
                     .frame(width: 415, height: 267)
                     .novaPlace(space, -208.5, -149.5)
 
@@ -492,6 +496,7 @@ struct MissionSingleDialog: View {
                 }
             }
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
+                .cursorScrollable()
             HStack {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()

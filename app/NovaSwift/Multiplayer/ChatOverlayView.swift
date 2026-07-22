@@ -156,6 +156,11 @@ struct ChatOverlayView: View {
 
     private var inputBar: some View {
         HStack(spacing: 6) {
+            #if os(tvOS)
+            // Cursor-clickable stand-in: opens the fullscreen keyboard and
+            // sends straight from its commit (see TVTextEntry.swift).
+            TVCursorTextField(placeholder: "Message…", text: $draft, onCommit: send)
+            #else
             TextField("Message…", text: $draft)
                 .textFieldStyle(.plain)
                 .foregroundStyle(.white)
@@ -163,6 +168,7 @@ struct ChatOverlayView: View {
                 .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                 .focused($inputFocused)
                 .onSubmit(send)
+            #endif
             Button(action: send) {
                 Image(systemName: "paperplane.fill")
                     .foregroundStyle(draft.trimmingCharacters(in: .whitespaces).isEmpty

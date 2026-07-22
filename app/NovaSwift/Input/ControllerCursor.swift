@@ -84,6 +84,12 @@ struct CursorFrameTransform: Equatable {
     /// move when the container scales about its centre). `nil` while the
     /// container hasn't been measured yet — see `ready`.
     var anchor: CGPoint?
+    /// The container's *visual* scale, regardless of whether `scale` carries
+    /// it. On OS versions that already fold ancestor `scaleEffect` into
+    /// global geometry frames (see `CursorScaleEffect`'s probe) `scale` is 1 —
+    /// but `actionAt` hit points still arrive in drawn coordinates and need
+    /// this divided out to land in the target's own layout space.
+    var pointScale: CGFloat = 1
 
     /// False only in the not-yet-measured window right after a scaled
     /// container appears; targets wait it out rather than register skewed.
@@ -115,6 +121,19 @@ private struct CursorScaleEffect: ViewModifier {
     /// `nil` until the first geometry callback — descendants don't register
     /// at all until then, so a not-yet-measured anchor can't skew targets.
     @State private var anchor: CGPoint?
+    /// Whether this OS build already folds ancestor `scaleEffect` into global
+    /// geometry frames (behaviour differs across SwiftUI versions/platforms).
+    /// Probed from a real measurement rather than assumed: the container's
+    /// global frame is compared against its own layout size. When the system
+    /// does it for us, descendants must NOT scale their frames again — that
+    /// double-scale is exactly the "cursor lands beside the button" offset.
+    @State private var systemAppliesScale: Bool?
+
+    /// One measurement carrying both interpretations of the same view.
+    private struct Probe: Equatable {
+        var frame: CGRect     // global — drawn or layout space, OS-dependent
+        var layoutSize: CGSize // always layout space (scaleEffect is layout-neutral)
+    }
 
     func body(content: Content) -> some View {
         content
@@ -122,16 +141,34 @@ private struct CursorScaleEffect: ViewModifier {
             // Layout-neutral geometry observation (a bare GeometryReader here
             // would be greedy and break the content-hugging dialogs). Fires on
             // appear and on every geometry change.
-            .onGeometryChange(for: CGRect.self) { proxy in
-                proxy.frame(in: .global)
-            } action: { frame in
+            .onGeometryChange(for: Probe.self) { proxy in
+                Probe(frame: proxy.frame(in: .global), layoutSize: proxy.size)
+            } action: { probe in
+                // The centre is the scale anchor, invariant either way.
+                anchor = CGPoint(x: probe.frame.midX, y: probe.frame.midY)
+                if probe.layoutSize.width > 0, scale != 1 {
+                    // Whichever reading the measured width is closer to wins.
+                    let drawn = probe.layoutSize.width * scale
+                    systemAppliesScale =
+                        abs(probe.frame.width - drawn) < abs(probe.frame.width - probe.layoutSize.width)
+                }
                 #if DEBUG
-                print("[cursor] scale container ×\(scale) layout frame \(frame)")
+                print("[cursor] scale container ×\(scale) frame \(probe.frame) layout \(probe.layoutSize) systemAppliesScale \(String(describing: systemAppliesScale))")
                 #endif
-                anchor = CGPoint(x: frame.midX, y: frame.midY)
             }
-            .environment(\.cursorFrameTransform,
-                         CursorFrameTransform(scale: scale, anchor: anchor))
+            .environment(\.cursorFrameTransform, transform)
+    }
+
+    private var transform: CursorFrameTransform {
+        if systemAppliesScale == true {
+            // Global frames are already drawn-space: register them untouched
+            // (scale 1 → ready), only hit points still need the visual scale
+            // divided out for `actionAt`.
+            return CursorFrameTransform(scale: 1, anchor: nil, pointScale: scale)
+        }
+        // Legacy semantics (or not yet probed — anchor nil keeps `ready`
+        // false so descendants wait rather than register skewed).
+        return CursorFrameTransform(scale: scale, anchor: anchor, pointScale: scale)
     }
 }
 
@@ -186,7 +223,7 @@ private struct CursorClickable: ViewModifier {
                             // visual scale back out of the drawn-space offset.
                             let mappedActionAt = actionAt.map { f in
                                 { (p: CGPoint) in
-                                    f(CGPoint(x: p.x / t.scale, y: p.y / t.scale))
+                                    f(CGPoint(x: p.x / t.pointScale, y: p.y / t.pointScale))
                                 }
                             }
                             CursorTargets.shared.update(id, frame: t.apply(geo.frame(in: .global)),
@@ -293,8 +330,26 @@ struct ControllerCursorOverlay: View {
 
     @Environment(\.novaDebugEnabled) private var novaDebug
 
+    /// Where the overlay sits on screen + whether the loop should run — the
+    /// poll task's identity, so it restarts when either changes. Targets
+    /// register in *global* coordinates while the cursor draws (and its
+    /// position state lives) in the overlay's *local* ones; the loop needs
+    /// the local→global origin so the point it hit-tests is exactly the point
+    /// under the drawn dot even when an ancestor keeps the overlay inset from
+    /// the screen edge (e.g. the tvOS safe area).
+    private struct Space: Hashable {
+        var active: Bool
+        var originX: CGFloat, originY: CGFloat
+        var width: CGFloat, height: CGFloat
+        var size: CGSize { CGSize(width: width, height: height) }
+    }
+
     var body: some View {
         GeometryReader { geo in
+            let globalFrame = geo.frame(in: .global)
+            let space = Space(active: active,
+                              originX: globalFrame.minX, originY: globalFrame.minY,
+                              width: geo.size.width, height: geo.size.height)
             ZStack {
                 if novaDebug {
                     // UI-debug: outline every registered hit frame, so a
@@ -308,6 +363,9 @@ struct ControllerCursorOverlay: View {
                                       .map { "\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))×\(Int($0.frame.height))" }
                                       .joined(separator: " | "))
                             #endif
+                            // Target frames are global; this canvas draws in
+                            // the overlay's local space.
+                            ctx.translateBy(x: -globalFrame.minX, y: -globalFrame.minY)
                             for target in CursorTargets.shared.targets.values {
                                 ctx.stroke(Path(target.frame),
                                            with: .color(target.hoverEffect ? .green : .cyan),
@@ -315,7 +373,6 @@ struct ControllerCursorOverlay: View {
                             }
                         }
                     }
-                    .ignoresSafeArea()
                 }
                 if active, visible, let position {
                     cursorShape
@@ -325,7 +382,7 @@ struct ControllerCursorOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .animation(.easeInOut(duration: 0.15), value: visible)
-            .task(id: active) { await loop(in: geo.size) }
+            .task(id: space) { await loop(in: space) }
         }
         .allowsHitTesting(false)
         .ignoresSafeArea()
@@ -358,10 +415,15 @@ struct ControllerCursorOverlay: View {
     }
 
     /// ~60 Hz stick poll while active: move, show/auto-hide, and click on the
-    /// Ⓐ press edge. Lives in `.task(id: active)` so it stops when a pad
+    /// Ⓐ press edge. Lives in `.task(id:)` so it stops when a pad
     /// disconnects or flight takes the sticks back.
-    private func loop(in bounds: CGSize) async {
-        guard active else { return }
+    private func loop(in space: Space) async {
+        guard space.active else { return }
+        let bounds = space.size
+        /// The cursor's local position in the global space targets register in.
+        func global(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: p.x + space.originX, y: p.y + space.originY)
+        }
         defer {
             // Leave no stale hover/press behind when a pad disconnects or
             // flight takes the sticks back mid-hover.
@@ -398,14 +460,14 @@ struct ControllerCursorOverlay: View {
 
                 // Hover: whatever's under the visible cursor. `setHovered`
                 // publishes only on change, so this is cheap per tick.
-                let hit = (visible && !clickPulse) ? position.flatMap { CursorTargets.shared.hit(at: $0) } : nil
+                let hit = (visible && !clickPulse) ? position.flatMap { CursorTargets.shared.hit(at: global($0)) } : nil
                 if !clickPulse {
                     CursorTargets.shared.setHovered(hit?.target.hoverEffect == true ? hit?.id : nil)
                     hovering = hit?.target.hoverEffect == true
                 }
 
                 let pressed = pad.buttonA.isPressed
-                if pressed, !wasPressed, visible, let p = position {
+                if pressed, !wasPressed, visible, let p = position.map(global) {
                     clickPulse = true
                     if let (id, target) = CursorTargets.shared.hit(at: p) {
                         CursorTargets.shared.setPressed(id)

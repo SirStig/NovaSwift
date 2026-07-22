@@ -50,6 +50,15 @@ struct NovaDialog<Content: View>: View {
             // tall ones stay fully on-screen and closable, with no downscaling,
             // so the text stays crisp. Width is capped to `width` but shrinks on
             // a narrow phone; the 12pt padding keeps it clear of the edges.
+            //
+            // CAUTION: the two variants are separate subtrees, so content whose
+            // height grows across the fit threshold at runtime is DESTROYED and
+            // REBUILT — all view state inside the dialog resets. (This once
+            // recreated the Apple TV Wi-Fi import receiver mid-upload.) Dialog
+            // content must keep a stable height while holding live state — and
+            // an always-ScrollView replacement is NOT the fix: it proposes nil
+            // height, which breaks the measure-dependent dialog content
+            // (GeometryReaders, fill frames, shrink-to-fit scaling).
             ViewThatFits(in: .vertical) {
                 card(scrolls: false)
                 card(scrolls: true)
@@ -73,6 +82,7 @@ struct NovaDialog<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             if scrolls {
                 ScrollView { dialogBody }
+                    .cursorScrollable()
             } else {
                 dialogBody
             }
@@ -189,6 +199,9 @@ struct DialogChrome<Content: View>: View {
             .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 10)
 
             content()
+                // Right-stick scrolling for the Form/List inside (Settings,
+                // Plug-ins) — the modifier binds to the scrollable within.
+                .cursorScrollable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
 
@@ -326,8 +339,40 @@ let novaAmber = Color(red: 1.0, green: 0.7, blue: 0.28)
 struct NovaTextField: View {
     let placeholder: String
     @Binding var text: String
+    /// Suggestion chips shown on the pad keyboard (e.g. random pilot names) —
+    /// nil for fields where canned entries make no sense.
+    var padSuggestions: (() -> [String])? = nil
+    #if os(tvOS)
+    @State private var editing = false
+    #else
+    @EnvironmentObject private var model: AppModel
+    #endif
 
     var body: some View {
+        #if os(tvOS)
+        // An inline TextField can never be activated on tvOS here — typing
+        // needs the fullscreen keyboard, which needs first-responder status
+        // the parked focus engine won't grant. The field is a cursor button
+        // that summons the keyboard instead (see TVTextEntry.swift).
+        CursorButton { editing = true } label: {
+            HStack(spacing: 8) {
+                Text(text.isEmpty ? placeholder : text)
+                    .novaFont(.body)
+                    .foregroundStyle(text.isEmpty ? Color.secondary : .white)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Image(systemName: "keyboard")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(Color(white: 0.04), in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(white: 0.3)))
+            .contentShape(Rectangle())
+        }
+        .tvTextEntry(text: $text, editing: $editing, placeholder: placeholder)
+        #else
         TextField("", text: $text, prompt: Text(placeholder)
             .font(.custom(NovaFontRole.body.family, size: NovaFontRole.body.baseSize)).foregroundColor(.secondary))
             .textFieldStyle(.plain)
@@ -336,6 +381,16 @@ struct NovaTextField: View {
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(Color(white: 0.04), in: RoundedRectangle(cornerRadius: 5))
             .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(white: 0.3)))
+            // A controller player can't reach the touch/hardware keyboard —
+            // Ⓐ on the field opens the pad-drivable overlay instead. Touch
+            // and mouse still edit inline exactly as before.
+            .cursorClickable { [weak model] in
+                guard let model else { return }
+                model.padKeyboard = PadKeyboardRequest(
+                    title: placeholder, text: text,
+                    suggestions: padSuggestions) { text = $0 }
+            }
+        #endif
     }
 }
 

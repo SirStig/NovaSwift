@@ -180,6 +180,7 @@ struct GameMenuView: View {
                 }
                 .padding(12)
             }
+            .cursorScrollable()
         }
     }
 

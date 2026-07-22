@@ -52,6 +52,7 @@ struct PlayerInfoView: View {
                 NovaText(paneText, size: 10, width: 393, align: .leading)
                     .padding(.top, 4).padding(.leading, 6)
             }
+            .cursorScrollable()
             .frame(width: 405, height: 141)
             .clipped()
             .novaPlace(space, -202.5, -73.5)

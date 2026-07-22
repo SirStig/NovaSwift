@@ -19,6 +19,22 @@ final class GameDataController: ObservableObject {
     @Published private(set) var plugins: [PluginBundle] = []
     @Published private(set) var status: String = "No game data imported yet."
 
+    /// What a *partial* import is still missing (empty when the data set is
+    /// playable). `hasBaseData` alone only means "some resource file merged" —
+    /// three of the six Nova Data files merge fine and then the game wedges on
+    /// a loading screen hunting for art that was never imported. Every
+    /// import surface gates its "you're done" transition on
+    /// `isBaseDataComplete`, not `hasBaseData`.
+    @Published private(set) var missingEssentials: [String] = []
+    var isBaseDataComplete: Bool { hasBaseData && missingEssentials.isEmpty }
+
+    /// Changes on every completed reload — key work that must re-run when the
+    /// data set's *contents* change (e.g. re-attempting the authentic menu-art
+    /// decode as import batches land). `hasBaseData` can't serve: it flips
+    /// once at the first partial file and never again through the rest of an
+    /// import.
+    @Published private(set) var dataStamp = UUID()
+
     /// The latest prewarm report, in order. Kept separate from `status` so the
     /// loading screen's transient per-sprite chatter doesn't overwrite the
     /// launcher's "Loaded N resources…" summary pill.
@@ -300,6 +316,7 @@ final class GameDataController: ObservableObject {
 
         guard let baseDir = resolveBaseDir() else {
             hasBaseData = false
+            missingEssentials = []
             game = nil
             status = "No EV Nova data found. Import your game data to play. \(plugins.count) plug-in(s) ready."
             Log.data.notice("reload: no base game data found (checked \(self.importedBaseDir.path, privacy: .public) and NOVASWIFT_DATA) — \(self.plugins.count, privacy: .public) plug-in(s) ready but nothing to play")
@@ -319,13 +336,45 @@ final class GameDataController: ObservableObject {
         storylineTagCache = StorylineTagCache(fingerprint: fingerprint)
         storylineTags = [:]   // stale from any previous data set until `prewarm()` recomputes
         hasBaseData = true
+        dataStamp = UUID()
+        missingEssentials = Self.findMissingEssentials(in: merged)
         status = "Loaded \(merged.totalCount) resources from base + \(plugins.filter(\.isEnabled).count) plug-in(s)."
+        if !missingEssentials.isEmpty {
+            status += " Still missing: \(missingEssentials.joined(separator: ", ")) — add the rest of your Nova Files."
+        }
         let byType = merged.typeCounts.map { "\($0.type)=\($0.count)" }.joined(separator: ", ")
         Log.data.info("reload: loaded \(merged.totalCount, privacy: .public) resource(s) from base (\(baseFiles.count, privacy: .public) file(s)) + \(self.plugins.filter(\.isEnabled).count, privacy: .public) plug-in(s) — by type: \(byType, privacy: .public)")
     }
 
+    /// The resource kinds a data set genuinely can't play without, phrased for
+    /// the import screens. Deliberately conservative — only things whose
+    /// absence wedges the app (no menu art) or the game (no ships/systems),
+    /// so an unusual-but-valid data set never gets stuck behind the gate.
+    private nonisolated static func findMissingEssentials(in merged: ResourceCollection) -> [String] {
+        var missing: [String] = []
+        let counts = Dictionary(uniqueKeysWithValues: merged.typeCounts.map { ($0.type, $0.count) })
+        // The gameplay catalog — all of it ships in the "Nova Data" files.
+        let gameplay: [(NovaSwiftKit.FourCharCode, String)] = [
+            (NovaType.ship, "ships"), (NovaType.syst, "star systems"),
+            (NovaType.spob, "planets"), (NovaType.outfit, "outfits"),
+            (NovaType.weapon, "weapons"),
+        ]
+        let absent = gameplay.filter { counts[$0.0, default: 0] == 0 }.map(\.1)
+        if !absent.isEmpty {
+            missing.append("game data (\(absent.joined(separator: "/")))")
+        }
+        // The main-menu button art (rlëD 8050, from Nova Titles) — without it
+        // the authentic menu can never render and the app sits on the loading
+        // visual forever.
+        if merged.resource(NovaType.rleD, 8050) == nil {
+            missing.append("menu art (Nova Titles)")
+        }
+        return missing
+    }
+
     private func applyMergeFailure(_ message: String, baseDir: URL) {
         hasBaseData = false
+        missingEssentials = []
         game = nil
         status = "Failed to load data: \(message)"
         Log.data.error("reload: failed to merge game data from \(baseDir.path, privacy: .public): \(message, privacy: .public)")

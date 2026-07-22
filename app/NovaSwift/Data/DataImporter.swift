@@ -1,5 +1,6 @@
 import Foundation
 import NovaSwiftKit
+import NovaSwiftPluginStore
 
 /// Copies resource files (`.rez`/`.ndat`) — and any bundled soundtrack file
 /// (e.g. `Nova Music.mp3`) or original fonts (`Charcoal.ttf`/`Geneva.ttf`) —
@@ -19,6 +20,15 @@ enum DataImporter {
 
         let fm = FileManager.default
         try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+
+        // A .zip (e.g. the zipped Windows build, or a zipped Nova Files
+        // folder) imports as the folder it unpacks to — same discovery,
+        // same filtering.
+        if src.pathExtension.lowercased() == "zip" {
+            let unpacked = try GameDataArchiver.unzipToTemporary(archive: src)
+            defer { try? fm.removeItem(at: unpacked) }
+            return try importBase(from: unpacked, into: destDir)
+        }
 
         var sources: [URL] = []
         if (try? src.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {

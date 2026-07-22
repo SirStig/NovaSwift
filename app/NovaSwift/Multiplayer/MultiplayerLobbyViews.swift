@@ -36,11 +36,17 @@ struct HostSetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     field(title: "Lobby Name") {
+                        #if os(tvOS)
+                        // Cursor-clickable stand-in for the fullscreen
+                        // keyboard (see TVTextEntry.swift).
+                        TVCursorTextField(placeholder: "e.g. \"Ares Rescue\"", text: $lobbyName)
+                        #else
                         TextField("e.g. \"Ares Rescue\"", text: $lobbyName)
                             .textFieldStyle(.plain)
                             .padding(12)
                             .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.08)))
                             .foregroundStyle(.white)
+                        #endif
                     }
 
                     field(title: "Stakes") {

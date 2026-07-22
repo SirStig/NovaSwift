@@ -346,6 +346,11 @@ final class GameScene: SKScene {
     private var renderAlpha: Double = 0
     private var hudClock: TimeInterval = 0
     private var moveDiagClock: TimeInterval = 0
+    /// Seconds of "hostiles are attacking" left to report on the HUD
+    /// (`underAttack`): topped up whenever any live NPC's brain is actively
+    /// attacking the player, decayed per HUD tick — the linger keeps the
+    /// contextual escort controls from strobing between an attacker's passes.
+    private var underAttackHold: TimeInterval = 0
     // Radar scope radius in world units. Stellar objects sit within ~900 units
     // of the system centre (p90 across the base data) and combat happens within
     // a couple of thousand; 4500 zooms the scope out so a whole system reads at
@@ -4342,6 +4347,19 @@ final class GameScene: SKScene {
         hud.hasCloak = p.hasCloak
         hud.cloakEngaged = p.cloakEngaged
         hud.hasFighterBays = !p.fighterBays.isEmpty
+        // Contextual mobile controls: whether there's a wing to command, and
+        // whether anyone is actively attacking the player right now. The attack
+        // flag lingers a few seconds past the last attacker seen — AI brains
+        // flip out of `.attacking` between passes, and the escort pill
+        // shouldn't strobe with them. Reuses `isEntityAttackingPlayer` so this
+        // can never disagree with the engine about who's an attacker.
+        hud.hasEscorts = !world.playerEscorts.isEmpty
+        if world.npcs.contains(where: { !$0.disabled && isEntityAttackingPlayer($0.entityID) }) {
+            underAttackHold = 6
+        } else {
+            underAttackHold = max(0, underAttackHold - 0.08)
+        }
+        hud.underAttack = underAttackHold > 0
         var deg = p.angle * 180 / .pi
         deg = deg.truncatingRemainder(dividingBy: 360)
         if deg < 0 { deg += 360 }

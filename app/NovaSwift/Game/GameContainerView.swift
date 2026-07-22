@@ -861,8 +861,9 @@ struct GameContainerView: View {
                 }
                 #endif
 
-                // The land prompt sits above the controls; on iOS it's a tappable
-                // pill that lands you (replacing the desktop "Press L" hint).
+                // The contextual action strip sits above the controls; on iOS
+                // it's the row of situational pills (Land, Board, Hail, Jump,
+                // Escorts), on macOS just the classic "Press L" land hint.
                 // Inset by the HUD sidebar width so it centres on the actual play
                 // viewport, not the full window (see `Self.sidebarWidth`).
                 // Only while flight actually owns the screen — same gate as the
@@ -870,8 +871,8 @@ struct GameContainerView: View {
                 // floats over the galaxy map or another fullscreen dialog.
                 if flightControlsVisible && gateMapOrigin == nil {
                     GeometryReader { geo in
-                        LandPromptView(hud: host.hud, onLand: { handleDiscrete(.land) },
-                                        rightInset: touchRightInset(host, in: geo.size))
+                        ContextualActionsView(hud: host.hud, onAction: handleDiscrete,
+                                              rightInset: touchRightInset(host, in: geo.size))
                     }
                 }
 
@@ -2965,87 +2966,6 @@ struct GameLoadingView: View {
     }
 }
 
-/// The land prompt at the bottom-centre of the screen. On macOS it's the plain
-/// EV Nova on-screen text hint ("Press L to land on …"). On iOS the desktop
-/// keyboard hint is meaningless, so when you're cleared to set down it becomes a
-/// **tappable amber "Land" pill** — the actual control, not a description of one
-/// — falling back to a plain "Slow down…" hint when you're too fast.
-struct LandPromptView: View {
-    @ObservedObject var hud: GameHUDModel
-    var onLand: () -> Void = {}
-    /// Width of the HUD sidebar this screen is reserving on the right (see
-    /// `GameContainerView.sidebarWidth`), so the prompt centres on the actual
-    /// play viewport instead of the full window.
-    var rightInset: CGFloat = 0
-
-    /// On iOS the safe area already clears the home indicator, and the touch
-    /// controls anchor only a few points beyond it. On macOS there's no safe
-    /// area to lean on, but it should still sit flush with the window's
-    /// bottom edge rather than floating well above it.
-    private var bottomPadding: CGFloat {
-        #if os(iOS)
-        6
-        #else
-        8
-        #endif
-    }
-
-    var body: some View {
-        VStack {
-            Spacer()
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
-                content
-                Spacer(minLength: 0)
-            }
-            .padding(.trailing, rightInset)
-            .padding(.bottom, bottomPadding)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .novaResponsive()
-        .animation(.easeInOut(duration: 0.15), value: hud.landPrompt)
-    }
-
-    @ViewBuilder private var content: some View {
-        #if os(iOS)
-        if hud.landReady, !hud.landName.isEmpty {
-            Button(action: onLand) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.down.to.line")
-                    Text("Land on \(hud.landName)").lineLimit(1)
-                    // Pad players see which physical button lands, right on
-                    // the pill (renders nothing without a controller).
-                    PadGlyph(.land, size: 13, tint: .black)
-                }
-                .novaFont(.hud, weight: .semibold, size: 12)
-                .foregroundStyle(.black)
-                .padding(.horizontal, 13).padding(.vertical, 6)
-                .background(Capsule().fill(novaAmber))
-                .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
-            }
-            .buttonStyle(.novaPlain)
-            .transition(.opacity)
-        } else if !hud.landName.isEmpty {
-            hint("Slow down to land on \(hud.landName)").allowsHitTesting(false)
-        }
-        #else
-        if !hud.landPrompt.isEmpty { hint(hud.landPrompt).allowsHitTesting(false) }
-        #endif
-    }
-
-    private func hint(_ text: String) -> some View {
-        Text(text)
-            #if os(iOS)
-            .novaFont(.hud, weight: .semibold, size: 12)
-            #else
-            .novaFont(.hud, weight: .semibold)
-            #endif
-            .foregroundStyle(.white)
-            .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
-            .transition(.opacity)
-    }
-}
-
 /// The bottom-left status line: the calendar date on each jump/land, hail
 /// replies, mission notices and any other transient game message — one line
 /// that fades out on its own timer (`GameHUDModel.post`), replaced by whatever
@@ -3054,7 +2974,7 @@ struct LandPromptView: View {
 struct MessageLogView: View {
     @ObservedObject var hud: GameHUDModel
 
-    /// Mirrors `LandPromptView.bottomPadding` — sits flush with the true
+    /// Mirrors `ContextualActionsView.bottomPadding` — sits flush with the true
     /// bottom edge (just clearing the safe area on iOS, which already clears
     /// the home indicator).
     private var bottomPadding: CGFloat {

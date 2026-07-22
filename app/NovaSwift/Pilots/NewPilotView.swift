@@ -86,7 +86,22 @@ struct NewPilotView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     NovaText("Full Name:", size: 13, width: 84)
-                    NovaTextField(placeholder: "Captain", text: $name)
+                    NovaTextField(placeholder: "Captain", text: $name,
+                                  padSuggestions: { PilotNames.suggestions() })
+                    // Rather not type (especially with a controller)? Roll one.
+                    CursorButton {
+                        model.audio.play(.uiSelect)
+                        name = PilotNames.random()
+                    } label: {
+                        Image(systemName: "dice")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(novaAmber)
+                            .frame(width: 34, height: 34)
+                            .background(Color(white: 0.04), in: RoundedRectangle(cornerRadius: 5))
+                            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(white: 0.3)))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.novaPlain)
                 }
 
                 HStack(spacing: 12) {

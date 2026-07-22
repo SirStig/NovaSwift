@@ -99,6 +99,7 @@ struct ShipInfoView: View {
                     }
                 }
             }
+            .cursorScrollable()
             .frame(width: 234, height: 214, alignment: .topLeading)
             .novaPlace(space, -116, -110.5)
             // [0] OK (86,253)-(160,278) 74×25

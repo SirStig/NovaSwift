@@ -50,8 +50,9 @@ struct TutorialContainerView: View {
                 #endif
 
                 GeometryReader { geo in
-                    LandPromptView(hud: host.hud, onLand: { landAttempt() },
-                                   rightInset: sidebarWidth(geo.size, hudStyle))
+                    ContextualActionsView(hud: host.hud, landOnly: true,
+                                          onAction: { if $0 == .land { landAttempt() } },
+                                          rightInset: sidebarWidth(geo.size, hudStyle))
                 }
 
                 MessageLogView(hud: host.hud)

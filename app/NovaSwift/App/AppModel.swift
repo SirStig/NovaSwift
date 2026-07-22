@@ -36,6 +36,19 @@ final class AppModel: ObservableObject {
     @Published var padBindings: PadBindings = .load()
     @Published var data = GameDataController()
 
+    /// The active pad-keyboard request (see `PadKeyboardView`): a controller
+    /// player on iOS/macOS cursor-clicked a text field. Presented full-screen
+    /// at the `RootView` level; nil = none. tvOS uses the system fullscreen
+    /// keyboard instead (`TVTextEntry`).
+    @Published var padKeyboard: PadKeyboardRequest?
+
+    /// True while the Wi-Fi import receiver (`TVWebImportPanel`) is on screen.
+    /// `RootView` must not auto-advance off the launcher while this is set:
+    /// leaving the launcher unmounts the wizard and kills the server, cutting
+    /// the browser off mid-batch — the data can validate "complete" the moment
+    /// enough files land even though more are still uploading.
+    @Published var webImportActive = false
+
     /// Catalog browse/install state for the plug-in store (see `Store/`).
     let store = PluginStoreModel()
 

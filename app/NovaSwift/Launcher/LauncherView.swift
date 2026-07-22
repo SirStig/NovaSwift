@@ -9,9 +9,10 @@ import SwiftUI
 struct LauncherView: View {
     @EnvironmentObject private var model: AppModel
     @State private var sheet: Sheet?
-    /// Dev/automation only (see the DEBUG onAppear): open the wizard directly
-    /// on its Import step. Always false in normal use.
-    @State private var devStartAtImport = false
+    /// Open the wizard directly on its Import step — set when resuming a
+    /// partial import (the guide steps are already done) and by the
+    /// dev/automation hook in the DEBUG onAppear.
+    @State private var wizardStartsAtImport = false
 
     private enum Sheet: String, Identifiable {
         case importData, about
@@ -32,20 +33,32 @@ struct LauncherView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             #else
             ScrollView { column }
+                .cursorScrollable()
             #endif
         }
         .novaResponsive()
         .overlay { dialogOverlay }
-        #if DEBUG
-        // Dev/automation: open the import wizard immediately so scripted
-        // simulator runs can screenshot it without navigating.
         .onAppear {
-            if let mode = ProcessInfo.processInfo.environment["NOVASWIFT_OPEN_IMPORT"] {
-                devStartAtImport = (mode == "import")
+            #if os(tvOS)
+            // A partial import can only be finished over Wi-Fi, and the
+            // receiver (with the address to type into a browser) only runs
+            // while the wizard's Import step is on screen — so landing here
+            // with files missing reopens that step immediately instead of
+            // parking the player on a card.
+            if model.data.hasBaseData, !model.data.isBaseDataComplete, sheet == nil {
+                wizardStartsAtImport = true
                 sheet = .importData
             }
+            #endif
+            #if DEBUG
+            // Dev/automation: open the import wizard immediately so scripted
+            // simulator runs can screenshot it without navigating.
+            if let mode = ProcessInfo.processInfo.environment["NOVASWIFT_OPEN_IMPORT"] {
+                wizardStartsAtImport = (mode == "import")
+                sheet = .importData
+            }
+            #endif
         }
-        #endif
     }
 
     /// Full-screen dialog overlay (not a macOS `.sheet`, whose fixed card would
@@ -55,7 +68,7 @@ struct LauncherView: View {
             Group {
                 switch which {
                 case .importData: DataSetupWizard(onClose: { sheet = nil },
-                                                  startAtImport: devStartAtImport)
+                                                  startAtImport: wizardStartsAtImport)
                 case .about:      AboutView(onClose: { sheet = nil })
                 }
             }
@@ -69,8 +82,10 @@ struct LauncherView: View {
     private var column: some View {
         VStack(spacing: 18) {
             hero
-            if model.data.hasBaseData {
+            if model.data.isBaseDataComplete {
                 dataFoundCard
+            } else if model.data.hasBaseData {
+                partialDataCard
             } else {
                 guideCard
             }
@@ -129,14 +144,17 @@ struct LauncherView: View {
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.1)))
     }
 
-    private var setUpButton: some View {
+    private var setUpButton: some View { setUpButton(title: "Set Up EV Nova") }
+
+    private func setUpButton(title: String, startAtImport: Bool = false) -> some View {
         CursorButton {
             model.audio.play(.uiSelect)
+            wizardStartsAtImport = startAtImport
             sheet = .importData
         } label: {
             HStack {
                 Image(systemName: "sparkles")
-                Text("Set Up EV Nova")
+                Text(title)
             }
             .novaFont(.body, weight: .bold)
             .frame(maxWidth: .infinity)
@@ -151,11 +169,37 @@ struct LauncherView: View {
         .shadow(color: novaAmber.opacity(0.35), radius: 10, y: 4)
     }
 
+    // MARK: Partial data — some files landed, essentials still missing
+
+    /// Behind the auto-reopened wizard on tvOS, and the manual route back into
+    /// the Import step everywhere else. Says exactly what's still missing
+    /// (`status` carries the list) and keeps the door to the importer open —
+    /// this state used to render `dataFoundCard`, a button-less spinner that
+    /// could never advance.
+    private var partialDataCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Import incomplete", systemImage: "exclamationmark.triangle.fill")
+                .novaFont(.body, weight: .bold)
+                .foregroundStyle(novaAmber)
+
+            Text(model.data.status)
+                .novaFont(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            setUpButton(title: "Continue Import", startAtImport: true)
+        }
+        .padding(16)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.1)))
+    }
+
     // MARK: Data present — the moment before `RootView` advances to the real menu
 
-    /// Only ever on screen for a beat: `RootView` watches `hasBaseData` and
-    /// advances to `.mainMenu` as soon as it flips true. Kept as real content
-    /// (not just a blank frame) in case that transition ever races a render.
+    /// Only ever on screen for a beat: `RootView` watches `isBaseDataComplete`
+    /// and advances to `.mainMenu` as soon as it flips true. Kept as real
+    /// content (not just a blank frame) in case that transition ever races a
+    /// render.
     private var dataFoundCard: some View {
         VStack(spacing: 10) {
             Image(systemName: "checkmark.seal.fill")

@@ -4,6 +4,9 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @State private var menuAssets: MainMenuAssets?
+    /// Data is loaded but the authentic menu's art wouldn't decode — show the
+    /// modern menu rather than an endless loading screen.
+    @State private var menuArtFailed = false
     #if os(tvOS)
     /// Drives the controller-required gate: shows/hides live with pairing.
     @ObservedObject private var padState = PadState.shared
@@ -35,6 +38,13 @@ struct RootView: View {
                 } else if let assets = menuAssets {
                     // The authentic EV Nova main menu, from the player's own assets.
                     AuthenticMainMenuView(assets: assets)
+                        .transition(.opacity)
+                } else if menuArtFailed {
+                    // The data merged but its menu art won't decode — fall back
+                    // to the port's own menu instead of sitting on the loading
+                    // visual forever (the player can still play, and re-import
+                    // from Settings).
+                    ModernMainMenuView()
                         .transition(.opacity)
                 } else {
                     // Still decoding menu art — show the loading visual, but it
@@ -89,6 +99,16 @@ struct RootView: View {
             // flag injected below.
             debugControls
 
+            // A controller player clicked a text field on a device with no
+            // fullscreen system keyboard — the pad-drivable keyboard overlay.
+            // `.id` so each request starts with its own text/suggestions.
+            if let request = model.padKeyboard {
+                PadKeyboardView(request: request)
+                    .id(request.id)
+                    .zIndex(48)
+                    .transition(.opacity)
+            }
+
             // The controller-driven UI cursor, above everything so it can
             // click into any screen. Inert on tvOS / without a pad.
             ControllerCursorOverlay()
@@ -131,18 +151,39 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.3), value: model.pendingIntro != nil)
         .animation(.easeInOut(duration: 0.3), value: model.pendingTutorialOffer)
         .animation(.easeInOut(duration: 0.3), value: model.tutorial != nil)
-        .task(id: model.data.hasBaseData) {
-            // Decode the authentic main-menu assets from the player's data (once).
+        .task(id: model.data.dataStamp) {
+            // Decode the authentic main-menu assets from the player's data —
+            // re-attempted after every reload until it succeeds, because a
+            // partial import fails this decode and the failure must not latch:
+            // keyed on hasBaseData it ran once against the first partial batch
+            // and stuck the modern menu on even after the art arrived.
             if menuAssets == nil, model.data.game != nil {
                 menuAssets = MainMenuAssets.load(model.data.game)
+                // Only a *complete* data set that still won't decode is a real
+                // art failure worth falling back to the modern menu for.
+                menuArtFailed = menuAssets == nil && model.data.isBaseDataComplete
             }
         }
-        .onChange(of: model.data.hasBaseData) { _, has in
+        .onChange(of: model.data.isBaseDataComplete) { _, complete in
             // The launcher is a pre-data setup guide only — there is no "demo"
-            // to fall through to. The moment data becomes available (import
-            // completes while the guide is on screen), advance straight into
-            // the authentic menu, mirroring the `onAppear` check below.
-            if has, model.screen == .launcher {
+            // to fall through to. The moment a *complete* data set is available
+            // (import finishes while the guide is on screen), advance straight
+            // into the authentic menu, mirroring the `onAppear` check below.
+            // A partial import stays on the launcher: entering the menu with
+            // files missing is how the app used to wedge on the loading visual.
+            // While the Wi-Fi receiver is live, hold position even on complete
+            // data — advancing unmounts the wizard and kills the server while
+            // the browser may still be sending (the batch signal / Continue
+            // button end that session; the webImportActive onChange below
+            // then performs this advance).
+            if complete, model.screen == .launcher, !model.webImportActive {
+                model.screen = .mainMenu
+            }
+        }
+        .onChange(of: model.webImportActive) { _, active in
+            // The Wi-Fi import session just ended — perform the advance the
+            // gate above deferred, if the data indeed came out complete.
+            if !active, model.data.isBaseDataComplete, model.screen == .launcher {
                 model.screen = .mainMenu
             }
         }
@@ -180,9 +221,11 @@ struct RootView: View {
                 return
             }
             #endif
-            if model.data.hasBaseData, model.screen == .launcher {
-                // With game data present, the authentic EV Nova menu IS the main
-                // menu — skip the native launcher (that's only the no-data import gate).
+            if model.data.isBaseDataComplete, model.screen == .launcher {
+                // With complete game data present, the authentic EV Nova menu IS
+                // the main menu — skip the native launcher (that's only the
+                // no-data import gate). A partial import stays here so the setup
+                // wizard can say what's still missing.
                 model.screen = .mainMenu
             }
         }

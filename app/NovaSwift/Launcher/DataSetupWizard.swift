@@ -126,9 +126,19 @@ struct DataSetupWizard: View {
         case .ownership:
             return [backButton]
         case .importData:
-            // Apple TV has no file picker — files arrive over Wi-Fi and the
-            // step advances itself once data lands, so there's nothing to choose.
-            if device == .appleTV { return [backButton] }
+            // Apple TV has no file picker — files arrive over Wi-Fi. The step
+            // advances itself when the uploader page reports a finished batch
+            // and the data validates complete; Continue is the manual path,
+            // unlocked by the same completeness check.
+            if device == .appleTV {
+                #if os(tvOS)
+                return [backButton,
+                        NovaDialogButton(title: "Continue", isDefault: true,
+                                         enabled: model.data.isBaseDataComplete) { finishTVImport() }]
+                #else
+                return [backButton]
+                #endif
+            }
             return [backButton, NovaDialogButton(title: "Choose Data…", isDefault: true) { importing = true }]
         case .success:
             return [NovaDialogButton(title: "Play", isDefault: true) { onClose() }]
@@ -152,15 +162,31 @@ struct DataSetupWizard: View {
             let count = try DataImporter.importBase(from: src, into: model.data.importedBaseDir)
             model.data.reload()
             message = "Imported \(count) file(s)."
-            if model.data.hasBaseData {
+            if model.data.isBaseDataComplete {
                 #if canImport(CloudKit)
                 model.uploadGameDataToCloud()   // so the player's other devices can restore it
                 #endif
                 withAnimation(.easeInOut(duration: 0.2)) { step = .success }
+            } else if model.data.hasBaseData {
+                // A partial set (e.g. three of the six Nova Data files) must
+                // not count as success — say what's missing and stay here.
+                message = "Imported \(count) file(s), but this isn't the full set yet — still missing: "
+                    + model.data.missingEssentials.joined(separator: ", ")
+                    + ". Pick the whole game folder to get everything at once."
             }
         } catch {
             message = "That didn't work — \(error.localizedDescription). Try picking the whole game folder."
         }
+    }
+
+    /// Wraps up the Apple TV Wi-Fi import — reached from the uploader page's
+    /// batch-done signal or the footer's Continue, both gated on a complete
+    /// data set.
+    private func finishTVImport() {
+        #if canImport(CloudKit)
+        model.uploadGameDataToCloud()   // purge self-heal: back the TV's copy with iCloud
+        #endif
+        withAnimation(.easeInOut(duration: 0.2)) { step = .success }
     }
 
     #if canImport(CloudKit)
@@ -314,10 +340,7 @@ struct DataSetupWizard: View {
                 if device == .appleTV {
                     #if os(tvOS)
                     TVWebImportPanel(destination: model.data.importedBaseDir) {
-                        #if canImport(CloudKit)
-                        model.uploadGameDataToCloud()   // purge self-heal: back the TV's copy with iCloud
-                        #endif
-                        withAnimation(.easeInOut(duration: 0.2)) { step = .success }
+                        finishTVImport()
                     }
                     #else
                     Text("Do this step on the Apple TV itself — its setup screen shows the address to send files to.")
@@ -635,8 +658,10 @@ private struct TransferGlyph: View {
 /// The live Wi-Fi drop-box for the Apple TV import step: runs
 /// `WebImportServer` while on screen, shows the address to open on a
 /// computer, lists files as they land, and reloads the game data (debounced,
-/// so a burst of files triggers one reload) — advancing the wizard the
-/// moment playable data is present.
+/// so a burst of files triggers one reload). The wizard advances only when
+/// the uploader page signals its batch is finished AND the data validates
+/// complete — advancing mid-batch (the old behaviour) tore the server down
+/// while files were still arriving and let a partial set masquerade as done.
 private struct TVWebImportPanel: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var server: WebImportServer
@@ -669,33 +694,68 @@ private struct TVWebImportPanel: View {
                 Text("Starting the Wi-Fi receiver…")
                     .novaFont(.caption).foregroundStyle(.secondary)
             }
-            if !server.receivedFiles.isEmpty {
-                ForEach(server.receivedFiles.suffix(5), id: \.self) { name in
-                    Label(name, systemImage: "checkmark.circle.fill")
-                        .novaFont(.caption)
-                        .foregroundStyle(.white.opacity(0.9))
-                }
+            // One fixed line, not a growing list — the dialog keeps a stable
+            // height while a batch streams in.
+            if let last = server.receivedFiles.last {
+                Label("\(server.receivedFiles.count) received — latest: \(last)",
+                      systemImage: "checkmark.circle.fill")
+                    .novaFont(.caption)
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
         }
         .onAppear {
             server.onFileReceived = { scheduleReload() }
+            server.onBatchComplete = { @MainActor in await batchFinished() }
             server.start()
+            // Holds RootView on the launcher while uploads may be in flight —
+            // mid-batch the data can already validate complete, and advancing
+            // would unmount this panel and kill the server under the browser.
+            model.webImportActive = true
         }
         .onDisappear {
             server.stop()
             reloadTask?.cancel()
+            model.webImportActive = false
         }
     }
 
-    /// One reload ~1.2 s after the last file of a burst; advance on success.
+    /// One reload ~1.2 s after the last file of a burst — keeps the wizard's
+    /// status line live while a batch streams in. Never advances: that's the
+    /// batch-done signal's job (`batchFinished`), because advancing tears the
+    /// server down while later files may still be uploading.
     private func scheduleReload() {
         reloadTask?.cancel()
         reloadTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             guard !Task.isCancelled else { return }
-            model.data.reload()
-            if model.data.hasBaseData { onDataReady() }
+            await model.data.reloadAsync()
         }
+    }
+
+    /// `POST /done`: the browser finished its batch. Reload + validate, then
+    /// either advance the wizard or report what's still missing — the return
+    /// value shows up on the uploader's page, so the person at the computer
+    /// sees the verdict without walking to the TV.
+    @MainActor private func batchFinished() async -> String {
+        reloadTask?.cancel()
+        await model.data.reloadAsync()
+        if model.data.isBaseDataComplete {
+            // Give the response a moment to reach the browser before this
+            // panel (and the server with it) leaves the screen.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                onDataReady()
+            }
+            return "✓ All set — pick up on your Apple TV."
+        }
+        if model.data.hasBaseData {
+            return "Received, but still missing: "
+                + model.data.missingEssentials.joined(separator: ", ")
+                + ". Send the rest of your Nova Files (easiest: drop the whole folder)."
+        }
+        return "No usable EV Nova data received yet — drop the Nova Files folder, its .ndat/.rez files, or a .zip of the game."
     }
 }
 #endif
