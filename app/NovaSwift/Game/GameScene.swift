@@ -327,6 +327,11 @@ final class GameScene: SKScene {
     /// System murk (`sÿst.Murk`) fog overlay — a camera-space dark veil whose
     /// opacity tracks `World.effectiveMurk(for:)`.
     private var murkFog: SKSpriteNode?
+    /// Space backdrop for systems with no `sÿst.BkgndColor` (near-black blue).
+    private static let defaultBackdrop = SKColor(red: 0.02, green: 0.02, blue: 0.06, alpha: 1)
+    /// Last applied `World.systemBackgroundColor`, so the backdrop/fog only
+    /// re-tint when the system actually changes (jumps swap the world in place).
+    private var appliedBackdrop: NovaColor?
 
     private var lastUpdate: TimeInterval = 0
     /// Banked simulation time (seconds) not yet consumed by a fixed sim tick. The
@@ -755,7 +760,7 @@ final class GameScene: SKScene {
     }
 
     override func didMove(to view: SKView) {
-        backgroundColor = SKColor(red: 0.02, green: 0.02, blue: 0.06, alpha: 1)
+        backgroundColor = Self.defaultBackdrop
         scaleMode = .resizeFill
         #if os(macOS)
         // Needed for `mouseMoved` (the "Aim toward mouse cursor" option) to fire;
@@ -768,6 +773,7 @@ final class GameScene: SKScene {
         addChild(cameraNode)
         buildJumpOverlays()
         buildMurkFog()
+        applySystemBackdrop()
         buildStarfield()
         buildPlanets()
         npcLayer.zPosition = 9
@@ -3035,10 +3041,31 @@ final class GameScene: SKScene {
         murkFog = fog
     }
 
+    /// Applies `sÿst.BkgndColor` (`World.systemBackgroundColor`): tints the
+    /// space backdrop and the murk fog so nebula systems get their colored
+    /// haze (Bible: "The system's background color… set to zero for pure
+    /// black"). Zero keeps the default near-black backdrop and a black fog.
+    private func applySystemBackdrop() {
+        let c = world.systemBackgroundColor
+        guard c != appliedBackdrop else { return }
+        appliedBackdrop = c
+        if c == NovaColor(r: 0, g: 0, b: 0) {
+            backgroundColor = Self.defaultBackdrop
+            murkFog?.color = .black
+        } else {
+            let tint = SKColor(red: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
+                               blue: CGFloat(c.b) / 255, alpha: 1)
+            backgroundColor = tint
+            // Murk fades the view toward the system's ambient color, not black.
+            murkFog?.color = tint
+        }
+    }
+
     /// Fog opacity tracks `World.effectiveMurk(for:)` (0 = clear, 100 = the
     /// Bible's own "question your glasses prescription"); a negative value
     /// hides the starfield entirely instead of thickening the fog.
     private func updateMurkFog() {
+        applySystemBackdrop()   // re-tints after an in-place jump world swap
         let murk = world.effectiveMurk(for: world.player)
         for layer in starLayers { layer.container.isHidden = murk < 0 }
         guard let murkFog else { return }

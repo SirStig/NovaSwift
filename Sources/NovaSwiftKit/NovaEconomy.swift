@@ -240,13 +240,14 @@ extension NovaGame {
     }
 
     /// The outfits for sale at `spob`, ordered as EV Nova's outfitter lists them
-    /// (by display weight, then id). Empty when there's no outfitter. `day`
-    /// (an absolute day count, e.g. `GameDate.julianDay`) applies `BuyRandom`
-    /// — the Bible's "not everything shows every time" per-day stocking roll;
-    /// pass `nil` to skip it (e.g. tooling that wants the full catalog).
+    /// (higher display weight first, then id). Empty when there's no outfitter.
+    /// `day` (an absolute day count, e.g. `GameDate.julianDay`) applies
+    /// `BuyRandom` — the Bible's "not everything shows every time" per-day
+    /// stocking roll; pass `nil` to skip it (e.g. tooling that wants the full
+    /// catalog).
     public func outfitsSold(at spob: SpobRes, day: Int? = nil) -> [OutfRes] {
         guard spob.hasOutfitter else { return [] }
-        return outfits()
+        let available = outfits()
             // Bible `Flags 0x0800`: "This item can be sold anywhere, regardless
             // of tech level, requirements, or mission bits" — sell-side only
             // (waives the outfitter-stock restriction when selling an owned
@@ -258,7 +259,24 @@ extension NovaGame {
                 return onOfferToday(buyRandom: outfit.buyRandom, neverIfZero: false,
                                      spobID: spob.id, itemID: outfit.id, day: day)
             }
-            .sorted { ($0.displayWeight, $0.id) < ($1.displayWeight, $1.id) }
+        // Bible `Flags 0x1000`: "When this item is available for sale, it
+        // prevents all higher-numbered items with equal DispWeight from being
+        // made available for sale at the same time." The lowest-id flagged
+        // item in each weight tier caps that tier.
+        var suppressorID: [Int: Int] = [:]   // displayWeight → lowest flagged id
+        for o in available where o.suppressesHigherIDsAtSameWeight {
+            suppressorID[o.displayWeight] = min(suppressorID[o.displayWeight] ?? Int.max, o.id)
+        }
+        return available
+            .filter { o in o.id <= (suppressorID[o.displayWeight] ?? Int.max) }
+            // Bible `DispWeight`: "Items with a higher display weight are shown
+            // closer to the top of the outfit dialog" — descending weight,
+            // ascending id within a tier.
+            .sorted {
+                $0.displayWeight != $1.displayWeight
+                    ? $0.displayWeight > $1.displayWeight
+                    : $0.id < $1.id
+            }
     }
 
     /// The hulls for sale at `spob`, cheapest first. Empty when there's no

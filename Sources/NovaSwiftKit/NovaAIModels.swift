@@ -186,6 +186,15 @@ public struct OutfRes {
     /// `OnSell` (Bible): the sibling NCB set expression "evaluated when the item
     /// is sold." @556, `n0FF`. Empty = no effect.
     public let onSell: String
+    /// The item's display name in the outfitter dialog (Bible's unnamed
+    /// "the name that is displayed in the outfit dialog" string). Empty =
+    /// use the resource name. @811, `C040` (64-byte C string).
+    public let outfitterName: String
+    /// Lowercase singular for running text ("you don't have room for
+    /// a <lowercase name>"). @875, `C040`. Empty = use the resource name.
+    public let lowercaseName: String
+    /// Lowercase plural for running text. @939, `C041` (65 bytes).
+    public let lowercasePlural: String
 
     public init(_ r: Resource) {
         id = r.id
@@ -214,6 +223,9 @@ public struct OutfRes {
         scanMask = au16(d, 1006)
         onPurchase = acstr(d, 301, 255)
         onSell = acstr(d, 556, 255)
+        outfitterName = acstr(d, 811, 64)
+        lowercaseName = acstr(d, 875, 64)
+        lowercasePlural = acstr(d, 939, 65)
     }
 
     /// Full-hide opt-ins (Bible `oütf.Flags`): normally a locked item still
@@ -223,6 +235,36 @@ public struct OutfRes {
     /// "This item can be sold anywhere, regardless of tech level,
     /// requirements, or mission bits" (Bible, `Flags` 0x0800).
     public var ignoresRequirements: Bool { flags & 0x0800 != 0 }
+    /// "This item stays with you when you trade ships (persistent)"
+    /// (Bible, `Flags` 0x0004) — buy/capture a new hull.
+    public var persistsOnShipTrade: Bool { flags & 0x0004 != 0 }
+    /// "This item is persistent in the case where the player's ship is
+    /// changed by a mission set operator" (Bible, `Flags` 0x0020) — the
+    /// `H` NCB op; distinct from the 0x0004 trade persistence above.
+    public var persistsOnMissionShipChange: Bool { flags & 0x0020 != 0 }
+    /// "When this item is available for sale, it prevents all higher-numbered
+    /// items with equal DispWeight from being made available for sale at the
+    /// same time" (Bible, `Flags` 0x1000).
+    public var suppressesHigherIDsAtSameWeight: Bool { flags & 0x1000 != 0 }
+    /// "This outfit appears in the Ranks section of the player info dialog
+    /// instead of in the Extras section" (Bible, `Flags` 0x2000).
+    public var showsInRanksSection: Bool { flags & 0x2000 != 0 }
+
+    /// The name the outfitter dialog shows: the in-record "Outfitter Name"
+    /// string when set, else the resource name (annotation stripped).
+    public var outfitterDisplayName: String {
+        outfitterName.isEmpty ? displayName : outfitterName.novaDisplayName
+    }
+    /// Lowercase singular for running text ("a light blaster"); falls back to
+    /// the resource display name when the record leaves it blank.
+    public var lowercaseDisplayName: String {
+        lowercaseName.isEmpty ? displayName : lowercaseName
+    }
+    /// Lowercase plural for running text ("2 fuel scoops"); falls back to the
+    /// singular when the record leaves it blank.
+    public var lowercasePluralDisplayName: String {
+        lowercasePlural.isEmpty ? lowercaseDisplayName : lowercasePlural
+    }
 
     /// Sum of one modifier kind across this outfit's slots (0 if absent).
     public func value(of kind: OutfitModType) -> Int {

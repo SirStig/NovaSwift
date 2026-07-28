@@ -200,7 +200,8 @@ final class MissionFidelityTests: XCTestCase {
             shipWithDefaults(id: 300, cargo: 100, defaults: [(id: 500, count: 1)]),
             outfit(id: 400),                 // ordinary (non-persistent)
             outfit(id: 500),                 // the new hull's default
-            outfit(id: 600, flags: 0x0008),  // can't-sell → treated as persistent
+            outfit(id: 600, flags: 0x0020),  // Bible 0x0020: persists across a mission ship change
+            outfit(id: 700, flags: 0x0008),  // can't-sell — NOT mission-change persistence
         ]
         let (eng, _) = engine(resources)
         return eng
@@ -226,11 +227,12 @@ final class MissionFidelityTests: XCTestCase {
 
     func testChangeShipH_DropsNonPersistentKeepsPersistentAddsDefaults() {
         let eng = shipChangeGame()
-        eng.player.outfits = [400: 1, 600: 1]
+        eng.player.outfits = [400: 1, 600: 1, 700: 1]
         eng.apply(set: "H300")
         XCTAssertEqual(eng.player.shipType, 300)
         XCTAssertNil(eng.player.outfits[400], "H drops non-persistent outfit")
-        XCTAssertEqual(eng.player.outfits[600], 1, "H keeps persistent (can't-sell) outfit")
+        XCTAssertEqual(eng.player.outfits[600], 1, "H keeps 0x0020 mission-change-persistent outfit")
+        XCTAssertNil(eng.player.outfits[700], "can't-sell (0x0008) is not mission-change persistence")
         XCTAssertEqual(eng.player.outfits[500], 1, "H adds the hull's default outfits")
     }
 
@@ -321,6 +323,18 @@ final class MissionFidelityTests: XCTestCase {
         eng.advanceOneDay()
         XCTAssertEqual(eng.player.outfits[500], 1, "iterative loop stops once EnableOn goes false")
         XCTAssertTrue(eng.player.isBitSet(999))
+    }
+
+    func testCronDateFieldsTreatMinusOneAsWildcard() {
+        // Bible §crön: "0 or -1" both wildcard a date field. `LastYear = -1`
+        // ("never expires") must not be read as a literal year--1 upper bound,
+        // which would keep the cron permanently outside its window.
+        let spec = CronSpec(id: 128, firstDay: -1, firstMonth: -1, firstYear: -1,
+                            lastDay: -1, lastMonth: -1, lastYear: -1,
+                            random: 100, onStart: "G500")
+        let (eng, _) = engine([spec.resource()])
+        eng.advanceOneDay()
+        XCTAssertEqual(eng.player.outfits[500], 1, "-1 date fields wildcard the window; the cron still fires")
     }
 
     // MARK: - 7. Stellar OnDestroy / OnRegen hooks

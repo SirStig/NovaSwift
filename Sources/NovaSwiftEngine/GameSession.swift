@@ -47,6 +47,7 @@ public enum GameSession {
         if let sys = game.system(systemID) {
             world.systemInterference = sys.interference   // sensor static (sÿst.Interference)
             world.systemMurk = sys.murk                    // visual fog (sÿst.Murk)
+            world.systemBackgroundColor = sys.backgroundColor  // backdrop tint (sÿst.BkgndColor)
             let spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
             world.spawner = spawner
             spawner.populate(world)

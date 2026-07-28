@@ -70,6 +70,18 @@ public final class AIBrain {
     /// `isHostile` reads an outsider's flag from every fleet member, not just
     /// the one ship that actually pulled the trigger.
     public var provokedByPlayer = false
+    /// Set only when the player's fleet lands a hit on this ship while it was
+    /// NOT already fighting that fleet (hadn't traded fire with it and wasn't
+    /// targeting one of its members) and its government isn't at war with the
+    /// player — i.e. genuine, unprovoked player aggression against a
+    /// bystander. This is the flag the piracy-police perception reads to
+    /// decide the PLAYER is an aggressor. `provokedByPlayer` cannot serve
+    /// there: it's also set on ships that attacked the player first
+    /// (`World.applyHit`'s reverse rule), so reading it as "the player hit
+    /// this ship" made local authorities interpret "a pirate jumped the
+    /// player" as "the player is assaulting an innocent" and pile onto a
+    /// blameless player — the "police randomly attack me constantly" bug.
+    public var wrongedByPlayer = false
     /// Fleet leader to escort, if any. A `leaderID` of `World.playerEntityID`
     /// (0) marks a ship as one of the *player's* escorts — commanded via
     /// `escortOrder`.
@@ -374,14 +386,18 @@ public final class AIBrain {
             let d = (aggressor.position - me.position).length
             if d < bestDist { bestDist = d; best = aggressor }
         }
-        // The player is a genuine aggressor once they've actually landed a hit on
-        // some non-enemy ship nearby (`provokedByPlayer`) — the local authority
-        // steps in against the player directly, same as it would against an NPC
-        // pirate caught mid-attack.
+        // The player is a genuine aggressor once they've actually landed an
+        // UNPROVOKED hit on some non-enemy ship nearby (`wrongedByPlayer`, set
+        // in `World.applyHit` only when the victim wasn't already fighting the
+        // player's fleet) — the local authority steps in against the player
+        // directly, same as it would against an NPC pirate caught mid-attack.
+        // `provokedByPlayer` deliberately does NOT qualify here: it's also set
+        // on ships that attacked the player first, and treating those as the
+        // player's "victims" had the police punishing self-defense.
         if world.player.isAlive {
             for victim in world.allShips
             where victim.entityID != me.entityID && victim.isAlive && !victim.disabled
-                && victim.brain?.provokedByPlayer == true && !isHostile(me, victim, world) {
+                && victim.brain?.wrongedByPlayer == true && !isHostile(me, victim, world) {
                 let d = (world.player.position - me.position).length
                 if d < bestDist { bestDist = d; best = world.player }
             }
@@ -765,6 +781,22 @@ public final class AIBrain {
             }
         }
 
+        // An interrupted departure must drop its departure intent. `flee`/
+        // `depart` assert `wantsToDepart` every frame they run, but a warship
+        // pulled off its jump-out by a fight (or a trader yanked into a flee
+        // that ended) kept a stale `wantsToDepart` — and possibly a stale
+        // `departViaGateID` — forever. The world's despawn sweep keys on
+        // exactly those, so such a ship silently vanished the next time its
+        // patrol/travel leg happened to carry it over a hypergate or past the
+        // system edge, which read as ships randomly stopping/disappearing at
+        // gates. Clearing the gate pick here also lets the next real
+        // departure re-roll it fresh.
+        if state != .departing && state != .fleeing {
+            me.wantsToDepart = false
+            departViaGateID = nil
+            departureGateChecked = false
+        }
+
         me.currentTargetID = (state == .attacking) ? targetID : nil
 
         // Cloak-capable ships raise the cloak to slip away when fleeing, and drop
@@ -963,7 +995,14 @@ public final class AIBrain {
         }
         if let gateID = departViaGateID,
            let gate = world.systemContext.bodies.first(where: { $0.id == gateID }) {
-            return seek(me, to: gate.position)
+            // Settle onto the gate rather than `seek`ing across it at cruise:
+            // the despawn sweep needs the ship inside `gate.radius + 40`, and
+            // a fast hull seeking the exact centre could slice past off-axis
+            // and wheel around the gate in loops before ever registering —
+            // ships visibly milling about a hypergate instead of using it.
+            // Braking in guarantees it converges on the ring, and reads as a
+            // proper gate approach besides.
+            return arrive(me, to: gate.position, slowRadius: max(140, gate.radius + 60))
         }
         var out = me.position - world.systemContext.center
         if out.length < 1 { out = Vec2(0, 1) }

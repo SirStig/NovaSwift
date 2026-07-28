@@ -340,7 +340,7 @@ struct OutfitterView: View {
             .animation(.easeInOut(duration: 0.25), value: hintDismissed)
             .sheet(isPresented: Binding(get: { qtyPromptMode != nil }, set: { if !$0 { qtyPromptMode = nil } })) {
                 if let mode = qtyPromptMode, let o = selected {
-                    TradeQuantityPrompt(title: "How many \(o.displayName)?",
+                    TradeQuantityPrompt(title: "How many \(o.lowercasePluralDisplayName)?",
                                          range: 1...max(1, qtyUpperBound(mode, o)), initial: 1, unitLabel: "items",
                                          onConfirm: { qty in transact(mode, o, qty); qtyPromptMode = nil },
                                          onCancel: { qtyPromptMode = nil })
@@ -429,7 +429,7 @@ struct OutfitterView: View {
         LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
             ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, o in
                 if let o {
-                    ItemTile(name: o.displayName, image: graphics.outfitPicture(o),
+                    ItemTile(name: o.outfitterDisplayName, image: graphics.outfitPicture(o),
                              quantity: pilot.owned(outfit: o.id),
                              selected: (selectedID ?? stock.first?.id) == o.id,
                              locked: lockState(for: o) == .locked)

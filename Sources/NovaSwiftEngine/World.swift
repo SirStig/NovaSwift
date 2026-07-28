@@ -976,8 +976,10 @@ public final class World {
     public private(set) var projectiles: [Projectile] = []
     /// Live beam segments the renderer mirrors each frame. Continuous beams are
     /// welded to their shooter (geometry recomputed every step); pulse beams are
-    /// brief flashes. See `refreshActiveBeams`.
-    public private(set) var activeBeams: [ActiveBeam] = []
+    /// brief flashes. See `refreshActiveBeams`. The setter is module-internal
+    /// (not file-private) so a sibling file's firing pass (e.g.
+    /// `StellarWeapons.swift`) can append a pulse flash too.
+    public internal(set) var activeBeams: [ActiveBeam] = []
     /// Transient render/audio events produced this step; drain after `step`.
     public private(set) var events: [WorldEvent] = []
 
@@ -1051,6 +1053,10 @@ public final class World {
     /// how many defenders a planet still has to launch and its wave size, so the
     /// world can relaunch waves as they're destroyed until the pool is exhausted.
     var stellarDefenses: [Int: StellarDefense] = [:]
+    /// Reload state for each armed stellar's defense weapon (`spöb.Weapon`),
+    /// keyed by `spöb` id and created lazily on first fire opportunity — see
+    /// `updateStellarWeapons` (StellarWeapons.swift).
+    var stellarWeaponMounts: [Int: WeaponMount] = [:]
 
     /// Live asteroids (real `röid` rocks, from the system's `sÿst.Asteroids`/
     /// `AstTypes` fields). Stationary — see `Asteroid`'s doc comment.
@@ -1639,6 +1645,7 @@ public final class World {
         }
 
         prof("sim.deadlyStellars") { checkDeadlyStellarCollisions() }
+        prof("sim.stellarWeapons") { updateStellarWeapons(dt) }
         prof("sim.pointDefense") { runPointDefense() }
         prof("sim.projectiles") { stepProjectiles(dt) }
         prof("sim.despawn") { despawnDepartedAndDead() }
@@ -1947,8 +1954,8 @@ public final class World {
     /// `shotSpeed` so it meets a moving target. Falls back to aiming straight at
     /// the target when there's no real solution (or the shot is an instant-hit
     /// beam). Ported from NovaJS `guidance.ts` `firstOrderWithFallback`.
-    private func leadAngle(from origin: Vec2, shooterVel: Vec2, target: Ship,
-                           shotSpeed: Double, instantHit: Bool) -> Double {
+    func leadAngle(from origin: Vec2, shooterVel: Vec2, target: Ship,
+                   shotSpeed: Double, instantHit: Bool) -> Double {
         let straight = (target.position - origin).angle
         guard !instantHit, shotSpeed > 0 else { return straight }
         let pos = (target.position - origin) * (1.0 / shotSpeed)
@@ -1975,9 +1982,9 @@ public final class World {
     /// owner's velocity, everything else inherits the owner's velocity plus the
     /// muzzle vector.
     @discardableResult
-    private func spawnProjectile(spec: WeaponSpec, muzzle: Vec2, aim: Double,
-                                 ownerID: Int, ownerGovt: Int, ownerVelocity: Vec2,
-                                 targetID: Int?, subDepth: Int) -> Projectile {
+    func spawnProjectile(spec: WeaponSpec, muzzle: Vec2, aim: Double,
+                         ownerID: Int, ownerGovt: Int, ownerVelocity: Vec2,
+                         targetID: Int?, subDepth: Int) -> Projectile {
         let dir = Vec2.heading(aim)
         let homing = spec.homes
         let accelerating = spec.accelerates
@@ -2123,7 +2130,8 @@ public final class World {
                           spec: WeaponSpec, aim: Double, target: Ship?) {
         let origin = ship.muzzle(for: mount)
         let dir = Vec2.heading(aim)
-        let cast = beamCast(from: origin, dir: dir, range: spec.range, owner: ship)
+        let cast = beamCast(from: origin, dir: dir, range: spec.range,
+                            ownerID: ship.entityID, ownerGovt: ship.government)
         if let h = cast.hitShip {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization, ionizeColor: spec.ionizeColor,
@@ -2165,14 +2173,16 @@ public final class World {
     }
 
     /// Raycast a beam of `range` px from `origin` along unit `dir`: the nearest
-    /// hittable ship or asteroid, and the clipped endpoint.
-    private func beamCast(from origin: Vec2, dir: Vec2, range: Double, owner: Ship)
+    /// hittable ship or asteroid, and the clipped endpoint. The owner is passed
+    /// as id + government (not a `Ship`) so a stellar defense weapon — whose
+    /// shooter is a planet, not a ship — can cast too.
+    func beamCast(from origin: Vec2, dir: Vec2, range: Double, ownerID: Int, ownerGovt: Int)
         -> (end: Vec2, hitShip: Ship?, hitAsteroid: Asteroid?) {
         var bestT = range
         var hitShip: Ship?
         var hitAsteroid: Asteroid?
-        for other in allShips where other.entityID != owner.entityID && other.isAlive {
-            if !canHit(owner: owner.entityID, ownerGovt: owner.government, victim: other) { continue }
+        for other in allShips where other.entityID != ownerID && other.isAlive {
+            if !canHit(owner: ownerID, ownerGovt: ownerGovt, victim: other) { continue }
             let rel = other.position - origin
             let along = rel.dot(dir)
             guard along > 0, along <= range else { continue }
@@ -2228,7 +2238,8 @@ public final class World {
         // along the hull — a beam that looked like it connected but didn't.
         let target: Ship? = ship.currentTargetID.flatMap { self.ship(id: $0) }.flatMap { $0.isAlive ? $0 : nil }
         let aim = fireAngle(for: spec, ship: ship, muzzle: origin, target: target) ?? ship.angle
-        let cast = beamCast(from: origin, dir: Vec2.heading(aim), range: spec.range, owner: ship)
+        let cast = beamCast(from: origin, dir: Vec2.heading(aim), range: spec.range,
+                            ownerID: ship.entityID, ownerGovt: ship.government)
         beam.from = origin
         beam.to = cast.end
         beam.hit = cast.hitShip != nil || cast.hitAsteroid != nil
@@ -2258,7 +2269,7 @@ public final class World {
     /// `combatTuning`). Not modeling the wëap "x10 mass damage to asteroids"
     /// flag — that bit isn't decoded on `WeaponSpec` anywhere in this engine
     /// yet, so every weapon currently does its normal damage to rock.
-    private func applyAsteroidHit(_ rock: Asteroid, shield: Double, armor: Double, shooterID: Int) {
+    func applyAsteroidHit(_ rock: Asteroid, shield: Double, armor: Double, shooterID: Int) {
         rock.hp -= (shield + armor) * combatTuning.damageScale
         if rock.hp <= 0 { destroyAsteroid(rock, killerID: shooterID) }
     }
@@ -2485,9 +2496,9 @@ public final class World {
         return true
     }
 
-    private func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
-                          ionization: Double = 0, ionizeColor: (r: Double, g: Double, b: Double)? = nil,
-                          piercing: Bool = false, weaponID: Int = -1) {
+    func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
+                  ionization: Double = 0, ionizeColor: (r: Double, g: Double, b: Double)? = nil,
+                  piercing: Bool = false, weaponID: Int = -1) {
         // Difficulty: scale only the damage the *player* takes (Easy softens,
         // Hard sharpens); NPC-vs-NPC combat is untouched.
         var shield = shield, armor = armor
@@ -2532,24 +2543,44 @@ public final class World {
         // legal record; only the disable/kill/board/smuggling outcomes below
         // do (`recordDisable`/`recordKill`, `Diplomacy.swift`).
         if !isPlayerFleetMember(ship.entityID), isPlayerFleetMember(ownerID) {
+            // Is this hit fresh player aggression, or return fire? A victim
+            // that had already traded fire with the fleet (`provokedByPlayer`,
+            // set by the reverse rule below when it shot first), is actively
+            // targeting a fleet member, or belongs to a government at war
+            // with the player, started (or is part of) this fight itself —
+            // hitting it back is self-defense. Self-defense must NOT mark the
+            // player an aggressor for the piracy police (`wrongedByPlayer`)
+            // nor flip the victim's whole government hostile: defending
+            // against one grudge-holder or mission assassin used to turn his
+            // entire otherwise-neutral government (and then the local police,
+            // and then THEIR government...) on the player — the cascading
+            // "everyone attacks me for no reason" bug.
+            let wasAlreadyFightingFleet = ship.brain?.provokedByPlayer == true
+                || ship.currentTargetID.map(isPlayerFleetMember) == true
+                || (diplomacy?.isHostileToPlayer(ship.government) ?? false)
             ship.brain?.provokedByPlayer = true
-            // Attacking any one ship of a government turns the WHOLE
-            // government hostile in this system immediately, not just the
-            // ship actually hit — matches the real game's "you shot one of
-            // ours" reaction and is independent of whether the player's
-            // legal record has crossed that government's CrimeTol yet (that
-            // gate, `Diplomacy.isHostileToPlayer`, is untouched — this is a
-            // separate, purely combat-hostility/reinforcement trigger). Only
-            // real resource-defined governments (id >= 128, matching the
-            // convention `Spawner.governmentUnderAttackAndOutmatched` already
-            // uses) qualify — `independentGovt` (-1) has no organized "side"
-            // to provoke.
-            if ship.government >= 128 {
-                provokedGovernments.insert(ship.government)
-                for other in allShips
-                where other.entityID != ship.entityID && other.government == ship.government
-                    && !isPlayerFleetMember(other.entityID) {
-                    other.brain?.provokedByPlayer = true
+            if !wasAlreadyFightingFleet {
+                // Unprovoked player aggression against a bystander — the flag
+                // the local authority's piracy-police perception keys on.
+                ship.brain?.wrongedByPlayer = true
+                // Attacking any one ship of a government turns the WHOLE
+                // government hostile in this system immediately, not just the
+                // ship actually hit — matches the real game's "you shot one of
+                // ours" reaction and is independent of whether the player's
+                // legal record has crossed that government's CrimeTol yet (that
+                // gate, `Diplomacy.isHostileToPlayer`, is untouched — this is a
+                // separate, purely combat-hostility/reinforcement trigger). Only
+                // real resource-defined governments (id >= 128, matching the
+                // convention `Spawner.governmentUnderAttackAndOutmatched` already
+                // uses) qualify — `independentGovt` (-1) has no organized "side"
+                // to provoke.
+                if ship.government >= 128 {
+                    provokedGovernments.insert(ship.government)
+                    for other in allShips
+                    where other.entityID != ship.entityID && other.government == ship.government
+                        && !isPlayerFleetMember(other.entityID) {
+                        other.brain?.provokedByPlayer = true
+                    }
                 }
             }
         }
@@ -2835,6 +2866,11 @@ public final class World {
     /// starfield). Set when the world is built for a system; the app draws a
     /// fog whose depth tracks `effectiveMurk(for:)`. No gameplay effect.
     public var systemMurk: Int = 0
+    /// The current system's backdrop tint (`sÿst.BkgndColor`, `0x00RRGGBB`;
+    /// zero = pure black). Set when the world is built for a system; the app
+    /// tints the space background and the murk fog with it — how nebula
+    /// systems get their colored haze. No gameplay effect.
+    public var systemBackgroundColor = NovaColor(r: 0, g: 0, b: 0)
 
     /// `base` sensor range reduced by the effective interference `observer`
     /// experiences: `base × (1 − netInterference/100)`, where net interference
@@ -3242,6 +3278,7 @@ public final class World {
         brain.leaderID = Self.playerEntityID
         brain.escortOrder = .defensive
         brain.provokedByPlayer = false
+        brain.wrongedByPlayer = false
         brain.formationSlot = playerEscorts.filter { $0.entityID != ship.entityID }.count
         ship.disabled = false
         ship.currentTargetID = nil

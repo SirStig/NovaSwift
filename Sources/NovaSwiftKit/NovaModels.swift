@@ -597,6 +597,14 @@ public struct SystRes {
     /// depth for the renderer. @146, confirmed against real data (sits right
     /// before AstTypes@148).
     public let murk: Int
+    /// `sÿst.BkgndColor` (Bible): "The system's background color, encoded the
+    /// same as HTML colors. (RRGGBB) …set to zero for pure black." The space
+    /// backdrop tint that gives nebula regions their colored/murky look. @142
+    /// (4 bytes `0x00RRGGBB`, same on-disk shape as `ïntf` colors), confirmed
+    /// against real data: Vell-os space carries dark greens (`0x000C07`…),
+    /// murky Auroran systems a dark red (`0x19090F`), Kipa/Cipa/Zipa a gray
+    /// (`0x0A0A0A`), and every un-tinted system is zero.
+    public let backgroundColor: NovaColor
     /// Which `röid` type ids (128-143) are enabled for this system, per the
     /// `AstTypes` bitmask.
     public let asteroidTypeIDs: [Int]
@@ -656,6 +664,14 @@ public struct SystRes {
         asteroidCount = max(0, min(16, i16(d, 106)))
         interference = i16(d, 108)
         pinnedPersons = (0..<8).map { i16(d, 110 + $0 * 2) }.filter { $0 >= 128 }
+        // BkgndColor @142: 4 bytes 0x00RRGGBB (first byte padding), right
+        // between the Person block and Murk@146.
+        if d.count >= 146 {
+            let cb = d.startIndex + 142
+            backgroundColor = NovaColor(r: d[cb + 1], g: d[cb + 2], b: d[cb + 3])
+        } else {
+            backgroundColor = NovaColor(r: 0, g: 0, b: 0)
+        }
         murk = i16(d, 146)
         // AstTypes: two bitmask bytes. @148 ("roidTypes1") bits 0-7 select röid
         // 136-143 (dust/crystal); @149 ("roidTypes2") bits 0-7 select röid
@@ -797,6 +813,16 @@ public struct SpobRes {
     /// verified `spöb` TMPL chain that puts `OnDestroy`@582 (576 + DeadType 2 +
     /// RegenTime 2 + Explosion 2 = 582).
     public let destroyedGraphicRaw: Int
+    /// `Weapon` (@570, `RSID`): the `wëap` this stellar fires at ships hostile to
+    /// its government — planetary/station defense guns. `-1` (any `< 128`) = the
+    /// stellar is unarmed. Offset from the same verified TMPL #520 chain as its
+    /// neighbours: `OnRelease`@309 ends at 564, then Landing Fee `DLNG`@564,
+    /// Gravity `DWRD`@568, Weapon `RSID`@570, Strength `DLNG`@572 — landing
+    /// `DestroyedGraphic` exactly at its verified @576.
+    public let defenseWeaponRaw: Int
+    /// `Strength` (@572, `int32`): the stellar's armor — how much weapon damage
+    /// it takes before being destroyed. TMPL: `0` (or below) = invulnerable.
+    public let strength: Int
     /// The `spïn` id of the destroyed/wreck graphic, or nil when the stellar has
     /// none (`-1`/≤0 → invulnerable, shown as simply *gone* when destroyed).
     public var destroyedGraphicSpinID: Int? {
@@ -831,6 +857,16 @@ public struct SpobRes {
     /// This stellar fields a defense fleet, so it can be forced to submit by
     /// destroying its defenders (the Demand-Tribute flow).
     public var hasDefenseFleet: Bool { defenseDude >= 128 && defenseTotal > 0 }
+    /// The `wëap` id this stellar defends itself with, or nil when unarmed
+    /// (`Weapon < 128` — the TMPL's `-1` plus any other non-resource value).
+    public var defenseWeaponID: Int? { defenseWeaponRaw >= 128 ? defenseWeaponRaw : nil }
+    /// `Flags2 0x0200` (TMPL: "Fires weapon only when provoked"): an armed
+    /// stellar that holds fire until the shooter's side has actually been
+    /// provoked, rather than opening up on any passing enemy of its government.
+    public var firesWeaponOnlyWhenProvoked: Bool { flags2 & 0x0200 != 0 }
+    /// TMPL `Strength` CASE: "Invulnerable=0" — a stellar with no positive
+    /// strength can't be destroyed by weapon fire.
+    public var isInvulnerable: Bool { strength <= 0 }
     /// `Flags2 0x0020`: the stellar begins the game already dominated by the
     /// player ("all your base are belong to us").
     public var startsDominated: Bool { flags2 & 0x0020 != 0 }
@@ -924,6 +960,8 @@ public struct SpobRes {
         onDestroy = cstr(d, 582, 255)
         onRegen = cstr(d, 837, 255)
         destroyedGraphicRaw = i16(d, 576)
+        defenseWeaponRaw = i16(d, 570)
+        strength = i32(d, 572)
     }
 }
 

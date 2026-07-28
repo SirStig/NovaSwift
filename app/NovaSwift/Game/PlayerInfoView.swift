@@ -146,24 +146,37 @@ struct PlayerInfoView: View {
     }
 
     private var extrasText: String {
+        // Outfits flagged `0x2000` appear "in the Ranks section of the player
+        // info dialog instead of in the Extras section" (Bible) — see
+        // `honorsText` below.
         let owned = pilot.state.outfits.filter { $0.value > 0 }
+            .filter { game.outfit($0.key)?.showsInRanksSection != true }
         guard !owned.isEmpty else { return "Your ship carries no extra equipment." }
         // The original reads as prose: "Current outfit for your ship: a light
-        // blaster, 2 fuel scoops, …" — one comma-joined sentence.
+        // blaster, 2 fuel scoops, …" — one comma-joined sentence, using the
+        // oütf record's lowercase names when it provides them.
         let items = owned.sorted { $0.key < $1.key }.map { id, qty -> String in
-            let name = game.outfit(id)?.displayName ?? "outfit #\(id)"
-            return qty > 1 ? "\(qty) × \(name)" : name
+            guard let o = game.outfit(id) else { return "outfit #\(id)" }
+            return qty > 1 ? "\(qty) \(o.lowercasePluralDisplayName)" : o.lowercaseDisplayName
         }
         return "Current outfit for your ship:\n\n" + items.joined(separator: ", ") + "."
     }
 
     private var honorsText: String {
-        let ranks = pilot.state.activeRanks
+        var honors = pilot.state.activeRanks
             .compactMap { game.rank($0)?.conversationName }
             .filter { !$0.isEmpty }
             .sorted()
-        guard !ranks.isEmpty else { return "You have not been granted any special honors." }
-        return "You hold the following titles and honors:\n\n" + ranks.joined(separator: "\n")
+        // Ranks-section outfits (`oütf.Flags 0x2000`) — permits, licenses and
+        // the like — list among the honors rather than the ship's equipment.
+        honors += pilot.state.outfits
+            .filter { $0.value > 0 }
+            .compactMap { id, _ in game.outfit(id) }
+            .filter(\.showsInRanksSection)
+            .map(\.displayName)
+            .sorted()
+        guard !honors.isEmpty else { return "You have not been granted any special honors." }
+        return "You hold the following titles and honors:\n\n" + honors.joined(separator: "\n")
     }
 
     /// "June 23rd, 1177" — the long calendar form the game uses in prose.

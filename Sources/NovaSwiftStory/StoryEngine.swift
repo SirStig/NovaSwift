@@ -189,27 +189,19 @@ public final class StoryEngine {
     }
 
     /// Remove every non-persistent outfit the player currently owns (the `H`
-    /// op's "lose any nonpersistent outfit items").
-    ///
-    /// TODO(accessor): `OutfRes` exposes no dedicated `persistent`/`fixed`
-    /// accessor, so persistence is approximated from the outfit flag bits the
-    /// codebase already recognises: can't-sell (`0x0008`) and fixed gun/turret
-    /// mounts (`0x0001`/`0x0002`, per ShipLoadout.swift) — these are the
-    /// permanently-attached items that survive a hull swap. This deliberately
-    /// errs toward *keeping* an outfit when its persistence is ambiguous (safer
-    /// than wrongly deleting the player's gear). If a real `oütf` persistent flag
-    /// is decoded on `OutfRes`, switch `isOutfitPersistent` to read it.
+    /// op's "lose any nonpersistent outfit items"). Persistence across a
+    /// *mission* ship change is the Bible's `oütf.Flags 0x0020` — distinct
+    /// from `0x0004`, which governs buying/capturing a new ship (that half
+    /// lives in `PilotEconomy.buyShip`).
     private func dropNonPersistentOutfits() {
         for oid in Array(player.outfits.keys) where !isOutfitPersistent(oid) {
             player.outfits[oid] = nil
         }
     }
 
-    /// Best-effort "is this outfit persistent across a hull swap?" See the TODO
-    /// on `dropNonPersistentOutfits`.
+    /// "Is this outfit persistent across a mission set-operator hull swap?"
     private func isOutfitPersistent(_ outfitID: Int) -> Bool {
-        guard let o = game.outfit(outfitID) else { return false }
-        return o.flags & (0x0008 | 0x0001 | 0x0002) != 0
+        game.outfit(outfitID)?.persistsOnMissionShipChange ?? false
     }
 
     // MARK: - Mission availability
@@ -932,16 +924,19 @@ public final class StoryEngine {
     }
 
     private func dateInWindow(_ c: CronRes) -> Bool {
+        // Bible §crön: "0 or -1" both wildcard a date field — a plugin using the
+        // documented `-1` (e.g. `LastYear = -1` for "never expires") must not be
+        // read as a literal year/-1 date, which would fail the window forever.
         let d = player.date
-        if c.firstYear != 0 {
-            let first = GameDate(day: c.firstDay == 0 ? 1 : c.firstDay,
-                                 month: c.firstMonth == 0 ? 1 : c.firstMonth,
+        if c.firstYear > 0 {
+            let first = GameDate(day: c.firstDay <= 0 ? 1 : c.firstDay,
+                                 month: c.firstMonth <= 0 ? 1 : c.firstMonth,
                                  year: c.firstYear)
             if d < first { return false }
         }
-        if c.lastYear != 0 {
-            let last = GameDate(day: c.lastDay == 0 ? 31 : c.lastDay,
-                                month: c.lastMonth == 0 ? 12 : c.lastMonth,
+        if c.lastYear > 0 {
+            let last = GameDate(day: c.lastDay <= 0 ? 31 : c.lastDay,
+                                month: c.lastMonth <= 0 ? 12 : c.lastMonth,
                                 year: c.lastYear)
             if d > last { return false }
         }

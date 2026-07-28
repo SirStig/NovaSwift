@@ -27,9 +27,10 @@ final class OutfitMechanicsTests: XCTestCase {
     private func outfit(_ id: Int, name: String = "Item",
                         modType: Int = -1, modVal: Int = 0,
                         flags: Int = 0, cost: Int = 0, max: Int = 0,
-                        tech: Int = 1, mass: Int = 0,
+                        tech: Int = 1, mass: Int = 0, dispWeight: Int = 0,
                         onPurchase: String = "", onSell: String = "") -> Resource {
         var b = [UInt8](repeating: 0, count: 1028)
+        put16(&b, 0, dispWeight)
         put16(&b, 2, mass)
         put16(&b, 4, tech)
         put16(&b, 6, modType); put16(&b, 8, modVal)   // primary modifier slot
@@ -190,5 +191,59 @@ final class OutfitMechanicsTests: XCTestCase {
         let ids = Set(game.outfitsSold(at: spob).map(\.id))
         XCTAssertFalse(ids.contains(200), "tech-99 item hidden at tech-1 port")
         XCTAssertFalse(ids.contains(201), "0x0800 must not bypass the buy-listing tech-level gate")
+    }
+
+    // MARK: DispWeight ordering & Flags 0x1000 same-weight suppression
+
+    private func outfitterSpob(_ id: Int = 400, tech: Int = 1) -> Resource {
+        var s = [UInt8](repeating: 0, count: 60)
+        put32(&s, 6, 0x04)       // hasOutfitter
+        put16(&s, 12, tech)
+        return Resource(type: NovaType.spob, id: id, name: "Port", data: Data(s))
+    }
+
+    func testOutfitterListsHigherDispWeightFirst() {
+        // Bible `DispWeight`: "Items with a higher display weight are shown
+        // closer to the top of the outfit dialog."
+        var col = ResourceCollection()
+        col.add(outfitterSpob())
+        col.add(outfit(200, dispWeight: 0))
+        col.add(outfit(201, dispWeight: 10))
+        col.add(outfit(202, dispWeight: 5))
+        col.add(outfit(203, dispWeight: 10))
+        let game = NovaGame(col)
+        XCTAssertEqual(game.outfitsSold(at: game.spob(400)!).map(\.id), [201, 203, 202, 200])
+    }
+
+    func testFlag0x1000SuppressesHigherIDsAtEqualWeight() {
+        // Bible `Flags 0x1000`: "When this item is available for sale, it
+        // prevents all higher-numbered items with equal DispWeight from being
+        // made available for sale at the same time."
+        var col = ResourceCollection()
+        col.add(outfitterSpob())
+        col.add(outfit(200, flags: 0x1000, dispWeight: 5))
+        col.add(outfit(201, dispWeight: 5))       // same weight, higher id → suppressed
+        col.add(outfit(199, dispWeight: 5))       // same weight, lower id → survives
+        col.add(outfit(300, dispWeight: 7))       // different weight → unaffected
+        let game = NovaGame(col)
+        XCTAssertEqual(Set(game.outfitsSold(at: game.spob(400)!).map(\.id)), [199, 200, 300])
+    }
+
+    // MARK: outfitter display strings @811/@875/@939
+
+    func testOutfitterDisplayStringsDecodeWithFallbacks() {
+        var b = [UInt8](repeating: 0, count: 1028)
+        putStr(&b, 811, "Sigma Enhanced Blaster")
+        putStr(&b, 875, "enhanced blaster")
+        putStr(&b, 939, "enhanced blasters")
+        let named = OutfRes(Resource(type: NovaType.outfit, id: 200, name: "Blaster;dev note", data: Data(b)))
+        XCTAssertEqual(named.outfitterDisplayName, "Sigma Enhanced Blaster")
+        XCTAssertEqual(named.lowercaseDisplayName, "enhanced blaster")
+        XCTAssertEqual(named.lowercasePluralDisplayName, "enhanced blasters")
+
+        let blank = OutfRes(outfit(201, name: "Ion Cannon;annotation"))
+        XCTAssertEqual(blank.outfitterDisplayName, "Ion Cannon", "blank record strings fall back to the display name")
+        XCTAssertEqual(blank.lowercaseDisplayName, "Ion Cannon")
+        XCTAssertEqual(blank.lowercasePluralDisplayName, "Ion Cannon")
     }
 }

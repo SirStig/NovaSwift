@@ -33,16 +33,30 @@ public struct StellarBody {
     /// this gate, or nil to pick a random direction. Non-gates: nil.
     public let gateEmergeAngle: Double?
     public var isGate: Bool { isHypergate || isWormhole }
+    /// `spöb.Weapon`, resolved: the weapon this stellar fires at ships hostile
+    /// to its `government` (planetary/station defense guns). Nil = unarmed —
+    /// the overwhelmingly common case. Resolved to a full `WeaponSpec` at
+    /// system-build time so the per-frame firing pass (`World.
+    /// updateStellarWeapons`) needs no `Galaxy` lookup, and tests can arm a
+    /// body with a hand-built spec.
+    public let defenseWeapon: WeaponSpec?
+    /// `spöb.Flags2` 0x0200 ("Fires weapon only when provoked"): hold fire
+    /// until the player's side has actually provoked this stellar (tribute
+    /// contest / attacked its government) instead of opening up on any enemy
+    /// of its government that strays into range.
+    public let firesOnlyWhenProvoked: Bool
 
     public init(id: Int, position: Vec2, radius: Double, canLand: Bool, isLandable: Bool? = nil,
                 government: Int = independentGovt, isHypergate: Bool = false,
-                isWormhole: Bool = false, isDeadly: Bool = false, gateEmergeAngle: Double? = nil) {
+                isWormhole: Bool = false, isDeadly: Bool = false, gateEmergeAngle: Double? = nil,
+                defenseWeapon: WeaponSpec? = nil, firesOnlyWhenProvoked: Bool = false) {
         self.id = id; self.position = position; self.radius = radius; self.canLand = canLand
         // Defaults to `canLand` when the caller doesn't distinguish the two
         // (test fixtures, ad-hoc bodies) — `canLand` already implies landable.
         self.isLandable = isLandable ?? canLand
         self.government = government; self.isHypergate = isHypergate
         self.isWormhole = isWormhole; self.isDeadly = isDeadly; self.gateEmergeAngle = gateEmergeAngle
+        self.defenseWeapon = defenseWeapon; self.firesOnlyWhenProvoked = firesOnlyWhenProvoked
     }
 }
 
@@ -335,7 +349,9 @@ public final class Galaxy {
                 canLand: s.isLandable && !s.isUninhabited, isLandable: s.isLandable,
                 government: s.government, isHypergate: s.isHypergate, isWormhole: s.isWormhole,
                 isDeadly: s.isDeadly,
-                gateEmergeAngle: s.gateEmergeAngle.map { $0 * .pi / 180 }))
+                gateEmergeAngle: s.gateEmergeAngle.map { $0 * .pi / 180 },
+                defenseWeapon: s.defenseWeaponID.flatMap { weaponSpec($0) },
+                firesOnlyWhenProvoked: s.firesWeaponOnlyWhenProvoked))
         }
         // The system's actual centre of mass — not the world origin, which a
         // system's stellar objects don't necessarily cluster around. Everything

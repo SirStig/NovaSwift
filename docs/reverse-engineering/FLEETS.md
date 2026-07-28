@@ -125,7 +125,7 @@ Full field list, in Bible order, with what's decoded in `SystRes`
 | `Interference` | "How thick the static… 0 is no static, 100 is complete sensor blackout" | ❌ not decoded |
 | `Person` fields | Force a specific `përs` to always appear | ❌ not decoded |
 | `Visibility` | Control-bit test expression; hide/replace whole system | ❌ not decoded |
-| `BkgndColor`, `Murk`, `AstTypes` | Cosmetic / hazard flags | ❌ not decoded |
+| `BkgndColor`, `Murk`, `AstTypes` | Cosmetic / hazard flags | ✅ decoded as `backgroundColor`@142 (`0x00RRGGBB` nebula backdrop tint), `murk`@146, `asteroidTypeIDs`@148-149; the app tints the space backdrop + murk fog (`GameScene.applySystemBackdrop`) |
 | `ReinfFleet`, `ReinfTime`, `ReinfIntrval` | Reinforcement-fleet id/delay/regen interval — see [AI_GROUND_TRUTH.md](AI_GROUND_TRUTH.md) | ✅ decoded as `reinforcementFleet`/`reinforcementDelay`/`reinforcementRegen` @406-410 (`NovaModels.swift:392-441`) and wired to a live reactive-summon mechanism — see §5 below (updated) |
 
 **This directly answers the brief's question** ("any fields governing general

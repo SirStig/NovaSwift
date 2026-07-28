@@ -339,6 +339,116 @@ final class AIBehaviorTests: XCTestCase {
         XCTAssertTrue(intervened, "once the player actually fires on a neutral, the local authority should intervene")
     }
 
+    func testAuthorityDoesNotReadProvokedAttackerAsPlayersVictim() {
+        // Regression: `provokedByPlayer` is set BOTH on ships the player hits
+        // and on ships that hit the player first (`World.applyHit`'s reverse
+        // rule). Piracy-police perception used to read the flag as "the player
+        // attacked this ship" — so the moment anything jumped the player, the
+        // local authority attacked the PLAYER: the "police randomly attack me
+        // constantly" bug.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 10, acceleration: 10, turnRate: 3))
+        player.maxShield = 100; player.shield = 100; player.maxArmor = 100; player.armor = 100
+        let world = World(player: player)
+        // 500 (system authority) and 600 (the attacker's govt) are not enemies.
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50]), govt(600, classes: [60])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 3000), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
+
+        let cop = warship("Cop", govt: 500, at: Vec2(300, 0))
+        cop.brain = AIBrain(aiType: .interceptor, govt: 500)
+        world.addNPC(cop)
+        // A ship of a neutral government carrying the mark of having attacked
+        // the player first — exactly what `applyHit`'s reverse rule sets the
+        // moment it lands its first hit on the player. (Unarmed, so it takes
+        // no further actions of its own that could muddy the perception.)
+        let attacker = warship("Grudge", govt: 600, at: Vec2(0, 150), armed: false)
+        let abrain = AIBrain(aiType: .warship, govt: 600)
+        abrain.provokedByPlayer = true
+        attacker.brain = abrain
+        world.addNPC(attacker)
+
+        for _ in 0..<150 {   // 5 seconds
+            world.step(1.0 / 30.0)
+            XCTAssertNotEqual(cop.brain?.targetID, World.playerEntityID,
+                              "the police must not attack a player whose only 'crime' is having been attacked")
+        }
+    }
+
+    func testSelfDefenseHitDoesNotProvokeAttackersGovernment() {
+        // Regression: the player returning fire on a ship that attacked them
+        // first used to run the full "player aggression" reaction — marking
+        // the player an aggressor for the police and flipping the attacker's
+        // whole (otherwise neutral) government hostile in-system. Self-defense
+        // must do neither.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 10, acceleration: 10, turnRate: 3))
+        player.maxShield = 4000; player.shield = 4000; player.maxArmor = 4000; player.armor = 4000
+        player.weapons = [WeaponMount(spec: gun())]
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(600, classes: [60])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 3000), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000)
+
+        // The attacker shot first (its provocation flag is what the reverse
+        // rule in `applyHit` sets when its first hit lands on the player).
+        let attacker = warship("Grudge", govt: 600, at: Vec2(0, 150))
+        let abrain = AIBrain(aiType: .warship, govt: 600)
+        abrain.provokedByPlayer = true
+        attacker.brain = abrain
+        world.addNPC(attacker)
+        // An uninvolved same-government bystander, well out of the line of fire.
+        let bystander = warship("Bystander", govt: 600, at: Vec2(-600, -400), armed: false)
+        bystander.brain = AIBrain(aiType: .wimpyTrader, govt: 600)
+        world.addNPC(bystander)
+
+        // The player defends themselves; run until a return hit actually lands.
+        player.currentTargetID = attacker.entityID
+        world.intent.firePrimary = true
+        var hitLanded = false
+        for _ in 0..<300 {   // up to 10 seconds
+            world.step(1.0 / 30.0)
+            if attacker.shield < attacker.maxShield { hitLanded = true; break }
+        }
+        XCTAssertTrue(hitLanded, "fixture: the player's return fire must actually connect")
+        XCTAssertFalse(world.provokedGovernments.contains(600),
+                       "return fire in self-defense must not flip the attacker's whole government hostile")
+        XCTAssertNotEqual(attacker.brain?.wrongedByPlayer, true,
+                          "a ship that started the fight is not the player's victim")
+        XCTAssertNotEqual(bystander.brain?.provokedByPlayer, true,
+                          "an uninvolved same-government bystander stays neutral through the player's self-defense")
+    }
+
+    func testInterruptedDepartureDropsStaleDepartIntent() {
+        // Regression: a ship pulled off its jump-out by a fight kept a stale
+        // `wantsToDepart` (and possibly a stale hypergate pick) forever. The
+        // world's despawn sweep keys on exactly those, so the ship silently
+        // vanished the next time its patrol or travel leg happened to carry it
+        // over a hypergate or past the system edge — ships randomly
+        // stopping/disappearing at gates.
+        let player = Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
+                          position: Vec2(0, 400))
+        player.maxShield = 100; player.shield = 100; player.maxArmor = 100; player.armor = 100
+        let world = World(player: player)
+        world.diplomacy = Diplomacy(govts: [govt(500, classes: [50])])
+        world.systemContext = SystemContext(
+            bodies: [StellarBody(id: 128, position: Vec2(0, 3000), radius: 90, canLand: true)],
+            center: Vec2(), jumpRadius: 6000, spawnRadius: 5000, systemGovt: 500)
+
+        let patrol = warship("Patrol", govt: 500, at: Vec2())
+        let brain = AIBrain(aiType: .warship, govt: 500)
+        brain.state = .departing
+        brain.provokedByPlayer = true   // the player picked a fight mid-departure
+        patrol.brain = brain
+        patrol.wantsToDepart = true
+        world.addNPC(patrol)
+
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(brain.state, .attacking, "the fight pulls the ship off its jump-out")
+        XCTAssertFalse(patrol.wantsToDepart,
+                       "an interrupted departure must drop its depart intent, or the despawn sweep later eats the ship mid-patrol")
+    }
+
     func testTraderTravelsTowardPlanet() {
         let player = Ship(name: "Player", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
                           position: Vec2(9_000, 9_000))                // far away, no threat
@@ -435,7 +545,14 @@ final class AIBehaviorTests: XCTestCase {
         world.systemContext = SystemContext(bodies: [], center: Vec2(), jumpRadius: 1000, spawnRadius: 800)
         let leaver = warship("Leaver", govt: 300, at: Vec2(0, 1200), armed: false) // already past the edge
         leaver.wantsToDepart = true
-        leaver.brain = AIBrain(aiType: .warship, govt: 300)
+        let brain = AIBrain(aiType: .warship, govt: 300)
+        // Actually departing, not just carrying the flag: the brain now clears
+        // a stale `wantsToDepart` whenever it isn't flying an exit (an
+        // interrupted departure used to leave it set forever, silently eating
+        // the ship the next time it strayed near a gate or the edge), so the
+        // despawn sweep only honors the flag while the departure is real.
+        brain.state = .departing
+        leaver.brain = brain
         world.addNPC(leaver)
 
         world.step(1.0 / 30.0)
