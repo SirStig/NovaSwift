@@ -649,8 +649,6 @@ struct GameContainerView: View {
         #endif
     }
 
-    /// The in-game debug suite panel (developer tools), gated by debug mode.
-    @State private var showDebugSuite = false
     /// Live debug/performance state for this play session, handed to each
     /// `GameScene` the container (re)builds. Persists across host rebuilds.
     @StateObject private var debug = DebugController()
@@ -934,22 +932,23 @@ struct GameContainerView: View {
                                  onOpenMap: { nav.showingMap = true },
                                  onSave: { saveGame(reason: $0) },
                                  showDebug: model.settings.debugModeEnabled,
-                                 onOpenDebug: { showMenu = false; showDebugSuite = true })
+                                 onOpenDebug: {
+                                     showMenu = false
+                                     console.tab = .tools
+                                     console.isPresented = true
+                                 })
                 }
 
-                // Debug suite: an on-screen entry point + live metrics chip while
+                // Dev console: an on-screen entry point + live metrics chip while
                 // debug mode is on, and the full developer panel when opened. The
                 // simulation keeps running underneath so the readout stays live.
                 if model.settings.debugModeEnabled {
                     debugControls
-                    if showDebugSuite {
-                        DebugSuiteView(debug: debug) { showDebugSuite = false }
-                            .zIndex(30)
-                            .transition(.opacity)
-                    }
                     if console.isPresented {
-                        ConsoleView(console: console) { console.isPresented = false }
-                            .zIndex(35)
+                        DevConsoleView(console: console, debug: debug) {
+                            console.isPresented = false
+                        }
+                        .zIndex(35)
                     }
                 }
 
@@ -1007,7 +1006,7 @@ struct GameContainerView: View {
         .animation(.easeInOut(duration: 0.2), value: nav.showingMap)
         .animation(.easeInOut(duration: 0.2), value: gateMapOrigin)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMenu)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showDebugSuite)
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: console.isPresented)
         .animation(.easeInOut(duration: 0.2), value: landedSpobID)
         .onChange(of: isSceneFocused) { _, focused in
             Log.input.debug("isSceneFocused -> \(focused, privacy: .public)")
@@ -1185,6 +1184,14 @@ struct GameContainerView: View {
         gameStackWithMidLifecycle
         // Leaving the game unsuppresses the UI cursor so it works on the menus.
         .onDisappear { CursorTargets.shared.suppressed = false }
+        // Keep cursor suppression tracking who owns the screen. `wirePadController`
+        // asserts `suppressed == flightControlsVisible`, but it only re-runs on a
+        // scene/bindings change — so opening an overlay (console, menu, map) left
+        // the cursor suppressed from whenever the pad was last wired, and a
+        // controller/tvOS player couldn't click anything in it.
+        .onChange(of: flightControlsVisible) { _, flying in
+            CursorTargets.shared.suppressed = flying
+        }
         // Commands read `debug`/`model` live at call time (they close over
         // `self`), so registering once per session is enough — a jump
         // rebuild doesn't need to re-wire them the way pad bindings do.
@@ -2170,8 +2177,7 @@ struct GameContainerView: View {
     private var flightControlsVisible: Bool {
         landedSpobID == nil && !nav.showingMap && !showMenu && hailDialogState == nil
             && !showMissionsPanel && !showPilotInfoPanel && !showEscortsPanel
-            && !showShipInfoPanel && boardManifest == nil && !showDebugSuite
-            && !console.isPresented
+            && !showShipInfoPanel && boardManifest == nil && !console.isPresented
     }
 
     /// Push the touch steering mode (Settings ▸ Touch scheme) down to the live
@@ -2953,38 +2959,35 @@ struct GameContainerView: View {
         }
     }
 
-    /// The developer entry point shown while debug mode is on: a debug button,
-    /// a console button, and a live fps/ship chip, tucked under the menu
-    /// button (clear of the right-edge status bar). Also carries the hidden
-    /// ⌘\` shortcut that toggles the console from a hardware keyboard — same
-    /// pattern as `RootView`'s ⇧⌘D catcher, and command-modified for the same
-    /// reason: `FlightKeyboardMonitor` passes ⌘-chords through untouched even
-    /// while flight owns every other key.
+    /// The developer entry point shown while debug mode is on: one console
+    /// button and a live fps/ship chip, tucked under the menu button (clear of
+    /// the right-edge status bar). The button opens on the command line, the
+    /// chip on the tools pane — the same panel either way, landing where you
+    /// were already looking. Also carries the hidden ⌘\` shortcut that toggles
+    /// the console from a hardware keyboard — same pattern as `RootView`'s
+    /// ⇧⌘D catcher, and command-modified for the same reason:
+    /// `FlightKeyboardMonitor` passes ⌘-chords through untouched even while
+    /// flight owns every other key.
     private var debugControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Button { showDebugSuite = true } label: {
-                            Image(systemName: "ladybug.fill")
-                                .font(.body.weight(.semibold))
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(Circle().strokeBorder(Color(red: 0.35, green: 0.95, blue: 0.5).opacity(0.5)))
-                                .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.5))
-                        }
-                        .buttonStyle(.novaPlain)
-                        Button { console.isPresented = true } label: {
-                            Image(systemName: "terminal.fill")
-                                .font(.body.weight(.semibold))
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(Circle().strokeBorder(Color(red: 0.35, green: 0.95, blue: 0.5).opacity(0.5)))
-                                .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.5))
-                        }
-                        .buttonStyle(.novaPlain)
+                    Button {
+                        console.tab = .console
+                        console.isPresented = true
+                    } label: {
+                        Image(systemName: "terminal.fill")
+                            .font(.body.weight(.semibold))
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(devConsoleGreen.opacity(0.5)))
+                            .foregroundStyle(devConsoleGreen)
                     }
-                    DebugMetricsChip(debug: debug) { showDebugSuite = true }
+                    .buttonStyle(.novaPlain)
+                    DebugMetricsChip(debug: debug) {
+                        console.tab = .tools
+                        console.isPresented = true
+                    }
                 }
                 Spacer()
             }
@@ -2992,8 +2995,8 @@ struct GameContainerView: View {
         }
         .padding(.leading, 14)
         .padding(.top, 68)   // below the hamburger menu button
-        .opacity(showDebugSuite || showMenu || console.isPresented ? 0 : 1)
-        .allowsHitTesting(!showDebugSuite && !showMenu && !console.isPresented)
+        .opacity(showMenu || console.isPresented ? 0 : 1)
+        .allowsHitTesting(!showMenu && !console.isPresented)
         .zIndex(15)
         #if !os(tvOS)
         .overlay {
@@ -3144,6 +3147,24 @@ struct GameContainerView: View {
             model.pilot.state.shipName = ship.displayName
             model.pilot.save()
             return "Current ship set to #\(ship.id) \(ship.displayName) — applies on next takeoff/jump/landing."
+        })
+
+        console.register(.init(name: "outfit", summary: "Grant or remove an outfit.", usage: "outfit <add|remove> <outfitID> [count]") { args in
+            guard args.count >= 2, let id = Int(args[1]) else {
+                throw ConsoleController.CommandError(message: "Usage: outfit <add|remove> <outfitID> [count]")
+            }
+            let count = max(1, args.dropFirst(2).first.flatMap(Int.init) ?? 1)
+            guard let outfit = model.data.game?.outfit(id) else {
+                throw ConsoleController.CommandError(message: "No outfit #\(id).")
+            }
+            switch args[0].lowercased() {
+            case "add": model.pilot.state.grantOutfit(id, count: count)
+            case "remove": model.pilot.state.removeOutfit(id, count: count)
+            default: throw ConsoleController.CommandError(message: "Expected add/remove, got '\(args[0])'")
+            }
+            model.pilot.save()
+            let owned = model.pilot.state.outfits[id] ?? 0
+            return "\(outfit.outfitterDisplayName): now ×\(owned) — applies on next ship rebuild."
         })
 
         console.register(.init(name: "relation", summary: "Set standing with a government.", usage: "relation <govtID> <value>") { args in
