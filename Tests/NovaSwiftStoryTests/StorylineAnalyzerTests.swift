@@ -25,6 +25,27 @@ final class StorylineAnalyzerTests: XCTestCase {
         XCTAssertEqual(line.totalCount, 2)
     }
 
+    /// Regression: step 1 sets the gating bit only inside a random `R( … )` op.
+    /// The bit-source index used to fold SET ops by hand without descending into
+    /// `.random`, so step 2 reported *no* unlock source — the guide told the
+    /// player nothing could unlock it, when completing step 1 does (just not
+    /// every time).
+    func testLockedStepPointsAtMissionThatSetsBitRandomly() {
+        let m1 = MissionSpec(id: 500, name: "Do the first thing; Test1",
+                             returnStellar: 128, pay: 1000,
+                             onSuccess: "R(b800 b801)").resource()
+        let m2 = MissionSpec(id: 501, name: "Do the second thing; Test2",
+                             availBits: "b800").resource()
+        let a = StorylineAnalyzer(game: makeGame([m1, m2, spobResource(id: 128, govt: 128)]))
+
+        let lines = a.storylines(for: PlayerState())
+        let step2 = try! XCTUnwrap(lines.first?.steps.first { $0.missionID == 501 })
+        let blocker = try! XCTUnwrap(step2.blockers.first { $0.bit == 800 })
+        XCTAssertTrue(blocker.needsSet)
+        XCTAssertEqual(blocker.unlockedBy.first?.id, 500)
+        XCTAssertEqual(blocker.unlockedBy.first?.kind, .mission)
+    }
+
     func testLockedStepPointsAtUnlockingMission() {
         let a = StorylineAnalyzer(game: chainGame())
         // Fresh pilot: step 1 available, step 2 locked on b800.

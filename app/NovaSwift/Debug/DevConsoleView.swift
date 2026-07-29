@@ -1,10 +1,13 @@
 import SwiftUI
+import Foundation
 
 /// Shared chrome colour for every developer surface — the same green the debug
 /// suite has always used, hoisted out so the console, tools rail and browsers
 /// can't drift apart.
 let devConsoleGreen = Color(red: 0.35, green: 0.95, blue: 0.5)
 let devConsoleRed = Color(red: 0.95, green: 0.4, blue: 0.35)
+let devConsoleOrange = Color(red: 1.0, green: 0.72, blue: 0.3)
+let devConsoleBlue = Color(red: 0.45, green: 0.72, blue: 1.0)
 
 /// Base point size for the dev console's monospaced text. A TV is viewed from
 /// across a room, so the 11pt that reads fine on a Mac is unusable there.
@@ -20,6 +23,7 @@ let devFontScale: CGFloat = 1
 enum DevConsoleTab: String, CaseIterable, Identifiable {
     case console = "Console"
     case tools = "Tools"
+    case bits = "Bits"
     case ships = "Ships"
     case outfits = "Outfits"
     case govts = "Govts"
@@ -30,6 +34,7 @@ enum DevConsoleTab: String, CaseIterable, Identifiable {
         switch self {
         case .console: return "terminal.fill"
         case .tools: return "slider.horizontal.3"
+        case .bits: return "switch.2"
         case .ships: return "airplane"
         case .outfits: return "shippingbox.fill"
         case .govts: return "flag.fill"
@@ -57,6 +62,7 @@ enum DevConsoleTab: String, CaseIterable, Identifiable {
 /// execution path, records every action in the scrollback, and makes the UI
 /// teach its own command line. See `registerConsoleCommands()`.
 struct DevConsoleView: View {
+    @EnvironmentObject private var model: AppModel
     @ObservedObject var console: ConsoleController
     /// Deliberately *not* `@ObservedObject`: `DebugController` republishes a
     /// metrics sample several times a second, and observing it here would
@@ -65,6 +71,12 @@ struct DevConsoleView: View {
     /// themselves (`ConsoleHeaderMetrics`, `DevToolsPane`).
     let debug: DebugController
     var onClose: () -> Void
+    /// Fired when a clickable `«ship:…»`/`«spob:…»` chip in a log line is
+    /// tapped — the app wires this to select + recenter the camera on that
+    /// entity in the live scene. Defaults to a no-op so call sites that don't
+    /// care (there are none left, but keeps the type usable standalone/in
+    /// previews) don't have to pass one.
+    var onSelectEntity: (DevEntityRef) -> Void = { _ in }
 
     /// Below this the log and a useful inspector can't share a row.
     private static let wideBreakpoint: CGFloat = 820
@@ -91,6 +103,28 @@ struct DevConsoleView: View {
         .transition(.move(edge: .top).combined(with: .opacity))
         .onAppear { console.log.startPolling() }
         .onDisappear { console.log.stopPolling() }
+        #if !os(tvOS)
+        // Escape closes the console from anywhere in it — including while
+        // the command-line `TextField` has focus, where `.keyboardShortcut`
+        // alone doesn't fire (the focused text field's own responder eats
+        // Escape before it reaches a shortcut elsewhere in the hierarchy; see
+        // `ConsolePane.inputBar`'s matching `.onKeyPress(.escape)`). This
+        // hidden button covers every other tab (Tools/Ships/Bits/…), where
+        // nothing else is capturing the key.
+        .background {
+            Button("", action: onClose)
+                .keyboardShortcut(.cancelAction)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+        #endif
+        // Build the control-bit cross-reference as soon as the console opens,
+        // not when the Bits tab is first shown — otherwise `bit info` reports
+        // "no references" for anyone who only ever uses the command line.
+        .task(id: model.data.dataStamp) {
+            await console.buildNCBIndexIfNeeded(game: model.data.game,
+                                                stamp: model.data.dataStamp)
+        }
     }
 
     /// Tall enough to be a usable log, never so tall it hides the whole game.
@@ -168,13 +202,13 @@ struct DevConsoleView: View {
     @ViewBuilder private func content(wide: Bool) -> some View {
         if wide {
             HStack(spacing: 0) {
-                ConsolePane(console: console)
+                ConsolePane(console: console, onSelectEntity: onSelectEntity, onClose: onClose)
                 Rectangle().fill(devConsoleGreen.opacity(0.25)).frame(width: 1)
                 inspector(activeTab(wide: true))
                     .frame(width: 380)
             }
         } else if console.tab == .console {
-            ConsolePane(console: console)
+            ConsolePane(console: console, onSelectEntity: onSelectEntity, onClose: onClose)
         } else {
             inspector(console.tab)
         }
@@ -182,8 +216,9 @@ struct DevConsoleView: View {
 
     @ViewBuilder private func inspector(_ tab: DevConsoleTab) -> some View {
         switch tab {
-        case .console: ConsolePane(console: console)
+        case .console: ConsolePane(console: console, onSelectEntity: onSelectEntity, onClose: onClose)
         case .tools: DevToolsPane(console: console, debug: debug)
+        case .bits: DevBitBrowser(console: console)
         case .ships: DevShipBrowser(console: console)
         case .outfits: DevOutfitBrowser(console: console)
         case .govts: DevGovtBrowser(console: console)
@@ -219,9 +254,18 @@ struct ConsolePane: View {
     /// `console`. Without this the tail only refreshed when some unrelated
     /// state happened to re-render the pane.
     @ObservedObject private var log: ConsoleLogStore
+    var onSelectEntity: (DevEntityRef) -> Void = { _ in }
+    /// Closes the console — wired to Escape on the command-line `TextField`
+    /// (see `inputBar`), since a focused text field eats Escape before
+    /// `DevConsoleView`'s hidden `.keyboardShortcut(.cancelAction)` button
+    /// ever sees it.
+    var onClose: () -> Void = {}
 
-    init(console: ConsoleController) {
+    init(console: ConsoleController, onSelectEntity: @escaping (DevEntityRef) -> Void = { _ in },
+         onClose: @escaping () -> Void = {}) {
         self.console = console
+        self.onSelectEntity = onSelectEntity
+        self.onClose = onClose
         _log = ObservedObject(wrappedValue: console.log)
     }
 
@@ -230,15 +274,107 @@ struct ConsolePane: View {
     @State private var historyIndex: Int?
     @FocusState private var inputFocused: Bool
 
+    /// Severities hidden by the filter bar. Opt-out (empty = show everything)
+    /// so a fresh console always starts showing the full stream.
+    @State private var mutedSeverities: Set<ConsoleLogStore.Line.Severity> = []
+    /// Same idea for categories (the `[ai]`/`[combat]`/… prefix tailed log
+    /// lines already carry), keyed by the category string itself since the
+    /// set of categories in play isn't known up front.
+    @State private var mutedCategories: Set<String> = []
+    /// Lines the user has expanded past the default 2-line collapse.
+    @State private var expandedLines: Set<UUID> = []
+
+    /// A line collapses when it's long enough that showing it in full would
+    /// dominate the scrollback — either it already contains hard newlines, or
+    /// it's just long (heuristic: ~2 wrapped lines' worth of monospaced text
+    /// at the pane's typical width).
+    private static let collapseThreshold = 160
+
     var body: some View {
         VStack(spacing: 0) {
+            filterBar
+            Rectangle().fill(devConsoleGreen.opacity(0.2)).frame(height: 1)
             logList
             Rectangle().fill(devConsoleGreen.opacity(0.3)).frame(height: 1)
             inputBar
         }
         .frame(maxWidth: .infinity)
         .onAppear { inputFocused = true }
+        .environment(\.openURL, OpenURLAction { url in
+            guard let ref = DevEntityRef(linkURL: url) else { return .discarded }
+            onSelectEntity(ref)
+            return .handled
+        })
     }
+
+    // MARK: Filters
+
+    /// Every category seen in the current scrollback, in first-seen order —
+    /// tailed log lines are prefixed `"[category] ..."` by `LogTail.fetch`.
+    private var availableCategories: [String] {
+        var seen: Set<String> = []
+        var order: [String] = []
+        for line in log.lines {
+            guard case .log = line.kind, let category = category(of: line) else { continue }
+            if seen.insert(category).inserted { order.append(category) }
+        }
+        return order
+    }
+
+    private func category(of line: ConsoleLogStore.Line) -> String? {
+        guard line.text.hasPrefix("["), let end = line.text.firstIndex(of: "]") else { return nil }
+        return String(line.text[line.text.index(after: line.text.startIndex)..<end])
+    }
+
+    private var visibleLines: [ConsoleLogStore.Line] {
+        log.lines.filter { line in
+            guard case let .log(severity) = line.kind else { return true }
+            if mutedSeverities.contains(severity) { return false }
+            if let category = category(of: line), mutedCategories.contains(category) { return false }
+            return true
+        }
+    }
+
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(ConsoleLogStore.Line.Severity.allCases, id: \.self) { severity in
+                    filterChip(severity.displayName, color: severityColor(severity),
+                              active: !mutedSeverities.contains(severity)) {
+                        toggle(severity, in: &mutedSeverities)
+                    }
+                }
+                if !availableCategories.isEmpty {
+                    Rectangle().fill(.white.opacity(0.15)).frame(width: 1, height: 14)
+                    ForEach(availableCategories, id: \.self) { category in
+                        filterChip(category, color: .white,
+                                  active: !mutedCategories.contains(category)) {
+                            toggle(category, in: &mutedCategories)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+        }
+    }
+
+    private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
+        if !set.insert(value).inserted { set.remove(value) }
+    }
+
+    private func filterChip(_ title: String, color: Color, active: Bool, action: @escaping () -> Void) -> some View {
+        CursorButton(action: action) {
+            Text(title)
+                .font(.system(size: 9 * devFontScale, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Capsule().fill(active ? color.opacity(0.2) : .white.opacity(0.04)))
+                .overlay(Capsule().strokeBorder(active ? color.opacity(0.6) : .white.opacity(0.12)))
+                .foregroundStyle(active ? color : .white.opacity(0.35))
+        }
+    }
+
+    // MARK: Log list
 
     private var logList: some View {
         ScrollViewReader { proxy in
@@ -248,23 +384,13 @@ struct ConsolePane: View {
                         Text("Streaming \(Log.subsystem) — app logs appear here. Type 'help' for commands.")
                             .font(.system(size: 11 * devFontScale, design: .monospaced))
                             .foregroundStyle(.secondary)
-                    }
-                    ForEach(log.lines) { line in
-                        let text = Text(line.kind.isError ? "! \(line.text)" : line.text)
+                    } else if visibleLines.isEmpty {
+                        Text("Every line is filtered out — toggle a chip above to see it.")
                             .font(.system(size: 11 * devFontScale, design: .monospaced))
-                            .foregroundStyle(color(for: line))
-                        // `.textSelection` doesn't exist on tvOS (and copying a
-                        // log line off a TV is meaningless anyway).
-                        #if os(tvOS)
-                        text
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        #else
-                        text
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        #endif
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(visibleLines) { line in
+                        logRow(line)
                     }
                     Color.clear.frame(height: 1).id("console-bottom")
                 }
@@ -280,17 +406,84 @@ struct ConsolePane: View {
         }
     }
 
+    @ViewBuilder private func logRow(_ line: ConsoleLogStore.Line) -> some View {
+        let collapsible = isCollapsible(line)
+        let expanded = expandedLines.contains(line.id)
+        VStack(alignment: .leading, spacing: 2) {
+            let text = Text(attributedText(for: line))
+                .font(.system(size: 11 * devFontScale, design: .monospaced))
+                .fontWeight(line.isCritical ? .bold : .regular)
+                .lineLimit(collapsible && !expanded ? 2 : nil)
+            // `.textSelection` doesn't exist on tvOS (and copying a log line
+            // off a TV is meaningless anyway).
+            #if os(tvOS)
+            text.fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            #else
+            text.textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            #endif
+            if collapsible {
+                CursorButton { toggleExpanded(line.id) } label: {
+                    Text(expanded ? "▾ show less" : "▸ show more")
+                        .font(.system(size: 9 * devFontScale, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, line.isCritical ? 2 : 0)
+        .background(line.isCritical ? devConsoleRed.opacity(0.08) : .clear)
+    }
+
+    private func isCollapsible(_ line: ConsoleLogStore.Line) -> Bool {
+        line.text.count > Self.collapseThreshold || line.text.contains("\n")
+    }
+
+    private func toggleExpanded(_ id: UUID) {
+        if !expandedLines.insert(id).inserted { expandedLines.remove(id) }
+    }
+
+    /// Renders `line.segments`: plain runs in the severity/kind colour, and
+    /// `«ship:…»`/`«spob:…»` entity markers as underlined, tappable chips
+    /// (SwiftUI `Text` only supports inline tap targets via `.link` runs, so
+    /// clicking one fires `openURL` — see `DevEntityRef.linkURL`).
+    private func attributedText(for line: ConsoleLogStore.Line) -> AttributedString {
+        var result = AttributedString(line.kind.isError ? "! " : "")
+        result.foregroundColor = color(for: line)
+        for segment in line.segments {
+            switch segment {
+            case let .text(text):
+                var run = AttributedString(text)
+                run.foregroundColor = color(for: line)
+                result += run
+            case let .entity(ref):
+                var run = AttributedString("[\(ref.name.isEmpty ? "#\(ref.id)" : ref.name)]")
+                run.foregroundColor = devConsoleGreen
+                run.underlineStyle = .single
+                run.link = ref.linkURL
+                result += run
+            }
+        }
+        return result
+    }
+
     private func color(for line: ConsoleLogStore.Line) -> Color {
         switch line.kind {
-        case let .log(severity):
-            switch severity {
-            case .error, .fault: return devConsoleRed
-            case .debug: return .white.opacity(0.42)
-            case .info, .notice: return .white.opacity(0.78)
-            }
+        case let .log(severity): return severityColor(severity)
         case .commandEcho: return devConsoleGreen
         case .commandOutput: return .white
         case .commandError: return devConsoleRed
+        }
+    }
+
+    private func severityColor(_ severity: ConsoleLogStore.Line.Severity) -> Color {
+        switch severity {
+        case .fault: return devConsoleRed
+        case .error: return devConsoleOrange
+        case .notice: return devConsoleBlue
+        case .info: return .white.opacity(0.78)
+        case .debug: return .white.opacity(0.42)
         }
     }
 
@@ -311,6 +504,7 @@ struct ConsolePane: View {
                 .autocorrectionDisabled()
                 .onKeyPress(.upArrow) { walkHistory(-1); return .handled }
                 .onKeyPress(.downArrow) { walkHistory(1); return .handled }
+                .onKeyPress(.escape) { onClose(); return .handled }
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
@@ -363,6 +557,15 @@ struct ConsolePane: View {
 extension ConsoleLogStore.Line.Kind {
     var isError: Bool {
         if case .commandError = self { return true }
+        return false
+    }
+}
+
+extension ConsoleLogStore.Line {
+    /// Critical (`.fault`) log lines get a bolder, tinted row so the worst
+    /// severity reads as unmissable even in a fast-scrolling stream.
+    var isCritical: Bool {
+        if case .log(.fault) = kind { return true }
         return false
     }
 }

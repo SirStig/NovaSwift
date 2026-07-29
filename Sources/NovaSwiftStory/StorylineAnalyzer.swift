@@ -491,13 +491,17 @@ public final class StorylineAnalyzer {
 
     private func indexBitSources() {
         func add(_ expr: String, _ src: UnlockSource) {
-            for op in NCBSet.parse(expr) {
-                switch op {
-                case .setBit(let n): setters[n, default: []].append(src)
-                case .clearBit(let n): clearers[n, default: []].append(src)
-                case .toggleBit(let n):
-                    setters[n, default: []].append(src); clearers[n, default: []].append(src)
-                default: break
+            // `NCBSet.referencedBits` also reaches bits written inside `R( … )`.
+            // Folding the ops here by hand used to miss those, so a bit only
+            // ever set by a random op looked unreachable and the guide told the
+            // player nothing unlocked it — when in fact this mission does, just
+            // not every time.
+            for (bit, effect) in NCBSet.referencedBits(expr) {
+                switch effect {
+                case .set: setters[bit, default: []].append(src)
+                case .clear: clearers[bit, default: []].append(src)
+                case .toggle:
+                    setters[bit, default: []].append(src); clearers[bit, default: []].append(src)
                 }
             }
         }

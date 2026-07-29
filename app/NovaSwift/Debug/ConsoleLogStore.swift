@@ -21,6 +21,19 @@ final class ConsoleLogStore: ObservableObject {
         let date: Date
         let text: String
         let kind: Kind
+        /// `text` split into plain runs and `«ship:…»`/`«spob:…»` entity
+        /// markers (`DevLogLinking`), computed once here rather than per
+        /// render — the console pane renders this instead of raw `text` so a
+        /// tagged entity shows as a clickable chip.
+        let segments: [DevLogLinking.Segment]
+
+        init(id: UUID, date: Date, text: String, kind: Kind) {
+            self.id = id
+            self.date = date
+            self.text = text
+            self.kind = kind
+            self.segments = DevLogLinking.segments(in: text)
+        }
 
         enum Kind: Sendable {
             case log(Severity)
@@ -31,7 +44,22 @@ final class ConsoleLogStore: ObservableObject {
 
         /// Our own severity, rather than re-exporting `OSLogEntryLog.Level` —
         /// keeps the view layer off OSLog and the type trivially Sendable.
-        enum Severity: Sendable { case debug, info, notice, error, fault }
+        /// Named for the console's filter UI: OSLog's 5 native levels
+        /// (`debug`/`info`/`default`/`error`/`fault`) read most usefully to a
+        /// developer as Debug/Info/Notice/Warning/Critical.
+        enum Severity: CaseIterable, Hashable, Sendable {
+            case debug, info, notice, error, fault
+
+            var displayName: String {
+                switch self {
+                case .debug: return "Debug"
+                case .info: return "Info"
+                case .notice: return "Notice"
+                case .error: return "Warning"
+                case .fault: return "Critical"
+                }
+            }
+        }
     }
 
     @Published private(set) var lines: [Line] = []

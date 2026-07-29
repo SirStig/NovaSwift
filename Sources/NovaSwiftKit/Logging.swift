@@ -49,11 +49,13 @@ public struct LogMessage: ExpressibleByStringInterpolation, ExpressibleByStringL
 }
 
 /// Minimal stand-in for the subset of `os.Logger`'s API this module uses
-/// (`.debug`/`.notice`/`.error`). Prints to stderr.
+/// (`.debug`/`.info`/`.notice`/`.error`/`.fault`). Prints to stderr.
 public struct FallbackLogger {
     let category: String
     public func debug(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
+    public func info(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
     public func notice(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
     public func error(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
+    public func fault(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
 }
 #endif

@@ -79,6 +79,7 @@ extension World {
                 stellarDefenses[spobID] = nil
                 dominatedStellars.insert(spobID)
                 emit(.stellarDominated(spobID: spobID))
+                Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) dominated — defenses broken")
                 return .dominated
             }
             // Still contesting. Top up now so a re-demand at a thin moment doesn't
@@ -93,6 +94,7 @@ extension World {
         let required = tributeRatingRequired(for: spob)
         if required > 0, playerCombatRating < required {
             emit(.tributeRefused(spobID: spobID, reason: .combatRatingTooLow(required: required)))
+            Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) tribute refused — combat rating \(self.playerCombatRating) below required \(required)")
             return .refused(.combatRatingTooLow(required: required))
         }
 
@@ -108,7 +110,24 @@ extension World {
             emit(.stellarDefendersLaunched(spobID: spobID, count: n, remainingPool: defense.poolRemaining))
         }
         stellarDefenses[spobID] = defense
+        Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) tribute demand opened — \(n) defenders launched, pool \(defense.poolRemaining)")
         return .defending(launched: n)
+    }
+
+    /// Dev-tools shortcut: grants domination of `spobID` instantly, skipping the
+    /// defense-wave fight `demandTribute` normally requires. Drives the exact
+    /// same success outcome a real win reaches — inserts into `dominatedStellars`
+    /// and emits `.stellarDominated` — so tribute income, `PlayerState`
+    /// persistence, and UI all stay consistent with an actual conquest rather
+    /// than needing a separate "fake owned" flag. A no-op for an already-
+    /// dominated or unrecognized stellar.
+    public func debugForceDominate(spobID: Int) {
+        guard !dominatedStellars.contains(spobID),
+              let galaxy, galaxy.game.spob(spobID) != nil,
+              systemContext.bodies.contains(where: { $0.id == spobID }) else { return }
+        stellarDefenses[spobID] = nil
+        dominatedStellars.insert(spobID)
+        emit(.stellarDominated(spobID: spobID))
     }
 
     /// Number of a stellar's defense ships still up and fighting in the system —

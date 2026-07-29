@@ -2825,7 +2825,7 @@ public final class World {
                 events.append(.missionShipGoalReached(missionID: mid, entityID: ship.entityID,
                                                        goal: goal, byPlayer: ownerID == 0))
             }
-            Log.combat.debug("\(ship.name) [\(ship.entityID)] disabled (armor at/below \(Int(ship.disableArmorFraction * 100))% threshold) — now a drifting hulk")
+            Log.combat.notice("\(LogTag.ship(id: ship.entityID, name: ship.name)) disabled (armor at/below \(Int(ship.disableArmorFraction * 100))% threshold) — now a drifting hulk")
             if ownerID == 0, let dip = diplomacy {
                 dip.recordDisable(of: ship.government)
             }
@@ -2859,6 +2859,7 @@ public final class World {
                                          soundID: npc.explosionSoundID, boomID: npc.explosionBoomID))
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
                                              at: npc.position))
+                Log.combat.notice("\(LogTag.ship(id: npc.entityID, name: npc.name)) destroyed\(npc.killedByPlayer ? " by player" : "")")
                 // A destroyed mission ship meets a "destroy" (or "chase off",
                 // which a kill satisfies) objective. `disable`/`board`/`rescue`
                 // already fired when it was crippled; don't double-report those.
@@ -3451,6 +3452,7 @@ public final class World {
         let effective = min(75, max(1, chance + rng.int(in: -5...5)))
         guard roll < effective else { return nil }
         events.append(.shipCaptured(entityID: s.entityID, shipTypeID: s.shipTypeID, at: s.position))
+        Log.combat.notice("\(LogTag.ship(id: s.entityID, name: s.name)) captured (roll \(roll) < \(effective))")
         return (s.shipTypeID, personName(s) ?? s.name)
     }
 
@@ -3492,6 +3494,7 @@ public final class World {
         brain.formationSlot = playerEscorts.filter { $0.entityID != ship.entityID }.count
         ship.disabled = false
         ship.currentTargetID = nil
+        Log.combat.notice("\(LogTag.ship(id: ship.entityID, name: ship.name)) recruited as escort")
     }
 
     /// Lock a specific ship by id (click-to-select). Unlike

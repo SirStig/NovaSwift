@@ -945,10 +945,29 @@ struct GameContainerView: View {
                 if model.settings.debugModeEnabled {
                     debugControls
                     if console.isPresented {
-                        DevConsoleView(console: console, debug: debug) {
+                        DevConsoleView(console: console, debug: debug, onClose: {
                             console.isPresented = false
-                        }
+                        }, onSelectEntity: { ref in
+                            switch ref {
+                            case let .ship(id, _): console.submit("select ship \(id)")
+                            case let .spob(id, _): console.submit("select spob \(id)")
+                            }
+                        })
                         .zIndex(35)
+                    }
+                    // Right-click (macOS) / long-press (iOS/tvOS) context menu
+                    // on a ship/planet in the live scene — see
+                    // `GameScene.rightMouseDown`/`firePendingLongPress`.
+                    if let request = debug.contextMenuRequest {
+                        Color.black.opacity(0.001)
+                            .ignoresSafeArea()
+                            .onTapGesture { debug.contextMenuRequest = nil }
+                            .zIndex(38)
+                        DevContextMenu(ref: request.ref, console: console) {
+                            debug.contextMenuRequest = nil
+                        }
+                        .position(request.screenPoint)
+                        .zIndex(39)
                     }
                 }
 
@@ -3177,15 +3196,37 @@ struct GameContainerView: View {
             return "Government #\(govt) relation set to \(value)."
         })
 
-        console.register(.init(name: "bit", summary: "Set/clear/toggle a mission control bit.", usage: "bit <set|clear|toggle> <n>") { args in
+        console.register(.init(name: "bit", summary: "Set/clear/toggle a control bit, or explain one.",
+                               usage: "bit <set|clear|toggle|info> <n>") { args in
             guard args.count == 2, let n = Int(args[1]) else {
-                throw ConsoleController.CommandError(message: "Usage: bit <set|clear|toggle> <n>")
+                throw ConsoleController.CommandError(message: "Usage: bit <set|clear|toggle|info> <n>")
             }
             switch args[0].lowercased() {
             case "set": model.pilot.state.setBit(n)
             case "clear": model.pilot.state.clearBit(n)
             case "toggle": model.pilot.state.toggleBit(n)
-            default: throw ConsoleController.CommandError(message: "Expected set/clear/toggle, got '\(args[0])'")
+            case "info":
+                // Same cross-reference the Bits browser shows, as text. Reads
+                // whatever the browser already built; empty until then.
+                let refs = console.ncbIndex.references(for: n)
+                let state = model.pilot.state.setBits.contains(n) ? "SET" : "clear"
+                guard !refs.isEmpty else {
+                    return "Bit \(n) [\(state)] — no references in this data set."
+                }
+                let lines = refs.map { ref -> String in
+                    var role: String
+                    switch ref.role {
+                    case .set: role = "sets"
+                    case .clear: role = "clears"
+                    case .toggle: role = "toggles"
+                    case let .test(negated): role = negated ? "tests (needs clear)" : "tests (needs set)"
+                    }
+                    return "  \(role) — \(ref.kind) #\(ref.resourceID) \(ref.resourceName) · \(ref.field)"
+                }
+                return (["Bit \(n) [\(state)] — \(refs.count) reference(s):"] + lines)
+                    .joined(separator: "\n")
+            default:
+                throw ConsoleController.CommandError(message: "Expected set/clear/toggle/info, got '\(args[0])'")
             }
             model.pilot.save()
             return "Bit \(n): \(model.pilot.state.setBits.contains(n) ? "set" : "clear")"
@@ -3198,6 +3239,92 @@ struct GameContainerView: View {
             model.pilot.state.date = model.pilot.state.date.adding(days: days)
             model.pilot.save()
             return "Date: \(model.pilot.state.date.description)"
+        })
+
+        console.register(.init(name: "select", summary: "Select a live ship or stellar by id.",
+                               usage: "select <ship|spob> <id>") { args in
+            guard args.count == 2, let id = Int(args[1]) else {
+                throw ConsoleController.CommandError(message: "Usage: select <ship|spob> <id>")
+            }
+            guard let scene = debug.scene else { throw ConsoleController.CommandError(message: "No live scene.") }
+            switch args[0].lowercased() {
+            case "ship":
+                guard let ship = scene.npc(id: id) else { throw ConsoleController.CommandError(message: "No live ship #\(id).") }
+                scene.debugSelect(.ship(id: id, name: ship.name))
+                return "Selected ship #\(id) \(ship.name)."
+            case "spob":
+                let name = model.data.game?.spob(id)?.name ?? ""
+                scene.debugSelect(.spob(id: id, name: name))
+                return "Selected stellar #\(id)\(name.isEmpty ? "" : " \(name)")."
+            default:
+                throw ConsoleController.CommandError(message: "Expected ship/spob, got '\(args[0])'")
+            }
+        })
+
+        /// Every entity-action command below (`destroy`/`disable`/`capture`/`conquer`)
+        /// takes a bare ship entityID, or the literal `selected` to act on
+        /// whatever's currently targeted (`debug.selection`) — which is what a
+        /// right-click/long-press or the Selected card in Tools already set.
+        func resolveShipID(_ args: [String]) throws -> Int {
+            if let raw = args.first, raw.lowercased() != "selected", let id = Int(raw) { return id }
+            if case let .ship(id, _)? = debug.selection { return id }
+            throw ConsoleController.CommandError(message: "No ship selected — pass an id or select one first.")
+        }
+        func resolveSpobID(_ args: [String]) throws -> Int {
+            if let raw = args.first, raw.lowercased() != "selected", let id = Int(raw) { return id }
+            if case let .spob(id, _)? = debug.selection { return id }
+            throw ConsoleController.CommandError(message: "No stellar selected — pass an id or select one first.")
+        }
+
+        console.register(.init(name: "destroy", summary: "Dev-tools kill a ship.", usage: "destroy <id|selected>") { args in
+            let id = try resolveShipID(args)
+            guard debug.scene?.debugDestroyShip(entityID: id) == true else {
+                throw ConsoleController.CommandError(message: "No live ship #\(id).")
+            }
+            return "Destroyed ship #\(id)."
+        })
+
+        console.register(.init(name: "disable", summary: "Dev-tools disable a ship.", usage: "disable <id|selected>") { args in
+            let id = try resolveShipID(args)
+            guard debug.scene?.debugDisableShip(entityID: id) == true else {
+                throw ConsoleController.CommandError(message: "No live ship #\(id).")
+            }
+            return "Disabled ship #\(id)."
+        })
+
+        console.register(.init(name: "capture", summary: "Dev-tools cheat-capture a ship as an escort.",
+                               usage: "capture <id|selected>") { args in
+            let id = try resolveShipID(args)
+            guard let cap = debug.scene?.debugCaptureShip(entityID: id) else {
+                throw ConsoleController.CommandError(message: "No live ship #\(id).")
+            }
+            recruitCapturedShipAsEscort(cap)
+            return "Captured \(cap.name.isEmpty ? "ship #\(id)" : cap.name) as an escort."
+        })
+
+        console.register(.init(name: "conquer", summary: "Dev-tools instantly dominate a stellar (skips the defense fight).",
+                               usage: "conquer <id|selected>") { args in
+            let id = try resolveSpobID(args)
+            guard let scene = debug.scene else { throw ConsoleController.CommandError(message: "No live scene.") }
+            let name = model.data.game?.spob(id)?.name ?? "#\(id)"
+            guard scene.debugConquerStellar(spobID: id) else {
+                return "\(name) is already dominated, or isn't a stellar in this system."
+            }
+            return "\(name) dominated."
+        })
+
+        console.register(.init(name: "cycle", summary: "Cycle the ship/planet selection.",
+                               usage: "cycle <ships|planets> [next|prev]") { args in
+            guard let kind = args.first else { throw ConsoleController.CommandError(message: "Usage: cycle <ships|planets> [next|prev]") }
+            let reverse = args.dropFirst().first?.lowercased() == "prev"
+            guard let scene = debug.scene else { throw ConsoleController.CommandError(message: "No live scene.") }
+            switch kind.lowercased() {
+            case "ships": scene.cycleTarget(reverse: reverse)
+            case "planets": scene.cyclePlanet(reverse: reverse)
+            default: throw ConsoleController.CommandError(message: "Expected ships/planets, got '\(kind)'")
+            }
+            guard let ref = debug.selection else { return "Nothing in range to select." }
+            return "Selected \(ref.name.isEmpty ? "#\(ref.id)" : ref.name)."
         })
     }
 

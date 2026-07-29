@@ -177,8 +177,8 @@ struct DevGovtBrowser: View {
 
 // MARK: - Shared browser chrome
 
-/// Search field + result count + scrolling list, shared by all three browsers.
-private struct DevBrowserFrame<Content: View>: View {
+/// Search field + result count + scrolling list, shared by every browser.
+struct DevBrowserFrame<Content: View>: View {
     @Binding var query: String
     let placeholder: String
     let count: Int
@@ -328,7 +328,7 @@ private struct DevBrowserRow<Actions: View>: View {
 
 /// A browser action button. Shows a friendly label but submits the command,
 /// so the log records `> spawn hostile 158` exactly as if typed.
-private struct DevActionChip: View {
+struct DevActionChip: View {
     let title: String
     let command: String
     let console: ConsoleController

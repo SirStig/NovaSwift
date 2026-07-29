@@ -100,6 +100,21 @@ final class DebugController: ObservableObject {
     /// the scene's lifetime through `GameHost`, and swaps it on every rebuild.
     weak var scene: GameScene?
 
+    // MARK: Dev context menu
+
+    /// A right-click (macOS) or long-press (iOS/tvOS) on a ship/planet in the
+    /// live scene, requesting the Destroy/Disable/Capture/Conquer menu at
+    /// `screenPoint` (view-space, from `SKScene.convertPoint(toView:)`).
+    /// `GameScene` sets this; `GameContainerView` observes it to render the
+    /// menu and clears it once an action (or a dismiss) is taken.
+    @Published var contextMenuRequest: (ref: DevEntityRef, screenPoint: CGPoint)?
+
+    /// The live ship/planet selection, mirrored from `GameScene.selectShip`/
+    /// `selectPlanet`/`clearTarget` — lets `DevToolsPane`'s "Selected" card
+    /// show and act on whatever's currently targeted without polling the
+    /// scene every frame.
+    @Published var selection: DevEntityRef?
+
     /// Point the controls at a freshly-built scene. Called by the container
     /// after each `GameHost` (re)build. A new scene means a new, empty world,
     /// so any prior stress test is implicitly over.

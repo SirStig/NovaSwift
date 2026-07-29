@@ -108,4 +108,23 @@ final class NCBTests: XCTestCase {
         // Unknown tokens are dropped, valid ones kept.
         XCTAssertEqual(NCBSet.parse("b1 ??? b2"), [.setBit(1), .setBit(2)])
     }
+
+    func testReferencedBitsReportsEachEffect() {
+        let bits = NCBSet.referencedBits("b1 !b2 ^b3 G152")
+        XCTAssertEqual(bits.map(\.bit), [1, 2, 3])          // G152 contributes no bit
+        XCTAssertEqual(bits.map(\.effect), [.set, .clear, .toggle])
+    }
+
+    /// A bit written only inside `R( … )` must still be reported: it's reachable,
+    /// just not every time. Missing this made such bits look unreachable to
+    /// anything building a "what changes this bit" index.
+    func testReferencedBitsReachesInsideRandom() {
+        let bits = NCBSet.referencedBits("R(b800 !b900)")
+        XCTAssertEqual(bits.map(\.bit), [800, 900])
+        XCTAssertEqual(bits.map(\.effect), [.set, .clear])
+    }
+
+    func testReferencedBitsIgnoresNonBitOps() {
+        XCTAssertTrue(NCBSet.referencedBits("S781 G152 K128 Q25059").isEmpty)
+    }
 }

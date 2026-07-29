@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftKit
 
 /// Command registry and parser for the in-game **command console**. Owns the
 /// log tail (`ConsoleLogStore`) and whether the console is on screen; game-
@@ -35,6 +36,32 @@ final class ConsoleController: ObservableObject {
     /// Every line submitted this session, oldest first — a `history` command
     /// reads it back; nothing else consumes it today.
     @Published private(set) var submittedHistory: [String] = []
+
+    /// The control-bit cross-reference, cached here rather than in the browser
+    /// view: the view is torn down and rebuilt every time you switch tabs, so
+    /// view-owned state would re-walk the entire data set on each visit.
+    /// Shared with the `bit info` command, which needs it without any view.
+    @Published private(set) var ncbIndex = NCBIndex.empty
+    /// The data set `ncbIndex` was built from, so an import/plug-in change
+    /// rebuilds it and nothing else does.
+    private var ncbStamp: UUID?
+
+    /// Builds the NCB index once per data set. Safe to call repeatedly.
+    func buildNCBIndexIfNeeded(game: NovaGame?, stamp: UUID) async {
+        guard ncbStamp != stamp else { return }
+        guard let game else {
+            ncbIndex = .empty
+            ncbStamp = stamp
+            return
+        }
+        let built = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: NCBIndex.build(from: game))
+            }
+        }
+        ncbIndex = built
+        ncbStamp = stamp
+    }
 
     init() {
         registerBuiltins()

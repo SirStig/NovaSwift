@@ -19,6 +19,7 @@ struct DevToolsPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                selectedSection
                 performanceSection
                 cheatsSection
                 worldSection
@@ -40,6 +41,57 @@ struct DevToolsPane: View {
         .sheet(isPresented: $showTests) {
             DebugTestsView()
                 .environmentObject(model)
+        }
+    }
+
+    // MARK: Selected entity
+    //
+    // The same Destroy/Disable/Capture/Conquer actions the right-click
+    // (macOS) / long-press (iOS/tvOS) context menu offers on a ship/planet in
+    // the live scene (`DevContextMenu` below), surfaced here too — necessary
+    // on tvOS (no right-click/long-press path today) and generally the
+    // fastest way to act once something is already targeted. `debug.selection`
+    // mirrors whatever `GameScene.selectShip`/`selectPlanet` last set.
+
+    private var selectedSection: some View {
+        section("SELECTED", "scope") {
+            if let ref = debug.selection {
+                HStack(spacing: 8) {
+                    Image(systemName: ref.systemImage).font(.system(size: 11 * devFontScale))
+                    Text(ref.name.isEmpty ? "#\(ref.id)" : ref.name)
+                        .font(.system(size: 12 * devFontScale, weight: .semibold, design: .monospaced))
+                        .lineLimit(1)
+                    Spacer()
+                    Text("#\(ref.id)")
+                        .font(.system(size: 9 * devFontScale, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(devConsoleGreen)
+                HStack(spacing: 6) { entityActionChips(for: ref) }
+            } else {
+                Text("Nothing selected. Click a ship/planet, or cycle below.")
+                    .font(.system(size: 9 * devFontScale, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 6) {
+                Text("Ships").font(.system(size: 9 * devFontScale, design: .monospaced)).foregroundStyle(.secondary)
+                commandChip("◂", "cycle ships prev")
+                commandChip("▸", "cycle ships next")
+                Text("Planets").font(.system(size: 9 * devFontScale, design: .monospaced)).foregroundStyle(.secondary)
+                commandChip("◂", "cycle planets prev")
+                commandChip("▸", "cycle planets next")
+            }
+        }
+    }
+
+    @ViewBuilder private func entityActionChips(for ref: DevEntityRef) -> some View {
+        switch ref {
+        case .ship:
+            commandChip("Disable", "disable \(ref.id)")
+            commandChip("Capture", "capture \(ref.id)")
+            commandChip("Destroy", "destroy \(ref.id)", destructive: true)
+        case .spob:
+            commandChip("Conquer", "conquer \(ref.id)")
         }
     }
 
@@ -335,6 +387,60 @@ struct DebugMetricsChip: View {
         case 55...: return devConsoleGreen
         case 30..<55: return Color(red: 1.0, green: 0.75, blue: 0.3)
         default: return devConsoleRed
+        }
+    }
+}
+
+/// The floating Destroy/Disable/Capture/Conquer menu a right-click (macOS) or
+/// long-press (iOS/tvOS) on a ship/planet opens — `GameContainerView` shows
+/// this at `DebugController.contextMenuRequest.screenPoint` when debug mode
+/// is on. Every action submits a console command, same as everything else in
+/// the dev console, so it's logged and there's exactly one execution path.
+struct DevContextMenu: View {
+    let ref: DevEntityRef
+    @ObservedObject var console: ConsoleController
+    var onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: ref.systemImage).font(.system(size: 10 * devFontScale))
+                Text(ref.name.isEmpty ? "#\(ref.id)" : ref.name)
+                    .font(.system(size: 11 * devFontScale, weight: .bold, design: .monospaced))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(devConsoleGreen)
+            VStack(alignment: .leading, spacing: 5) {
+                switch ref {
+                case .ship:
+                    menuButton("Select", "select ship \(ref.id)")
+                    menuButton("Disable", "disable \(ref.id)")
+                    menuButton("Capture", "capture \(ref.id)")
+                    menuButton("Destroy", "destroy \(ref.id)", destructive: true)
+                case .spob:
+                    menuButton("Select", "select spob \(ref.id)")
+                    menuButton("Conquer", "conquer \(ref.id)")
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: 150)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.95)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(devConsoleGreen.opacity(0.5)))
+        .shadow(color: .black.opacity(0.5), radius: 12)
+    }
+
+    private func menuButton(_ title: String, _ command: String, destructive: Bool = false) -> some View {
+        let tint = destructive ? devConsoleRed : Color.white
+        return CursorButton {
+            console.submit(command)
+            onDismiss()
+        } label: {
+            Text(title)
+                .font(.system(size: 11 * devFontScale, weight: .medium, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(tint)
+                .contentShape(Rectangle())
         }
     }
 }

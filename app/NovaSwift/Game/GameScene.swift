@@ -641,6 +641,15 @@ final class GameScene: SKScene {
     // debug mode is on.
     weak var debug: DebugController?
     private var systemID = 0
+    // Long-press-to-context-menu (iOS/tvOS — macOS gets a real `rightMouseDown`
+    // below). Selection itself is deferred from `touchesBegan` to
+    // `touchesEnded` so a hold long enough to fire `pressTimer` first can open
+    // the dev context menu instead of also selecting; a normal short tap still
+    // selects, just on release rather than touch-down.
+    private var pendingSelectPoint: CGPoint?
+    private var pressTimer: Timer?
+    private static let longPressDuration: TimeInterval = 0.45
+    private static let longPressMoveTolerance: CGFloat = 12
     // Frame-timing accumulators for the performance readout, flushed to `debug`
     // on `perfReportClock`. `perfRawAccum`/`perfFrames` build the windowed
     // average; `perfWorstFrame` tracks the window's worst single frame (the one
@@ -895,6 +904,16 @@ final class GameScene: SKScene {
         selectAt(scenePoint: p)
     }
 
+    /// Dev-tools right-click: hit-tests the same way `selectAt` does but
+    /// read-only (`entity(at:)`), and — only in debug mode — asks the app to
+    /// show the Destroy/Disable/Capture/Conquer context menu at the click.
+    override func rightMouseDown(with event: NSEvent) {
+        guard debug != nil else { return }
+        let p = event.location(in: self)
+        guard let ref = entity(at: p) else { return }
+        debug?.contextMenuRequest = (ref, convertPoint(toView: p))
+    }
+
     override func mouseMoved(with event: NSEvent) { updateMouseAim(event) }
     override func mouseDragged(with event: NSEvent) { updateMouseAim(event) }
 
@@ -920,21 +939,57 @@ final class GameScene: SKScene {
         } else {
             let p = t.location(in: self)
             Log.input.debug("touchesBegan -> scenePoint=(\(p.x, privacy: .public),\(p.y, privacy: .public))")
-            selectAt(scenePoint: p)
+            // Selection itself waits for release (see `pendingSelectPoint`
+            // doc comment) so a hold long enough opens the dev context menu
+            // instead.
+            pendingSelectPoint = p
+            pressTimer?.invalidate()
+            pressTimer = Timer.scheduledTimer(withTimeInterval: Self.longPressDuration, repeats: false) { [weak self] _ in
+                self?.firePendingLongPress()
+            }
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard tapToFlyEnabled, let t = touches.first else { return }
-        steerViewOffset = viewOffset(of: t)
+        guard let t = touches.first else { return }
+        if tapToFlyEnabled {
+            steerViewOffset = viewOffset(of: t)
+        } else if let start = pendingSelectPoint {
+            let p = t.location(in: self)
+            if hypot(p.x - start.x, p.y - start.y) > Self.longPressMoveTolerance {
+                cancelPendingLongPress()
+            }
+        }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         steerViewOffset = nil   // stop steering; the last heading is held
+        if let p = pendingSelectPoint {
+            cancelPendingLongPress()
+            selectAt(scenePoint: p)
+        }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         steerViewOffset = nil
+        cancelPendingLongPress()
+    }
+
+    /// Dev-tools long-press: only fires — in debug mode, and only if the
+    /// touch never moved past `longPressMoveTolerance` or released early —
+    /// the same context menu `rightMouseDown` opens on macOS.
+    private func firePendingLongPress() {
+        pressTimer = nil
+        guard let p = pendingSelectPoint else { return }
+        pendingSelectPoint = nil
+        guard debug != nil, let ref = entity(at: p) else { return }
+        debug?.contextMenuRequest = (ref, convertPoint(toView: p))
+    }
+
+    private func cancelPendingLongPress() {
+        pressTimer?.invalidate()
+        pressTimer = nil
+        pendingSelectPoint = nil
     }
 
     /// A touch's offset from the presenting view's centre (which the follow
@@ -1731,6 +1786,7 @@ final class GameScene: SKScene {
     private func selectShip(_ id: Int) {
         let locked = world.selectTarget(id: id)
         selectedPlanetID = nil
+        debug?.selection = locked.map { .ship(id: $0.entityID, name: $0.name) }
         Log.input.debug("selectShip(\(id, privacy: .public)) -> selectTarget returned \(locked?.entityID.description ?? "nil", privacy: .public), player.currentTargetID now \(self.world.player.currentTargetID?.description ?? "nil", privacy: .public)")
     }
 
@@ -1739,6 +1795,7 @@ final class GameScene: SKScene {
     private func selectPlanet(_ id: Int) {
         selectedPlanetID = id
         world.clearPlayerTarget()
+        debug?.selection = .spob(id: id, name: planetVisuals.first { $0.id == id }?.name ?? "")
     }
 
     /// Select the nearest landable body if nothing is currently selected — what
@@ -1804,12 +1861,15 @@ final class GameScene: SKScene {
         return (others.sorted(by: byDistance) + escorts.sorted(by: byDistance)).map(\.id)
     }
 
-    /// Cycle the ship target forward through the in-range ships, wrapping around.
-    func cycleTarget() {
+    /// Cycle the ship target through the in-range ships, wrapping around.
+    /// `reverse` walks backward — used by the dev console's `cycle ships prev`.
+    func cycleTarget(reverse: Bool = false) {
         let candidates = cycleCandidates()
         guard !candidates.isEmpty else { return }
         let currentIdx = candidates.firstIndex { $0 == world.player.currentTargetID }
-        selectShip(candidates[(currentIdx.map { $0 + 1 } ?? 0) % candidates.count])
+        let step = reverse ? -1 : 1
+        let next = ((currentIdx.map { $0 + step } ?? 0) % candidates.count + candidates.count) % candidates.count
+        selectShip(candidates[next])
     }
 
     /// Drop the current selection entirely, ship or planet — after this,
@@ -1817,6 +1877,7 @@ final class GameScene: SKScene {
     func clearTarget() {
         world.clearPlayerTarget()
         selectedPlanetID = nil
+        debug?.selection = nil
     }
 
     /// Step the selected secondary weapon (the one the secondary trigger fires),
@@ -2082,6 +2143,48 @@ final class GameScene: SKScene {
     /// leaving it drifting forever. A no-op if it was captured (no longer a
     /// disabled hulk) or is gone already.
     func finishBoardingWithoutCapture(_ id: Int) { world?.finishBoardingWithoutCapture(shipID: id) }
+
+    /// Read-only hit test in scene space, same tolerances as `selectAt`
+    /// below: nearest ship first, then nearest planet. Deliberately a
+    /// separate, side-effect-free pass rather than a refactor of `selectAt`
+    /// itself — `selectAt` also drives gate-click and target-clearing
+    /// behaviour that a right-click/long-press must *not* trigger, so keeping
+    /// them as two small independent hit tests is safer than threading a
+    /// "don't act on this" flag through the tap-select path.
+    func entity(at scenePoint: CGPoint) -> DevEntityRef? {
+        let p = Vec2(Double(scenePoint.x), Double(scenePoint.y))
+        let hitTolerance = 24.0
+        if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + hitTolerance })
+            .min(by: { ($0.position - p).length < ($1.position - p).length }) {
+            return .ship(id: ship.entityID, name: ship.name)
+        }
+        if let planet = planetVisuals.filter({ pv in
+            let dx = Double(pv.position.x) - p.x, dy = Double(pv.position.y) - p.y
+            return (dx * dx + dy * dy).squareRoot() <= Double(pv.radius) + 15
+        }).min(by: { a, b in
+            let da = Double(a.position.x) - p.x, db = Double(a.position.y) - p.y
+            let ea = Double(b.position.x) - p.x, eb = Double(b.position.y) - p.y
+            return (da * da + db * db) < (ea * ea + eb * eb)
+        }) {
+            return .spob(id: planet.id, name: planet.name)
+        }
+        return nil
+    }
+
+    /// Look up a live NPC by id — used by the dev console/context-menu
+    /// bridge methods below, which only have an id (from a right-click, a
+    /// clicked log chip, or a typed command) to work from.
+    func npc(id: Int) -> Ship? { world?.npcs.first { $0.entityID == id } }
+
+    /// Select `ref` from a source outside normal tap/click input — a clicked
+    /// entity chip in the console log, or a `cycle` command — via the same
+    /// `selectShip`/`selectPlanet` on-screen tap-to-select uses.
+    func debugSelect(_ ref: DevEntityRef) {
+        switch ref {
+        case let .ship(id, _): selectShip(id)
+        case let .spob(id, _): selectPlanet(id)
+        }
+    }
 
     /// Click/tap hit-test in scene space (== world space here): nearest ship
     /// first, then nearest planet; clears the selection if nothing was hit.
@@ -5008,6 +5111,66 @@ final class GameScene: SKScene {
         let n = world.npcs.count
         world.removeAllNPCs()
         return n
+    }
+
+    /// Dev-tools kill: the same "zero armor/shield, let the despawn sweep
+    /// clean it up" path `debugDestroyAllHostiles` already uses, so the hull
+    /// explodes normally rather than warping out gracefully like
+    /// `World.removeShip` does.
+    @discardableResult
+    func debugDestroyShip(entityID: Int) -> Bool {
+        guard let s = npc(id: entityID), s.isAlive else { return false }
+        s.shield = 0
+        s.armor = 0
+        Log.scene.notice("debugDestroyShip: killed \(LogTag.ship(id: entityID, name: s.name), privacy: .public)")
+        return true
+    }
+
+    /// Dev-tools disable: sets the real `Ship.disabled` flag directly —
+    /// combat normally reaches this by dropping a hull below its disable
+    /// armor threshold.
+    @discardableResult
+    func debugDisableShip(entityID: Int) -> Bool {
+        guard let s = npc(id: entityID), s.isAlive else { return false }
+        s.disabled = true
+        Log.scene.notice("debugDisableShip: disabled \(LogTag.ship(id: entityID, name: s.name), privacy: .public)")
+        return true
+    }
+
+    /// Dev-tools cheat capture: validates the target exists (no capture-chance
+    /// roll, no `disabled` requirement — this is a cheat) and hands back the
+    /// same tuple shape the real `attemptCapture` does, so the caller can
+    /// commit it through the existing `recruitCapturedShipAsEscort`
+    /// (`GameContainerView`) rather than duplicating that registration logic.
+    func debugCaptureShip(entityID: Int) -> (entityID: Int, shipType: Int, name: String)? {
+        guard let s = npc(id: entityID), s.isAlive else { return nil }
+        return (entityID, s.shipTypeID, s.name)
+    }
+
+    /// Dev-tools conquer: skip the domination defense-wave fight and grant
+    /// `spobID` outright — see `World.debugForceDominate(spobID:)`.
+    @discardableResult
+    func debugConquerStellar(spobID: Int) -> Bool {
+        guard let world, let spob = galaxy?.game.spob(spobID) else { return false }
+        let already = world.dominatedStellars.contains(spobID)
+        world.debugForceDominate(spobID: spobID)
+        guard !already else { return false }
+        Log.scene.notice("debugConquerStellar: dominated \(LogTag.spob(id: spobID, name: spob.name), privacy: .public)")
+        return true
+    }
+
+    /// Cycle the planet/station selection through every stellar in the
+    /// current system, wrapping around — the planet-side counterpart to
+    /// `cycleTarget()` (ships aren't selected by clicking in EV Nova, so
+    /// there's no planet equivalent to reuse there). `reverse` walks
+    /// backward — used by the dev console's `cycle planets prev`.
+    func cyclePlanet(reverse: Bool = false) {
+        guard !planetVisuals.isEmpty else { return }
+        let ids = planetVisuals.map(\.id)
+        let currentIdx = selectedPlanetID.flatMap { id in ids.firstIndex(of: id) }
+        let step = reverse ? -1 : 1
+        let next = ((currentIdx.map { $0 + step } ?? 0) % ids.count + ids.count) % ids.count
+        selectPlanet(ids[next])
     }
 
     /// Whether an NPC currently counts as hostile to the player — provoked, or an

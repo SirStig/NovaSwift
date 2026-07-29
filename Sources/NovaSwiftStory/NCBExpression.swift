@@ -222,6 +222,9 @@ public enum NCBSetOp: Equatable, Sendable {
     case random([NCBSetOp])
 }
 
+/// How a SET expression writes a control bit.
+public enum NCBBitEffect: Equatable, Sendable { case set, clear, toggle }
+
 /// Which outfits carry over when a SET expression swaps the player's ship.
 public enum ChangeShipMode: Equatable, Sendable {
     case keepOutfits       // C
@@ -243,6 +246,32 @@ public enum NCBSet {
             if let op = parseToken(token) { ops.append(op) }
         }
         return ops
+    }
+
+    /// Every control bit this SET expression can write, and how — the SET-side
+    /// counterpart of `NCBTest.referencedBits`, for building "what changes this
+    /// bit" indexes.
+    ///
+    /// Recurses into `R( … )`. A random op only fires half the time, but it
+    /// still *can* write the bit, so anything asking "what could turn this on"
+    /// has to count it: dropping it makes a bit that's only ever set inside a
+    /// random choice look like nothing sets it at all.
+    public static func referencedBits(_ text: String) -> [(bit: Int, effect: NCBBitEffect)] {
+        bitEffects(in: parse(text))
+    }
+
+    private static func bitEffects(in ops: [NCBSetOp]) -> [(bit: Int, effect: NCBBitEffect)] {
+        var out: [(bit: Int, effect: NCBBitEffect)] = []
+        for op in ops {
+            switch op {
+            case let .setBit(n): out.append((n, .set))
+            case let .clearBit(n): out.append((n, .clear))
+            case let .toggleBit(n): out.append((n, .toggle))
+            case let .random(inner): out.append(contentsOf: bitEffects(in: inner))
+            default: break
+            }
+        }
+        return out
     }
 
     /// Split on whitespace, but keep `R( … )` (which contains spaces) together.

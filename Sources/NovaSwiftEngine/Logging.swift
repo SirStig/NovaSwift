@@ -26,6 +26,15 @@ public enum Log {
 #endif
 }
 
+/// Embeds a reference to a live ship/stellar in a log message so the dev
+/// console can render it as a clickable chip (`DevLogLinking` in the app
+/// target parses this exact marker back out). Purely additive text — a call
+/// site that never uses this looks and behaves exactly as before.
+public enum LogTag {
+    public static func ship(id: Int, name: String) -> String { "«ship:\(id):\(name)»" }
+    public static func spob(id: Int, name: String) -> String { "«spob:\(id):\(name)»" }
+}
+
 #if !canImport(os)
 /// A string-interpolation type shaped like `os.Logger`'s `OSLogMessage` just
 /// enough that call sites written as `"...\(value, privacy: .public)"` — the
@@ -49,11 +58,13 @@ public struct LogMessage: ExpressibleByStringInterpolation, ExpressibleByStringL
 }
 
 /// Minimal stand-in for the subset of `os.Logger`'s API this module uses
-/// (`.debug`/`.notice`/`.error`). Prints to stderr.
+/// (`.debug`/`.info`/`.notice`/`.error`/`.fault`). Prints to stderr.
 public struct FallbackLogger {
     let category: String
     public func debug(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
+    public func info(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
     public func notice(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
     public func error(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
+    public func fault(_ message: LogMessage) { FileHandle.standardError.write("[\(category)] \(message)\n".data(using: .utf8)!) }
 }
 #endif
