@@ -45,11 +45,37 @@ public struct StellarBody {
     /// contest / attacked its government) instead of opening up on any enemy
     /// of its government that strays into range.
     public let firesOnlyWhenProvoked: Bool
+    /// `spöb.Strength` (@572): how much combined weapon damage this stellar
+    /// absorbs before it is destroyed. `0` (the stock value for every base-game
+    /// body) means invulnerable — no amount of fire touches it. A positive value
+    /// makes the stellar a real, shootable target; see `World.updateStellarDamage`.
+    public let strength: Double
+    /// `spöb.Explosion` (@580), resolved to a `bööm` id — the detonation played
+    /// when this stellar is destroyed. Nil = no explosion sprite.
+    public let explosionBoomID: Int?
+    /// `spöb.Explosion` in the `1000...1063` band: scatter extra sparks around
+    /// the main detonation.
+    public let explosionHasSparks: Bool
+    /// `spöb.Regenerate Time` (@578, the Bible's `DeadTime`) in **days**, or nil
+    /// for "never regenerates" (the TMPL's -1). Consumed by the day clock, not
+    /// the flight sim.
+    public let regenerationDays: Int?
+    /// `spöb.Gravity` (@568): positive pulls passing ships in, negative pushes
+    /// them away, 0 (every base-game body) is inert. See `World.applyStellarGravity`.
+    public let gravity: Int
+    /// Whether this stellar can be destroyed by weapon fire at all.
+    public var isDestroyable: Bool { strength > 0 }
 
     public init(id: Int, position: Vec2, radius: Double, canLand: Bool, isLandable: Bool? = nil,
                 government: Int = independentGovt, isHypergate: Bool = false,
                 isWormhole: Bool = false, isDeadly: Bool = false, gateEmergeAngle: Double? = nil,
-                defenseWeapon: WeaponSpec? = nil, firesOnlyWhenProvoked: Bool = false) {
+                defenseWeapon: WeaponSpec? = nil, firesOnlyWhenProvoked: Bool = false,
+                strength: Double = 0, explosionBoomID: Int? = nil,
+                explosionHasSparks: Bool = false, regenerationDays: Int? = nil,
+                gravity: Int = 0) {
+        self.gravity = gravity
+        self.strength = strength; self.explosionBoomID = explosionBoomID
+        self.explosionHasSparks = explosionHasSparks; self.regenerationDays = regenerationDays
         self.id = id; self.position = position; self.radius = radius; self.canLand = canLand
         // Defaults to `canLand` when the caller doesn't distinguish the two
         // (test fixtures, ad-hoc bodies) — `canLand` already implies landable.
@@ -351,7 +377,12 @@ public final class Galaxy {
                 isDeadly: s.isDeadly,
                 gateEmergeAngle: s.gateEmergeAngle.map { $0 * .pi / 180 },
                 defenseWeapon: s.defenseWeaponID.flatMap { weaponSpec($0) },
-                firesOnlyWhenProvoked: s.firesWeaponOnlyWhenProvoked))
+                firesOnlyWhenProvoked: s.firesWeaponOnlyWhenProvoked,
+                strength: Double(max(0, s.strength)),
+                explosionBoomID: s.explosionBoomID,
+                explosionHasSparks: s.explosionHasSparks,
+                regenerationDays: s.regenerationDays,
+                gravity: s.gravity))
         }
         // The system's actual centre of mass — not the world origin, which a
         // system's stellar objects don't necessarily cluster around. Everything

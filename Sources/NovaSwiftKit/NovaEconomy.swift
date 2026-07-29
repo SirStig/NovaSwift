@@ -206,10 +206,18 @@ extension NovaGame {
 
     /// A `spöb`'s extra "special tech" levels. These unlock outfits/ships whose
     /// tech level matches exactly, on top of the base tech gate. Read straight
-    /// from the raw resource (@14/16/18) since `SpobRes` doesn't surface them.
+    /// from the raw resource since `SpobRes` doesn't surface them.
+    ///
+    /// The Bible says "SpecialTech (x8)", and ResForge's `spöb` TMPL #520 shows
+    /// where all eight live: the first three sit inline at @14/@16/@18, and the
+    /// remaining five were appended to the tail of the record at
+    /// @1092/@1094/@1096/@1098/@1100. Reading only the first three (as this did
+    /// originally) silently drops five slots per planet, so any outfit or hull
+    /// stocked via one of the tail techs was invisible in that shop.
     public func spobSpecialTech(_ spobID: Int) -> [Int] {
         guard let d = resources.resource(NovaType.spob, spobID)?.data else { return [] }
-        return [14, 16, 18].map { be16(d, $0) }.filter { $0 > 0 }
+        let offsets = [14, 16, 18, 1092, 1094, 1096, 1098, 1100]
+        return offsets.filter { $0 + 2 <= d.count }.map { be16(d, $0) }.filter { $0 > 0 }
     }
 
     /// Whether an item with `techLevel` is offered at `spob`: either the planet's

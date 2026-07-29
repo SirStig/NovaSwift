@@ -21,6 +21,7 @@ number, that's stated explicitly as an open question rather than invented.
 | [OUTFITTERS.md](OUTFITTERS.md) | `oütf` | Slots/mass, availability gating, pricing, ammo linkage, `BuyRandom` stocking |
 | [EVENTS.md](EVENTS.md) | `crön` | Background timed/triggered events, the activation/hold/start/end lifecycle, galaxy-news |
 | [ESCORTS.md](ESCORTS.md) | `përs`, `shïp` | Named NPCs, the real hire/requisition/capture escort system (it lives in `shïp`, not `përs`) |
+| [UNDECODED.md](UNDECODED.md) | *all* | **The remaining gap.** Every Bible field and flag bit we still don't decode, every decoded field nothing reads, and the places we deviate from the original on purpose — plus the repeatable audit method |
 
 Not covered here (already owned elsewhere): AI dispositions/combat behavior
 → [`../AI_GROUND_TRUTH.md`](../AI_GROUND_TRUTH.md); mission/NCB scripting,

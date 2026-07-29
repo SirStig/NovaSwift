@@ -791,6 +791,32 @@ public struct WeapRes {
     /// default applies instead of flashing the hull black. Offset verified
     /// against novaparse `WeapResource.ts` (`ionizeColor = getColor32(114)`).
     public let ionizeColor: NovaColor?
+    /// `SmokeSet` (@32): "Which cicn set to use for this weapon's smoke trail,
+    /// if any. 0 = cicn's 1000-1007, 1 = 1008-1015, etc." (Bible). `-1` = none,
+    /// which is what every stock base-game weapon carries — the smoke *flags*
+    /// (`generatesSmallSmoke`/`generatesBigSmoke`) then draw the engine's own
+    /// default puff. Offset derived from the Bible's field order — `Seeker`@30 is
+    /// two bytes and `Decay`@34 is already offset-verified, leaving exactly this
+    /// one word between them.
+    public let smokeSet: Int
+    /// `JamVuln1-4` (@94/@96/@98/@100): "The weapon's vulnerability to the four
+    /// different types of jamming, from 0 to 100%. Ignored if the weapon is not
+    /// a guided weapon" (Bible). Always four entries, clamped to 0...100.
+    ///
+    /// Offsets verified empirically against real base-game data: IR Missile
+    /// (#134) reads `[100, 0, 0, 0]`, Radar Missile (#135) `[0, 100, 0, 0]`,
+    /// EW Missile (#137) `[0, 0, 0, 100]` — each stock seeker is vulnerable to
+    /// exactly the jammer named after it, which is the whole point of the field.
+    public let jamVulnerability: [Int]
+
+    /// The `cicn` id range this weapon's smoke trail draws from, or nil when it
+    /// has no authored set (`SmokeSet < 0`). Bible: set *n* is `cicn`
+    /// `1000 + 8n ... 1007 + 8n`.
+    public var smokeIconIDs: ClosedRange<Int>? {
+        guard smokeSet >= 0 else { return nil }
+        let base = 1000 + smokeSet * 8
+        return base...(base + 7)
+    }
 
     public var guidance: WeaponGuidance { WeaponGuidance(raw: guidanceRaw) }
     /// `Flags` 0x0200 / 0x0400: this weapon generates small / big smoke as its
@@ -874,6 +900,95 @@ public struct WeapRes {
     /// homing weapons)" is `Flags` 0x0080; this is the inverse (matches
     /// novaparse's `vulnerableToPD = (flags & 0x80) == 0`).
     public var vulnerableToPD: Bool { flagsRaw & 0x0080 == 0 }
+
+    // MARK: Remaining documented flag bits
+    //
+    // The bits below round out the Bible's four `wëap` flag tables. They were
+    // decoded late (see docs/reverse-engineering/UNDECODED.md §2), so unlike the
+    // bits above each one names the system that consumes it.
+
+    /// `Flags` 0x0004: "For cycling weapons, always start on the first frame of
+    /// the animation" — renderer-only (`GameScene.syncProjectiles`).
+    public var alwaysStartsOnFirstFrame: Bool { flagsRaw & 0x0004 != 0 }
+    /// `Flags` 0x0008: "For guided weapons, don't fire at fast ships (ships with
+    /// turn rate > 3)". A launcher that can't track a nimble target simply won't
+    /// take the shot — consumed in `World.fireWeapons`.
+    public var wontFireAtFastShips: Bool { flagsRaw & 0x0008 != 0 }
+    /// `Flags` 0x0100: "Weapon's blast doesn't hurt the player" — the blast
+    /// radius still detonates and still damages NPCs, it just spares the player's
+    /// hull (`World.applyBlastDamage`).
+    public var blastSparesPlayer: Bool { flagsRaw & 0x0100 != 0 }
+    /// `Flags` 0x1000 / 0x2000 / 0x4000: "Turreted weapon has a blind spot to the
+    /// front / sides / rear". Each blocks a 90° arc measured from the firing
+    /// ship's nose, so a turret can be given a realistic mount restriction.
+    /// Consumed by `WeaponSpec.turretCanBear(relativeBearing:)`.
+    public var turretBlindFront: Bool { flagsRaw & 0x1000 != 0 }
+    public var turretBlindSides: Bool { flagsRaw & 0x2000 != 0 }
+    public var turretBlindRear: Bool { flagsRaw & 0x4000 != 0 }
+
+    /// `Flags2` 0x0004: "Proximity detonator ignores asteroids" — the fuse won't
+    /// trip on a rock the shot flies past.
+    public var proxIgnoresAsteroids: Bool { flags2Raw & 0x0004 != 0 }
+    /// `Flags2` 0x0040: "Don't show weapon's ammo quantity on the status display".
+    public var hidesAmmoCount: Bool { flags2Raw & 0x0040 != 0 }
+    /// `Flags2` 0x0080: "This weapon can only be fired when there is at least one
+    /// ship of this ship's KeyCarried type aboard" — a bay-linked weapon that
+    /// goes dead once the carrier's fighters are all launched or lost.
+    public var requiresKeyCarriedAboard: Bool { flags2Raw & 0x0080 != 0 }
+    /// `Flags2` 0x0100: "AI ships won't use this weapon". Player-only ordnance —
+    /// NPCs carrying it simply never pull the trigger.
+    public var aiWontUse: Bool { flags2Raw & 0x0100 != 0 }
+    /// `Flags2` 0x0400: "Weapon is a planet-type weapon, and can only hit
+    /// planet-type ships or destroyable stellars" — the siege guns you need to
+    /// crack a `spöb` with a positive `Strength`.
+    public var isPlanetTypeWeapon: Bool { flags2Raw & 0x0400 != 0 }
+    /// `Flags2` 0x0800: "Don't allow this weapon to be selected or displayed if
+    /// it is out of ammo".
+    public var hiddenWhenOutOfAmmo: Bool { flags2Raw & 0x0800 != 0 }
+    /// `Flags2` 0x1000: "Weapon can disable but not destroy" — damage stops at
+    /// the disable threshold, leaving a boardable hulk instead of a kill.
+    public var disablesOnly: Bool { flags2Raw & 0x1000 != 0 }
+    /// `Flags2` 0x2000: "For beam weapons, display the beam underneath ships
+    /// instead of on top of them" — renderer z-order only.
+    public var beamDrawsUnderShips: Bool { flags2Raw & 0x2000 != 0 }
+    /// `Flags2` 0x4000: "Weapon can be fired while cloaked" (without the flag,
+    /// firing drops the cloak).
+    public var firesWhileCloaked: Bool { flags2Raw & 0x4000 != 0 }
+    /// `Flags2` 0x8000: "Weapon does x10 mass damage to asteroids" — the mining
+    /// weapons.
+    public var tenTimesVersusAsteroids: Bool { flags2Raw & 0x8000 != 0 }
+
+    /// "Seeker" 0x0001: "Passes over asteroids" — the shot ignores rocks entirely
+    /// instead of colliding with them.
+    public var passesOverAsteroids: Bool { seekerFlagsRaw & 0x0001 != 0 }
+    /// "Seeker" 0x0002: "Decoyed by asteroids" — a nearby rock can steal this
+    /// seeker's lock.
+    public var decoyedByAsteroids: Bool { seekerFlagsRaw & 0x0002 != 0 }
+    /// "Seeker" 0x4000: "Loses lock if target not directly ahead" — the seeker
+    /// goes ballistic once the target leaves its forward cone.
+    public var losesLockOffBoresight: Bool { seekerFlagsRaw & 0x4000 != 0 }
+    /// "Seeker" 0x8000: "May attack parent ship if jammed" — a jammed seeker can
+    /// come home to roost rather than merely turning away.
+    public var mayAttackParentIfJammed: Bool { seekerFlagsRaw & 0x8000 != 0 }
+
+    /// Whether a turret with this weapon's blind-spot flags may bear on a target
+    /// at `relativeBearing` radians off the firing ship's nose (any value; it is
+    /// normalised internally). Bible: the three blind-spot bits block the front,
+    /// the sides, and the rear respectively — read as 90° arcs centred on the
+    /// nose, the two beams, and the tail, which tiles the circle exactly.
+    /// A weapon with no blind-spot flags always bears.
+    public func turretCanBear(relativeBearing: Double) -> Bool {
+        guard turretBlindFront || turretBlindSides || turretBlindRear else { return true }
+        // Fold to 0...π — the arcs are symmetric about the nose-tail axis.
+        let twoPi = Double.pi * 2
+        var a = relativeBearing.truncatingRemainder(dividingBy: twoPi)
+        if a < 0 { a += twoPi }
+        if a > .pi { a = twoPi - a }
+        let quarter = Double.pi / 4
+        if a <= quarter { return !turretBlindFront }            // ±45° of the nose
+        if a >= .pi - quarter { return !turretBlindRear }       // ±45° of the tail
+        return !turretBlindSides                                // the two beams
+    }
     /// Effective reach in world pixels. Beams use their length; projectiles use
     /// speed × lifetime (the game runs the projectile sim at 30 fps).
     public var range: Double {
@@ -905,6 +1020,8 @@ public struct WeapRes {
         loopSound = flags & 0x0010 != 0
         flagsRaw = flags
         seekerFlagsRaw = ai16(d, 30)
+        smokeSet = ai16(d, 32)
+        jamVulnerability = (0..<4).map { max(0, min(100, ai16(d, 94 + $0 * 2))) }
         decay = ai16(d, 34)
         ionization = ai16(d, 74)
         proxRadius = ai16(d, 24)

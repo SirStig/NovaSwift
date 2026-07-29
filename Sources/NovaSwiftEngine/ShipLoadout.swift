@@ -156,11 +156,13 @@ public struct Loadout {
     /// Extra ion-dissipation rate from fitted `oütf` ModType 39 (`deionize`)
     /// items — added onto the hull's `Deionize` so ion charge bleeds off faster.
     public var deionizeBonus: Int = 0
-    /// Combined jamming strength from fitted `oütf` ModTypes 33-36 (`jam1-4`).
-    /// A ship-level defense that stacks with the pilot's government's inherent
-    /// `InhJam1-4`, giving incoming "turns away if jammed" guided shots a per-second
-    /// chance to lose their lock on this ship. See `World`'s guided-steering loop.
-    public var jamming: Int = 0
+    /// Per-type jamming strength from fitted `oütf` ModTypes 33-36 (`jam1-4`) —
+    /// **four independent values**, one per jammer type, not a single total.
+    /// Stacks with the pilot's government's inherent `InhJam1-4` and is matched
+    /// against each incoming seeker's `wëap.JamVuln1-4` (see
+    /// `WeaponBehaviorFlags.jamChance(against:)`), so an IR jammer only ever
+    /// troubles IR-guided ordnance. Always four entries.
+    public var jamming: [Int] = [0, 0, 0, 0]
     /// Whether a fitted `oütf` ModType 31 (`miningScoop`) — or the hull's own
     /// `shïp.Flags3` 0x0002 ("scoops asteroid debris") — lets this ship auto-collect
     /// an asteroid's `röid.YieldType`/`YieldQty` yield when it destroys the rock.
@@ -289,7 +291,20 @@ extension Galaxy {
     /// summed into the hull's base stats, then converted to sim units using the
     /// same scales `Galaxy.shipSpec` uses for NPCs — so player and NPC ships stay
     /// on one footing.
-    public func loadout(shipID: Int, extraOutfits: [Int: Int] = [:]) -> Loadout? {
+    /// - Parameter includeDefaultItems: whether to fold in the hull's own
+    ///   `shïp.DefaultItems`. The Bible is explicit that these are for the
+    ///   *player*: "Up to eight default items with which to equip this ship when
+    ///   the player buys or captures one. Note that **AI-controlled ships will
+    ///   ignore these fields**." Pass `false` for anything the spawner puts in
+    ///   the world under AI control — an ambient trader, a fleet escort, a
+    ///   mission ship, a planet's defenders — so NPCs fly the hull as authored
+    ///   (stock weapons from `shïp`'s own WeapType list, plus any `përs`
+    ///   customisation) rather than with the afterburners, shield boosters and
+    ///   extra fuel the player would buy one with. Leaving this on for NPCs made
+    ///   every spawned ship measurably tougher than the original's, which then
+    ///   skewed every combat-odds decision downstream.
+    public func loadout(shipID: Int, extraOutfits: [Int: Int] = [:],
+                        includeDefaultItems: Bool = true) -> Loadout? {
         guard let s = game.ship(shipID) else {
             Log.world.error("Galaxy.loadout: ship id \(shipID) not found in game data — returning nil loadout")
             return nil
@@ -297,7 +312,9 @@ extension Galaxy {
 
         // Merge preinstalled outfits with anything else installed.
         var outfitCounts: [Int: Int] = [:]
-        for (oid, c) in s.outfits { outfitCounts[oid, default: 0] += c }
+        if includeDefaultItems {
+            for (oid, c) in s.outfits { outfitCounts[oid, default: 0] += c }
+        }
         for (oid, c) in extraOutfits where c > 0 { outfitCounts[oid, default: 0] += c }
 
         // Aggregate in stat-space (the same units the hull stores).
@@ -317,7 +334,10 @@ extension Galaxy {
         var captureOddsBonus = 0
         var cloakFlags = 0, cloakScannerFlags = 0
         var interferenceReduction = 0, murkModifier = 0
-        var ionCapBonus = 0, deionizeBonus = 0, jammingBonus = 0
+        var ionCapBonus = 0, deionizeBonus = 0
+        // Four independent jammer types (ModTypes 33-36), kept separate so each
+        // only counters the seekers whose `JamVuln` names it.
+        var jammingBonus = [0, 0, 0, 0]
         var hasMiningScoop = s.flags3 & 0x0002 != 0   // hull "scoops asteroid debris"
         var hasEscapePod = s.podCount > 0, hasAutoEject = false
         var inertialess = s.inertialess        // hull flag; an inertial-dampener outfit ORs in below
@@ -383,8 +403,10 @@ extension Galaxy {
                 case .inertialDamper:  inertialess = true            // ModType 38 → no-inertia flight
                 case .ionCapacity:     ionCapBonus += v              // ModType 40 → +max ion charge
                 case .deionize:        deionizeBonus += v            // ModType 39 → +ion dissipation
-                case .jam1, .jam2, .jam3, .jam4:
-                    jammingBonus += v                                // ModTypes 33-36 → jamming defense
+                case .jam1: jammingBonus[0] += v                     // ModType 33 → jam type 1
+                case .jam2: jammingBonus[1] += v                     // ModType 34 → jam type 2
+                case .jam3: jammingBonus[2] += v                     // ModType 35 → jam type 3
+                case .jam4: jammingBonus[3] += v                     // ModType 36 → jam type 4
                 case .miningScoop:     hasMiningScoop = true         // ModType 31 → collect asteroid yield
                 case .hyperspaceDist:  hyperspaceDistBonus += v      // ModType 23 → no-jump zone radius delta
                 case .autoRefuel:      hasAutoRefuel = true          // ModType 19 → free refuel at spaceport
@@ -510,7 +532,7 @@ extension Galaxy {
             hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject, inertialess: inertialess,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus,
             ionCapacityBonus: max(0, ionCapBonus), deionizeBonus: max(0, deionizeBonus),
-            jamming: max(0, jammingBonus), hasMiningScoop: hasMiningScoop,
+            jamming: jammingBonus.map { max(0, min(100, $0)) }, hasMiningScoop: hasMiningScoop,
             hyperspaceDistBonus: hyperspaceDistBonus,
             hasAutoRefuel: hasAutoRefuel, hasDensityScanner: hasDensityScanner,
             hasRepairSystem: hasRepairSystem,
@@ -525,11 +547,16 @@ extension Galaxy {
     /// capacity, and a resolved weapon set. Use this for the player (and any NPC
     /// you want equipped from real outfit data). Falls back to `makeShip` if the
     /// hull can't be found.
+    /// - Parameter includeDefaultItems: see `loadout(shipID:extraOutfits:includeDefaultItems:)`.
+    ///   Pass `false` for AI-controlled spawns; the Bible says they ignore
+    ///   `shïp.DefaultItems`.
     public func makeLoadedShip(_ shipID: Int, government govt: Int? = nil,
                                extraOutfits: [Int: Int] = [:],
                                at position: Vec2 = Vec2(), angle: Double = 0,
-                               skillRoll: Double? = nil) -> Ship? {
-        guard let lo = loadout(shipID: shipID, extraOutfits: extraOutfits) else {
+                               skillRoll: Double? = nil,
+                               includeDefaultItems: Bool = true) -> Ship? {
+        guard let lo = loadout(shipID: shipID, extraOutfits: extraOutfits,
+                               includeDefaultItems: includeDefaultItems) else {
             // Falls back to an un-equipped hull (`makeShip`) — if this fires
             // for the player's own ship, they'll fly with none of their
             // fitted outfits and no other clue why.
@@ -564,6 +591,8 @@ extension Galaxy {
             rate: Double(max(0, shipRes?.deionize ?? 0) + lo.deionizeBonus) * 0.3,
             ionizeMax: ship.ionizeMax)
         ship.jamming = lo.jamming
+        ship.rawTurnRate = shipRes?.turnRate ?? 0
+        ship.keyCarriedShipID = shipRes?.keyCarriedShipID ?? -1
         ship.hasMiningScoop = lo.hasMiningScoop
         ship.maxShield = lo.maxShield; ship.shield = lo.maxShield
         ship.maxArmor = lo.maxArmor; ship.armor = lo.maxArmor

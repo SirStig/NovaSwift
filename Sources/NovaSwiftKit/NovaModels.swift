@@ -128,6 +128,28 @@ public struct ShanRes {
     public let shieldSpriteID: Int
     public let shieldWidth: Int
     public let shieldHeight: Int
+    /// Alternating-sprite overlay (→ rlëD id). Bible: "Sprites from the alt
+    /// sprite sets can be displayed on top of the basic sprite for the ship,
+    /// cycling through each available set." The layer stock hulls leave unset
+    /// (-1) and plug-ins use for pulsing/rotating hull detail. Fields
+    /// @12/@16/@18/@20 (spriteID / setCount / width / height); mask @14 unused.
+    public let altSpriteID: Int
+    /// How many alternating sets the alt sheet packs (Bible `AltSetCount`). The
+    /// overlay cycles through them at `animDelay`, same cadence as the base
+    /// sheet's `.animation` extra frames.
+    public let altSetCount: Int
+    public let altWidth: Int
+    public let altHeight: Int
+    /// `BaseTransp` (@10): "The inherent transparency of the basic sprite images,
+    /// from 0 (no transparency) to 32 (fully transparent)" (Bible). Clamped to
+    /// 0...32 on decode; see `baseOpacity` for the renderer-ready form.
+    public let baseTransparency: Int
+
+    /// `baseTransparency` as a 0...1 alpha multiplier for the hull sprite —
+    /// 0 transparency → fully opaque, 32 → fully invisible.
+    public var baseOpacity: Double { 1.0 - Double(baseTransparency) / 32.0 }
+    /// Whether this hull carries a usable alternating-sprite overlay.
+    public var hasAltLayer: Bool { altSpriteID > 0 && altSetCount > 0 }
     /// Number of sprite frames in ONE full rotation (Bible "FramesPer", @52).
     /// Usually 36 (10°/frame); big hulls use more (e.g. 64) for smoother turns.
     /// The base sheet packs `baseSetCount` such sets back-to-back, so frame
@@ -200,6 +222,14 @@ public struct ShanRes {
         shieldSpriteID = i16(d, 64)
         shieldWidth = i16(d, 68)
         shieldHeight = i16(d, 70)
+        // Alt layer + base transparency, offsets from ResForge's shän TMPL #517
+        // (@10 Transparency, @12 Alternating Sprite, @16 Alt Set Count,
+        // @18 Alt Frame Size). Stock hulls leave the sprite id at -1.
+        baseTransparency = max(0, min(32, i16(d, 10)))
+        altSpriteID = i16(d, 12)
+        altSetCount = max(0, i16(d, 16))
+        altWidth = i16(d, 18)
+        altHeight = i16(d, 20)
         let fps = i16(d, 52)
         framesPerSet = fps > 0 ? fps : 36        // guard against 0 → avoids div-by-0 downstream
         extraFrameFlags = i16(d, 46)
@@ -352,6 +382,16 @@ public struct ShipRes {
     /// against novaparse `ShipResource.ts` (`ionization`).
     public let ionizeMax: Int       // @876
 
+    /// `KeyCarried` (@878, `RSID`): "The key carried ship type, used for
+    /// interesting effects in the wëap and shän resources" (Bible). A hull that
+    /// names one gains two data-driven behaviours: `wëap.Flags2` 0x0080 weapons
+    /// only fire while one is still docked, and the `shän` `keyCarried` extra
+    /// sprite set shows when none are. `< 128` = unset. Offset from `shïp`
+    /// TMPL #518.
+    public let keyCarriedShipID: Int
+    /// Whether this hull declares a `KeyCarried` ship type at all.
+    public var hasKeyCarriedShip: Bool { keyCarriedShipID >= 128 }
+
     /// Built-in weapons: (weapon id, count, ammo). Drives NPC + starting loadouts.
     public let weapons: [(id: Int, count: Int, ammo: Int)]
     /// Preinstalled outfits: (outfit id, count). These grant their stat mods and
@@ -500,6 +540,8 @@ public struct ShipRes {
             if wid >= 128 { w.append((wid, i16(d, 1750 + i * 2), i16(d, 1758 + i * 2))) }
         }
         weapons = w
+
+        keyCarriedShipID = i16(d, 878)
 
         // Preinstalled outfits: 4 slots (ids @78, counts @86) plus 4 more (@880/@888).
         var o: [(Int, Int)] = []
@@ -762,10 +804,20 @@ public struct SpobRes {
     /// Station (#299, government #129 "Auroran Empire") carries id 10033,
     /// "Auroran station.SFIL" — a real, thematically-correct pairing.
     public let ambientSoundID: Int?
-    /// `Flags2` (`spöb` second flag longword, @30 — verified empirically against
-    /// the base data: all 23 named "Wormhole" spöbs carry `0x2000`, all 35 "HG-*"
-    /// hypergates carry `0x1000`). Bits: `0x1000` hypergate, `0x2000` wormhole,
-    /// `0x0100` deadly, `0x0400` buys any outfit, `0x0020` always dominated, …
+    /// `Flags2` (`spöb` @32, a two-byte `WORV` — the authoritative layout from
+    /// ResForge's `spöb` TMPL #520, cross-checked empirically: all 23 named
+    /// "Wormhole" spöbs carry `0x2000` and all 35 "HG-*" hypergates `0x1000`).
+    ///
+    /// Note this used to be read as `u32@30`, which spans `DefCount`@30 *and*
+    /// this field; every bit the Bible defines is ≤ `0x2000`, so the two agree on
+    /// the low word and the old form only differed in junk high bits. Read
+    /// exactly now so a future high-bit test can't silently pick up `DefCount`.
+    ///
+    /// Bits: `0x0001` show first frame between every other, `0x0002` pick frames
+    /// randomly, `0x0010` loop ambient sound, `0x0020` always dominated,
+    /// `0x0040` starts destroyed, `0x0080` animate only when destroyed,
+    /// `0x0100` deadly, `0x0200` fires weapon only when provoked, `0x0400`
+    /// player can sell any outfit here, `0x1000` hypergate, `0x2000` wormhole.
     public let flags2: UInt32
     /// `HyperLink1-8` (@38, eight `int16`s): the `spöb` ids of the other
     /// hypergates/wormholes this gate connects to (−1/0 = unused; a wormhole
@@ -823,6 +875,62 @@ public struct SpobRes {
     /// `Strength` (@572, `int32`): the stellar's armor — how much weapon damage
     /// it takes before being destroyed. TMPL: `0` (or below) = invulnerable.
     public let strength: Int
+    /// `Landing Fee` (@564, `DLNG`): "The fee that is deducted from the player's
+    /// credits when landing" (Bible). 0 = free. Offset straight from TMPL #520.
+    public let landingFee: Int
+    /// `Gravity` (@568, `DWRD`): "The stellar's gravity - 0 for none, positive
+    /// for stellars that [pull ships in]" (Bible; the TMPL adds the dry warning
+    /// "Confuses AI, not recommended"). Negative values push ships away. A hull
+    /// with `shïp.Flags3` 0x0010 or a fitted `oütf` ModType 41 ignores it.
+    public let gravity: Int
+    /// `Regenerate Time` (@578, `DWRD`, the Bible's `DeadTime`): "The amount of
+    /// time a stellar remains destroyed before it [comes back]", in **days**.
+    /// TMPL CASE: `-1` = never regenerates. `nil` here means never.
+    public let regenerationDays: Int?
+    /// `Explosion` (@580, `DWRD`): the explosion played when this stellar is
+    /// destroyed. TMPL: `-1` none, `0...63` a single `bööm`, `1000...1063` the
+    /// same `bööm` plus a scatter of sparks. Decoded into `explosionBoomID` /
+    /// `explosionHasSparks` below.
+    public let explosionRaw: Int
+    /// `Animation Delay` (@34, `DWRD`): frames (in 30ths of a second) between
+    /// animation frames for an animated stellar. `<= 0` = not animated.
+    public let animationDelay: Int
+    /// `First Frame Bias` (@36, `DWRD`): "delay multiplier for first frame" — a
+    /// value > 1 holds frame 0 that many times longer than the rest, so a
+    /// rotating beacon can rest between sweeps. `<= 1` = no bias.
+    public let frame0Bias: Int
+
+    /// The `bööm` id this stellar detonates when destroyed, or nil for none.
+    /// Same `0...63 → 128+` mapping the rest of the data uses; the `1000+` band
+    /// selects the same explosion with sparks (see `explosionHasSparks`).
+    public var explosionBoomID: Int? { boomID(raw: explosionRaw >= 1000 ? explosionRaw - 1000 : explosionRaw) }
+    /// TMPL: an `Explosion` in the `1000...1063` band means "Explosion + Sparks".
+    public var explosionHasSparks: Bool { explosionRaw >= 1000 }
+    /// `Flags2` 0x0040: "Starts destroyed" — this stellar begins every new game
+    /// already blown up (revealed later by story, or by its regeneration timer).
+    public var startsDestroyed: Bool { flags2 & 0x0040 != 0 }
+    /// `Flags2` 0x0400: "Player can sell any outfits here" — this outfitter buys
+    /// back items it doesn't itself stock, rather than only its own inventory.
+    public var buysAnyOutfit: Bool { flags2 & 0x0400 != 0 }
+    /// `Flags2` 0x0010: "Loop ambient sound" — hold `ambientSoundID` as a
+    /// continuous bed rather than a one-shot sting on landing.
+    public var loopsAmbientSound: Bool { flags2 & 0x0010 != 0 }
+    /// `Flags2` 0x0001: "Show first frame between every other" — an animated
+    /// stellar that returns to frame 0 between each subsequent frame.
+    public var showsFirstFrameBetween: Bool { flags2 & 0x0001 != 0 }
+    /// `Flags2` 0x0002: "Pick frames randomly" rather than cycling in order.
+    public var picksFramesRandomly: Bool { flags2 & 0x0002 != 0 }
+    /// `Flags2` 0x0080: "Animate only when destroyed" — the wreck flickers, the
+    /// intact stellar doesn't.
+    public var animatesOnlyWhenDestroyed: Bool { flags2 & 0x0080 != 0 }
+    /// This stellar has an authored frame animation at all.
+    public var isAnimated: Bool { animationDelay > 0 }
+    /// Whether a stellar destroyed on `destroyedOn` should be back by `now`.
+    /// Never true when the stellar doesn't regenerate.
+    public func hasRegenerated(destroyedDayCount: Int, nowDayCount: Int) -> Bool {
+        guard let days = regenerationDays, days >= 0 else { return false }
+        return nowDayCount - destroyedDayCount >= days
+    }
     /// The `spïn` id of the destroyed/wreck graphic, or nil when the stellar has
     /// none (`-1`/≤0 → invulnerable, shown as simply *gone* when destroyed).
     public var destroyedGraphicSpinID: Int? {
@@ -942,7 +1050,7 @@ public struct SpobRes {
         government = i16(d, 20)
         landingPictID = u16(d, 24)
         minStatus = i16(d, 22)
-        let flags2v = u32(d, 30)
+        let flags2v = UInt32(u16(d, 32))
         flags2 = flags2v
         // @26 (CustSndID) is an ambient-sound id on ordinary stellars but the
         // ships-emerge angle on gates (Bible) — so a gate has no ambient sound,
@@ -962,6 +1070,13 @@ public struct SpobRes {
         destroyedGraphicRaw = i16(d, 576)
         defenseWeaponRaw = i16(d, 570)
         strength = i32(d, 572)
+        landingFee = max(0, i32(d, 564))
+        gravity = i16(d, 568)
+        let regen = i16(d, 578)
+        regenerationDays = regen < 0 ? nil : regen
+        explosionRaw = i16(d, 580)
+        animationDelay = i16(d, 34)
+        frame0Bias = i16(d, 36)
     }
 }
 
@@ -1258,6 +1373,18 @@ public struct NovaGame {
         guard let shan = shan(shipID), shan.weaponGlowSpriteID > 0,
               resources.resource(NovaType.rleD, shan.weaponGlowSpriteID) != nil else { return nil }
         return decodedRLE(shan.weaponGlowSpriteID)
+    }
+
+    /// Decode a ship's alternating-sprite overlay (the `shän` alt layer), if this
+    /// hull defines one. Bible: the alt sheet packs `altSetCount` sets that cycle
+    /// on top of the base sprite, each set laid out with the same per-heading
+    /// frame count as the hull — so index it `set * framesPerSet + heading` and
+    /// advance `set` on the hull's `animDelay` clock. Stock hulls leave this
+    /// unset, so it is nil for base-game data. Cached like the other layers.
+    public func altSprite(_ shipID: Int) -> SpriteSheet? {
+        guard let shan = shan(shipID), shan.hasAltLayer,
+              resources.resource(NovaType.rleD, shan.altSpriteID) != nil else { return nil }
+        return decodedRLE(shan.altSpriteID)
     }
 
     // MARK: Stellar objects

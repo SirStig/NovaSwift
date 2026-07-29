@@ -326,10 +326,37 @@ public final class Ship {
     /// by this weapon will appear after being sufficiently ionized"). Nil → the
     /// renderer's default bluish glow. Reset to nil once the charge dissipates.
     public var ionizeColor: (r: Double, g: Double, b: Double)?
-    /// Ship-level jamming strength summed from fitted jammer outfits (`oütf`
-    /// ModTypes 33-36). Stacks with the pilot government's inherent `InhJam1-4`
-    /// when an incoming "turns away if jammed" guided shot rolls to keep lock.
-    public var jamming: Int = 0
+    /// Per-type jamming strength from fitted jammer outfits (`oütf` ModTypes
+    /// 33-36) — four values, one per jammer type. Stacks with the pilot
+    /// government's inherent `InhJam1-4`, and is weighed against each incoming
+    /// seeker's own `wëap.JamVuln1-4` rather than applied as a blanket ECM
+    /// rating. Always four entries.
+    public var jamming: [Int] = [0, 0, 0, 0]
+    /// The hull's raw `shïp.TurnRate` integer, kept alongside the converted
+    /// `stats.turnRate` because two Bible rules are written in raw units — the
+    /// "don't fire at ships with turn rate > 3" weapon flag being the one the
+    /// sim reads. 0 for a synthetic ship with no backing resource.
+    public var rawTurnRate: Int = 0
+    /// The hull's `shïp.KeyCarried` ship type (`< 128` = none) and whether one is
+    /// currently aboard. Bible: a `wëap.Flags2` 0x0080 weapon only fires while a
+    /// key-carried ship is still docked, and the `shän` `keyCarried` extra sprite
+    /// set shows when none are.
+    public var keyCarriedShipID: Int = -1
+    /// True when this hull either declares no key-carried type (nothing to run
+    /// out of) or still has at least one docked in a fighter bay.
+    public var carriesKeyShip: Bool {
+        guard keyCarriedShipID >= 128 else { return true }
+        return fighterBays.contains { $0.spec.fighterShipID == keyCarriedShipID && $0.docked > 0 }
+    }
+    /// This ship's total jam strength per type: its own fitted jammers plus its
+    /// government's inherent `InhJam1-4`, each clamped to 0...100.
+    public func combinedJamming(govtJamming: [Int]?) -> [Int] {
+        (0..<4).map { i in
+            let g = (govtJamming?.count ?? 0) > i ? govtJamming![i] : 0
+            let s = jamming.count > i ? jamming[i] : 0
+            return max(0, min(100, g + s))
+        }
+    }
     /// Whether this ship auto-collects an asteroid's yield when it destroys the
     /// rock (`oütf` ModType 31 mining scoop, or `shïp.Flags3` 0x0002). Only the
     /// player's collection is surfaced (as a `.asteroidMined` event to the host).
@@ -1057,6 +1084,16 @@ public final class World {
     /// keyed by `spöb` id and created lazily on first fire opportunity — see
     /// `updateStellarWeapons` (StellarWeapons.swift).
     var stellarWeaponMounts: [Int: WeaponMount] = [:]
+    /// Live armor for each *destroyable* stellar in this system (`spöb.Strength`
+    /// > 0), keyed by `spöb` id and seeded lazily on the first hit. Base-game
+    /// stellars are all invulnerable, so this stays empty unless a plug-in or TC
+    /// ships shootable planets — see `applyStellarHit` (StellarWeapons.swift).
+    var stellarArmor: [Int: Double] = [:]
+    /// Stellars destroyed by weapon fire *in this world*. The host drains this to
+    /// fire `spöb.OnDestroy` and to schedule regeneration from `spöb.DeadTime`;
+    /// it is also what keeps a downed stellar from being re-targeted before the
+    /// host rebuilds the system without it.
+    public internal(set) var stellarsDestroyedThisSession: Set<Int> = []
 
     /// Live asteroids (real `röid` rocks, from the system's `sÿst.Asteroids`/
     /// `AstTypes` fields). Stationary — see `Asteroid`'s doc comment.
@@ -1366,7 +1403,8 @@ public final class World {
             let govt = government ?? (dude.govt >= 128 ? dude.govt : nil)
             let (pos, ang) = missionSpawnPose(arrival: arrival)
             guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang,
-                                                   skillRoll: rng.double(in: -1...1)) else { continue }
+                                                   skillRoll: rng.double(in: -1...1),
+                                                   includeDefaultItems: false) else { continue }
             let brain = AIBrain(aiType: dude.aiType, govt: ship.government)
             brain.behaviorOverride = behavior
             if behavior == .protectPlayer {
@@ -1644,6 +1682,7 @@ public final class World {
             }
         }
 
+        prof("sim.gravity") { applyStellarGravity(dt) }
         prof("sim.deadlyStellars") { checkDeadlyStellarCollisions() }
         prof("sim.stellarWeapons") { updateStellarWeapons(dt) }
         prof("sim.pointDefense") { runPointDefense() }
@@ -1660,6 +1699,43 @@ public final class World {
         if let profiler {
             let totalNs = DispatchTime.now().uptimeNanoseconds &- profStepT0
             profiler("sim.other", Double(totalNs &- min(totalNs, profMeasuredNs)) / 1_000_000_000)
+        }
+    }
+
+    /// `spöb.Gravity` (Bible): "The stellar's gravity - 0 for none, positive for
+    /// stellars that [pull ships in]"; negative values push away. Applied as an
+    /// inverse-square acceleration toward (or away from) each gravitating body,
+    /// falling off from its surface so a distant ship is barely nudged and a
+    /// close one is dragged hard.
+    ///
+    /// A hull with `shïp.Flags3` 0x0010 or a fitted `oütf` ModType 41
+    /// (`gravityResist`) is exempt — that's what `Ship.ignoresGravity` is for,
+    /// and until now there was no force for it to be immune to. No stock stellar
+    /// sets a nonzero Gravity (the `spöb` TMPL warns "Confuses AI, not
+    /// recommended"), so this is inert on base-game data.
+    ///
+    /// The strength scale is this engine's own: `Gravity` is treated as an
+    /// acceleration in px/s² at the body's surface, since the Bible gives no
+    /// units. Acceleration, not a velocity nudge, so it composes correctly with
+    /// the Newtonian flight model and is naturally frame-rate independent.
+    func applyStellarGravity(_ dt: Double) {
+        let wells = systemContext.bodies.filter { $0.gravity != 0 }
+        guard !wells.isEmpty else { return }
+        for ship in allShips where ship.isAlive && !ship.ignoresGravity {
+            // An inertialess hull has no momentum to perturb — it flies exactly
+            // where it points — so gravity has nothing to act on.
+            guard !ship.fliesInertialess(tuning) else { continue }
+            for body in wells {
+                let rel = body.position - ship.position
+                let d = rel.length
+                let surface = max(1, body.radius)
+                guard d > 1 else { continue }
+                // Inverse-square from the surface, capped at the surface value so
+                // a ship grazing the body doesn't get an unbounded impulse.
+                let falloff = min(1.0, (surface * surface) / (d * d))
+                let accel = Double(body.gravity) * falloff
+                ship.velocity += rel.normalized * (accel * dt)
+            }
         }
     }
 
@@ -1817,6 +1893,21 @@ public final class World {
             // Seeker 0x0020: this guided weapon refuses to fire while its own
             // ship is fully ionized.
             if spec.cantFireWhileIonized && ship.isIonized { continue }
+            // Flags2 0x0100: "AI ships won't use this weapon" — player-only
+            // ordnance an NPC may be carrying but will never actually fire.
+            if isAI && spec.aiWontUse { continue }
+            // Flags 0x0008: "for guided weapons, don't fire at fast ships (ships
+            // with turn rate > 3)". The Bible's threshold is in raw `shïp.TurnRate`
+            // units, so compare against the target's stored raw rate.
+            if spec.wontFireAtFastShips, spec.homes, let target, target.rawTurnRate > 3 { continue }
+            // Flags2 0x0080: a `KeyCarried`-linked weapon only works while at
+            // least one ship of the carrier's key type is still aboard.
+            if spec.requiresKeyCarriedAboard && !ship.carriesKeyShip { continue }
+            // Flags2 0x4000 (inverted): firing an ordinary weapon drops the
+            // ship's cloak. A cloaked ship holds fire with everything that
+            // isn't explicitly cleared to fire cloaked, rather than decloaking
+            // itself by accident.
+            if ship.isCloaked && !spec.firesWhileCloaked { continue }
             // Flags3 0x0004: hold fire while a previous shot of this same weapon
             // is still aloft (owned by this ship).
             if spec.cantRefireUntilShotEnds,
@@ -1926,6 +2017,12 @@ public final class World {
         switch spec.guidance {
         case .turret, .beamTurret:
             guard let t = target else { return nil }
+            // Flags 0x1000/0x2000/0x4000: a turret can be given blind arcs to the
+            // front, sides and/or rear. A target sitting in one is simply not
+            // engageable by this mount — hold fire rather than shoot through the
+            // hull. Bearing is measured off the ship's nose, not the muzzle's.
+            let bearing = angleDelta(from: ship.angle, to: (t.position - ship.position).angle)
+            guard spec.flags.turretCanBear(relativeBearing: bearing) else { return nil }
             return leadAngle(from: muzzle, shooterVel: ship.velocity, target: t,
                              shotSpeed: spec.projectileSpeed, instantHit: spec.isBeam)
         case .frontQuadrant, .rearQuadrant:
@@ -2010,7 +2107,7 @@ public final class World {
                            turnsAwayIfJammed: spec.turnsAwayIfJammed,
                            penetratesShields: spec.penetratesShields,
                            weaponID: spec.id, pdDurability: spec.durability,
-                           translucentShots: spec.translucentShots)
+                           translucentShots: spec.translucentShots, flags: spec.flags)
         p.ionizeColor = spec.ionizeColor
         projectiles.append(p)
         return p
@@ -2131,11 +2228,15 @@ public final class World {
         let origin = ship.muzzle(for: mount)
         let dir = Vec2.heading(aim)
         let cast = beamCast(from: origin, dir: dir, range: spec.range,
-                            ownerID: ship.entityID, ownerGovt: ship.government)
-        if let h = cast.hitShip {
+                            ownerID: ship.entityID, ownerGovt: ship.government,
+                            planetTypeOnly: spec.isPlanetTypeWeapon)
+        if let body = cast.hitStellar {
+            applyStellarHit(body, shield: spec.shieldDamage, armor: spec.armorDamage)
+        } else if let h = cast.hitShip {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization, ionizeColor: spec.ionizeColor,
-                     piercing: spec.penetratesShields, weaponID: spec.id)
+                     piercing: spec.penetratesShields, weaponID: spec.id,
+                     disablesOnly: spec.disablesOnly)
             // Tractor beam (negative Impact): pull the target toward the firing
             // ship each time the beam connects, more strongly on lighter hulls.
             if spec.isTractorBeam {
@@ -2148,9 +2249,11 @@ public final class World {
                 h.velocity += dir * (spec.impact * 6.0 / max(4, h.radius))
             }
         } else if let rock = cast.hitAsteroid {
-            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage, shooterID: ship.entityID)
+            // Flags2 0x8000: mining beams do ×10 mass damage to rocks.
+            let rockArmor = spec.tenTimesVersusAsteroids ? spec.armorDamage * 10 : spec.armorDamage
+            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: rockArmor, shooterID: ship.entityID)
         }
-        let hit = cast.hitShip != nil || cast.hitAsteroid != nil
+        let hit = cast.hitShip != nil || cast.hitAsteroid != nil || cast.hitStellar != nil
         if !spec.loopSound {
             // Pulse beam: a short-lived flash welded to the exit point. Continuous
             // beams instead keep the persistent ActiveBeam from updateBeamLoops.
@@ -2176,32 +2279,48 @@ public final class World {
     /// hittable ship or asteroid, and the clipped endpoint. The owner is passed
     /// as id + government (not a `Ship`) so a stellar defense weapon — whose
     /// shooter is a planet, not a ship — can cast too.
-    func beamCast(from origin: Vec2, dir: Vec2, range: Double, ownerID: Int, ownerGovt: Int)
-        -> (end: Vec2, hitShip: Ship?, hitAsteroid: Asteroid?) {
+    func beamCast(from origin: Vec2, dir: Vec2, range: Double, ownerID: Int, ownerGovt: Int,
+                  planetTypeOnly: Bool = false)
+        -> (end: Vec2, hitShip: Ship?, hitAsteroid: Asteroid?, hitStellar: StellarBody?) {
         var bestT = range
         var hitShip: Ship?
         var hitAsteroid: Asteroid?
-        for other in allShips where other.entityID != ownerID && other.isAlive {
-            if !canHit(owner: ownerID, ownerGovt: ownerGovt, victim: other) { continue }
-            let rel = other.position - origin
+        var hitStellar: StellarBody?
+        // `wëap.Flags2` 0x0400 ("planet-type weapon"): the beam passes straight
+        // through ships and rocks, connecting only with a destroyable stellar.
+        if !planetTypeOnly {
+            for other in allShips where other.entityID != ownerID && other.isAlive {
+                if !canHit(owner: ownerID, ownerGovt: ownerGovt, victim: other) { continue }
+                let rel = other.position - origin
+                let along = rel.dot(dir)
+                guard along > 0, along <= range else { continue }
+                let perp = (rel - dir * along).length
+                if perp <= other.radius + 4 && along < bestT {
+                    bestT = along; hitShip = other; hitAsteroid = nil; hitStellar = nil
+                }
+            }
+            for rock in asteroids where rock.isAlive {
+                let rel = rock.position - origin
+                let along = rel.dot(dir)
+                guard along > 0, along <= range else { continue }
+                let perp = (rel - dir * along).length
+                if perp <= rock.radius + 4 && along < bestT {
+                    bestT = along; hitAsteroid = rock; hitShip = nil; hitStellar = nil
+                }
+            }
+        }
+        for body in destroyableStellars {
+            let rel = body.position - origin
             let along = rel.dot(dir)
             guard along > 0, along <= range else { continue }
             let perp = (rel - dir * along).length
-            if perp <= other.radius + 4 && along < bestT {
-                bestT = along; hitShip = other; hitAsteroid = nil
+            if perp <= body.radius + 4 && along < bestT {
+                bestT = along; hitStellar = body; hitShip = nil; hitAsteroid = nil
             }
         }
-        for rock in asteroids where rock.isAlive {
-            let rel = rock.position - origin
-            let along = rel.dot(dir)
-            guard along > 0, along <= range else { continue }
-            let perp = (rel - dir * along).length
-            if perp <= rock.radius + 4 && along < bestT {
-                bestT = along; hitAsteroid = rock; hitShip = nil
-            }
-        }
-        let end = (hitShip != nil || hitAsteroid != nil) ? origin + dir * bestT : origin + dir * range
-        return (end, hitShip, hitAsteroid)
+        let anyHit = hitShip != nil || hitAsteroid != nil || hitStellar != nil
+        let end = anyHit ? origin + dir * bestT : origin + dir * range
+        return (end, hitShip, hitAsteroid, hitStellar)
     }
 
     /// Create the persistent beam segment for a continuous mount (geometry is
@@ -2239,10 +2358,11 @@ public final class World {
         let target: Ship? = ship.currentTargetID.flatMap { self.ship(id: $0) }.flatMap { $0.isAlive ? $0 : nil }
         let aim = fireAngle(for: spec, ship: ship, muzzle: origin, target: target) ?? ship.angle
         let cast = beamCast(from: origin, dir: Vec2.heading(aim), range: spec.range,
-                            ownerID: ship.entityID, ownerGovt: ship.government)
+                            ownerID: ship.entityID, ownerGovt: ship.government,
+                            planetTypeOnly: spec.isPlanetTypeWeapon)
         beam.from = origin
         beam.to = cast.end
-        beam.hit = cast.hitShip != nil || cast.hitAsteroid != nil
+        beam.hit = cast.hitShip != nil || cast.hitAsteroid != nil || cast.hitStellar != nil
     }
 
     /// Advance all live beams once per step: weld continuous beams to their
@@ -2295,20 +2415,36 @@ public final class World {
 
             // Movement by guidance.
             if p.homing {
-                // Seeker 0x0010 "turns away if jammed": each second in flight,
-                // an at-risk shot has a chance (equal to its target's
-                // government's summed InhJam1-4, clamped 0-100%) to lose lock
-                // entirely — an engine reading of the four jam types as one
-                // combined jam strength, since the Bible doesn't specify how
-                // a weapon picks among them.
-                if p.turnsAwayIfJammed, let tid = p.targetID, let t = ship(id: tid) {
-                    // Combined jam = target government's inherent InhJam1-4 plus the
-                    // target ship's own fitted jammer outfits (ModTypes 33-36).
-                    let govtJam = diplomacy?.govt(t.government)?.jamming.reduce(0, +) ?? 0
-                    let jam = max(0, min(100, govtJam + t.jamming))
-                    if jam > 0, rng.double(in: 0...1) < (Double(jam) / 100) * dt {
-                        p.targetID = nil
+                // Seeker 0x0010 "turns away if jammed": each second in flight, an
+                // at-risk shot rolls against its target's ECM to lose lock. The
+                // roll is **per jammer type** — the target's four jam strengths
+                // (`gövt.InhJam1-4` plus its own ModType 33-36 outfits) are
+                // weighed against this weapon's own `wëap.JamVuln1-4`, so an IR
+                // jammer only ever troubles IR-guided ordnance and a seeker with
+                // no vulnerability at all is immune however heavy the ECM.
+                if p.turnsAwayIfJammed, p.flags.jamVulnerability.contains(where: { $0 > 0 }),
+                   let tid = p.targetID, let t = ship(id: tid) {
+                    let strength = t.combinedJamming(govtJamming: diplomacy?.govt(t.government)?.jamming)
+                    let chance = p.flags.jamChance(against: strength)
+                    if chance > 0, rng.double(in: 0...1) < chance * dt {
+                        // Seeker 0x8000 "may attack parent ship if jammed": half
+                        // the time a jammed seeker of this kind comes home to
+                        // roost instead of merely going ballistic.
+                        if p.flags.mayAttackParentIfJammed, rng.double(in: 0...1) < 0.5,
+                           let parent = ship(id: p.ownerID), parent.isAlive {
+                            p.targetID = parent.entityID
+                            p.turnedOnParent = true
+                        } else {
+                            p.targetID = nil
+                        }
                     }
+                }
+                // Seeker 0x4000 "loses lock if target not directly ahead": once
+                // the target slides outside the seeker's forward cone it goes
+                // ballistic rather than pulling an impossible turn.
+                if p.flags.losesLockOffBoresight, let tid = p.targetID, let t = ship(id: tid) {
+                    let bearing = abs(angleDelta(from: p.facing, to: (t.position - p.position).angle))
+                    if bearing > .pi / 4 { p.targetID = nil }
                 }
                 // Steer the heading toward the first-order intercept, then fly
                 // inertialessly at cruise speed along it (EV Nova guided shots
@@ -2359,9 +2495,29 @@ public final class World {
             // Collision — direct hit, or within the proximity radius once armed.
             guard p.proxSafetyRemaining <= 0 else { continue }
             let reach = p.proxRadius
+
+            // Destroyable stellars (`spöb.Strength` > 0) are real targets. Checked
+            // before ships so a siege round aimed at a planet isn't eaten by a
+            // defender drifting across the muzzle.
+            if let body = destroyableStellarHit(from: prevPos, to: p.position, reach: reach) {
+                applyStellarHit(body, shield: p.shieldDamage, armor: p.armorDamage)
+                p.alive = false
+                detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
+                continue
+            }
+
             var struck: Ship?
-            for other in allShips where other.isAlive {
-                guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) else { continue }
+            // Flags2 0x0400: "planet-type weapon" — only hits planet-type ships or
+            // destroyable stellars, so it flies straight through ordinary hulls
+            // (the stellar test above is the shot's only way to connect).
+            for other in allShips where other.isAlive && !p.flags.isPlanetTypeWeapon {
+                // Seeker 0x8000: a jammed seeker that turned on its parent must be
+                // able to hit it, so the no-self-hit rule is lifted for that shot.
+                if p.turnedOnParent && other.entityID == p.ownerID {
+                    // fall through to the distance test below
+                } else {
+                    guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) else { continue }
+                }
                 // Swept distance: shortest gap between the ship and the segment the
                 // shot travelled this frame, so a high-velocity round still connects
                 // with a small hull it flew past between samples.
@@ -2383,12 +2539,23 @@ public final class World {
                 continue
             }
 
-            for rock in asteroids where rock.isAlive {
-                if Self.segmentPointDistance(prevPos, p.position, rock.position) <= rock.radius + reach {
-                    applyAsteroidHit(rock, shield: p.shieldDamage, armor: p.armorDamage, shooterID: p.ownerID)
-                    p.alive = false
-                    detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
-                    break
+            // Seeker 0x0001 "passes over asteroids": this shot ignores rocks
+            // entirely rather than colliding with them. A planet-type weapon
+            // likewise only cares about stellars.
+            if !p.flags.passesOverAsteroids && !p.flags.isPlanetTypeWeapon {
+                // Flags2 0x0004: the proximity fuse ignores asteroids, so the
+                // shot needs an actual contact hit to trip on a rock.
+                let rockReach = p.flags.proxIgnoresAsteroids ? 0 : reach
+                for rock in asteroids where rock.isAlive {
+                    if Self.segmentPointDistance(prevPos, p.position, rock.position) <= rock.radius + rockReach {
+                        // Flags2 0x8000: ×10 mass (armor) damage against
+                        // asteroids — the mining weapons' whole point.
+                        let rockArmor = p.flags.tenTimesVersusAsteroids ? p.armorDamage * 10 : p.armorDamage
+                        applyAsteroidHit(rock, shield: p.shieldDamage, armor: rockArmor, shooterID: p.ownerID)
+                        p.alive = false
+                        detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
+                        break
+                    }
                 }
             }
         }
@@ -2418,7 +2585,8 @@ public final class World {
         if let h = directHit {
             applyHit(to: h, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
                      ionization: p.ionization, ionizeColor: p.ionizeColor,
-                     piercing: p.penetratesShields, weaponID: p.weaponID)
+                     piercing: p.penetratesShields, weaponID: p.weaponID,
+                     disablesOnly: p.flags.disablesOnly)
             if p.impact > 0 {
                 // Knockback along the shot's travel, inversely ∝ target size
                 // (a proxy for mass — heavier hulls barely budge).
@@ -2434,10 +2602,14 @@ public final class World {
                 // when friendly fire is enabled (direct hits already pass canHit's
                 // pvp gate; this is the extra splash-only guard).
                 if ownerIsPlayer, splash.isPlayerControlled, !friendlyFireAllowed { continue }
+                // Flags 0x0100: "Weapon's blast doesn't hurt the player" — the
+                // splash still catches NPCs, it just never touches the player.
+                if p.flags.blastSparesPlayer, splash.isPlayerControlled { continue }
                 if (splash.position - pos).length <= p.blastRadius {
                     applyHit(to: splash, shield: p.shieldDamage * 0.5, armor: p.armorDamage * 0.5,
                              ownerID: p.ownerID, ionization: p.ionization * 0.5, ionizeColor: p.ionizeColor,
-                             piercing: p.penetratesShields, weaponID: p.weaponID)
+                             piercing: p.penetratesShields, weaponID: p.weaponID,
+                             disablesOnly: p.flags.disablesOnly)
                 }
             }
         }
@@ -2498,10 +2670,19 @@ public final class World {
 
     func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
                   ionization: Double = 0, ionizeColor: (r: Double, g: Double, b: Double)? = nil,
-                  piercing: Bool = false, weaponID: Int = -1) {
+                  piercing: Bool = false, weaponID: Int = -1,
+                  disablesOnly: Bool = false) {
         // Difficulty: scale only the damage the *player* takes (Easy softens,
         // Hard sharpens); NPC-vs-NPC combat is untouched.
         var shield = shield, armor = armor
+        // `wëap.Flags2` 0x1000: "Weapon can disable but not destroy". Clamp the
+        // armor damage so it can carry the target down to — but never through —
+        // its own disable threshold, leaving a boardable hulk. Shields are
+        // untouched: knocking them flat is how you reach the armor at all.
+        if disablesOnly {
+            let floor = ship.maxArmor * ship.disableArmorFraction
+            armor = max(0, min(armor, ship.armor - floor))
+        }
         if ship.isPlayer, combatTuning.playerDamageScale != 1.0 {
             shield *= combatTuning.playerDamageScale
             armor  *= combatTuning.playerDamageScale
@@ -3053,8 +3234,12 @@ public final class World {
     private func launchFighter(from carrier: Ship, bay: Ship.FighterBay, formationSlot: Int) -> Ship? {
         guard let galaxy else { return nil }
         let pos = carrier.position + Vec2.heading(carrier.angle) * (carrier.radius + 20)
+        // A launched fighter is AI-flown and was neither bought nor captured, so
+        // it too ignores its hull's `DefaultItems` (Bible). It flies the fighter
+        // class exactly as authored — which is what the carrier's bay stocks.
         guard let fighter = galaxy.makeLoadedShip(bay.spec.fighterShipID, government: carrier.government,
-                                                  at: pos, angle: carrier.angle) else { return nil }
+                                                  at: pos, angle: carrier.angle,
+                                                  includeDefaultItems: false) else { return nil }
         let brain = fighter.brain ?? AIBrain(aiType: .interceptor, govt: carrier.government)
         fighter.brain = brain
         brain.leaderID = carrier.entityID

@@ -100,7 +100,7 @@ extension World {
                 applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage,
                          ownerID: shooterID, ionization: spec.ionization,
                          ionizeColor: spec.ionizeColor, piercing: spec.penetratesShields,
-                         weaponID: spec.id)
+                         weaponID: spec.id, disablesOnly: spec.disablesOnly)
                 if spec.impact > 0 {
                     h.velocity += dir * (spec.impact * 6.0 / max(4, h.radius))
                 }
@@ -137,5 +137,59 @@ extension World {
                               soundID: spec.fireSoundID, weaponID: spec.id))
         }
         mount.didFire(shots: 1)
+    }
+}
+
+// MARK: - Destroyable stellars (`spöb.Strength` / `Explosion` / `DeadTime`)
+//
+// The other half of an armed planet: one you can shoot back. A `spöb` with a
+// positive `Strength` is a real target that soaks combined mass+energy damage
+// and, at zero, detonates its `Explosion` and swaps to its `DestroyedGraphic`.
+// Every base-game stellar carries `Strength = 0` ("Invulnerable" in the TMPL),
+// so none of this fires against stock data — it exists for the plug-ins and TCs
+// that ship destructible planets, and it is what `wëap.Flags2` 0x0400
+// ("planet-type weapon") exists to shoot.
+extension World {
+
+    /// Every destroyable stellar in the current system that is still standing.
+    var destroyableStellars: [StellarBody] {
+        systemContext.bodies.filter { $0.isDestroyable && !stellarsDestroyedThisSession.contains($0.id) }
+    }
+
+    /// The armor a destroyable stellar has left, seeding from its full strength
+    /// the first time it's asked.
+    func stellarArmorRemaining(_ body: StellarBody) -> Double {
+        stellarArmor[body.id] ?? body.strength
+    }
+
+    /// Land one weapon hit on a stellar. Damage is the Bible's "combined mass and
+    /// energy damage" — a stellar has no shields to knock down first, so both
+    /// halves of the shot count toward the same pool. Returns true when this hit
+    /// destroyed it.
+    @discardableResult
+    func applyStellarHit(_ body: StellarBody, shield: Double, armor: Double) -> Bool {
+        guard body.isDestroyable, !stellarsDestroyedThisSession.contains(body.id) else { return false }
+        let remaining = max(0, stellarArmorRemaining(body) - (shield + armor))
+        stellarArmor[body.id] = remaining
+        emit(.stellarDamaged(spobID: body.id, armor: remaining, maxArmor: body.strength))
+        guard remaining <= 0 else { return false }
+        stellarsDestroyedThisSession.insert(body.id)
+        emit(.stellarDestroyed(spobID: body.id, at: body.position,
+                               boomID: body.explosionBoomID, sparks: body.explosionHasSparks))
+        // A destroyed stellar stops shooting and drops any tribute contest.
+        stellarWeaponMounts[body.id] = nil
+        stellarDefenses[body.id] = nil
+        Log.combat.notice("Stellar \(body.id, privacy: .public) destroyed by weapon fire")
+        return true
+    }
+
+    /// Swept collision of one shot's path against every destroyable stellar.
+    /// Returns the body it struck, if any.
+    func destroyableStellarHit(from: Vec2, to: Vec2, reach: Double) -> StellarBody? {
+        for body in destroyableStellars
+        where Self.segmentPointDistance(from, to, body.position) <= body.radius + reach {
+            return body
+        }
+        return nil
     }
 }

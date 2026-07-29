@@ -165,7 +165,8 @@ extension World {
             let ang = rng.double(in: 0...(2 * .pi))
             guard let ship = galaxy.makeLoadedShip(shipID, government: defense.govt,
                                                    at: origin + jitter, angle: ang,
-                                                   skillRoll: rng.double(in: -1...1)) else { continue }
+                                                   skillRoll: rng.double(in: -1...1),
+                                                   includeDefaultItems: false) else { continue }
             let brain = AIBrain(aiType: dude.aiType == .unknown ? .warship : dude.aiType, govt: defense.govt)
             brain.behaviorOverride = .attackPlayer   // defenders exist to repel the player
             ship.brain = brain

@@ -66,6 +66,122 @@ public struct Submunition {
     }
 }
 
+/// The `wëap` flag bits that don't need unit conversion — carried verbatim from
+/// the decoded resource into the sim so `WeaponSpec` doesn't grow twenty more
+/// initializer parameters. Everything here defaults to "off", which is the
+/// behaviour the engine had before these bits were decoded, so a synthetic spec
+/// built by a test keeps its old semantics unless it opts in.
+///
+/// See `docs/reverse-engineering/UNDECODED.md` §2 for where each bit came from.
+public struct WeaponBehaviorFlags: Sendable, Equatable {
+    /// `Flags` 0x0008 — guided launchers won't engage ships with turn rate > 3.
+    public var wontFireAtFastShips = false
+    /// `Flags` 0x0100 — this weapon's blast radius never damages the player.
+    public var blastSparesPlayer = false
+    /// `Flags` 0x1000 / 0x2000 / 0x4000 — turret mount blind arcs.
+    public var turretBlindFront = false
+    public var turretBlindSides = false
+    public var turretBlindRear = false
+    /// `Flags` 0x0004 — cycling shot graphics restart on frame 0 (renderer only).
+    public var alwaysStartsOnFirstFrame = false
+    /// `Flags2` 0x0004 — the proximity fuse ignores asteroids.
+    public var proxIgnoresAsteroids = false
+    /// `Flags2` 0x0040 — don't show this weapon's ammo count on the status display.
+    public var hidesAmmoCount = false
+    /// `Flags2` 0x0080 — only fires while a `KeyCarried`-type ship is aboard.
+    public var requiresKeyCarriedAboard = false
+    /// `Flags2` 0x0100 — AI ships never fire this weapon.
+    public var aiWontUse = false
+    /// `Flags2` 0x0400 — only hits planet-type ships and destroyable stellars.
+    public var isPlanetTypeWeapon = false
+    /// `Flags2` 0x0800 — hidden from the weapon selector when out of ammo.
+    public var hiddenWhenOutOfAmmo = false
+    /// `Flags2` 0x1000 — damage stops at the disable threshold; never kills.
+    public var disablesOnly = false
+    /// `Flags2` 0x2000 — beams render beneath ships (renderer only).
+    public var beamDrawsUnderShips = false
+    /// `Flags2` 0x4000 — firing this doesn't drop the ship's cloak.
+    public var firesWhileCloaked = false
+    /// `Flags2` 0x8000 — ×10 armor damage against asteroids (mining lasers).
+    public var tenTimesVersusAsteroids = false
+    /// Seeker 0x0001 / 0x0002 — asteroid interaction for guided shots.
+    public var passesOverAsteroids = false
+    public var decoyedByAsteroids = false
+    /// Seeker 0x4000 — loses lock once the target leaves the forward cone.
+    public var losesLockOffBoresight = false
+    /// Seeker 0x8000 — a jammed seeker may come back at the ship that fired it.
+    public var mayAttackParentIfJammed = false
+    /// `SmokeSet` — `cicn` set index for the smoke trail, or -1 for none.
+    public var smokeSet = -1
+    /// `JamVuln1-4` — 0...100% vulnerability to each of the four jammer types.
+    /// Always four entries.
+    public var jamVulnerability: [Int] = [0, 0, 0, 0]
+
+    public init() {}
+
+    public init(_ w: WeapRes) {
+        wontFireAtFastShips = w.wontFireAtFastShips
+        blastSparesPlayer = w.blastSparesPlayer
+        turretBlindFront = w.turretBlindFront
+        turretBlindSides = w.turretBlindSides
+        turretBlindRear = w.turretBlindRear
+        alwaysStartsOnFirstFrame = w.alwaysStartsOnFirstFrame
+        proxIgnoresAsteroids = w.proxIgnoresAsteroids
+        hidesAmmoCount = w.hidesAmmoCount
+        requiresKeyCarriedAboard = w.requiresKeyCarriedAboard
+        aiWontUse = w.aiWontUse
+        isPlanetTypeWeapon = w.isPlanetTypeWeapon
+        hiddenWhenOutOfAmmo = w.hiddenWhenOutOfAmmo
+        disablesOnly = w.disablesOnly
+        beamDrawsUnderShips = w.beamDrawsUnderShips
+        firesWhileCloaked = w.firesWhileCloaked
+        tenTimesVersusAsteroids = w.tenTimesVersusAsteroids
+        passesOverAsteroids = w.passesOverAsteroids
+        decoyedByAsteroids = w.decoyedByAsteroids
+        losesLockOffBoresight = w.losesLockOffBoresight
+        mayAttackParentIfJammed = w.mayAttackParentIfJammed
+        smokeSet = w.smokeSet
+        jamVulnerability = w.jamVulnerability
+    }
+
+    /// Whether a turret carrying this weapon may bear on a target `relativeBearing`
+    /// radians off the firing ship's nose. Mirrors `WeapRes.turretCanBear`: the
+    /// three blind-spot bits block 90° arcs centred on the nose, the beams, and
+    /// the tail, which tiles the circle exactly. No flags → always bears.
+    public func turretCanBear(relativeBearing: Double) -> Bool {
+        guard turretBlindFront || turretBlindSides || turretBlindRear else { return true }
+        let twoPi = Double.pi * 2
+        var a = relativeBearing.truncatingRemainder(dividingBy: twoPi)
+        if a < 0 { a += twoPi }
+        if a > .pi { a = twoPi - a }
+        let quarter = Double.pi / 4
+        if a <= quarter { return !turretBlindFront }
+        if a >= .pi - quarter { return !turretBlindRear }
+        return !turretBlindSides
+    }
+
+    /// The chance (0...1) that a seeker from this weapon is jammed by a target
+    /// carrying `strength` in each of the four jam types.
+    ///
+    /// The Bible gives the two halves — `gövt.InhJam1-4` / `oütf` ModTypes 33-36
+    /// supply per-type jammer strength, `wëap.JamVuln1-4` supplies per-type
+    /// vulnerability, both as percentages — but never states how to combine them.
+    /// This engine treats each type as an independent trial at `strength × vuln`
+    /// and takes the union: `1 - Π(1 - sᵢvᵢ)`. That keeps a jammer that the
+    /// weapon isn't vulnerable to completely inert (the property the old
+    /// single-summed-scalar model lost) while letting several matching jammers
+    /// stack toward, but never past, certainty.
+    public func jamChance(against strength: [Int]) -> Double {
+        var survive = 1.0
+        for i in 0..<min(4, min(strength.count, jamVulnerability.count)) {
+            let s = Double(max(0, min(100, strength[i]))) / 100.0
+            let v = Double(max(0, min(100, jamVulnerability[i]))) / 100.0
+            survive *= (1 - s * v)
+        }
+        return 1 - survive
+    }
+}
+
 /// A simulation-ready weapon: damage, reach, fire rate, projectile behaviour.
 /// Built from a decoded `WeapRes` via `CombatTuning`.
 public struct WeaponSpec {
@@ -194,6 +310,34 @@ public struct WeaponSpec {
     public let oneAmmoPerBurst: Bool
     /// `Flags3` 0x0002: this weapon's shots are drawn translucent (visual only).
     public let translucentShots: Bool
+    /// The remaining documented `wëap` flag bits, carried verbatim. Forwarding
+    /// accessors for the ones the sim reads hot are just below.
+    public let flags: WeaponBehaviorFlags
+
+    // Forwarding accessors — the sim reads these in inner loops, and
+    // `spec.disablesOnly` beats `spec.flags.disablesOnly` at every call site.
+    public var wontFireAtFastShips: Bool { flags.wontFireAtFastShips }
+    public var blastSparesPlayer: Bool { flags.blastSparesPlayer }
+    public var aiWontUse: Bool { flags.aiWontUse }
+    public var isPlanetTypeWeapon: Bool { flags.isPlanetTypeWeapon }
+    public var disablesOnly: Bool { flags.disablesOnly }
+    public var firesWhileCloaked: Bool { flags.firesWhileCloaked }
+    public var tenTimesVersusAsteroids: Bool { flags.tenTimesVersusAsteroids }
+    public var passesOverAsteroids: Bool { flags.passesOverAsteroids }
+    public var decoyedByAsteroids: Bool { flags.decoyedByAsteroids }
+    public var losesLockOffBoresight: Bool { flags.losesLockOffBoresight }
+    public var mayAttackParentIfJammed: Bool { flags.mayAttackParentIfJammed }
+    public var proxIgnoresAsteroids: Bool { flags.proxIgnoresAsteroids }
+    public var requiresKeyCarriedAboard: Bool { flags.requiresKeyCarriedAboard }
+    public var hidesAmmoCount: Bool { flags.hidesAmmoCount }
+    public var hiddenWhenOutOfAmmo: Bool { flags.hiddenWhenOutOfAmmo }
+    public var beamDrawsUnderShips: Bool { flags.beamDrawsUnderShips }
+    public var alwaysStartsOnFirstFrame: Bool { flags.alwaysStartsOnFirstFrame }
+    public var smokeSet: Int { flags.smokeSet }
+    public var jamVulnerability: [Int] { flags.jamVulnerability }
+    /// Whether this weapon can be jammed at all — a seeker with no vulnerability
+    /// to any jammer type is immune however strong the target's ECM is.
+    public var isJammable: Bool { flags.jamVulnerability.contains { $0 > 0 } }
 
     /// Whether shots from this weapon home on a target (fly inertialessly toward
     /// the intercept). True for guidance `.guided`; also honours the legacy
@@ -236,7 +380,8 @@ public struct WeaponSpec {
                 isExclusive: Bool = false, cantRefireUntilShotEnds: Bool = false,
                 firesFromClosestExit: Bool = false, durability: Int = 0,
                 oneAmmoPerBurst: Bool = false, translucentShots: Bool = false,
-                ammoTypeRaw: Int = -1) {
+                ammoTypeRaw: Int = -1, flags: WeaponBehaviorFlags = WeaponBehaviorFlags()) {
+        self.flags = flags
         self.id = id; self.name = name
         self.shieldDamage = shieldDamage; self.armorDamage = armorDamage
         self.penetratesShields = penetratesShields
@@ -271,6 +416,7 @@ public struct WeaponSpec {
 
     /// Convert a decoded weapon into simulation units.
     public init(_ w: WeapRes, tuning: CombatTuning = .default) {
+        flags = WeaponBehaviorFlags(w)
         id = w.id
         name = w.name
         shieldDamage = Double(w.shieldDamage) * tuning.damageScale
@@ -555,6 +701,14 @@ public final class Projectile {
     public let confusedByInterference: Bool
     /// Seeker 0x0010: can lose lock on a target whose government jams hard enough.
     public let turnsAwayIfJammed: Bool
+    /// The firing weapon's remaining behaviour flags, carried onto the shot so
+    /// the projectile loop can honour asteroid interaction, blast exemptions,
+    /// disable-only damage and per-type jamming without a resource lookup.
+    public let flags: WeaponBehaviorFlags
+    /// Set when a jammed seeker (Seeker 0x8000) turns on the ship that fired it —
+    /// the projectile stops treating `ownerID` as friendly so it can actually
+    /// connect.
+    public var turnedOnParent = false
 
     public init(position: Vec2, velocity: Vec2, life: Double,
                 shieldDamage: Double, armorDamage: Double, blastRadius: Double,
@@ -567,7 +721,8 @@ public final class Projectile {
                 explosionBoomID: Int? = nil, graphicSpinID: Int? = nil, spinShots: Bool = false,
                 confusedByInterference: Bool = false, turnsAwayIfJammed: Bool = false,
                 penetratesShields: Bool = false, weaponID: Int = -1, pdDurability: Int = 0,
-                translucentShots: Bool = false) {
+                translucentShots: Bool = false, flags: WeaponBehaviorFlags = WeaponBehaviorFlags()) {
+        self.flags = flags
         self.weaponID = weaponID; self.pdDurability = pdDurability
         self.translucentShots = translucentShots
         self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
@@ -822,6 +977,13 @@ public enum WorldEvent {
     /// dominated. The host persists it (`PlayerState.dominatedStellars`), applies
     /// the stellar's `OnDominate` control bits, and starts paying its daily tribute.
     case stellarDominated(spobID: Int)
+    /// A destroyable stellar (`spöb.Strength` > 0) took weapon damage. Carries
+    /// the armor left and its starting strength so the HUD can draw a siege bar.
+    case stellarDamaged(spobID: Int, armor: Double, maxArmor: Double)
+    /// A destroyable stellar's armor reached zero. The host runs the persistent
+    /// half: fire `spöb.OnDestroy`, swap in the wreck graphic, and schedule the
+    /// `spöb.DeadTime` regeneration.
+    case stellarDestroyed(spobID: Int, at: Vec2, boomID: Int?, sparks: Bool)
 }
 
 /// Why a Demand-Tribute attempt was rebuffed (`WorldEvent.tributeRefused`).

@@ -12,7 +12,8 @@ because the library compiles. The three words we use, straight from
   loop calls it. As far as the player is concerned, it isn't in the game.
 - **Missing** — not built, or just a UI shell / "coming soon" placeholder.
 
-*Last walked through: 2026-07-19.*
+*Last walked through: 2026-07-19. Field-level decoder audit: 2026-07-28 —
+see [reverse-engineering/UNDECODED.md](reverse-engineering/UNDECODED.md).*
 
 ## Where things stand
 
@@ -86,6 +87,7 @@ covers what the Bible documents (see [`AI.md`](AI.md) and
 | **Spawn cadence / density** | Ambient population is a trickle heuristic (`spawnInterval` toward `sÿst.AvgShips`) "in the same spirit as" the original, not its exact algorithm. Single ships are now the maintained backbone and fleets a capped, varied accent (`maxConcurrentFleets`, single-only fill target) — fixing "all fleets, barely any lone ships" — but the exact arrival rhythm/mix is still hand-tuned. | `Spawner.swift` ambient/fleet cadence |
 | **Flight handling** | Ships **holding formation** (fleet members, escorts) fly the **driftless (inertialess) model** by default (`FlightTuning.aiInertialess = .formations`), reproducing EV Nova's tight formation-holding and removing escort micro-correction/lag. Lone AI traffic and lone combatants (and the player) still fly Newtonian, momentum-based flight — including the reverse-and-fire "Monty Python" maneuver, a signature of the original — so ambient/combat flight fidelity still rests on the hand-tuned steering heuristics below, not the driftless model. | `AIBrain.swift` steering, `Ship.fliesInertialess`, `FlightTuning` |
 | **Combat/behavior edge cases** | One mission `ShipBehav` case falls through to normal AI; brainless ships drift; some engagement transitions approximate undocumented timing. | `AIBrain.swift`, `World.swift` |
+| **NPCs are over-equipped** | The Bible is explicit that "AI-controlled ships will ignore" `shïp.DefaultItems`, but `Galaxy.loadout` merges the hull's preinstalled outfits unconditionally and `Spawner` routes every NPC through `makeLoadedShip`. Spawned NPCs fly with afterburners/shield boosters the original never gives them, which skews every combat-odds calculation downstream. | `ShipLoadout.swift:298`, `Spawner.swift:603` |
 
 This is the honest soft spot. **Most of the game plays close to the original;
 the way ships fly and show up is where you can still tell it's a
@@ -142,6 +144,7 @@ what's still waiting to be plugged in:
 |---|---|---|
 | **Junk cargo & `öops` price disasters** | `JunkModels.swift` (`JunkRes`) / `OopsModels.swift` (`OopsRes`) decode correctly | No app caller of `junk()`/`junks()`/`oops()`/`oopses()` — no junk-trade UI, no price-disaster daily roll. Now **designed** (a concrete implementation plan): [reverse-engineering/JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md), building on [ECONOMY.md](reverse-engineering/ECONOMY.md). Not yet wired. |
 | **Classic pilot save format** | `PilotSave`, `CombatRating` classic-archive encode | The app persists `PlayerState` as native JSON instead (`.evpilot` via `JSONEncoder`); the classic-archive *encode* path is unused (backup/restore mechanics are used). |
+| **~20 correctly-decoded fields** | `ränk` perks, `mïsn` QuickBrief/RefuseText/ShipSubtitle/invisible, `cölr` font+theme values, `oütf` display names and two purchase rules, `përs.showsDisasterInfo`, `shïp.deathDelay`/`inherentGovt`, `chär.startingSystems` (only slot 0 is used), `spöb.landableOnlyWhenDestroyed` (decoded twice, read never) | Each parses and is unit-tested; no production code reads them. Full table with per-field consequences in [UNDECODED.md](reverse-engineering/UNDECODED.md) §4. |
 
 ## Not there yet ❌ (missing, or just a placeholder)
 
@@ -149,6 +152,11 @@ what's still waiting to be plugged in:
 |---|---|
 | **AI / spawning / flight fidelity** | Really a quality gap more than a missing feature — see "how ships fly and spawn" above. Because it's rebuilt from data, the traffic rhythm, flight smoothness, and some combat transitions don't match the original exactly yet. |
 | **Junk-trade / öops UI** | The decoders exist and the wiring is now **designed** ([JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md)), but no trade UI / daily price-disaster roll is implemented yet. |
+| **Landing fees, stellar gravity, stellar regeneration** | `spöb.Fee`@564, `Gravity`@568, `DeadTime`@578 and `ExplodType`@580 are **not decoded at all**. Landing is always free; there is no gravity for `ignoresGravity`/ModType 41 to be immune to; destroyed stellars never come back (so the decoded `OnRegen` hook at `StoryEngine.swift:120` is dead code). |
+| **Four-type weapon jamming** | `wëap.JamVuln1-4` is not decoded. The four `oütf` jam types (ModTypes 33-36) are summed into one scalar and clamped 0-100 (`ShipLoadout.swift:386`, `World.swift:2307`), so jamming is all-or-nothing instead of per-type. |
+| **~16 weapon flag bits** | Including "AI ships won't use this weapon", "can disable but not destroy", "planet-type weapon", "fire while cloaked", turret blind spots, and the four asteroid/lock seeker bits. Full list in [UNDECODED.md](reverse-engineering/UNDECODED.md) §2. |
+| **shän Alt sprite layer + animated stellars** | The `shän` alternating-sprite-set layer (AltImageID/MaskID/SetCount) and `BaseTransp` aren't decoded, and neither are `spöb.AnimDelay`/`Frame0Bias` — so planets never animate. |
+| **Rank perks** | `ränk.permanent` and `freeRepairRefuel` (flags 0x0800) decode correctly and nothing reads them: free repair/refuel at the granting govt's worlds isn't granted. |
 
 ## So what's next?
 

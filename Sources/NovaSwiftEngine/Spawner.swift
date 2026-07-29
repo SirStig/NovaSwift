@@ -601,8 +601,11 @@ public final class Spawner {
         // Equip NPCs from their real hull loadout (preinstalled outfits: afterburner,
         // extra shields/weapons, fuel) — the same aggregation the player uses — so a
         // spawned ship matches its authentic EV Nova fit, not a bare hull.
+        // Bible: "AI-controlled ships will ignore [DefaultItems]" — an ambient
+        // NPC flies its hull's authored stock weapons, not the player's fit.
         guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang,
-                                               skillRoll: world.rng.double(in: -1...1)) else { return nil }
+                                               skillRoll: world.rng.double(in: -1...1),
+                                               includeDefaultItems: false) else { return nil }
         let brain = AIBrain(aiType: dude.aiType, govt: govt)
         brain.leaderID = leaderID
         brain.spawnOriginSpobID = originSpobID
@@ -675,7 +678,8 @@ public final class Spawner {
             let govt = pers.govt >= 128 ? pers.govt : table.systemGovt
             let (pos, ang, arrival, _) = spawnPose(world, origin: .interior)
             guard let ship = galaxy.makeLoadedShip(pers.shipType, government: govt, at: pos, angle: ang,
-                                                   skillRoll: world.rng.double(in: -1...1)) else { continue }
+                                                   skillRoll: world.rng.double(in: -1...1),
+                                                   includeDefaultItems: false) else { continue }
             ship.brain = AIBrain(aiType: AIType(raw: pers.aiType), govt: govt)
             ship.personID = pers.id
             applyPersonCustomization(pers, to: ship, world: world)
@@ -764,7 +768,8 @@ public final class Spawner {
 
         let (pos, ang, arrival, originSpobID) = spawnPose(world, origin: origin)
         guard let lead = galaxy.makeLoadedShip(fleet.leadShip, government: govt, at: pos, angle: ang,
-                                               skillRoll: world.rng.double(in: -1...1)) else { return }
+                                               skillRoll: world.rng.double(in: -1...1),
+                                               includeDefaultItems: false) else { return }
         // The flagship acts on its own hull's disposition (a freighter convoy leader
         // trades; a warfleet's leader fights) rather than always being a warship.
         let leadAI = galaxy.game.ship(fleet.leadShip).map { AIType(raw: $0.inherentAI) } ?? .warship
@@ -789,7 +794,8 @@ public final class Spawner {
                 let offset = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
                 guard let e = galaxy.makeLoadedShip(escort.shipID, government: govt,
                                                     at: pos + offset, angle: ang,
-                                                    skillRoll: world.rng.double(in: -1...1)) else { continue }
+                                                    skillRoll: world.rng.double(in: -1...1),
+                                                    includeDefaultItems: false) else { continue }
                 // Escorts fly their own hull's disposition so that, if the flagship
                 // dies, they fall back to hull-appropriate behavior rather than
                 // always reverting to a generic interceptor.
