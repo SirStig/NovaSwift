@@ -7,21 +7,6 @@ name: Godot layer (Linux/Windows)
 # only the SwiftPM packages.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Sources/**"
-      - "godot/**"
-      - "Package.swift"
-      - "scripts/build-gdextension.sh"
-      - ".github/workflows/godot-linux-windows.yml"
-  pull_request:
-    paths:
-      - "Sources/**"
-      - "godot/**"
-      - "Package.swift"
-      - "scripts/build-gdextension.sh"
-      - ".github/workflows/godot-linux-windows.yml"
   workflow_dispatch:
 
 permissions:
