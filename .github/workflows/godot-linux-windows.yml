@@ -53,9 +53,15 @@ jobs:
         run: swift build
 
   # Informational: the same core on Windows, where Foundation has its own edges.
+  #
+  # Pinned to windows-2022 (not windows-latest, which now means Windows Server
+  # 2025 + VS 2026): that newer image's MSVC/Windows SDK combo hits a Clang
+  # module cyclic-dependency bug in the Swift 5.10 toolchain's ucrt shims the
+  # moment anything needs a C module build on Windows (swift-crypto's C target
+  # was the first dependency here to trigger it).
   core-windows:
     name: Core builds on Windows (informational)
-    runs-on: windows-latest
+    runs-on: windows-2022
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -69,10 +75,14 @@ jobs:
 
   # Informational: the SwiftGodot GDExtension bridge (fetches SwiftGodot, links
   # the native library). Promote to required once verified on a real toolchain.
+  #
+  # Needs a newer toolchain than the core jobs above: SwiftGodot's `main`
+  # (which this bridge is intentionally pinned to — see godot/bridge/Package.swift)
+  # moved to swift-tools-version 6.3, so this job alone tracks that minimum.
   bridge-linux:
     name: GDExtension bridge on Linux (informational)
     runs-on: ubuntu-latest
-    container: swift:5.10-jammy
+    container: swift:6.3-jammy
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
