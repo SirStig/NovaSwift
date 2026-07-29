@@ -654,6 +654,9 @@ struct GameContainerView: View {
     /// Live debug/performance state for this play session, handed to each
     /// `GameScene` the container (re)builds. Persists across host rebuilds.
     @StateObject private var debug = DebugController()
+    /// The in-game command console: a typed CLI companion to the debug suite
+    /// (log tail + commands), gated by the same debug-mode setting.
+    @StateObject private var console = ConsoleController()
     /// The spöb the player is currently landed on (nil = flying).
     @State private var landedSpobID: Int?
     /// A pending landing awaiting the player's confirmation (the "Confirm before
@@ -944,6 +947,10 @@ struct GameContainerView: View {
                             .zIndex(30)
                             .transition(.opacity)
                     }
+                    if console.isPresented {
+                        ConsoleView(console: console) { console.isPresented = false }
+                            .zIndex(35)
+                    }
                 }
 
                 // The landed spaceport, drawn from the player's own EV Nova data.
@@ -1178,6 +1185,10 @@ struct GameContainerView: View {
         gameStackWithMidLifecycle
         // Leaving the game unsuppresses the UI cursor so it works on the menus.
         .onDisappear { CursorTargets.shared.suppressed = false }
+        // Commands read `debug`/`model` live at call time (they close over
+        // `self`), so registering once per session is enough — a jump
+        // rebuild doesn't need to re-wire them the way pad bindings do.
+        .onAppear { registerConsoleCommands() }
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
         // Push any settings change into the live scene's own copy so display
         // options (ship bars, planet labels, smooth sprites, engine glow, screen
@@ -2160,6 +2171,7 @@ struct GameContainerView: View {
         landedSpobID == nil && !nav.showingMap && !showMenu && hailDialogState == nil
             && !showMissionsPanel && !showPilotInfoPanel && !showEscortsPanel
             && !showShipInfoPanel && boardManifest == nil && !showDebugSuite
+            && !console.isPresented
     }
 
     /// Push the touch steering mode (Settings ▸ Touch scheme) down to the live
@@ -2941,22 +2953,37 @@ struct GameContainerView: View {
         }
     }
 
-    /// The developer entry point shown while debug mode is on: a debug button
-    /// and a live fps/ship chip, tucked under the menu button (clear of the
-    /// right-edge status bar). Both open the full debug suite.
+    /// The developer entry point shown while debug mode is on: a debug button,
+    /// a console button, and a live fps/ship chip, tucked under the menu
+    /// button (clear of the right-edge status bar). Also carries the hidden
+    /// ⌘\` shortcut that toggles the console from a hardware keyboard — same
+    /// pattern as `RootView`'s ⇧⌘D catcher, and command-modified for the same
+    /// reason: `FlightKeyboardMonitor` passes ⌘-chords through untouched even
+    /// while flight owns every other key.
     private var debugControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
-                    Button { showDebugSuite = true } label: {
-                        Image(systemName: "ladybug.fill")
-                            .font(.body.weight(.semibold))
-                            .padding(10)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(Circle().strokeBorder(Color(red: 0.35, green: 0.95, blue: 0.5).opacity(0.5)))
-                            .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.5))
+                    HStack(spacing: 8) {
+                        Button { showDebugSuite = true } label: {
+                            Image(systemName: "ladybug.fill")
+                                .font(.body.weight(.semibold))
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(Circle().strokeBorder(Color(red: 0.35, green: 0.95, blue: 0.5).opacity(0.5)))
+                                .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.5))
+                        }
+                        .buttonStyle(.novaPlain)
+                        Button { console.isPresented = true } label: {
+                            Image(systemName: "terminal.fill")
+                                .font(.body.weight(.semibold))
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(Circle().strokeBorder(Color(red: 0.35, green: 0.95, blue: 0.5).opacity(0.5)))
+                                .foregroundStyle(Color(red: 0.35, green: 0.95, blue: 0.5))
+                        }
+                        .buttonStyle(.novaPlain)
                     }
-                    .buttonStyle(.novaPlain)
                     DebugMetricsChip(debug: debug) { showDebugSuite = true }
                 }
                 Spacer()
@@ -2965,9 +2992,192 @@ struct GameContainerView: View {
         }
         .padding(.leading, 14)
         .padding(.top, 68)   // below the hamburger menu button
-        .opacity(showDebugSuite || showMenu ? 0 : 1)
-        .allowsHitTesting(!showDebugSuite && !showMenu)
+        .opacity(showDebugSuite || showMenu || console.isPresented ? 0 : 1)
+        .allowsHitTesting(!showDebugSuite && !showMenu && !console.isPresented)
         .zIndex(15)
+        #if !os(tvOS)
+        .overlay {
+            Button { console.isPresented.toggle() } label: { Color.clear }
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+                .keyboardShortcut("`", modifiers: [.command])
+        }
+        #endif
+    }
+
+    /// Registers every game-specific console command onto `console` — the CLI
+    /// counterpart to `DebugSuiteView`'s buttons/toggles, plus a few things
+    /// only a typed command makes practical (arbitrary credit amounts, a
+    /// specific hull by id/name, jumping straight to a relation value).
+    /// Called once from `onAppear`; each closure reads `debug`/`model` live,
+    /// so it keeps working across host rebuilds (jumps, landings) without
+    /// re-registering.
+    private func registerConsoleCommands() {
+        func onOff(_ args: [String], current: Bool) throws -> Bool {
+            guard let raw = args.first else { return !current }
+            switch raw.lowercased() {
+            case "on", "true", "1": return true
+            case "off", "false", "0": return false
+            default: throw ConsoleController.CommandError(message: "Expected on/off, got '\(raw)'")
+            }
+        }
+
+        console.register(.init(name: "god", summary: "Toggle god mode (no damage).", usage: "god [on|off]") { args in
+            debug.godMode = try onOff(args, current: debug.godMode)
+            return "God mode: \(debug.godMode ? "on" : "off")"
+        })
+
+        console.register(.init(name: "fuel", summary: "Toggle infinite fuel.", usage: "fuel [on|off]") { args in
+            debug.infiniteFuel = try onOff(args, current: debug.infiniteFuel)
+            return "Infinite fuel: \(debug.infiniteFuel ? "on" : "off")"
+        })
+
+        console.register(.init(name: "ai", summary: "Toggle the AI state/paths overlay.", usage: "ai [on|off]") { args in
+            debug.aiDebugEnabled = try onOff(args, current: debug.aiDebugEnabled)
+            return "AI overlay: \(debug.aiDebugEnabled ? "on" : "off")"
+        })
+
+        console.register(.init(name: "uidebug", summary: "Toggle the UI measurement grid.", usage: "uidebug [on|off]") { args in
+            model.settings.uiDebugOverlay = try onOff(args, current: model.settings.uiDebugOverlay)
+            model.commitSettings()
+            return "UI debug grid: \(model.settings.uiDebugOverlay ? "on" : "off")"
+        })
+
+        console.register(.init(name: "heal", summary: "Full shield + armor on the live ship.", usage: "heal") { _ in
+            guard let ship = debug.scene?.playerShip else { throw ConsoleController.CommandError(message: "No live ship.") }
+            ship.shield = ship.maxShield
+            ship.armor = ship.maxArmor
+            return "Healed."
+        })
+
+        console.register(.init(name: "refuel", summary: "Fill the live ship's fuel tank.", usage: "refuel") { _ in
+            guard let ship = debug.scene?.playerShip else { throw ConsoleController.CommandError(message: "No live ship.") }
+            ship.fuel = ship.maxFuel
+            model.pilot.state.fuel = ship.maxFuel
+            model.pilot.save()
+            return "Refueled."
+        })
+
+        console.register(.init(name: "credits", summary: "Add or set the pilot's credits.", usage: "credits <add|set> <amount>") { args in
+            guard args.count == 2, let amount = Int(args[1]) else {
+                throw ConsoleController.CommandError(message: "Usage: credits <add|set> <amount>")
+            }
+            switch args[0].lowercased() {
+            case "add": model.pilot.state.credits = max(0, model.pilot.state.credits + amount)
+            case "set": model.pilot.state.credits = max(0, amount)
+            default: throw ConsoleController.CommandError(message: "Expected add/set, got '\(args[0])'")
+            }
+            model.pilot.save()
+            debug.scene?.debugSyncCredits(model.pilot.state.credits)
+            return "Credits: \(model.pilot.state.credits)"
+        })
+
+        console.register(.init(name: "fps", summary: "Print the current performance snapshot.", usage: "fps") { _ in
+            String(format: "%.0f fps · frame %.1fms (worst %.1fms) · %d ships, %d shots, %d roids, %d nodes",
+                   debug.fps, debug.frameMsAvg, debug.frameMsMax,
+                   debug.shipCount, debug.projectileCount, debug.asteroidCount, debug.nodeCount)
+        })
+
+        console.register(.init(name: "perf", summary: "Start/stop the performance stress test.", usage: "perf <start [count]|stop>") { args in
+            guard let sub = args.first else { throw ConsoleController.CommandError(message: "Usage: perf <start [count]|stop>") }
+            switch sub.lowercased() {
+            case "start":
+                if let count = args.dropFirst().first.flatMap(Int.init) { debug.perfTestShipCount = count }
+                debug.startPerformanceTest()
+                return "Stress test started with \(debug.perfTestShipCount) ships."
+            case "stop":
+                debug.stopPerformanceTest()
+                return "Stress test stopped."
+            default:
+                throw ConsoleController.CommandError(message: "Expected start/stop, got '\(sub)'")
+            }
+        })
+
+        console.register(.init(name: "clearnpcs", summary: "Remove every NPC from the live system.", usage: "clearnpcs") { _ in
+            let n = debug.scene?.debugClearAllNPCs() ?? 0
+            return "Cleared \(n) ship\(n == 1 ? "" : "s")."
+        })
+
+        console.register(.init(name: "killhostiles", summary: "Destroy every hostile in the live system.", usage: "killhostiles") { _ in
+            let n = debug.scene?.debugDestroyAllHostiles() ?? 0
+            return "Destroyed \(n) ship\(n == 1 ? "" : "s")."
+        })
+
+        console.register(.init(name: "spawn", summary: "Spawn a ship by id, hostile/escort/neutral.", usage: "spawn <hostile|escort|neutral> <shipID> [count]") { args in
+            guard args.count >= 2, let hull = Int(args[1]) else {
+                throw ConsoleController.CommandError(message: "Usage: spawn <hostile|escort|neutral> <shipID> [count]")
+            }
+            let disposition: GameScene.DebugDisposition
+            switch args[0].lowercased() {
+            case "hostile": disposition = .hostile
+            case "escort": disposition = .escort
+            case "neutral": disposition = .neutral
+            default: throw ConsoleController.CommandError(message: "Expected hostile/escort/neutral, got '\(args[0])'")
+            }
+            let count = args.dropFirst(2).first.flatMap(Int.init) ?? 1
+            var spawned = 0
+            for _ in 0..<max(1, count) where debug.scene?.debugSpawnShip(hull: hull, as: disposition) == true {
+                spawned += 1
+            }
+            return spawned > 0 ? "Spawned \(spawned) × #\(hull) (\(args[0]))." : "Couldn't spawn #\(hull) — no live scene?"
+        })
+
+        console.register(.init(name: "ship", summary: "Set the pilot's current hull by id or name.", usage: "ship <id|name…>") { args in
+            guard !args.isEmpty else { throw ConsoleController.CommandError(message: "Usage: ship <id|name…>") }
+            guard let game = model.data.game else { throw ConsoleController.CommandError(message: "No game data loaded.") }
+            let resolved: ShipRes?
+            if args.count == 1, let id = Int(args[0]) {
+                resolved = game.ship(id)
+            } else {
+                let query = args.joined(separator: " ")
+                let matches = game.ships().filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+                if matches.count > 1 {
+                    let names = matches.prefix(8).map { "#\($0.id) \($0.displayName)" }.joined(separator: ", ")
+                    throw ConsoleController.CommandError(message: "Ambiguous — matches: \(names)")
+                }
+                resolved = matches.first
+            }
+            guard let ship = resolved else { throw ConsoleController.CommandError(message: "No ship matching '\(args.joined(separator: " "))'.") }
+            model.pilot.state.shipType = ship.id
+            model.pilot.state.shipName = ship.displayName
+            model.pilot.save()
+            return "Current ship set to #\(ship.id) \(ship.displayName) — applies on next takeoff/jump/landing."
+        })
+
+        console.register(.init(name: "relation", summary: "Set standing with a government.", usage: "relation <govtID> <value>") { args in
+            guard args.count == 2, let govt = Int(args[0]), let value = Int(args[1]) else {
+                throw ConsoleController.CommandError(message: "Usage: relation <govtID> <value>")
+            }
+            model.pilot.state.legalRecord[govt] = value
+            model.pilot.save()
+            debug.scene?.debugSetLiveRelation(govt: govt, record: value)
+            return "Government #\(govt) relation set to \(value)."
+        })
+
+        console.register(.init(name: "bit", summary: "Set/clear/toggle a mission control bit.", usage: "bit <set|clear|toggle> <n>") { args in
+            guard args.count == 2, let n = Int(args[1]) else {
+                throw ConsoleController.CommandError(message: "Usage: bit <set|clear|toggle> <n>")
+            }
+            switch args[0].lowercased() {
+            case "set": model.pilot.state.setBit(n)
+            case "clear": model.pilot.state.clearBit(n)
+            case "toggle": model.pilot.state.toggleBit(n)
+            default: throw ConsoleController.CommandError(message: "Expected set/clear/toggle, got '\(args[0])'")
+            }
+            model.pilot.save()
+            return "Bit \(n): \(model.pilot.state.setBits.contains(n) ? "set" : "clear")"
+        })
+
+        console.register(.init(name: "date", summary: "Advance the galaxy date.", usage: "date +<days>") { args in
+            guard let arg = args.first, arg.hasPrefix("+"), let days = Int(arg.dropFirst()) else {
+                throw ConsoleController.CommandError(message: "Usage: date +<days>")
+            }
+            model.pilot.state.date = model.pilot.state.date.adding(days: days)
+            model.pilot.save()
+            return "Date: \(model.pilot.state.date.description)"
+        })
     }
 
     // The single in-game entry point: one unobtrusive button in the top-left

@@ -27,13 +27,18 @@ on:
 permissions:
   contents: read
 
+# Every job pins Swift 6.3, the toolchain this code is developed against and the
+# minimum SwiftGodot's `main` requires. The jobs previously ran 5.10, which no
+# part of the project was ever built or verified against — on Linux its older
+# corelibs Foundation lacks `Sendable` conformances the sources assume, and on
+# Windows its ucrt module shims can't parse the current Windows SDK headers.
 jobs:
   # Required signal: the libraries the Godot layer depends on compile on Linux.
   # These were audited clean of Apple-only frameworks (docs/GODOT_LAYER.md).
   core-linux:
     name: Core builds on Linux
     runs-on: ubuntu-latest
-    container: swift:5.10-jammy
+    container: swift:6.3-jammy
     steps:
       - uses: actions/checkout@v4
       - name: Build NovaSwiftEngine (+ NovaSwiftKit)
@@ -45,7 +50,7 @@ jobs:
   full-core-linux:
     name: Full package on Linux (informational)
     runs-on: ubuntu-latest
-    container: swift:5.10-jammy
+    container: swift:6.3-jammy
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -54,11 +59,12 @@ jobs:
 
   # Informational: the same core on Windows, where Foundation has its own edges.
   #
-  # Pinned to windows-2022 (not windows-latest, which now means Windows Server
-  # 2025 + VS 2026): that newer image's MSVC/Windows SDK combo hits a Clang
-  # module cyclic-dependency bug in the Swift 5.10 toolchain's ucrt shims the
-  # moment anything needs a C module build on Windows (swift-crypto's C target
-  # was the first dependency here to trigger it).
+  # Also pinned to windows-2022, not windows-latest: the latter now means Windows
+  # Server 2025 + VS 2026, a much newer MSVC than the Swift toolchain is tested
+  # against. Both the runner image and the toolchain matter here — on 5.10 this
+  # job failed on *either* image with "cyclic dependency in module 'ucrt'" as
+  # soon as anything needed a C module built (swift-crypto's C target was the
+  # first dependency to trigger it).
   core-windows:
     name: Core builds on Windows (informational)
     runs-on: windows-2022
@@ -68,17 +74,15 @@ jobs:
       - name: Install Swift toolchain
         uses: compnerd/gha-setup-swift@main
         with:
-          branch: swift-5.10-release
-          tag: 5.10-RELEASE
+          branch: swift-6.3.3-release
+          tag: 6.3.3-RELEASE
       - name: Build NovaSwiftEngine (+ NovaSwiftKit)
         run: swift build --target NovaSwiftEngine
 
   # Informational: the SwiftGodot GDExtension bridge (fetches SwiftGodot, links
   # the native library). Promote to required once verified on a real toolchain.
-  #
-  # Needs a newer toolchain than the core jobs above: SwiftGodot's `main`
-  # (which this bridge is intentionally pinned to — see godot/bridge/Package.swift)
-  # moved to swift-tools-version 6.3, so this job alone tracks that minimum.
+  # SwiftGodot's `main` (which this bridge is intentionally pinned to — see
+  # godot/bridge/Package.swift) is what sets the 6.3 floor shared above.
   bridge-linux:
     name: GDExtension bridge on Linux (informational)
     runs-on: ubuntu-latest
