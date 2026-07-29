@@ -924,6 +924,11 @@ public enum WorldEvent {
     case shipDepartedViaGate(entityID: Int, gateSpobID: Int, at: Vec2)
     /// A ship's armor was knocked out but it survived as a drifting hulk.
     case shipDisabled(entityID: Int, at: Vec2)
+    /// An NPC's armor just hit 0 — the renderer should start that ship's
+    /// staggered wreck-explosion sequence (mirroring the player's own death
+    /// spectacle). The ship itself lingers in the world, frozen, until
+    /// `.shipDestroyed` fires once the sequence finishes.
+    case shipDying(entityID: Int, at: Vec2, boomID: Int?)
     /// A government patrol/interceptor ran a scan pass on another ship (checking
     /// for contraband in EV Nova; here it's the visible fly-by + scan sweep).
     /// `scannerID` is the authority ship, `targetID` the ship being scanned.

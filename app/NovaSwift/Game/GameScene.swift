@@ -186,6 +186,11 @@ final class GameScene: SKScene {
     private var shipNode: SKNode!
     /// One-shot latch so the player's multi-burst death animation only runs once.
     private var playerDeathSequenceStarted = false
+    /// Same one-shot latch as `playerDeathSequenceStarted`, but per dying NPC —
+    /// keyed by entityID so a `.shipDying` event fired again (it shouldn't be,
+    /// but the world only guarantees "at least once") never double-starts the
+    /// sequence. Entries are removed once `.shipDestroyed` retires the entityID.
+    private var npcDeathSequenceStarted: Set<Int> = []
     private var shipSprite: SKSpriteNode?
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
@@ -1504,6 +1509,8 @@ final class GameScene: SKScene {
             case let .shipDisabled(entityID, at):
                 spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
                 if entityID == 0 { onPlayerDisabled?() }
+            case let .shipDying(entityID, at, boomID):
+                beginNPCDeathSequence(entityID: entityID, at: CGPoint(x: at.x, y: at.y), boomID: boomID)
             case let .shipBoarded(entityID, _):
                 if entityID == 0 { onPlayerBoarded?() }
             case let .shipScanned(scannerID, targetID, _):
@@ -1567,6 +1574,7 @@ final class GameScene: SKScene {
                     escortRecordByEntity[entityID] = nil
                     onEscortLost?(recordID)
                 }
+                npcDeathSequenceStarted.remove(entityID)
             default:
                 break
             }
@@ -4544,6 +4552,41 @@ final class GameScene: SKScene {
                     self.addShake(at: at, radius: 110)
                 }
                 self.shipNode?.isHidden = true
+            }
+        ]))
+    }
+
+    /// The NPC counterpart to `beginPlayerDeathSequence`: the same staggered
+    /// run of explosion bursts over the same ~1.8s window, played at a fixed
+    /// point (the world freezes a dying NPC's velocity, so unlike the player
+    /// there's no need to re-read a live position each burst). The world keeps
+    /// the wreck in `npcs` for the same duration — `syncNPCs` naturally tears
+    /// its node down the instant `.shipDestroyed` finally drops it, which lands
+    /// right as this sequence's last burst fires.
+    private func beginNPCDeathSequence(entityID: Int, at point: CGPoint, boomID: Int?) {
+        guard npcDeathSequenceStarted.insert(entityID).inserted else { return }
+        let bursts = 9
+        let step = 0.2
+        for i in 0..<bursts {
+            run(.sequence([
+                .wait(forDuration: Double(i) * step),
+                .run { [weak self] in
+                    guard let self else { return }
+                    let at = CGPoint(x: point.x + .random(in: -22...22),
+                                     y: point.y + .random(in: -22...22))
+                    self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4, boomID: boomID)
+                    self.audio?.play(303, at: at, listener: at)
+                    self.addShake(at: at, radius: 60)
+                }
+            ]))
+        }
+        run(.sequence([
+            .wait(forDuration: Double(bursts) * step),
+            .run { [weak self] in
+                guard let self else { return }
+                self.spawnExplosion(at: point, radius: 96, boomID: boomID)
+                self.audio?.play(303, at: point, listener: point)
+                self.addShake(at: point, radius: 110)
             }
         ]))
     }

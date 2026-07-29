@@ -627,6 +627,17 @@ public final class Ship {
     /// player's legal record).
     public var killedByPlayer = false
 
+    /// Non-nil once this NPC's armor has hit 0: counts up the seconds spent
+    /// playing out its wreck-explosion sequence before `despawnDepartedAndDead`
+    /// actually removes it from `npcs`. Lets a dying NPC linger on screen the
+    /// same way the player's own death sequence lingers before its wreck is
+    /// hidden, instead of vanishing the instant its armor reaches 0.
+    public var deathTimer: Double? = nil
+
+    /// How long a dead NPC's wreck lingers (matches the player's own 9-burst,
+    /// 0.2s-apart death sequence in `GameScene.beginPlayerDeathSequence`).
+    static let deathSequenceDuration: Double = 1.8
+
     /// Debug/cheat only: when set, `applyDamage` is a no-op — shields and armor
     /// never drop and the ship can't be destroyed or disabled by weapon fire.
     /// The debug suite drives this on the player ship for "god mode"; nothing in
@@ -745,6 +756,10 @@ public final class Ship {
     }
 
     func regen(_ dt: Double) {
+        // A dead ship (armor at 0, wreck lingering out its death sequence)
+        // never regens anything — a nonzero `armorRechargePerSec` ship would
+        // otherwise be able to heal itself back above 0 and un-die mid-sequence.
+        guard armor > 0 else { return }
         if shield < maxShield { shield = min(maxShield, shield + shieldRechargePerSec * dt) }
         if armor < maxArmor && armorRechargePerSec > 0 {
             armor = min(maxArmor, armor + armorRechargePerSec * dt)
@@ -1712,7 +1727,7 @@ public final class World {
         prof("sim.stellarWeapons") { updateStellarWeapons(dt) }
         prof("sim.pointDefense") { runPointDefense() }
         prof("sim.projectiles") { stepProjectiles(dt) }
-        prof("sim.despawn") { despawnDepartedAndDead() }
+        prof("sim.despawn") { despawnDepartedAndDead(dt) }
         // Ships have moved this step; weld continuous beams to their new
         // positions/headings and expire pulse-beam flashes.
         prof("sim.beams") { refreshActiveBeams(dt) }
@@ -2844,40 +2859,67 @@ public final class World {
 
     // MARK: Despawn
 
-    private func despawnDepartedAndDead() {
+    private func despawnDepartedAndDead(_ dt: Double) {
         var survivors: [Ship] = []
         for npc in npcs {
             if !npc.isAlive {
-                if npc.killedByPlayer, let dip = diplomacy {
-                    dip.recordKill(of: npc.government, shipStrength: Int(npc.combatStrength))
+                if npc.deathTimer == nil {
+                    // The frame this NPC actually died: all the *gameplay*
+                    // consequences (diplomacy, mission goals, targeting) fire
+                    // right away, but the ship itself lingers as a frozen wreck
+                    // for `deathSequenceDuration` — playing out a staggered
+                    // multi-burst explosion just like the player's own death —
+                    // instead of vanishing the instant its armor hit 0.
+                    npc.deathTimer = 0
+                    npc.velocity = Vec2()
+                    // Piggyback the drifting-hulk render treatment (thruster/
+                    // health-bar/shield-flare hidden) for the lingering wreck —
+                    // harmless: everywhere `disabled` gates *behavior* also
+                    // gates on `isAlive`, which is already false here.
+                    npc.disabled = true
+                    if npc.killedByPlayer, let dip = diplomacy {
+                        dip.recordKill(of: npc.government, shipStrength: Int(npc.combatStrength))
+                    }
+                    // A named person the player destroyed won't appear again.
+                    if npc.killedByPlayer, let pid = npc.personID {
+                        events.append(.personDefeated(personID: pid))
+                    }
+                    events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
+                                             soundID: npc.explosionSoundID, boomID: npc.explosionBoomID))
+                    events.append(.shipDying(entityID: npc.entityID, at: npc.position,
+                                             boomID: npc.explosionBoomID))
+                    Log.combat.notice("\(LogTag.ship(id: npc.entityID, name: npc.name)) destroyed\(npc.killedByPlayer ? " by player" : "")")
+                    // A destroyed mission ship meets a "destroy" (or "chase off",
+                    // which a kill satisfies) objective. `disable`/`board`/`rescue`
+                    // already fired when it was crippled; don't double-report those.
+                    if let mid = npc.missionID, let goal = npc.missionShipGoal,
+                       goal == .destroy || goal == .chaseOff {
+                        events.append(.missionShipGoalReached(missionID: mid, entityID: npc.entityID,
+                                                              goal: goal, byPlayer: npc.killedByPlayer))
+                    }
+                    // An escort/rescue ship the player was supposed to keep alive just
+                    // died → a loss, so the story layer can fail the mission.
+                    if let mid = npc.missionID, let goal = npc.missionShipGoal,
+                       goal == .escort || goal == .rescue {
+                        events.append(.missionShipLost(missionID: mid, goal: goal))
+                    }
+                    Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
+                    // Clear any targeting of the dead ship.
+                    clearTarget(npc.entityID)
+                    stopAllBeamLoops(for: npc)
+                    survivors.append(npc)
+                    continue
                 }
-                // A named person the player destroyed won't appear again.
-                if npc.killedByPlayer, let pid = npc.personID {
-                    events.append(.personDefeated(personID: pid))
+                npc.deathTimer! += dt
+                if npc.deathTimer! < Ship.deathSequenceDuration {
+                    // Still mid-explosion — keep the wreck around so its sprite
+                    // stays on screen for the sequence to play over.
+                    survivors.append(npc)
+                    continue
                 }
-                events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
-                                         soundID: npc.explosionSoundID, boomID: npc.explosionBoomID))
+                // Sequence finished — actually gone now.
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
                                              at: npc.position))
-                Log.combat.notice("\(LogTag.ship(id: npc.entityID, name: npc.name)) destroyed\(npc.killedByPlayer ? " by player" : "")")
-                // A destroyed mission ship meets a "destroy" (or "chase off",
-                // which a kill satisfies) objective. `disable`/`board`/`rescue`
-                // already fired when it was crippled; don't double-report those.
-                if let mid = npc.missionID, let goal = npc.missionShipGoal,
-                   goal == .destroy || goal == .chaseOff {
-                    events.append(.missionShipGoalReached(missionID: mid, entityID: npc.entityID,
-                                                          goal: goal, byPlayer: npc.killedByPlayer))
-                }
-                // An escort/rescue ship the player was supposed to keep alive just
-                // died → a loss, so the story layer can fail the mission.
-                if let mid = npc.missionID, let goal = npc.missionShipGoal,
-                   goal == .escort || goal == .rescue {
-                    events.append(.missionShipLost(missionID: mid, goal: goal))
-                }
-                Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
-                // Clear any targeting of the dead ship.
-                clearTarget(npc.entityID)
-                stopAllBeamLoops(for: npc)
                 continue
             }
             // Landed on a stellar object → vanished into the spaceport (no wreck).

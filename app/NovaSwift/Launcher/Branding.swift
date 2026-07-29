@@ -159,6 +159,49 @@ enum NovaLinks {
     /// "EV Nova mod 4" build. Linked from the data-setup wizard; NovaSwift never
     /// hosts game data or registration codes itself.
     static let evstuff = URL(string: "https://andrews05.github.io/evstuff/")!
+
+    /// Builds a GitHub "New Issue" URL against the port's own repo, pre-filled
+    /// with a bug-report template plus the reporter's version/build/platform —
+    /// there's no NovaSwift-hosted server to submit reports to, so "open a
+    /// pre-filled issue in the browser" is the report pipeline. `context`, when
+    /// given, is free text about where in the game the reporter was (e.g. a
+    /// system/ship name from the in-flight menu); the About box has none.
+    static func reportIssueURL(context: String = "") -> URL {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        #if os(macOS)
+        let platform = "macOS"
+        #elseif os(tvOS)
+        let platform = "tvOS"
+        #else
+        let platform = "iOS"
+        #endif
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+
+        var body = """
+        **What happened?**
+
+
+        **What did you expect instead?**
+
+
+        **Steps to reproduce**
+
+
+        """
+        if !context.isEmpty {
+            body += "**Where:** \(context)\n\n"
+        }
+        body += "---\nNovaSwift \(version) (\(build)) · \(platform) \(osVersion)"
+
+        var components = URLComponents(url: repo.appendingPathComponent("issues/new"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "labels", value: "bug"),
+            URLQueryItem(name: "body", value: body),
+        ]
+        return components.url!
+    }
 }
 
 /// The About box, in the game's own dialog chrome (`NovaDialog` — mission-panel
@@ -197,6 +240,10 @@ struct AboutView: View {
                     Text("Created by Joshua Kac (SirStig)").novaFont(.body, weight: .semibold)
                     Link(destination: NovaLinks.repo) {
                         Label("github.com/SirStig", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    .novaFont(.body)
+                    Link(destination: NovaLinks.reportIssueURL()) {
+                        Label("Report a Bug", systemImage: "ladybug")
                     }
                     .novaFont(.body)
                 }

@@ -14,5 +14,7 @@
 		<string>_novaswift-mp._tcp</string>
 		<string>_novaswift-mp._udp</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

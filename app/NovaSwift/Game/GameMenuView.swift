@@ -13,6 +13,7 @@ import AppKit
 /// New features get a row here rather than another floating button on the HUD.
 struct GameMenuView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openURL) private var openURL
     @ObservedObject var hud: GameHUDModel
     var onResume: () -> Void
     var onOpenMap: () -> Void
@@ -135,6 +136,11 @@ struct GameMenuView: View {
                         openStoryGuide()
                     }
                     row("Preferences", "gearshape.fill") { showSettings = true }
+                    row("Report Issue", "ladybug.fill") {
+                        let context = [hud.systemName, hud.shipName]
+                            .filter { !$0.isEmpty }.joined(separator: " · ")
+                        openURL(NovaLinks.reportIssueURL(context: context))
+                    }
                     #if os(macOS)
                     // Native full screen also works from the green window button
                     // or ⌃⌘F; this is the in-game control. Full screen is what
