@@ -41,6 +41,10 @@ struct NovaUITheme: Equatable {
     /// (cölr.menuFont has no text target here — our main-menu labels are PICT
     /// art, not rendered text — so it's decoded in `ColrRes` but not carried.)
     var buttonFont: String?
+    /// The `cölr` button font *size* (buttonFontSz) — nil leaves the role's own
+    /// size. Paired with `buttonFont`, so a TC reskin gets both the family and
+    /// the point size it authored for its button art.
+    var buttonFontSize: CGFloat?
 
     /// The look each field had before `cölr` drove it — used whole when no `cölr`
     /// decodes, and per-field whenever a colour decodes to pure black (0,0,0),
@@ -60,20 +64,22 @@ struct NovaUITheme: Equatable {
         progOutline: Color(white: 0.30),
         floatingMap: novaAmber.opacity(0.25),
         escortHilite: novaAmber.opacity(0.16),
-        buttonFont: nil)
+        buttonFont: nil,
+        buttonFontSize: nil)
 
     init(buttonUp: Color, buttonDown: Color, buttonGrey: Color,
          gridBright: Color, gridDim: Color,
          listText: Color, listBkgnd: Color, listHilite: Color,
          progBright: Color, progDim: Color, progOutline: Color,
          floatingMap: Color, escortHilite: Color,
-         buttonFont: String?) {
+         buttonFont: String?, buttonFontSize: CGFloat? = nil) {
         self.buttonUp = buttonUp; self.buttonDown = buttonDown; self.buttonGrey = buttonGrey
         self.gridBright = gridBright; self.gridDim = gridDim
         self.listText = listText; self.listBkgnd = listBkgnd; self.listHilite = listHilite
         self.progBright = progBright; self.progDim = progDim; self.progOutline = progOutline
         self.floatingMap = floatingMap; self.escortHilite = escortHilite
         self.buttonFont = buttonFont
+        self.buttonFontSize = buttonFontSize
     }
 
     init(colr: ColrRes?) {
@@ -113,7 +119,11 @@ struct NovaUITheme: Equatable {
             progOutline: col(c.progOutline, f.progOutline),
             floatingMap: col(c.floatingMap, f.floatingMap),
             escortHilite: col(c.escortHilite, f.escortHilite),
-            buttonFont: font(c.buttonFont))
+            buttonFont: font(c.buttonFont),
+            // `buttonFontSz`: only trust a plausible point size — a zeroed or
+            // absurd decode leaves the button role's own size rather than
+            // rendering labels at 0pt (invisible) or 200pt (overflowing the art).
+            buttonFontSize: (6...48).contains(c.buttonFontSz) ? CGFloat(c.buttonFontSz) : nil)
     }
 }
 

@@ -225,4 +225,102 @@ final class StellarWeaponTests: XCTestCase {
         XCTAssertEqual(beam?.shooterID, World.stellarShooterID(forSpob: 1))
         XCTAssertEqual(beam?.continuous, false, "stellar beams are pulse flashes")
     }
+
+    // MARK: Destroyable stellars (`spöb.Strength`)
+
+    /// A world with one destroyable stellar at the origin and the player in range.
+    private func destroyableWorld(strength: Double, gravity: Int = 0) -> World {
+        let world = World(player: makeShip("Player", govt: independentGovt, at: Vec2(0, 200)))
+        world.diplomacy = warDiplomacy()
+        world.systemContext = SystemContext(bodies: [StellarBody(
+            id: 1, position: Vec2(), radius: 20, canLand: true, government: 128,
+            strength: strength, explosionBoomID: 135, explosionHasSparks: true,
+            regenerationDays: 30, gravity: gravity)])
+        return world
+    }
+
+    func testDestroyableStellarTakesDamageAndDies() {
+        let world = destroyableWorld(strength: 100)
+        let body = world.systemContext.bodies[0]
+
+        var damaged: [(Double, Double)] = []
+        var destroyed: (id: Int, boom: Int?, sparks: Bool)?
+        world.applyStellarHit(body, shield: 30, armor: 30)
+        for e in world.events {
+            if case let .stellarDamaged(_, armor, maxArmor) = e { damaged.append((armor, maxArmor)) }
+        }
+        XCTAssertEqual(damaged.first?.0, 40, "combined mass+energy damage comes off one pool")
+        XCTAssertEqual(damaged.first?.1, 100)
+
+        // A second hit of the same size finishes it.
+        let before = world.events.count
+        world.applyStellarHit(body, shield: 30, armor: 30)
+        for e in world.events.dropFirst(before) {
+            if case let .stellarDestroyed(id, _, boom, sparks) = e { destroyed = (id, boom, sparks) }
+        }
+        XCTAssertEqual(destroyed?.id, 1)
+        XCTAssertEqual(destroyed?.boom, 135, "the stellar's own spöb.Explosion plays")
+        XCTAssertEqual(destroyed?.sparks, true)
+        XCTAssertTrue(world.stellarsDestroyedThisSession.contains(1))
+        XCTAssertTrue(world.destroyableStellars.isEmpty, "a downed stellar stops being a target")
+    }
+
+    func testInvulnerableStellarIgnoresFire() {
+        let world = destroyableWorld(strength: 0)
+        let body = world.systemContext.bodies[0]
+        XCTAssertFalse(world.applyStellarHit(body, shield: 9999, armor: 9999))
+        XCTAssertTrue(world.stellarsDestroyedThisSession.isEmpty,
+                      "Strength 0 is the TMPL's 'Invulnerable' — no amount of fire touches it")
+    }
+
+    /// A planet-type weapon (`wëap.Flags2` 0x0400) flies through ships and only
+    /// connects with a destroyable stellar.
+    func testPlanetTypeWeaponPassesThroughShipsAndHitsTheStellar() {
+        var flags = WeaponBehaviorFlags(); flags.isPlanetTypeWeapon = true
+        let siegeGun = WeaponSpec(id: 301, name: "Siege Gun", shieldDamage: 40, armorDamage: 40,
+                                  reloadSeconds: 0.2, projectileSpeed: 900, range: 2000,
+                                  accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
+                                  blastRadius: 0, ammoPerShot: 0, flags: flags)
+        let world = destroyableWorld(strength: 60)
+        // A hostile ship parked directly between the player and the planet.
+        let shield = makeShip("Blocker", govt: 200, at: Vec2(0, 100))
+        _ = world.addNPC(shield)
+
+        world.player.weapons = [WeaponMount(spec: siegeGun)]
+        world.player.angle = .pi                     // nose down, toward the origin
+        world.intent.firePrimary = true
+        run(world, seconds: 1.5)
+
+        XCTAssertEqual(shield.shield, 100, "a planet-type weapon flies straight through ordinary hulls")
+        XCTAssertTrue(world.stellarsDestroyedThisSession.contains(1),
+                      "…and lands its damage on the destroyable stellar behind them")
+    }
+
+    // MARK: Gravity (`spöb.Gravity`)
+
+    func testStellarGravityPullsShipsAndTheImmuneIgnoreIt() {
+        let world = destroyableWorld(strength: 0, gravity: 400)
+        let drifter = makeShip("Drifter", govt: independentGovt, at: Vec2(0, 200))
+        drifter.brain = nil
+        _ = world.addNPC(drifter)
+        let immune = makeShip("Immune", govt: independentGovt, at: Vec2(0, 200))
+        immune.brain = nil
+        immune.ignoresGravity = true
+        _ = world.addNPC(immune)
+
+        for _ in 0..<30 { world.step(1.0 / 30.0) }
+        XCTAssertLessThan(drifter.velocity.y, -1, "positive gravity pulls a ship toward the body")
+        XCTAssertEqual(immune.velocity.y, 0, accuracy: 1e-9,
+                       "shïp Flags3 0x0010 / oütf ModType 41 make a hull immune")
+    }
+
+    func testZeroGravityIsInert() {
+        let world = destroyableWorld(strength: 0, gravity: 0)
+        let drifter = makeShip("Drifter", govt: independentGovt, at: Vec2(0, 200))
+        drifter.brain = nil
+        _ = world.addNPC(drifter)
+        for _ in 0..<30 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(drifter.velocity.length, 0, accuracy: 1e-9,
+                       "every base-game stellar has Gravity 0 — it must cost nothing and do nothing")
+    }
 }

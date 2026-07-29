@@ -24,6 +24,51 @@ struct PlanetVisual {
     var isHypergate: Bool = false
     var isWormhole: Bool = false
     var isGate: Bool { isHypergate || isWormhole }
+    /// Every frame of this stellar's sprite sheet, for an animated `spöb`
+    /// (`AnimDelay > 0`). Empty when the stellar is a single static frame, which
+    /// is every base-game body.
+    var frames: [SKTexture] = []
+    /// `spöb.AnimDelay` in seconds between frames.
+    var animDelaySec: Double = 0
+    /// `spöb.Frame0Bias`: hold frame 0 this many times longer than the rest, so a
+    /// rotating beacon can rest between sweeps. <= 1 = no bias.
+    var frame0Bias: Int = 1
+    /// `Flags2` 0x0001 — return to frame 0 between each subsequent frame.
+    var showsFirstFrameBetween = false
+    /// `Flags2` 0x0002 — pick the next frame at random instead of cycling.
+    var picksFramesRandomly = false
+    /// `Flags2` 0x0080 — only animate once the stellar has been destroyed.
+    var animatesOnlyWhenDestroyed = false
+    var isAnimated: Bool { animDelaySec > 0 && frames.count > 1 }
+
+    /// Which frame to show at `clock` seconds into the animation. Implements the
+    /// Bible/TMPL frame rules: `Frame0Bias` stretches frame 0, `Flags2` 0x0001
+    /// interleaves frame 0 between every other, and 0x0002 picks at random.
+    /// `randomSeed` keeps the random mode stable per stellar rather than
+    /// strobing every draw.
+    func frameIndex(clock: Double, randomSeed: Int) -> Int {
+        let n = frames.count
+        guard n > 1, animDelaySec > 0 else { return 0 }
+        // Frame 0 occupies `bias` slots; every other frame occupies one.
+        let bias = max(1, frame0Bias)
+        let cycleSlots = showsFirstFrameBetween
+            ? (n - 1) * (bias + 1)              // 0,1,0,2,0,3… with frame 0 stretched
+            : bias + (n - 1)
+        let slot = Int(clock / animDelaySec) % max(1, cycleSlots)
+        if picksFramesRandomly {
+            // Deterministic per (stellar, slot) so the frame holds for its whole
+            // slot instead of flickering every rendered frame.
+            var h = UInt64(bitPattern: Int64(randomSeed &* 2_654_435_761 &+ slot))
+            h ^= h >> 33; h = h &* 0xFF51AFD7ED558CCD; h ^= h >> 33
+            return Int(h % UInt64(n))
+        }
+        if showsFirstFrameBetween {
+            let pair = bias + 1
+            let idx = slot / pair
+            return (slot % pair) < bias ? 0 : min(n - 1, idx + 1)
+        }
+        return slot < bias ? 0 : min(n - 1, slot - bias + 1)
+    }
 }
 
 /// The live game scene. Runs the `NovaSwiftEngine` simulation and draws it: an
@@ -70,6 +115,11 @@ final class GameScene: SKScene {
 
     /// pêrs ids the player has wronged (grudge) — host-supplied from pilot state.
     var persGrudges: Set<Int> = []
+    /// `spöb` ids currently destroyed, mirrored from the pilot so the renderer
+    /// can apply the rules that key off it — chiefly `spöb.Flags2` 0x0080
+    /// ("animate only when destroyed"). Kept in sync by the container on system
+    /// build and whenever a stellar is destroyed or regenerates.
+    var destroyedStellarIDs: Set<Int> = []
     /// Host gate: whether a pêrs may spawn now (ActiveOn NCB + not defeated).
     var persSpawnEligible: ((Int) -> Bool)?
     /// Host gate: whether a hull with a non-blank `shïp.AppearOn` may spawn now.
@@ -416,6 +466,8 @@ final class GameScene: SKScene {
     /// spöb id → its render node, so gate glow/flash can find the right planet
     /// node without a linear scan. Rebuilt in `buildPlanets`, cleared on reload.
     private var planetNodeByID: [Int: SKNode] = [:]
+    /// Shared clock for animated `spöb` frame cycling (see `updateAnimatedStellars`).
+    private var stellarAnimClock: Double = 0
     /// Set by `reloadSystem` when the arrival is *out of a gate*, consumed by the
     /// gate open→close flourish once the new system's nodes are built.
     private var pendingGateArrivalID: Int?
@@ -1487,6 +1539,7 @@ final class GameScene: SKScene {
         lap("sync.npcs")
         syncAsteroids()
         lap("sync.asteroids")
+        updateAnimatedStellars(dt)
         updateSelectionBrackets()
         updateAIDebug()
         shipNode.position = scenePos
@@ -3479,19 +3532,48 @@ final class GameScene: SKScene {
     /// Build the render-side stellar visuals for a system from game data — the
     /// same construction `GameHost` does on a fresh build, so an in-place system
     /// reload gets identical planets without a host rebuild.
+    /// Advance every animated `spöb` in the system (`AnimDelay` > 0). No stock
+    /// stellar is animated, so this early-outs on base-game data; plug-ins and
+    /// TCs use it for rotating beacons, pulsing stations and flickering wrecks.
+    private func updateAnimatedStellars(_ dt: TimeInterval) {
+        guard planetVisuals.contains(where: \.isAnimated) else { return }
+        stellarAnimClock += dt
+        for p in planetVisuals where p.isAnimated {
+            // `Flags2` 0x0080: the wreck animates, the intact body doesn't.
+            if p.animatesOnlyWhenDestroyed && !destroyedStellarIDs.contains(p.id) { continue }
+            guard let sprite = planetNodeByID[p.id] as? SKSpriteNode else { continue }
+            let idx = p.frameIndex(clock: stellarAnimClock, randomSeed: p.id)
+            if idx < p.frames.count { sprite.texture = p.frames[idx] }
+        }
+    }
+
     private func makePlanetVisuals(systemID: Int, game: NovaGame) -> [PlanetVisual] {
         game.stellarObjects(in: systemID).map { entry in
             let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
             let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
             // `spöb.X/Y` is authored +y-down (same convention as `sÿst.X/Y`); flip
             // to this engine/SpriteKit's +y-up world (see `Galaxy.systemContext`).
-            return PlanetVisual(id: entry.spob.id, name: entry.spob.name,
-                                position: CGPoint(x: entry.spob.x, y: -entry.spob.y),
-                                texture: tex, radius: radius,
-                                government: entry.spob.government,
-                                isUninhabited: entry.spob.isUninhabited,
-                                isHypergate: entry.spob.isHypergate,
-                                isWormhole: entry.spob.isWormhole)
+            // Animated stellars (`spöb.AnimDelay` > 0) carry their whole sheet so
+            // the scene can cycle it; static ones (every base-game body) don't,
+            // which keeps the common case a single texture.
+            var frames: [SKTexture] = []
+            if entry.spob.isAnimated, let sheet = entry.sprite, sheet.frameCount > 1 {
+                frames = (0..<sheet.frameCount).compactMap { sheet.frameCGImage($0) }.map { SKTexture(cgImage: $0) }
+            }
+            var v = PlanetVisual(id: entry.spob.id, name: entry.spob.name,
+                                 position: CGPoint(x: entry.spob.x, y: -entry.spob.y),
+                                 texture: tex, radius: radius,
+                                 government: entry.spob.government,
+                                 isUninhabited: entry.spob.isUninhabited,
+                                 isHypergate: entry.spob.isHypergate,
+                                 isWormhole: entry.spob.isWormhole)
+            v.frames = frames
+            v.animDelaySec = Double(max(0, entry.spob.animationDelay)) / 30.0
+            v.frame0Bias = entry.spob.frame0Bias
+            v.showsFirstFrameBetween = entry.spob.showsFirstFrameBetween
+            v.picksFramesRandomly = entry.spob.picksFramesRandomly
+            v.animatesOnlyWhenDestroyed = entry.spob.animatesOnlyWhenDestroyed
+            return v
         }
     }
 

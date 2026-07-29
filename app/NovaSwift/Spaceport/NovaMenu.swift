@@ -312,7 +312,12 @@ struct NovaButtonFace: View {
             // 13pt floor overflow a 25px-tall authentic button. cölr.buttonFont
             // overrides the family when the data supplies (and registers) one.
             Text(title)
-                .font(.custom(theme.buttonFont ?? NovaFontRole.button.family, size: 12))
+                // cölr.buttonFontSz sizes the label when the data supplies a
+                // plausible one; 12pt otherwise (what fits the 25px-tall
+                // authentic button art), capped so an oversized TC value can't
+                // overflow the slices.
+                .font(.custom(theme.buttonFont ?? NovaFontRole.button.family,
+                              size: min(theme.buttonFontSize ?? 12, 16)))
                 .foregroundStyle(labelColor(state))
         )
     }

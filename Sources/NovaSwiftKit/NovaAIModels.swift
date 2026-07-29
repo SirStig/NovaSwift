@@ -250,6 +250,17 @@ public struct OutfRes {
     /// instead of in the Extras section" (Bible, `Flags` 0x2000).
     public var showsInRanksSection: Bool { flags & 0x2000 != 0 }
 
+    /// The lowercase singular/plural forms for running text ("you don't have
+    /// room for a fuel scoop", "2 fuel scoops"), falling back to the display
+    /// name when the record leaves them blank — which most do.
+    public var runningTextName: String {
+        lowercaseName.isEmpty ? displayName : lowercaseName
+    }
+    public func runningTextName(count: Int) -> String {
+        if count == 1 { return runningTextName }
+        return lowercasePlural.isEmpty ? runningTextName : lowercasePlural
+    }
+
     /// The name the outfitter dialog shows: the in-record "Outfitter Name"
     /// string when set, else the resource name (annotation stripped).
     public var outfitterDisplayName: String {

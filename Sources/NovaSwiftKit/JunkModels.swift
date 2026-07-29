@@ -86,6 +86,19 @@ public struct JunkRes {
     /// this junk type may be sold.
     public let sellOn: String
 
+    /// The name to use in the player-info cargo list — the Bible's lowercase
+    /// `LCName` when the record sets one, else the resource name. This is what
+    /// makes junk read naturally in running text ("12 tons of luxury goods")
+    /// instead of shouting a title-cased resource name mid-sentence.
+    public var runningTextName: String {
+        lowercaseName.isEmpty ? name.novaDisplayName : lowercaseName
+    }
+    /// The compact form for the flight status bar (`Abbrev`), falling back to
+    /// the full name when the record sets none.
+    public var statusBarName: String {
+        statusBarAbbrev.isEmpty ? name.novaDisplayName : statusBarAbbrev
+    }
+
     /// Bible `Flags` 0x0001 "Tribbles" — this junk multiplies in the cargo
     /// bay over time.
     public var multipliesInCargoHold: Bool { flags & 0x0001 != 0 }

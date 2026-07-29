@@ -444,4 +444,81 @@ final class ShipSystemTests: XCTestCase {
         XCTAssertEqual(ship.unloadCargo(1, tons: 999), 20, "can't remove more than held")
         XCTAssertNil(ship.cargo[1])
     }
+
+    // MARK: `shïp.DefaultItems` is player-only
+
+    /// The Bible on `DefaultItems`: "Up to eight default items with which to equip
+    /// this ship **when the player buys or captures one**. Note that AI-controlled
+    /// ships will ignore these fields."
+    ///
+    /// The test hull (128) ships with outfit 200 preinstalled, which grants +50
+    /// shield, +30 cargo, an afterburner and weapon 129. A player-built ship gets
+    /// all of that; an AI-spawned one gets none of it and flies the bare hull with
+    /// only its own stock weapon (128).
+    func testAIShipsIgnoreDefaultItemsButThePlayerGetsThem() throws {
+        let galaxy = Galaxy(game: makeGame())
+
+        let player = try XCTUnwrap(galaxy.makeLoadedShip(128))
+        XCTAssertEqual(player.maxShield, 150, "hull 100 + the preinstalled kit's +50")
+        XCTAssertEqual(player.cargoCapacity, 80, "hull 50 + the kit's +30")
+        XCTAssertNotNil(player.afterburner, "the kit's afterburner is fitted")
+        XCTAssertEqual(Set(player.weapons.map(\.spec.id)), [128, 129],
+                       "stock weapon plus the one the kit grants")
+
+        let npc = try XCTUnwrap(galaxy.makeLoadedShip(128, includeDefaultItems: false))
+        XCTAssertEqual(npc.maxShield, 100, "an AI hull gets no DefaultItems shield boost")
+        XCTAssertEqual(npc.cargoCapacity, 50, "…nor the extra hold")
+        XCTAssertNil(npc.afterburner, "…nor the afterburner")
+        XCTAssertEqual(Set(npc.weapons.map(\.spec.id)), [128],
+                       "an NPC flies its hull's own stock armament, nothing more")
+
+        // Extra outfits passed in explicitly (a captured hull, a mission grant)
+        // still apply — only the hull's *own* defaults are suppressed.
+        let equipped = try XCTUnwrap(galaxy.makeLoadedShip(128, extraOutfits: [200: 1],
+                                                           includeDefaultItems: false))
+        XCTAssertEqual(equipped.maxShield, 150)
+    }
+
+    // MARK: disable-only weapons (`wëap.Flags2` 0x1000)
+
+    /// Fire `weapon` at a fresh 100-armor NPC for 4 seconds and report its state.
+    private func pound(with weapon: WeaponSpec) -> Ship {
+        let attacker = Ship(name: "A", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: .pi))
+        let world = World(player: attacker)
+        let victim = Ship(name: "B", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: .pi),
+                          position: Vec2(0, 300))
+        victim.maxShield = 0; victim.shield = 0
+        victim.maxArmor = 100; victim.armor = 100
+        victim.shieldRechargePerSec = 0; victim.armorRechargePerSec = 0
+        victim.radius = 20
+        victim.government = 200
+        _ = world.addNPC(victim)
+
+        attacker.weapons = [WeaponMount(spec: weapon)]
+        attacker.currentTargetID = victim.entityID
+        world.intent.firePrimary = true
+        for _ in 0..<120 { world.step(1.0 / 30.0) }
+        return victim
+    }
+
+    private func stunner(disablesOnly: Bool) -> WeaponSpec {
+        var flags = WeaponBehaviorFlags(); flags.disablesOnly = disablesOnly
+        return WeaponSpec(id: 400, name: "Stunner", shieldDamage: 0, armorDamage: 1000,
+                          reloadSeconds: 0.1, projectileSpeed: 900, range: 2000,
+                          accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
+                          blastRadius: 0, ammoPerShot: 0, flags: flags)
+    }
+
+    func testDisableOnlyWeaponCripplesButNeverKills() {
+        // Enough armor damage per shot (1000 vs 100 armor) to vaporize the target
+        // outright — the flag is the only thing standing between it and a kill.
+        let victim = pound(with: stunner(disablesOnly: true))
+        XCTAssertTrue(victim.isAlive, "a disable-only weapon must never finish a ship off")
+        XCTAssertTrue(victim.disabled, "…but it does carry it down to a boardable hulk")
+
+        // The identical weapon without the flag kills it, so the difference is
+        // the flag and nothing else.
+        let killed = pound(with: stunner(disablesOnly: false))
+        XCTAssertFalse(killed.isAlive, "the same weapon without Flags2 0x1000 destroys the target")
+    }
 }

@@ -294,6 +294,7 @@ final class GameHost {
             // pêrs (named characters): seed grudges, gate appearances on their
             // ActiveOn NCB + not-yet-defeated, and persist grudge/defeat outcomes.
             scene.persGrudges = model.pilot.state.persGrudges ?? []
+            scene.destroyedStellarIDs = model.pilot.state.destroyedStellars ?? []
             scene.persSpawnEligible = { [weak pilotStore] id in
                 guard let store = pilotStore else { return true }
                 if store.state.isPersDefeated(id) { return false }
@@ -1557,6 +1558,10 @@ struct GameContainerView: View {
             // Persisted in PlayerState by the engine; the body itself drops out
             // of the world on the next system (re)build. Surface it now.
             let name = model.data.game?.spob(spobID)?.name ?? "A stellar object"
+            // Keep the renderer's mirror current so `Flags2` 0x0080 ("animate
+            // only when destroyed") flips without waiting for a system rebuild.
+            if destroyed { host?.scene.destroyedStellarIDs.insert(spobID) }
+            else { host?.scene.destroyedStellarIDs.remove(spobID) }
             host?.hud.post(destroyed ? "\(name) has been destroyed." : "\(name) has been restored.")
         }
         // Daily escort upkeep (charged by StoryEngine.payDailyEscortFees as the
