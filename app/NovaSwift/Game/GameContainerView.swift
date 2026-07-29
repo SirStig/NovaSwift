@@ -89,6 +89,7 @@ final class GameHost {
         var shieldTextures: [SKTexture] = []
         var lightTextures: [SKTexture] = []
         var weaponGlowTextures: [SKTexture] = []
+        var altTextures: [SKTexture] = []
         var hullAnim = HullAnim()
         var planets: [PlanetVisual] = []
         var systemName = ""
@@ -137,6 +138,7 @@ final class GameHost {
             shieldTextures = session.shieldTextures
             lightTextures = session.lightTextures
             weaponGlowTextures = session.weaponGlowTextures
+            altTextures = session.altTextures
             hullAnim = session.hullAnim
             hud.shipName = session.shipName
             // Load the requested system (or the pilot's current one — every call
@@ -231,6 +233,7 @@ final class GameHost {
         scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
                         shieldTextures: shieldTextures,
                         lightTextures: lightTextures, weaponGlowTextures: weaponGlowTextures,
+                        altTextures: altTextures,
                         hullAnim: hullAnim,
                         settings: model.settings,
                         input: input, controller: controller, hud: hud, audio: model.audio,
@@ -449,6 +452,7 @@ final class GameHost {
         let shieldTextures: [SKTexture]
         let lightTextures: [SKTexture]
         let weaponGlowTextures: [SKTexture]
+        let altTextures: [SKTexture]
         let hullAnim: HullAnim
         let shipName: String
     }
@@ -471,12 +475,14 @@ final class GameHost {
         var shieldTextures: [SKTexture] = []
         var lightTextures: [SKTexture] = []
         var weaponGlowTextures: [SKTexture] = []
+        var altTextures: [SKTexture] = []
         // Full multi-set sheets (banking/animation sets + all headings) so the
         // scene can select the live set/heading — not just the first 36 frames.
         if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.allFrames(from: sheet) }
         if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.allFrames(from: glow) }
         if let lights = game.lightSprite(shipID) { lightTextures = SpriteTextures.allFrames(from: lights) }
         if let wg = game.weaponGlowSprite(shipID) { weaponGlowTextures = SpriteTextures.allFrames(from: wg) }
+        if let alt = game.altSprite(shipID) { altTextures = SpriteTextures.allFrames(from: alt) }
         // The shän shield-bubble layer (single-frame overlay), only present when a
         // "Shields" graphics plug-in populated it — nil/empty for stock hulls.
         if let bubble = game.shieldSprite(shipID) { shieldTextures = SpriteTextures.rotationFrames(from: bubble) }
@@ -484,7 +490,8 @@ final class GameHost {
         let name = pilot.shipName.isEmpty ? (res?.displayName ?? "") : pilot.shipName
         return PlayerSession(ship: ship, textures: textures, engineTextures: engineTextures,
                              shieldTextures: shieldTextures, lightTextures: lightTextures,
-                             weaponGlowTextures: weaponGlowTextures, hullAnim: hullAnim, shipName: name)
+                             weaponGlowTextures: weaponGlowTextures, altTextures: altTextures,
+                             hullAnim: hullAnim, shipName: name)
     }
 
     /// The nearest inhabited `spöb` to `position` within `systemID`, paired
@@ -1316,6 +1323,14 @@ struct GameContainerView: View {
     private func landingRefusalReason(spob: SpobRes) -> String? {
         guard let game = host?.game else { return nil }
         let govtID = spob.government
+        // `spöb.Flags` 0x0080 ("Can only land when destroyed"): a hidden base or
+        // buried installation whose cover has to be blown off first. Checked
+        // before every other gate — no rank, domination or permit gets you in
+        // while the surface is intact. (Checked here rather than dropped from the
+        // approach list so the player gets a reason, not a dead planet.)
+        if spob.landableOnlyWhenDestroyed, !model.pilot.state.isStellarDestroyed(spob.id) {
+            return "There is nowhere to land here."
+        }
         // A stellar you've conquered is yours — always landable.
         if model.pilot.state.dominatedStellars?.contains(spob.id) == true { return nil }
         // A rank that "can always land" for this govt (or an ally of it) overrides
@@ -1462,6 +1477,7 @@ struct GameContainerView: View {
                                               shieldTextures: session.shieldTextures,
                                               lightTextures: session.lightTextures,
                                               weaponGlowTextures: session.weaponGlowTextures,
+                                              altTextures: session.altTextures,
                                               hullAnim: session.hullAnim)
                 landedSpobID = nil            // now fade the port out over the ready scene
                 setScenePaused(false, reason: "depart (in place)")
@@ -1513,6 +1529,9 @@ struct GameContainerView: View {
         }
         host?.scene.onStellarDominated = { spobID in
             handleStellarDominated(spobID: spobID)
+        }
+        host?.scene.onStellarDestroyed = { spobID in
+            handleStellarShotDown(spobID: spobID)
         }
         // Live-world effect hooks for the flight-side story services (mission
         // OnSuccess / cron OnStart side effects that reach outside pilot state).
@@ -1666,10 +1685,14 @@ struct GameContainerView: View {
             let goalEligible = m.hasShipObjective && (passiveGoal || am.shipObjectivesRemaining > 0)
             let goalSystemMatches = missionSystemMatches(code: m.shipSystem, active: am, currentSystem: currentSys, game: game)
             if goalEligible, goalSystemMatches {
+                // `mïsn.ShipName`/`ShipSubtitle` name the mission's special ships
+                // on the target display, instead of their bare hull type.
                 scene.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
                                         count: max(1, m.shipCount), goal: m.shipGoal,
                                         behavior: m.shipBehaviorMode, government: nil,
-                                        arrival: arrivalMode(forShipStart: m.shipStart))
+                                        arrival: arrivalMode(forShipStart: m.shipStart),
+                                        name: missionShipName(m, game: game),
+                                        subtitle: missionShipSubtitle(m, game: game))
             } else if m.hasShipObjective {
                 Log.story.debug("spawnActiveMissionShips: mission \(m.id) goal ships not spawned (eligible=\(goalEligible), systemMatches=\(goalSystemMatches), shipSystem=\(m.shipSystem), currentSys=\(currentSys), remaining=\(am.shipObjectivesRemaining))")
             }
@@ -1713,6 +1736,26 @@ struct GameContainerView: View {
         model.pilot.state = engine.player
         host?.hud.post(reason)
         saveGame(reason: .timer)
+    }
+
+    /// `mïsn.ShipName` (a `STR#` id), resolved to the name this mission's special
+    /// ships fly under. Empty when the mission names none, which leaves each
+    /// ship showing its hull type as before.
+    private func missionShipName(_ m: MissionRes, game: NovaGame) -> String {
+        guard m.shipNameStrID > 0,
+              let list = game.stringList(m.shipNameStrID),
+              let first = list.strings.first(where: { !$0.isEmpty }) else { return "" }
+        return first
+    }
+
+    /// `mïsn.ShipSubtitle` (a `STR#` id), resolved to the line shown beneath the
+    /// ship's name on the target display (e.g. "Federation Navy"). Empty when
+    /// the mission sets none, which is the common case.
+    private func missionShipSubtitle(_ m: MissionRes, game: NovaGame) -> String {
+        guard m.shipSubtitleStrID > 0,
+              let list = game.stringList(m.shipSubtitleStrID),
+              let first = list.strings.first(where: { !$0.isEmpty }) else { return "" }
+        return first
     }
 
     /// Map a `mïsn.ShipStart` code to a spawn arrival: `1` = jump in from
@@ -1807,8 +1850,24 @@ struct GameContainerView: View {
     /// never topped off here — that's the paid Recharge service. Uninhabited rocks
     /// give nothing. Writes both the live ship and the persisted pilot so the state
     /// survives the takeoff `GameHost` rebuild.
+    /// `spöb.Fee` (Bible: "The fee that is deducted from the player's credits
+    /// when landing"). Charged once per touchdown, before repairs are billed —
+    /// a docking fee for the berth, not a service. No stock EV Nova stellar sets
+    /// one, so this is inert on base-game data and exists for plug-ins/TCs. If
+    /// the player can't cover it they're simply charged what they have (the
+    /// original has no "refused landing for lack of fee" state).
+    private func chargeLandingFee(spobID: Int) {
+        guard let game = host?.game, let spob = game.spob(spobID), spob.landingFee > 0 else { return }
+        let charged = min(spob.landingFee, model.pilot.state.credits)
+        guard charged > 0 else { return }
+        model.pilot.state.credits -= charged
+        host?.hud.post("Landing fee: \(charged) cr")
+        Log.spaceport.debug("Landing fee \(charged) cr charged at spob \(spobID, privacy: .public)")
+    }
+
     private func repairOnLanding(spobID: Int) {
         guard let ship = host?.scene.playerShip else { return }
+        chargeLandingFee(spobID: spobID)
         if let game = host?.game, let spob = game.spob(spobID), !spob.isUninhabited {
             ship.shield = ship.maxShield                    // shields regen free
             let missing = ship.maxArmor - ship.armor
@@ -2829,6 +2888,21 @@ struct GameContainerView: View {
             state.responseText = "The stellar submits to your demand. It is yours."
             hailDialogState = state
         }
+    }
+
+    /// A destroyable stellar (`spöb.Strength` > 0) was shot down in the live
+    /// world (`onStellarDestroyed`). Persist it through the story engine — which
+    /// fires the stellar's `OnDestroy` control bits and stamps the day so its
+    /// `spöb.DeadTime` regeneration timer runs on the galaxy clock — then drop it
+    /// out of the live scene the same way a story `Y` op would.
+    private func handleStellarShotDown(spobID: Int) {
+        guard let game = model.data.game else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+        engine.stellarShotDown(spobID)
+        model.pilot.state = engine.player
+        saveGame(reason: .timer)
+        let name = game.spob(spobID)?.name ?? "The stellar"
+        host?.hud.post("\(name) has been destroyed.")
     }
 
     private func hailShowsAssistButton(_ state: HailDialogState) -> Bool {

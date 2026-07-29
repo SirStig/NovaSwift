@@ -22,6 +22,13 @@ struct HullAnim {
     var blinkMode = 0
     var blink: (a: Int, b: Int, c: Int, d: Int) = (0, 0, 0, 0)
     var hidesLightsWhenDisabled = false
+    /// `shän.AltSetCount` — how many sets the alternating-sprite overlay packs.
+    /// The overlay cycles through them on the same `animDelaySec` clock as the
+    /// base sheet's animation mode. 0 = this hull has no alt layer.
+    var altSetCount = 0
+    /// `shän.BaseTransp` as a 0…1 alpha for the hull sprite (1 = fully opaque).
+    /// Stock hulls are all opaque; plug-ins use this for ghost/phase ships.
+    var baseOpacity: CGFloat = 1
 
     init() {}
     init(_ shan: ShanRes) {
@@ -33,6 +40,16 @@ struct HullAnim {
         blinkMode = shan.blinkMode
         blink = shan.blinkValues
         hidesLightsWhenDisabled = shan.hidesLightsWhenDisabled
+        altSetCount = shan.hasAltLayer ? shan.altSetCount : 0
+        baseOpacity = CGFloat(shan.baseOpacity)
+    }
+
+    /// Which alternating-sprite set to draw this frame. The Bible only says the
+    /// overlay cycles "through each available set", so it runs on the same
+    /// `animDelaySec` cadence the base sheet's animation mode uses.
+    func altSet(animClock: Double) -> Int {
+        guard altSetCount > 1 else { return 0 }
+        return Int(animClock / animDelaySec) % altSetCount
     }
 
     /// Whether this hull has more than the single level-flight set to draw.
@@ -52,7 +69,11 @@ struct HullAnim {
     /// 0 ~straight. `animClock`: seconds accumulated (animation mode only).
     /// Folding / keyCarried aren't wired to their triggers yet, so they draw the
     /// level set (set 0) — no worse than today, and ready to extend.
-    func baseSet(turnSign: Int, animClock: Double, disabled: Bool) -> Int {
+    /// - Parameter carriesKeyShip: whether a `shïp.KeyCarried`-type ship is still
+    ///   aboard. Only consulted in `.keyCarried` mode, where the Bible has the
+    ///   second set shown precisely when none are.
+    func baseSet(turnSign: Int, animClock: Double, disabled: Bool,
+                 carriesKeyShip: Bool = true) -> Int {
         guard setCount > 1 else { return 0 }
         // A hulk has no attitude control, so it can't bank and its animation is
         // dead: it always draws the level set, whatever it seems to be doing.
@@ -64,7 +85,11 @@ struct HullAnim {
             return 0
         case .animation:
             return Int(animClock / animDelaySec) % setCount
-        case .none, .folding, .keyCarried:
+        case .keyCarried:
+            // Bible: the second set is shown "when not carrying key ships" — an
+            // empty carrier visibly reads as empty (open, dark bay doors).
+            return carriesKeyShip ? 0 : min(1, setCount - 1)
+        case .none, .folding:
             return 0
         }
     }

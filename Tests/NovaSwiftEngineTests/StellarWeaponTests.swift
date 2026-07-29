@@ -23,7 +23,10 @@ final class StellarWeaponTests: XCTestCase {
         var b = [UInt8](repeating: 0, count: 1100)
         put16(&b, 570, 196)      // Weapon @570 (real Earth: Enormous Blaster Turret)
         put32(&b, 572, 3000)     // Strength @572
-        put16(&b, 30, 0x0200)    // Flags2: fires only when provoked
+        // Flags2 is a two-byte `WORV` at **@32** per ResForge's spöb TMPL #520.
+        // (@30 is DefCount — writing the flag there, as this test used to, only
+        // set a defense-ship count and the assertion below never actually held.)
+        put16(&b, 32, 0x0200)    // Flags2: fires only when provoked
         let s = SpobRes(Resource(type: NovaType.spob, id: 128, name: "Earth", data: Data(b)))
         XCTAssertEqual(s.defenseWeaponID, 196)
         XCTAssertEqual(s.strength, 3000)
@@ -35,6 +38,46 @@ final class StellarWeaponTests: XCTestCase {
         let u = SpobRes(Resource(type: NovaType.spob, id: 129, name: "Rock", data: Data(unarmed)))
         XCTAssertNil(u.defenseWeaponID)
         XCTAssertTrue(u.isInvulnerable)
+    }
+
+    /// The `spöb` fields that had never been decoded: landing fee, gravity,
+    /// regeneration time, death explosion, and the three late `Flags2` bits.
+    /// Offsets are all from ResForge's `spöb` TMPL #520.
+    func testSpobLateFieldsDecode() {
+        var b = [UInt8](repeating: 0, count: 1100)
+        put32(&b, 564, 250)                  // Landing Fee
+        put16(&b, 568, -40)                  // Gravity (negative = pushes away)
+        put16(&b, 578, 30)                   // Regenerate Time, days
+        put16(&b, 580, 1007)                 // Explosion: bööm 7 + sparks
+        put16(&b, 34, 6)                     // Animation Delay
+        put16(&b, 36, 3)                     // First Frame Bias
+        put16(&b, 32, 0x0040 | 0x0400 | 0x0010)  // starts destroyed | sells any outfit | loops sound
+        let s = SpobRes(Resource(type: NovaType.spob, id: 130, name: "Test", data: Data(b)))
+        XCTAssertEqual(s.landingFee, 250)
+        XCTAssertEqual(s.gravity, -40)
+        XCTAssertEqual(s.regenerationDays, 30)
+        XCTAssertEqual(s.explosionBoomID, 135)      // 1007 → bööm 7 → 128 + 7
+        XCTAssertTrue(s.explosionHasSparks)
+        XCTAssertEqual(s.animationDelay, 6)
+        XCTAssertEqual(s.frame0Bias, 3)
+        XCTAssertTrue(s.isAnimated)
+        XCTAssertTrue(s.startsDestroyed)
+        XCTAssertTrue(s.buysAnyOutfit)
+        XCTAssertTrue(s.loopsAmbientSound)
+        XCTAssertFalse(s.picksFramesRandomly)
+
+        // "Never regenerates" is the TMPL's -1, which decodes to nil.
+        var never = [UInt8](repeating: 0, count: 1100)
+        put16(&never, 578, -1)
+        put16(&never, 580, -1)
+        let n = SpobRes(Resource(type: NovaType.spob, id: 131, name: "Gone", data: Data(never)))
+        XCTAssertNil(n.regenerationDays)
+        XCTAssertNil(n.explosionBoomID)
+        XCTAssertFalse(n.hasRegenerated(destroyedDayCount: 0, nowDayCount: 10_000))
+
+        // A 30-day timer is back exactly on day 30, not before.
+        XCTAssertFalse(s.hasRegenerated(destroyedDayCount: 100, nowDayCount: 129))
+        XCTAssertTrue(s.hasRegenerated(destroyedDayCount: 100, nowDayCount: 130))
     }
 
     // MARK: World fixtures

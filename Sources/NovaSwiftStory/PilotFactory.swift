@@ -71,6 +71,17 @@ public enum PilotFactory {
         player.combatRating = scenario.kills
         player.legalRecord = initialLegalRecord(scenario: scenario, game: game)
 
+        // `spöb.Flags2` 0x0040 ("Starts destroyed"): some stellars begin every new
+        // game already blown up, to be revealed later by a storyline (or by their
+        // own `DeadTime` timer). Seeded here rather than at load so it applies
+        // once, to a fresh pilot, and can then be undone normally by a `U` op.
+        // No base-game stellar sets this bit, so stock scenarios seed nothing.
+        let preDestroyed = game.spobs().filter(\.startsDestroyed).map(\.id)
+        if !preDestroyed.isEmpty {
+            player.destroyedStellars = Set(preDestroyed)
+            Log.pilot.notice("PilotFactory.make: \(preDestroyed.count) stellar(s) start destroyed")
+        }
+
         // Apply the OnStart NCB via a throwaway StoryEngine so the exact same SET
         // grammar/side-effects (bits, ranks, outfits, missions, ship swap) run.
         if !scenario.onStart.isEmpty {

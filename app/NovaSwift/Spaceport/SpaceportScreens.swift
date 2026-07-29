@@ -325,7 +325,35 @@ struct OutfitterView: View {
     /// dropped when the player doesn't meet their Availability/Require and
     /// doesn't already own one.
     private var stock: [OutfRes] {
-        game.outfitsSold(at: spob, day: pilot.state.date.julianDay).filter { lockState(for: $0) != .hidden }
+        let sold = game.outfitsSold(at: spob, day: pilot.state.date.julianDay)
+            .filter { lockState(for: $0) != .hidden }
+        let stocked = Set(sold.map(\.id))
+        let extras = sellBackOnly(excluding: stocked)
+        return extras.isEmpty ? sold : sold + extras
+    }
+
+    /// Owned outfits this port will *buy back* but doesn't stock. Two Bible
+    /// rules put an item here, and until now neither had anywhere to happen —
+    /// an outfit the port didn't sell couldn't even be selected, so there was
+    /// no way to unload it:
+    ///
+    /// - `spöb.Flags2` 0x0400, "Player can sell any outfits here": this
+    ///   outfitter takes anything.
+    /// - `oütf.Flags` 0x0800, "This item can be sold anywhere, regardless of
+    ///   tech level, requirements, or mission bits" — sell-side only, so it
+    ///   never widens what's for *sale* (see OUTFITTERS.md §3.5).
+    private func sellBackOnly(excluding stocked: Set<Int>) -> [OutfRes] {
+        pilot.state.outfits
+            .filter { $0.value > 0 && !stocked.contains($0.key) }
+            .keys.compactMap { game.outfit($0) }
+            .filter { spob.buysAnyOutfit || $0.ignoresRequirements }
+            .sorted { $0.id < $1.id }
+    }
+
+    /// Outfits listed for sell-back only — they can be sold here but never bought.
+    private var sellOnlyIDs: Set<Int> {
+        let stocked = Set(game.outfitsSold(at: spob, day: pilot.state.date.julianDay).map(\.id))
+        return Set(sellBackOnly(excluding: stocked).map(\.id))
     }
     private var selected: OutfRes? {
         stock.first { $0.id == selectedID } ?? stock.first
@@ -498,7 +526,13 @@ struct OutfitterView: View {
     // this just anchors it to the game's own real dialog layout instead.)
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let o = selected
-        let canBuy = o.map { pilot.canBuyOutfit($0, galaxy: galaxy, priceMultiplier: rankMult) && lockState(for: $0) == .available } ?? false
+        // A sell-only listing (this port buys anything, but doesn't stock this
+        // item) can never be bought here, however affordable it is.
+        let canBuy = o.map {
+            !sellOnlyIDs.contains($0.id)
+                && pilot.canBuyOutfit($0, galaxy: galaxy, priceMultiplier: rankMult)
+                && lockState(for: $0) == .available
+        } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
                    width: 73, enabled: canBuy,
                    onQuantity: canBuy ? { qtyPromptMode = .buy } : nil) {

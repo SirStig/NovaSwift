@@ -100,8 +100,17 @@ public final class StoryEngine {
         case .activateRank(let id):
             activateRank(id)
         case .deactivateRank(let id):
-            player.activeRanks.remove(id)
-            services?.notify(.rankDeactivated(rankID: id))
+            // `ränk` flags 0x0008 ("permanent"): once earned, this rank can't be
+            // taken away — a `!` op naming it is simply ignored. Everything that
+            // keys off holding it (salary, price modifier, free repair/refuel,
+            // `govtWontAttack`, `canAlwaysLand`, `Contribute` unlocks) therefore
+            // survives whatever the storyline does next.
+            if game.rank(id)?.permanent == true {
+                Log.mission.debug("Rank \(id, privacy: .public) is permanent — ignoring deactivate")
+            } else {
+                player.activeRanks.remove(id)
+                services?.notify(.rankDeactivated(rankID: id))
+            }
 
         case .playSound(let id):
             services?.playSound(id: id)
@@ -401,6 +410,11 @@ public final class StoryEngine {
             return
         }
         Log.mission.debug("decline: mission \(missionID) (\"\(m.name, privacy: .public)\") declined")
+        // `mïsn.RefuseText`: the `dësc` shown when the player turns the job down —
+        // the offerer's parting words. Shown before `OnRefuse` runs so the text
+        // reads against the state the player refused in.
+        let refusal = resolveMissionText(game.descText(m.refuseText, context: textContext), for: m)
+        if !refusal.isEmpty { services?.showStoryText(refusal, title: m.displayName) }
         apply(set: m.onRefuse)
     }
 
@@ -647,8 +661,43 @@ public final class StoryEngine {
             payDailyEscortFees()
             evaluateCrons()
             evaluateDisasters()
+            regenerateDestroyedStellars()
             checkDeadlines()
         }
+    }
+
+    /// A stellar shot down in combat comes back once its `spöb.DeadTime`
+    /// ("Regenerate Time", days) has elapsed, firing its `OnRegen` control bits
+    /// on the way in — the natural counterpart to the `OnDestroy` bits that fire
+    /// when it goes down.
+    ///
+    /// Only weapon-destroyed stellars are eligible: they're the ones carrying a
+    /// `stellarDestroyedOnDay` stamp. A planet a *mission* destroyed (the `Y` op)
+    /// stays down until the story's own `U` op brings it back, which is how EV
+    /// Nova's storylines expect to control the galaxy. A `DeadTime` of -1 ("never
+    /// regenerates", `regenerationDays == nil`) also stays down forever.
+    public func regenerateDestroyedStellars() {
+        guard let stamps = player.stellarDestroyedOnDay, !stamps.isEmpty else { return }
+        let now = player.date.julianDay
+        for (spobID, destroyedOn) in stamps {
+            guard let s = game.spob(spobID) else { continue }
+            guard s.hasRegenerated(destroyedDayCount: destroyedOn, nowDayCount: now) else { continue }
+            player.markStellarRegenerated(spobID)
+            services?.setStellarDestroyed(spobID: spobID, destroyed: false)
+            if !s.onRegen.isEmpty { apply(set: s.onRegen) }
+            Log.mission.notice("Stellar \(spobID, privacy: .public) regenerated after \(now - destroyedOn, privacy: .public) days")
+        }
+    }
+
+    /// A destroyable stellar (`spöb.Strength` > 0) was shot down in the live
+    /// world. Persists it, pushes the galaxy mutation out to the host, fires its
+    /// `OnDestroy` control bits, and starts the `DeadTime` regeneration clock.
+    public func stellarShotDown(_ spobID: Int) {
+        guard !player.isStellarDestroyed(spobID) else { return }
+        player.markStellarShotDown(spobID, onDay: player.date.julianDay)
+        services?.setStellarDestroyed(spobID: spobID, destroyed: true)
+        if let s = game.spob(spobID), !s.onDestroy.isEmpty { apply(set: s.onDestroy) }
+        Log.mission.notice("Stellar \(spobID, privacy: .public) destroyed by weapon fire")
     }
 
     /// Roll each `öops` disaster: expire any whose duration has elapsed, then for
@@ -1129,6 +1178,11 @@ public final class StoryEngine {
     public func activeMissionSummaries() -> [MissionSummary] {
         player.activeMissions.compactMap { am in
             guard let m = game.mission(am.missionID) else { return nil }
+            // `mïsn.Flags` 0x0400: "Mission is invisible and won't appear in the
+            // mission info dialog." Background bookkeeping missions the storyline
+            // runs on the player's behalf — they still tick, spawn ships and pay
+            // out, they're just not listed.
+            guard !m.invisible else { return nil }
             // Before the travel stellar is reached, point at it; afterward point
             // at the return stellar (the drop-off), mirroring EV Nova's arrow.
             let targetSpob: Int?
@@ -1200,12 +1254,21 @@ public final class StoryEngine {
         }
     }
 
-    /// A trimmed one-liner describing an accepted mission (its pitch text with
-    /// wildcards resolved, whitespace collapsed) for compact list rows.
+    /// A trimmed one-liner describing an accepted mission, for compact list rows.
+    ///
+    /// Uses the mission's own `mïsn.QuickBrief` `dësc` when it has one — that is
+    /// exactly what the field is for, and it's what the original shows in the
+    /// mission list. Only when a mission leaves it unset do we fall back to
+    /// collapsing the full offer pitch, which is what this always did before
+    /// `QuickBrief` was wired up (and which reads as a truncated wall of text).
     private func missionQuickBrief(for m: MissionRes) -> String {
-        let full = resolveMissionText(game.descText(m.offerTextID, context: textContext), for: m)
-        let collapsed = full.split(whereSeparator: \.isNewline).joined(separator: " ")
-        return collapsed.trimmingCharacters(in: .whitespaces)
+        func collapsed(_ id: Int) -> String {
+            let full = resolveMissionText(game.descText(id, context: textContext), for: m)
+            return full.split(whereSeparator: \.isNewline).joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces)
+        }
+        let quick = collapsed(m.quickBriefText)
+        return quick.isEmpty ? collapsed(m.offerTextID) : quick
     }
 
     /// The systems that currently hold an active-mission destination — used by the
@@ -1293,7 +1356,12 @@ public final class StoryEngine {
         let initialSystem = initialSpob.flatMap { game.systemContaining(spob: $0) }
         let candidates = game.spobs()
             .filter { $0.id != (initialSpob ?? -1) }   // not where the mission is offered
-            .filter { game.systemContaining(spob: $0.id) != initialSystem }   // not the system the player is already in
+            // Not the system the player is already in — but only when we actually
+            // know which system that is. Comparing against a nil `initialSystem`
+            // matched every stellar whose own system is also unknown (nil == nil),
+            // which threw away the entire candidate list and resolved the mission
+            // to no destination at all.
+            .filter { initialSystem == nil || game.systemContaining(spob: $0.id) != initialSystem }
             .filter { StellarMatch.spob(code: code, spobID: $0.id, game: game, initialSpob: initialSpob) }
             .map { $0.id }
             .sorted()

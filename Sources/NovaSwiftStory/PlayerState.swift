@@ -274,6 +274,16 @@ public struct PlayerState: Codable, Sendable {
     /// save/reload. Optional so pilots saved before this feature still decode
     /// (treated as empty), like `fuel`.
     public var destroyedStellars: Set<Int>?
+    /// For stellars destroyed by **weapon fire** (`spöb.Strength` reached zero),
+    /// the game-day count on which each went down. `spöb.DeadTime` ("Regenerate
+    /// Time", days) is measured from here, so the day clock can bring a bombed
+    /// planet back on schedule and fire its `OnRegen` bits — see
+    /// `StoryEngine.regenerateDestroyedStellars`.
+    ///
+    /// Story-destroyed stellars (the mission `Y` op) deliberately do **not** get
+    /// an entry: the `U` op is their only way back, exactly as EV Nova scripts
+    /// them. Optional so older pilots still decode (treated as empty).
+    public var stellarDestroyedOnDay: [Int: Int]?
 
     /// The player's persistent escort wing — hired (paying a daily fee),
     /// captured (free), or mission-granted (free, temporary). Source of truth
@@ -406,7 +416,17 @@ public struct PlayerState: Codable, Sendable {
         destroyedStellars = (destroyedStellars ?? []).union([id])
     }
     /// Regenerate stellar `id` (undo a destroy) — the `U` SET op.
-    public mutating func markStellarRegenerated(_ id: Int) { destroyedStellars?.remove(id) }
+    public mutating func markStellarRegenerated(_ id: Int) {
+        destroyedStellars?.remove(id)
+        stellarDestroyedOnDay?[id] = nil
+    }
+    /// Record stellar `id` as destroyed by **weapon fire** on `day`, so its
+    /// `spöb.DeadTime` regeneration timer can run. Distinct from the story `Y`
+    /// op above, which is permanent until a matching `U`.
+    public mutating func markStellarShotDown(_ id: Int, onDay day: Int) {
+        markStellarDestroyed(id)
+        stellarDestroyedOnDay = (stellarDestroyedOnDay ?? [:]).merging([id: day]) { old, _ in old }
+    }
 
     /// Whether the player has dominated stellar `id`.
     public func hasDominated(_ id: Int) -> Bool { dominatedStellars?.contains(id) ?? false }

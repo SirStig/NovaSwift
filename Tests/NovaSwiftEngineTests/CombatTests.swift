@@ -558,11 +558,21 @@ final class CombatTests: XCTestCase {
         return GovtRes(Resource(type: NovaType.govt, id: id, name: "G\(id)", data: Data(d)))
     }
 
+    /// A seeker vulnerable to one jammer type, as `wëap.JamVuln1-4` describes.
+    private func seeker(vulnerableTo type: Int, percent: Int = 100) -> WeaponSpec {
+        var flags = WeaponBehaviorFlags()
+        flags.jamVulnerability = (0..<4).map { $0 == type ? percent : 0 }
+        return WeaponSpec(id: 150, name: "Seeker", shieldDamage: 10, armorDamage: 10,
+                          reloadSeconds: 1, projectileSpeed: 400, range: 30_000,
+                          accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 2,
+                          blastRadius: 0, ammoPerShot: 0, turnsAwayIfJammed: true, flags: flags)
+    }
+
     func testTurnsAwayIfJammedEventuallyLosesLockAgainstAHighJamGovt() {
-        let missile = WeaponSpec(id: 150, name: "Seeker", shieldDamage: 10, armorDamage: 10,
-                                 reloadSeconds: 1, projectileSpeed: 400, range: 30_000,
-                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 2,
-                                 blastRadius: 0, ammoPerShot: 0, turnsAwayIfJammed: true)
+        // The seeker must actually be vulnerable to jam type 1 — that's the half
+        // of the rule `wëap.JamVuln1-4` supplies. A jammer the weapon has no
+        // vulnerability to is inert (see the type-mismatch test below).
+        let missile = seeker(vulnerableTo: 0)
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
         world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [100, 0, 0, 0])])
@@ -585,10 +595,7 @@ final class CombatTests: XCTestCase {
     }
 
     func testTurnsAwayIfJammedNeverTriggersAgainstAnUnjammedGovt() {
-        let missile = WeaponSpec(id: 150, name: "Seeker", shieldDamage: 10, armorDamage: 10,
-                                 reloadSeconds: 1, projectileSpeed: 400, range: 30_000,
-                                 accuracyRadians: 0, isBeam: false, isGuided: true, turnRate: 2,
-                                 blastRadius: 0, ammoPerShot: 0, turnsAwayIfJammed: true)
+        let missile = seeker(vulnerableTo: 0)
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
         world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [0, 0, 0, 0])])
@@ -604,6 +611,84 @@ final class CombatTests: XCTestCase {
 
         for _ in 0..<120 { world.step(1.0 / 30.0) }
         XCTAssertEqual(world.projectiles.first?.targetID, tid, "zero jamming should never shake the lock")
+    }
+
+    /// The point of decoding `wëap.JamVuln1-4`: jamming is **per type**. A target
+    /// running a type-2 jammer at full strength is no defence at all against a
+    /// seeker that only answers to type 1 — which the old model (all four
+    /// strengths summed into one scalar, clamped 0-100) got exactly backwards.
+    func testJammingOfTheWrongTypeNeverShakesTheLock() {
+        let missile = seeker(vulnerableTo: 0)      // vulnerable to jam type 1 only
+        let attacker = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: attacker)
+        // Type 2 jammer, maxed — and three more types the seeker ignores.
+        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [0, 100, 100, 100])])
+        let target = makeShip("B", govt: 2, at: Vec2(0, 2000))
+        target.government = 2
+        let tid = world.addNPC(target)
+
+        attacker.weapons = [WeaponMount(spec: missile)]
+        attacker.currentTargetID = tid
+        world.intent.firePrimary = true
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(world.projectiles.count, 1)
+
+        for _ in 0..<300 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(world.projectiles.first?.targetID, tid,
+                       "300% of the wrong jammer types must not touch a type-1 seeker")
+    }
+
+    /// A ship's own `oütf` ModType 33-36 jammers stack onto its government's
+    /// inherent `InhJam1-4`, per type.
+    func testShipJammersStackOntoGovernmentJammingPerType() {
+        let ship = makeShip("B", govt: 2, at: Vec2())
+        ship.jamming = [40, 0, 0, 0]
+        let combined = ship.combinedJamming(govtJamming: [30, 90, 0, 0])
+        XCTAssertEqual(combined, [70, 90, 0, 0])
+
+        // And each type is clamped, so a heavily-jammed government plus a fitted
+        // jammer can't exceed certainty on that type.
+        ship.jamming = [80, 0, 0, 0]
+        XCTAssertEqual(ship.combinedJamming(govtJamming: [50, 0, 0, 0]), [100, 0, 0, 0])
+    }
+
+    /// `WeaponBehaviorFlags.jamChance` combines the matched types as independent
+    /// trials — several partial jammers stack toward, but never past, certainty.
+    func testJamChanceCombinesMatchedTypesIndependently() {
+        var flags = WeaponBehaviorFlags()
+        flags.jamVulnerability = [50, 50, 0, 0]
+        // 50% strength × 50% vulnerability = 25% per type; union of two = 43.75%.
+        XCTAssertEqual(flags.jamChance(against: [50, 50, 0, 0]), 0.4375, accuracy: 1e-9)
+        // A type the weapon ignores contributes nothing.
+        XCTAssertEqual(flags.jamChance(against: [0, 0, 100, 100]), 0, accuracy: 1e-9)
+        // Full jammer strength is still capped by the weapon's own vulnerability.
+        XCTAssertEqual(flags.jamChance(against: [100, 0, 0, 0]), 0.5, accuracy: 1e-9)
+        // Full strength against full vulnerability is certain.
+        var total = WeaponBehaviorFlags()
+        total.jamVulnerability = [100, 0, 0, 0]
+        XCTAssertEqual(total.jamChance(against: [100, 0, 0, 0]), 1, accuracy: 1e-9)
+    }
+
+    /// Turret blind arcs (`wëap.Flags` 0x1000/0x2000/0x4000) tile the circle:
+    /// front and rear are ±45° cones, the sides are everything between.
+    func testTurretBlindArcs() {
+        var front = WeaponBehaviorFlags(); front.turretBlindFront = true
+        XCTAssertFalse(front.turretCanBear(relativeBearing: 0))
+        XCTAssertTrue(front.turretCanBear(relativeBearing: .pi / 2))
+        XCTAssertTrue(front.turretCanBear(relativeBearing: .pi))
+
+        var rear = WeaponBehaviorFlags(); rear.turretBlindRear = true
+        XCTAssertTrue(rear.turretCanBear(relativeBearing: 0))
+        XCTAssertFalse(rear.turretCanBear(relativeBearing: .pi))
+        XCTAssertFalse(rear.turretCanBear(relativeBearing: -.pi))
+
+        var sides = WeaponBehaviorFlags(); sides.turretBlindSides = true
+        XCTAssertTrue(sides.turretCanBear(relativeBearing: 0))
+        XCTAssertFalse(sides.turretCanBear(relativeBearing: .pi / 2))
+        XCTAssertFalse(sides.turretCanBear(relativeBearing: -.pi / 2))
+
+        // No flags: bears everywhere.
+        XCTAssertTrue(WeaponBehaviorFlags().turretCanBear(relativeBearing: .pi / 2))
     }
 
     func testConfusedByInterferenceSlowsSteeringButNotUnaffectedWeapons() {

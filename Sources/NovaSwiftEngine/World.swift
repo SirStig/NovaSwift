@@ -227,7 +227,14 @@ public final class Ship {
     /// weapon-switch control steps through. Point-defense mounts fire themselves,
     /// so they aren't selectable.
     public var secondaryWeaponIDs: [Int] {
-        weapons.filter { $0.spec.isSecondary && !$0.spec.isPointDefense }.map { $0.spec.id }
+        weapons.filter {
+            guard $0.spec.isSecondary, !$0.spec.isPointDefense else { return false }
+            // `wëap.Flags2` 0x0800: "Don't allow this weapon to be selected or
+            // displayed if it is out of ammo" — a dry launcher drops out of the
+            // cycle entirely rather than sitting there refusing to fire.
+            if $0.spec.hiddenWhenOutOfAmmo, $0.spec.ammoPerShot > 0, $0.ammo == 0 { return false }
+            return true
+        }.map { $0.spec.id }
     }
 
     /// The secondary id actually used when the secondary trigger is held: the
@@ -332,6 +339,15 @@ public final class Ship {
     /// seeker's own `wëap.JamVuln1-4` rather than applied as a blanket ECM
     /// rating. Always four entries.
     public var jamming: [Int] = [0, 0, 0, 0]
+    /// Overrides the hull name on the target display — `mïsn.ShipName` for a
+    /// mission's special ships ("the *Kestrel*" rather than "Fed Destroyer").
+    /// Nil for ordinary traffic. `name` itself is `let` (it identifies the hull
+    /// in logs), so the display override lives separately.
+    public var displayName: String?
+    /// A second line shown under this ship's name on the target display —
+    /// `mïsn.ShipSubtitle` for a mission's special ships. Nil for ordinary
+    /// traffic, which shows only its hull/government line.
+    public var displaySubtitle: String?
     /// The hull's raw `shïp.TurnRate` integer, kept alongside the converted
     /// `stats.turnRate` because two Bible rules are written in raw units — the
     /// "don't fire at ships with turn rate > 3" weapon flag being the one the
@@ -1390,11 +1406,18 @@ public final class World {
     ///   `.protectPlayer` wires each ship as a player escort so the existing
     ///   escort logic makes it defend the player.
     @discardableResult
+    /// - Parameters:
+    ///   - name: `mïsn.ShipName`, resolved — the name these special ships carry
+    ///     on the target display instead of their bare hull type. Empty keeps
+    ///     the hull name.
+    ///   - subtitle: `mïsn.ShipSubtitle`, resolved — the line shown *beneath*
+    ///     that name (e.g. "Federation Navy"). Empty shows none.
     public func spawnMissionShips(missionID: Int, dudeID: Int, count: Int,
                                   goal: MissionShipGoal = .none,
                                   behavior: MissionShipBehavior = .standard,
                                   government: Int? = nil,
-                                  arrival: ArrivalMode = .hyperspace) -> [Int] {
+                                  arrival: ArrivalMode = .hyperspace,
+                                  name: String = "", subtitle: String = "") -> [Int] {
         guard count > 0, let galaxy = galaxy, let dude = galaxy.game.dude(dudeID) else { return [] }
         var placed: [Int] = []
         for i in 0..<count {
@@ -1417,6 +1440,8 @@ public final class World {
             ship.brain = brain
             ship.missionID = missionID
             ship.missionShipGoal = goal
+            if !name.isEmpty { ship.displayName = name }
+            if !subtitle.isEmpty { ship.displaySubtitle = subtitle }
             // A rescue objective's ship starts as a helpless drifting hulk the
             // player must protect/tow — same disabled state a crippled ship holds.
             var mode = arrival

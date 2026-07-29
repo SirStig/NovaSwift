@@ -162,6 +162,11 @@ final class GameScene: SKScene {
     /// muzzle flash flared on firing and faded per `weapDecay`.
     private var lightTextures: [SKTexture] = []
     private var lightNode: SKSpriteNode?
+    /// The hull's alternating-sprite overlay (shän alt layer) — extra sets drawn
+    /// over the base sprite and cycled on the hull's animation clock. Stock hulls
+    /// leave it unset, so this is empty for base-game data.
+    private var altTextures: [SKTexture] = []
+    private var altNode: SKSpriteNode?
     private var weaponGlowTextures: [SKTexture] = []
     private var weaponGlowNode: SKSpriteNode?
     private var weaponGlowFlare: CGFloat = 0
@@ -458,6 +463,12 @@ final class GameScene: SKScene {
     /// container persists the domination (`StoryEngine.dominateStellar`), which
     /// fires `OnDominate` and starts the daily tribute income.
     var onStellarDominated: ((_ spobID: Int) -> Void)?
+    /// A destroyable stellar (`spöb.Strength` > 0) was shot to pieces. The
+    /// container persists it (`StoryEngine.stellarShotDown`), which fires the
+    /// stellar's `OnDestroy` bits and starts its `spöb.DeadTime` regeneration
+    /// clock. No base-game stellar is destroyable, so this only fires for
+    /// plug-in/TC data.
+    var onStellarDestroyed: ((_ spobID: Int) -> Void)?
 
     /// Whether the live world already holds ships tagged with `missionID` — the
     /// container checks this before (re)spawning a mission's ships so entering a
@@ -488,10 +499,11 @@ final class GameScene: SKScene {
     func spawnMissionShips(missionID: Int, dudeID: Int, count: Int,
                            goal: MissionShipGoal, behavior: MissionShipBehavior,
                            government: Int?,
-                           arrival: World.ArrivalMode = .hyperspace) -> [Int] {
+                           arrival: World.ArrivalMode = .hyperspace,
+                           name: String = "", subtitle: String = "") -> [Int] {
         world?.spawnMissionShips(missionID: missionID, dudeID: dudeID, count: count,
                                  goal: goal, behavior: behavior, government: government,
-                                 arrival: arrival) ?? []
+                                 arrival: arrival, name: name, subtitle: subtitle) ?? []
     }
 
     /// Engage auto-landing toward the currently-selected planet, or the nearest
@@ -629,6 +641,7 @@ final class GameScene: SKScene {
     private var npcShieldCache: [Int: [SKTexture]] = [:]
     private var npcLightCache: [Int: [SKTexture]] = [:]
     private var npcWeaponGlowCache: [Int: [SKTexture]] = [:]
+    private var npcAltCache: [Int: [SKTexture]] = [:]
     // An arrival effect to play when a node is first built for a ship that just
     // jumped in from hyperspace (warp streak) or lifted off a planet (grow out).
     private enum EntranceFX { case warpIn, launch }
@@ -661,6 +674,9 @@ final class GameScene: SKScene {
         var weaponGlow: SKSpriteNode?
         var weaponGlowTextures: [SKTexture] = []
         var weaponGlowFlare: CGFloat = 0
+        /// The shän alternating-sprite overlay (empty for stock hulls).
+        var alt: SKSpriteNode?
+        var altTextures: [SKTexture] = []
         /// Additive overlay that tints the hull toward its ionization colour as
         /// ion charge builds — the Bible's "the ship will appear [IonizeColor]".
         var ionizeTint: SKSpriteNode?
@@ -702,6 +718,7 @@ final class GameScene: SKScene {
     func configure(player ship: Ship, textures: [SKTexture], engineTextures: [SKTexture] = [],
                    shieldTextures: [SKTexture] = [],
                    lightTextures: [SKTexture] = [], weaponGlowTextures: [SKTexture] = [],
+                   altTextures: [SKTexture] = [],
                    hullAnim: HullAnim = HullAnim(),
                    settings: GameSettings,
                    input: InputController, controller: GameControllerInput?, hud: GameHUDModel?,
@@ -735,6 +752,7 @@ final class GameScene: SKScene {
         self.shieldTextures = shieldTextures
         self.lightTextures = lightTextures
         self.weaponGlowTextures = weaponGlowTextures
+        self.altTextures = altTextures
         self.hullAnim = hullAnim
         self.lastPlayerShield = -1
         self.shieldFlare = 0
@@ -1048,6 +1066,19 @@ final class GameScene: SKScene {
             node.addChild(wg)
             weaponGlowNode = wg
         }
+        // Alternating-sprite overlay: normal (not additive) blending — the Bible
+        // describes it as sprites "displayed on top of the basic sprite", i.e.
+        // hull detail, not a glow. Drawn just above the hull, below the glows.
+        if let first = altTextures.first {
+            let alt = SKSpriteNode(texture: first)
+            alt.texture?.filteringMode = spriteFilter
+            alt.zPosition = 0.4
+            node.addChild(alt)
+            altNode = alt
+        }
+        // `shän.BaseTransp`: the hull's inherent transparency (0 = opaque,
+        // 32 = invisible). Opaque for every stock hull.
+        if hullAnim.baseOpacity < 1 { shipSprite?.alpha = hullAnim.baseOpacity }
 
         // Engine exhaust plume (behind the hull). Hidden unless thrusting. Sized
         // relative to the hull (16 = the old fixed placeholder radius, kept as
@@ -1405,6 +1436,21 @@ final class GameScene: SKScene {
                 onStellarDefendersLaunched?(spobID, count, remaining)
             case let .stellarDominated(spobID):
                 onStellarDominated?(spobID)
+            case let .stellarDestroyed(spobID, at, boomID, sparks):
+                // Play the stellar's own `spöb.Explosion` where it stood — a
+                // planet-scale blast, so the radius is the body's, not a shot's.
+                let point = CGPoint(x: at.x, y: at.y)
+                let radius = CGFloat(world?.systemContext.bodies.first { $0.id == spobID }?.radius ?? 64)
+                spawnExplosion(at: point, radius: max(48, radius), boomID: boomID)
+                audio?.play(boomID.flatMap { galaxy?.game.boom($0)?.soundID } ?? 303,
+                            at: point, listener: scenePos)
+                addShake(at: point, radius: max(48, radius))
+                // `Explosion` in the 1000-1063 band means "Explosion + Sparks".
+                if sparks {
+                    spawnParticles(at: point, count: 90, color: SKColor(red: 1.0, green: 0.78, blue: 0.47, alpha: 1),
+                                   speed: 260, life: 1.1, size: 3, additive: true, grow: false)
+                }
+                onStellarDestroyed?(spobID)
             case let .shipDestroyed(entityID, _, _):
                 // A player escort tied to a persistent record just died — drop it
                 // from the pilot roster so it doesn't respawn next system (and a
@@ -1457,7 +1503,8 @@ final class GameScene: SKScene {
         let turn = playerBank.update(angle: p.angle, dt: dt)
         animClock += dt
         blinkClock += dt
-        let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false)
+        let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false,
+                                       carriesKeyShip: p.carriesKeyShip)
         if let sprite = shipSprite, !rotationTextures.isEmpty {
             sprite.texture = rotationTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: rotationTextures.count)]
         } else if let tri = placeholder {
@@ -1472,6 +1519,12 @@ final class GameScene: SKScene {
             let intensity = hullAnim.lightIntensity(clock: blinkClock)
             lights.isHidden = intensity <= 0.02
             lights.alpha = intensity
+        }
+        // Alternating-sprite overlay (shän alt layer): cycles its own sets on the
+        // hull's animation clock, drawn over the base sprite at the same heading.
+        if let alt = altNode, !altTextures.isEmpty {
+            let set = hullAnim.altSet(animClock: animClock)
+            alt.texture = altTextures[hullAnim.frameIndex(set: set, heading: heading, count: altTextures.count)]
         }
         if let wg = weaponGlowNode, !weaponGlowTextures.isEmpty {
             weaponGlowFlare *= hullAnim.weaponGlowDecay(dt: dt)
@@ -2108,12 +2161,18 @@ final class GameScene: SKScene {
         guard let target else {
             hud.targetName = ""; hud.targetShield = 0; hud.targetArmor = 0
             hud.targetHostile = false; hud.targetDisabled = false; hud.targetGovtLabel = ""
+            hud.targetSubtitle = ""
             hud.targetShipTypeID = nil
             hud.targetHidesShieldArmorLine = false
             hud.targetCargo = []
             return
         }
-        hud.targetName = target.name
+        // A mission's special ships carry their own `mïsn.ShipName`/`ShipSubtitle`
+        // on the target display; ordinary traffic shows its hull name and no
+        // subtitle. (`targetSubtitle` was rendered by the authentic HUD but never
+        // set by anything until the mission fields were wired up.)
+        hud.targetName = target.displayName ?? target.name
+        hud.targetSubtitle = target.displaySubtitle ?? ""
         hud.targetShipTypeID = target.shipTypeID >= 128 ? target.shipTypeID : nil
         hud.targetShield = target.maxShield > 0 ? target.shield / target.maxShield : 0
         hud.targetArmor = target.maxArmor > 0 ? target.armor / target.maxArmor : 1
@@ -2783,7 +2842,8 @@ final class GameScene: SKScene {
             node.blinkClock += frameDT
             let heading = node.hullAnim.heading(forAngle: renderHeading(npc))
             let turn = node.bank.update(angle: npc.angle, dt: frameDT)
-            let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock, disabled: npc.disabled)
+            let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock,
+                                            disabled: npc.disabled, carriesKeyShip: npc.carriesKeyShip)
             if let sprite = node.sprite, !node.textures.isEmpty {
                 sprite.texture = node.textures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.textures.count)]
             } else if let tri = node.placeholder {
@@ -2802,6 +2862,10 @@ final class GameScene: SKScene {
                     lights.isHidden = intensity <= 0.02
                     lights.alpha = intensity
                 }
+            }
+            if let alt = node.alt, !node.altTextures.isEmpty {
+                let altSet = node.hullAnim.altSet(animClock: node.animClock)
+                alt.texture = node.altTextures[node.hullAnim.frameIndex(set: altSet, heading: heading, count: node.altTextures.count)]
             }
             if let wg = node.weaponGlow, !node.weaponGlowTextures.isEmpty {
                 node.weaponGlowFlare *= node.hullAnim.weaponGlowDecay(dt: frameDT)
@@ -2918,6 +2982,19 @@ final class GameScene: SKScene {
             n.container.addChild(wg)
             n.weaponGlow = wg
         }
+        // Alternating-sprite overlay: hull detail drawn over the base sprite
+        // (normal blending, not additive) and cycled on the hull's anim clock.
+        let altTex = npcAltTextures(for: npc.shipTypeID)
+        n.altTextures = altTex
+        if let first = altTex.first {
+            let alt = SKSpriteNode(texture: first)
+            alt.texture?.filteringMode = spriteFilter
+            alt.zPosition = 0.4
+            n.container.addChild(alt)
+            n.alt = alt
+        }
+        // `shän.BaseTransp` applies to NPC hulls too.
+        if n.hullAnim.baseOpacity < 1 { n.sprite?.alpha = n.hullAnim.baseOpacity }
 
         // Shield bubble overlay (only when a "Shields" plug-in supplied the art),
         // drawn on top of the hull and flared when this NPC's shields take a hit.
@@ -3330,6 +3407,7 @@ final class GameScene: SKScene {
     func reloadForDeparture(spobID: Int, player: Ship, textures: [SKTexture], engineTextures: [SKTexture],
                             shieldTextures: [SKTexture] = [],
                             lightTextures: [SKTexture] = [], weaponGlowTextures: [SKTexture] = [],
+                            altTextures: [SKTexture] = [],
                             hullAnim: HullAnim = HullAnim()) {
         guard let galaxy else {
             Log.scene.error("reloadForDeparture(\(spobID)): no galaxy — cannot reload the system")
@@ -3374,6 +3452,7 @@ final class GameScene: SKScene {
         self.shieldTextures = shieldTextures
         self.lightTextures = lightTextures
         self.weaponGlowTextures = weaponGlowTextures
+        self.altTextures = altTextures
         self.hullAnim = hullAnim
         self.lastPlayerShield = -1
         self.shieldFlare = 0
@@ -3810,6 +3889,18 @@ final class GameScene: SKScene {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcLightCache[shipTypeID] = textures
+        return textures
+    }
+
+    /// That hull's alternating-sprite overlay, if any — full multi-set sheet,
+    /// cached. Stock hulls leave the alt layer unset, so this is usually empty.
+    private func npcAltTextures(for shipTypeID: Int) -> [SKTexture] {
+        if let cached = npcAltCache[shipTypeID] { return cached }
+        var textures: [SKTexture] = []
+        if shipTypeID >= 128, let sheet = galaxy?.game.altSprite(shipTypeID) {
+            textures = SpriteTextures.allFrames(from: sheet)
+        }
+        npcAltCache[shipTypeID] = textures
         return textures
     }
 
@@ -4365,7 +4456,10 @@ final class GameScene: SKScene {
         // the primary is "always available" and never occupies this readout.
         if let mount = p.effectiveSecondaryMount {
             hud.weaponName = mount.spec.name.novaDisplayName
-            hud.weaponAmmo = mount.ammo   // -1 = unlimited
+            // `wëap.Flags2` 0x0040: "Don't show weapon's ammo quantity on the
+            // status display" — the readout shows the name alone, as though the
+            // weapon had unlimited ammo, even while it's really being consumed.
+            hud.weaponAmmo = mount.spec.hidesAmmoCount ? -1 : mount.ammo   // -1 = unlimited
         } else {
             hud.weaponName = ""
             hud.weaponAmmo = -1
