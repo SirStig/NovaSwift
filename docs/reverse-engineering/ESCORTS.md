@@ -1,86 +1,16 @@
 # Escorts & Named/Special NPCs — Behavioral Ground Truth
 
-Source: `data/EV Nova/Documentation/Nova Bible.txt` (official Ambrosia/Matt Burch
-"Resource Bible"), read in full for the `përs` section (lines 2108–2252) plus
-every other section that documents escort *behavior* — the `mïsn` special-ship
-goal fields (~1417–1462), the `flët` fleet-escort fields (~896–944), the `gövt`
-`VoiceType` field (~944–964), the `shïp` escort/hire/capture fields
-(~2531–2735), and the `dësc` reserved-ID table (~723–732). Grep of the raw file
-for `escort`/`hire`/`requisition` (case-insensitive) found **every** hit these
-sections cover — there is no separate "escort resource"; escorting is a
-cross-cutting behavior assembled from `përs`, `düde`/`flët`, `mïsn`, `gövt`, and
-`shïp` fields.
+Read in full from the Nova Bible: `përs` (lines 2108–2252), plus every other
+section documenting escort behaviour — `mïsn` special-ship goals (~1417–1462),
+`flët` fleet-escort fields (~896–944), `gövt.VoiceType` (~944–964), the `shïp`
+escort/hire/capture fields (~2531–2735), and the `dësc` reserved-ID table
+(~723–732). See the [folder README](README.md) for the standard every claim here
+follows, and [STATUS.md](../STATUS.md) for what's implemented.
 
-## Implementation status (updated — escorts are now fully wired)
-
-Since this doc's original "byte-verified, nothing built" pass, and since the
-follow-up "backend logic, zero player-visible surface" pass that immediately
-preceded this revision, escorts have gone all the way to a complete,
-player-reachable feature. Every layer this doc used to describe as inert now
-has a real caller:
-
-- **`ShipRes` decoding (`Sources/NovaSwiftKit/NovaModels.swift`):**
-  `hireRandom` (`@906`), `escortCategory` (`@1842`), `escortUpgradesTo`
-  (`@1832`), `escortUpgradeCost` (`@1834`), and `escortSellValue` (`@1838`)
-  are decoded struct fields, plus derived `escortHireFee`/`escortDailyFee`
-  properties (`NovaModels.swift:434,437` — see the "Pricing gap" note in §2.2,
-  now resolved).
-- **Escort economics (`app/NovaSwift/Game/PilotStore.swift`):**
-  `escortAvailableToday(_:at:day:)` (`:550`), `escortHireRemaining(_:at:day:)`
-  (`:583`), `hireEscort(_:at:day:)` (`:596`), `requestEscortUpgrade(recordID:
-  game:)` (`:619`), `cancelEscortUpgrade(recordID:)` (`:629`),
-  `applyPendingEscortUpgrades(at:game:)` (`:651`), `escortSellValue(for:)`
-  (`:677`), and `sellEscort(recordID:game:)` (`:685`) are real, working
-  credit-transaction logic against `state.credits`/`PlayerState.escortWing`.
-  `PilotStore.maxEscorts = 9` (`:22`) caps the roster.
-- **A persistent roster exists:** `EscortRecord` (`Sources/NovaSwiftStory/
-  PlayerState.swift:109-`, with `EscortOrigin` `.hired`/`.captured`/`.mission`
-  at `:92-101`) and `PlayerState.escortWing`/`hiredEscorts` (`:421,423`) are a
-  real, `Codable` (save-persisted) data model — not just library functions
-  with nowhere to write their result.
-- **A real hire dialog exists:** `app/NovaSwift/Spaceport/HireEscortView.swift`
-  (240 lines) is a working DITL #1004-based hire browser — see the new §2.2a
-  below.
-- **`EscortsView.swift` (`app/NovaSwift/Game/EscortsView.swift`, 361 lines)**
-  is fully data-bound, not a static empty-state shell: it takes `records:
-  [EscortRecord]`, `game: NovaGame?`, `currentOrder: EscortOrder?`, and
-  closures `onCommand`/`onRelease`/`onUpgrade`/`onCancelUpgrade`/`onSell`
-  (`EscortsView.swift:38-56`), renders the live roster and per-escort
-  upgrade/sell pricing (`:285-303`), and gates its four standing-order
-  buttons on whether the wing is non-empty (`:130-133,233-237`).
-- **The wiring, end to end:** `app/NovaSwift/Game/GameContainerView.swift`
-  instantiates `EscortsView` with the live roster and wires every closure to
-  a real handler (`:2063-2073`): `onCommand` → `scene.commandEscorts($0)`,
-  `onRelease` → `releaseEscort($0)` (`:2380-2386`), `onUpgrade` →
-  `upgradeEscort($0)` (`:2393-2402`, calls `PilotStore
-  .requestEscortUpgrade(recordID:game:)`), `onCancelUpgrade` →
-  `cancelEscortUpgrade($0)` (`:2405-2409`), `onSell` → `sellEscort($0)`
-  (`:2412-2419`, calls `PilotStore.sellEscort(recordID:game:)`).
-- **Daily billing is wired:** `StoryEngine.payDailyEscortFees()`
-  (`Sources/NovaSwiftStory/StoryEngine.swift:721-735`) runs inside
-  `advanceDays` right next to `payDailyTribute()`/`payDailySalaries()`
-  (`:643-645`) — hired escorts are charged `dailyFee` per in-game day,
-  cheapest-first, and depart (via `.escortDeparted`) if the player can't pay.
-
-**What this means:** the "not wired together" framing this doc previously
-carried is no longer accurate. `hireEscort`/`requestEscortUpgrade`/
-`sellEscort`/`escortAvailableToday` all have real call sites outside their own
-declarations, `EscortsView` reads `PilotStore`/`ShipRes` escort fields
-directly, there is a hire-escort dialog (`HireEscortView`) and a persistent
-roster data model (`EscortRecord`/`PlayerState.escortWing`), and the whole
-loop — hire → fly with the wing → command it → upgrade/sell/release it →
-pay its daily upkeep — is player-reachable in one playthrough. See the
-updated §5 table below for the field-by-field breakdown.
-
-This doc does **not** re-derive:
-- `përs`/`düde` field-offset tables — see `docs/MISSIONS.md` (`PersRes`,
-  `Sources/NovaSwiftKit/MissionModels.swift:317-351`) for the verified byte layout.
-- The 4 base `AIType` dispositions or combat-AI variance sources (odds gating,
-  cloak flags, jamming, etc.) — see `docs/AI_GROUND_TRUTH.md`, whose §1 already
-  quotes `AIType = 0` = "use the ship's own inherent AI, only meaningful for
-  escorts" verbatim. That statement is the hinge for this doc's §2 below.
-
----
+There is no "escort resource." A case-insensitive grep for
+`escort`/`hire`/`requisition` across the whole Bible lands entirely inside those
+sections: escorting is a cross-cutting behaviour assembled from `përs`,
+`düde`/`flët`, `mïsn`, `gövt` and `shïp` fields.
 
 ## 1. What a `përs` is, and how it's placed in the world
 

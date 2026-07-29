@@ -1,8 +1,9 @@
 # Scope — Plug-in System, In-App Editor & Save-Game Editing
 
-Status: **planning / not started.** This document scopes three related capabilities and
-sequences them into milestones. Nothing here is built yet; it defines *what to build* and
-*in what order*, and calls out the one architectural change everything depends on.
+> **Plan, not built.** Nothing here exists yet.
+
+This scopes three related capabilities and sequences them into milestones: what to
+build, in what order, and the one architectural change everything depends on.
 
 Related: `docs/MOBILE_AND_PLUGINS.md` (the runtime plug-in/loader design, already partly
 built), `docs/DATA_FORMAT.md` (container + resource formats), `docs/ROADMAP.md` (phase 8).
@@ -141,9 +142,7 @@ app/NovaSwift/Editor/
 
 ---
 
-## 3.4 Native pilot save system — **BUILT** (2026-07-08)
-
-The multi-pilot save system is implemented and shipping ahead of the editor, using our
+## 3.4 Native pilot save system — **built** The multi-pilot save system is implemented and shipping ahead of the editor, using our
 **own native `.evpilot` format** (versioned JSON around `PlayerState`), *not* the obfuscated
 `.plt`. It is deliberately editor-ready: the future pilot editor mutates these same Codable
 types with an automatic pre-edit backup.

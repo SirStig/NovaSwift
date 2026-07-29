@@ -5,7 +5,7 @@ installed outfits (`oütf`) resolved into effective stats, plus the live resourc
 pools (shields, armor, fuel, cargo) and the weapon loadout. Everything is driven
 from the player's own game data — nothing is hard-coded per ship.
 
-Built 2026-07-07. Verified against the real EV Nova data (`novaswift-extract ship`).
+Verified against real EV Nova data (`novaswift-extract ship`).
 
 ## Where it lives
 

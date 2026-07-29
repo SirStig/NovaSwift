@@ -1,11 +1,9 @@
 # Planetary domination — "Demand Tribute"
 
-Source: `Documentation/Nova Bible.txt` (the official EV Nova plugin-developer
-"Resource Bible", ©1995-2004 Ambrosia Software / Matt Burch) inside the user's
-owned `EV Nova CE` install — the `spöb` resource section (Tribute/DefenseDude/
-DefCount/Flags2/OnDominate/OnRelease), cross-checked against the real `spöb`
-`TMPL` (#520 in `third_party/ResForge/.../NovaTools/Templates.rsrc`) and raw
-`spöb` dumps (`novaswift-extract raw "data/base" spöb <id>`).
+Read from the Nova Bible: the `spöb` fields Tribute, DefenseDude, DefCount,
+Flags2, OnDominate and OnRelease — cross-checked against `spöb` TMPL #520 and raw
+dumps. See the [folder README](README.md) for the standard every claim here
+follows, and [STATUS.md](../STATUS.md) for what's implemented.
 
 ## What it is
 
@@ -107,7 +105,7 @@ are implemented and covered by unit tests (`DominationTests`,
 (`StoryEngine.advanceDays` runs in the live app, and `payDailyTribute` runs
 inside it), so daily tribute income and `OnDominate`/`OnRelease` NCB effects flow.
 
-**The app-side trigger is now wired (2026-07-12).** The "Demand Tribute" button
+**The app-side trigger is wired.** The "Demand Tribute" button
 in the planet hail dialog (`GameContainerView.demandPlanetTribute`) calls the
 real engine through `GameScene.demandTribute(spobID:combatRating:alreadyDominated:)`,
 which syncs the player's live combat rating and already-dominated set into the

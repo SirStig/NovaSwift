@@ -2,10 +2,13 @@
 
 Plan for going *beyond* the original engine's constraints — smarter AI, higher-res
 art, richer effects, better audio and UI — as **opt-in enhancements layered on top
-of a faithful base**. Planned 2026-07-07. Not started.
+of a faithful base**.
 
-See also: `ROADMAP.md` (fidelity-first goal), `MOBILE_AND_PLUGINS.md` (override
-chain + toggles), `AI.md`, `EDITOR_AND_PLUGINS_SCOPE.md`.
+> **Plan, not built.** Nothing here exists yet; this scopes what to build.
+
+See also [MOBILE_AND_PLUGINS.md](MOBILE_AND_PLUGINS.md) (override chain and
+toggles), [AI.md](AI.md), and
+[EDITOR_AND_PLUGINS_SCOPE.md](EDITOR_AND_PLUGINS_SCOPE.md).
 
 ## 0. Principles (the guardrails)
 

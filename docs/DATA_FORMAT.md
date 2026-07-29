@@ -33,7 +33,7 @@ ASCII-normalized spelling. (Mac Roman `ï`=0x95, `ë`=0x89, `ö`=0x9A, `ÿ`=0xD8
 IDs start at **128** by convention (IDs below 128 are reserved). Each resource is identified by
 its 4-char type + a signed 16-bit ID.
 
-| Code   | Holds |
+| Code | Holds |
 |--------|-------|
 | `shïp` | Ship classes: performance, armament, AI, appearance, cost |
 | `wëap` | Weapons: damage, ammo, guidance, rate of fire, linked explosion |
@@ -61,7 +61,7 @@ its 4-char type + a signed 16-bit ID.
 
 Standard **Mac resource types** are also used (plain ASCII codes, no umlauts):
 
-| Code   | Holds |
+| Code | Holds |
 |--------|-------|
 | `snd ` | Sound (note trailing space); classic Mac `'snd '` format |
 | `PICT` | QuickDraw picture (bitmap graphics, e.g. landscapes, logos) |
@@ -88,9 +88,9 @@ On classic Mac OS, Nova data files and plug-ins store everything in the **resour
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0  | u4 | Offset to resource **data** section |
-| 4  | u4 | Offset to resource **map** |
-| 8  | u4 | Length of data section |
+| 0 | u4 | Offset to resource **data** section |
+| 4 | u4 | Offset to resource **map** |
+| 8 | u4 | Length of data section |
 | 12 | u4 | Length of map |
 
 **Resource data section:** a sequence of resources; each is `u4 length` followed by `length`
@@ -101,12 +101,12 @@ bytes of raw resource data. A resource's data is located by adding its 3-byte da
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0   | 16 bytes | (copy of the file header — usually ignored) |
-| 16  | u4 | reserved (next-map handle) |
-| 20  | u2 | reserved (file ref) |
-| 22  | u2 | resource-fork attributes |
-| 24  | u2 | offset to **type list**, from start of map |
-| 26  | u2 | offset to **name list**, from start of map |
+| 0 | 16 bytes | (copy of the file header — usually ignored) |
+| 16 | u4 | reserved (next-map handle) |
+| 20 | u2 | reserved (file ref) |
+| 22 | u2 | resource-fork attributes |
+| 24 | u2 | offset to **type list**, from start of map |
+| 26 | u2 | offset to **name list**, from start of map |
 
 **Type list** (at map + typeListOffset):
 - `u2 numTypes - 1` (count is stored minus one)
@@ -138,7 +138,7 @@ work on macOS, Windows, and Linux.
 
 ### 2.3 `.rez` — the "BRGR" Rez format (VERIFIED against real files)
 
-**Correction (2026-07-07):** the `.rez` files distributed by the modern community (andrews05's
+**Correction:** the `.rez` files distributed by the modern community (andrews05's
 tooling, Graphite/ResForge, KDL) are **NOT** the old MacBinary/Windows container. They are the
 **Graphite "Rez" extended format**, identified by a **`BRGR`** magic (0x42524752) at offset 0.
 Confirmed by inspecting real files (The Frozen Heart TC: `E3 Data.rez`, `Override Essentials.rez`,

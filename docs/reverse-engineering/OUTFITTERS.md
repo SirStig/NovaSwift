@@ -1,93 +1,21 @@
 # The Outfitter — availability, pricing, and buy/sell mechanics
 
-Source: `data/EV Nova/Documentation/Nova Bible.txt` (the official Ambrosia/Matt
-Burch "Resource Bible", ©1995-2004). The `oütf` resource is documented at
-lines 1819-2108 of that file; the ship-purchase (`shïp`) fields it shares
-mechanics with are at lines ~2600-2695. The NCB control-bit test-expression
-primer is at lines ~97-150. Every field/quote below is a direct quote or close
-paraphrase of that document — this is a spec doc, not behavior reverse-guessed
-from play. See `docs/AI_GROUND_TRUTH.md` for the sibling doc on AI, and
-`docs/SHIP_SYSTEM.md` for how a bought outfit's *stat modifiers* actually fold
-into a ship (`Galaxy.loadout`) — this doc does not re-derive that math, only
-the shopfront logic: what's for sale, where, at what price, under what
-conditions.
+Read from the Nova Bible: `oütf` (lines 1819–2108), the ship-purchase (`shïp`)
+fields it shares mechanics with (~2600–2695), and the NCB test-expression primer
+(~97–150). See the [folder README](README.md) for the standard every claim here
+follows, and [STATUS.md](../STATUS.md) for what's implemented.
+
+This doc covers the shopfront logic only — what's for sale, where, at what price,
+under what conditions. How a bought outfit's *stat modifiers* fold into a ship
+(`Galaxy.loadout`) is in [SHIP_SYSTEM.md](../SHIP_SYSTEM.md).
 
 Note on encoding: `Nova Bible.txt` is Mac OS Roman with CRLF line endings, not
 UTF-8 — plain `grep` silently finds nothing in it unless you decode first
 (`python3 -c "open(...).read().decode('mac_roman')"` or equivalent); this bit
 several of the greps while researching this doc.
 
-## Implementation status (updated after the outfitter wiring audit)
-
-**Outfitter wiring audit (this pass).** A follow-up pass closed the remaining
-"decoded/computed but not wired" gaps the earlier passes had catalogued below,
-plus fixed a real behavior bug in the map outfit. All are grounded in the Bible
-ModType/Flags text (cross-checked against the andrews05 EV Nova Bible mirror) —
-no invented logic:
-
-- **Map outfit (ModType 16) — behavior fix.** Previously *any* map outfit
-  revealed the **entire galaxy** (`PilotStore.ownsMapOutfit` → a
-  `mapRevealAll` boolean). That is wrong: the Bible's ModVal is "1 and up = how
-  many jumps away from present system to explore; -1 = all inhabited independent
-  systems; -1000 & down = all systems of that govt class." Now a one-shot reveal
-  is computed at acquisition (`NovaGame.mapRevealedSystems(modVal:from:)`) and
-  recorded in a new `PlayerState.chartedSystems` set — kept distinct from
-  `exploredSystems` so a bought chart never satisfies an NCB `Exxx`
-  "have-you-been-there" gate. Wired at both acquisition points (shop
-  `PilotStore.buyOutfit` and mission grant `StoryEngine.grantOutfit`).
-- **Clean legal record (ModType 21)** now applied on acquisition
-  (`PlayerState.applyOutfitAcquisition`): clears standing with the ModVal govt,
-  or all govts when ModVal is -1. ✅
-- **Mass-proportional price (Flags 0x0200)** now charged/refunded via
-  `Galaxy.effectiveCost` in `PilotStore.buyOutfit`/`sellOutfit`/`canBuyOutfit`/
-  `tradeInValue` (was computed but never charged). ✅
-- **Fixed-gun/turret slots (Flags 0x0001/0x0002)** now enforced at purchase —
-  `PilotStore.canBuyOutfit` rejects a buy when `freeGunSlots`/`freeTurretSlots`
-  is 0 (was computed but not enforced). ✅
-- **Increase-maximum (ModType 27)** now consumed at purchase via
-  `NovaGame.effectiveMaxInstallable` (base Max × owned expanders pointing at the
-  item); `canBuyOutfit` checks that effective cap (was decoded but inert). ✅
-- **Sell-anywhere (Flags 0x0800)** now bypasses the upstream tech-level filter in
-  `NovaEconomy.outfitsSold`, not just the Require/Availability check (§3.5). ✅
-- **OnPurchase/OnSell (@301/@556)** now decoded on `OutfRes` and executed via
-  `StoryEngine.apply(set:)` on buy/sell — permits/licenses that flip story bits
-  now work (§3.3a). ✅
-
-## Implementation status (updated after the mass-cost/slot-tracking/sell-flag pass)
-
-Since this doc was first written, a follow-up implementation pass landed real
-Swift for several of the gaps identified below:
-
-- **`OutfRes` decoding** (`Sources/NovaSwiftKit/NovaAIModels.swift`): `itemClass`
-  (`@1004`) and `scanMask` (`@1006`) are now decoded fields on `OutfRes` (they
-  were previously confirmed-by-offset-only, not present in code). Neither is
-  consumed by any behavior yet — see §6.
-- **Mass-proportional mass** (`Flags 0x0400`): now fully implemented and
-  wired — `OutfRes.massIsShipMassProportional`/`.effectiveMass(shipMass:)`
-  (`Sources/NovaSwiftEngine/ShipLoadout.swift`) are consumed inside
-  `Galaxy.loadout`'s `usedMass` aggregation. ✅
-- **Mass-proportional price** (`Flags 0x0200`): the *decoding and math* landed
-  the same way (`OutfRes.priceIsShipMassProportional`/`.effectiveCost(shipMass:)`),
-  but it is **not wired into the shop** — `PilotStore.buyOutfit`/`sellOutfit`
-  (`app/NovaSwift/Game/PilotStore.swift`) still charge/refund the flat `o.cost`
-  and never call `effectiveCost`. Verified directly against the current file
-  contents for this update. ⚠️ computed, not charged.
-- **Gun/turret slot tracking**: `Loadout.usedGunSlots`/`usedTurretSlots`/
-  `freeGunSlots`/`freeTurretSlots` are now computed in `Galaxy.loadout`
-  (`ShipLoadout.swift`), fed by the newly-added `OutfRes.isFixedGunOutfit`/
-  `.isTurretOutfit`. But `PilotStore.canBuyOutfit` still only checks
-  affordability, free mass, and `maxInstallable` — it never reads
-  `freeGunSlots`/`freeTurretSlots`, so a player can still buy more gun/turret
-  outfits than the hull has mounts for. ⚠️ computed, not enforced.
-- **Can't-sell (`Flags 0x0008`) and consumed-on-purchase (`Flags 0x0010`)**:
-  both are now decoded *and* enforced in `PilotStore.swift` — `sellOutfit`
-  rejects a sale when `0x0008` is set, and `buyOutfit` grants then immediately
-  `removeOutfit`s when `0x0010` is set. ✅ both fully done.
-
-Everything else in the table below (OnPurchase/OnSell side effects, ModType 27
-increase-max, persistent-on-trade flags 0x0004/0x0020, DispWeight suppression
-0x1000, Ranks-section 0x2000, outfitter display-name strings) is unchanged
-from the original findings — still not implemented.
+> **This doc describes the original game, not our progress against it.**
+> For what's implemented, see [STATUS.md](../STATUS.md).
 
 ## 1. What the `oütf` resource is
 

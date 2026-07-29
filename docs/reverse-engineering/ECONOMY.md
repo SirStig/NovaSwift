@@ -1,44 +1,9 @@
 # The trade economy — commodity pricing, junk, and disasters
 
-Source: `Documentation/Nova Bible.txt` (the official EV Nova plugin-developer
-"Resource Bible", ©1995-2004 Ambrosia Software / Matt Burch) inside the user's
-owned `EV Nova CE` install. The `spöb` (lines 2764–3002), `jünk` (1163–1207)
-and `öops` (1792–1819) resource sections were read in full, plus Part I "Game
-Constants" (37–68) and Appendix III "Patching STR# Resources" (3580–3609).
-Every field below is a direct quote/paraphrase of that document, not a guess.
-
-> **Implementation status (updated after the junk/öops wiring pass):**
-> since this doc was first written, all three of the gaps flagged in §5 got
-> real Swift code, and all three are now wired into gameplay, not just decoded:
-> `Sources/NovaSwiftKit/JunkModels.swift` (`JunkRes`, decoding `jünk`) and
-> `Sources/NovaSwiftKit/OopsModels.swift` (`OopsRes`, decoding `öops`) both
-> decode correctly against the byte layouts documented below, and
-> `Sources/NovaSwiftKit/NovaEconomy.swift` now reads base commodity prices from
-> `STR ` 9300-9305 (`NovaGame.commodityBasePrice`/`commodityPrices`) instead
-> of only the hardcoded Swift table, falling back to that table when no
-> override is present — which is always, for the stock game (verified below).
->
-> **Junk trading is wired**: `TradeCenterView.market` in
-> `app/NovaSwift/Spaceport/SpaceportScreens.swift:29-101` builds buy/sell rows
-> from `game.junks()`, gated by the `BuyOn`/`SellOn` NCB tests and the
-> `SoldAt`/`BoughtAt` stellar lists. Junk cargo lives in the same
-> `state.cargo` dictionary as standard commodities
-> (`app/NovaSwift/Game/PilotStore.swift:210-262`), including the Tribbles/
-> Perishable growth/decay side effects (`tickJunkCargo`). Junk contraband is
-> wired too: `Sources/NovaSwiftKit/Contraband.swift:55-57`
-> (`isCargoContraband`) is consumed by
-> `Sources/NovaSwiftStory/ContrabandScan.swift:49`.
->
-> **Öops price disasters are wired**: the daily `Freq` roll and expiry run in
-> `Sources/NovaSwiftStory/StoryEngine.swift:658-676` (`evaluateDisasters`,
-> called every day from `advanceDays`), and the resulting `PriceDelta` is
-> applied via `Sources/NovaSwiftKit/OopsModels.swift:112-118`
-> (`disasterPriceDelta`), consumed at
-> `app/NovaSwift/Spaceport/SpaceportScreens.swift:78-83`. See
-> [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md) for the implementation notes,
-> including the two places the shipped code diverges from that design doc's
-> original plan (a stateful shared RNG instead of a pure hash, and no
-> disaster-name banner in the trade UI yet). Details in §5.
+Read in full from the Nova Bible: `spöb` (lines 2764–3002), `jünk` (1163–1207),
+`öops` (1792–1819), Part I "Game Constants" (37–68) and Appendix III "Patching
+STR# Resources" (3580–3609). See the [folder README](README.md) for the standard
+every claim here follows, and [STATUS.md](../STATUS.md) for what's implemented.
 
 This doc does **not** re-derive the `spöb` flag-word layout (services bits,
 the six commodity-price nibbles, tech level, `DefenseDude`/`DefCount`, etc.)

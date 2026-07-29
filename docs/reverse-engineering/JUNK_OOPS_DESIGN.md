@@ -12,6 +12,9 @@ wired; where the two disagree, ECONOMY.md wins.
 
 ## Implementation status
 
+This is a design doc, so it tracks its own delivery. Everything else in this
+folder defers to [STATUS.md](../STATUS.md).
+
 Both Part A (junk trading) and Part B (öops disasters) are implemented and
 wired into gameplay, matching the plan below with two notable deviations
 (called out inline at §B.3 and §B.5):

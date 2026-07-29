@@ -1,136 +1,10 @@
 # Government, legal status & rank — reverse-engineered from the Nova Bible
 
-Source: `Documentation/Nova Bible.txt` (the official EV Nova plugin-developer
-"Resource Bible", ©1995-2004 Ambrosia Software / Matt Burch), read in full for
-the `gövt` resource (lines 932–1163), the `ränk` resource (lines 2252–2344),
+Read in full from the Nova Bible: `gövt` (lines 932–1163), `ränk` (2252–2344),
 Appendix I — Combat Ratings (~3518–3543), Appendix II — Legal Status
-(~3543–3577), and the control-bit/NCB primer (~97–229). Every quoted line
-below is verbatim or a close paraphrase of that text, not a guess.
-
-## Implementation status (updated after the code changes below landed)
-
-Since this doc was first written, a follow-up pass implemented several items
-that §5 originally listed as gaps:
-
-- `Diplomacy.isCriminal` now reads each government's own `crimeTolerance`
-  (`GovtRes.crimeTolerance`) instead of a single hardcoded threshold for
-  every govt — the per-government-ratio model in §2 is now correctly
-  modeled at the hostility-check layer.
-- `GovtRes` gained six previously-undecoded fields: `require`, `jamming`
-  (`InhJam1-4`), `mediumName`, `mapColor`, `shipColor`, `interface`,
-  `newsPic` — closing the byte-verified "six fields genuinely missing from
-  the struct" gap noted in the "Correction" entry further down. **All six now
-  have real readers** (added in a later pass than when this note was first
-  written): `require` gates landing
-  (`GameContainerView.landingRefusalReason`, `GameContainerView.swift:1284-1302`);
-  `jamming` feeds guided-weapon lock-loss odds (`World.swift:2200-2203`);
-  `mapColor`/`shipColor`/`interface`/`newsPic` each have a live UI consumer
-  (`GovernmentPalette.color(for:)`, `app/NovaSwift/UI/GovernmentPalette.swift:53-61`;
-  `GameScene.applyGovernmentShipColor`, `app/NovaSwift/Game/GameScene.swift:3769-3776`;
-  the HUD interface lookup, `GameContainerView.swift:555-570`; the Holovid
-  news backdrop, `app/NovaSwift/Spaceport/SpaceportScreens.swift:936-939`).
-  `mediumName` remains the one field of the six with no reader anywhere yet
-  (no "reinforcement fleet approaching" text event exists).
-- `RankRes.contribute` and `MissionRes.require` are now decoded (both were
-  previously flagged as "offset known, not yet read into the struct").
-  Both are now also **wired**: `StoryEngine.activeContributeBits()` folds
-  rank `Contribute` into the pooled bitmask, and `StoryEngine.isEligible`
-  AND-gates `mission.require` against it — the mission-availability half of
-  the Contribute/Require chain (§4.4) is live. The purchase-gating half
-  (`app/NovaSwift/Spaceport/ItemLocking.swift`) is **also wired as of
-  2026-07-12**: `contributedBits(pilot:)` now folds active-rank **and**
-  active-crön Contribute (mirroring `StoryEngine.activeContributeBits`), so a
-  rank-gated purchase — the Bible's own headline example for `ränk.Contribute`
-  — is now achievable through the shipyard/outfitter UI.
-
-**2026-07-14 — the four combat/piracy evilness methods are now fully wired,
-and legal record is spatially correct.** A wiki cross-check (every one of the
-68 real `gövt` resources checked against the EVN Fandom Wiki) found the
-government *relations* model (§1.2/§1.3, classes/allies/enemies + flags) was
-already fully correct and needed zero changes — but surfaced that the
-combat/legal-record *machinery* itself had real gaps, now closed:
-
-- `Diplomacy.recordKill`/`recordDisable` **are called** from `World.swift`'s
-  disable/destroy transitions (not the dead `ShootPenalty` field — see
-  §2.1's "currently ignored" note, now actually honored: a per-hit
-  `shootPenalty` docking no longer happens at all).
-- `Diplomacy.recordBoard` is called from `World.board(shipID:)` — boarding a
-  hulk (a real, substantially-built mechanic; see `Boarding.swift` and
-  `app/NovaSwift/Game/PlunderView.swift`) now applies `BoardPenalty`.
-- `NovaSwiftStory.ContrabandScan.enforce`'s smuggling branch applies
-  `SmugPenalty` with full §1.2 ally/enemy propagation (previously a bare
-  `legalRecord[govt] -= penalty`, no propagation at all).
-- **Legal record is now spatial, per the wiki's Legal Status page**: "status
-  changes due to missions will be reflected universally, while hostile
-  actions against ships will be reflected locally... favorably... in a 3
-  system radius... negatively... in a 5 system radius." `PlayerState` now
-  splits this into `legalRecord` (universal, mission-driven — unchanged) and
-  a new `localLegalRecord: [govt: [system: Int]]` (combat/boarding/smuggling-
-  driven, full weight at the system it happened in, linearly tapering to 0
-  at the radius edge in nearby systems). `PlayerState.effectiveLegalRecord`/
-  `effectiveLegalRecords` combine the two into the "displayed legal status"
-  player-facing code should read — landing gates, mission `AvailRecord`,
-  `pêrs` grudge/like checks, and the galaxy map's per-system relation color
-  all use it now. The shared propagation math (ally/enemy split, plus the
-  new radius taper) lives in `NovaSwiftKit.LegalRecordPropagation` (`apply`
-  for universal, `applyLocal` for local) since `NovaSwiftStory` can't depend
-  on `NovaSwiftEngine`. `NovaGame.systemsWithinHops` (BFS over `sÿst.links`)
-  backs the radius computation.
-- `Diplomacy` itself is unchanged in shape for existing callers — a fresh
-  instance is still one system's session, `playerRecord` still means "standing
-  at that system" (now literally true, since it's seeded from the *combined*
-  value), and `recordKill`/`recordDisable`/`recordBoard` still write it in
-  full — they *additionally* spread a tapered share to nearby systems into
-  `localSpread` when a `NovaGame` is attached (`Diplomacy.game`), draining via
-  `consumeLocalRecordDelta()`/`consumeLocalSpread()` (mirrors
-  `consumeCombatRatingDelta()`'s multi-sync-point-safe drain pattern). See
-  `Sources/NovaSwiftEngine/Diplomacy.swift` and
-  `Tests/NovaSwiftEngineTests/DiplomacyTests.swift`'s spatial-decay tests.
-- Also added while here: the "take command of a captured ship" outcome
-  (previously only "join as escort" existed) and a
-  `novaswift-extract govt <baseDir> [id]` inspector subcommand.
-
-**2026-07-17 — combat hostility/reinforcement-eligibility decoupled from the
-legal-record gate.** Previously, attacking one ship of a government only
-made *that ship* (and, via the player-fleet-membership rule, the player's
-whole fleet) fight back — every OTHER ship of that same government in the
-system stayed unaware and non-hostile until the player's accumulated legal
-record (`CrimeTol`) crossed that government's hostile threshold
-(`Diplomacy.isHostileToPlayer`), and `Spawner`'s reactive reinforcement
-trigger (§1.2/FLEETS.md §5) was gated on that same threshold. That's the
-real game's behavior too (shoot one of a faction's ships and the whole
-faction reacts, immediately, whether or not you've built up a "criminal"
-legal record with them yet) but wasn't modeled: now fixed. `World.applyHit`
-adds the hit ship's government to a new `World.provokedGovernments: Set<Int>`
-(system-scoped — `World` is rebuilt fresh per system entry, so this resets
-naturally) and propagates `AIBrain.provokedByPlayer = true` to every other
-same-government ship currently in the system, mirroring exactly what already
-happened to the directly-hit ship. Only real resource-defined governments
-(id `>= 128`, the same convention `Spawner.governmentUnderAttackAndOutmatched`
-already used) are eligible — `independentGovt` has no organized "side" to
-provoke. `Spawner.governmentUnderAttackAndOutmatched`'s player-foe check now
-ORs `world.provokedGovernments.contains(govt)` alongside
-`dip.isHostileToPlayer(govt)`, so a government can call in reinforcements
-from a single hit's provocation alone. **Rating/reputation penalties are
-untouched** — `KillPenalty`/`DisabPenalty`/`BoardPenalty` still only apply on
-an actual kill/disable/board via `recordKill`/`recordDisable`/`recordBoard`
-(§2.1's "ShootPenalty is ignored" finding still holds: mere provocation,
-like a mere hit, dents nothing). See
-`Tests/NovaSwiftEngineTests/CombatTests.swift`
-(`testHittingOneGovernmentShipProvokesAllOthersInSystem`,
-`testIndependentGovernmentIsNeverMarkedProvoked`) and
-`Tests/NovaSwiftEngineTests/MissionAndFleetSpawnTests.swift`
-(`testReinforcementTriggersFromProvocationAloneWithoutLegalRecordThreshold`).
-Further detail in [FLEETS.md §5](FLEETS.md#5-relationship-to-reinforcement-fleets).
-
-This doc does **not** re-derive:
-- `gövt.MaxOdds` combat-odds gating — see [AI_GROUND_TRUTH.md](../AI_GROUND_TRUTH.md#2-combat-odds-gating-gövtmaxodds--completely-missing-from-our-sim),
-  referenced briefly below where legal status interacts with it.
-- `ränk`'s exact on-disk byte layout and the NCB test/set grammar — both are
-  tabulated in [MISSIONS.md](../MISSIONS.md#ränk--152-bytes) and
-  [MISSIONS.md](../MISSIONS.md#the-ncb-scripting-language); only the *fields'
-  meaning*, not their offsets, is repeated here.
-- Ship/outfit stat aggregation — see [SHIP_SYSTEM.md](../SHIP_SYSTEM.md).
+(~3543–3577), and the control-bit primer (~97–229). See the
+[folder README](README.md) for the standard every claim here follows, and
+[STATUS.md](../STATUS.md) for what's implemented.
 
 ## 1. The `gövt` resource — government relations model
 
@@ -161,7 +35,7 @@ This doc does **not** re-derive:
 | `SkillMult` | Global pilot-skill multiplier for this govt's ships (100 = normal, 50 = half as skilled, 150 = 50% more skilled); values `<1` ignored. |
 | `ScanMask` | 16-bit mask; if it shares a set bit with a `mïsn`'s `ScanMask`, this govt considers that mission's cargo illegal. `0` = unused. |
 | `Require` (2×32-bit → 64-bit) | AND'ed against the player's ship+outfit `Contribute` bits; unmet ⇒ **can't land on any planet/station of this govt at all** — "useful for making travel permits." |
-| `InhJam1-4` | Inherent jamming (0–100%) per of 4 jam types — see [AI_GROUND_TRUTH.md §4.10](../AI_GROUND_TRUTH.md) for how this interacts with targeting/guided weapons. |
+| `InhJam1-4` | Inherent jamming (0–100%) per of 4 jam types — see [AI_GROUND_TRUTH.md §4.10](AI_GROUND_TRUTH.md) for how this interacts with targeting/guided weapons. |
 | `MediumName` | Medium-length name, used in "Sensors detect *xxx* reinforcement fleet approaching." |
 | `Color` / `ShipColor` | HTML-style theme colors for UI / ship paint. |
 | `CommName` | Short name shown when the player hails a ship of this govt. |
@@ -293,7 +167,7 @@ thresholds are separate, per-government fields, all keyed off the same raw
 - **MaxOdds interaction**: legal status determines *whether* a govt's ships
   want to fight the player at all (via the attack threshold above); `MaxOdds`
   then gates whether they actually *commit* to that fight once hostile — see
-  [AI_GROUND_TRUTH.md §2](../AI_GROUND_TRUTH.md). A "Wanted Criminal" in a
+  [AI_GROUND_TRUTH.md §2](AI_GROUND_TRUTH.md). A "Wanted Criminal" in a
   system where the local warships are badly outnumbered still won't be
   charged by a lone patrol ship.
 
@@ -305,7 +179,7 @@ thresholds are separate, per-government fields, all keyed off the same raw
 
 `shïp.Strength` (per-kill contribution) is documented elsewhere in the Bible
 and used identically for `gövt.MaxOdds` — see
-[AI_GROUND_TRUTH.md §2](../AI_GROUND_TRUTH.md) for that field's shield-scaled
+[AI_GROUND_TRUTH.md §2](AI_GROUND_TRUTH.md) for that field's shield-scaled
 30–100% modifier. **The "internal multiplier for adjustment" is not given a
 value anywhere in the Bible** — it's explicitly acknowledged as unspecified
 developer-internal tuning, not scenario-editable data.
@@ -529,11 +403,11 @@ evaluates either.
   aren't satisfied by the player's current ship/outfit/rank/cron Contribute
   bits is correctly excluded from `missionsOffered`. `crön.Require` is wired
   the same way (`StoryEngine.swift:482`, cron activation).
-- ✅ **Implemented and wired: `ränk.Contribute`** (fully, as of 2026-07-12).
+- ✅ **Implemented and wired: `ränk.Contribute`** (fully).
   `RankRes.contribute` (`MissionModels.swift:414/433`) is decoded and *is*
   folded into `StoryEngine.activeContributeBits()`
   (`StoryEngine.swift:407`), so an active rank correctly unlocks
-  rank-gated missions/crons. As of 2026-07-12 it is **also** folded into
+  rank-gated missions/crons. It is **also** folded into
   `app/NovaSwift/Spaceport/ItemLocking.swift`'s `contributedBits(pilot:)`,
   which now pools ship + outfit + active-rank + active-crön Contribute
   (mirroring `StoryEngine.activeContributeBits`) — so the Bible's own headline
@@ -551,10 +425,8 @@ evaluates either.
 - **`CrimeTol` — resolved, see "Correctly modeled" above.** (Kept as a
   removed-item marker so a reader diffing this doc against an older copy
   can see the gap was closed, not silently dropped.)
-- **`recordKill`/`recordDisable`/`recordBoard`/`recordSmuggling` — resolved,
-  all four wired (2026-07-14).** (Kept as a removed-item marker; see the
-  "Implementation status" section at the top for what changed and where.)
-  `recordKill`/`recordDisable` fire from `World.swift`'s disable/destroy
+- **`recordKill`/`recordDisable`/`recordBoard`/`recordSmuggling` — all four
+  wired.** `recordKill`/`recordDisable` fire from `World.swift`'s disable/destroy
   transitions; the every-hit `gov.shootPenalty` docking is gone entirely.
   `recordBoard` fires from `World.board(shipID:)`. `recordSmuggling`'s Kit-
   layer sibling (`LegalRecordPropagation.applyLocal`) is called from
@@ -672,13 +544,13 @@ evaluates either.
   `app/NovaSwift/Spaceport/ItemLocking.swift` (`lockState(for:pilot:at:diplomacy:)`
   for both `OutfRes` and `ShipRes`) to grey out/hide purchases whose
   `Require` isn't satisfied, and by `StoryEngine.activeContributeBits()`
-  (`StoryEngine.swift:399-410`) for mission/cron eligibility. As of 2026-07-12
+  (`StoryEngine.swift`) for mission/cron eligibility.
   `ItemLocking.contributedBits(pilot:)` also folds in active-rank + active-crön
   Contribute (matching `StoryEngine.activeContributeBits()`; see the
   `ränk.Contribute` entry above). What's still missing: `gövt.require`
   (previous bullet) has no consumer at all.
 - **Most rank-exclusivity/revocation `ränk.Flags` bits are still unmodeled;
-  `0x0100`/`0x0200`/`PriceMod` are now wired, `0x0800` is not.** Only `0x0001`
+  `0x0100`/`0x0200`/`PriceMod` are wired, `0x0800` is not.** Only `0x0001`
   is checked for activation-time exclusivity (`StoryEngine.activateRank`,
   `StoryEngine.swift:115`). `0x0002`, `0x0004`, `0x0008` (permanent), `0x0010`,
   `0x0020`, `0x0040` still have no decoded property or check anywhere — e.g. a
@@ -748,7 +620,7 @@ evaluates either.
   doc for citations). Only `mediumName` remains a decoded-but-unread
   cosmetic field, since no "reinforcement fleet approaching" text event
   exists yet to consume it. `SkillMult` remains separately confirmed
-  missing/unguessable in [AI_GROUND_TRUTH.md §4.6](../AI_GROUND_TRUTH.md)
+  missing/unguessable in [AI_GROUND_TRUTH.md §4.6](AI_GROUND_TRUTH.md)
   (no `GovtResource.ts` in novaparse to verify against). A dedicated re-check
   of the full TMPL #507 field list above (every `DWRD`/`WORV`/`CASE`/`CASR`
   line, not just the struct-relevant ones) turns up no field resembling a
@@ -805,7 +677,7 @@ evaluates either.
   (roadside assistance) have no computed property at all, only the raw
   `flags1`/`flags2` integers. Bribery itself is already tracked as
   deliberately deferred pending a hail-dialog UI in
-  [AI_GROUND_TRUTH.md item 10](../AI_GROUND_TRUTH.md); roadside assistance
+  [AI_GROUND_TRUTH.md item 10](AI_GROUND_TRUTH.md); roadside assistance
   isn't mentioned there and has no tracking anywhere else either.
 
 ### Open questions the Bible text doesn't resolve

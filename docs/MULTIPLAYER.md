@@ -1,11 +1,10 @@
 # Multiplayer
 
-Status: **Built and playable** (2026-07-16). Every feature described below exists in
-the codebase and is covered by tests. What has *not* happened is runtime verification
-on real hardware over a real network — the netcode and sync logic are proven
-headlessly (two live `World`s talking over a loopback transport), and the app-side
-wiring compiles, but nobody has yet sat down at two machines and played a session
-end to end. Known gaps are listed in "What isn't done" at the bottom.
+Everything described here is built and covered by tests. What hasn't happened is
+verification on real hardware over a real network: the netcode and sync logic are
+proven headlessly (two live `World`s talking over a loopback transport) and the
+app-side wiring compiles, but nobody has played a session end to end on two
+machines. Known gaps are listed at the bottom.
 
 ## What multiplayer is
 

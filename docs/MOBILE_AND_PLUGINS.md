@@ -1,7 +1,9 @@
 # Mobile UX, Launcher & Plug-in Management
 
 Design decisions for touch controls, the launcher/menu, and how plug-ins ship on
-mobile. Locked 2026-07-07.
+mobile.
+
+> **Design, partly built.** See [STATUS.md](STATUS.md) for what's live.
 
 ## 1. Touch controls (iPhone / iPad)
 

@@ -1,30 +1,4 @@
-# Missions & Story (`NovaSwiftStory`)
-
-> ✅ **Status: WIRED (as of 2026-07-12).** This module is now driven by the
-> running app end-to-end, not just the CLI/tests. `app/NovaSwift/Story/AppGameServices.swift`
-> is a real `GameServices` conformer; `MissionBoardView.swift` runs a live
-> `StoryEngine`; accepting/declining a mission mutates and saves `PlayerState`;
-> **`GameContainerView.handleStoryLanding` calls `engine.playerLanded` on every
-> dock** so delivery/courier/passenger/cargo missions complete, pay out, and
-> show completion text; **`advanceGameDay` advances the galaxy-day clock** on
-> landing/gate/hyperjump so `crön` background events (timed bit-flips, news)
-> fire; and **mission ships spawn into the live world** and report
-> disable/board/destroy back to the engine (`spawnActiveMissionShips` →
-> `World.spawnMissionShips` → `.missionShipGoalReached`). Remaining follow-ups
-> are narrow: govt allies/enemies stellar selectors resolve as plain govt
-> matches until the government-relations table is queried at those call sites;
-> a *landed* player's hull-swap/relocate takes effect on the next takeoff
-> rebuild rather than instantly (in-flight, both rebuild the live scene
-> immediately). `dësc` **PICT/movie** art in offers is now decoded and
-> rendered (`DescRes.pictureID`/`movieFilename`, `MissionOffer.pictureID`,
-> `MissionSingleDialog`'s briefing pane + "Play Clip" holovid overlay, backed
-> by `GameDataController.videoURL(named:)` — searches the base data dir and
-> every plugin dir, so a plugin-shipped clip like ARPIA2's `gasminer.mov`
-> resolves the same way its base-install `Race N.mov` clips already did). See
-> [STATUS.md](STATUS.md),
-> [ROADMAP.md](ROADMAP.md), and
-> [reverse-engineering/EVENTS.md](reverse-engineering/EVENTS.md) §5. "Done"
-> below now means both "the library works" *and* "the player experiences it."
+# Missions & Story
 
 The story layer — bar/computer missions, the control-bit ("NCB") scripting
 language, background `crön` events, ranks, and the campaign save-state. It is a
@@ -127,11 +101,11 @@ Two dialects stored as short strings inside the resources above.
 
 | token | meaning |
 |-------|---------|
-| `bN`  | control bit N is set |
-| `oN`  | player has outfit N |
-| `eN`  | player has explored system N |
-| `pN`  | unregistered ≤ N days (registered player ⇒ always true) |
-| `g`   | player is male |
+| `bN` | control bit N is set |
+| `oN` | player has outfit N |
+| `eN` | player has explored system N |
+| `pN` | unregistered ≤ N days (registered player ⇒ always true) |
+| `g` | player is male |
 
 Example (real mïsn #128): `!(b511 | b515) & !b350`.
 

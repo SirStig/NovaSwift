@@ -21,16 +21,32 @@ struct MainMenuAssets {
         /// shown centred at cölr's `rollover` anchor while the button is hovered.
         let rolloverIcon: CGImage?
     }
+    /// One of the three animated shutter strips that slide across the main
+    /// menu's button rows (`cölr` Slide1-3 + `spïn` 608/609/610, whose PICTs are
+    /// literally named "Slide upper/middle/lower").
+    struct SlideStrip {
+        /// Vertically-stacked frames, in play order: frame 0 is the retracted
+        /// state — which matches backdrop PICT 8000 exactly, so the strip starts
+        /// invisible against it — and the last frame is fully extended.
+        let frames: [CGImage]
+        /// Top-left position in the 1024×768 design space (`cölr` Slide1-3).
+        let origin: CGPoint
+        let size: CGSize
+    }
+
     let background: CGImage?
     let logo: CGImage?
     let logoSize: CGSize
     let buttons: [ButtonArt]
+    /// The three sliding shutter strips, top to bottom. Empty when the data
+    /// doesn't supply them (a plug-in/TC with no `spïn` 608-610).
     /// The player data's live cölr #128 resource (colors, fonts, button/logo
     /// layout) — nil only if the resource is missing, in which case callers fall
     /// back to hand-coded values that mirror the base game's cölr contents.
     let colr: ColrRes?
     /// The main-screen rollover sheet's 7th frame — the gold "ATMOS" wordmark —
     /// shown at rest when no button is hovered.
+    let slides: [SlideStrip]
     let rolloverDefault: CGImage?
     let rolloverSize: CGSize
 
@@ -41,6 +57,12 @@ struct MainMenuAssets {
     private static let fallbackPositions: [CGPoint] = [
         CGPoint(x: 349, y: 400), CGPoint(x: 344, y: 464), CGPoint(x: 345, y: 528),
         CGPoint(x: 555, y: 401), CGPoint(x: 581, y: 464), CGPoint(x: 580, y: 528),
+    ]
+    /// Fallback shutter-strip anchors — cölr #128's Slide1X/Y..Slide3X/Y. Each
+    /// sits within a pixel or two of the matching left-column button row above,
+    /// which is what identifies them as that row's backing plate.
+    private static let fallbackSlideAnchors: [CGPoint] = [
+        CGPoint(x: 343, y: 399), CGPoint(x: 337, y: 462), CGPoint(x: 337, y: 526),
     ]
 
     static func load(_ game: NovaGame?) -> MainMenuAssets? {
@@ -116,7 +138,47 @@ struct MainMenuAssets {
             }
         }
 
+        // The three sliding shutter strips (`spïn` 608/609/610 → PICT 8030/8031/
+        // 8032, named "Slide upper/middle/lower" in the data). Each is a single
+        // tall PICT holding `tilesDown` frames stacked vertically — 11/10/11
+        // frames of 338×63, 351×64 and 351×65 respectively in the base game —
+        // and each is positioned by one of `cölr`'s Slide1-3 anchors, which sit
+        // within a pixel or two of the button rows they belong to.
+        //
+        // They render as a one-shot flourish when the menu appears: frame 0 is
+        // the strip retracted (visually identical to backdrop PICT 8000 at those
+        // coordinates, which is how we know it's the start of the run, not the
+        // end) and the panels slide inward from both edges to their resting
+        // extent. Drawn beneath the buttons, so the buttons land on top of their
+        // finished backing plates.
+        var slides: [MainMenuAssets.SlideStrip] = []
+        let slideAnchors: [CGPoint] = colr.map { [$0.slide1, $0.slide2, $0.slide3] }
+            ?? Self.fallbackSlideAnchors
+        for (i, spinID) in [608, 609, 610].enumerated() {
+            guard let spin = game.spin(spinID) else { continue }
+            var frames: [CGImage] = []
+            var frameSize = CGSize(width: spin.tileWidth, height: spin.tileHeight)
+            if let sheet = rle(spin.spriteID) {
+                frames = sheet.frameCGImages(0..<sheet.frameCount).map(\.image)
+                frameSize = CGSize(width: sheet.frameWidth, height: sheet.frameHeight)
+            } else if let full = pict(spin.spriteID) {
+                let w = spin.tileWidth > 0 ? min(spin.tileWidth, full.width) : full.width
+                let h = spin.tileHeight > 0 ? min(spin.tileHeight, full.height) : full.height
+                guard h > 0 else { continue }
+                let count = spin.tilesDown > 0 ? spin.tilesDown : full.height / max(1, h)
+                frames = (0..<count).compactMap { row in
+                    full.cropping(to: CGRect(x: 0, y: row * h, width: w, height: h))
+                }
+                frameSize = CGSize(width: w, height: h)
+            }
+            guard !frames.isEmpty else { continue }
+            slides.append(.init(frames: frames,
+                                origin: slideAnchors[min(i, slideAnchors.count - 1)],
+                                size: frameSize))
+        }
+
         return MainMenuAssets(background: pict(8000), logo: logo, logoSize: logoSize, buttons: buttons, colr: colr,
+                              slides: slides,
                               rolloverDefault: rolloverFrames.count > 6 ? rolloverFrames[6] : rolloverFrames.last,
                               rolloverSize: rolloverSize)
     }
@@ -130,6 +192,17 @@ struct AuthenticMainMenuView: View {
     @State private var appeared = false
     @State private var sheet: Sheet?
     @State private var hoveredAction: MainMenuAction?
+    /// How many frames of the shutter-strip run have played. Starts at 0 (the
+    /// retracted state, pixel-identical to the backdrop) and counts up to each
+    /// strip's last frame, where it rests.
+    @State private var slideFrame = 0
+    @State private var slideTimer: Timer?
+    /// Frame cadence for the shutter run. `cölr` gives the strips a position but
+    /// no delay — unlike `spöb`/`shän`, which carry an explicit `AnimDelay` — so
+    /// this is the port's own choice: 1/20 s, which plays the base game's 10-11
+    /// frame strips in about half a second. Quick enough to read as a flourish
+    /// on entry rather than a loading delay.
+    private static let slideFrameInterval: TimeInterval = 1.0 / 20.0
     private enum Sheet: String, Identifiable {
         case newPilot, openPilot, settings, about, plugins, importData
         var id: String { rawValue }
@@ -149,6 +222,8 @@ struct AuthenticMainMenuView: View {
                         .resizable().interpolation(.medium)
                         .novaPlace(layout, x: 0, y: 0, w: base.width, h: base.height)
                 }
+
+                slideStrips(layout: layout)
 
                 if let logo = assets.logo, assets.logoSize.height > 0 {
                     // The logo frame is not just the letters — it bakes in the
@@ -184,8 +259,13 @@ struct AuthenticMainMenuView: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .overlay { dialogOverlay }
+        .onDisappear {
+            slideTimer?.invalidate()
+            slideTimer = nil
+        }
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
+            startSlideAnimation()               // cölr Slide1-3 shutter flourish
             model.audio.play(.uiSelect)         // menu appears
             model.prepareAudioAndData()         // ensure main-menu background music is playing
         }
@@ -326,6 +406,44 @@ struct AuthenticMainMenuView: View {
         if let game = model.data.game, let graphics = model.uiGraphics, let res = game.ship(id),
            let sprite = graphics.shipFallbackPicture(res) {
             ShipSilhouetteView(sprite: sprite)
+        }
+    }
+
+    /// The three sliding shutter strips (`cölr` Slide1-3 / `spïn` 608-610),
+    /// drawn between the backdrop and the buttons so each row's panels settle
+    /// underneath the button that sits on them.
+    ///
+    /// Each strip holds at its own last frame once the run finishes, so a strip
+    /// with fewer frames than its neighbours (the base game's middle strip has
+    /// 10 against the others' 11) simply arrives a frame earlier rather than
+    /// looping or snapping back.
+    @ViewBuilder private func slideStrips(layout: NovaLayout) -> some View {
+        ForEach(Array(assets.slides.enumerated()), id: \.offset) { _, strip in
+            let idx = min(slideFrame, strip.frames.count - 1)
+            Image(decorative: strip.frames[idx], scale: 1)
+                .resizable().interpolation(.medium)
+                .novaPlace(layout, x: strip.origin.x, y: strip.origin.y,
+                           w: strip.size.width, h: strip.size.height)
+        }
+    }
+
+    /// Run the shutter strips once, from retracted to their resting extent.
+    /// Idempotent: re-entering the menu restarts the run from frame 0.
+    private func startSlideAnimation() {
+        slideTimer?.invalidate()
+        let last = assets.slides.map(\.frames.count).max().map { $0 - 1 } ?? 0
+        guard last > 0 else { return }
+        slideFrame = 0
+        slideTimer = Timer.scheduledTimer(withTimeInterval: Self.slideFrameInterval,
+                                          repeats: true) { timer in
+            Task { @MainActor in
+                slideFrame += 1
+                if slideFrame >= last {
+                    slideFrame = last
+                    timer.invalidate()
+                    slideTimer = nil
+                }
+            }
         }
     }
 

@@ -1,11 +1,10 @@
 # Godot Layer — Linux / Windows support
 
-Status: **In progress (started 2026-07-19)** — foundation + runnable vertical
-slice landed on branch `claude/godot-layer-linux-windows`. Confirmed compiling
-and running on-toolchain (macOS, Swift 6.3 + Godot 4.7) 2026-07-18: bridge
-builds clean, headless run loads real EV Nova data, builds a system, and
-steps the simulation with no errors. Linux/Windows are still unverified —
-CI is the mechanism that'll catch platform-specific gaps.
+**In progress.** The foundation and a runnable vertical slice are in. Verified
+on-toolchain (macOS, Swift 6.3 + Godot 4.7): the bridge builds clean, a headless
+run loads real EV Nova data, builds a system, and steps the simulation without
+errors. Linux and Windows themselves are still unverified — CI is what will catch
+platform-specific gaps.
 
 > The authoritative platform decision for Apple targets is
 > [ARCHITECTURE.md](ARCHITECTURE.md) (native Swift + SpriteKit). This document
@@ -191,7 +190,7 @@ is a follow-up once the frontend is fleshed out.
    slice, build script, CI. ✅
 2. **Real data path** — sprite upload from `NovaSwiftKit` decode into Godot
    textures; render real ships/planets from the player's data via `make_world`.
-   ✅ *confirmed on-toolchain 2026-07-18 (macOS).*
+   ✅ *confirmed on-toolchain (macOS).*
 3. **HUD & flight** — radar, status bar, target lock, weapons firing/FX, sound
    from `drain_events`. ✅ *radar, status bars, target panel, weapon readout,
    message log implemented; weapon FX and sound still open.*

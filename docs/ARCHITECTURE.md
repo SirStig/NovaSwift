@@ -1,6 +1,7 @@
-# Architecture & Engine Decision
+# Architecture
 
-Status: **Decided (2026-07-07)** — revisit only if a milestone invalidates it.
+How the port is put together, and why. Revisit only if a milestone invalidates
+the engine decision below.
 
 ## Target
 

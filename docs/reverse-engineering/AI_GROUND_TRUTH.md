@@ -1,15 +1,13 @@
 # AI ground truth — extracted from ATMOS's own developer docs
 
-Source: `Documentation/Nova Bible.txt` (the official EV Nova plugin-developer
-"Resource Bible", ©1995-2004 Ambrosia Software / Matt Burch) inside the user's
-owned `EV Nova CE` install. Read in full (not sampled) — every field below is a
-direct quote/paraphrase of that document, not a guess. This is the actual
-design spec the original AI was built against — much stronger ground truth
-than reverse-guessing from behavior descriptions.
+The Nova Bible, read in full rather than sampled. This is the actual design spec
+the original AI was built against — far stronger ground truth than
+reverse-guessing from observed behaviour. See the [folder README](README.md) for
+the standard every claim here follows, and [STATUS.md](../STATUS.md) for what's
+implemented.
 
-A second artifact exists if we ever need exact runtime math the Bible doesn't
-give us: `EV Nova.exe` at `~/Downloads/EV Nova/EV Nova.exe` (x86 PE, not fully
-stripped) — a candidate for disassembly later.
+Where the Bible doesn't give exact runtime math, `EV Nova.exe` (x86 PE, not fully
+stripped) is a candidate for disassembly.
 
 **The core correction to how we'd been thinking about this:** EV Nova's AI is
 not "4 dispositions, each a fixed rule." It's 4 base dispositions layered with
@@ -64,7 +62,7 @@ same calculation gates a second, dynamic layer of population.
 > `sÿst.ReinfFleet`/`ReinfDelay`/`ReinfRegen` decode and the "ally under
 > attack and outmatched → summon" trigger) is now implemented in
 > `Spawner.swift` (`updateReinforcements`/`governmentUnderAttackAndOutmatched`).
-> See [FLEETS.md](reverse-engineering/FLEETS.md) §5 and §7 for the current,
+> See [FLEETS.md](FLEETS.md) §5 and §7 for the current,
 > byte-verified implementation status and remaining caveats (notably the
 > `ReinfRegen` "days" unit being approximated as fixed sim-seconds, since no
 > galaxy-day clock reaches this layer) — this doc's own reverse-engineering
@@ -187,7 +185,7 @@ sources on top of the base 4-type model:
 ## 6. Priority read for implementation (rough order)
 
 All items below are now either ✅ done, or explicitly deferred with a reason
-(not silently skipped). Done in this pass (2026-07-08 - 2026-07-09), all with
+(not silently skipped). Done in this pass, all with
 tests and a real-data headless sanity sweep (`novaswift-extract ai`) across many
 systems showing combat/disable/kills/orbiting all still occur:
 
@@ -247,7 +245,7 @@ systems showing combat/disable/kills/orbiting all still occur:
    unimplemented: cloak when weapon in burst reload (0x0100), cloak when
    hyperspacing (0x0400), cloak when just flying around (0x0800), won't
    uncloak until close to target (0x1000), cloak when docking (0x2000), cloak
-   when preemptively attacked (0x4000). See [`AI.md`](AI.md)'s fidelity note
+   when preemptively attacked (0x4000). See [`AI.md`](../AI.md)'s fidelity note
    for the current wiring.
 9. ✅ **Point defense as a second targeting loop**: `WeapRes.isPointDefense`
    (Guidance 9/10) + `vulnerableToPD` (Flags 0x0080 inverted, verified via
@@ -286,7 +284,7 @@ systems showing combat/disable/kills/orbiting all still occur:
     since no ship-vs-stellar combat exists in this engine yet (documented
     stub, not silently equivalent to `.standard` — see `docs/STATUS.md`'s
     note that "one mission ShipBehav case falls through to normal AI", and
-    [`AI.md`](AI.md) for the fidelity framing). Wired through
+    [`AI.md`](../AI.md) for the fidelity framing). Wired through
     `World.spawnMissionShips`, which the story layer calls to place a
     mission's special ships into the live system with the override already
     set; also used directly by planetary defense fleets
