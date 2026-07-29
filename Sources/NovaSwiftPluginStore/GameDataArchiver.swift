@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import Crypto
 import ZIPFoundation
 
 /// Zips and unzips the imported base-data directory ("Nova Files") for

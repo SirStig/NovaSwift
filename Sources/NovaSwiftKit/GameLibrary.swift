@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import Crypto
 
 /// How a plug-in relates to the base scenario. Drives load order and mutual
 /// exclusivity in the launcher (you play at most one total conversion at a time;

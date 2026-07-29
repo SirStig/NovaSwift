@@ -27,9 +27,14 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
     ],
     targets: [
-        .target(name: "NovaSwiftKit", path: "Sources/NovaSwiftKit"),
+        .target(
+            name: "NovaSwiftKit",
+            dependencies: [.product(name: "Crypto", package: "swift-crypto")],
+            path: "Sources/NovaSwiftKit"
+        ),
         .target(name: "NovaSwiftEngine", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftEngine"),
         .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit", "NovaSwiftEngine"], path: "Sources/NovaSwiftStory"),
         .target(name: "NovaSwiftNet", path: "Sources/NovaSwiftNet"),
@@ -43,6 +48,7 @@ let package = Package(
             dependencies: [
                 "NovaSwiftKit",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ],
             path: "Sources/NovaSwiftPluginStore",
             resources: [
