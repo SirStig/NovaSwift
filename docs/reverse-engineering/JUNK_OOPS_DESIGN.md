@@ -20,25 +20,25 @@ wired into gameplay, matching the plan below with two notable deviations
 (called out inline at §B.3 and §B.5):
 
 - **Junk trading**: `TradeCenterView.market`
-  (`app/NovaSwift/Spaceport/SpaceportScreens.swift:29-101`) surfaces buy/sell
+  (`app/NovaSwift/Spaceport/SpaceportScreens.swift`) surfaces buy/sell
   rows from `game.junks()`, gated by `BuyOn`/`SellOn` NCB tests and the
   `SoldAt`/`BoughtAt` stellar lists, exactly as sketched in Part A.
 - **Shared cargo capacity**: junk tonnage lives in the same `state.cargo`
   dictionary as standard commodities
-  (`app/NovaSwift/Game/PilotStore.swift:210-262`), so capacity accounting is
+  (`app/NovaSwift/Game/PilotStore.swift`), so capacity accounting is
   unified rather than needing a separate combined-total helper.
 - **Tribbles/Perishable**: `PilotStore.tickJunkCargo`
-  (`app/NovaSwift/Game/PilotStore.swift:246-265`) grows/decays held junk
+  (`app/NovaSwift/Game/PilotStore.swift`) grows/decays held junk
   tonnage per day, as Part A.5 describes.
-- **Contraband hook**: `Sources/NovaSwiftKit/Contraband.swift:55-57`
+- **Contraband hook**: `Sources/NovaSwiftKit/Contraband.swift`
   (`isCargoContraband`) is consumed by
-  `Sources/NovaSwiftStory/ContrabandScan.swift:49`.
-- **Öops daily roll + expiry**: `Sources/NovaSwiftStory/StoryEngine.swift:658-676`
+  `Sources/NovaSwiftStory/ContrabandScan.swift`.
+- **Öops daily roll + expiry**: `Sources/NovaSwiftStory/StoryEngine.swift`
   (`evaluateDisasters`, called from `advanceDays` next to
   `payDailyTribute()`), tracking active disasters in `player.activeDisasters`.
-- **Öops pricing**: `Sources/NovaSwiftKit/OopsModels.swift:112-118`
+- **Öops pricing**: `Sources/NovaSwiftKit/OopsModels.swift`
   (`disasterPriceDelta`) applies the additive `PriceDelta`, consumed at
-  `app/NovaSwift/Spaceport/SpaceportScreens.swift:78-83`.
+  `app/NovaSwift/Spaceport/SpaceportScreens.swift`.
 
 See ECONOMY.md's "Implementation status" blurb and §5 table for the
 up-to-date, per-field wiring picture.
@@ -54,15 +54,15 @@ Decoders: `Sources/NovaSwiftKit/JunkModels.swift` (`JunkRes`,
 1. **Determinism over RNG for anything price/stock related.** The economy is
    already deterministic: stocking (`shïp`/`oütf.BuyRandom`) is a day-seeded
    FNV-1a hash of `(day, spobID, resourceID)`, not `Math.random`
-   (`NovaEconomy.swift` ~line 366-380; `PilotStore.swift:366-380` mirrors it).
+   (`NovaEconomy.swift` ~line 366-380; `PilotStore.swift` mirrors it).
    Öops activation must use the **same** hash pattern so a market shows the same
    prices whether you relaunch, revisit, or reload a save on the same in-game
    day. No stored RNG state, no per-frame rolls.
 
    > **As shipped, this principle was not followed.** `StoryEngine.evaluateDisasters`
-   > (`Sources/NovaSwiftStory/StoryEngine.swift:669`) calls
+   > (`Sources/NovaSwiftStory/StoryEngine.swift`) calls
    > `rng.chance(percent: o.freq)`, where `rng` is a stateful `StoryRNG`
-   > (SplitMix64, `Sources/NovaSwiftStory/StellarMatching.swift:85-107`) shared
+   > (SplitMix64, `Sources/NovaSwiftStory/StellarMatching.swift`) shared
    > across missions, bar rumors, and cron evaluation — the same generator
    > advances every time any of those systems rolls, not a pure function of
    > `(day, oopsID)`. This means the öops roll is *not* guaranteed to reproduce
@@ -78,7 +78,7 @@ Decoders: `Sources/NovaSwiftKit/JunkModels.swift` (`JunkRes`,
    `dominatedStellars: Set<Int>?`) so old saves decode.
 4. **The day clock is the single driver.** Öops lifecycles advance inside
    `StoryEngine.advanceDays` next to `payDailyTribute()`/`payDailySalaries()`
-   (`StoryEngine.swift:637-642`) — the one place the calendar moves.
+   (`StoryEngine.swift`) — the one place the calendar moves.
 
 ---
 
@@ -143,7 +143,7 @@ already wired: `Sources/NovaSwiftStory/ContrabandScan.swift` +
 `Sources/NovaSwiftKit/Contraband.swift`. Extend the scan check so a scanning
 government whose `ScanMask` shares a set bit with a **held junk type's**
 `scanMask` flags the player as carrying contraband, exactly as for illegal
-outfits. `Contraband.swift:56` already does `junk(cargoID)` — confirm whether
+outfits. `Contraband.swift` already does `junk(cargoID)` — confirm whether
 that path reads `junkCargo` once it exists, or is currently dead.
 
 ### A.5 Cargo-hold side effects (Tribbles / Perishable)
@@ -203,7 +203,7 @@ Runs once per advanced day, next to `payDailyTribute()`:
    - on fire, append an `ActiveOops`; surface the resource's own `name` as news
      (route through the existing `showNews`/`stationNews` path so it reads at a
      station, matching how cron news already surfaces — see
-     `AppGameServices.swift:120-127`). `-2` news-only disasters do exactly this
+     `AppGameServices.swift`). `-2` news-only disasters do exactly this
      and nothing else.
 
 Because the roll is a pure function of the day number and the resource id, it
@@ -214,7 +214,7 @@ day — the same guarantee the rest of the economy already gives.
 
 The **only** place a live commodity price is computed is
 `NovaEconomy.commodityPrices(_:)` / `commodityMarket(at:)`
-(`NovaEconomy.swift:199,225`). Add the active-disaster delta there:
+(`NovaEconomy.swift`). Add the active-disaster delta there:
 
 - `commodityMarket(at spob:)` sums, for every active `öops` whose `Stellar`
   matches `spob.id` (or is `-1` galaxy-wide) and whose `Commodity` matches the

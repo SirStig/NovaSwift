@@ -57,7 +57,7 @@ outfit mass`. Cargo is a separate pool (`cargoCapacity` tons).
 - Outfitter buy/sell, persisted per pilot: `app/NovaSwift/Spaceport/SpaceportScreens.swift`
   calls `pilot.buyOutfit(...)`/`pilot.sellOutfit(...)` (single-unit at lines 495/511,
   bulk "buy N" quantity-prompt variants at lines 357/361). The underlying
-  `PilotStore` methods (`app/NovaSwift/Game/PilotStore.swift:356-432`) gate each
+  `PilotStore` methods (`app/NovaSwift/Game/PilotStore.swift`) gate each
   purchase on affordable effective cost (rank-scaled `priceMultiplier`), free mass,
   the outfit's (expander-adjusted) max-installed cap, and free gun/turret mounts for
   fixed-gun/turret items, then mutate `PilotState` and persist via `save()`; selling

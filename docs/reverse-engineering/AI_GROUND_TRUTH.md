@@ -48,7 +48,7 @@ only meaningful for escorts).
 This is the single biggest behavioral gap. Real Nova ships **do a cost-benefit
 calculation before picking a fight** — a lone interceptor won't charge a
 4-ship convoy even if hostile. We already decode `GovtRes.maxOdds` and
-`ShipRes.strength` (`NovaAIModels.swift:163`, `NovaModels.swift:162`) — **they
+`ShipRes.strength` (`NovaAIModels.swift`, `NovaModels.swift`) — **they
 are never read anywhere in `AIBrain`/`Diplomacy`/`World`.** This alone
 explains a lot of "toothless"/uniform-feeling combat: everything just charges
 in regardless of numbers.
@@ -74,7 +74,7 @@ same calculation gates a second, dynamic layer of population.
 
 The *default* (flag unset) is **disabled at 33% armor** — this is implied
 directly by the flag's phrasing ("instead of 33%"). Our current
-`World.swift:522-534` instead lets armor hit 0 ("killed"), then rolls a random
+`World.swift` instead lets armor hit 0 ("killed"), then rolls a random
 `disableChance` (0.6 trader / 0.18 warship / 0.35 default) to decide disabled
 vs. destroyed. That's our own invention; the real mechanic is a hard
 percentage-of-max-armor trigger, checked continuously as armor drops, not a

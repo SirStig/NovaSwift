@@ -209,18 +209,18 @@ browsable immediately.
   table (initial system, random-but-frozen-per-mission, adjacent-to-initial,
   follow-the-player, plus travel/return spöb systems and specific system ids)
   is implemented in `missionSystemMatches`
-  (`app/NovaSwift/Game/GameContainerView.swift:1695`).
+  (`app/NovaSwift/Game/GameContainerView.swift`).
 - ✅ Background **news** local/independent precedence per station —
   `StoryEngine.stationNews(forGovt:)`
-  (`Sources/NovaSwiftStory/StoryEngine.swift:892`) collects local news tagged
+  (`Sources/NovaSwiftStory/StoryEngine.swift`) collects local news tagged
   for the requesting station's govt (or a govt allied with it) and falls back
   to the shared independent pool only when no local news applies; wired into
-  `HolovidView` (`app/NovaSwift/Spaceport/SpaceportScreens.swift:944`).
+  `HolovidView` (`app/NovaSwift/Spaceport/SpaceportScreens.swift`).
 - ✅ A destroyed stellar renders its **wreck** graphic
   (`spöb.DestroyedGraphic` → `spïn` → `rlëD`, decoded by
-  `NovaGame.spobDestroyedSprite`, `Sources/NovaSwiftKit/NovaModels.swift:1241`)
+  `NovaGame.spobDestroyedSprite`, `Sources/NovaSwiftKit/NovaModels.swift`)
   when wreck art exists for it; it only vanishes from the system when there's
-  no wreck art at all (`app/NovaSwift/Game/GameContainerView.swift:159`).
+  no wreck art at all (`app/NovaSwift/Game/GameContainerView.swift`).
 
 ## Still not fully wired (low-value polish)
 
@@ -229,4 +229,4 @@ browsable immediately.
 - A *landed* player's hull-swap/relocate takes effect on the next takeoff
   rebuild rather than instantly; in-flight, both `onChangePlayerShip` (via
   `rebuildFlightHost`) and `onMovePlayer` (via `movePlayerToSystem`) rebuild
-  the live scene immediately (`app/NovaSwift/Game/GameContainerView.swift:1492`).
+  the live scene immediately (`app/NovaSwift/Game/GameContainerView.swift`).
