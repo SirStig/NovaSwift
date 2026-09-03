@@ -1,4 +1,11 @@
 import Foundation
+// URLSession and friends live in a separate module in corelibs-Foundation, so a
+// bare `import Foundation` leaves them undeclared on Linux/Windows — which is
+// what took the full-package CI job down with a wall of "'URLSession' is
+// unavailable: This type has moved to the FoundationNetworking module".
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public enum PluginDownloadError: Error, LocalizedError {
     case badStatus(Int)
