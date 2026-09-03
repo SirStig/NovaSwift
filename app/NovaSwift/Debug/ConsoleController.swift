@@ -13,6 +13,20 @@ import NovaSwiftKit
 @MainActor
 final class ConsoleController: ObservableObject {
     @Published var isPresented = false
+
+    /// Shows/hides the panel from a *keyboard* path. SwiftUI dispatches key
+    /// handlers — `.onKeyPress(.escape)` on the command line, the hidden
+    /// `.keyboardShortcut(.cancelAction)`/⌘` buttons — inside the same pass
+    /// that is evaluating view bodies, so publishing `isPresented` straight
+    /// from one trips "Publishing changes from within view updates is not
+    /// allowed". Hopping to the next main-actor turn lands the change after
+    /// that pass; the implicit `.animation(_:value:)` on `isPresented` still
+    /// runs, so the panel slides exactly as before.
+    func setPresented(_ presented: Bool) {
+        guard presented != isPresented else { return }
+        Task { isPresented = presented }
+    }
+
     /// Which half of the dev console the narrow (phone) layout is showing.
     /// Ignored on wide screens, where both panes are on screen at once — see
     /// `DevConsoleView`. Set by whichever control opened the panel, so the

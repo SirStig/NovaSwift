@@ -946,7 +946,9 @@ struct GameContainerView: View {
                     debugControls
                     if console.isPresented {
                         DevConsoleView(console: console, debug: debug, onClose: {
-                            console.isPresented = false
+                            // Escape / the hidden cancel button reach this from
+                            // inside a SwiftUI update pass — see `setPresented`.
+                            console.setPresented(false)
                         }, onSelectEntity: { ref in
                             switch ref {
                             case let .ship(id, _): console.submit("select ship \(id)")
@@ -3038,7 +3040,7 @@ struct GameContainerView: View {
         .zIndex(15)
         #if !os(tvOS)
         .overlay {
-            Button { console.isPresented.toggle() } label: { Color.clear }
+            Button { console.setPresented(!console.isPresented) } label: { Color.clear }
                 .buttonStyle(.plain)
                 .frame(width: 0, height: 0)
                 .opacity(0)

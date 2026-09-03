@@ -20,6 +20,8 @@ built for a screen you hold.
 
 Runs today on **macOS, iPadOS, iOS, and tvOS**, all tested on real devices. A
 **Godot port for Linux and Windows** is [in progress](#linux-and-windows-the-godot-port).
+AI was used to help build it; every change is checked against the real game's
+behavior.
 
 ## Screenshots
 
@@ -67,7 +69,9 @@ in a Shuttle with a few thousand credits and no particular plans.
 
 - **Fly and fight** — the momentum-heavy flight the original was built on: you
   don't turn, you swing the nose around and keep going the way you were. Lock a
-  target, strip its shields, watch the ion cannons leave it drifting.
+  target, strip its shields, watch the ion cannons leave it drifting. The ships
+  shooting back run EV Nova's own `düde`/`flët` decision tables, reconstructed
+  rather than rewritten as scripts. ([docs/AI.md](docs/AI.md))
 - **Explore and trade** — hyperjump between hundreds of systems on real fuel and
   work the spread, then trade the Shuttle up through a Starbridge to something
   with real guns on it.
@@ -157,17 +161,6 @@ reads your own legally-owned copy at runtime — classic resource forks, `.ndat`
 or the modern `BRGR .rez` container — the same model as OpenMW and OpenRA. The
 reasoning is in [docs/CHARTER.md](docs/CHARTER.md), which governs every decision
 in the repo.
-
-## Built with AI
-
-NOVA Swift is developed with heavy AI assistance — most of the engine, the UI,
-and the reverse-engineering of EV Nova's resource formats were built
-collaboratively with Claude Code. Every change is still checked against the real
-game's behavior.
-
-Fittingly, AI is also a subject *inside* the game: NPCs run on a behavior engine
-reconstructed from EV Nova's own `düde`/`flët` decision tables, not hardcoded
-scripts. See [docs/AI.md](docs/AI.md).
 
 ## Build it yourself
 
