@@ -110,7 +110,7 @@ public struct PilotSave: Codable, Sendable, Identifiable {
     public static func snapshot(for player: PlayerState, game: NovaGame?) -> Snapshot {
         let shipName = !player.shipName.isEmpty ? player.shipName
             : (game?.ship(player.shipType)?.name ?? "")
-        let systemName = game?.system(player.currentSystem)?.name ?? ""
+        let systemName = game?.system(player.currentSystem)?.displayName ?? ""
         return Snapshot(shipName: shipName, systemName: systemName,
                         credits: player.credits, combatRating: player.combatRating,
                         ratingTitle: CombatRating.title(forRating: player.combatRating))

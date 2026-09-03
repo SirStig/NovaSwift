@@ -274,14 +274,24 @@ public final class Spawner {
     // MARK: Population accounting (single-ship backbone vs. fleet accent)
 
     /// Ships in-system that belong to a spawned `flët` (flagship + escorts).
+    /// Wrecks don't count — see `singleShipCount`.
     private func fleetShipCount(_ world: World) -> Int {
-        world.npcs.reduce(0) { $0 + (($1.brain?.isFleetMember ?? false) ? 1 : 0) }
+        world.npcs.reduce(0) { $0 + (($1.brain?.isFleetMember == true && !$1.disabled) ? 1 : 0) }
     }
 
     /// Lone ships in-system — the ambient single-ship traffic the trickle
     /// maintains, i.e. everything that isn't part of a fleet.
+    ///
+    /// Disabled hulks are excluded: `sÿst.AvgShips` is "the average number of AI
+    /// ships in the system", meaning *traffic*, and a drifting wreck is scenery,
+    /// not traffic. Counting them was why Gefjon (AvgShips 3, with four
+    /// `Drifting Derelict` përs pinned to it by `sÿst.Person1-8`) had its entire
+    /// ambient budget eaten by hulks before a single Federation patrol or pirate
+    /// could spawn — the system that's supposed to be a running Fed/pirate
+    /// firefight had nothing in it but derelicts. The hard `maxPopulation` cap
+    /// still counts every entity, so wrecks can't blow up the entity budget.
     private func singleShipCount(_ world: World) -> Int {
-        world.npcs.count - fleetShipCount(world)
+        world.npcs.reduce(0) { $0 + ($1.disabled ? 0 : 1) } - fleetShipCount(world)
     }
 
     /// Distinct fleets currently in-system, counted by their flagships (a fleet

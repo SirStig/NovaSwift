@@ -207,7 +207,7 @@ final class StoryGuideModel: ObservableObject {
 
     func governmentName(_ governmentID: Int?) -> String? {
         guard let governmentID else { return nil }
-        return game?.govt(governmentID)?.name
+        return game?.govt(governmentID)?.displayName
     }
 
     // MARK: Pilot summary (built in the background)
@@ -218,7 +218,7 @@ final class StoryGuideModel: ObservableObject {
             .filter { !$0.isEmpty }.sorted()
         let relations = player.legalRecord
             .filter { $0.value != 0 }
-            .map { PilotSummary.Relation(govt: game.govt($0.key)?.name ?? "Govt #\($0.key)", standing: $0.value) }
+            .map { PilotSummary.Relation(govt: game.govt($0.key)?.displayName ?? "Govt #\($0.key)", standing: $0.value) }
             .sorted { abs($0.standing) > abs($1.standing) }
         let active = player.activeMissions.compactMap { am -> PilotSummary.MissionBrief? in
             guard let s = analyzer.brief(forMission: am.missionID, player: player) else { return nil }
@@ -229,7 +229,7 @@ final class StoryGuideModel: ObservableObject {
         return PilotSummary(
             name: player.pilotName, credits: player.credits, combatRating: player.combatRating,
             shipName: game.ship(player.shipType)?.name ?? "Unknown ship",
-            currentSystem: game.system(player.currentSystem)?.name ?? "—",
+            currentSystem: game.system(player.currentSystem)?.displayName ?? "—",
             date: player.date.description, ranks: ranks, relations: relations, activeMissions: active)
     }
 

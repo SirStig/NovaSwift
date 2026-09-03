@@ -23,7 +23,7 @@ Runs today on **macOS, iPadOS, iOS, and tvOS**, all tested on real devices. A
 
 ## Screenshots
 
-Running on iPhone:
+### Running on iPhone
 
 | Flight | Galaxy map |
 |---|---|
@@ -39,6 +39,25 @@ Running on iPhone:
 |---|
 | ![Plug-in store](docs/branding/screenshots/plugin-store.png) |
 | Community plug-ins and total conversions, installed in-game. |
+
+### Beyond the original
+
+Things EV Nova never shipped with, all of them optional:
+
+| Story Guide | Multiplayer stakes |
+|---|---|
+| ![Story Guide](docs/branding/screenshots/story-guide.webp) | ![Host Lobby](docs/branding/screenshots/host-lobby.webp) |
+| Every campaign in your data as a step list — where you are, what's locked, and which mission unlocks it. Reads your plug-ins too. | Host a co-op session and set the rules: PvP on or off, real damage or friendly sparring, friendly fire, permadeath, player trading. |
+
+| Presentation presets | Gameplay dials |
+|---|---|
+| ![Presentation presets](docs/branding/screenshots/presentation-modes.webp) | ![Gameplay settings](docs/branding/screenshots/gameplay-settings.webp) |
+| Classic, Enhanced or Nova Swift as one click — then flip any individual modern touch on or off. Classic is pure 2002. | Difficulty, traffic density from 0.5× to 8×, auto-target, auto-landing, tutorial hints and a flight-training range. |
+
+| Plug-in manager | Debug suite |
+|---|---|
+| ![Plug-in manager](docs/branding/screenshots/plugin-manager.webp) | ![Debug suite](docs/branding/screenshots/dev-console.webp) |
+| Import a plug-in or `.zip`, reorder the load stack, toggle any of them off — total conversions and small tweaks side by side. | Filtered live logs, a frame-time breakdown by subsystem, a ship/planet inspector and a command console. |
 
 ## What you can do
 

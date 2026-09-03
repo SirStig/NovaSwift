@@ -119,7 +119,7 @@ struct PlayerInfoView: View {
         lines.append("You have \(p.credits.creditsAbbreviated).")
         lines.append("Your combat rating is \(CombatRating.title(forRating: p.combatRating)).")
         if let govt = game.system(p.currentSystem)?.government,
-           let name = game.govt(govt)?.name {
+           let name = game.govt(govt)?.displayName {
             let record = p.effectiveLegalRecord(govt: govt, atSystem: p.currentSystem)
             let status: String
             switch record {

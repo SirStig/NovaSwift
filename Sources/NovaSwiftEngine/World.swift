@@ -1254,8 +1254,34 @@ public final class World {
             ship.velocity = outward * min(ship.stats.maxSpeed * 0.6, 180)
             events.append(.shipEmergedFromGate(entityID: ship.entityID, gateSpobID: spobID, at: ship.position))
         }
+        applyDerelictGovtIfNeeded(ship)
         refreshRoster()
         return ship.entityID
+    }
+
+    /// `gövt.Flags` 0x0800 — "Ships of this govt start out disabled (derelicts)."
+    /// The base data's gövt #160 "Derelicts" is what every `Drifting Derelict`
+    /// përs flies, and the designers pin those to fixed systems (Tichel, Gefjon,
+    /// Sol…) as salvage waiting to be boarded. Without this they spawned as
+    /// ordinary live ships — full shields, flying around, un-boardable — which is
+    /// why Gefjon read as "a lot of derelicts flying around" instead of a
+    /// Fed/pirate brawl with a few hulks drifting through it.
+    ///
+    /// Applied after the arrival mode so it also cancels a jump-in's inrush
+    /// velocity: a hulk has no engines and never tears into a system.
+    private func applyDerelictGovtIfNeeded(_ ship: Ship) {
+        guard !ship.disabled, ship.government >= 128,
+              galaxy?.game.govt(ship.government)?.startsDisabled == true else { return }
+        ship.disabled = true
+        ship.shield = 0
+        ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
+        ship.velocity = Vec2()
+        ship.throttleSpeed = 0
+        ship.entryOverspeed = 0
+        ship.wantsToDepart = false
+        ship.currentTargetID = nil
+        ship.brain?.targetID = nil
+        Log.world.debug("\(LogTag.ship(id: ship.entityID, name: ship.name)) spawned as a derelict (gövt \(ship.government) Flags 0x0800)")
     }
 
     /// Inject another player's ship into this system for co-op. It's an ordinary

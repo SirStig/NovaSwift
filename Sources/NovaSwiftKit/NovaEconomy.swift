@@ -222,8 +222,20 @@ extension NovaGame {
 
     /// Whether an item with `techLevel` is offered at `spob`: either the planet's
     /// tech level covers it, or it appears in the planet's special-tech list.
+    ///
+    /// Tech levels are 1-based, so a `TechLevel` of 0 or less is the designers'
+    /// "never stocked anywhere" marker, not "available at every port" — the base
+    /// data uses it exactly once, on oütf #342 "Area Map - Vell-os", a
+    /// mission-granted map whose own dësc (#3214) is literally "Placeholder text
+    /// … This description is never seen by the player." Reading 0 as
+    /// always-eligible put it on the outfitter shelf of every world for anyone
+    /// who had been granted one (an owned item is never hidden, so it could not
+    /// be filtered out downstream) — placeholder text and all. A `SpecialTech`
+    /// slot can still stock such an item deliberately: those are matched
+    /// exactly, and `spobSpecialTech` already drops non-positive slots.
     public func sells(techLevel: Int, at spob: SpobRes) -> Bool {
-        techLevel <= spob.techLevel || spobSpecialTech(spob.id).contains(techLevel)
+        guard techLevel > 0 else { return spobSpecialTech(spob.id).contains(techLevel) }
+        return techLevel <= spob.techLevel || spobSpecialTech(spob.id).contains(techLevel)
     }
 
     /// The commodity market at `spob`: each traded good with its level and price.

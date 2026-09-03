@@ -51,6 +51,16 @@ struct GalaxyMapView: View {
     }
     var gateSelection: GateSelection?
 
+    /// Preview mode for a mission the player hasn't accepted yet: the Mission
+    /// BBS's "where does this job go?" map. The named system gets the same
+    /// orange "go here" arrow and label an accepted mission's destination
+    /// gets, and the chart opens centred on it instead of on the player.
+    struct DestinationPreview {
+        let systemID: Int
+        let label: String
+    }
+    var destinationPreview: DestinationPreview?
+
     // Zoom is points-per-map-unit. Median link length in the data is ~37 units,
     // so 2.4 puts directly-linked systems ~90pt apart — a comfortable local view.
     @State private var zoom: CGFloat = GalaxyMapView.defaultZoom
@@ -127,6 +137,11 @@ struct GalaxyMapView: View {
             rebuildNebulae(using: g)
             rebuildGateLinks()
             rebuildMissionDestinations()
+            // Open a preview chart looking at the job's destination, not at
+            // wherever the player happens to be standing.
+            if let preview = destinationPreview, let sys = nav.system(preview.systemID) {
+                centerOn(sys)
+            }
         }
         .sheet(isPresented: $showingFinder) {
             SystemFinderView(nav: nav, pilot: pilot) { system in centerOn(system) }
@@ -251,7 +266,18 @@ struct GalaxyMapView: View {
     private func rebuildMissionDestinations() {
         guard let game = nav.game else { return }
         let engine = StoryEngine(game: game, player: pilot.state)
-        missionDestinations = engine.missionDestinations()
+        var dests = engine.missionDestinations()
+        // A previewed (not yet accepted) destination joins the accepted ones so
+        // it draws with exactly the same arrow + label treatment.
+        if let preview = destinationPreview {
+            if let i = dests.firstIndex(where: { $0.systemID == preview.systemID }) {
+                dests[i].names.append(preview.label)
+            } else {
+                dests.append((systemID: preview.systemID, names: [preview.label]))
+                dests.sort { $0.systemID < $1.systemID }
+            }
+        }
+        missionDestinations = dests
         hiddenSystems = engine.hiddenSystemIDs()
     }
 
@@ -495,7 +521,7 @@ struct GalaxyMapView: View {
             // out. Unvisited/uncharted systems show as "Unexplored" — no name
             // leak from adjacency alone.
             if showLabels || isCurrent || isDestination {
-                let name = isKnownDetail ? s.name : "Unexplored"
+                let name = isKnownDetail ? s.displayName : "Unexplored"
                 let color: Color = isCurrent ? amber
                     : onRoute ? (hopAffordable ? routeGreen : routeWarn)
                     : isKnownDetail ? (neighborIDs.contains(s.id) ? .white.opacity(0.9) : .white.opacity(0.7))
@@ -851,16 +877,16 @@ struct GalaxyMapView: View {
                 let known = vis == .explored || vis == .chartered
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 6) {
-                        NovaText(known ? sys.name : "Unexplored", size: 13,
+                        NovaText(known ? sys.displayName : "Unexplored", size: 13,
                                  color: sys.id == cur.id ? amber : .white, width: 104, weight: .bold)
                         if known {
-                            NovaText(game.govt(sys.government)?.name ?? "Independent", size: 11,
+                            NovaText(game.govt(sys.government)?.displayName ?? "Independent", size: 11,
                                      color: govtMapColor(sys.government, game: game), width: 104)
                             Divider().overlay(.white.opacity(0.25))
                             ForEach(sys.spobs, id: \.self) { spobID in
                                 if let spob = game.spob(spobID) {
                                     VStack(alignment: .leading, spacing: 1) {
-                                        NovaText(spob.name, size: 11, color: .white.opacity(0.9),
+                                        NovaText(spob.displayName, size: 11, color: .white.opacity(0.9),
                                                  width: 104, weight: .semibold)
                                         NovaText(spobServices(spob), size: 11, color: Color(white: 0.6),
                                                  width: 104)
@@ -903,7 +929,7 @@ struct GalaxyMapView: View {
                                                adjacent: nav.adjacentToKnown(explored: explored, charted: charted),
                                                charted: charted)
                     != .adjacent
-                let destName = destKnown ? dest.name : "Unexplored"
+                let destName = destKnown ? dest.displayName : "Unexplored"
                 // Frame-pixel Geneva (like all in-frame text), not `.novaFont`
                 // chrome roles — the route bar lives inside the scaled map
                 // frame, where the roles' 13-15pt sizes render oversized.

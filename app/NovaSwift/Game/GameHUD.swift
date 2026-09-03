@@ -132,6 +132,11 @@ final class GameHUDModel: ObservableObject {
     /// readout while too close to the system centre to jump, the same visual
     /// nudge the distance gate itself enforces.
     @Published var canJumpNow = true
+    /// Whether the player's fit includes an IFF decoder (`oütf` ModType 14).
+    /// Per the Bible's `ïntf` notes — "having an IFF outfit will override these
+    /// colors" — the authentic HUD's radar draws in the interface's two-tone
+    /// bright/dim scheme without one, and in allegiance colours with it.
+    @Published var hasIFF = false
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.

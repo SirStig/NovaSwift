@@ -271,7 +271,7 @@ final class GameHost {
                 guard let result = ContrabandScan.enforce(on: &pilotStore.state,
                                                            game: scanGame, govtID: scannerGovt),
                       result.foundContraband else { return }
-                let name = scanGame.govt(scannerGovt)?.name ?? "Patrol"
+                let name = scanGame.govt(scannerGovt)?.displayName ?? "Patrol"
                 if result.warningOnly {
                     hud?.post("\(name): contraband detected — you are let off with a warning.")
                 } else if result.fine > 0 {
@@ -1072,6 +1072,15 @@ struct GameContainerView: View {
             setMenuPaused(open, reason: "flightMissionOffer=\(open)")
             if !open { grabSceneFocus(reason: "flight mission offer closed") }
         }
+        // The remaining in-flight overlays. Each of these takes the controls away
+        // (they're all in `flightControlsVisible`) but used to leave the sim
+        // running underneath — so reading a plunder manifest, the mission list,
+        // the pilot card or a mission's completion text meant being shot at by
+        // ships you could neither see nor answer. One gate covers the lot.
+        .onChange(of: sceneFreezingOverlayOpen) { _, open in
+            setMenuPaused(open, reason: "flightOverlay=\(open)")
+            if !open { grabSceneFocus(reason: "flight overlay closed") }
+        }
         .onChange(of: scenePhase) { _, phase in
             // Backgrounding/quitting is the one moment a manual save/jump/land
             // won't have already caught — e.g. shopping at a spaceport and then
@@ -1639,7 +1648,7 @@ struct GameContainerView: View {
     /// advanced, or cleared from the map) without a host rebuild.
     private func syncNavCourseToHUD(_ host: GameHost?) {
         guard let hud = host?.hud else { return }
-        if let destID = nav.destinationID, let name = nav.system(destID)?.name {
+        if let destID = nav.destinationID, let name = nav.system(destID)?.displayName {
             hud.navCourseSystemName = name
             hud.navCourseJumps = nav.route.count
         } else {
@@ -1856,7 +1865,7 @@ struct GameContainerView: View {
         syncNav(host)
         if let keptPosition { host?.scene.playerShip?.position = keptPosition }
         grabSceneFocus(reason: "story relocate")
-        host?.hud.post("Relocated to \(game.system(systemID)?.name ?? "a new system").")
+        host?.hud.post("Relocated to \(game.system(systemID)?.displayName ?? "a new system").")
     }
 
     /// Rebuild the flight host in place for the *current* system — used when a
@@ -2191,6 +2200,16 @@ struct GameContainerView: View {
         // must stay hidden and inert; it takes over the moment a modal/landing
         // screen opens. Tracks the same gate as the controller's flight input.
         CursorTargets.shared.suppressed = flightControlsVisible
+    }
+
+    /// The in-flight overlays that should freeze the sim behind them but aren't
+    /// already covered by their own `onChange` above. Boarding is the one the
+    /// player notices most: the plunder dialog is a decision, not a glance, and
+    /// the fight it interrupts kept going while it was open.
+    private var sceneFreezingOverlayOpen: Bool {
+        landedSpobID == nil
+            && (boardManifest != nil || showMissionsPanel || showPilotInfoPanel
+                || showStoryGuide || flightMissionServices.storyText != nil)
     }
 
     private var flightControlsVisible: Bool {

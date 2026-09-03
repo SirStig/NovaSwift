@@ -602,7 +602,7 @@ public final class StorylineAnalyzer {
         if m.pay > 0 { parts.append("\(formatted(m.pay)) cr") }
         else if m.pay < 0 { parts.append("costs \(formatted(-m.pay)) cr") }
         if m.compRewardGovt >= 128 {
-            let g = game.govt(m.compRewardGovt)?.name ?? "govt #\(m.compRewardGovt)"
+            let g = game.govt(m.compRewardGovt)?.displayName ?? "govt #\(m.compRewardGovt)"
             parts.append("\(m.compLegalReward >= 0 ? "+" : "")standing with \(g)")
         }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
@@ -618,7 +618,7 @@ public final class StorylineAnalyzer {
         case 9999: return "an independent world"
         default:
             if code >= 10128, code <= 10255 {
-                return "a \(game.govt(code - 10000)?.name ?? "govt")-controlled world"
+                return "a \(game.govt(code - 10000)?.displayName ?? "govt")-controlled world"
             }
             return "a designated world"
         }

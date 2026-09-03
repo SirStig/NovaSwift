@@ -90,7 +90,9 @@ final class GameScene: SKScene {
     /// colorizes radar blips by allegiance when an IFF outfit is installed; without
     /// one, ship contacts are drawn in a single neutral color. Defaults to false
     /// (no IFF) so the faithful monochrome behavior is the safe fallback.
-    var playerHasIFF = false
+    var playerHasIFF = false {
+        didSet { hud?.hasIFF = playerHasIFF }
+    }
     /// Host-supplied in-game day (`PlayerState.date.julianDay`), read live at each
     /// world (re)build to vary the spawn RNG seed per visit — otherwise a system
     /// spawns the identical ships every single time it's entered (the world is
@@ -837,6 +839,7 @@ final class GameScene: SKScene {
         Haptics.enabled = settings.hapticsEnabled
         applyColorblindFilter()
         self.hud = hud
+        hud?.hasIFF = playerHasIFF         // the host may have set this before the HUD was attached
         self.audio = audio
         self.planetVisuals = planets
         self.systemName = systemName
@@ -1540,6 +1543,14 @@ final class GameScene: SKScene {
                 // — play out the multi-burst wreck explosion while the host counts
                 // down to the menu.
                 audio?.stopAllLoops()
+                // Say it out loud. The wreck freezing and the controls going dead
+                // is not, on its own, legible as "you died" — players read it as
+                // the ship having glitched.
+                hud?.post(hadEscapePod ? "Your ship was destroyed — escape pod away."
+                                       : "Your ship has been destroyed.")
+                hud?.landPrompt = ""
+                hud?.landName = ""
+                hud?.landReady = false
                 if !hadEscapePod { beginPlayerDeathSequence() }
                 onPlayerDestroyed?(hadEscapePod)
             case let .missionShipGoalReached(missionID, _, goal, byPlayer):
@@ -1696,8 +1707,11 @@ final class GameScene: SKScene {
         }
         nearestLandableID = bestID
         let inReach = bestID != nil && bestDist <= bestReach
-        canLandNow = inReach && p.velocity.length <= landingSpeedLimit
-        if let id = bestID, inReach {
+        // A destroyed ship doesn't land — it's a wreck. Without this the death
+        // sequence left the Land prompt live, so dying next to a planet let the
+        // player simply set down and walk away from their own destruction.
+        canLandNow = p.isAlive && inReach && p.velocity.length <= landingSpeedLimit
+        if let id = bestID, inReach, p.isAlive {
             let name = world.systemContext.bodies.first { $0.id == id }
                 .flatMap { _ in planetVisuals.first { $0.id == id }?.name } ?? "the spaceport"
             hud?.landPrompt = canLandNow ? "Press \(landControlLabel()) to land on \(name)"
@@ -2060,7 +2074,7 @@ final class GameScene: SKScene {
     /// (so the Board control "just works" near a wreck, since the target-cycle
     /// hotkeys deliberately skip disabled ships). nil when nothing is boardable.
     func attemptBoard() -> World.BoardingManifest? {
-        guard let w = world else { return nil }
+        guard let w = world, w.player.isAlive else { return nil }
         let pos = w.player.position
         func boardable(_ s: Ship) -> Bool {
             s.isAlive && s.disabled && s !== w.player && (s.position - pos).length <= boardingRange
@@ -2281,7 +2295,7 @@ final class GameScene: SKScene {
             }
         } else {
             audio?.play(.uiError)
-            let owner = galaxy?.game.govt(spob.government)?.name ?? "controlling"
+            let owner = galaxy?.game.govt(spob.government)?.displayName ?? "controlling"
             hud?.post("You are not cleared to use the \(owner) hypergate.")
         }
     }
@@ -3527,7 +3541,7 @@ final class GameScene: SKScene {
         let scenePos = CGPoint(x: player.position.x, y: player.position.y)
         shipNode.position = scenePos
         cameraNode.position = scenePos
-        systemName = game.system(systemID)?.name ?? ""
+        systemName = game.system(systemID)?.displayName ?? ""
         hud?.systemName = systemName
         audio?.play(.hyperspaceArrive)
         jumpArriveGateID = nil
@@ -4031,6 +4045,7 @@ final class GameScene: SKScene {
     /// it posts the original's "fly further out" nudge and returns false so the
     /// caller refuses the jump.
     func canEnterHyperspace() -> Bool {
+        guard world?.player.isAlive != false else { return false }   // a wreck doesn't jump
         if isClearOfNoJumpZone { return true }
         hud?.post("You are too close to the system's center to enter hyperspace.")
         return false
@@ -4753,11 +4768,12 @@ final class GameScene: SKScene {
                                     playerColor: GalaxyMapView.playerColor(for: info.peerID),
                                     playerName: info.name, isTarget: isTarget)
             }
-            // Radar blips are always tinted by allegiance (red/green/blue/grey),
-            // no IFF outfit required — friend and foe are readable straight off a
-            // bare hull. (Stock EV Nova gates this behind the IFF Decoder outfit,
-            // but that outfit is so cheap/early it plays as always-on; we make it
-            // the default so the scope is useful without shopping first.)
+            // Every contact carries its allegiance (`relationship`) regardless of
+            // IFF; whether that allegiance is actually *drawn* in colour is the
+            // HUD's call. The Nova Swift HUD always colourizes (the IFF Decoder
+            // is cheap and early enough that gating it just made the scope
+            // useless before a shopping trip); the authentic HUD honours the
+            // Bible's `ïntf` rule and stays two-tone until an IFF is fitted.
             let rel = relationship(for: npc)
             return RadarContact(x: dx, y: dy, relationship: rel, isTarget: isTarget)
         }

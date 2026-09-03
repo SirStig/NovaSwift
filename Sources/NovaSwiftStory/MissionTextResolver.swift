@@ -110,7 +110,7 @@ enum MissionText {
 
     private static func systemName(ofSpob spobID: Int?, game: NovaGame) -> String {
         if let spobID, let sys = game.systems().first(where: { $0.spobs.contains(spobID) }) {
-            return sys.name
+            return sys.displayName
         }
         return "an unknown system"
     }

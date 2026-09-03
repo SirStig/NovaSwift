@@ -12,10 +12,12 @@ enum MobilePanel { case missions, pilotInfo }
 /// controls you hold constantly are always visible — **turn on the left, thrust
 /// on the right**, so one thumb steers while the other drives — with target/next/
 /// afterburner/fire-2nd and fire tucked beside thrust. Everything occasional
-/// (map, jump, hail, board, missions, escorts, pilot, cloak, recall) lives
-/// behind a single expandable Actions button, so the screen stays uncluttered;
-/// the pause menu (top-left) and the amber Land pill (bottom-centre, when
-/// cleared to land) are separate always-on controls, not grid entries.
+/// (hail, board, missions, escorts, pilot, cloak, recall) lives behind a single
+/// expandable Actions button, so the screen stays uncluttered — except **Map**
+/// and **Jump**, which sit out beside that toggle because plot-a-course /
+/// engage-it is the loop you run all game and burying it two taps deep is a
+/// tax on every trip. The pause menu (top-left) and the amber Land pill
+/// (bottom-centre, when cleared to land) are the other always-on controls.
 ///
 /// The whole thing is one `VStack` with transparent `Spacer`s, not a stack of
 /// full-screen layers — so only the buttons themselves capture touches and the
@@ -76,7 +78,11 @@ struct TouchControlsOverlay: View {
                 HStack(alignment: .top) {
                     Spacer()
                     VStack(alignment: .trailing, spacing: m.gap) {
-                        actionsToggle
+                        HStack(spacing: m.gap) {
+                            quickAction("map.fill", "Map", .galaxyMap)
+                            quickAction("bolt.horizontal.circle.fill", "Jump", .hyperjump)
+                            actionsToggle
+                        }
                         if menuOpen {
                             actionGrid
                                 .transition(.scale(scale: 0.9, anchor: .topTrailing).combined(with: .opacity))
@@ -224,6 +230,19 @@ struct TouchControlsOverlay: View {
     }
 
     // MARK: Actions menu (top-right)
+
+    /// Map and Jump are the two occasional controls players reach for most —
+    /// plotting a course and then engaging it is the loop that gets you
+    /// anywhere — so they sit out on the deck beside the Actions toggle rather
+    /// than two taps deep inside the grid. They stay in `actionItems` too: the
+    /// grid is the complete list, this is the shortcut.
+    private func quickAction(_ system: String, _ label: String, _ action: GameAction) -> some View {
+        labeled(label) {
+            TapButton(size: m.toggle, onTap: { onDiscrete(action) }) {
+                NovaControlCap(system: system, size: m.toggle, accent: true, glyphScale: 0.42)
+            }
+        }
+    }
 
     private var actionsToggle: some View {
         labeled(menuOpen ? "Close" : "Actions") {

@@ -97,6 +97,7 @@ struct SpaceportView: View {
         .onAppear {
             Log.spaceport.info("Landed at spöb \(spob.id, privacy: .public) (\(spob.name, privacy: .public)) — shipyard=\(spob.hasShipyard, privacy: .public) outfitter=\(spob.hasOutfitter, privacy: .public) trade=\(spob.hasCommodityExchange, privacy: .public) bar=\(spob.hasBar, privacy: .public) uninhabited=\(spob.isUninhabited, privacy: .public)")
             rollLandingOffer()
+            autoRecharge()
         }
         .onChange(of: screen) { _, newValue in
             Log.spaceport.debug("Spaceport screen -> \(String(describing: newValue), privacy: .public) at spöb \(spob.id, privacy: .public)")
@@ -291,16 +292,43 @@ struct SpaceportView: View {
         return currentFuel < maxFuel - 0.5
     }
     /// Free refuel if the port's government runs "Roadside Assistance" (govt
-    /// `Flags2` 0x0010), the player holds a rank from that govt with the
-    /// free-repair/refuel flag (0x0800), or the player carries an
-    /// auto-refueller outfit (`oütf` ModType 19 — Bible ModVal is "ignored",
-    /// ownership alone is what matters, e.g. stock "Auto-recharger"/#186) —
-    /// all three are routes to free service. Otherwise it's paid.
+    /// `Flags2` 0x0010), or the player holds a rank from that govt with the
+    /// free-repair/refuel flag (0x0800). The auto-refueller (`oütf` ModType 19,
+    /// stock "Auto-recharger" #186) is deliberately NOT a route to free
+    /// service — its own dësc (#3058) says so outright: "the cost remains the
+    /// same regardless of whether you have the Auto-recharger or not." What it
+    /// buys is the *convenience*: see `autoRecharge()`.
     private var rechargeIsFree: Bool {
         let govtID = spob.government
         if govtID >= 128, let g = game.govt(govtID), g.roadsideAssistance { return true }
-        if pilot.state.activeRanks.contains(where: { game.rank($0)?.govt == govtID && (game.rank($0)?.flags ?? 0) & 0x0800 != 0 }) { return true }
-        return galaxy.loadout(shipID: pilot.state.shipType, extraOutfits: pilot.state.outfits)?.hasAutoRefuel ?? false
+        return pilot.state.activeRanks.contains { game.rank($0)?.govt == govtID && (game.rank($0)?.flags ?? 0) & 0x0800 != 0 }
+    }
+
+    /// Whether the player's fit includes an auto-refueller (`oütf` ModType 19).
+    private var hasAutoRecharger: Bool {
+        galaxy.loadout(shipID: pilot.state.shipType, extraOutfits: pilot.state.outfits)?.hasAutoRefuel ?? false
+    }
+
+    /// The Auto-recharger's actual job, per its description: "automatically
+    /// contacts spaceport computers via your comm system whenever you land and
+    /// arranges for them to recharge your ship, saving you the worry." So on
+    /// landing it silently does what the Recharge button does — at the same
+    /// price — and only as far as the player can afford. Previously the outfit
+    /// only made fuel free, which is the one thing its description rules out,
+    /// and which is invisible at a port that already comps fuel — so owning it
+    /// looked like it did nothing at all.
+    private func autoRecharge() {
+        guard hasAutoRecharger, !spob.isUninhabited, needsRecharge, let maxFuel else { return }
+        let cost = rechargeCost
+        guard pilot.state.credits >= cost else {
+            Log.spaceport.debug("Auto-recharger at spöb \(spob.id, privacy: .public): can't afford \(cost, privacy: .public)cr")
+            return
+        }
+        pilot.state.credits -= cost
+        pilot.state.fuel = maxFuel
+        pilot.save()
+        onLiveSync()
+        Log.spaceport.debug("Auto-recharger topped fuel to \(maxFuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(cost, privacy: .public)cr")
     }
     /// Cost to top off: ~1cr per missing fuel unit (a ~jump's worth ≈ 100cr),
     /// zero when a friendly government/rank comps it.

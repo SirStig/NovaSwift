@@ -72,6 +72,7 @@
   /* ---- Scroll reveals ---- */
   var reveals = document.querySelectorAll(".reveal");
   if ("IntersectionObserver" in window && !reduce) {
+    document.body.classList.add("anim");
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }

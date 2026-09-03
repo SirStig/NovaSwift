@@ -34,6 +34,12 @@ struct MissionBoardView: View {
     @State private var graphics: SpaceportGraphics?
     @State private var showStoryGuide = false
     @State private var storyGuideFocusKey: String?
+    /// The offer whose destination the player asked to see on the chart, and a
+    /// throwaway `NavigationModel` to render it with. The map is a read-only
+    /// preview here — plotting a course on it goes nowhere, since the player is
+    /// standing in a spaceport.
+    @State private var mapPreview: DestinationPreviewTarget?
+    @StateObject private var mapNav = NavigationModel(game: nil, startSystemID: 128)
 
     /// Storyline tag per mission id, from the table prewarmed once per data
     /// set at load time (`GameDataController.prewarm()`) — powers the
@@ -71,6 +77,13 @@ struct MissionBoardView: View {
         .onAppear(perform: buildEngine)
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
+        .sheet(item: $mapPreview) { target in
+            GalaxyMapView(nav: mapNav, pilot: pilot,
+                          onJump: {},                       // read-only preview: nowhere to jump from a spaceport
+                          onClose: { mapPreview = nil },
+                          fullscreen: appModel.settings.fullscreenGalaxyMap,
+                          destinationPreview: .init(systemID: target.systemID, label: target.label))
+        }
         .sheet(isPresented: Binding(get: { services.pendingOffer != nil },
                                     set: { if !$0 { services.pendingOffer = nil } })) {
             if let offer = services.pendingOffer, let graphics {
@@ -78,23 +91,28 @@ struct MissionBoardView: View {
                 switch location {
                 case .missionComputer:
                     MissionInfoSheet(graphics: graphics, offer: offer, offered: offered,
+                                      resolvedName: { engine?.resolvedName(for: $0) ?? $0.displayName },
                                       onSelect: { engine?.present($0) },
                                       onAccept: { accept(offer) }, onDecline: { decline(offer) },
-                                      storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } })
+                                      storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
+                                      onShowDestination: showDestinationAction(for: offer))
                 case .bar:
                     MissionSingleDialog(graphics: graphics, offer: offer, offered: offered,
                                         onPage: { engine?.present($0) },
                                         onAccept: { accept(offer) }, onDecline: { decline(offer) },
-                                        storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } })
+                                        storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
+                                        onShowDestination: showDestinationAction(for: offer))
                 // persShip/mainSpaceport/tradeCenter/shipyard/outfitter/unknown: no dedicated
                 // authentic sheet yet (this view only ever gets instantiated at .missionComputer
                 // or .bar today) — fall back to the mission-computer style so an offer is never
                 // silently dropped if one of these locations is ever wired up.
                 default:
                     MissionInfoSheet(graphics: graphics, offer: offer, offered: offered,
+                                      resolvedName: { engine?.resolvedName(for: $0) ?? $0.displayName },
                                       onSelect: { engine?.present($0) },
                                       onAccept: { accept(offer) }, onDecline: { decline(offer) },
-                                      storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } })
+                                      storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
+                                      onShowDestination: showDestinationAction(for: offer))
                 }
             }
         }
@@ -106,6 +124,17 @@ struct MissionBoardView: View {
         engine = e
         offered = e.missionsOffered(at: location, spob: spob.id)
         if graphics == nil { graphics = SpaceportGraphics(game: game) }
+        // The preview chart needs a nav model anchored at the port we're standing
+        // on, so "you are here" and the hyperspace web read correctly.
+        let here = game.systems().first { $0.spobs.contains(spob.id) }?.id ?? pilot.state.currentSystem
+        mapNav.configure(game: game, startSystemID: here)
+    }
+
+    /// The "show me where this goes" action for an offer, or nil when the job
+    /// has no destination to point at (a pure combat or bit-flipping mission).
+    private func showDestinationAction(for offer: MissionOffer) -> (() -> Void)? {
+        guard let dest = engine?.offerDestination(for: offer.mission) else { return nil }
+        return { mapPreview = DestinationPreviewTarget(systemID: dest.systemID, label: dest.stellar) }
     }
 
     private func openStoryline(_ key: String) {
@@ -128,6 +157,34 @@ struct MissionBoardView: View {
         pilot.state = engine.player
         services.pendingOffer = nil
     }
+}
+
+/// A small chart pin beside a mission offer's title: opens the galaxy map
+/// centred on where the job would send the player, with the destination
+/// carrying the same orange "go here" marker an accepted mission gets. Not in
+/// the original — EV Nova's BBS made you accept first and find out after — but
+/// it's the single most-asked-for quality-of-life addition to that screen.
+struct DestinationMapBadge: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Color(red: 0.55, green: 0.82, blue: 1.0))
+        }
+        .buttonStyle(.novaPlain)
+        .accessibilityLabel("Show destination on the galaxy map")
+        .help("Show this mission's destination on the galaxy map")
+    }
+}
+
+/// One "show this offer's destination" request — `Identifiable` so it can drive
+/// a `.sheet(item:)` and carry which system to point the chart at.
+private struct DestinationPreviewTarget: Identifiable {
+    let systemID: Int
+    let label: String
+    var id: Int { systemID }
 }
 
 // MARK: - Frame containers
@@ -208,11 +265,17 @@ private struct MissionInfoSheet: View {
     let graphics: SpaceportGraphics
     let offer: MissionOffer
     let offered: [MissionRes]
+    /// Resolves a listed mission's `<…>` wildcards (`<DST>` etc.) for the row
+    /// labels — the raw `mïsn` name still carries them.
+    let resolvedName: (MissionRes) -> String
     let onSelect: (MissionRes) -> Void
     let onAccept: () -> Void
     let onDecline: () -> Void
     var storylineTag: MissionStorylineTag? = nil
     var onOpenStoryline: (() -> Void)? = nil
+    /// Opens the galaxy map on this job's destination. Nil when the mission has
+    /// nowhere to send the player.
+    var onShowDestination: (() -> Void)? = nil
 
     /// PICT #8517 "Mission Info" — 471×155, matches the DLOG bounds exactly.
     private static let pictID = 8517
@@ -223,7 +286,8 @@ private struct MissionInfoSheet: View {
                 MissionPictFrame(image: image) { space in
                     // item 2: (13,1)-(206,13) 193x12 — selected mission's title
                     HStack(spacing: 4) {
-                        NovaText(offer.title, size: 11, width: 175, align: .leading, weight: .bold)
+                        NovaText(offer.title, size: 11, width: 163, align: .leading, weight: .bold)
+                        if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                         if let storylineTag, let onOpenStoryline {
                             StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
                         }
@@ -264,7 +328,7 @@ private struct MissionInfoSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(offered, id: \.id) { mission in
                     Button { onSelect(mission) } label: {
-                        NovaText(mission.displayName, size: 10,
+                        NovaText(resolvedName(mission), size: 10,
                                  color: mission.id == offer.mission.id ? .white : Color(white: 0.6),
                                  width: 191, align: .leading)
                             .padding(.vertical, 1)
@@ -283,6 +347,7 @@ private struct MissionInfoSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 6) {
                 Text(offer.title).novaFont(.heading)
+                if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                 if let storylineTag, let onOpenStoryline {
                     StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
                 }
@@ -328,6 +393,9 @@ struct MissionSingleDialog: View {
     let onDecline: () -> Void
     var storylineTag: MissionStorylineTag? = nil
     var onOpenStoryline: (() -> Void)? = nil
+    /// Opens the galaxy map on this job's destination. Nil when the mission has
+    /// nowhere to send the player.
+    var onShowDestination: (() -> Void)? = nil
 
     @EnvironmentObject private var model: AppModel
     /// Set while the briefing's `dësc` movie (`offer's` `MissionOffer.mission`
@@ -408,7 +476,8 @@ struct MissionSingleDialog: View {
                     ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 6) {
-                                NovaText(offer.title, size: 11, width: 380, align: .leading, weight: .bold)
+                                NovaText(offer.title, size: 11, width: 368, align: .leading, weight: .bold)
+                                if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                                 if let storylineTag, let onOpenStoryline {
                                     StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
                                 }
@@ -491,6 +560,7 @@ struct MissionSingleDialog: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 6) {
                 Text(offer.title).novaFont(.heading)
+                if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                 if let storylineTag, let onOpenStoryline {
                     StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
                 }

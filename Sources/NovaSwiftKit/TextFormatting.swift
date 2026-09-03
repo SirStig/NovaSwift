@@ -56,6 +56,9 @@ extension MissionRes: NovaNamedResource {}
 extension PersRes: NovaNamedResource {}
 extension SpobRes: NovaNamedResource {}
 extension SystRes: NovaNamedResource {}
+// gövt #186 ships as "Federation;hates Temmin Shard" — the annotation belongs in
+// the designer's notes, not on the player's targeting readout or map legend.
+extension GovtRes: NovaNamedResource {}
 
 // MARK: - Description formatting
 

@@ -29,12 +29,12 @@ struct SystemFinderView: View {
                 let vis = nav.visibility(of: $0.id, explored: explored, adjacent: adjacent, charted: charted)
                 return vis == .explored || vis == .chartered
             }
-            .sorted { $0.name < $1.name }
+            .sorted { $0.displayName < $1.displayName }
     }
 
     private var filtered: [SystRes] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return q.isEmpty ? known : known.filter { $0.name.localizedCaseInsensitiveContains(q) }
+        return q.isEmpty ? known : known.filter { $0.displayName.localizedCaseInsensitiveContains(q) }
     }
 
     var body: some View {
@@ -46,7 +46,7 @@ struct SystemFinderView: View {
                     dismiss()
                 } label: {
                     HStack {
-                        Text(system.name).novaFont(.body)
+                        Text(system.displayName).novaFont(.body)
                         Spacer()
                         if system.id == nav.currentSystemID {
                             Text("Current").novaFont(.caption).foregroundStyle(.secondary)

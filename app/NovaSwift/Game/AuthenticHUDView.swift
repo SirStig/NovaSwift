@@ -332,10 +332,12 @@ fileprivate func novaSwiftUIColor(_ c: NovaColor, brightness: Double = 1) -> Col
 }
 
 /// Radar contacts + player heading, drawn in the placed radar rect's local space.
-/// Stellars are the larger dots, ships the small ones. Colours come straight
-/// from the theme's two `ïntf` radar colours so a plug-in reskin fully applies:
-/// hostiles take `brightRadar` (the same hue as the player marker), everything
-/// else `dimRadar`, and disabled/non-functional contacts a dimmed `dimRadar`.
+/// Stellars are the larger dots, ships the small ones. Without an IFF decoder
+/// colours come straight from the theme's two `ïntf` radar colours so a plug-in
+/// reskin fully applies: hostiles take `brightRadar` (the same hue as the player
+/// marker), everything else `dimRadar`, and disabled/non-functional contacts a
+/// dimmed `dimRadar`. An IFF decoder overrides both with allegiance colours —
+/// see `radarColor`.
 private struct RadarContactsView: View {
     @ObservedObject var model: GameHUDModel
     let brightRadar: NovaColor
@@ -343,11 +345,18 @@ private struct RadarContactsView: View {
 
     private var playerMarker: Color { novaSwiftUIColor(brightRadar) }
 
-    /// Map a contact's relationship onto the theme's two radar colours. EV Nova's
-    /// scope is a two-tone display: the alert colour for hostiles, the base
-    /// colour for the rest — with disabled/dead contacts dimmed further so they
-    /// read as inert rather than as a live neutral.
+    /// Map a contact's relationship onto a colour. Without an IFF decoder the
+    /// scope is the interface's own two-tone display: the alert colour for
+    /// hostiles, the base colour for the rest — with disabled/dead contacts
+    /// dimmed further so they read as inert rather than as a live neutral.
+    ///
+    /// With one fitted, the Bible's `ïntf` note applies — "having an IFF outfit
+    /// will override these colors" — and every contact takes its allegiance
+    /// colour instead (green friend / red hostile / blue neutral / grey hulk),
+    /// the whole point of buying the thing. This used to be unconditional
+    /// two-tone, so an IFF Decoder changed nothing on the authentic HUD.
     private func radarColor(_ rel: RadarRelationship) -> Color {
+        if model.hasIFF { return rel.color }
         switch rel {
         case .hostile:                    return novaSwiftUIColor(brightRadar)
         case .friendlyOrOwned, .neutral:  return novaSwiftUIColor(dimRadar)

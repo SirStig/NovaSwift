@@ -135,12 +135,13 @@ struct GameSettings: Codable, Equatable {
     /// reload and shield/armor regen — leave it at `x1` for combat and travel
     /// pacing that matches the documented Bible formulas exactly.
     enum GameSpeed: String, Codable, CaseIterable, Identifiable {
-        case x0_5, x1, x2, x4, x8
+        case x0_5, x1, x1_5, x2, x4, x8
         var id: String { rawValue }
         var label: String {
             switch self {
             case .x0_5: return "0.5×"
             case .x1: return "1×"
+            case .x1_5: return "1.5×"
             case .x2: return "2×"
             case .x4: return "4×"
             case .x8: return "8×"
@@ -151,6 +152,7 @@ struct GameSettings: Codable, Equatable {
             switch self {
             case .x0_5: return 0.5
             case .x1: return 1.0
+            case .x1_5: return 1.5
             case .x2: return 2.0
             case .x4: return 4.0
             case .x8: return 8.0

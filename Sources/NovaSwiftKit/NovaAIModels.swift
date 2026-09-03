@@ -394,6 +394,20 @@ public struct GovtRes {
     public var neverAttacksPlayer: Bool { flags1 & 0x0040 != 0 }
     public var warshipsTakeBribes: Bool { flags1 & 0x0200 != 0 }
     public var cantBeHailed: Bool     { flags1 & 0x0400 != 0 }
+    /// "Ships of this govt start out disabled (derelicts). Note that ships of
+    /// other governments don't care if you attack or board derelict govt ships"
+    /// (Bible `Flags` 0x0800). The base data's gövt #160 "Derelicts" is exactly
+    /// this: every `Drifting Derelict` përs the designers pinned to a system
+    /// (Tichel, Gefjon, Sol…) flies it, and is meant to be a motionless hulk
+    /// waiting to be boarded — not a live ship at full shields flying around.
+    public var startsDisabled: Bool   { flags1 & 0x0800 != 0 }
+    /// "'pers' ships of this govt won't use escape pod, but will act as if they
+    /// did" (Bible `Flags` 0x0100).
+    public var persSkipsEscapePod: Bool { flags1 & 0x0100 != 0 }
+    /// "Nosy ships of other non-allied governments ignore ships of this govt
+    /// that are under attack" (Bible `Flags` 0x0020) — nobody comes to a
+    /// derelict's rescue.
+    public var ignoredWhenAttacked: Bool { flags1 & 0x0020 != 0 }
     public var plundersBeforeKilling: Bool { flags1 & 0x1000 != 0 }
     /// "Can't Request Assist/Mercy, non-talkative" — never has anything to say
     /// when hailed even though `cantBeHailed` is false.

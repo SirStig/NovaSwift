@@ -383,7 +383,7 @@ public final class StoryEngine {
         // The post-accept briefing (BriefText) — "the dialog that comes up when
         // you accept a mission" — shown now, after the offer is accepted.
         let brief = acceptBriefing(for: m)
-        if !brief.isEmpty { services?.showStoryText(brief, title: m.displayName) }
+        if !brief.isEmpty { services?.showStoryText(brief, title: resolvedName(for: m)) }
 
         // Missions whose special ships appear in the current system spawn now.
         if m.hasShipObjective { services?.spawnMissionShips(missionID: missionID, mission: m) }
@@ -414,7 +414,7 @@ public final class StoryEngine {
         // the offerer's parting words. Shown before `OnRefuse` runs so the text
         // reads against the state the player refused in.
         let refusal = resolveMissionText(game.descText(m.refuseText, context: textContext), for: m)
-        if !refusal.isEmpty { services?.showStoryText(refusal, title: m.displayName) }
+        if !refusal.isEmpty { services?.showStoryText(refusal, title: resolvedName(for: m)) }
         apply(set: m.onRefuse)
     }
 
@@ -477,7 +477,7 @@ public final class StoryEngine {
         apply(set: m.onSuccess)
 
         let text = resolveMissionText(game.descText(m.completionText, context: textContext), for: m)
-        if !text.isEmpty { services?.showStoryText(text, title: m.displayName) }
+        if !text.isEmpty { services?.showStoryText(text, title: resolvedName(for: m)) }
         services?.notify(.missionCompleted(missionID: missionID, name: m.name))
 
         if m.datePostIncrement > 0 { advanceDays(m.datePostIncrement) }
@@ -504,7 +504,7 @@ public final class StoryEngine {
         apply(set: m.onFailure)
         if !m.canAbort {
             let text = resolveMissionText(game.descText(m.failureText, context: textContext), for: m)
-            if !text.isEmpty { services?.showStoryText(text, title: m.displayName) }
+            if !text.isEmpty { services?.showStoryText(text, title: resolvedName(for: m)) }
         }
         services?.notify(.missionFailed(missionID: missionID, name: m.name))
     }
@@ -1200,7 +1200,7 @@ public final class StoryEngine {
                 destinationSpobID: targetSpob,
                 destinationSpob: targetSpob.flatMap { game.spob($0)?.displayName } ?? "",
                 destinationSystemID: sys?.id,
-                destinationSystem: sys?.name ?? "",
+                destinationSystem: sys?.displayName ?? "",
                 deadline: am.deadline,
                 canAbort: m.canAbort)
         }
@@ -1291,6 +1291,22 @@ public final class StoryEngine {
         return bySystem.map { (systemID: $0.key, names: $0.value) }.sorted { $0.systemID < $1.systemID }
     }
 
+    /// Where a mission the player hasn't accepted yet would send them — the
+    /// same concrete travel stellar `<DST>` names in its briefing, resolved
+    /// with the same salt so the map, the pitch and the later accepted mission
+    /// all agree on one world. Lets the Mission BBS answer "where is this?"
+    /// before the player commits, which the original never could.
+    /// Nil when the mission has no destination (or none currently matches).
+    public func offerDestination(for m: MissionRes) -> (spobID: Int, systemID: Int, stellar: String, system: String)? {
+        let active = player.activeMissions.first { $0.missionID == m.id }
+        guard let spobID = active?.travelSpobID
+                ?? concreteStellar(m.travelStellar, salt: 0x7 &* UInt64(bitPattern: Int64(m.id))),
+              let spob = game.spob(spobID),
+              let sys = game.systems().first(where: { $0.spobs.contains(spobID) })
+        else { return nil }
+        return (spobID, sys.id, spob.displayName, sys.displayName)
+    }
+
     /// The text shown in the **offer** dialog: EV Nova's initial mission
     /// description (dësc 4000-4255, by convention `offerTextID` = 3872 + id) —
     /// the pitch. NOT `BriefText`, which the Bible defines as "the desc to show
@@ -1317,7 +1333,7 @@ public final class StoryEngine {
     private func showMissionText(_ descID: Int, for m: MissionRes) {
         guard descID >= 128 else { return }
         let text = resolveMissionText(game.descText(descID, context: textContext), for: m)
-        if !text.isEmpty { services?.showStoryText(text, title: m.displayName) }
+        if !text.isEmpty { services?.showStoryText(text, title: resolvedName(for: m)) }
     }
 
     /// Expand a mission-related `dësc` body's `<…>` wildcards (`<PN>`, `<CQ>`,
