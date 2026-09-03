@@ -20,11 +20,20 @@ if ! command -v swift >/dev/null 2>&1; then
   exit 1
 fi
 
+# SwiftGodot builds with library evolution, and on Linux the emitted
+# `SwiftGodotRuntime.swiftinterface` re-imports SwiftGodot's private C module
+# `GDExtension`, which is not on the search path when the interface is verified
+# ("no such module 'GDExtension'"). That check is a self-test of a dependency's
+# textual interface — it says nothing about whether our bridge compiles or
+# links — so skip it rather than carry a patched SwiftGodot. The module itself
+# still builds and is still type-checked normally.
+SWIFT_FLAGS=(-Xswiftc -no-verify-emitted-module-interface)
+
 echo "→ swift version:"; swift --version | sed 's/^/    /'
 echo "→ building NovaSwiftGodot ($CONFIG) in $BRIDGE_DIR …"
-swift build --package-path "$BRIDGE_DIR" -c "$CONFIG"
+swift build --package-path "$BRIDGE_DIR" -c "$CONFIG" "${SWIFT_FLAGS[@]}"
 
-BIN_PATH="$(swift build --package-path "$BRIDGE_DIR" -c "$CONFIG" --show-bin-path)"
+BIN_PATH="$(swift build --package-path "$BRIDGE_DIR" -c "$CONFIG" "${SWIFT_FLAGS[@]}" --show-bin-path)"
 
 # The product name is `NovaSwiftGodot`; SwiftPM names the dynamic library per OS.
 copied=0
