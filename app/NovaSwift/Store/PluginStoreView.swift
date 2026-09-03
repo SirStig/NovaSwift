@@ -48,12 +48,13 @@ struct PluginStoreView: View {
         .navigationTitle("Store")
     }
 
+    /// `NovaMenuPicker`, not a stock `Picker`: the cursor can't open a native
+    /// menu popup, and a stock picker registers no target at all — so on a pad
+    /// the store's only filter was unreachable. Ⓐ on the chip cycles the value.
     private var filterPicker: some View {
-        Picker("Kind", selection: $kindFilter) {
-            Text("All Kinds").tag(PluginKind?.none)
-            ForEach([PluginKind.totalConversion, .patch, .gameplay], id: \.self) { kind in
-                Text(kind.label).tag(PluginKind?.some(kind))
-            }
+        NovaMenuPicker(title: "Kind", selection: $kindFilter,
+                       options: [PluginKind?.none] + [PluginKind.totalConversion, .patch, .gameplay].map { PluginKind?.some($0) }) {
+            $0?.label ?? "All Kinds"
         }
     }
 

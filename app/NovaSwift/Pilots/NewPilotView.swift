@@ -106,10 +106,10 @@ struct NewPilotView: View {
 
                 HStack(spacing: 12) {
                     NovaText("Gender:", size: 13, width: 84)
-                    Picker("", selection: $isMale) {
-                        Text("Male").tag(true); Text("Female").tag(false)
+                    NovaSegmentedPicker(selection: $isMale, options: [true, false]) {
+                        $0 ? "Male" : "Female"
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                    .frame(width: 200)
                 }
                 // A one-line reminder of what this scenario starts you with.
                 NovaText(summary(scenario), size: 11, color: .secondary)

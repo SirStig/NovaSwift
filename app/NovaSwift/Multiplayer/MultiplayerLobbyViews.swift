@@ -50,10 +50,7 @@ struct HostSetupView: View {
                     }
 
                     field(title: "Stakes") {
-                        Picker("Stakes", selection: $preset) {
-                            ForEach(Preset.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
+                        NovaSegmentedPicker(selection: $preset, options: Array(Preset.allCases)) { $0.rawValue }
                         .onChange(of: preset) { _, new in
                             // Apply the preset's defaults, still tweakable below.
                             let r: SessionRules = new == .safe ? .safe : .fullStakes
@@ -71,22 +68,28 @@ struct HostSetupView: View {
 
                     field(title: "Combat") {
                         Toggle("Allow PvP — players can attack each other", isOn: $allowPvP)
+                            .cursorClickable { allowPvP.toggle() }
                         if allowPvP {
                             Toggle("Real PvP damage (off = friendly sparring)", isOn: $pvpDamageReal)
+                                .cursorClickable { pvpDamageReal.toggle() }
                             Toggle("Splash damage hits allies (friendly fire)", isOn: $friendlyFire)
+                                .cursorClickable { friendlyFire.toggle() }
                         }
                         Toggle("Permadeath — players' ships can be destroyed", isOn: $deathReal)
+                            .cursorClickable { deathReal.toggle() }
                     }
                     .tint(amber)
 
                     field(title: "Options") {
                         Toggle("Allow trading between players", isOn: $allowTrade)
+                            .cursorClickable { allowTrade.toggle() }
                     }
                     .tint(amber)
 
                     if showsPublicListing {
                         field(title: "Visibility") {
                             Toggle("List this lobby publicly", isOn: $listPublicly)
+                                .cursorClickable { listPublicly.toggle() }
                             Text(listPublicly
                                  ? "Anyone can see your lobby name and pilot name, and ask to join. You approve every request — nobody gets in without it."
                                  : "Invite-only. Your lobby stays private and you invite friends through Game Center.")

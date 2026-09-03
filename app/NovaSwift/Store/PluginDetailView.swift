@@ -118,6 +118,8 @@ struct PluginDetailView: View {
                         get: { bundle.isEnabled },
                         set: { model.data.setPlugin(entry.id, enabled: $0) }
                     ))
+                    // See PluginsView: a system Toggle is invisible to the cursor.
+                    .cursorClickable { model.data.setPlugin(entry.id, enabled: !bundle.isEnabled) }
                     Button("Delete", role: .destructive) {
                         model.store.delete(entry, data: model.data)
                     }

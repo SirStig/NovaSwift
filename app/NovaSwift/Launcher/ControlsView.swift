@@ -27,11 +27,10 @@ struct ControlsView: View {
     var body: some View {
         List {
             Section {
-                Picker("Input device", selection: $device) {
-                    ForEach(InputDevice.allCases) { d in Text(d.rawValue).tag(d) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                // Cursor-pressable (a system segmented Picker isn't) — and
+                // this is the controller-remapping screen, so a pad has to be
+                // able to reach it.
+                NovaSegmentedPicker(selection: $device, options: Array(InputDevice.allCases)) { $0.rawValue }
                 Text(device == .keyboard
                      ? "Tap a key to rebind, then press the new key — or hold a modifier alone, like Control (Esc cancels). These match EV Nova's scheme and drive keyboard play."
                      : padHint)

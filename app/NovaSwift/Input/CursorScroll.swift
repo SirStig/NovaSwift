@@ -55,10 +55,6 @@ private struct CursorScrollable: ViewModifier {
     @State private var offsetY: CGFloat = 0
     @State private var minY: CGFloat = 0
     @State private var maxY: CGFloat = 0
-    /// Ancestor `cursorScaleEffect` — hit frames register where the
-    /// container is *drawn*, same mapping as `CursorClickable`.
-    @Environment(\.cursorFrameTransform) private var frameTransform
-
     private struct Metrics: Equatable {
         var offsetY: CGFloat, minY: CGFloat, maxY: CGFloat
     }
@@ -81,19 +77,18 @@ private struct CursorScrollable: ViewModifier {
                     // registration — the registry publishes nothing, so this
                     // is safe during view updates.
                     let _ = {
-                        if frameTransform.ready {
-                            CursorScrollTargets.shared.update(
-                                id, frame: frameTransform.apply(geo.frame(in: .global)),
-                                scrollBy: { dy in
-                                    let target = min(max(offsetY + dy, minY), maxY)
-                                    position.scrollTo(y: target)
-                                    // Advance locally: the next 60 Hz tick can't
-                                    // wait for the geometry callback round-trip.
-                                    offsetY = target
-                                })
-                        } else {
-                            CursorScrollTargets.shared.remove(id)
-                        }
+                        // Already drawn-space (ancestor scaleEffect/offset folded
+                        // in by SwiftUI) — register verbatim, same as
+                        // `CursorClickable`.
+                        CursorScrollTargets.shared.update(
+                            id, frame: geo.frame(in: .global),
+                            scrollBy: { dy in
+                                let target = min(max(offsetY + dy, minY), maxY)
+                                position.scrollTo(y: target)
+                                // Advance locally: the next 60 Hz tick can't
+                                // wait for the geometry callback round-trip.
+                                offsetY = target
+                            })
                     }()
                     Color.clear.onDisappear { CursorScrollTargets.shared.remove(id) }
                 }

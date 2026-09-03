@@ -180,6 +180,10 @@ struct TradeCenterView: View {
                 .background(i == selected ? theme.listHilite : theme.listBkgnd)
                 .contentShape(Rectangle())
                 .onTapGesture { selected = i }
+                // Tap alone left the commodity rows unselectable by the
+                // controller cursor — on tvOS, where the cursor is the only
+                // pointer, the Trade Center could not be used at all.
+                .cursorClickable { selected = i }
             }
         }
     }
@@ -462,6 +466,9 @@ struct OutfitterView: View {
                              selected: (selectedID ?? stock.first?.id) == o.id,
                              locked: lockState(for: o) == .locked)
                         .onTapGesture { selectedID = o.id }
+                        // Same gap as the trade rows: without this the cursor
+                        // could press Buy/Sell but never choose *which* outfit.
+                        .cursorClickable { selectedID = o.id }
                 } else {
                     Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
                 }
@@ -683,6 +690,7 @@ struct ShipyardView: View {
                              selected: (selectedID ?? stock.first?.id) == s.id,
                              locked: lockState(for: s) == .locked)
                         .onTapGesture { selectedID = s.id }
+                        .cursorClickable { selectedID = s.id }
                 } else {
                     Color.clear.frame(width: gridTileSize.width, height: gridTileSize.height)
                 }

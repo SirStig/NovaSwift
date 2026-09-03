@@ -324,11 +324,11 @@ private struct StorylineSidebar: View {
 
     @ViewBuilder private var filterControl: some View {
         if pluginIDs.count <= 4 {
-            Picker("", selection: $pluginFilter) {
-                Text("All").tag(String?.none)
-                ForEach(pluginIDs, id: \.self) { Text(pluginLabel($0)).tag(String?.some($0)) }
+            NovaSegmentedPicker(selection: $pluginFilter,
+                                options: [String?.none] + pluginIDs.map { String?.some($0) }) {
+                $0.map(pluginLabel) ?? "All"
             }
-            .pickerStyle(.segmented).padding(10)
+            .padding(10)
         } else {
             Menu {
                 Button("All sources") { pluginFilter = nil }

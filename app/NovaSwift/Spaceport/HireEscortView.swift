@@ -128,6 +128,7 @@ struct HireEscortView: View {
                              selected: (selectedID ?? stock.first?.id) == s.id,
                              locked: remaining == 0 || lockState(for: s) != .available)
                         .onTapGesture { selectedID = s.id }
+                        .cursorClickable { selectedID = s.id }
                 } else {
                     Color.clear.frame(width: hireGridTileSize.width, height: hireGridTileSize.height)
                 }

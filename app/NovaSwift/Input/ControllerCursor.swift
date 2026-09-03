@@ -38,12 +38,12 @@ final class CursorTargets: ObservableObject {
 
     func update(_ id: UUID, frame: CGRect, action: @escaping () -> Void,
                 actionAt: ((CGPoint) -> Void)? = nil, hoverEffect: Bool = true) {
-        // Global frames include render transforms, so the hover-grow/press-
-        // squish animation would feed back into this very frame on the next
-        // layout pass. Freeze the hit frame while its own effect is showing —
-        // the action closure still refreshes.
-        let frozen = (id == hoveredID || id == pressedID) ? targets[id]?.frame : nil
-        targets[id] = Target(frame: frozen ?? frame, action: action, actionAt: actionAt,
+        // No freezing while hovered/pressed: `CursorClickable` reads its frame
+        // outside its own hover-grow/press-squish, so that animation provably
+        // never feeds back into the measurement (verified — a 1.07 hover scale
+        // leaves the reported frame byte-identical). Freezing only ever pinned a
+        // stale rect across a real layout change.
+        targets[id] = Target(frame: frame, action: action, actionAt: actionAt,
                              hoverEffect: hoverEffect)
     }
 
@@ -74,112 +74,35 @@ final class CursorTargets: ObservableObject {
     }
 }
 
-/// Maps layout-space rects (what `GeometryReader` reports) to drawn/screen
-/// rects under ancestor `scaleEffect`s — a draw-time transform the layout
-/// system can't see (verified: the debug overlay shows unscaled hit frames
-/// compressed toward the scale anchor without this).
-struct CursorFrameTransform: Equatable {
-    var scale: CGFloat = 1
-    /// The scale anchor in global layout coordinates (the point that doesn't
-    /// move when the container scales about its centre). `nil` while the
-    /// container hasn't been measured yet — see `ready`.
-    var anchor: CGPoint?
-    /// The container's *visual* scale, regardless of whether `scale` carries
-    /// it. On OS versions that already fold ancestor `scaleEffect` into
-    /// global geometry frames (see `CursorScaleEffect`'s probe) `scale` is 1 —
-    /// but `actionAt` hit points still arrive in drawn coordinates and need
-    /// this divided out to land in the target's own layout space.
-    var pointScale: CGFloat = 1
-
-    /// False only in the not-yet-measured window right after a scaled
-    /// container appears; targets wait it out rather than register skewed.
-    var ready: Bool { scale == 1 || anchor != nil }
-
-    func apply(_ rect: CGRect) -> CGRect {
-        guard scale != 1, let anchor else { return rect }
-        return CGRect(x: anchor.x + (rect.minX - anchor.x) * scale,
-                      y: anchor.y + (rect.minY - anchor.y) * scale,
-                      width: rect.width * scale,
-                      height: rect.height * scale)
-    }
-}
-
-private struct CursorFrameTransformKey: EnvironmentKey {
-    static let defaultValue = CursorFrameTransform()
-}
-
-extension EnvironmentValues {
-    var cursorFrameTransform: CursorFrameTransform {
-        get { self[CursorFrameTransformKey.self] }
-        set { self[CursorFrameTransformKey.self] = newValue }
-    }
-}
-
-private struct CursorScaleEffect: ViewModifier {
-    let scale: CGFloat
-    /// The scale anchor (this view's centre) in global layout coordinates.
-    /// `nil` until the first geometry callback — descendants don't register
-    /// at all until then, so a not-yet-measured anchor can't skew targets.
-    @State private var anchor: CGPoint?
-    /// Whether this OS build already folds ancestor `scaleEffect` into global
-    /// geometry frames (behaviour differs across SwiftUI versions/platforms).
-    /// Probed from a real measurement rather than assumed: the container's
-    /// global frame is compared against its own layout size. When the system
-    /// does it for us, descendants must NOT scale their frames again — that
-    /// double-scale is exactly the "cursor lands beside the button" offset.
-    @State private var systemAppliesScale: Bool?
-
-    /// One measurement carrying both interpretations of the same view.
-    private struct Probe: Equatable {
-        var frame: CGRect     // global — drawn or layout space, OS-dependent
-        var layoutSize: CGSize // always layout space (scaleEffect is layout-neutral)
-    }
-
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(scale)
-            // Layout-neutral geometry observation (a bare GeometryReader here
-            // would be greedy and break the content-hugging dialogs). Fires on
-            // appear and on every geometry change.
-            .onGeometryChange(for: Probe.self) { proxy in
-                Probe(frame: proxy.frame(in: .global), layoutSize: proxy.size)
-            } action: { probe in
-                // The centre is the scale anchor, invariant either way.
-                anchor = CGPoint(x: probe.frame.midX, y: probe.frame.midY)
-                if probe.layoutSize.width > 0, scale != 1 {
-                    // Whichever reading the measured width is closer to wins.
-                    let drawn = probe.layoutSize.width * scale
-                    systemAppliesScale =
-                        abs(probe.frame.width - drawn) < abs(probe.frame.width - probe.layoutSize.width)
-                }
-                #if DEBUG
-                print("[cursor] scale container ×\(scale) frame \(probe.frame) layout \(probe.layoutSize) systemAppliesScale \(String(describing: systemAppliesScale))")
-                #endif
-            }
-            .environment(\.cursorFrameTransform, transform)
-    }
-
-    private var transform: CursorFrameTransform {
-        if systemAppliesScale == true {
-            // Global frames are already drawn-space: register them untouched
-            // (scale 1 → ready), only hit points still need the visual scale
-            // divided out for `actionAt`.
-            return CursorFrameTransform(scale: 1, anchor: nil, pointScale: scale)
-        }
-        // Legacy semantics (or not yet probed — anchor nil keeps `ready`
-        // false so descendants wait rather than register skewed).
-        return CursorFrameTransform(scale: scale, anchor: anchor, pointScale: scale)
-    }
-}
-
+/// `scaleEffect(_:)` for containers holding cursor-clickable controls.
+///
+/// This is now a plain alias, kept because a dozen call sites read better for
+/// saying "this scale has cursor targets under it" — and because the name is a
+/// warning: a container that scales its contents used to have to *tell* its
+/// descendants so they could correct their hit frames. It doesn't any more, and
+/// must not try.
+///
+/// Measured on this SwiftUI generation (macOS 27 / iOS 26 / tvOS 26, probe in
+/// the session notes), a descendant's `frame(in: .global)` is already reported
+/// in **drawn** space: ancestor `scaleEffect` *and* ancestor `offset` (which is
+/// how `novaPlace` positions every authentic control) are both folded in, and
+/// nested scale containers compose on their own — outer 1.4 × inner 0.5 reports
+/// a ratio of exactly 0.7. So a hit frame read at the control is already correct
+/// and needs no adjustment whatsoever.
+///
+/// What used to happen: `CursorScaleEffect` probed whether the OS folded the
+/// scale in by comparing its *own* `frame(in: .global)` against its layout size.
+/// A geometry read at the modifier's own level always reports layout space, so
+/// that comparison always concluded "the OS does not fold it in" — at every
+/// scale, on every OS — and descendants dutifully scaled their already-drawn
+/// frames a second time. The hit rect drifted away from the drawn control by
+/// (scale − 1) × its distance from the container's centre, so the cursor had to
+/// sit well off a button to press it. `novaFrameScale` floors at 1.0 on a phone
+/// (no error, which is why it felt fine there) and rises to ~1.41 on a 1080p-
+/// point 4K TV and up to 2.6 on a large desktop — precisely where it was worst.
 extension View {
-    /// `scaleEffect(_:)` for containers holding cursor-clickable controls:
-    /// applies the visual scale AND tells descendant `cursorClickable`s about
-    /// it so their hit frames land where the controls are drawn. Note: wraps
-    /// the content in a `GeometryReader`, so the container must be sized by
-    /// its parent (all current sites are full-viewport or explicitly framed).
     func cursorScaleEffect(_ scale: CGFloat) -> some View {
-        modifier(CursorScaleEffect(scale: scale))
+        scaleEffect(scale)
     }
 }
 
@@ -190,9 +113,6 @@ private struct CursorClickable: ViewModifier {
     /// Ambient `.disabled()` must gate the cursor exactly like it gates taps —
     /// a disabled control's frame is deregistered so Ⓐ can't fire its action.
     @Environment(\.isEnabled) private var isEnabled
-    /// Ancestor `cursorScaleEffect` — hit frames must be registered where the
-    /// control is *drawn*; global layout frames don't include render scales.
-    @Environment(\.cursorFrameTransform) private var frameTransform
     /// Re-renders this target when the cursor's hover/press target changes
     /// (an occasional event, not a per-tick one — see `setHovered`).
     @ObservedObject private var registry = CursorTargets.shared
@@ -216,22 +136,27 @@ private struct CursorClickable: ViewModifier {
                     // captured action fresh. Safe during view updates because the
                     // registry publishes nothing on target mutation.
                     let _ = {
-                        if isEnabled, frameTransform.ready {
-                            let t = frameTransform
-                            // actionAt receives the hit point in this view's
-                            // own layout coordinates — divide the ancestor's
-                            // visual scale back out of the drawn-space offset.
-                            let mappedActionAt = actionAt.map { f in
-                                { (p: CGPoint) in
-                                    f(CGPoint(x: p.x / t.pointScale, y: p.y / t.pointScale))
-                                }
+                        guard isEnabled else { CursorTargets.shared.remove(id); return }
+                        // Already drawn-space: every ancestor `scaleEffect` and
+                        // `offset` (i.e. `novaPlace`) is folded in here by
+                        // SwiftUI, and nested scale containers compose. Register
+                        // it verbatim — adjusting it is what put the hit rect
+                        // beside the button. This reader sits *outside* the
+                        // hover-grow below, so that effect can't feed back in.
+                        let drawn = geo.frame(in: .global)
+                        // ...which also makes the drawn/layout width ratio the
+                        // exact cumulative visual scale, needed to hand a
+                        // point-aware target (a slider track) a hit point in its
+                        // own layout coordinates.
+                        let visualScale = geo.size.width > 0 ? drawn.width / geo.size.width : 1
+                        let mappedActionAt = actionAt.map { f in
+                            { (p: CGPoint) in
+                                f(CGPoint(x: p.x / visualScale, y: p.y / visualScale))
                             }
-                            CursorTargets.shared.update(id, frame: t.apply(geo.frame(in: .global)),
-                                                        action: action, actionAt: mappedActionAt,
-                                                        hoverEffect: hoverEffect)
-                        } else {
-                            CursorTargets.shared.remove(id)
                         }
+                        CursorTargets.shared.update(id, frame: drawn, action: action,
+                                                    actionAt: mappedActionAt,
+                                                    hoverEffect: hoverEffect)
                     }()
                     Color.clear
                         .onDisappear { CursorTargets.shared.remove(id) }

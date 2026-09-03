@@ -30,11 +30,12 @@ struct PluginsView: View {
     var body: some View {
         DialogChrome(title: "Plug-ins", onClose: onClose) {
             VStack(spacing: 0) {
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding([.horizontal, .top])
+                // NovaSegmentedPicker, not `Picker(.segmented)`: a system
+                // segmented control registers no cursor target, so on a pad
+                // (and on tvOS, where the cursor is the only pointer) the tabs
+                // simply could not be pressed.
+                NovaSegmentedPicker(selection: $tab, options: Array(Tab.allCases)) { $0.rawValue }
+                    .padding([.horizontal, .top])
 
                 switch tab {
                 case .installed:
@@ -146,6 +147,10 @@ struct PluginsView: View {
                 set: { model.data.setPlugin(plugin.id, enabled: $0) }
             ))
             .labelsHidden()
+            // A system Toggle registers no cursor target, so Ⓐ had nothing to
+            // press here — enabling a plug-in was mouse/touch-only. Purely
+            // additive: the switch keeps its stock appearance.
+            .cursorClickable { model.data.setPlugin(plugin.id, enabled: !plugin.isEnabled) }
         }
     }
 }

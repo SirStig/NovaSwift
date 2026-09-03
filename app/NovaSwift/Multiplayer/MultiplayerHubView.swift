@@ -63,11 +63,8 @@ struct MultiplayerHubView: View {
         ScrollView {
             VStack(spacing: 18) {
                 header
-                Picker("Mode", selection: $tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
+                NovaSegmentedPicker(selection: $tab, options: Array(Tab.allCases)) { $0.rawValue }
+                    .padding(.horizontal)
 
                 switch tab {
                 case .local:  LocalLobbySection(onEnterFlight: onEnterFlight)

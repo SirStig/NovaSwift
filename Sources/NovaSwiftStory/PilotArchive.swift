@@ -89,10 +89,19 @@ public final class PilotArchive {
     /// sets up the container on first use, so callers resolve it off the main
     /// thread (see `PilotRoster.useICloud`).
     public static func iCloudRoot(containerID: String? = defaultICloudContainerID) -> URL? {
+        // iCloud is an Apple-platform facility: corelibs-Foundation has no
+        // ubiquity container at all, so on Linux/Windows (the Godot desktop
+        // frontend) there is simply never a cloud root and every caller falls
+        // through to the local archive — which is already the documented
+        // behaviour when the user isn't signed in or the entitlement is absent.
+        #if canImport(Darwin)
         guard let container = FileManager.default.url(forUbiquityContainerIdentifier: containerID) else {
             return nil
         }
         return container.appendingPathComponent("Documents/Pilots", isDirectory: true)
+        #else
+        return nil
+        #endif
     }
 
     /// Whether an iCloud pilots container is currently reachable (entitled +
