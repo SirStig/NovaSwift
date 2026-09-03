@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=2" />
 </head>
 <body>
   <div class="space-bg" aria-hidden="true"></div>
@@ -54,7 +54,7 @@
   <!-- ═══ HERO ═══ -->
   <header class="hero">
     <div class="wrap">
-      <picture class="reveal">
+      <picture>
         <source srcset="assets/launch-banner.webp" type="image/webp" />
         <img class="hero-art" src="assets/launch-banner.png" width="1584" height="672" fetchpriority="high"
              alt="NOVA — a complete rewrite in Swift: a warship over a red nebula, flanked by space stations and star charts." />
@@ -81,13 +81,13 @@
   <!-- ═══ WHAT'S NEW ═══ -->
   <section class="section" id="new">
     <div class="wrap">
-      <div class="head reveal">
+      <div class="head">
         <p class="eyebrow">Beyond the original</p>
         <h2>Six things EV Nova never had.</h2>
         <p>Every one of them optional. Set the game to Classic and it behaves like 2002.</p>
       </div>
 
-      <div class="tabs reveal">
+      <div class="tabs">
         <input type="radio" name="feat" id="f1" checked />
         <input type="radio" name="feat" id="f2" />
         <input type="radio" name="feat" id="f3" />
@@ -143,12 +143,12 @@
   <!-- ═══ ON IPHONE ═══ -->
   <section class="section" id="mobile">
     <div class="wrap">
-      <div class="head reveal">
+      <div class="head">
         <p class="eyebrow">Running on iPhone</p>
         <h2>Not a Mac screenshot.</h2>
         <p>EV Nova never came to mobile. These are real captures from a phone.</p>
       </div>
-      <div class="shots reveal">
+      <div class="shots">
         <figure>
           <picture>
             <source srcset="assets/screenshots/flight-hud.webp" type="image/webp" />
@@ -188,11 +188,11 @@
   <!-- ═══ THE GAME ═══ -->
   <section class="band">
     <div class="wrap">
-      <div class="head center reveal">
+      <div class="head center">
         <p class="eyebrow">The game itself</p>
         <h2>It's 1177. You have a Shuttle and no plans.</h2>
       </div>
-      <div class="grid-4 reveal">
+      <div class="grid-4">
         <div class="card">
           <h3>Fly</h3>
           <p>Momentum flight — you don't turn, you swing the nose around and keep going the way you were.</p>
@@ -216,13 +216,13 @@
   <!-- ═══ STATUS ═══ -->
   <section class="section" id="status">
     <div class="wrap">
-      <div class="head reveal">
+      <div class="head">
         <p class="eyebrow">Status</p>
         <h2>Playable start to finish. Still being sharpened.</h2>
         <p>Roughly 90% of a full port: flight, combat, economy, branching campaigns, boarding, domination
            — all in, on all four platforms.</p>
       </div>
-      <div class="grid-2 reveal">
+      <div class="grid-2">
         <div class="card list done">
           <h3>Done and shipping</h3>
           <ul>
@@ -255,7 +255,7 @@
   <!-- ═══ GET IT ═══ -->
   <section class="section" id="get">
     <div class="wrap">
-      <div class="get reveal">
+      <div class="get">
         <div>
           <p class="eyebrow">Get it</p>
           <h2>Two ways in.</h2>
@@ -283,7 +283,7 @@
   <!-- ═══ THE RULE ═══ -->
   <section class="section tight">
     <div class="wrap">
-      <div class="rule reveal">
+      <div class="rule">
         <h2>You bring the game.</h2>
         <p>
           We ship the code; you supply the data. EV Nova's content belongs to ATMOS, so this project contains
@@ -320,6 +320,6 @@
     </div>
   </footer>
 
-  <script src="starfield.js"></script>
+  <script src="starfield.js?v=2"></script>
 </body>
 </html>

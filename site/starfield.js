@@ -1,4 +1,4 @@
-/* Lightweight parallax starfield + scroll reveals. No dependencies. */
+/* Lightweight parallax starfield. No dependencies, no content depends on it. */
 (function () {
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -67,19 +67,5 @@
       rt = setTimeout(function () { seed(); if (reduce) draw(); }, 150);
     });
     if (reduce) draw();
-  }
-
-  /* ---- Scroll reveals ---- */
-  var reveals = document.querySelectorAll(".reveal");
-  if ("IntersectionObserver" in window && !reduce) {
-    document.body.classList.add("anim");
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
-      });
-    }, { threshold: 0.12 });
-    reveals.forEach(function (el) { io.observe(el); });
-  } else {
-    reveals.forEach(function (el) { el.classList.add("in"); });
   }
 })();
