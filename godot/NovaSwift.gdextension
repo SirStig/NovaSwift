@@ -8,7 +8,12 @@
 [configuration]
 
 entry_symbol = "swift_entry_point"
-compatibility_minimum = "4.2"
+; Must not be lower than the Godot release SwiftGodot's pinned revision
+; generated its bindings from — Godot loads an extension that claims a
+; compatibility_minimum it meets, and a binding calling an interface function
+; the host does not export takes the editor down rather than degrading. See the
+; matching note in project.godot; keep the two in step.
+compatibility_minimum = "4.6"
 
 [libraries]
 

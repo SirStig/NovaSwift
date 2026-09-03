@@ -114,10 +114,13 @@ frontend on **Godot 4**, bridged through
 [SwiftGodot](https://github.com/migueldeicaza/SwiftGodot), reaches Linux and
 Windows without forking any game logic: both builds run the same `World.step`.
 
-In progress. The Godot project flies a ship on the engine's real flight model,
-renders ships and planets decoded from your data, and has a working HUD, radar,
-target lock, and landing/launch. The galaxy map, spaceport screens, and story
-runtime are next. Status in [docs/GODOT_LAYER.md](docs/GODOT_LAYER.md).
+In progress. The Godot project flies a ship on the engine's real flight model
+at the same fixed 30 Hz tick the Apple build uses, and renders ships, planets,
+shots, beams, asteroids and explosions decoded from your data — plus a working
+HUD, radar, target lock, landing/launch and a first spaceport screen (the
+commodity exchange). Sound, the galaxy map, the rest of the spaceport, and the
+story runtime are next. Status in
+[docs/GODOT_LAYER.md](docs/GODOT_LAYER.md).
 
 ## Beta
 

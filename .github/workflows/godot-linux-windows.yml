@@ -6,7 +6,28 @@ name: Godot layer (Linux/Windows)
 # The Apple app (app/NovaSwift, Xcode) is untouched by this workflow — it builds
 # only the SwiftPM packages.
 
+# Back on push/PR. It was demoted to manual-only while
+# every job died in NovaSwiftKit on `NSData.compressed(using: .lzfse)` — an
+# Apple-only Foundation facility that no amount of Godot work could route
+# around, since the bridge builds the core first. That is fixed in
+# SpriteDiskCache (the record now carries a codec byte and stores raw off
+# Apple), so the signal is worth having again.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "Sources/**"
+      - "godot/**"
+      - "Package.swift"
+      - "scripts/build-gdextension.sh"
+      - ".github/workflows/godot-linux-windows.yml"
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "godot/**"
+      - "Package.swift"
+      - "scripts/build-gdextension.sh"
+      - ".github/workflows/godot-linux-windows.yml"
   workflow_dispatch:
 
 permissions:

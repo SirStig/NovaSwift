@@ -1,10 +1,31 @@
 # Godot Layer — Linux / Windows support
 
-**In progress.** The foundation and a runnable vertical slice are in. Verified
-on-toolchain (macOS, Swift 6.3 + Godot 4.7): the bridge builds clean, a headless
-run loads real EV Nova data, builds a system, and steps the simulation without
-errors. Linux and Windows themselves are still unverified — CI is what will catch
-platform-specific gaps.
+**In progress.** The foundation, a runnable vertical slice, and the flight
+renderer are in. Verified on-toolchain (macOS, Swift 6.3 + Godot 4.7): the bridge
+builds clean, a headless run loads real EV Nova data, builds a system, and steps
+the simulation without errors. Linux and Windows themselves are still unverified
+— CI is what will catch platform-specific gaps.
+
+## Version matrix
+
+| Piece | Version | Where it's pinned |
+|---|---|---|
+| Godot (floor) | **4.6** | `godot/project.godot` `config/features`, `godot/NovaSwift.gdextension` `compatibility_minimum` |
+| Godot (developed against) | 4.7 | — |
+| SwiftGodot | `main`, revision-locked | `godot/bridge/Package.swift` + `Package.resolved` |
+| Swift toolchain | 6.3 | `.github/workflows/godot-linux-windows.yml` |
+
+The Godot floor is not a taste call: it has to be **at least** the release
+SwiftGodot's pinned revision generated its bindings from, because a GDExtension
+that calls an interface function the host engine doesn't export takes the editor
+down rather than degrading. It was left at `4.2` long after SwiftGodot's `main`
+had moved on; that's now corrected. Move both files together whenever the
+SwiftGodot pin moves.
+
+`branch: "main"` is still a moving target on paper, but `Package.resolved`
+locks the revision, so a plain `swift build` is reproducible — only an explicit
+`swift package update` moves it. Pinning to a SwiftGodot tag remains the right
+end state.
 
 > The authoritative platform decision for Apple targets is
 > [ARCHITECTURE.md](ARCHITECTURE.md) (native Swift + SpriteKit). This document
@@ -94,8 +115,15 @@ every frame. Its surface (see `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swi
 - **Input** — `set_intent(turn_left, turn_right, thrust, reverse, afterburner,
   fire_primary, fire_secondary)` maps a frame of Godot input onto the engine's
   `ControlIntent`.
-- **Tick** — `step(dt)` advances the simulation exactly as the Apple app and the
-  headless `novaswift-extract ai` harness do.
+- **Tick** — `step(dt)` feeds one display frame into a **fixed 30 Hz
+  accumulator** and runs whole ticks out of it, exactly as `GameScene.update`
+  does on Apple. This matters for fidelity, not just tidiness: `World.step`
+  integrates flight, reloads, AI re-planning and spawn cadence *per call*, so
+  driving it with a raw frame delta makes the same ship handle differently at
+  60 Hz and 144 Hz. `render_alpha() -> float` reports how far the frame sits
+  into the next pending tick; every pose below is already eased by it off the
+  engine's own `snapshotRenderState()` slots, so a 30 Hz sim glides on a 144 Hz
+  display instead of stepping.
 - **Readback** (for rendering, packed to avoid per-entity Variant churn)
   - `player_position() -> Vector2`, `player_angle() -> float`,
     `player_velocity() -> Vector2`, `player_shield_fraction() -> float`,
@@ -103,8 +131,35 @@ every frame. Its surface (see `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swi
   - `ship_count() -> int` and `ship_transforms() -> PackedFloat32Array`
     (`[x, y, angle, kind]` per live ship, player first) so GDScript can draw all
     ships from one array.
-  - `drain_events() -> PackedStringArray` — one string per `WorldEvent` this
-    step (weaponFired, shipDestroyed, …) for sound/FX hooks.
+  - `ship_visuals() -> PackedFloat32Array` — `[cloak, ionize, thrusting]` per
+    live ship, same order, for the cloak dissolve, the ionization tint and the
+    engine-glow overlay.
+- **Combat entities** — the things that make a fight visible. All packed, all
+  render-interpolated where the engine keeps a snapshot slot for them.
+  - `projectile_transforms() -> PackedFloat32Array` (`[x, y, facing]` per live
+    shot) and `projectile_styles() -> PackedInt32Array`
+    (`[graphicSpinID, spins, translucent]`, same order).
+  - `beam_segments() -> PackedFloat32Array` — 13 floats per live beam:
+    `[x0, y0, x1, y1, width, alpha, r, g, b, coronaR, coronaG, coronaB,
+    coronaFalloff]`. Both colors cross the bridge because real EV Nova beams
+    ship no sprite art at all — the core→corona gradient *is* the authored look,
+    and a `width` of 0 means "corona only, no core".
+  - `asteroid_transforms() -> PackedFloat32Array` (`[x, y, radius, angle]`) and
+    `asteroid_styles() -> PackedInt32Array` (`[roidTypeID, spriteFrame]`).
+- **Event drains** — both genuinely drain, handing over what has accumulated
+  since the last call and emptying the buffer. `World.events` is cleared at the
+  top of every `step`, so reading it directly both loses the first tick's events
+  on a two-tick frame and re-reports the last tick's events forever on a frame
+  that doesn't tick at all (which is every frame while docked).
+  - `drain_events() -> PackedStringArray` — one string per `WorldEvent`
+    (weaponFired, shipDestroyed, …) for the message log and sound hooks.
+  - `drain_effects() -> PackedFloat32Array` — the subset that wants to be
+    *drawn*, `effect_stride()` floats per row: `[kind, x, y, p0, p1, r, g, b]`.
+    Kinds: 0 explosion, 1 shield hit, 2 armor hit, 3 asteroid debris, 4 ship
+    dying, 5 ship destroyed, 6 weapon fired. This is what carries the *position*
+    an event happened at — the name-only drain never could.
+  - `system_background_color() -> PackedFloat32Array` — the system's authored
+    `sÿst.BkgndColor` as `[r, g, b]`, so nebula systems don't clear to black.
 - **Real-data render queries** (empty/sentinel in the demo world, so the frontend
   calls them unconditionally)
   - `has_game() -> bool`, `player_ship_type() -> int`,
@@ -117,13 +172,20 @@ every frame. Its surface (see `godot/bridge/Sources/NovaSwiftGodot/NovaWorld.swi
     PackedInt32Array` for the system's planets/stations/gates.
 - **Sprite export** (raw RGBA — the decoders are pure Swift, no CoreGraphics, so
   this is fully cross-platform; GDScript builds an `Image`/`ImageTexture` once per
-  resource and caches it)
-  - `ship_sprite_info(ship_type)` / `spob_sprite_info(spob_id) ->
-    PackedInt32Array` = `[frameW, frameH, frameCount, columns, rows, surfaceW,
-    surfaceH]`.
-  - `ship_sprite_rgba(ship_type)` / `spob_sprite_rgba(spob_id) ->
-    PackedByteArray` = the RGBA8 surface (6-wide frame grid; frame *i* is at cell
-    `(i % 6, i / 6)`).
+  resource and caches it). One *kinded* accessor rather than a method pair per art
+  type, since every one of these resolves through the same `spïn` → `rlëD` path
+  and marshals identically — only the lookup varies:
+  - `sprite_info(kind, id) -> PackedInt32Array` = `[frameW, frameH, frameCount,
+    columns, rows, surfaceW, surfaceH, animationRate]`.
+  - `sprite_rgba(kind, id) -> PackedByteArray` = the RGBA8 surface (6-wide frame
+    grid; frame *i* is at cell `(i % 6, i / 6)`).
+  - `kind`: 0 hull · 1 engine glow · 2 shield · 3 running lights · 4 weapon glow ·
+    5 spöb · 6 destroyed spöb · 7 weapon shot art (by `spïn` id) · 8 `bööm`
+    explosion · 9 `röid` rock · 10 starfield tile. The values are API; GDScript
+    mirrors them as `SPRITE_*` constants and they must not be reordered.
+  - `animationRate` is the `bööm`'s authored playback rate and 0 for every other
+    kind (they're rotation sheets indexed by heading, not timed animations).
+    FrameAdvance *R* means *R*/100 × 30 fps, so a frame lasts 100/(30*R*) seconds.
 
 The bridge is **stateless glue**: no game logic lives here. Anything the bridge
 does that isn't marshalling is a bug — new behavior belongs in the engine, where
@@ -138,9 +200,9 @@ startup:
 
 - **Real data** — if EV Nova data is found (`NOVA_DATA_DIR` env var, else the
   repo's git-ignored `data/base/`), it `load_game` + `make_world(-1)`s a real
-  system and draws **actual hull and planet sprites** decoded by `NovaSwiftKit`,
-  plus the jump-radius ring. Sprites are the engine's own RGBA decode uploaded as
-  Godot textures (cached per resource).
+  system and draws **actual hull, planet, shot, rock and explosion sprites**
+  decoded by `NovaSwiftKit`, plus the jump-radius ring. Sprites are the engine's
+  own RGBA decode uploaded as Godot textures (cached per `(kind, id)`).
 - **Demo** — otherwise a data-free physics world: a ship you fly plus drifting
   hulls, drawn as primitives. Always runs, no data required.
 
@@ -153,6 +215,16 @@ This proves the full loop — **Godot input → Swift `ControlIntent` → `World
 synthetic world and the player's real data. It is not the finished game; it is
 the foundation the real UI is built on next.
 
+### Division of labour in the frontend
+
+`Main.gd` lays out pixels and does small numeric formatting; it never decides
+game state. Targeting, hostility, weapon readiness, fuel, sensor range, landing
+eligibility and the whole combat entity set are engine calls. The one thing the
+frontend owns outright is the **transient particle layer**: the engine says "an
+explosion happened here, this big, playing this `bööm`", and how that reads on
+screen is presentation. Anything past that belongs in the engine, where the
+Apple app inherits it too.
+
 ## Cross-platform status of the core
 
 An audit of `NovaSwiftKit` + `NovaSwiftEngine` (the two libraries the bridge
@@ -163,14 +235,26 @@ needs) found the core almost entirely portable:
 - ✅ `NovaSwiftKit/SpriteSheet+Image.swift` — already `#if
   canImport(CoreGraphics)`-guarded; the CGImage helpers simply compile out
   off-Apple (Godot decodes sprites its own way).
-- ✅ `NovaSwiftKit/ColorModels.swift` — **fixed here**: was an unconditional
+- ✅ `NovaSwiftKit/ColorModels.swift` — **fixed**: was an unconditional
   `import CoreGraphics` for `CGPoint`; now imports Foundation (which provides
   `CGPoint` on Linux/Windows) with CoreGraphics guarded.
+- ✅ `NovaSwiftKit/SpriteDiskCache.swift` — **fixed**, and this was the one that
+  mattered. The decoded-sprite cache compressed its records with
+  `NSData.compressed(using: .lzfse)`, which exists only where Apple's Compression
+  framework does — `swift-corelibs-foundation` has no such member. It failed
+  *every* Linux and Windows CI job, in `NovaSwiftKit`, which the bridge builds
+  before it ever reaches `NovaSwiftEngine`: the Godot layer could not be compiled
+  off Apple at all, and the workflow was demoted to manual-only rather than stay
+  permanently red. The record header's version byte now doubles as a codec tag —
+  `0x01` LZFSE, `0x02` raw — so Apple keeps the compression and other platforms
+  store the surface uncompressed. Both are readable on Apple; off Apple an LZFSE
+  record is treated as a cache miss and re-decoded, which only comes up if a
+  cache directory is carried between platforms.
 
-CI (below) is the mechanism that finds anything the audit missed: the first full
-Linux/Windows compile of the core may surface further platform edges (a
-`Data(contentsOf:)` mode, a threading primitive) to guard. Those fixes belong in
-the core with `#if` guards so the Apple build is untouched.
+This is exactly the class of gap the audit's "almost entirely portable" verdict
+couldn't catch by reading imports: nothing about `import Foundation` says which
+half of Foundation you get. CI is the mechanism, and it only works while it's
+allowed to run — the workflow is back on push/PR now that it can pass.
 
 ## Build & CI
 
@@ -178,7 +262,10 @@ the core with `#if` guards so the Apple build is untouched.
   for the host platform and copies it into `godot/bin/`.
 - `.github/workflows/godot-linux-windows.yml` — compiles the core + bridge on
   Linux and Windows using the official Swift toolchain, so regressions in
-  cross-platform compilation are caught on every push.
+  cross-platform compilation are caught on every push. `core-linux` is the
+  required signal; the full-package, Windows and bridge jobs are informational
+  (`continue-on-error`). It ran manual-only for a while — see the LZFSE entry
+  above — and is back on push/PR.
 
 Godot **export templates** turn `godot/` + the platform library into shippable
 `.x86_64` (Linux) and `.exe` (Windows) builds; wiring the export presets into CD
@@ -192,25 +279,28 @@ is a follow-up once the frontend is fleshed out.
    textures; render real ships/planets from the player's data via `make_world`.
    ✅ *confirmed on-toolchain (macOS).*
 3. **HUD & flight** — radar, status bar, target lock, weapons firing/FX, sound
-   from `drain_events`. ✅ *radar, status bars, target panel, weapon readout,
-   message log implemented; weapon FX and sound still open.*
+   from `drain_events`. ✅ *radar (ships and stellars), status bars, target
+   panel, weapon readout, message log; and the whole combat entity set now
+   renders — projectiles with their real `wëap` `spïn` art (rotation sheets
+   indexed by heading, spinning strips animated), beams as a core→corona
+   gradient, `röid` rocks, `bööm` explosion animations, impact sparks and
+   asteroid debris, engine-glow exhaust, the cloak dissolve, the ionization
+   tint, and the system's own `sÿst.BkgndColor`.* **Sound is the one thing
+   still open here** — `drain_events` carries the event names and
+   `drain_effects` the positions, so the hook exists; nothing plays them yet.
 4. **Screens** — galaxy map, landing, spaceport (trade/outfit/shipyard), pilot
    save/load — GDScript `Control` UI over the same engine/story calls the Apple
    app makes. **Landing/launch done and confirmed on-toolchain** (`canLandNow`/
    `nearestLandableSpobID`/`attemptLand`/`launch`, mirroring
-   `GameScene.updateLanding`/`reloadForDeparture`); docked state currently shows
-   a placeholder screen, not real trade/outfit/shipyard. **Blocked on an
-   architecture gap**: those three screens' transaction math (`buyCargo`,
-   `sellCargo`, `cargoFree`, outfit/ship pricing) lives in `PilotStore`
-   (`app/NovaSwift/Game/PilotStore.swift`), an Apple-app file (imports SwiftUI,
-   `ObservableObject`) — not in the portable core. Reproducing it in the bridge
-   would duplicate business logic outside the engine, which is exactly what
-   this bridge's own header comment forbids. The fix is to extract that
-   transaction logic into a portable, non-SwiftUI type (`NovaSwiftStory`
-   already owns the portable `PlayerState` save schema these calls mutate) so
-   `PilotStore` becomes a thin `ObservableObject` wrapper and the Godot bridge
-   calls the same code. Not yet done — next work item before trade/outfit/
-   shipyard screens can start for real.
+   `GameScene.updateLanding`/`reloadForDeparture`). The architecture gap that
+   used to block this is **resolved**: the transaction math (`buyCargo`,
+   `sellCargo`, `cargoFree`, outfit/ship pricing) was extracted out of the
+   Apple-only `PilotStore` into the portable `PilotEconomy`
+   (`Sources/NovaSwiftStory/PilotEconomy.swift`), so `PilotStore` is now a thin
+   `ObservableObject` wrapper and the bridge calls the same code rather than
+   reimplementing it. **Trade Center works** on that basis (real prices,
+   credits, cargo capacity, buy/sell); outfitter, shipyard, bar and mission BBS
+   are still to build, and the pilot is still in-memory only — no save/load.
 5. **Story runtime** — bring `NovaSwiftStory` across for missions/crons/NCB.
 6. **Packaging** — Godot export presets + CD for Linux/Windows artifacts.
 

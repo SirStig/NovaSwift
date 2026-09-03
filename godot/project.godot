@@ -1,6 +1,13 @@
 ; Godot 4 project — NOVA Swift desktop (Linux/Windows/macOS) frontend.
 ; This hosts the vertical slice that drives the Swift engine through the
 ; NovaSwiftGodot GDExtension. See docs/GODOT_LAYER.md.
+;
+; Engine floor: Godot 4.6. It is not a taste call — it tracks whatever Godot
+; release SwiftGodot's pinned `main` revision generates its bindings against
+; (godot/bridge/Package.swift), because a GDExtension built against a newer
+; extension_api.json than the host engine provides is a crash, not a
+; degradation. Bump this and NovaSwift.gdextension's compatibility_minimum
+; together whenever that pin moves. Developed and run against Godot 4.7.
 
 config_version=5
 
@@ -9,7 +16,7 @@ config_version=5
 config/name="NOVA Swift (Godot)"
 config/description="Cross-platform desktop frontend for NOVA Swift, driving the Swift engine via a SwiftGodot GDExtension."
 run/main_scene="res://Main.tscn"
-config/features=PackedStringArray("4.2", "GL Compatibility")
+config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [display]
@@ -17,6 +24,9 @@ config/icon="res://icon.svg"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
+; Keep the 16:9 frame's proportions when the window is resized — the HUD lays
+; itself out off the viewport rect, so a stretched aspect would skew it.
+window/stretch/aspect="keep"
 
 [rendering]
 

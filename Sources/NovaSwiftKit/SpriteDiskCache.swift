@@ -9,7 +9,8 @@ import Foundation
 /// this because QuickDraw blitted the RLE straight to screen; we materialise a
 /// 32-bit bitmap for Metal, so we do the decode once and keep it.
 ///
-/// This cache persists that decoded surface to disk, LZFSE-compressed, keyed by
+/// This cache persists that decoded surface to disk — LZFSE-compressed where the
+/// platform has LZFSE, raw where it doesn't (see `Codec`) — keyed by
 /// `rlëD` id under a directory named for the data set's fingerprint (see
 /// `GameLibrary.fingerprint`). On a warm cache, first-visit art loads as a fast
 /// mmap + decompress instead of a full RLE decode, and second-and-later launches
@@ -21,9 +22,43 @@ import Foundation
 public final class SpriteDiskCache: @unchecked Sendable {
     private let dir: URL
 
-    /// Bytes: "NSS" + version. Bump the version to invalidate every entry when
-    /// the on-disk layout or the decoder's output changes.
-    private static let magic: [UInt8] = [0x4E, 0x53, 0x53, 0x01] // "NSS\u{01}"
+    /// Bytes: "NSS" + a codec/version byte. Bump the byte to invalidate every
+    /// entry when the on-disk layout or the decoder's output changes.
+    ///
+    /// The last byte doubles as the body codec, because LZFSE is an Apple-only
+    /// Foundation/Compression facility: `NSData.compressed(using:)` does not
+    /// exist in swift-corelibs-foundation, so Linux and Windows store the
+    /// surface uncompressed instead (`.raw`). Both codecs are readable on
+    /// Apple; off-Apple an `.lzfse` record is simply treated as a cache miss
+    /// and re-decoded. That only ever happens if a cache directory is carried
+    /// between platforms — the fingerprint directory lives in the local user's
+    /// caches, so in practice each machine only ever meets its own records.
+    private static let magicPrefix: [UInt8] = [0x4E, 0x53, 0x53]  // "NSS"
+    private static let magicSize = magicPrefix.count + 1
+
+    private enum Codec: UInt8 {
+        case lzfse = 0x01
+        case raw = 0x02
+    }
+
+    /// The codec this platform writes with. LZFSE roughly halves a decoded
+    /// surface on disk, so it stays the default wherever it exists.
+    /// `canImport(Compression)` is the availability test for it: the algorithm
+    /// enum hangs off `NSData` in Foundation, but only on platforms that ship
+    /// Apple's Compression framework.
+    ///
+    /// Off Apple the trade is disk for time: a raw record is roughly twice the
+    /// size, but it still skips the RLE decode, which is the expensive half and
+    /// the whole reason this cache exists. `maxSurfaceBytes` still bounds any
+    /// single entry, and a changed data set still evicts the whole directory.
+    private static var writeCodec: Codec {
+        #if canImport(Compression)
+        return .lzfse
+        #else
+        return .raw
+        #endif
+    }
+
     /// A hard ceiling on a single decoded surface (defends against a corrupt
     /// header asking us to allocate gigabytes). 4096×4096×4 ≈ 64 MB is already
     /// far larger than any real Nova sprite sheet.
@@ -76,34 +111,63 @@ public final class SpriteDiskCache: @unchecked Sendable {
 
     // MARK: - Record format
     //
-    // [ magic(4) ]
+    // [ "NSS", codec(1) ]
     // [ frameWidth, frameHeight, frameCount, columns, rows,
     //   surfaceWidth, surfaceHeight ]  — 7 × Int32 little-endian
-    // [ LZFSE-compressed RGBA ]
+    // [ RGBA body — LZFSE-compressed (codec 0x01) or raw (codec 0x02) ]
 
     private static func encodeRecord(_ s: SpriteSheet) -> Data? {
         guard s.rgba.count == s.surfaceWidth * s.surfaceHeight * 4 else { return nil }
-        guard let compressed = try? (Data(s.rgba) as NSData).compressed(using: .lzfse) as Data else {
-            return nil
-        }
+        let codec = writeCodec
+        guard let body = compressBody(Data(s.rgba), using: codec) else { return nil }
         var out = Data()
-        out.append(contentsOf: magic)
+        out.append(contentsOf: magicPrefix)
+        out.append(codec.rawValue)
         for field in [s.frameWidth, s.frameHeight, s.frameCount, s.columns, s.rows,
                       s.surfaceWidth, s.surfaceHeight] {
             var le = Int32(field).littleEndian
             withUnsafeBytes(of: &le) { out.append(contentsOf: $0) }
         }
-        out.append(compressed)
+        out.append(body)
         return out
     }
 
+    private static func compressBody(_ raw: Data, using codec: Codec) -> Data? {
+        switch codec {
+        case .raw:
+            return raw
+        case .lzfse:
+            #if canImport(Compression)
+            return try? (raw as NSData).compressed(using: .lzfse) as Data
+            #else
+            return nil
+            #endif
+        }
+    }
+
+    /// Inflate a record body. Returns nil when this platform has no decoder for
+    /// `codec` — the caller then treats the record as a miss and re-decodes.
+    private static func decompressBody(_ body: Data, codec: Codec) -> Data? {
+        switch codec {
+        case .raw:
+            return body
+        case .lzfse:
+            #if canImport(Compression)
+            return try? (body as NSData).decompressed(using: .lzfse) as Data
+            #else
+            return nil
+            #endif
+        }
+    }
+
     private static func decodeRecord(_ data: Data) -> SpriteSheet? {
-        let headerSize = magic.count + 7 * MemoryLayout<Int32>.size
+        let headerSize = magicSize + 7 * MemoryLayout<Int32>.size
         guard data.count > headerSize else { return nil }
-        guard Array(data.prefix(magic.count)) == magic else { return nil }
+        guard Array(data.prefix(magicPrefix.count)) == magicPrefix,
+              let codec = Codec(rawValue: data[data.startIndex + magicPrefix.count]) else { return nil }
 
         var fields = [Int](repeating: 0, count: 7)
-        var offset = magic.count
+        var offset = magicSize
         for i in 0..<7 {
             let slice = data.subdata(in: (data.startIndex + offset)..<(data.startIndex + offset + 4))
             let v = slice.withUnsafeBytes { $0.load(as: Int32.self) }
@@ -118,8 +182,7 @@ public final class SpriteDiskCache: @unchecked Sendable {
             return nil
         }
         let body = data.subdata(in: (data.startIndex + headerSize)..<data.endIndex)
-        guard let raw = try? (body as NSData).decompressed(using: .lzfse) as Data,
-              raw.count == expected else { return nil }
+        guard let raw = decompressBody(body, codec: codec), raw.count == expected else { return nil }
 
         return SpriteSheet(frameWidth: frameWidth, frameHeight: frameHeight, frameCount: frameCount,
                            columns: columns, rows: rows,

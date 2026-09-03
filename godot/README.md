@@ -13,7 +13,7 @@ Full design: [`../docs/GODOT_LAYER.md`](../docs/GODOT_LAYER.md).
 godot/
   project.godot          Godot 4 project
   NovaSwift.gdextension  loads the native bridge library per platform
-  Main.tscn / Main.gd    the vertical slice (flyable ship + starfield)
+  Main.tscn / Main.gd    the flight frontend (ships, shots, beams, rocks, HUD)
   icon.svg               app icon
   bin/                   built bridge libraries land here (git-ignored)
   bridge/                the Swift ↔ Godot bridge (its own SPM package)
@@ -25,8 +25,10 @@ godot/
 
 ## Build & run
 
-Requires a [Swift toolchain](https://swift.org/download/) and
-[Godot 4.2+](https://godotengine.org/download).
+Requires a [Swift toolchain](https://swift.org/download/) (6.3) and
+[Godot 4.6+](https://godotengine.org/download) — developed against 4.7. The
+floor tracks the Godot release SwiftGodot's pinned revision binds to; see the
+version matrix in [`../docs/GODOT_LAYER.md`](../docs/GODOT_LAYER.md).
 
 ```bash
 # 1 · build the native bridge into godot/bin/
@@ -49,7 +51,10 @@ godot --path godot
   fly plus a ring of drifting hulls, drawn as primitives). Always runs.
 
 Controls: **arrows / WASD** fly (you swing the nose and keep drifting — that's
-the engine's real physics), **Shift** afterburner, **Space** fire primary.
+the engine's real physics), **Shift** afterburner, **Space** fire primary,
+**Ctrl** fire secondary, **Tab** target nearest hostile, **Backspace** clear
+target, **Q**/**E** cycle secondary weapon, **L** land / launch. Docked:
+**up**/**down** pick a commodity row, **B** buy a ton, **S** sell a ton.
 
 ## What this proves
 
@@ -72,3 +77,12 @@ run loads real EV Nova data, builds a system, and steps the simulation with no
 errors, on macOS. Linux/Windows are not yet verified locally — CI
 (`.github/workflows/godot-linux-windows.yml`) tracks the core's Linux/Windows
 compilation and the bridge build there.
+
+Until recently that CI could never have gone green: `NovaSwiftKit`'s decoded-
+sprite cache used LZFSE through `NSData.compressed(using:)`, an Apple-only
+Foundation facility, so every Linux and Windows job died before the bridge was
+even reached. That's fixed (`Sources/NovaSwiftKit/SpriteDiskCache.swift` now
+tags each record with its codec and stores raw off Apple) and the workflow is
+back on push/PR. The first green Linux run is what will actually confirm the
+core compiles off Apple end to end — the LZFSE failure masked everything
+downstream of it, so more platform edges may surface behind it.

@@ -44,7 +44,8 @@ final class SpriteDiskCacheTests: XCTestCase {
         XCTAssertEqual(loaded.rows, original.rows)
         XCTAssertEqual(loaded.surfaceWidth, original.surfaceWidth)
         XCTAssertEqual(loaded.surfaceHeight, original.surfaceHeight)
-        XCTAssertEqual(loaded.rgba, original.rgba, "decoded pixels must survive the LZFSE round-trip byte-for-byte")
+        // Lossless on both record codecs — LZFSE on Apple, raw off it.
+        XCTAssertEqual(loaded.rgba, original.rgba, "decoded pixels must survive the cache round-trip byte-for-byte")
     }
 
     func testMissReturnsNil() throws {
