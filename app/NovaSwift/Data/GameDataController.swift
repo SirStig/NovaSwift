@@ -363,11 +363,14 @@ final class GameDataController: ObservableObject {
         if !absent.isEmpty {
             missing.append("game data (\(absent.joined(separator: "/")))")
         }
-        // The main-menu button art (rlëD 8050, from Nova Titles) — without it
+        // The main-menu button art (rlëD 8050 "Main menu buttons") — without it
         // the authentic menu can never render and the app sits on the loading
-        // visual forever.
+        // visual forever. It ships in **Nova Graphics 3**, alongside cölr 128
+        // and the spïn sheets (verified against the shipping data — the Nova
+        // Titles files are all PICT: title screens and the 8000 backdrop). The
+        // old wording sent players hunting through the wrong file.
         if merged.resource(NovaType.rleD, 8050) == nil {
-            missing.append("menu art (Nova Titles)")
+            missing.append("menu art (Nova Graphics)")
         }
         return missing
     }

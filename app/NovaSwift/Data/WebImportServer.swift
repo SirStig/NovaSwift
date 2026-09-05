@@ -254,9 +254,10 @@ final class WebImportServer: ObservableObject {
             defer { try? FileManager.default.removeItem(at: tmpZip) }
             do {
                 try body.write(to: tmpZip)
-                let count = try await Task.detached(priority: .userInitiated) {
+                let outcome = try await Task.detached(priority: .userInitiated) {
                     try DataImporter.importBase(from: tmpZip, into: dest)
                 }.value
+                let count = outcome.copied
                 guard count > 0 else {
                     self.send(status: "415 Unsupported Media Type",
                               body: "No EV Nova data files found inside \(name)", on: connection)

@@ -34,6 +34,10 @@ struct DataSetupWizard: View {
     @State private var owns: Bool?
     @State private var device: SetupDevice = .current
     @State private var importing = false
+    /// A copy/parse is in flight (off the main actor) — the footer's import
+    /// button is disabled and the step shows a spinner rather than looking
+    /// frozen while ~100 MB is copied and parsed.
+    @State private var busy = false
     @State private var message: String?
     /// An iCloud restore kicked off from this wizard is in flight.
     @State private var restoring = false
@@ -139,7 +143,9 @@ struct DataSetupWizard: View {
                 return [backButton]
                 #endif
             }
-            return [backButton, NovaDialogButton(title: "Choose Data…", isDefault: true) { importing = true }]
+            return [backButton,
+                    NovaDialogButton(title: "Choose Data…", isDefault: true,
+                                     enabled: !busy) { importing = true }]
         case .success:
             return [NovaDialogButton(title: "Play", isDefault: true) { onClose() }]
         default:
@@ -156,26 +162,66 @@ struct DataSetupWizard: View {
 
     // MARK: Import
 
+    /// Copies the picked data in and reloads — both **off the main actor**. A
+    /// full install is ~100 MB to copy and parse; doing that synchronously in
+    /// this completion handler froze the UI for seconds (an unresponsive app
+    /// the player can only read as a hang or a crash) and left no room to say
+    /// what was happening.
     private func handleImport(_ result: Result<[URL], Error>) {
+        let src: URL
         do {
-            guard let src = try result.get().first else { return }
-            let count = try DataImporter.importBase(from: src, into: model.data.importedBaseDir)
-            model.data.reload()
-            message = "Imported \(count) file(s)."
-            if model.data.isBaseDataComplete {
-                #if canImport(CloudKit)
-                model.uploadGameDataToCloud()   // so the player's other devices can restore it
-                #endif
-                withAnimation(.easeInOut(duration: 0.2)) { step = .success }
-            } else if model.data.hasBaseData {
-                // A partial set (e.g. three of the six Nova Data files) must
-                // not count as success — say what's missing and stay here.
-                message = "Imported \(count) file(s), but this isn't the full set yet — still missing: "
-                    + model.data.missingEssentials.joined(separator: ", ")
-                    + ". Pick the whole game folder to get everything at once."
-            }
+            guard let first = try result.get().first else { return }
+            src = first
         } catch {
             message = "That didn't work — \(error.localizedDescription). Try picking the whole game folder."
+            return
+        }
+        guard !busy else { return }
+        busy = true
+        message = "Copying your files…"
+        let destDir = model.data.importedBaseDir
+        Task {
+            let outcome: Result<DataImporter.Outcome, Error> = await Task.detached(priority: .userInitiated) {
+                do { return .success(try DataImporter.importBase(from: src, into: destDir)) }
+                catch { return .failure(error) }
+            }.value
+            await model.data.reloadAsync()
+            busy = false
+            report(outcome)
+        }
+    }
+
+    /// Turns an import's outcome into the step's status line, and advances to
+    /// Success only on a data set that actually validates complete.
+    private func report(_ outcome: Result<DataImporter.Outcome, Error>) {
+        guard case let .success(o) = outcome else {
+            if case let .failure(error) = outcome {
+                message = "That didn't work — \(error.localizedDescription). Try picking the whole game folder."
+            }
+            return
+        }
+        var text = "Imported \(o.copied) file(s)."
+        if !o.failed.isEmpty {
+            text += " Couldn't copy: " + o.failed.joined(separator: ", ") + "."
+        }
+        if !o.pendingDownload.isEmpty {
+            // The classic silent partial import: files kept in iCloud Drive
+            // that are still only placeholders on this device.
+            text += " Still downloading from iCloud: " + o.pendingDownload.joined(separator: ", ")
+                + " — wait for those to finish in the Files app, then import again."
+        }
+        message = text
+        if model.data.isBaseDataComplete {
+            #if canImport(CloudKit)
+            model.uploadGameDataToCloud()   // so the player's other devices can restore it
+            #endif
+            withAnimation(.easeInOut(duration: 0.2)) { step = .success }
+        } else if model.data.hasBaseData {
+            // A partial set (e.g. three of the six Nova Data files) must
+            // not count as success — say what's missing and stay here.
+            message = text + " This isn't the full set yet — still missing: "
+                + model.data.missingEssentials.joined(separator: ", ")
+                + ". Pick the whole game folder to get everything at once."
         }
     }
 
@@ -346,6 +392,13 @@ struct DataSetupWizard: View {
                     Text("Do this step on the Apple TV itself — its setup screen shows the address to send files to.")
                         .novaFont(.caption).foregroundStyle(.secondary)
                     #endif
+                }
+                if busy {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(novaAmber)
+                        Text("Copying and reading your data — this can take a moment.")
+                            .novaFont(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if let message {
                     Text(message).novaFont(.caption).foregroundStyle(.secondary)
