@@ -235,6 +235,9 @@ public struct OutfRes {
     /// "This item can be sold anywhere, regardless of tech level,
     /// requirements, or mission bits" (Bible, `Flags` 0x0800).
     public var ignoresRequirements: Bool { flags & 0x0800 != 0 }
+    /// "This item can't be sold" (Bible, `Flags` 0x0008) — the permanent items
+    /// (licenses, story grants) that an outfitter will never buy back.
+    public var cannotBeSold: Bool { flags & 0x0008 != 0 }
     /// "This item stays with you when you trade ships (persistent)"
     /// (Bible, `Flags` 0x0004) — buy/capture a new hull.
     public var persistsOnShipTrade: Bool { flags & 0x0004 != 0 }
@@ -262,9 +265,18 @@ public struct OutfRes {
     }
 
     /// The name the outfitter dialog shows: the in-record "Outfitter Name"
-    /// string when set, else the resource name (annotation stripped).
+    /// string when set, else the resource name (annotation stripped). Flattened
+    /// to a single line — most outfitter names embed a literal `\n` escape for
+    /// the two-line grid tile, which would leak into running text. Use
+    /// `outfitterGridName` to draw the tile itself.
     public var outfitterDisplayName: String {
-        outfitterName.isEmpty ? displayName : outfitterName.novaDisplayName
+        outfitterName.isEmpty ? displayName : outfitterName.novaDisplayName.novaSingleLineName
+    }
+    /// `outfitterDisplayName` with the record's own line break honoured — what
+    /// the 83×54 grid tile draws, so "IR Missile\nLauncher" wraps where the
+    /// original wraps it instead of showing the escape (see `String.novaGridName`).
+    public var outfitterGridName: String {
+        outfitterName.isEmpty ? displayName : outfitterName.novaDisplayName.novaGridName
     }
     /// Lowercase singular for running text ("a light blaster"); falls back to
     /// the resource display name when the record leaves it blank.
@@ -299,6 +311,23 @@ public struct OutfRes {
     /// independent; <= -1000 = a govt class). Usually one entry.
     public var mapModVals: [Int] {
         modifiers.filter { $0.type == .map }.map(\.value)
+    }
+    /// True when this outfit is *nothing but* a star chart — every modifier it
+    /// has is a `ModType 16` map reveal, with no ship-stat effect riding along.
+    ///
+    /// A chart is a service, not equipment. Its own dësc says it "will
+    /// automatically update your ship's computer with information about the
+    /// location and contents of the systems surrounding **this one**", and the
+    /// reveal is measured in jumps from wherever it's bought — so the item is
+    /// meant to be bought again in each new region. The stock records don't set
+    /// `Flags` 0x0010 ("remove any items of this type after purchase") to say so,
+    /// they just carry `Max 1`; read literally that would let a pilot buy exactly
+    /// one chart for the whole game and then find it greyed out at every port
+    /// forever. `PilotEconomy.buyOutfit` therefore consumes a chart the way an
+    /// 0x0010 permit is consumed — the systems it revealed are already recorded
+    /// permanently in `PlayerState.chartedSystems`, so nothing is lost.
+    public var isConsumableChart: Bool {
+        !mapModVals.isEmpty && modifiers.allSatisfy { $0.type == .map }
     }
     /// The government ids this outfit clears the player's legal record with when
     /// acquired (`ModType 21`, "clean legal record"): the Bible's "ID of govt to
@@ -534,8 +563,8 @@ extension NovaGame {
             hop += 1
             var next: [Int] = []
             for sid in frontier {
-                guard let s = system(sid) else { continue }
-                for link in s.links where dist[link] == nil {
+                guard system(sid) != nil else { continue }
+                for link in systemNeighbors(sid) where dist[link] == nil {
                     dist[link] = hop
                     next.append(link)
                 }

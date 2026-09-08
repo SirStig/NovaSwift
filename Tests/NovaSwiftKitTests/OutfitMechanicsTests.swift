@@ -246,4 +246,18 @@ final class OutfitMechanicsTests: XCTestCase {
         XCTAssertEqual(blank.lowercaseDisplayName, "Ion Cannon")
         XCTAssertEqual(blank.lowercasePluralDisplayName, "Ion Cannon")
     }
+
+    /// Most outfitter names encode their grid line break as a literal backslash-n
+    /// escape, not a newline byte: `oütf` #130 ships as `Light Blaster\nTurret`,
+    /// #134 as `IR Missile\nLauncher`. Rendered raw, the escape leaked straight
+    /// into the shop tile ("IR Missile\nLauncher"), which is what testers saw.
+    func testOutfitterNameLineBreakEscapeIsResolved() {
+        var b = [UInt8](repeating: 0, count: 1028)
+        putStr(&b, 811, #"Light Blaster\nTurret"#)
+        let o = OutfRes(Resource(type: NovaType.outfit, id: 130, name: "Light Blaster Turret", data: Data(b)))
+        XCTAssertEqual(o.outfitterGridName, "Light Blaster\nTurret",
+                       "the grid tile wraps where the record says to")
+        XCTAssertEqual(o.outfitterDisplayName, "Light Blaster Turret",
+                       "running text gets one line, with no escape left in it")
+    }
 }

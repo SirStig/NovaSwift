@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 import NovaSwiftKit
+import NovaSwiftEngine
 @testable import NovaSwiftStory
 
 /// Acquisition-time outfit effects on the pilot: map reveal (ModType 16) into
@@ -72,6 +73,50 @@ final class OutfitAcquisitionTests: XCTestCase {
         player.legalRecord = [128: -50, 129: -10, 130: 5]
         player.applyOutfitAcquisition(game.outfit(601)!, game: game, fromSystem: 128)
         XCTAssertTrue(player.legalRecord.isEmpty, "-1 clears every government")
+    }
+
+    // MARK: charts are consumed, so they can be bought again in the next region
+
+    /// A star chart reveals the systems around *wherever it is bought* — so it
+    /// has to be re-buyable at the next port. The stock records only carry
+    /// `Max 1` and never set `Flags` 0x0010, which read literally means one
+    /// chart per pilot per game: bought once at Earth, greyed out at every other
+    /// world forever (exactly what a tester hit). Buying consumes it instead; the
+    /// reveal it paid for is already permanent in `chartedSystems`.
+    func testChartIsConsumedOnPurchaseSoItCanBeBoughtAgainElsewhere() {
+        var col = ResourceCollection()
+        col.add(system(128, links: [129]))
+        col.add(system(129, links: [128, 130]))
+        col.add(system(130, links: [129]))
+        var b = [UInt8](repeating: 0, count: 1028)
+        put16(&b, 4, 1)                       // tech
+        put16(&b, 6, 16); put16(&b, 8, 1)     // ModType 16, 1 jump
+        put16(&b, 10, 1)                      // Max 1
+        b[14] = 0; b[15] = 0; b[16] = 0x03; b[17] = 0xE8   // cost 1000
+        col.add(Resource(type: NovaType.outfit, id: 500, name: "Map", data: Data(b)))
+        let game = NovaGame(col)
+        let galaxy = Galaxy(game: game)
+        let chart = game.outfit(500)!
+        XCTAssertTrue(chart.isConsumableChart)
+
+        var player = PlayerState(credits: 10_000, currentSystem: 128)
+        XCTAssertTrue(PilotEconomy.buyOutfit(&player, chart, galaxy: galaxy))
+        XCTAssertEqual(player.credits, 9_000)
+        XCTAssertNil(player.outfits[500], "a chart is a service, not an item in the hold")
+        XCTAssertEqual(player.chartedSystems, [128, 129])
+
+        // …and the next port sells one again, revealing its own neighbourhood.
+        player.currentSystem = 129
+        XCTAssertTrue(PilotEconomy.canBuyOutfit(player, chart, galaxy: galaxy),
+                      "Max 1 must not lock a pilot out of every later chart")
+        XCTAssertTrue(PilotEconomy.buyOutfit(&player, chart, galaxy: galaxy))
+        XCTAssertEqual(player.chartedSystems, [128, 129, 130])
+
+        // One per transaction: a consumed item never accumulates, so a bulk
+        // "buy 50" would otherwise charge fifty times for one reveal.
+        player.currentSystem = 130
+        XCTAssertEqual(PilotEconomy.buyOutfit(&player, chart, count: 50, galaxy: galaxy), 1)
+        XCTAssertEqual(player.credits, 7_000)
     }
 
     // MARK: chartedSystems save compatibility

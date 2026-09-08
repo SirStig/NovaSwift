@@ -171,6 +171,7 @@ enum DebugDiagnostics {
         }
         return [
             dataSetSection(game),
+            navigationSection(game, pilot),
             pilotSection(game, pilot),
             liveWorldSection(liveShip, hostiles: liveHostiles),
         ]
@@ -228,13 +229,89 @@ enum DebugDiagnostics {
                                detail: "\(missingSprites.count) hull(s) have no shän, e.g. \"\(missingSprites[0].displayName)\" (#\(missingSprites[0].id)) — they'd render blank."))
 
         // Orphan systems (no links in or out) are usually a data mistake.
-        let orphaned = systems.filter { $0.links.isEmpty }
+        let orphaned = systems.filter { game.systemNeighbors($0.id).isEmpty }
         out.append(orphaned.isEmpty
-            ? DiagnosticResult(name: "Systems reachable", status: .pass, detail: nil)
-            : DiagnosticResult(name: "Systems reachable", status: .warn,
+            ? DiagnosticResult(name: "Systems linked", status: .pass, detail: nil)
+            : DiagnosticResult(name: "Systems linked", status: .warn,
                                detail: "\(orphaned.count) system(s) have no hyperspace links, e.g. \"\(orphaned[0].name)\" (#\(orphaned[0].id))."))
 
         return DiagnosticSection(title: "Data Set", results: out)
+    }
+
+    // MARK: Navigation reachability
+
+    /// Can the player actually *get* to the rest of the galaxy from where they're
+    /// standing — and, specifically, to everywhere their accepted missions are
+    /// sending them?
+    ///
+    /// This replaces a check that only asked whether each system had a non-empty
+    /// link list. That version passed while New Ireland was completely
+    /// unreachable: its system (Tuatha) ships as four bit-gated copies, and the
+    /// three the storyline swaps in list their neighbour without being listed
+    /// back, so a one-way reading of `sÿst.links` cut them off. `links` was
+    /// non-empty the whole time. A real flood from the pilot's own position is the
+    /// only thing that catches that class of bug — and a tester whose mission
+    /// target has become unroutable gets a red row naming the mission instead of
+    /// having to describe it in prose.
+    private static func navigationSection(_ game: NovaGame, _ pilot: PlayerState) -> DiagnosticSection {
+        var out: [DiagnosticResult] = []
+        let engine = StoryEngine(game: game, player: pilot)
+        let hidden = engine.hiddenSystemIDs()
+        let origin = pilot.currentSystem
+
+        // Breadth-first flood over the symmetric link graph, skipping systems the
+        // pilot's control bits currently hide — i.e. exactly what course plotting
+        // walks (`NavigationModel.shortestPath`).
+        var reached: Set<Int> = [origin]
+        var frontier = [origin]
+        while !frontier.isEmpty {
+            var next: [Int] = []
+            for id in frontier {
+                for link in game.systemNeighbors(id) where !reached.contains(link) && !hidden.contains(link) {
+                    reached.insert(link)
+                    next.append(link)
+                }
+            }
+            frontier = next
+        }
+
+        let live = game.systems().filter { !hidden.contains($0.id) }
+        let stranded = live.filter { !reached.contains($0.id) }
+        out.append(stranded.isEmpty
+            ? DiagnosticResult(name: "Galaxy reachable", status: .pass,
+                               detail: "All \(live.count) live system(s) routable from \"\(game.system(origin)?.displayName ?? "#\(origin)")\".")
+            : DiagnosticResult(name: "Galaxy reachable", status: .warn,
+                               detail: "\(stranded.count) of \(live.count) live system(s) can't be routed to from here, e.g. \"\(stranded[0].displayName)\" (#\(stranded[0].id))."))
+
+        // The one that actually strands a player: an accepted mission pointing at
+        // a system no course can reach. Always a fail — the save is unwinnable.
+        let destinations = engine.missionDestinations()
+        let unreachable = destinations.filter { !reached.contains($0.systemID) }
+        if destinations.isEmpty {
+            out.append(DiagnosticResult(name: "Mission destinations routable", status: .pass,
+                                        detail: "No accepted mission has a destination right now."))
+        } else if unreachable.isEmpty {
+            out.append(DiagnosticResult(name: "Mission destinations routable", status: .pass,
+                                        detail: "All \(destinations.count) destination(s) routable."))
+        } else {
+            let worst = unreachable[0]
+            let where_ = game.system(worst.systemID)?.displayName ?? "#\(worst.systemID)"
+            out.append(DiagnosticResult(
+                name: "Mission destinations routable", status: .fail,
+                detail: "\(unreachable.count) accepted mission destination(s) unreachable — \"\(worst.names.joined(separator: ", "))\" wants \"\(where_)\" (#\(worst.systemID)), which no course can reach from here."))
+        }
+
+        // A hidden system the player is *standing in* means the story swapped the
+        // galaxy under them; every route out is computed against a system that
+        // shouldn't exist.
+        if hidden.contains(origin) {
+            out.append(DiagnosticResult(name: "Current system is live", status: .fail,
+                                        detail: "The pilot is in system #\(origin), which the current control bits hide."))
+        }
+        out.append(DiagnosticResult(name: "Systems hidden by story bits", status: .pass,
+                                    detail: "\(hidden.count) system(s) currently gated out by sÿst.Visibility."))
+
+        return DiagnosticSection(title: "Navigation", results: out)
     }
 
     // MARK: Pilot state

@@ -16,5 +16,16 @@
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- Expose the app's Documents folder in the Files app and over Finder file
+	     sharing. That's where `BugReport` writes its Diagnostics/*.zip bundles,
+	     so a tester who can't get the share sheet where they want it can still
+	     hand the file over. Note this exposes Documents only — pilot saves live
+	     in Application Support (see `NovaStorage.root`) and stay private; the
+	     save reaches a report by being copied into the bundle, not by being
+	     browsable. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>

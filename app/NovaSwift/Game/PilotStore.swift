@@ -76,6 +76,22 @@ final class PilotStore: ObservableObject {
         newGame(game: game)
     }
 
+    /// Bring a save written by an older build up to the current `PlayerState`
+    /// contract. Runs once per session, right before play begins, on whichever
+    /// pilot is live (fresh, resumed autosave, or adopted from the roster) —
+    /// which is the earliest point at which the game data needed to interpret
+    /// the save is loaded.
+    ///
+    /// Today that's one migration: `outfits` now records the hull's own
+    /// `shïp.DefaultItems` alongside bought items, so an older pilot's starting
+    /// Light Blaster (etc.) is topped up into their inventory. See
+    /// `PilotEconomy.migrateHullDefaults`.
+    func migrateIfNeeded(game: NovaGame) {
+        guard started else { return }
+        guard PilotEconomy.migrateHullDefaults(&state, game: game) else { return }
+        save()
+    }
+
     /// Start a brand-new pilot from the scenario defaults. Delegates to
     /// `PilotFactory.makeDefault`, which is the single authoritative `chär`
     /// bootstrap: it rolls a *random* start system among the scenario's

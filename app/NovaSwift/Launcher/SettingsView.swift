@@ -20,6 +20,10 @@ struct SettingsView: View {
     /// Debug: preview the full first-run setup wizard from the top, regardless of
     /// whether data is already imported.
     @State private var showWizardDebug = false
+    /// The diagnostic bug reporter — always available, not gated on debug mode:
+    /// a tester hitting something odd shouldn't have to find a developer switch
+    /// first. See `BugReportView`.
+    @State private var showBugReport = false
 
     var body: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
@@ -71,6 +75,14 @@ struct SettingsView: View {
             NavigationStack { ControlsView() }
                 .frame(minWidth: 480, minHeight: 560)
                 .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showBugReport) {
+            // No `debug:` here — Settings can be opened from the launcher, where
+            // there's no live flight session. The report's data-set and pilot
+            // checks still run; only the live-world ones are skipped.
+            BugReportView()
+                .environmentObject(model)
+                .environmentObject(model.pilot)
         }
         // Debug: the full first-run wizard from the welcome step (no `startAtImport`),
         // so the whole guide can be reviewed even after data is imported.
@@ -134,6 +146,7 @@ struct SettingsView: View {
                 accessibilitySection
             case .data:
                 storageSection
+                supportSection
                 developerSection
             }
         }
@@ -387,6 +400,22 @@ struct SettingsView: View {
             sectionHeader("Accessibility", icon: "accessibility")
         } footer: {
             Text("Reduce flashing calms the exhaust flicker, screen shake and jump flash. (Larger HUD, high-contrast HUD and UI scale are under HUD & Interface.)")
+        }
+    }
+
+    @ViewBuilder
+    private var supportSection: some View {
+        Section {
+            Button {
+                model.audio.play(.uiSelect)
+                showBugReport = true
+            } label: {
+                Label("Report a Bug", systemImage: "ladybug")
+            }
+        } header: {
+            sectionHeader("Support", icon: "lifepreserver")
+        } footer: {
+            Text("Builds a report you can share: your description plus the pilot save, the recent game log and a self-test — the state that's hard to describe in a message. None of your imported EV Nova data is included.")
         }
     }
 

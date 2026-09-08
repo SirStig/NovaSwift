@@ -118,6 +118,24 @@ final class ConsoleLogStore: ObservableObject {
     }
 }
 
+extension ConsoleLogStore {
+    /// A one-shot dump of this process's own log covering the last `seconds`,
+    /// newest last, for a bug report.
+    ///
+    /// Deliberately **not** `lines`: the live scrollback only fills while the
+    /// console is actually on screen (`startPolling`/`stopPolling`), so a tester
+    /// who never opened it would attach an empty log. `OSLogStore` keeps the
+    /// whole process's history regardless, so this reaches back over what already
+    /// happened — which is the entire point of capturing after the fact.
+    ///
+    /// Runs off the main actor and is bounded by `limit`, so a long session or a
+    /// logging burst can't turn one capture into an unbounded scan.
+    static func snapshot(lastSeconds seconds: TimeInterval = 900,
+                         limit: Int = 4000) async -> [Line] {
+        await LogTail.snapshot(since: Date(timeIntervalSinceNow: -seconds), limit: limit)
+    }
+}
+
 /// The off-main half: owns the `OSLogStore` and answers one query at a time on
 /// its own serial queue.
 private enum LogTail {
@@ -143,6 +161,37 @@ private enum LogTail {
     static func pull(since cursor: Date) async -> Batch {
         await withCheckedContinuation { continuation in
             queue.async { continuation.resume(returning: fetch(since: cursor)) }
+        }
+    }
+
+    /// One-shot history read for `ConsoleLogStore.snapshot` — same store and
+    /// queue, but its own (larger) cap and no cursor bookkeeping, so it can't
+    /// disturb the live tail's position.
+    static func snapshot(since: Date, limit: Int) async -> [ConsoleLogStore.Line] {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                if holder.store == nil {
+                    holder.store = try? OSLogStore(scope: .currentProcessIdentifier)
+                }
+                guard let store = holder.store,
+                      let entries = try? store.getEntries(with: [],
+                                                          at: store.position(date: since),
+                                                          matching: predicate)
+                else { return continuation.resume(returning: []) }
+
+                var lines: [ConsoleLogStore.Line] = []
+                for entry in entries {
+                    guard let log = entry as? OSLogEntryLog else { continue }
+                    lines.append(ConsoleLogStore.Line(
+                        id: UUID(), date: entry.date,
+                        text: "[\(log.category)] \(log.composedMessage)",
+                        kind: .log(severity(log.level))))
+                    // Keep the *newest* `limit` lines: a bug report is read
+                    // backwards from whatever just went wrong.
+                    if lines.count > limit { lines.removeFirst(lines.count - limit) }
+                }
+                continuation.resume(returning: lines)
+            }
         }
     }
 

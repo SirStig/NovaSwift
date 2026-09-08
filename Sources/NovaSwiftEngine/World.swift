@@ -2375,13 +2375,17 @@ public final class World {
                 }
             }
         }
-        for body in destroyableStellars {
-            let rel = body.position - origin
-            let along = rel.dot(dir)
-            guard along > 0, along <= range else { continue }
-            let perp = (rel - dir * along).length
-            if perp <= body.radius + 4 && along < bestT {
-                bestT = along; hitStellar = body; hitShip = nil; hitAsteroid = nil
+        // Only a planet-type beam can connect with a stellar (Bible, `wëap.Flags2`
+        // 0x0400) — an ordinary beam sweeping across a planet must not damage it.
+        if planetTypeOnly {
+            for body in destroyableStellars {
+                let rel = body.position - origin
+                let along = rel.dot(dir)
+                guard along > 0, along <= range else { continue }
+                let perp = (rel - dir * along).length
+                if perp <= body.radius + 4 && along < bestT {
+                    bestT = along; hitStellar = body; hitShip = nil; hitAsteroid = nil
+                }
             }
         }
         let anyHit = hitShip != nil || hitAsteroid != nil || hitStellar != nil
@@ -2562,10 +2566,22 @@ public final class World {
             guard p.proxSafetyRemaining <= 0 else { continue }
             let reach = p.proxRadius
 
-            // Destroyable stellars (`spöb.Strength` > 0) are real targets. Checked
-            // before ships so a siege round aimed at a planet isn't eaten by a
-            // defender drifting across the muzzle.
-            if let body = destroyableStellarHit(from: prevPos, to: p.position, reach: reach) {
+            // Destroyable stellars (`spöb.Strength` > 0) are real targets — but
+            // only for a planet-type weapon (`wëap.Flags2` 0x0400: "Weapon is a
+            // planet-type weapon, and can only hit planet-type ships or
+            // destroyable stellars"; `spöb.Strength` is likewise "the amount of
+            // combined mass and energy damage this stellar can take **from
+            // planetary-type weapons**"). Every other shot flies straight past.
+            // Without this gate ordinary blaster fire chipped away at planets and
+            // hypergates — nearly every base-game stellar carries a Strength of
+            // 1000-10000, not 0 — so a firefight near a world could blow it up,
+            // firing its `OnDestroy` bits (e.g. Earth's `b6200`, which summons the
+            // Federation task force) and stranding the player when the casualty
+            // was a hypergate.
+            // Checked before ships so a siege round aimed at a planet isn't eaten
+            // by a defender drifting across the muzzle.
+            if p.flags.isPlanetTypeWeapon,
+               let body = destroyableStellarHit(from: prevPos, to: p.position, reach: reach) {
                 applyStellarHit(body, shield: p.shieldDamage, armor: p.armorDamage)
                 p.alive = false
                 detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)

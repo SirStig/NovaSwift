@@ -176,3 +176,31 @@ func makeGame(_ resources: [Resource]) -> NovaGame {
     for r in resources { col.add(r) }
     return NovaGame(col)
 }
+
+/// A ship with preinstalled `DefaultItems` (`shïp` slots @78/@86 — ids and
+/// counts) on top of the plain `shipResource` above, plus a real `FreeMass` so
+/// outfit-mass accounting has room to work with.
+func shipResource(id: Int, cargo: Int, freeMass: Int, defaultItems: [(id: Int, count: Int)]) -> Resource {
+    var b = [UInt8](repeating: 0, count: 1860)
+    Bytes.i16(&b, 0, cargo)
+    Bytes.i16(&b, 12, freeMass)
+    for i in 0..<4 { Bytes.i16(&b, 78 + i * 2, -1) }
+    for (i, item) in defaultItems.prefix(4).enumerated() {
+        Bytes.i16(&b, 78 + i * 2, item.id)
+        Bytes.i16(&b, 86 + i * 2, item.count)
+    }
+    for i in 0..<4 { Bytes.i16(&b, 880 + i * 2, -1) }
+    return Resource(type: NovaType.ship, id: id, name: "Ship \(id)", data: Data(b))
+}
+
+/// An `oütf` with a mass and cost, and optionally the "Outfitter Name" string
+/// (@811) the shop grid draws.
+func outfitResource(id: Int, name: String, mass: Int = 0, cost: Int = 0,
+                    outfitterName: String = "") -> Resource {
+    var b = [UInt8](repeating: 0, count: 1012)
+    Bytes.i16(&b, 2, mass)
+    Bytes.i32(&b, 14, cost)
+    for pos in [6, 18, 22, 26] { Bytes.i16(&b, pos, -1) }   // no modifiers
+    Bytes.cstr(&b, 811, outfitterName)
+    return Resource(type: NovaType.outfit, id: id, name: name, data: Data(b))
+}

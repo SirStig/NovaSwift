@@ -19,9 +19,54 @@ public enum PilotEconomy {
 
     // MARK: Derived, data-dependent queries
 
+    /// The player's live `Loadout`: their hull fitted with exactly what
+    /// `state.outfits` says they own.
+    ///
+    /// `includeDefaultItems: false` is the whole point. `state.outfits` is the
+    /// single record of what the player has — the hull's own `shïp.DefaultItems`
+    /// are granted into it when the pilot is created (`PilotFactory.make`), when
+    /// a hull is bought (`buyShip`), and, for pre-existing saves, once by
+    /// `migrateHullDefaults`. Letting the aggregator fold `DefaultItems` in
+    /// *again* on top of that inventory double-counted every preinstalled item:
+    /// a hull bought with two turrets flew with four, its mass and free-mass
+    /// budget were wrong, and the numbers shifted depending on whether the pilot
+    /// had ever traded ships. Every player-side call site must go through here;
+    /// NPC spawns keep their own `includeDefaultItems: false` (the Bible: AI
+    /// ships ignore `DefaultItems` entirely).
+    public static func loadout(_ state: PlayerState, galaxy: Galaxy) -> Loadout? {
+        galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits,
+                       includeDefaultItems: false)
+    }
+
+    /// One-time save migration for pilots written before `state.outfits` recorded
+    /// the hull's `DefaultItems` (see `PlayerState.hullDefaultsGranted`). Tops the
+    /// inventory up so each of the current hull's default items is owned at least
+    /// as many times as the hull ships with, then marks the pilot migrated.
+    ///
+    /// It tops up rather than adding, because a pilot who bought their current
+    /// hull *did* already receive its defaults through `buyShip` — adding again
+    /// would duplicate them. The one thing it can't recover is a default item the
+    /// player deliberately bought extras of before migrating; that pilot keeps
+    /// what they bought. Returns whether anything changed (so the caller can save).
+    @discardableResult
+    public static func migrateHullDefaults(_ state: inout PlayerState, game: NovaGame) -> Bool {
+        guard state.hullDefaultsGranted != true else { return false }
+        state.hullDefaultsGranted = true
+        let hull = state.shipType
+        var changed = false
+        for (oid, count) in game.ship(hull)?.outfits ?? [] where count > 0 {
+            let owned = state.outfits[oid] ?? 0
+            guard owned < count else { continue }
+            state.grantOutfit(oid, count: count - owned)
+            changed = true
+        }
+        Log.pilot.notice("migrateHullDefaults: pilot on hull \(hull, privacy: .public) topped up to its DefaultItems (changed=\(changed, privacy: .public))")
+        return true
+    }
+
     /// Effective cargo capacity of the current hull + installed outfits, in tons.
     public static func cargoCapacity(_ state: PlayerState, galaxy: Galaxy) -> Int {
-        galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.cargoCapacity
+        loadout(state, galaxy: galaxy)?.cargoCapacity
             ?? galaxy.game.ship(state.shipType)?.cargoSpace ?? 0
     }
     public static func cargoUsed(_ state: PlayerState) -> Int { state.usedCargoSpace }
@@ -31,7 +76,7 @@ public enum PilotEconomy {
 
     /// Free outfit mass remaining (hull free mass minus installed outfit mass).
     public static func freeMass(_ state: PlayerState, galaxy: Galaxy) -> Int {
-        galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.freeMass
+        loadout(state, galaxy: galaxy)?.freeMass
             ?? galaxy.game.ship(state.shipType)?.freeMass ?? 0
     }
 
@@ -41,13 +86,13 @@ public enum PilotEconomy {
     /// Hyperlane hops a single hyperspace jump can cross, from installed outfits
     /// (multi-jump drives). 1 = standard single-jump.
     public static func maxJumpHops(_ state: PlayerState, galaxy: Galaxy) -> Int {
-        galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.maxJumpHops ?? 1
+        loadout(state, galaxy: galaxy)?.maxJumpHops ?? 1
     }
 
     /// True if the ship has an instant-jump / jump-control outfit (`oütf` ModType
     /// 37): jumps skip the slow turn-and-align spin-up and fire almost instantly.
     public static func hasInstantJump(_ state: PlayerState, galaxy: Galaxy) -> Bool {
-        galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.instantJump ?? false
+        loadout(state, galaxy: galaxy)?.instantJump ?? false
     }
 
     /// How much faster than stock the jump sequence runs, from hyperspace-speed
@@ -55,7 +100,7 @@ public enum PilotEconomy {
     /// clamped so it stays a speed-up and never gets absurd. The scene divides
     /// its jump-phase durations by this.
     public static func jumpSpeedFactor(_ state: PlayerState, galaxy: Galaxy) -> Double {
-        let bonus = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.hyperspaceSpeedBonus ?? 0
+        let bonus = loadout(state, galaxy: galaxy)?.hyperspaceSpeedBonus ?? 0
         return min(4.0, max(1.0, 1.0 + Double(bonus) / 100.0))
     }
 
@@ -64,7 +109,7 @@ public enum PilotEconomy {
     /// so it can never invert to a negative/zero radius from a large enough
     /// reduction.
     public static func hyperspaceNoJumpRadius(_ state: PlayerState, galaxy: Galaxy) -> Double {
-        let bonus = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits)?.hyperspaceDistBonus ?? 0
+        let bonus = loadout(state, galaxy: galaxy)?.hyperspaceDistBonus ?? 0
         return max(0, 1000 + Double(bonus))
     }
 
@@ -194,7 +239,7 @@ public enum PilotEconomy {
         // cargo already loaded, so a sale that would leave less room than
         // what's aboard has to be rejected here — it's the only gate.
         let cargoDelta = o.value(of: .freeCargo)
-        if cargoDelta < 0, let lo = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits) {
+        if cargoDelta < 0, let lo = loadout(state, galaxy: galaxy) {
             if lo.blocksMassExpansion { return false }
             if cargoUsed(state) > lo.cargoCapacity + cargoDelta { return false }
         }
@@ -203,7 +248,7 @@ public enum PilotEconomy {
         // Bible `Flags 0x0001/0x0002`: a fixed gun / turret consumes one of the
         // hull's `MaxGuns`/`MaxTurrets` mounts. Block the purchase when none are free.
         if o.isFixedGunOutfit || o.isTurretOutfit,
-           let lo = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits) {
+           let lo = loadout(state, galaxy: galaxy) {
             if o.isFixedGunOutfit, lo.freeGunSlots < 1 { return false }
             if o.isTurretOutfit, lo.freeTurretSlots < 1 { return false }
         }
@@ -225,12 +270,17 @@ public enum PilotEconomy {
         // Bible `OnPurchase`: an NCB *set* expression run as a side effect of
         // buying (e.g. a permit that flips a story bit). Distinct from a mission
         // grant, which does not "buy" and so does not fire this.
-        runOutfitScript(&state, o.onPurchase, game: galaxy.game)
+        runOutfitScript(&state, o.onPurchase, outfit: o, field: "OnPurchase", game: galaxy.game)
         // Bible `Flags 0x0010`: "Remove any items of this type after purchase —
         // useful for permits and other intangible purchases." The effects above
         // (charted systems, cleared record, set bits) have already landed; this
         // just keeps the intangible item from sitting in inventory.
-        if o.flags & 0x0010 != 0 {
+        //
+        // A pure star chart is consumed the same way even though the stock
+        // records don't set that bit — see `OutfRes.isConsumableChart`. It's what
+        // makes a chart re-buyable in the next region instead of a once-per-game
+        // purchase that's greyed out at every port thereafter.
+        if o.flags & 0x0010 != 0 || o.isConsumableChart {
             state.removeOutfit(o.id)
         }
         return true
@@ -248,8 +298,12 @@ public enum PilotEconomy {
     /// how many were actually bought.
     @discardableResult
     public static func buyOutfit(_ state: inout PlayerState, _ o: OutfRes, count: Int, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
+        // A consumed item leaves inventory the instant it's bought, so its `Max`
+        // never stops the loop — "buy 1000" of a chart would charge for a
+        // thousand copies of the same one-shot reveal. One per transaction.
+        let limit = (o.flags & 0x0010 != 0 || o.isConsumableChart) ? min(count, 1) : count
         var bought = 0
-        while bought < count, buyOutfitUnit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier) {
+        while bought < limit, buyOutfitUnit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier) {
             bought += 1
         }
         return bought
@@ -263,7 +317,7 @@ public enum PilotEconomy {
         state.credits += effectiveCost(state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
         state.removeOutfit(o.id)
         // Bible `OnSell`: the sibling NCB set expression, run when the item is sold.
-        runOutfitScript(&state, o.onSell, game: galaxy.game)
+        runOutfitScript(&state, o.onSell, outfit: o, field: "OnSell", game: galaxy.game)
         return true
     }
 
@@ -288,17 +342,22 @@ public enum PilotEconomy {
     /// pilot, reusing the story engine's full set-op executor (bit set/clear,
     /// and any richer op a plugin encodes) so the effect matches how mission
     /// scripts run. No-op for the (overwhelmingly common) empty expression.
-    private static func runOutfitScript(_ state: inout PlayerState, _ expr: String, game: NovaGame) {
-        runControlBitSet(&state, expr, game: game)
+    private static func runOutfitScript(_ state: inout PlayerState, _ expr: String,
+                                        outfit o: OutfRes, field: String, game: NovaGame) {
+        runControlBitSet(&state, expr, game: game,
+                         source: "oütf \(o.id) \"\(o.name)\" \(field)")
     }
 
     /// Run an NCB control-bit *set* expression against the live pilot via the
     /// story engine's set-op executor. Shared by outfit `OnPurchase`/`OnSell` and
     /// ship `OnPurchase`/`OnRetire` hooks. No-op for the (common) empty expression.
-    private static func runControlBitSet(_ state: inout PlayerState, _ expr: String, game: NovaGame) {
+    /// `source` names the resource field running the expression, so every bit it
+    /// writes is attributable in the log — see `StoryEngine.apply(set:source:)`.
+    private static func runControlBitSet(_ state: inout PlayerState, _ expr: String,
+                                         game: NovaGame, source: String) {
         guard !expr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let engine = StoryEngine(game: game, player: state)
-        engine.apply(set: expr)
+        engine.apply(set: expr, source: source)
         state = engine.player
     }
 
@@ -337,12 +396,14 @@ public enum PilotEconomy {
         // set expression after the swap. Both are usually empty (base-game hulls
         // rarely script story bits on trade-in), so this no-ops for most ships.
         if let oldShip = game.ship(state.shipType) {
-            runControlBitSet(&state, oldShip.onRetire, game: game)
+            runControlBitSet(&state, oldShip.onRetire, game: game,
+                             source: "shïp \(oldShip.id) \"\(oldShip.name)\" OnRetire")
         }
         state.credits -= price
         state.shipType = ship.id
         state.shipName = ship.displayName
-        runControlBitSet(&state, ship.onPurchase, game: game)
+        runControlBitSet(&state, ship.onPurchase, game: game,
+                         source: "shïp \(ship.id) \"\(ship.name)\" OnPurchase")
         // The old hull and everything installed on it are traded in together
         // (credited via `tradeInValue` above) — real EV Nova does NOT carry
         // outfits over to a new ship by default. The one exception is
@@ -355,10 +416,11 @@ public enum PilotEconomy {
         // The new hull's own preinstalled outfits (shïp.outfits — turrets,
         // launchers, jammers, etc. it ships with stock) become owned so the
         // Outfitter/Ship-Info screens show them and they can be sold off like
-        // any other installed item. `Galaxy.loadout` already folds these (and
-        // the hull's built-in weapons) into the flown ship's stats/armament
-        // unconditionally, so this doesn't change combat behavior — it's
-        // purely so the player's inventory record matches what they're flying.
+        // any other installed item. This is the *only* place they enter the
+        // flown ship: `PilotEconomy.loadout` builds the player's hull with
+        // `includeDefaultItems: false`, precisely so what's granted here isn't
+        // then folded in a second time on top of itself.
+        state.hullDefaultsGranted = true
         for (oid, count) in ship.outfits {
             state.grantOutfit(oid, count: count)
         }

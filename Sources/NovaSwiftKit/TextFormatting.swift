@@ -35,6 +35,22 @@ public extension String {
         let visible = self[startIndex..<semi].trimmingCharacters(in: .whitespaces)
         return visible.isEmpty ? self : visible
     }
+
+    /// The shop-grid names EV Nova draws under an item's picture encode their
+    /// line break as a **literal two-character escape** — a backslash followed by
+    /// `n`, not a newline byte. `oütf` #130 ships its outfitter name as
+    /// `Light Blaster\nTurret`, #134 as `IR Missile\nLauncher`, and `shïp` #142's
+    /// short name as `Fed Patrol\nBoat`; the original wraps each onto two lines in
+    /// the 83×54 tile. Rendered raw, the escape leaks into the label
+    /// ("IR Missile\nLauncher").
+    ///
+    /// - `novaGridName` turns the escape into the real line break the tile wants.
+    /// - `novaSingleLineName` flattens it to a space, for the many places that
+    ///   want the item's name inside running text (a toast, a search list, an
+    ///   "n× <item>" line) where a hard break would be wrong.
+    var novaGridName: String { replacingOccurrences(of: "\\n", with: "\n") }
+    /// See `novaGridName`.
+    var novaSingleLineName: String { replacingOccurrences(of: "\\n", with: " ") }
 }
 
 /// A resource whose `name` field is shown to the player and therefore needs the

@@ -145,10 +145,16 @@ extension World {
 // The other half of an armed planet: one you can shoot back. A `spöb` with a
 // positive `Strength` is a real target that soaks combined mass+energy damage
 // and, at zero, detonates its `Explosion` and swaps to its `DestroyedGraphic`.
-// Every base-game stellar carries `Strength = 0` ("Invulnerable" in the TMPL),
-// so none of this fires against stock data — it exists for the plug-ins and TCs
-// that ship destructible planets, and it is what `wëap.Flags2` 0x0400
-// ("planet-type weapon") exists to shoot.
+//
+// Almost every base-game stellar carries a positive `Strength` (1000-10000;
+// Earth is 3000) — so what keeps stock worlds standing is **not** invulnerability
+// but the weapon gate: the Bible defines `Strength` as the damage a stellar takes
+// "from planetary-type weapons", and `wëap.Flags2` 0x0400 as "Weapon is a
+// planet-type weapon, and can only hit planet-type ships or destroyable
+// stellars". Ordinary guns therefore pass straight through a planet. The two
+// call sites — `World.stepProjectiles` and `beamCast` — enforce that; without it
+// a routine dogfight near a world could destroy it, firing its `OnDestroy`
+// control bits and (for a hypergate) deleting a route off the map.
 extension World {
 
     /// Every destroyable stellar in the current system that is still standing.

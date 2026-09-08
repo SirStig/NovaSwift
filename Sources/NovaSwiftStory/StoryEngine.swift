@@ -51,25 +51,67 @@ public final class StoryEngine {
         NCBTest(expr).evaluate(player)
     }
 
+    /// The `source` label `apply(set:source:)` records against every bit a SET
+    /// expression writes: resource type, id, name and which field ran — e.g.
+    /// `spöb 128 "Earth" OnDestroy`. Kept terse because it lands in a log line.
+    private func ncbSource(_ type: String, _ id: Int, _ name: String, _ field: String) -> String {
+        name.isEmpty ? "\(type) \(id) \(field)" : "\(type) \(id) \"\(name)\" \(field)"
+    }
+
     /// Parse and apply a control-bit SET expression (mission OnAccept/OnSuccess,
     /// cron OnStart/OnEnd, …).
-    public func apply(set expr: String) {
+    ///
+    /// - Parameter source: a short human label for *which resource field* is
+    ///   running this expression — "mïsn 615 OnAccept", "spöb 128 OnDestroy".
+    ///   It is logged with every control bit the expression writes, which is the
+    ///   only practical way to answer "why is bit N set on this pilot?" from a
+    ///   tester's log. Control bits are write-only history: once set, nothing
+    ///   records where they came from, and a wrongly-set bit silently changes
+    ///   which missions the game offers for the rest of the playthrough. Chasing
+    ///   one (`b6200`, which turned out to be fired by a planet the player had
+    ///   accidentally destroyed) meant grepping the raw `.rez` by hand.
+    /// - Parameter logBits: whether each bit write is logged at `.notice`. Only
+    ///   an *iterative* crön hook passes `false`, and only past its first few
+    ///   passes: those re-run the same expression up to `cronLoopCap` times, and
+    ///   a thousand identical lines would evict the surrounding context that
+    ///   makes a report readable. The runaway itself is still reported — see
+    ///   `runCronHook`'s cap error.
+    public func apply(set expr: String, source: String = "unattributed", logBits: Bool = true) {
         let ops = NCBSet.parse(expr)
         if ops.isEmpty, !expr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // Every token in a non-empty SET expression was unrecognized/skipped —
             // this silently no-ops rather than throwing, so flag it: it usually
             // means a data-parsing gap or a malformed resource.
-            Log.ncb.error("NCB apply: expression yielded no operations: \"\(expr, privacy: .public)\"")
+            Log.ncb.error("NCB apply: expression yielded no operations: \"\(expr, privacy: .public)\" (from \(source, privacy: .public))")
         }
-        for op in ops { execute(op) }
+        for op in ops { execute(op, source: source, logBits: logBits) }
     }
 
-    private func execute(_ op: NCBSetOp) {
-        Log.ncb.debug("NCB execute: \(String(describing: op), privacy: .public)")
+    private func execute(_ op: NCBSetOp, source: String, logBits: Bool = true) {
+        Log.ncb.debug("NCB execute: \(String(describing: op), privacy: .public) (from \(source, privacy: .public))")
         switch op {
-        case .setBit(let n):    player.setBit(n)
-        case .clearBit(let n):  player.clearBit(n)
-        case .toggleBit(let n): player.toggleBit(n)
+        // Bit writes log at `.notice`, not `.debug`: this is the audit trail a
+        // bug report is read with, so it has to survive the console's default
+        // level filter. "already set"/"already clear" is called out because a
+        // re-run expression is itself a common bug shape.
+        case .setBit(let n):
+            let had = player.setBits.contains(n)
+            player.setBit(n)
+            if logBits {
+                Log.ncb.notice("NCB bit b\(n, privacy: .public) SET by \(source, privacy: .public)\(had ? " (was already set)" : "")")
+            }
+        case .clearBit(let n):
+            let had = player.setBits.contains(n)
+            player.clearBit(n)
+            if logBits {
+                Log.ncb.notice("NCB bit b\(n, privacy: .public) CLEARED by \(source, privacy: .public)\(had ? "" : " (was already clear)")")
+            }
+        case .toggleBit(let n):
+            player.toggleBit(n)
+            let nowSet = player.setBits.contains(n)
+            if logBits {
+                Log.ncb.notice("NCB bit b\(n, privacy: .public) TOGGLED to \(nowSet ? "set" : "clear", privacy: .public) by \(source, privacy: .public)")
+            }
 
         case .startMission(let id):  startMission(id)
         case .abortMission(let id):  abortMission(id, silent: true)
@@ -122,11 +164,15 @@ public final class StoryEngine {
             // (a mission `Y` op is exactly that trigger). `apply` is a flat op
             // list, so this doesn't recurse unless the data itself re-destroys the
             // same id (which stock data never does).
-            if let s = game.spob(id), !s.onDestroy.isEmpty { apply(set: s.onDestroy) }
+            if let s = game.spob(id), !s.onDestroy.isEmpty {
+                apply(set: s.onDestroy, source: ncbSource("spöb", id, s.name, "OnDestroy"))
+            }
         case .regenerateStellar(let id):
             player.markStellarRegenerated(id)
             services?.setStellarDestroyed(spobID: id, destroyed: false)
-            if let s = game.spob(id), !s.onRegen.isEmpty { apply(set: s.onRegen) }
+            if let s = game.spob(id), !s.onRegen.isEmpty {
+                apply(set: s.onRegen, source: ncbSource("spöb", id, s.name, "OnRegen"))
+            }
 
         case .exploreSystem(let id):
             player.exploredSystems.insert(id)
@@ -142,7 +188,7 @@ public final class StoryEngine {
             // EV Nova's R(a b) picks one of the (up to two) ops at 50/50.
             if choices.isEmpty { return }
             let pick = choices.count == 1 ? choices[0] : choices[rng.int(choices.count)]
-            execute(pick)
+            execute(pick, source: source, logBits: logBits)
         }
     }
 
@@ -177,6 +223,13 @@ public final class StoryEngine {
     /// hull. (See NovaSwiftEngine/ShipLoadout.swift.)
     private func applyShipChange(to shipID: Int, mode: ChangeShipMode) {
         player.shipType = shipID
+        // Whatever this op decides the new hull comes with is now *the* record of
+        // it: `PilotEconomy.loadout` builds the player's ship straight from
+        // `player.outfits` and never re-adds `shïp.DefaultItems` behind it. So a
+        // `C` swap really does hand over a hull carrying only what the player
+        // brought (plus the hull's own built-in wëap list, which the loadout layer
+        // always applies), and an `E`/`H` swap's defaults land exactly once.
+        player.hullDefaultsGranted = true
         switch mode {
         case .keepOutfits:
             break                              // C: keep outfits, add nothing.
@@ -377,7 +430,7 @@ public final class StoryEngine {
         // only on success (see `completeMission`).
         applyPayVal(m.pay, atAccept: true)
 
-        apply(set: m.onAccept)
+        apply(set: m.onAccept, source: ncbSource("mïsn", m.id, m.name, "OnAccept"))
         services?.notify(.missionAccepted(missionID: missionID, name: m.name))
 
         // The post-accept briefing (BriefText) — "the dialog that comes up when
@@ -415,7 +468,7 @@ public final class StoryEngine {
         // reads against the state the player refused in.
         let refusal = resolveMissionText(game.descText(m.refuseText, context: textContext), for: m)
         if !refusal.isEmpty { services?.showStoryText(refusal, title: resolvedName(for: m)) }
-        apply(set: m.onRefuse)
+        apply(set: m.onRefuse, source: ncbSource("mïsn", m.id, m.name, "OnRefuse"))
     }
 
     /// The player (or a SET op) aborted an active mission.
@@ -435,7 +488,7 @@ public final class StoryEngine {
         if let m, m.flags1 & 0x0040 != 0, m.compRewardGovt >= 128, m.compLegalReward != 0 {
             player.legalRecord[m.compRewardGovt, default: 0] += -5 * m.compLegalReward
         }
-        if let m { apply(set: m.onAbort) }
+        if let m { apply(set: m.onAbort, source: ncbSource("mïsn", m.id, m.name, "OnAbort")) }
         Log.mission.notice("abortMission: mission \(missionID) (\"\(m?.name ?? "?", privacy: .public)\") aborted (silent=\(silent))")
         if !silent, let m {
             services?.notify(.missionAborted(missionID: missionID, name: m.name))
@@ -474,7 +527,7 @@ public final class StoryEngine {
             player.legalRecord[m.compRewardGovt, default: 0] += m.compLegalReward
         }
 
-        apply(set: m.onSuccess)
+        apply(set: m.onSuccess, source: ncbSource("mïsn", m.id, m.name, "OnSuccess"))
 
         let text = resolveMissionText(game.descText(m.completionText, context: textContext), for: m)
         if !text.isEmpty { services?.showStoryText(text, title: resolvedName(for: m)) }
@@ -501,7 +554,7 @@ public final class StoryEngine {
         if m.compRewardGovt >= 128, m.compLegalReward != 0 {
             player.legalRecord[m.compRewardGovt, default: 0] += -(m.compLegalReward / 2)
         }
-        apply(set: m.onFailure)
+        apply(set: m.onFailure, source: ncbSource("mïsn", m.id, m.name, "OnFailure"))
         if !m.canAbort {
             let text = resolveMissionText(game.descText(m.failureText, context: textContext), for: m)
             if !text.isEmpty { services?.showStoryText(text, title: resolvedName(for: m)) }
@@ -606,7 +659,7 @@ public final class StoryEngine {
         // BEFORE the "no return leg → complete" logic so the bits/text land
         // whether or not the mission also auto-completes here.
         if wasRemaining > 0, am.shipObjectivesRemaining == 0 {
-            apply(set: m.onShipDone)
+            apply(set: m.onShipDone, source: ncbSource("mïsn", m.id, m.name, "OnShipDone"))
             showMissionText(m.shipDoneText, for: m)
         }
 
@@ -684,7 +737,9 @@ public final class StoryEngine {
             guard s.hasRegenerated(destroyedDayCount: destroyedOn, nowDayCount: now) else { continue }
             player.markStellarRegenerated(spobID)
             services?.setStellarDestroyed(spobID: spobID, destroyed: false)
-            if !s.onRegen.isEmpty { apply(set: s.onRegen) }
+            if !s.onRegen.isEmpty {
+                apply(set: s.onRegen, source: ncbSource("spöb", spobID, s.name, "OnRegen"))
+            }
             Log.mission.notice("Stellar \(spobID, privacy: .public) regenerated after \(now - destroyedOn, privacy: .public) days")
         }
     }
@@ -696,7 +751,9 @@ public final class StoryEngine {
         guard !player.isStellarDestroyed(spobID) else { return }
         player.markStellarShotDown(spobID, onDay: player.date.julianDay)
         services?.setStellarDestroyed(spobID: spobID, destroyed: true)
-        if let s = game.spob(spobID), !s.onDestroy.isEmpty { apply(set: s.onDestroy) }
+        if let s = game.spob(spobID), !s.onDestroy.isEmpty {
+            apply(set: s.onDestroy, source: ncbSource("spöb", spobID, s.name, "OnDestroy"))
+        }
         Log.mission.notice("Stellar \(spobID, privacy: .public) destroyed by weapon fire")
     }
 
@@ -733,7 +790,9 @@ public final class StoryEngine {
     public func dominateStellar(_ spobID: Int) {
         guard !player.hasDominated(spobID) else { return }
         player.dominate(spobID)
-        if let spob = game.spob(spobID), !spob.onDominate.isEmpty { apply(set: spob.onDominate) }
+        if let spob = game.spob(spobID), !spob.onDominate.isEmpty {
+            apply(set: spob.onDominate, source: ncbSource("spöb", spobID, spob.name, "OnDominate"))
+        }
         services?.notify(.stellarDominated(spobID: spobID))
     }
 
@@ -742,7 +801,9 @@ public final class StoryEngine {
     public func releaseStellar(_ spobID: Int) {
         guard player.hasDominated(spobID) else { return }
         player.releaseDomination(spobID)
-        if let spob = game.spob(spobID), !spob.onRelease.isEmpty { apply(set: spob.onRelease) }
+        if let spob = game.spob(spobID), !spob.onRelease.isEmpty {
+            apply(set: spob.onRelease, source: ncbSource("spöb", spobID, spob.name, "OnRelease"))
+        }
         services?.notify(.stellarReleased(spobID: spobID))
     }
 
@@ -810,7 +871,7 @@ public final class StoryEngine {
 
             // End an active event whose duration has elapsed.
             if rt.isActive, let end = rt.endDate, player.date >= end {
-                runCronHook(c.onEnd, loop: c.loopEndUntilFalse, cron: c)
+                runCronHook(c.onEnd, loop: c.loopEndUntilFalse, cron: c, field: "OnEnd")
                 Log.mission.debug("cron \(c.id) ended on \(String(describing: self.player.date), privacy: .public)")
                 services?.notify(.cronEnded(cronID: c.id))
                 rt.startedDate = nil
@@ -866,7 +927,7 @@ public final class StoryEngine {
     /// Run a cron's OnStart, announce it, and schedule its end from `Duration`.
     /// Shared by the immediate-start and post-PreHoldoff paths.
     private func startCron(_ c: CronRes, rt: inout CronRuntime) {
-        runCronHook(c.onStart, loop: c.loopStartUntilFalse, cron: c)
+        runCronHook(c.onStart, loop: c.loopStartUntilFalse, cron: c, field: "OnStart")
         Log.mission.debug("cron \(c.id) started on \(String(describing: self.player.date), privacy: .public)")
         services?.notify(.cronStarted(cronID: c.id))
         announceNews(for: c)
@@ -884,14 +945,19 @@ public final class StoryEngine {
     /// its iterative flag (`0x0001` entry / `0x0002` exit), keep re-running the
     /// expression while `EnableOn` still evaluates true **and** the `Require`
     /// capability gate is still satisfied, up to `cronLoopCap` iterations.
-    private func runCronHook(_ expr: String, loop: Bool, cron c: CronRes) {
-        apply(set: expr)
+    private func runCronHook(_ expr: String, loop: Bool, cron c: CronRes, field: String) {
+        let source = ncbSource("crön", c.id, c.name, field)
+        apply(set: expr, source: source)
         guard loop else { return }
         var iterations = 1
         while iterations < Self.cronLoopCap {
             guard NCBTest(c.enableOn).evaluate(player) else { break }
             if c.require != 0, (activeContributeBits() & c.require) != c.require { break }
-            apply(set: expr)
+            // Past the first few passes the bit-level log is suppressed: a
+            // long-running iterative hook writes the same bits over and over,
+            // and a thousand identical lines would push everything useful out
+            // of a captured bug report. The cap error below still fires.
+            apply(set: expr, source: source, logBits: iterations < 4)
             iterations += 1
         }
         if iterations >= Self.cronLoopCap {

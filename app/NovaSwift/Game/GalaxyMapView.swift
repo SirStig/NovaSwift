@@ -84,10 +84,11 @@ struct GalaxyMapView: View {
     /// EV Nova's orange "go here" arrow over each. Rebuilt from the story engine
     /// when the map opens (accepted missions don't change while it's up).
     @State private var missionDestinations: [(systemID: Int, names: [String])] = []
-    /// Systems the story currently hides (`sÿst.Visibility` NCB evaluates false
-    /// against the pilot's control bits) — not drawn and not selectable, EV
-    /// Nova's mechanism for systems appearing/disappearing mid-campaign.
-    @State private var hiddenSystems: Set<Int> = []
+    // Systems the story currently hides (`sÿst.Visibility` NCB evaluates false
+    // against the pilot's control bits) live on the nav model as
+    // `nav.hiddenSystems`, refreshed here whenever the map opens: they're neither
+    // drawn nor routable. That's EV Nova's mechanism for systems appearing and
+    // disappearing mid-campaign.
 
     private struct MapNebula { let x, y, w, h: Int; let image: CGImage }
 
@@ -278,7 +279,11 @@ struct GalaxyMapView: View {
             }
         }
         missionDestinations = dests
-        hiddenSystems = engine.hiddenSystemIDs()
+        // Push into the nav model rather than keeping a view-local copy: course
+        // plotting has to skip a story-hidden system too, or a route can be laid
+        // through (and end in) the swapped-out twin of a system — see
+        // `NavigationModel.hiddenSystems`.
+        nav.hiddenSystems = engine.hiddenSystemIDs()
     }
 
     /// A government's authentic **territory** colour — its real `gövt.mapColor`
@@ -324,7 +329,7 @@ struct GalaxyMapView: View {
     private func drawMap(ctx: inout GraphicsContext, size: CGSize, blinkOn: Bool) {
         // Story-hidden systems are dropped up front, so every downstream pass
         // (links, stars, labels, `byID`) excludes them uniformly.
-        let systems = nav.systems().filter { !hiddenSystems.contains($0.id) }
+        let systems = nav.systems().filter { !nav.hiddenSystems.contains($0.id) }
         guard let cur = nav.current, let game = nav.game else { return }
         var byID: [Int: SystRes] = [:]
         for s in systems { byID[s.id] = s }
@@ -407,7 +412,9 @@ struct GalaxyMapView: View {
         for s in systems {
             guard visibility[s.id] != .unknown else { continue }
             let a = plot(s.x, s.y)
-            for link in s.links {
+            // `systemNeighbors` (not `s.links`) so a link the data only declares
+            // from the far end still draws — see NovaGame.systemNeighbors.
+            for link in game.systemNeighbors(s.id) {
                 guard let n = byID[link], link > s.id, visibility[link] != .unknown else { continue }
                 let b = plot(n.x, n.y)
                 guard visibleRect.contains(a) || visibleRect.contains(b) else { continue }
@@ -466,7 +473,7 @@ struct GalaxyMapView: View {
             }
         }
 
-        let neighborIDs = Set(cur.links)
+        let neighborIDs = Set(game.systemNeighbors(cur.id))
         let showLabels = zoom >= 1.1
         // Fixed design-point size: the canvas is already scaled to the device by
         // its container (novaFrameScale), so labels must not re-apply a viewport
@@ -688,7 +695,7 @@ struct GalaxyMapView: View {
         var best: (id: Int, dist: CGFloat)?
         for s in nav.systems() {
             // Story-hidden systems can't be targeted at all.
-            guard !hiddenSystems.contains(s.id) else { continue }
+            guard !nav.hiddenSystems.contains(s.id) else { continue }
             // Fog of war: only known systems are selectable.
             guard nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted) != .unknown else { continue }
             let p = CGPoint(x: center.x + CGFloat(s.x - cur.x) * zoom,

@@ -1104,6 +1104,10 @@ private final class NovaGameCache {
     /// (walking every system) so gate transport can resolve a linked gate's
     /// destination system without re-scanning the galaxy each time.
     var spobSystemIndex: [Int: Int]?
+    /// system id → its hyperspace neighbours, with every declared link closed in
+    /// both directions (see `NovaGame.systemNeighbors`). Built once by walking
+    /// every system's `links`.
+    var systemNeighborIndex: [Int: [Int]]?
     /// Cross-launch cache of decoded sheets on disk; nil when no writable cache
     /// location exists. Set once at `NovaGame` init.
     var diskCache: SpriteDiskCache?
@@ -1192,6 +1196,40 @@ public struct NovaGame {
             cache.spobSystemIndex = idx
         }
         return cache.spobSystemIndex?[spobID]
+    }
+
+    /// Every system one hyperspace jump from `systemID`, **both ways along every
+    /// link**. Use this — not `SystRes.links` — anywhere a jump, a course plot or
+    /// a map line is decided.
+    ///
+    /// The Bible describes hyperlinks as bidirectional ("each system can be
+    /// linked to up to 16 other systems, and the player can make hyperspace jumps
+    /// **back and forth** between them"), so the data only ever declares a link
+    /// from one end and relies on the engine to close the pair. 49 of the base
+    /// game's 1812 declared links are one-sided — and they cluster exactly where
+    /// it hurts, on the alternate story-state copies of a system. Tuatha, which
+    /// holds New Ireland, ships as four `sÿst` variants gated on control bits
+    /// 850/851/852: the first (#185) is listed by its neighbour HJG-1034, and
+    /// #762/#763/#764 are not. Following links one-way, the moment the storyline
+    /// flipped b850 New Ireland became unreachable — no route would plot to it
+    /// even while a mission was sending the player there. Same shape for Evlei,
+    /// Glimmer, Koria and the Polaris/Auroran variants.
+    ///
+    /// Backed by a one-time symmetric index over every system (see
+    /// `systemNeighborIndex`); the result is sorted for a stable jump/route order.
+    public func systemNeighbors(_ systemID: Int) -> [Int] {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if cache.systemNeighborIndex == nil {
+            var idx: [Int: Set<Int>] = [:]
+            for sys in resources.resources(of: NovaType.syst).map(SystRes.init) {
+                for link in sys.links where link != sys.id {
+                    idx[sys.id, default: []].insert(link)
+                    idx[link, default: []].insert(sys.id)
+                }
+            }
+            cache.systemNeighborIndex = idx.mapValues { $0.sorted() }
+        }
+        return cache.systemNeighborIndex?[systemID] ?? []
     }
 
     /// The destinations a hypergate offers: for each valid `HyperLink` gate, the

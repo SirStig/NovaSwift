@@ -393,7 +393,10 @@ final class AppModel: ObservableObject {
 
     func finishLoadingIntoGame() {
         prepareAudioAndData()
-        if let game = data.game { pilot.ensureStarted(game: game) }
+        if let game = data.game {
+            pilot.ensureStarted(game: game)
+            pilot.migrateIfNeeded(game: game)
+        }
         screen = .game
     }
 

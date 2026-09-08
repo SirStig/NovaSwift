@@ -282,7 +282,7 @@ struct SpaceportView: View {
     // MARK: Refuel (paid)
 
     private var maxFuel: Double? {
-        galaxy.loadout(shipID: pilot.state.shipType, extraOutfits: pilot.state.outfits)?.maxFuel
+        PilotEconomy.loadout(pilot.state, galaxy: galaxy)?.maxFuel
     }
     /// Current fuel; a nil saved level (new pilot / never spent) reads as full.
     private var currentFuel: Double { pilot.state.fuel ?? (maxFuel ?? 0) }
@@ -306,7 +306,7 @@ struct SpaceportView: View {
 
     /// Whether the player's fit includes an auto-refueller (`oütf` ModType 19).
     private var hasAutoRecharger: Bool {
-        galaxy.loadout(shipID: pilot.state.shipType, extraOutfits: pilot.state.outfits)?.hasAutoRefuel ?? false
+        PilotEconomy.loadout(pilot.state, galaxy: galaxy)?.hasAutoRefuel ?? false
     }
 
     /// The Auto-recharger's actual job, per its description: "automatically

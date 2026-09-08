@@ -287,8 +287,8 @@ final class GameHost {
             // blips by allegiance when the player's ship carries an IFF outfit;
             // without one, contacts are a single neutral color. Resolve the player's
             // full loadout (hull preinstalled + owned outfits) and check for it.
-            scene.playerHasIFF = aiGalaxy?
-                .loadout(shipID: model.pilot.state.shipType, extraOutfits: model.pilot.state.outfits)?
+            scene.playerHasIFF = aiGalaxy
+                .flatMap { PilotEconomy.loadout(model.pilot.state, galaxy: $0) }?
                 .outfits.keys.contains { scanGame.outfit($0)?.has(.iff) == true } ?? false
 
             // pêrs (named characters): seed grudges, gate appearances on their
@@ -461,12 +461,16 @@ final class GameHost {
         let pilot = model.pilot.state
         let shipID = pilot.shipType
         let res = game.ship(shipID)
-        let ship = galaxy.makeLoadedShip(shipID, extraOutfits: pilot.outfits)
+        // `includeDefaultItems: false`: `pilot.outfits` already lists the hull's
+        // own `shïp.DefaultItems` (granted at pilot creation / purchase / capture),
+        // so folding them in again here would fly every preinstalled turret twice.
+        let ship = galaxy.makeLoadedShip(shipID, extraOutfits: pilot.outfits,
+                                         includeDefaultItems: false)
             ?? Ship(name: res?.displayName ?? "Ship",
                     stats: ShipStats(speed: res?.speed ?? 300, acceleration: res?.acceleration ?? 400,
                                      turnRate: res?.turnRate ?? 30, rotationFrames: 36))
         ship.cargo = pilot.cargo
-        if let lo = galaxy.loadout(shipID: shipID, extraOutfits: pilot.outfits) {
+        if let lo = PilotEconomy.loadout(pilot, galaxy: galaxy) {
             ship.fuel = pilot.fuel.map { min($0, lo.maxFuel) } ?? lo.maxFuel
         }
         ship.armor = pilot.armor.map { min($0, ship.maxArmor) } ?? ship.maxArmor
@@ -1835,7 +1839,7 @@ struct GameContainerView: View {
         case -1:                       return am.acceptSystemID == currentSystem // initial
         case -5:                                                                 // adjacent to initial
             guard let initial = am.acceptSystemID else { return false }
-            return game.system(initial)?.links.contains(currentSystem) ?? false
+            return game.systemNeighbors(initial).contains(currentSystem)
         case -2:                                                                 // random, frozen per mission
             let systems = game.systems().map(\.id).sorted()
             guard !systems.isEmpty else { return false }
@@ -2375,7 +2379,7 @@ struct GameContainerView: View {
         host.hud.credits = state.credits
         let res = game.ship(state.shipType)
         host.hud.shipName = state.shipName.isEmpty ? (res?.displayName ?? "") : state.shipName
-        guard let lo = galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits) else { return }
+        guard let lo = PilotEconomy.loadout(state, galaxy: galaxy) else { return }
         let fuel = state.fuel.map { min($0, lo.maxFuel) } ?? lo.maxFuel
         let shield = state.shield.map { min($0, lo.maxShield) } ?? lo.maxShield
         let armor = state.armor.map { min($0, lo.maxArmor) } ?? lo.maxArmor
@@ -2557,6 +2561,16 @@ struct GameContainerView: View {
         let oldName = model.data.game?.ship(oldType)?.name ?? "Escort"
         _ = model.pilot.state.registerEscort(shipType: oldType, name: oldName, origin: .captured)
         model.pilot.state.shipType = cap.shipType
+        // Bible `shïp.DefaultItems`: "the default items with which to equip this
+        // ship when the player buys **or captures** one." They have to be granted
+        // into `outfits` here, the same as a shipyard purchase does — that dict is
+        // the only record of what the player is flying (`PilotEconomy.loadout`
+        // deliberately doesn't re-add a hull's defaults behind it), so without
+        // this the prize hull would arrive stripped of its own turrets.
+        model.pilot.state.hullDefaultsGranted = true
+        for (oid, count) in model.data.game?.ship(cap.shipType)?.outfits ?? [] {
+            model.pilot.state.grantOutfit(oid, count: count)
+        }
         applyOnCapture(shipType: cap.shipType)
         model.pilot.save()
         host?.hud.post("You take command of \(cap.name.isEmpty ? "the captured ship" : cap.name).")
@@ -2572,7 +2586,8 @@ struct GameContainerView: View {
         guard let game = model.data.game, let onCapture = game.ship(shipType)?.onCapture,
               !onCapture.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let engine = StoryEngine(game: game, player: model.pilot.state)
-        engine.apply(set: onCapture)
+        engine.apply(set: onCapture,
+                     source: "shïp \(shipType) \"\(game.ship(shipType)?.name ?? "")\" OnCapture")
         model.pilot.state = engine.player
     }
 

@@ -336,21 +336,34 @@ struct OutfitterView: View {
         return extras.isEmpty ? sold : sold + extras
     }
 
-    /// Owned outfits this port will *buy back* but doesn't stock. Two Bible
-    /// rules put an item here, and until now neither had anywhere to happen —
-    /// an outfit the port didn't sell couldn't even be selected, so there was
-    /// no way to unload it:
+    /// Owned outfits this port will *buy back* but isn't stocking today. An
+    /// outfit the grid doesn't list can't even be selected, so anything missing
+    /// from here is an item the player can see on their ship and never unload.
     ///
-    /// - `spöb.Flags2` 0x0400, "Player can sell any outfits here": this
-    ///   outfitter takes anything.
+    /// Three Bible rules put an item here:
+    ///
+    /// - The port's own tech level. `spöb.Flags2` 0x0400 is worded "it can buy
+    ///   any nonpermanent outfits the player owns, **regardless of tech level**"
+    ///   — so the *baseline*, without that flag, is that an outfitter buys back
+    ///   what its tech level covers. What it happens to have in stock today is a
+    ///   separate thing: `oütf.BuyRandom` re-rolls the shelves daily and
+    ///   `Flags` 0x1000 suppresses same-weight siblings, and listing only that
+    ///   roll meant a fitted turret was sellable one day and invisible the next.
+    /// - `spöb.Flags2` 0x0400: this outfitter takes anything at all.
     /// - `oütf.Flags` 0x0800, "This item can be sold anywhere, regardless of
     ///   tech level, requirements, or mission bits" — sell-side only, so it
     ///   never widens what's for *sale* (see OUTFITTERS.md §3.5).
+    ///
+    /// "Nonpermanent" is the Bible's own qualifier: an `oütf.Flags` 0x0008
+    /// ("can't be sold") item — a license, a story grant — is never bought back,
+    /// so it isn't padded into the grid as a tile that can only be looked at.
     private func sellBackOnly(excluding stocked: Set<Int>) -> [OutfRes] {
         pilot.state.outfits
             .filter { $0.value > 0 && !stocked.contains($0.key) }
             .keys.compactMap { game.outfit($0) }
-            .filter { spob.buysAnyOutfit || $0.ignoresRequirements }
+            .filter { !$0.cannotBeSold }
+            .filter { spob.buysAnyOutfit || $0.ignoresRequirements
+                       || game.sells(techLevel: $0.techLevel, at: spob) }
             .sorted { $0.id < $1.id }
     }
 
@@ -461,7 +474,7 @@ struct OutfitterView: View {
         LazyVGrid(columns: Array(repeating: GridItem(.fixed(gridTileSize.width), spacing: 0), count: gridCols), spacing: 0) {
             ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, o in
                 if let o {
-                    ItemTile(name: o.outfitterDisplayName, image: graphics.outfitPicture(o),
+                    ItemTile(name: o.outfitterGridName, image: graphics.outfitPicture(o),
                              quantity: pilot.owned(outfit: o.id),
                              selected: (selectedID ?? stock.first?.id) == o.id,
                              locked: lockState(for: o) == .locked)

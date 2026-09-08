@@ -29,6 +29,26 @@ final class NavigationModel: ObservableObject {
     /// Hyperlane hops one `jumpAlongRoute()` call can cross (multi-jump outfits).
     @Published var maxJumpHops: Int = 1
 
+    /// Systems the pilot's control bits currently hide — a `sÿst.Visibility` NCB
+    /// test evaluating false (see `StoryEngine.hiddenSystemIDs`). EV Nova uses
+    /// this to swap a system for an identical-coordinate copy as a storyline
+    /// progresses: Tuatha, which holds New Ireland, ships as four `sÿst` records
+    /// gated on bits 850/851/852, exactly one of which is live at any time.
+    ///
+    /// Pushed in by whoever owns the pilot (the game container on configure, the
+    /// galaxy map whenever it opens); empty for a standalone preview map, which
+    /// simply shows everything. Used to keep *routing* off a system that isn't
+    /// currently part of the galaxy — a course must never deposit the player in
+    /// the swapped-out twin. Deliberately NOT consulted by `canJump`: a stale set
+    /// there could refuse a jump the player can legitimately make, and stranding
+    /// someone is the failure this whole area is meant to prevent.
+    @Published var hiddenSystems: Set<Int> = []
+
+    /// `systemNeighbors` minus anything the story currently hides.
+    private func visibleNeighbors(_ id: Int) -> [Int] {
+        (game?.systemNeighbors(id) ?? []).filter { !hiddenSystems.contains($0) }
+    }
+
     /// The live player ship, for fuel — attached/reattached by the container
     /// whenever the play session's ship is (re)built (it doesn't survive a jump).
     private(set) weak var ship: Ship?
@@ -60,10 +80,10 @@ final class NavigationModel: ObservableObject {
 
     /// Systems reachable in one jump from the current system.
     func neighbors() -> [SystRes] {
-        (current?.links ?? []).compactMap { game?.system($0) }
+        visibleNeighbors(currentSystemID).compactMap { game?.system($0) }
     }
 
-    func canJump(to id: Int) -> Bool { current?.links.contains(id) ?? false }
+    func canJump(to id: Int) -> Bool { game?.systemNeighbors(currentSystemID).contains(id) ?? false }
 
     var destinationID: Int? { route.last }
 
@@ -118,7 +138,7 @@ final class NavigationModel: ObservableObject {
     /// Every system directly linked to a system in `explored` (the "you can see
     /// there's something there" ring around what you've actually visited).
     func adjacentToExplored(_ explored: Set<Int>) -> Set<Int> {
-        Set(explored.flatMap { game?.system($0)?.links ?? [] })
+        Set(explored.flatMap { visibleNeighbors($0) })
     }
 
     /// The visible frontier one hop beyond *all* known space — neighbours of
@@ -176,8 +196,8 @@ final class NavigationModel: ObservableObject {
         while !frontier.isEmpty {
             var next: [Int] = []
             for id in frontier {
-                guard let sys = game.system(id) else { continue }
-                for link in sys.links where !visited.contains(link) {
+                guard game.system(id) != nil else { continue }
+                for link in visibleNeighbors(id) where !visited.contains(link) {
                     visited.insert(link)
                     cameFrom[link] = id
                     if link == to {

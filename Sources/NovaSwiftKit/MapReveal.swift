@@ -53,7 +53,7 @@ extension NovaGame {
         while depth < jumps, !frontier.isEmpty {
             var next: [Int] = []
             for id in frontier {
-                for link in system(id)?.links ?? [] where !seen.contains(link) {
+                for link in systemNeighbors(id) where !seen.contains(link) {
                     seen.insert(link)
                     next.append(link)
                 }

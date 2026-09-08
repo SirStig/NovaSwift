@@ -352,6 +352,19 @@ public struct PlayerState: Codable, Sendable {
     /// existed (decodes to nil → treated as no active disasters).
     public var activeDisasters: [Int: GameDate]?
 
+    /// Whether this pilot's `outfits` already includes the hull's own
+    /// `shïp.DefaultItems`. `outfits` is the single record of everything the
+    /// player owns — the preinstalled turrets and jammers a hull comes with
+    /// included — so the loadout aggregator folds `DefaultItems` in only for
+    /// NPCs, never on top of a player's inventory.
+    ///
+    /// `nil`/false marks a save written before that was true, whose `outfits`
+    /// therefore lists only *bought* items; `PilotEconomy.migrateHullDefaults`
+    /// tops such a pilot up once and sets this. New pilots
+    /// (`PilotFactory.make`) and every ship purchase (`PilotEconomy.buyShip`)
+    /// grant the hull's items directly, so they start out already true.
+    public var hullDefaultsGranted: Bool? = nil
+
     public init(pilotName: String = "Captain",
                 isMale: Bool = true,
                 shipType: Int = 128,

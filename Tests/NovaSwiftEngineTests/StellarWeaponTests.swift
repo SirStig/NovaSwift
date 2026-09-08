@@ -273,6 +273,31 @@ final class StellarWeaponTests: XCTestCase {
                       "Strength 0 is the TMPL's 'Invulnerable' — no amount of fire touches it")
     }
 
+    /// The other half of the `wëap.Flags2` 0x0400 rule, and the one that keeps
+    /// the stock galaxy intact: an *ordinary* gun can't scratch a stellar, no
+    /// matter how long it's pointed at one. The Bible defines `spöb.Strength` as
+    /// the damage a stellar takes "from planetary-type weapons", and no base-game
+    /// weapon is one — while nearly every base-game stellar carries a positive
+    /// Strength (Earth 3000). Without this gate a firefight near a world slowly
+    /// destroyed it: firing its `OnDestroy` control bits (Earth's is `b6200`,
+    /// which summons the Federation task force at every Fed port) and, when the
+    /// casualty was a hypergate, silently deleting a route off the galaxy map.
+    func testOrdinaryWeaponCannotDamageAStellar() {
+        for beam in [false, true] {
+            let world = destroyableWorld(strength: 60)
+            world.player.weapons = [WeaponMount(spec: gun(range: 2000, beam: beam))]
+            world.player.angle = .pi                 // nose down, straight at the planet
+            world.intent.firePrimary = true
+            run(world, seconds: 3)
+
+            XCTAssertTrue(world.stellarsDestroyedThisSession.isEmpty,
+                          "a non-planet-type \(beam ? "beam" : "gun") must not destroy a stellar")
+            XCTAssertEqual(world.stellarArmorRemaining(world.systemContext.bodies[0]), 60,
+                           accuracy: 1e-9,
+                           "…and must not chip its armour either")
+        }
+    }
+
     /// A planet-type weapon (`wëap.Flags2` 0x0400) flies through ships and only
     /// connects with a destroyable stellar.
     func testPlanetTypeWeaponPassesThroughShipsAndHitsTheStellar() {

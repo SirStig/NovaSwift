@@ -71,6 +71,19 @@ public enum PilotFactory {
         player.combatRating = scenario.kills
         player.legalRecord = initialLegalRecord(scenario: scenario, game: game)
 
+        // The starting hull's own `shïp.DefaultItems` become *owned* outfits, the
+        // same way `PilotEconomy.buyShip` grants a purchased hull's. Bible: they
+        // are "up to eight default items with which to equip this ship when the
+        // player buys or captures one" — i.e. the player's, not an invisible
+        // property of the hull. Without this a brand-new pilot flew a Shuttle
+        // whose Light Blaster existed only inside `Galaxy.loadout`: the outfitter
+        // showed no quantity badge for it, Sell stayed greyed out, and the ship
+        // could never be stripped down — only added to.
+        player.hullDefaultsGranted = true
+        for (oid, count) in game.ship(shipID)?.outfits ?? [] {
+            player.grantOutfit(oid, count: count)
+        }
+
         // `spöb.Flags2` 0x0040 ("Starts destroyed"): some stellars begin every new
         // game already blown up, to be revealed later by a storyline (or by their
         // own `DeadTime` timer). Seeded here rather than at load so it applies
@@ -86,7 +99,8 @@ public enum PilotFactory {
         // grammar/side-effects (bits, ranks, outfits, missions, ship swap) run.
         if !scenario.onStart.isEmpty {
             let engine = StoryEngine(game: game, player: player, seed: resolvedSeed)
-            engine.apply(set: scenario.onStart)
+            engine.apply(set: scenario.onStart,
+                         source: "chär \(scenario.id) \"\(scenario.name)\" OnStart")
             player = engine.player
         }
 

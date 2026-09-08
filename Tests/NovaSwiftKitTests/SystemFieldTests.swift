@@ -22,6 +22,44 @@ final class SystemFieldTests: XCTestCase {
                        "zeroed BkgndColor is the Bible's \"pure black\"")
     }
 
+    /// Hyperspace links are bidirectional (Bible: "the player can make hyperspace
+    /// jumps **back and forth** between them"), so the data declares each pair
+    /// from whichever end it likes. This is the exact shape that stranded testers:
+    /// HJG-1034 (#145) lists only the first Tuatha variant (#185), while the
+    /// bit-gated replacements #762-#764 list #145 and are listed by nobody. Read
+    /// one-way, New Ireland vanished from the map the moment the storyline swapped
+    /// the variant in.
+    func testSystemNeighborsClosesOneWayLinksBothWays() {
+        func syst(_ id: Int, name: String, links: [Int]) -> Resource {
+            var b = [UInt8](repeating: 0, count: 428)
+            for i in 0..<16 { put16(&b, 4 + i * 2, -1) }
+            for (i, l) in links.prefix(16).enumerated() { put16(&b, 4 + i * 2, l) }
+            return Resource(type: NovaType.syst, id: id, name: name, data: Data(b))
+        }
+        var col = ResourceCollection()
+        col.add(syst(145, name: "HJG-1034", links: [185]))
+        col.add(syst(185, name: "Tuatha", links: [145]))
+        col.add(syst(762, name: "Tuatha", links: [145]))     // declared from this end only
+        let game = NovaGame(col)
+
+        XCTAssertEqual(game.systemNeighbors(145), [185, 762],
+                       "a link declared only by #762 still lets you jump *into* it from #145")
+        XCTAssertEqual(game.systemNeighbors(762), [145])
+        XCTAssertEqual(game.systemNeighbors(185), [145])
+        XCTAssertEqual(game.systemNeighbors(999), [], "an unknown system has no neighbours")
+    }
+
+    func testSystemNeighborsDropsSelfLinksAndDeduplicates() {
+        var b = [UInt8](repeating: 0, count: 428)
+        for i in 0..<16 { put16(&b, 4 + i * 2, -1) }
+        put16(&b, 4, 128)          // self-link
+        put16(&b, 6, 129)
+        put16(&b, 8, 129)          // duplicate
+        var col = ResourceCollection()
+        col.add(Resource(type: NovaType.syst, id: 128, name: "A", data: Data(b)))
+        XCTAssertEqual(NovaGame(col).systemNeighbors(128), [129])
+    }
+
     func testBackgroundColorDecode() {
         var b = [UInt8](repeating: 0, count: 428)
         // BkgndColor @142: 0x00RRGGBB — the murky Auroran red 0x0019090F.

@@ -15,6 +15,7 @@ struct DevToolsPane: View {
     @State private var showGameState = false
     @State private var showDiagnostics = false
     @State private var showTests = false
+    @State private var showBugReport = false
 
     var body: some View {
         ScrollView {
@@ -41,6 +42,13 @@ struct DevToolsPane: View {
         .sheet(isPresented: $showTests) {
             DebugTestsView()
                 .environmentObject(model)
+        }
+        // Same reporter as Settings, but with the live scene attached so the
+        // bundled self-test can also check the flight session.
+        .sheet(isPresented: $showBugReport) {
+            BugReportView(debug: debug)
+                .environmentObject(model)
+                .environmentObject(model.pilot)
         }
     }
 
@@ -231,6 +239,7 @@ struct DevToolsPane: View {
             sheetRow("Game State", "pencil.and.list.clipboard") { showGameState = true }
             sheetRow("Diagnostics", "checkmark.seal") { showDiagnostics = true }
             sheetRow("Self-Tests", "testtube.2") { showTests = true }
+            sheetRow("Bug Report", "ladybug") { showBugReport = true }
         }
     }
 
