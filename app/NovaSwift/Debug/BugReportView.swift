@@ -127,7 +127,9 @@ struct BugReportView: View {
                 Text(bundle.summary)
                     .font(.system(size: 10, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    #if !os(tvOS)
                     .textSelection(.enabled)
+                    #endif
             }
             .frame(maxHeight: 320)
         } header: {
