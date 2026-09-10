@@ -447,6 +447,7 @@ final class AppModel: ObservableObject {
         let save = roster.create(name: name, isMale: isMale, scenario: scenario, game: game)
         roster.setSelected(save.id)                 // a new pilot becomes the loaded one
         pilot.begin(state: save.player, rosterID: save.id)
+        pilot.migrateIfNeeded(game: game)
         return scenario
     }
 
@@ -457,6 +458,11 @@ final class AppModel: ObservableObject {
         prepareAudioAndData()
         roster.setSelected(save.id)
         pilot.begin(state: save.player, rosterID: save.id)
+        // Migrate at adoption as well as at `finishLoadingIntoGame`. It's
+        // idempotent, and the cost of a path that somehow skips it is no longer
+        // cosmetic: the player's loadout is built purely from `outfits`, so an
+        // un-migrated pilot would take off with no guns.
+        if let game = data.game { pilot.migrateIfNeeded(game: game) }
         beginPlay()
     }
 

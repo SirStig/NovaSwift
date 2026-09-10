@@ -352,18 +352,24 @@ public struct PlayerState: Codable, Sendable {
     /// existed (decodes to nil → treated as no active disasters).
     public var activeDisasters: [Int: GameDate]?
 
-    /// Whether this pilot's `outfits` already includes the hull's own
-    /// `shïp.DefaultItems`. `outfits` is the single record of everything the
-    /// player owns — the preinstalled turrets and jammers a hull comes with
-    /// included — so the loadout aggregator folds `DefaultItems` in only for
-    /// NPCs, never on top of a player's inventory.
+    /// Whether this pilot's `outfits` already includes everything their hull came
+    /// with — its `shïp.DefaultItems` **and** its `shïp.WeapType` stock weapons,
+    /// materialised as the `oütf` ids that install them (see
+    /// `PilotEconomy.hullFittings`). `outfits` is the single record of what the
+    /// player owns, so the loadout aggregator adds neither on top of it for the
+    /// player; NPCs still get their hull weapons, which is all that arms them.
     ///
-    /// `nil`/false marks a save written before that was true, whose `outfits`
-    /// therefore lists only *bought* items; `PilotEconomy.migrateHullDefaults`
-    /// tops such a pilot up once and sets this. New pilots
-    /// (`PilotFactory.make`) and every ship purchase (`PilotEconomy.buyShip`)
-    /// grant the hull's items directly, so they start out already true.
-    public var hullDefaultsGranted: Bool? = nil
+    /// `nil` marks a save written before that was true, whose `outfits` lists only
+    /// *bought* items; `PilotEconomy.migrateHullFittings` tops such a pilot up once
+    /// and sets this. Every path that hands the player a hull — `PilotFactory.make`,
+    /// `PilotEconomy.buyShip`, capture, a mission `C`/`E`/`H` swap — grants the
+    /// fittings directly, so those start out already true.
+    ///
+    /// This replaced an earlier `hullDefaultsGranted` flag that covered only
+    /// `DefaultItems`. Deliberately a *new* key: pilots migrated under the old one
+    /// still need the weapon half, and would otherwise be skipped — and, once the
+    /// loadout stopped applying hull weapons, would have been left unarmed.
+    public var hullFittingsGranted: Bool? = nil
 
     public init(pilotName: String = "Captain",
                 isMale: Bool = true,

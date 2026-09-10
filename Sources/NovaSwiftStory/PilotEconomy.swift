@@ -20,47 +20,103 @@ public enum PilotEconomy {
     // MARK: Derived, data-dependent queries
 
     /// The player's live `Loadout`: their hull fitted with exactly what
-    /// `state.outfits` says they own.
+    /// `state.outfits` says they own, and nothing else.
     ///
-    /// `includeDefaultItems: false` is the whole point. `state.outfits` is the
-    /// single record of what the player has — the hull's own `shïp.DefaultItems`
-    /// are granted into it when the pilot is created (`PilotFactory.make`), when
-    /// a hull is bought (`buyShip`), and, for pre-existing saves, once by
-    /// `migrateHullDefaults`. Letting the aggregator fold `DefaultItems` in
-    /// *again* on top of that inventory double-counted every preinstalled item:
-    /// a hull bought with two turrets flew with four, its mass and free-mass
-    /// budget were wrong, and the numbers shifted depending on whether the pilot
-    /// had ever traded ships. Every player-side call site must go through here;
-    /// NPC spawns keep their own `includeDefaultItems: false` (the Bible: AI
-    /// ships ignore `DefaultItems` entirely).
+    /// Both `include…: false` flags are the whole point. `state.outfits` is the
+    /// single record of what the player has — *everything the hull came with*
+    /// included: its `shïp.DefaultItems`, and its `shïp.WeapType` stock weapons
+    /// materialised into the `oütf` ids that install them. Those are granted when
+    /// the pilot is created (`PilotFactory.make`), when a hull is bought
+    /// (`buyShip`), captured, or swapped by a mission op, and for older saves once
+    /// by `migrateHullFittings`.
+    ///
+    /// Letting the aggregator fold either in *again* on top of that inventory
+    /// double-counts: a hull bought with two turrets flew with four, and a stock
+    /// Shuttle would fly two Light Blasters. NPC spawns pass `includeDefaultItems:
+    /// false` for the unrelated Bible reason that AI ships ignore `DefaultItems`,
+    /// but keep `includeHullWeapons: true` — that's the only thing arming them.
     public static func loadout(_ state: PlayerState, galaxy: Galaxy) -> Loadout? {
         galaxy.loadout(shipID: state.shipType, extraOutfits: state.outfits,
-                       includeDefaultItems: false)
+                       includeDefaultItems: false, includeHullWeapons: false)
+    }
+
+    /// Everything a hull hands its new owner, as owned `oütf` ids: the
+    /// `DefaultItems` it ships with, plus the `WeapType`/`AmmoLoad` stock
+    /// armament resolved through `NovaGame.outfitInstalling(weapon:)`.
+    ///
+    /// The Bible introduces both as the buyer's, not the hull's: `DefaultItems`
+    /// are "up to eight default items with which to equip this ship when the
+    /// player buys or captures one", and the weapon block is "which stock weapons
+    /// to put on your ship when you first buy it". Materialising them is what
+    /// makes them visible in the outfitter, counted against `MaxGun`/`MaxTur` and
+    /// against free mass, and — the thing testers actually asked for — sellable.
+    ///
+    /// A weapon no outfit installs is omitted: it stays inherent to the hull, and
+    /// `Galaxy.loadout(…includeHullWeapons: false)` keeps applying exactly those.
+    /// - Parameter includeDefaultItems: pass `false` for the mission `C` op,
+    ///   which keeps the player's own items and adds none of the hull's — but
+    ///   still has to arm it.
+    public static func hullFittings(_ ship: ShipRes, game: NovaGame,
+                                    includeDefaultItems: Bool = true) -> [Int: Int] {
+        var fittings: [Int: Int] = [:]
+        if includeDefaultItems {
+            for (oid, count) in ship.outfits where count > 0 {
+                fittings[oid, default: 0] += count
+            }
+        }
+        for w in ship.weapons {
+            if let oid = game.outfitInstalling(weapon: w.id) {
+                fittings[oid, default: 0] += max(1, w.count)
+            }
+            // `AmmoLoad` rounds arrive as the matching ammunition outfit, one
+            // per round — the same unit `Loadout` counts them in.
+            if w.ammo > 0, let ammoID = game.outfitLoadingAmmo(for: w.id) {
+                fittings[ammoID, default: 0] += w.ammo
+            }
+        }
+        return fittings
+    }
+
+    /// Grant `ship`'s fittings to a pilot taking delivery of it (new pilot,
+    /// purchase, capture, mission hull swap) and mark them recorded.
+    public static func grantHullFittings(_ state: inout PlayerState, ship: ShipRes, game: NovaGame) {
+        state.hullFittingsGranted = true
+        for (oid, count) in hullFittings(ship, game: game) {
+            state.grantOutfit(oid, count: count)
+        }
     }
 
     /// One-time save migration for pilots written before `state.outfits` recorded
-    /// the hull's `DefaultItems` (see `PlayerState.hullDefaultsGranted`). Tops the
-    /// inventory up so each of the current hull's default items is owned at least
-    /// as many times as the hull ships with, then marks the pilot migrated.
+    /// what their hull came with (see `PlayerState.hullFittingsGranted`). Tops the
+    /// inventory up so every fitting of the *current* hull is owned at least as
+    /// many times as the hull ships with, then marks the pilot migrated.
     ///
-    /// It tops up rather than adding, because a pilot who bought their current
-    /// hull *did* already receive its defaults through `buyShip` — adding again
-    /// would duplicate them. The one thing it can't recover is a default item the
-    /// player deliberately bought extras of before migrating; that pilot keeps
-    /// what they bought. Returns whether anything changed (so the caller can save).
+    /// It tops up rather than adds, because a pilot who bought or captured their
+    /// current hull already received those fittings — adding again would duplicate
+    /// them. Two consequences worth knowing: a fitting the player deliberately
+    /// bought *extras* of keeps only what they bought, and one they had sold since
+    /// is restored. Both are bounded by a single hull's fittings, and the
+    /// alternative — skipping the top-up — would strip the guns off every existing
+    /// pilot the moment the loadout stops applying hull weapons.
+    ///
+    /// Returns whether the pilot was migrated (so the caller can save).
     @discardableResult
-    public static func migrateHullDefaults(_ state: inout PlayerState, game: NovaGame) -> Bool {
-        guard state.hullDefaultsGranted != true else { return false }
-        state.hullDefaultsGranted = true
+    public static func migrateHullFittings(_ state: inout PlayerState, game: NovaGame) -> Bool {
+        guard state.hullFittingsGranted != true else { return false }
+        state.hullFittingsGranted = true
         let hull = state.shipType
-        var changed = false
-        for (oid, count) in game.ship(hull)?.outfits ?? [] where count > 0 {
+        guard let ship = game.ship(hull) else {
+            Log.pilot.error("migrateHullFittings: pilot's hull \(hull, privacy: .public) is not in the loaded data — nothing to top up")
+            return true
+        }
+        var added = 0
+        for (oid, count) in hullFittings(ship, game: game) {
             let owned = state.outfits[oid] ?? 0
             guard owned < count else { continue }
             state.grantOutfit(oid, count: count - owned)
-            changed = true
+            added += count - owned
         }
-        Log.pilot.notice("migrateHullDefaults: pilot on hull \(hull, privacy: .public) topped up to its DefaultItems (changed=\(changed, privacy: .public))")
+        Log.pilot.notice("migrateHullFittings: hull \(hull, privacy: .public) topped up, \(added, privacy: .public) item(s) added")
         return true
     }
 
@@ -413,17 +469,14 @@ public enum PilotEconomy {
         state.outfits = state.outfits.filter { id, _ in
             (game.outfit(id)?.flags ?? 0) & 0x0004 != 0
         }
-        // The new hull's own preinstalled outfits (shïp.outfits — turrets,
-        // launchers, jammers, etc. it ships with stock) become owned so the
-        // Outfitter/Ship-Info screens show them and they can be sold off like
-        // any other installed item. This is the *only* place they enter the
-        // flown ship: `PilotEconomy.loadout` builds the player's hull with
-        // `includeDefaultItems: false`, precisely so what's granted here isn't
-        // then folded in a second time on top of itself.
-        state.hullDefaultsGranted = true
-        for (oid, count) in ship.outfits {
-            state.grantOutfit(oid, count: count)
-        }
+        // Everything the new hull comes with — its preinstalled `DefaultItems`
+        // (turrets, launchers, jammers) *and* its stock `WeapType` armament —
+        // becomes owned, so the Outfitter and Ship Info show it and it can be
+        // sold off like any other installed item. This is the *only* place those
+        // enter the flown ship: `PilotEconomy.loadout` builds the player's hull
+        // with both `include…` flags off, precisely so what's granted here isn't
+        // folded in a second time on top of itself.
+        grantHullFittings(&state, ship: ship, game: game)
         // `armor`/`shield`/`fuel` are stored as raw absolute values with `nil`
         // meaning "uninitialized (full)". Left alone, the *old* ship's raw
         // numbers (e.g. 100/100) would carry over as a ceiling on the *new*

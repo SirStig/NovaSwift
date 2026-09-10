@@ -461,11 +461,14 @@ final class GameHost {
         let pilot = model.pilot.state
         let shipID = pilot.shipType
         let res = game.ship(shipID)
-        // `includeDefaultItems: false`: `pilot.outfits` already lists the hull's
-        // own `shïp.DefaultItems` (granted at pilot creation / purchase / capture),
-        // so folding them in again here would fly every preinstalled turret twice.
+        // Both flags off: `pilot.outfits` already lists everything the hull came
+        // with — `DefaultItems` and stock `WeapType` armament alike (granted at
+        // pilot creation / purchase / capture / mission swap) — so folding either
+        // in again here would fly every preinstalled turret, and every stock gun,
+        // twice. See `PilotEconomy.loadout`.
         let ship = galaxy.makeLoadedShip(shipID, extraOutfits: pilot.outfits,
-                                         includeDefaultItems: false)
+                                         includeDefaultItems: false,
+                                         includeHullWeapons: false)
             ?? Ship(name: res?.displayName ?? "Ship",
                     stats: ShipStats(speed: res?.speed ?? 300, acceleration: res?.acceleration ?? 400,
                                      turnRate: res?.turnRate ?? 30, rotationFrames: 36))
@@ -2562,14 +2565,14 @@ struct GameContainerView: View {
         _ = model.pilot.state.registerEscort(shipType: oldType, name: oldName, origin: .captured)
         model.pilot.state.shipType = cap.shipType
         // Bible `shïp.DefaultItems`: "the default items with which to equip this
-        // ship when the player buys **or captures** one." They have to be granted
-        // into `outfits` here, the same as a shipyard purchase does — that dict is
-        // the only record of what the player is flying (`PilotEconomy.loadout`
-        // deliberately doesn't re-add a hull's defaults behind it), so without
-        // this the prize hull would arrive stripped of its own turrets.
-        model.pilot.state.hullDefaultsGranted = true
-        for (oid, count) in model.data.game?.ship(cap.shipType)?.outfits ?? [] {
-            model.pilot.state.grantOutfit(oid, count: count)
+        // ship when the player buys **or captures** one" — and the stock
+        // `WeapType` armament alongside them. Both have to be granted into
+        // `outfits` here, the same as a shipyard purchase does: that dict is the
+        // only record of what the player is flying (`PilotEconomy.loadout`
+        // deliberately re-adds neither behind it), so without this the prize hull
+        // would arrive stripped of its own turrets and guns.
+        if let game = model.data.game, let hull = game.ship(cap.shipType) {
+            PilotEconomy.grantHullFittings(&model.pilot.state, ship: hull, game: game)
         }
         applyOnCapture(shipType: cap.shipType)
         model.pilot.save()

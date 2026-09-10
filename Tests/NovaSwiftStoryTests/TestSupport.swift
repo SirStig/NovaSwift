@@ -180,10 +180,24 @@ func makeGame(_ resources: [Resource]) -> NovaGame {
 /// A ship with preinstalled `DefaultItems` (`shïp` slots @78/@86 — ids and
 /// counts) on top of the plain `shipResource` above, plus a real `FreeMass` so
 /// outfit-mass accounting has room to work with.
-func shipResource(id: Int, cargo: Int, freeMass: Int, defaultItems: [(id: Int, count: Int)]) -> Resource {
+func shipResource(id: Int, cargo: Int, freeMass: Int,
+                  defaultItems: [(id: Int, count: Int)] = [],
+                  stockWeapons: [(id: Int, count: Int, ammo: Int)] = [],
+                  maxGuns: Int = 4, maxTurrets: Int = 4) -> Resource {
     var b = [UInt8](repeating: 0, count: 1860)
     Bytes.i16(&b, 0, cargo)
     Bytes.i16(&b, 12, freeMass)
+    Bytes.i16(&b, 42, maxGuns)
+    Bytes.i16(&b, 44, maxTurrets)
+    // WeapType/WeapCount/AmmoLoad @18/@26/@34 — the hull's stock armament.
+    for i in 0..<4 { Bytes.i16(&b, 18 + i * 2, -1) }
+    for (i, w) in stockWeapons.prefix(4).enumerated() {
+        Bytes.i16(&b, 18 + i * 2, w.id)
+        Bytes.i16(&b, 26 + i * 2, w.count)
+        Bytes.i16(&b, 34 + i * 2, w.ammo)
+    }
+    for i in 0..<4 { Bytes.i16(&b, 1742 + i * 2, -1) }
+    // DefaultItems/ItemCount @78/@86.
     for i in 0..<4 { Bytes.i16(&b, 78 + i * 2, -1) }
     for (i, item) in defaultItems.prefix(4).enumerated() {
         Bytes.i16(&b, 78 + i * 2, item.id)
@@ -193,14 +207,33 @@ func shipResource(id: Int, cargo: Int, freeMass: Int, defaultItems: [(id: Int, c
     return Resource(type: NovaType.ship, id: id, name: "Ship \(id)", data: Data(b))
 }
 
+/// A `wëap` just real enough for `Loadout` to mount it.
+func weaponResource(id: Int, name: String) -> Resource {
+    var b = [UInt8](repeating: 0, count: 400)
+    Bytes.i16(&b, 0, 60)      // reload
+    Bytes.i16(&b, 2, 300)     // duration/lifetime
+    Bytes.i16(&b, 4, 10)      // mass damage
+    Bytes.i16(&b, 6, 10)      // energy damage
+    Bytes.i16(&b, 8, 500)     // speed
+    return Resource(type: NovaType.weapon, id: id, name: name, data: Data(b))
+}
+
 /// An `oütf` with a mass and cost, and optionally the "Outfitter Name" string
 /// (@811) the shop grid draws.
 func outfitResource(id: Int, name: String, mass: Int = 0, cost: Int = 0,
-                    outfitterName: String = "") -> Resource {
+                    outfitterName: String = "",
+                    installsWeapon: Int? = nil, ammoFor: Int? = nil,
+                    isFixedGun: Bool = false) -> Resource {
     var b = [UInt8](repeating: 0, count: 1012)
     Bytes.i16(&b, 2, mass)
     Bytes.i32(&b, 14, cost)
     for pos in [6, 18, 22, 26] { Bytes.i16(&b, pos, -1) }   // no modifiers
+    if let installsWeapon {                                 // ModType 1
+        Bytes.i16(&b, 6, 1); Bytes.i16(&b, 8, installsWeapon)
+    } else if let ammoFor {                                 // ModType 3
+        Bytes.i16(&b, 6, 3); Bytes.i16(&b, 8, ammoFor)
+    }
+    if isFixedGun { Bytes.i16(&b, 12, 0x0001) }             // Flags: fixed gun
     Bytes.cstr(&b, 811, outfitterName)
     return Resource(type: NovaType.outfit, id: id, name: name, data: Data(b))
 }

@@ -1108,6 +1108,10 @@ private final class NovaGameCache {
     /// both directions (see `NovaGame.systemNeighbors`). Built once by walking
     /// every system's `links`.
     var systemNeighborIndex: [Int: [Int]]?
+    /// wëap id → the `oütf` that installs it (ModType 1) and the `oütf` that
+    /// loads ammo for it (ModType 3). Built once by walking the outfit catalog;
+    /// see `NovaGame.outfitInstalling(weapon:)`.
+    var weaponOutfitIndex: (installs: [Int: Int], ammo: [Int: Int])?
     /// Cross-launch cache of decoded sheets on disk; nil when no writable cache
     /// location exists. Set once at `NovaGame` init.
     var diskCache: SpriteDiskCache?
@@ -1230,6 +1234,42 @@ public struct NovaGame {
             cache.systemNeighborIndex = idx.mapValues { $0.sorted() }
         }
         return cache.systemNeighborIndex?[systemID] ?? []
+    }
+
+    /// The `oütf` that *is* weapon `weaponID` — the outfit whose ModType 1
+    /// ("a weapon") names it, e.g. wëap #128 Light Blaster → oütf #128 Light
+    /// Blaster. Lowest outfit id wins when several install the same weapon.
+    ///
+    /// This is the bridge between a hull's stock armament and the player's
+    /// inventory. `shïp.WeapType` holds *weapon* ids, and the Bible introduces
+    /// those fields as "which stock weapons to put on your ship when you first
+    /// buy it" — they belong to the buyer, not to the hull, exactly like
+    /// `DefaultItems`. To be seen, counted against gun mounts, and sold, they
+    /// have to become owned `oütf` ids, which is what this resolves. Every one
+    /// of the 851 stock-weapon entries in the base data maps; a plug-in that
+    /// arms a hull with a weapon no outfit sells returns nil here and keeps that
+    /// weapon inherent to the hull (see `loadout(shipID:…:includeHullWeapons:)`).
+    public func outfitInstalling(weapon weaponID: Int) -> Int? {
+        weaponOutfitIndex().installs[weaponID]
+    }
+
+    /// The `oütf` that loads ammunition for weapon `weaponID` (ModType 3), if
+    /// any — the companion to `outfitInstalling(weapon:)` for a hull's `AmmoLoad`.
+    public func outfitLoadingAmmo(for weaponID: Int) -> Int? {
+        weaponOutfitIndex().ammo[weaponID]
+    }
+
+    private func weaponOutfitIndex() -> (installs: [Int: Int], ammo: [Int: Int]) {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let cached = cache.weaponOutfitIndex { return cached }
+        var installs: [Int: Int] = [:], ammo: [Int: Int] = [:]
+        for o in resources.resources(of: NovaType.outfit).map(OutfRes.init).sorted(by: { $0.id < $1.id }) {
+            for w in o.grantedWeapons where installs[w] == nil { installs[w] = o.id }
+            for w in o.ammoFor where ammo[w] == nil { ammo[w] = o.id }
+        }
+        let built = (installs: installs, ammo: ammo)
+        cache.weaponOutfitIndex = built
+        return built
     }
 
     /// The destinations a hypergate offers: for each valid `HyperLink` gate, the

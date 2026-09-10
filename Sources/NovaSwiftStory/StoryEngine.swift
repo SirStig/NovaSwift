@@ -223,31 +223,43 @@ public final class StoryEngine {
     /// hull. (See NovaSwiftEngine/ShipLoadout.swift.)
     private func applyShipChange(to shipID: Int, mode: ChangeShipMode) {
         player.shipType = shipID
-        // Whatever this op decides the new hull comes with is now *the* record of
-        // it: `PilotEconomy.loadout` builds the player's ship straight from
-        // `player.outfits` and never re-adds `shïp.DefaultItems` behind it. So a
-        // `C` swap really does hand over a hull carrying only what the player
-        // brought (plus the hull's own built-in wëap list, which the loadout layer
-        // always applies), and an `E`/`H` swap's defaults land exactly once.
-        player.hullDefaultsGranted = true
+        // `player.outfits` is now *the* record of what the player is flying —
+        // `PilotEconomy.loadout` re-adds neither the hull's `DefaultItems` nor its
+        // stock `WeapType` armament behind it. So the new hull's own weapons have
+        // to be granted here on **every** mode, `C` included: the op's `mode` only
+        // decides what happens to the *items*, and a hull that arrived through a
+        // swap must still turn up armed.
         switch mode {
-        case .keepOutfits:
-            break                              // C: keep outfits, add nothing.
+        case .keepOutfits:                     // C: keep outfits, add the hull's guns.
+            grantStockWeapons(ofShip: shipID)
         case .addDefaultOutfits:
-            addDefaultOutfits(ofShip: shipID)  // E: keep + defaults.
-        case .defaultOutfits:                  // H: drop non-persistent + defaults.
+            addHullFittings(ofShip: shipID)    // E: keep + the hull's own fittings.
+        case .defaultOutfits:                  // H: drop non-persistent + fittings.
             dropNonPersistentOutfits()
-            addDefaultOutfits(ofShip: shipID)
+            addHullFittings(ofShip: shipID)
         }
     }
 
-    /// Add the hull's built-in `oütf` items to the player's owned outfits.
-    private func addDefaultOutfits(ofShip shipID: Int) {
+    /// Everything the hull comes with (`DefaultItems` + stock armament).
+    private func addHullFittings(ofShip shipID: Int) {
         guard let s = game.ship(shipID) else {
-            Log.mission.error("addDefaultOutfits: unknown ship id \(shipID)")
+            Log.mission.error("addHullFittings: unknown ship id \(shipID)")
             return
         }
-        for (oid, count) in s.outfits { player.grantOutfit(oid, count: max(1, count)) }
+        PilotEconomy.grantHullFittings(&player, ship: s, game: game)
+    }
+
+    /// Just the hull's stock `WeapType` armament — the `C` op keeps the player's
+    /// own items and adds no `DefaultItems`, but the hull still comes armed.
+    private func grantStockWeapons(ofShip shipID: Int) {
+        guard let s = game.ship(shipID) else {
+            Log.mission.error("grantStockWeapons: unknown ship id \(shipID)")
+            return
+        }
+        player.hullFittingsGranted = true
+        for (oid, count) in PilotEconomy.hullFittings(s, game: game, includeDefaultItems: false) {
+            player.grantOutfit(oid, count: count)
+        }
     }
 
     /// Remove every non-persistent outfit the player currently owns (the `H`

@@ -1271,6 +1271,93 @@ case "storylines":
         }
     }
 
+case "alltext":
+    // Dev tool: dump every player-facing text resource (dësc narrative blocks,
+    // STR# indexed strings, mïsn briefing/reward summaries with their linked
+    // dësc text resolved, and përs hail/comm quotes) for offline prose analysis.
+    //   novaswift-extract alltext <baseDir> [section]
+    //   section: all (default) | desc | str | missions | pers
+    guard args.count >= 2 else { usage() }
+    let atBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let atGame: NovaGame
+    do { atGame = NovaGame(try GameLibrary.merge(baseFiles: atBase)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    let atSection = args.count >= 3 ? args[2] : "all"
+
+    if atSection == "all" || atSection == "desc" {
+        let allDesc = atGame.resources.resources(of: NovaType.desc).sorted { $0.id < $1.id }
+        print("=== dësc resources (\(allDesc.count)) ===")
+        for r in allDesc {
+            let d = DescRes(r)
+            print("--- dësc #\(d.id) ---")
+            print(atGame.descText(d.id))
+            print("")
+        }
+    }
+
+    if atSection == "all" || atSection == "str" {
+        let allStr = atGame.resources.resources(of: NovaType.strList).sorted { $0.id < $1.id }
+        print("\n=== STR# resources (\(allStr.count)) ===")
+        for r in allStr {
+            let s = StringListRes(r)
+            print("--- STR# #\(s.id) \"\(s.name)\" (\(s.strings.count) strings) ---")
+            for (i, str) in s.strings.enumerated() {
+                print("  [\(i + 1)] \(str)")
+            }
+            print("")
+        }
+    }
+
+    if atSection == "all" || atSection == "missions" {
+        let allMissions = atGame.missions().sorted { $0.id < $1.id }
+        print("\n=== mïsn resources (\(allMissions.count)) ===")
+        func nz(_ s: String) -> String { s.isEmpty ? "—" : s }
+        for m in allMissions {
+            print("--- mïsn #\(m.id): \(m.name) ---")
+            print("  offered: loc=\(m.availLocation) minRecord=\(m.availRecord) minRating=\(m.availRating) random=\(m.availRandom)%  availBits: \(nz(m.availBits))")
+            print("  pay: \(m.pay)  timeLimit: \(m.timeLimit)  canAbort: \(m.canAbort)")
+            print("  acceptButton: \"\(m.acceptButton)\"  refuseButton: \"\(m.refuseButton)\"")
+            print("  [offerText \(m.offerTextID)]:")
+            print("  " + nz(atGame.descText(m.offerTextID)).replacingOccurrences(of: "\n", with: "\n  "))
+            if m.quickBriefText >= 0 {
+                print("  [quickBrief \(m.quickBriefText)]:")
+                print("  " + nz(atGame.descText(m.quickBriefText)).replacingOccurrences(of: "\n", with: "\n  "))
+            }
+            if m.loadCargoText >= 0 {
+                print("  [loadCargoText \(m.loadCargoText)]: " + nz(atGame.descText(m.loadCargoText)))
+            }
+            if m.completionText >= 0 {
+                print("  [completionText \(m.completionText)]:")
+                print("  " + nz(atGame.descText(m.completionText)).replacingOccurrences(of: "\n", with: "\n  "))
+            }
+            if m.failureText >= 0 {
+                print("  [failureText \(m.failureText)]: " + nz(atGame.descText(m.failureText)))
+            }
+            if m.shipDoneText >= 0 {
+                print("  [shipDoneText \(m.shipDoneText)]: " + nz(atGame.descText(m.shipDoneText)))
+            }
+            if m.refuseText >= 0 {
+                print("  [refuseText \(m.refuseText)]: " + nz(atGame.descText(m.refuseText)))
+            }
+            print("")
+        }
+    }
+
+    if atSection == "all" || atSection == "pers" {
+        let allPers = atGame.resources.resources(of: FourCharCode("përs")!).sorted { $0.id < $1.id }
+        let commQuotes = atGame.stringList(7100)
+        let hailQuotes = atGame.stringList(7101)
+        print("\n=== përs resources (\(allPers.count)) ===")
+        for r in allPers {
+            let p = PersRes(r)
+            print("--- përs #\(p.id): \(p.name) ---  govt=\(p.govt) shipType=\(p.shipType) linkMission=\(p.linkMission)")
+            if let cq = commQuotes?.string(at: p.commQuote) { print("  commQuote: \(cq)") }
+            if let hq = hailQuotes?.string(at: p.hailQuote) { print("  hailQuote: \(hq)") }
+            if !p.activeOn.isEmpty { print("  activeOn: \(p.activeOn)") }
+            print("")
+        }
+    }
+
 default:
     usage()
 }

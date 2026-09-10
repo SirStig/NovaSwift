@@ -82,13 +82,16 @@ final class PilotStore: ObservableObject {
     /// which is the earliest point at which the game data needed to interpret
     /// the save is loaded.
     ///
-    /// Today that's one migration: `outfits` now records the hull's own
-    /// `shïp.DefaultItems` alongside bought items, so an older pilot's starting
-    /// Light Blaster (etc.) is topped up into their inventory. See
-    /// `PilotEconomy.migrateHullDefaults`.
+    /// Today that's one migration: `outfits` now records everything the pilot's
+    /// hull came with — its `DefaultItems` *and* its stock `WeapType` armament —
+    /// alongside bought items, so an older pilot's starting Light Blaster is
+    /// topped up into their inventory. This must run before the first flight
+    /// build: the player's loadout no longer applies hull weapons, so an
+    /// un-migrated pilot would launch unarmed. See
+    /// `PilotEconomy.migrateHullFittings`.
     func migrateIfNeeded(game: NovaGame) {
         guard started else { return }
-        guard PilotEconomy.migrateHullDefaults(&state, game: game) else { return }
+        guard PilotEconomy.migrateHullFittings(&state, game: game) else { return }
         save()
     }
 

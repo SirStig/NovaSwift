@@ -71,17 +71,18 @@ public enum PilotFactory {
         player.combatRating = scenario.kills
         player.legalRecord = initialLegalRecord(scenario: scenario, game: game)
 
-        // The starting hull's own `shïp.DefaultItems` become *owned* outfits, the
-        // same way `PilotEconomy.buyShip` grants a purchased hull's. Bible: they
-        // are "up to eight default items with which to equip this ship when the
-        // player buys or captures one" — i.e. the player's, not an invisible
-        // property of the hull. Without this a brand-new pilot flew a Shuttle
-        // whose Light Blaster existed only inside `Galaxy.loadout`: the outfitter
-        // showed no quantity badge for it, Sell stayed greyed out, and the ship
-        // could never be stripped down — only added to.
-        player.hullDefaultsGranted = true
-        for (oid, count) in game.ship(shipID)?.outfits ?? [] {
-            player.grantOutfit(oid, count: count)
+        // Everything the starting hull comes with becomes *owned* outfits, the
+        // same way `PilotEconomy.buyShip` grants a purchased hull's: its
+        // `DefaultItems`, and its stock `WeapType` armament materialised into the
+        // outfits that install it (see `PilotEconomy.hullFittings`). Without this
+        // a brand-new pilot flew a Shuttle whose Light Blaster existed only inside
+        // `Galaxy.loadout` — the outfitter showed no quantity badge for it, Sell
+        // stayed greyed out, and the ship could never be stripped down, only added
+        // to. The Shuttle in particular has *no* DefaultItems at all; its blaster
+        // is purely a `WeapType`, which is why covering only DefaultItems left the
+        // most-reported case still broken.
+        if let hull = game.ship(shipID) {
+            PilotEconomy.grantHullFittings(&player, ship: hull, game: game)
         }
 
         // `spöb.Flags2` 0x0040 ("Starts destroyed"): some stellars begin every new

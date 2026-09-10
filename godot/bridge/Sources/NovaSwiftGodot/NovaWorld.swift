@@ -198,7 +198,8 @@ class NovaWorld: Node2D {
 
         let sysID = systemID >= 0 ? systemID : pilot.currentSystem
         let player = galaxy.makeLoadedShip(pilot.shipType, extraOutfits: pilot.outfits, at: Vec2(),
-                                            includeDefaultItems: false)
+                                            includeDefaultItems: false,
+                                            includeHullWeapons: false)
             ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
         player.cargo = pilot.cargo
 
@@ -610,7 +611,8 @@ class NovaWorld: Node2D {
         // `buildPlayerShip` (a fresh loaded ship each landing/launch, cargo
         // carried in from `pilot.cargo`).
         let player = galaxy.makeLoadedShip(pilot.shipType, extraOutfits: pilot.outfits, at: Vec2(),
-                                            includeDefaultItems: false)
+                                            includeDefaultItems: false,
+                                            includeHullWeapons: false)
             ?? world?.player ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
         player.cargo = pilot.cargo
         let (w, _) = GameSession.makeWorld(game: game, systemID: sysID, player: player, galaxy: galaxy)

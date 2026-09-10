@@ -303,8 +303,19 @@ extension Galaxy {
     ///   extra fuel the player would buy one with. Leaving this on for NPCs made
     ///   every spawned ship measurably tougher than the original's, which then
     ///   skewed every combat-odds decision downstream.
+    /// - Parameter includeHullWeapons: whether the hull's own `shïp.WeapType`
+    ///   stock weapons are added on top of `extraOutfits`. `true` for NPCs, which
+    ///   is how an AI ship is armed at all. `false` for the **player**, whose
+    ///   stock weapons have been materialised into `PlayerState.outfits` as the
+    ///   `oütf` ids that install them (the Bible: those fields are "which stock
+    ///   weapons to put on your ship when you first buy it" — the buyer's, like
+    ///   `DefaultItems`) so they can be seen, counted against gun mounts and sold.
+    ///   Adding them here as well would arm the player twice over. Only weapons
+    ///   an outfit actually installs are skipped: a plug-in hull carrying a weapon
+    ///   no `oütf` sells keeps it inherent rather than losing it.
     public func loadout(shipID: Int, extraOutfits: [Int: Int] = [:],
-                        includeDefaultItems: Bool = true) -> Loadout? {
+                        includeDefaultItems: Bool = true,
+                        includeHullWeapons: Bool = true) -> Loadout? {
         guard let s = game.ship(shipID) else {
             Log.world.error("Galaxy.loadout: ship id \(shipID) not found in game data — returning nil loadout")
             return nil
@@ -443,6 +454,9 @@ extension Galaxy {
         // Resolve weapons: stock hull weapons + outfit-granted, merged by id.
         var byID: [Int: (count: Int, ammo: Int)] = [:]
         for w in s.weapons {
+            // See `includeHullWeapons`: for the player these already arrived as
+            // owned outfits, so re-adding them here would double the armament.
+            if !includeHullWeapons, game.outfitInstalling(weapon: w.id) != nil { continue }
             let e = byID[w.id] ?? (0, 0)
             byID[w.id] = (e.count + max(1, w.count), e.ammo + max(0, w.ammo))
         }
@@ -554,9 +568,11 @@ extension Galaxy {
                                extraOutfits: [Int: Int] = [:],
                                at position: Vec2 = Vec2(), angle: Double = 0,
                                skillRoll: Double? = nil,
-                               includeDefaultItems: Bool = true) -> Ship? {
+                               includeDefaultItems: Bool = true,
+                               includeHullWeapons: Bool = true) -> Ship? {
         guard let lo = loadout(shipID: shipID, extraOutfits: extraOutfits,
-                               includeDefaultItems: includeDefaultItems) else {
+                               includeDefaultItems: includeDefaultItems,
+                               includeHullWeapons: includeHullWeapons) else {
             // Falls back to an un-equipped hull (`makeShip`) — if this fires
             // for the player's own ship, they'll fly with none of their
             // fitted outfits and no other clue why.
