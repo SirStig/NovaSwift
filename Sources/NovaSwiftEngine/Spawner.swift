@@ -713,7 +713,7 @@ public final class Spawner {
         applyPersonCustomization(pers, to: ship, world: world)
     }
 
-    /// Apply a `pêrs`'s ship customization: a shield-strength multiplier
+    /// Apply a `pêrs`'s ship customization: a shield-and-armor multiplier
     /// (`ShieldMod`, <0 = invincible), the credits it carries for plunder, and
     /// its `WeapType`/`WeapCount`/`AmmoLoad` weapon layering on top of the
     /// hull's stock fit.
@@ -721,8 +721,11 @@ public final class Spawner {
         if pers.shieldMod < 0 {
             ship.maxShield = 1_000_000; ship.shield = ship.maxShield   // "invincible"
         } else if pers.shieldMod > 0, pers.shieldMod != 100 {
-            let scale = Double(pers.shieldMod) / 100.0
+            // The original loader stores ShieldMod / 100 as Float32; both
+            // defense-capacity helpers then multiply by that stored value.
+            let scale = Double(Float(Double(pers.shieldMod) / 100.0))
             ship.maxShield *= scale; ship.shield = ship.maxShield
+            ship.maxArmor *= scale; ship.armor = ship.maxArmor
         }
         if pers.credits > 0 {
             // Credits carried, ±25% (deterministic jitter from the RNG).
