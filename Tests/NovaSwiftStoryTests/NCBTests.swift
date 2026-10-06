@@ -85,6 +85,85 @@ final class NCBTests: XCTestCase {
         XCTAssertFalse(NCBTest("p30").evaluate(c))      // 40 > 30
     }
 
+    // Regressions grounded in the Windows CE tokenizer/evaluator at
+    // 0x448BE0 / 0x449020, rather than conventional boolean precedence.
+    func testCountedSetsCompareAndNegate() {
+        var c = Ctx(); c.bits = [1, 2]
+        XCTAssertTrue(NCBTest("( [b1 b2 b3] = 2 )").evaluate(c))
+        XCTAssertTrue(NCBTest("( [b1 b2 b3] > 1 )").evaluate(c))
+        XCTAssertTrue(NCBTest("( [b1 b2 b3] < 3 )").evaluate(c))
+        XCTAssertFalse(NCBTest("( [b1 b2 b3] = 1 )").evaluate(c))
+        XCTAssertTrue(NCBTest("( [!b1 !b2 !b3] = 1 )").evaluate(c))
+        XCTAssertTrue(NCBTest("!( [b4 b5] > 0 )").evaluate(c))
+        // Its cursor scan also makes an adjacent '(' / '[' behave differently.
+        XCTAssertFalse(NCBTest("([b1 b2 b3] = 2)").evaluate(c))
+        // 0x447F20 rejects a bare leading '['; parentheses are required.
+        XCTAssertFalse(NCBTest("[b1 b2] = 2").evaluate(c))
+    }
+
+    func testMixedOperatorsUseOriginalAccumulator() {
+        var c = Ctx(); c.bits = [1]
+        XCTAssertFalse(NCBTest("b1 | b2 & b3").evaluate(c))
+        XCTAssertTrue(NCBTest("b1 | (b2 & b3)").evaluate(c))
+        c.bits = [2]
+        XCTAssertTrue(NCBTest("b1 & b2 | b3").evaluate(c))
+        XCTAssertFalse(NCBTest("(b1 & b2) | b3").evaluate(c))
+        // Every new operator starts from the latest operand, even the same
+        // operator. Grouping is what preserves an earlier accumulated value.
+        c.bits = [2, 3]
+        XCTAssertTrue(NCBTest("b1 & b2 & b3").evaluate(c))
+        XCTAssertFalse(NCBTest("(b1 & b2) & b3").evaluate(c))
+    }
+
+    func testRepeatedOperatorsCollapseToOneToken() {
+        var c = Ctx(); c.bits = [1, 2]
+        XCTAssertTrue(NCBTest("b1 &&& b2").evaluate(c))
+        c.bits = [2]
+        XCTAssertFalse(NCBTest("b1 && b2").evaluate(c))
+        XCTAssertTrue(NCBTest("b1 ||| b2").evaluate(c))
+        c.bits = []
+        XCTAssertFalse(NCBTest("b1 || b2").evaluate(c))
+    }
+
+    func testRepeatedNegationKeepsOnePendingFlag() {
+        var c = Ctx(); c.bits = [1]
+        XCTAssertFalse(NCBTest("!!b1").evaluate(c))
+        XCTAssertFalse(NCBTest("!!!(b1 | b2)").evaluate(c))
+        XCTAssertTrue(NCBTest("!(!b1)").evaluate(c))
+        c.bits = []
+        XCTAssertTrue(NCBTest("!!b1").evaluate(c))
+    }
+
+    func testReferencedBitsIncludeCountedSetsAndPendingNegation() {
+        let bits = NCBTest("!([!!b1 b2 !b3] = 2)").referencedBits
+        XCTAssertEqual(bits.map(\.bit), [1, 2, 3])
+        XCTAssertEqual(bits.map(\.negated), [false, true, false])
+    }
+
+    func testReferencedBitsUsesAdjacentASCIIDigits() {
+        let expression = NCBTest("b 1")
+        XCTAssertEqual(expression.referencedBits.map(\.bit), [0])
+        var c = Ctx(); c.bits = [1]
+        XCTAssertFalse(expression.evaluate(c))
+        c.bits = [0]
+        XCTAssertTrue(expression.evaluate(c))
+    }
+
+    func testReferencedBitsSharesSigned16BitNumberWrapping() {
+        let expression = NCBTest("b65537")
+        XCTAssertEqual(expression.referencedBits.map(\.bit), [1])
+        var c = Ctx(); c.bits = [1]
+        XCTAssertTrue(expression.evaluate(c))
+        c.bits = []
+        XCTAssertFalse(expression.evaluate(c))
+    }
+
+    func testReferencedBitsPreservesGroupedAndRepeatedNegation() {
+        let bits = NCBTest("!!(b1 | !(!b2)) & !!!b3").referencedBits
+        XCTAssertEqual(bits.map(\.bit), [1, 2, 3])
+        XCTAssertEqual(bits.map(\.negated), [true, true, true])
+    }
+
     // MARK: SET expressions
 
     func testSetParsesBitsAndCommands() {

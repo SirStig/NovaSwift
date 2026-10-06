@@ -30,6 +30,11 @@ repeat it:
 whether something is implemented, see [STATUS.md](../STATUS.md) — one place, so
 nine documents can't disagree.
 
+[NCB_BINARY.md](NCB_BINARY.md) records an additional kind of evidence: isolated
+execution of a pinned original x86 routine. It distinguishes observed binary
+quirks from documented syntax and states the inputs and context behavior that
+were not verified.
+
 ## The documents
 
 | Doc | Resources | Covers |
@@ -43,6 +48,7 @@ nine documents can't disagree.
 | [OUTFITTERS.md](OUTFITTERS.md) | `oütf` | Slots and mass, availability gating, pricing, ammo linkage, `BuyRandom` stocking |
 | [EVENTS.md](EVENTS.md) | `crön` | Timed and triggered background events, the activate/hold/start/end lifecycle, galaxy news |
 | [ESCORTS.md](ESCORTS.md) | `përs`, `shïp` | Named NPCs, and the real hire/requisition/capture escort system (it lives in `shïp`, not `përs`) |
+| [NCB_BINARY.md](NCB_BINARY.md) | NCB TEST expressions | Original cursor, counted-set, operator, and negation behavior; reproducible x86 comparison |
 
 Covered elsewhere: mission and NCB scripting in [MISSIONS.md](../MISSIONS.md);
 hull and outfit stat aggregation in [SHIP_SYSTEM.md](../SHIP_SYSTEM.md);

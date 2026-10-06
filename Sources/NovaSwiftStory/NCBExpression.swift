@@ -7,10 +7,10 @@ import Foundation
 //   • TEST expressions  gate availability, e.g.  "!(b511 | b515) & !b350"
 //   • SET expressions   apply side effects,  e.g.  "b350 b6666 S781"
 //
-// Grammar cross-checked against ResForge NovaTools' NCB parser (NCBTest.swift /
-// NCBSet.swift). Operators are case-insensitive; bit references are lowercase
-// `bNNN` in the real data. This file is pure logic — no game state — so it is
-// trivially unit-testable. State access is provided via `NCBTestContext`;
+// TEST behavior recovered from the Windows CE binary at 0x447F20, 0x448BE0,
+// and 0x449020, including its cursor and accumulator quirks. SET grammar remains
+// cross-checked against ResForge NovaTools. Bit references are case-insensitive.
+// This file is pure logic — no game state — so it is trivially unit-testable. State access is provided via `NCBTestContext`;
 // SET effects are handed back to the caller as a list of `NCBSetOp` to apply.
 
 // MARK: - Test expressions
@@ -26,169 +26,184 @@ public protocol NCBTestContext {
     var unregisteredDays: Int { get }
 }
 
-/// A parsed boolean control-bit test. Evaluate against any `NCBTestContext`.
-///
-/// Precedence (tightest first): `!`  >  `&`  >  `|`, with `(…)` grouping. This
-/// is a superset of EV Nova's own grammar (which forbids mixing `&`/`|` at one
-/// level without parentheses), so every real expression parses correctly.
+/// A parsed control-bit test, using the original evaluator's accumulator rules.
+/// Parentheses group expressions; square brackets count true operands. Mixed
+/// `&`/`|` deliberately do not use conventional operator precedence.
 public struct NCBTest: Sendable {
-    fileprivate indirect enum Node: Sendable {
-        case bit(Int)
-        case outfit(Int)
-        case explored(Int)
-        case genderMale
-        case unregisteredAtMost(Int)
-        case constant(Bool)     // unknown operand → false (fail-closed)
-        case not(Node)
-        case and([Node])
-        case or([Node])
-    }
-
-    fileprivate let root: Node
-    /// The original source text (useful for debugging / editor display).
+    private let chars: [Character]
     public let source: String
-
-    /// An empty expression is treated as "always true" (EV Nova's default — a
-    /// mission with no AvailBits is unconditionally available).
-    public var isAlwaysTrue: Bool {
-        if case .constant(true) = root { return true }
-        return false
-    }
+    public let isAlwaysTrue: Bool
+    private let hasValidStart: Bool
 
     public init(_ text: String) {
         source = text
+        // Retain the public API's whitespace normalization. Original resource
+        // strings normally have no leading whitespace.
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            root = .constant(true)
-        } else {
-            var parser = Parser(trimmed)
-            root = parser.parseOr() ?? .constant(true)
+        isAlwaysTrue = trimmed.isEmpty
+        hasValidStart = trimmed.first.map { "bB(!pPgGoOeE".contains($0) } ?? true
+        var prepared: [Character] = []
+        var previous: Character?
+        for ch in trimmed {
+            // 0x447F20 inserts a space between adjacent opening parentheses.
+            if ch == "(", previous == "(" { prepared.append(" ") }
+            prepared.append(ch)
+            previous = ch
         }
+        chars = prepared
     }
 
     public func evaluate(_ ctx: NCBTestContext) -> Bool {
-        Self.eval(root, ctx)
+        if isAlwaysTrue { return true }
+        guard hasValidStart else { return false }
+        // The original wrapper accepts only a result of exactly one, including
+        // when the inner evaluator returns a count rather than a boolean.
+        var interpreter = Interpreter(chars: chars, ctx: ctx)
+        var position = 0
+        return interpreter.evaluate(&position) == 1
     }
 
-    /// Every control bit referenced by this expression, with the polarity it
-    /// appears in: `negated == false` means "generally needs bN **set**",
-    /// `true` means "generally needs bN **clear**". Used by the storyline
-    /// analyzer to explain *why* a mission is locked and point at what sets the
-    /// missing bit. (Best-effort for arbitrary boolean formulae — it reports the
-    /// atoms and their nesting under `!`, which is what human guidance needs.)
+    /// Syntactically referenced bits and their pending negation, including
+    /// counted sets. Identifiers use the evaluator's number decoding. Polarity
+    /// follows grouping and pending `!`; it does not simplify comparisons or
+    /// account for operands skipped by the original evaluator's cursor quirks.
     public var referencedBits: [(bit: Int, negated: Bool)] {
         var out: [(Int, Bool)] = []
-        Self.collectBits(root, negated: false, into: &out)
+        var cursor = 0
+        Self.collectBits(chars, cursor: &cursor, negated: false, into: &out)
         return out
     }
 
-    private static func collectBits(_ node: Node, negated: Bool, into out: inout [(Int, Bool)]) {
-        switch node {
-        case .bit(let n): out.append((n, negated))
-        case .not(let inner): collectBits(inner, negated: !negated, into: &out)
-        case .and(let ns), .or(let ns): ns.forEach { collectBits($0, negated: negated, into: &out) }
-        case .outfit, .explored, .genderMale, .unregisteredAtMost, .constant: break
+    private static func collectBits(_ chars: [Character], cursor: inout Int, negated: Bool, into out: inout [(Int, Bool)]) {
+        var pendingNegation = false
+        while cursor < chars.count {
+            let ch = chars[cursor]
+            cursor += 1
+            switch ch {
+            case "!": pendingNegation = true
+            case "b", "B":
+                out.append((readNumber(chars, cursor: &cursor), negated != pendingNegation))
+                pendingNegation = false
+            case "o", "O", "e", "E", "p", "P":
+                _ = readNumber(chars, cursor: &cursor)
+                pendingNegation = false
+            case "g", "G": pendingNegation = false
+            case "(", "[":
+                collectBits(chars, cursor: &cursor, negated: negated != pendingNegation, into: &out)
+                pendingNegation = false
+            case ")", "]": return
+            default: break
+            }
         }
     }
 
-    private static func eval(_ node: Node, _ ctx: NCBTestContext) -> Bool {
-        switch node {
-        case .bit(let n):                return ctx.isBitSet(n)
-        case .outfit(let id):            return ctx.hasOutfit(id)
-        case .explored(let id):          return ctx.isSystemExplored(id)
-        case .genderMale:                return ctx.playerIsMale
-        case .unregisteredAtMost(let n): return ctx.unregisteredDays <= n
-        case .constant(let b):           return b
-        case .not(let inner):            return !eval(inner, ctx)
-        case .and(let nodes):            return nodes.allSatisfy { eval($0, ctx) }
-        case .or(let nodes):             return nodes.contains { eval($0, ctx) }
+    /// Original identifiers consume only adjacent ASCII digits and wrap as
+    /// signed 16-bit values. Share this rule with explanation metadata.
+    private static func readNumber(_ chars: [Character], cursor: inout Int) -> Int {
+        var value: Int16 = 0
+        while cursor < chars.count, let digit = chars[cursor].asciiValue, (48...57).contains(digit) {
+            value = value &* 10 &+ Int16(digit - 48)
+            cursor += 1
         }
+        return Int(value)
     }
 
-    // MARK: Recursive-descent parser
-
-    private struct Parser {
+    // Windows CE 0x449020 scans each group's end before consuming tokens, then
+    // restores the caller's cursor to that boundary. Keep the cursor behavior:
+    // simply building a conventional expression tree loses counted-set quirks.
+    private struct Interpreter {
         let chars: [Character]
-        var i = 0
-        init(_ s: String) { chars = Array(s) }
+        let ctx: NCBTestContext
+        var number = 0
 
-        mutating func skipWS() { while i < chars.count, chars[i].isWhitespace { i += 1 } }
-        func peek() -> Character? { i < chars.count ? chars[i] : nil }
+        private enum Token { case symbol(Character), truth(Bool), number(Int) }
 
-        mutating func parseOr() -> Node? {
-            guard var left = parseAnd() else { return nil }
-            var terms = [left]
-            skipWS()
-            while peek() == "|" {
-                i += 1
-                guard let rhs = parseAnd() else { break }
-                terms.append(rhs)
-                skipWS()
+        mutating func evaluate(_ position: inout Int) -> Int {
+            var opens = position < chars.count && "([".contains(chars[position]) ? 0 : 1
+            var closes = 0
+            var scan = position
+            var end: Int?
+            while scan < chars.count {
+                let ch = chars[scan]
+                if "([".contains(ch) { opens += 1 }
+                if ")]".contains(ch) { closes += 1 }
+                if opens == closes { end = scan - 1; break }
+                scan += 1
             }
-            if terms.count > 1 { left = .or(terms) }
-            return left
+            let boundary = end ?? scan
+            var cursor = position
+            var recent = 0
+            var accumulator = 1
+            var count = 0
+            var pendingNegation = false
+            var op: Character = "?"
+            loop: while cursor < chars.count {
+                if chars[cursor] == " " { cursor += 1; continue }
+                switch nextToken(&cursor) {
+                case .truth(let raw):
+                    let truth = raw != pendingNegation
+                    pendingNegation = false
+                    if truth {
+                        count += 1
+                        if op == "|" { accumulator = 1 }
+                        recent = 1
+                    } else {
+                        if op == "&" { accumulator = 0 }
+                        recent = 0
+                    }
+                case .number(let value):
+                    number = value
+                    switch op {
+                    case "=": accumulator = recent == number ? 1 : 0
+                    case "<": accumulator = recent < number ? 1 : 0
+                    case ">": accumulator = recent > number ? 1 : 0
+                    default: break
+                    }
+                case .symbol(let ch):
+                    switch ch {
+                    case "(", "[":
+                        var result = evaluate(&cursor)
+                        if pendingNegation { result = result == 0 ? 1 : 0 }
+                        pendingNegation = false
+                        if op == "&" {
+                            accumulator = recent
+                            if result == 0 { accumulator = 0; recent = 0 }
+                        } else if op == "|" {
+                            accumulator = recent
+                            if result == 1 { accumulator = 1; recent = 1 }
+                        } else {
+                            recent = result
+                        }
+                    case "]": op = "+"; accumulator = count; break loop
+                    case ")": break loop
+                    case "!": pendingNegation = true
+                    case "&", "|": op = ch; accumulator = recent
+                    case "=", "<", ">": op = ch; accumulator = 0
+                    default: break
+                    }
+                }
+            }
+            position = boundary + 2
+            return op == "?" ? recent : accumulator
         }
 
-        mutating func parseAnd() -> Node? {
-            guard let first = parseNot() else { return nil }
-            var terms = [first]
-            skipWS()
-            while peek() == "&" {
-                i += 1
-                guard let rhs = parseNot() else { break }
-                terms.append(rhs)
-                skipWS()
+        private mutating func nextToken(_ cursor: inout Int) -> Token {
+            let ch = chars[cursor]
+            cursor += 1
+            switch ch {
+            case "&", "|":
+                while cursor < chars.count, chars[cursor] == ch { cursor += 1 }
+                return .symbol(ch)
+            case "b", "B":
+                let n = NCBTest.readNumber(chars, cursor: &cursor)
+                return .truth((0..<10_000).contains(n) && ctx.isBitSet(n))
+            case "o", "O": return .truth(ctx.hasOutfit(NCBTest.readNumber(chars, cursor: &cursor)))
+            case "e", "E": return .truth(ctx.isSystemExplored(NCBTest.readNumber(chars, cursor: &cursor)))
+            case "p", "P": return .truth(ctx.unregisteredDays <= NCBTest.readNumber(chars, cursor: &cursor))
+            case "g", "G": return .truth(ctx.playerIsMale)
+            case "0"..."9": cursor -= 1; return .number(NCBTest.readNumber(chars, cursor: &cursor))
+            default: return .symbol(ch)
             }
-            return terms.count > 1 ? .and(terms) : first
-        }
-
-        mutating func parseNot() -> Node? {
-            skipWS()
-            if peek() == "!" {
-                i += 1
-                guard let inner = parseNot() else { return nil }
-                return .not(inner)
-            }
-            return parseAtom()
-        }
-
-        mutating func parseAtom() -> Node? {
-            skipWS()
-            guard let c = peek() else { return nil }
-            if c == "(" {
-                i += 1
-                let inner = parseOr()
-                skipWS()
-                if peek() == ")" { i += 1 }   // tolerate the odd unbalanced paren
-                return inner ?? .constant(true)
-            }
-            return parseOperand()
-        }
-
-        mutating func parseOperand() -> Node? {
-            skipWS()
-            guard let c = peek() else { return nil }
-            let letter = Character(c.lowercased())
-            i += 1
-            let value = parseInt()
-            switch letter {
-            case "b": return .bit(value ?? 0)
-            case "o": return .outfit(value ?? 0)
-            case "e": return .explored(value ?? 0)
-            case "p": return .unregisteredAtMost(value ?? 0)
-            case "g": return .genderMale
-            default:
-                // Unknown operand type: consume it and fail closed.
-                return .constant(false)
-            }
-        }
-
-        mutating func parseInt() -> Int? {
-            skipWS()
-            var digits = ""
-            if peek() == "-" { digits.append("-"); i += 1 }
-            while let c = peek(), c.isNumber { digits.append(c); i += 1 }
-            return Int(digits)
         }
     }
 }
