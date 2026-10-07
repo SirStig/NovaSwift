@@ -46,6 +46,12 @@ struct TradeQuantityPrompt: View {
                     #if os(iOS)
                     .keyboardType(.numberPad)
                     #endif
+                    #if !os(tvOS)
+                    // The focused text field eats Escape before the Cancel
+                    // button's `.cancelAction` shortcut sees it, so catch it
+                    // here too (same approach as DevConsoleView's inputBar).
+                    .onKeyPress(.escape) { onCancel(); return .handled }
+                    #endif
                 Text("of \(range.upperBound) \(unitLabel) max")
                     .novaFont(.body).foregroundStyle(.gray)
                     .fixedSize(horizontal: false, vertical: true)
