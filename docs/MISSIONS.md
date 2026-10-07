@@ -16,8 +16,9 @@ This is roadmap item **5 (Missions & story)**.
   against the real game** (791 missions, 125 crons, 31 ranks) — see below.
 - **NCB engine** (`NCBExpression.swift`): a hand-rolled parser + evaluator for
   both control-bit dialects (TEST expressions that gate availability, SET
-  expressions that apply effects). Case-insensitive; matches the ResForge
-  NovaTools grammar.
+  expressions that apply effects). TEST scanning reproduces the cursor and
+  accumulator behavior of the EV Nova CE Windows executable; SET parsing follows the
+  ResForge NovaTools grammar. See [binary validation](reverse-engineering/NCB_BINARY.md).
 - **Player save-state** (`PlayerState.swift`): `Codable` pilot file — control
   bits, credits, ship, cargo, outfits, ranks, legal records, explored systems,
   active/completed/failed missions, cron runtime, galaxy clock.
@@ -96,8 +97,19 @@ picture/movie/flags. `STR#` is a `u16` count then that many Pascal strings.
 
 Two dialects stored as short strings inside the resources above.
 
-**TEST** (availability gates), standard boolean precedence `!` > `&` > `|` with
-`(…)` grouping. Operands (case-insensitive; bit refs are lowercase in the data):
+**TEST** (availability gates) uses `(…)` grouping and `[ … ]` counted sets.
+The original scanner resets its accumulator at each `&` or `|`, so flat chains
+do not have conventional boolean precedence. Repeated `!` sets one pending
+negation flag. See [NCB binary behavior](reverse-engineering/NCB_BINARY.md)
+for examples and the bounded verification scope.
+
+Flat same-level chains such as `b1 | b2 | b3` and `b1 & b2 & b3` are evaluated
+pairwise from the latest operand, like the original, not as a conventional
+boolean chain. Plug-ins written against the earlier NovaSwift parser may
+therefore behave differently. As the Nova Bible advises, use parentheses to
+group each operation explicitly.
+
+Operands provided by the existing context API (case-insensitive; bit refs are lowercase in the data):
 
 | token | meaning |
 |-------|---------|
