@@ -85,8 +85,8 @@ final class NCBTests: XCTestCase {
         XCTAssertFalse(NCBTest("p30").evaluate(c))      // 40 > 30
     }
 
-    // Regressions grounded in the Windows CE tokenizer/evaluator at
-    // 0x448BE0 / 0x449020, rather than conventional boolean precedence.
+    // Regressions grounded in the EV Nova CE Windows executable's tokenizer and
+    // evaluator at 0x448BE0 / 0x449020, rather than conventional precedence.
     func testCountedSetsCompareAndNegate() {
         var c = Ctx(); c.bits = [1, 2]
         XCTAssertTrue(NCBTest("( [b1 b2 b3] = 2 )").evaluate(c))
@@ -165,6 +165,15 @@ final class NCBTests: XCTestCase {
     }
 
     // MARK: SET expressions
+
+    func testDigitLeadingGraphemeClusterDoesNotHang() {
+        // "1\u{FE0F}\u{20E3}" is one Character that starts with a digit but is
+        // not an ASCII digit. It must not stall the tokenizer.
+        var c = Ctx(); c.bits = [1]
+        let test = NCBTest("b1 & 1\u{FE0F}\u{20E3}")
+        XCTAssertFalse(test.evaluate(c))
+        XCTAssertEqual(test.referencedBits.map(\.bit), [1])
+    }
 
     func testSetParsesBitsAndCommands() {
         // Real mission #128 onSuccess: "b350 b6666".

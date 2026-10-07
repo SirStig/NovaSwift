@@ -1,8 +1,8 @@
 # NCB TEST binary behavior
 
-The TEST evaluator now reproduces the inspected Windows engine's cursor and
-accumulator behavior rather than applying conventional `! > & > |` precedence.
-For example, with only bit 1 set, `b1 | b2 & b3` returns false. With bits 2 and
+The TEST evaluator now reproduces the cursor and accumulator behavior of the
+inspected EV Nova CE Windows executable rather than applying conventional
+`! > & > |` precedence. For example, with only bit 1 set, `b1 | b2 & b3` returns false. With bits 2 and
 3 set, `b1 & b2 & b3` returns true: the second `&` resets the accumulator to the
 latest operand. These are observed compatibility quirks, not recommended syntax
 for new plug-ins. Parenthesize each binary operation to make intent explicit.
@@ -67,24 +67,16 @@ rather than claiming to repair a demonstrated stock-campaign failure.
 
 ## Reproduce locally
 
-Requirements: Swift, Python 3.11+, Unicorn 2.1.4, and your own matching reference
-executable and BRGR `.rez` data. From the repository root, place them in
-`.local/reference/EV Nova.exe` and `.local/reference/Nova Files/` or pass explicit
-paths to the tools. Everything generated below stays in ignored `.local/`.
+The oracle scripts (Python with Unicorn 2.1.4, plus a Swift comparison driver)
+are not kept in the tree. They can be found in the original PR commit:
+<https://github.com/SirStig/NovaSwift/tree/08134336482763eef9bd9afdaa3c911956472d25/scripts/fidelity>.
+Running them requires your own matching reference executable and BRGR `.rez`
+data, and everything they generate contains your own resource strings, so keep
+it outside the repository.
+
+The inspected corpus reported `Compared 5691 cases: 0 mismatches.` The committed
+regression cases are synthetic and run with:
 
 ```sh
-python3 -m venv .local/oracle-venv
-.local/oracle-venv/bin/python -m pip install unicorn==2.1.4
-python3 scripts/fidelity/scan_missions.py
-.local/oracle-venv/bin/python scripts/fidelity/emulate_fixture_matrix.py
-swiftc -parse-as-library Sources/NovaSwiftStory/NCBExpression.swift \
-  scripts/fidelity/compare_ncb_oracle.swift -o .local/reports/oracle/compare-ncb
-.local/reports/oracle/compare-ncb \
-  .local/reports/oracle/x86-mission-ncb-cases.json \
-  .local/reports/oracle/x86-ncb-fixture-matrix.json
 swift test --filter NCBTests
 ```
-
-The inspected corpus reports `Compared 5691 cases: 0 mismatches.` Both the mission
-scan and generated cases contain the user's own resource strings and must remain
-local. The committed regression cases are synthetic.

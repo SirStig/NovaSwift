@@ -7,11 +7,12 @@ import Foundation
 //   • TEST expressions  gate availability, e.g.  "!(b511 | b515) & !b350"
 //   • SET expressions   apply side effects,  e.g.  "b350 b6666 S781"
 //
-// TEST behavior recovered from the Windows CE binary at 0x447F20, 0x448BE0,
-// and 0x449020, including its cursor and accumulator quirks. SET grammar remains
-// cross-checked against ResForge NovaTools. Bit references are case-insensitive.
-// This file is pure logic — no game state — so it is trivially unit-testable. State access is provided via `NCBTestContext`;
-// SET effects are handed back to the caller as a list of `NCBSetOp` to apply.
+// TEST behavior recovered from the EV Nova CE Windows executable at 0x447F20,
+// 0x448BE0, and 0x449020, including its cursor and accumulator quirks. SET
+// grammar remains cross-checked against ResForge NovaTools. Bit references are
+// case-insensitive. This file is pure logic (no game state), so it is trivially
+// unit-testable. State access is provided via `NCBTestContext`; SET effects are
+// handed back to the caller as a list of `NCBSetOp` to apply.
 
 // MARK: - Test expressions
 
@@ -60,7 +61,8 @@ public struct NCBTest: Sendable {
         // when the inner evaluator returns a count rather than a boolean.
         var interpreter = Interpreter(chars: chars, ctx: ctx)
         var position = 0
-        return interpreter.evaluate(&position) == 1
+        let result = interpreter.evaluate(&position)
+        return !interpreter.failed && result == 1
     }
 
     /// Syntactically referenced bits and their pending negation, including
@@ -108,15 +110,18 @@ public struct NCBTest: Sendable {
         return Int(value)
     }
 
-    // Windows CE 0x449020 scans each group's end before consuming tokens, then
-    // restores the caller's cursor to that boundary. Keep the cursor behavior:
-    // simply building a conventional expression tree loses counted-set quirks.
+    // 0x449020 in the EV Nova CE Windows executable scans each group's end
+    // before consuming tokens, then restores the caller's cursor to that
+    // boundary. Keep the cursor behavior: simply building a conventional
+    // expression tree loses counted-set quirks.
     private struct Interpreter {
         let chars: [Character]
         let ctx: NCBTestContext
         var number = 0
+        /// Set when the input cannot be tokenized; the whole TEST fails closed.
+        var failed = false
 
-        private enum Token { case symbol(Character), truth(Bool), number(Int) }
+        private enum Token { case symbol(Character), truth(Bool), number(Int), invalid }
 
         mutating func evaluate(_ position: inout Int) -> Int {
             var opens = position < chars.count && "([".contains(chars[position]) ? 0 : 1
@@ -139,7 +144,18 @@ public struct NCBTest: Sendable {
             var op: Character = "?"
             loop: while cursor < chars.count {
                 if chars[cursor] == " " { cursor += 1; continue }
-                switch nextToken(&cursor) {
+                let before = cursor
+                let token = nextToken(&cursor)
+                // Every token must consume input. Fail closed rather than spin
+                // if a malformed string ever stops the cursor advancing.
+                if case .invalid = token { failed = true }
+                guard !failed, cursor > before else {
+                    failed = true
+                    position = chars.count + 1
+                    return 0
+                }
+                switch token {
+                case .invalid: break
                 case .truth(let raw):
                     let truth = raw != pendingNegation
                     pendingNegation = false
@@ -189,7 +205,19 @@ public struct NCBTest: Sendable {
 
         private mutating func nextToken(_ cursor: inout Int) -> Token {
             let ch = chars[cursor]
+            // Match digits by ASCII value: a Character range like "0"..."9"
+            // also matches grapheme clusters such as "1\u{FE0F}\u{20E3}", which
+            // readNumber would then refuse to consume.
+            if let ascii = ch.asciiValue, (48...57).contains(ascii) {
+                return .number(NCBTest.readNumber(chars, cursor: &cursor))
+            }
             cursor += 1
+            // A digit-led cluster that is not a plain ASCII digit cannot occur
+            // in the original single-byte strings; treat it as malformed.
+            if ch.asciiValue == nil, let first = ch.unicodeScalars.first,
+               ("0"..."9").contains(first) {
+                return .invalid
+            }
             switch ch {
             case "&", "|":
                 while cursor < chars.count, chars[cursor] == ch { cursor += 1 }
@@ -201,7 +229,6 @@ public struct NCBTest: Sendable {
             case "e", "E": return .truth(ctx.isSystemExplored(NCBTest.readNumber(chars, cursor: &cursor)))
             case "p", "P": return .truth(ctx.unregisteredDays <= NCBTest.readNumber(chars, cursor: &cursor))
             case "g", "G": return .truth(ctx.playerIsMale)
-            case "0"..."9": cursor -= 1; return .number(NCBTest.readNumber(chars, cursor: &cursor))
             default: return .symbol(ch)
             }
         }
