@@ -15,8 +15,10 @@ particular campaign or that its complete loadout has been verified.
 
 Reference executable SHA-256:
 `08fa47d24920cf3e5e2cb08a002cab47aa93002dd6c0184d431af5fa32211419`.
-The CE [symbol annotations](https://github.com/andrews05/EV-Nova-CE/blob/7c3fb177ba6e8cfc9cb90f61f0f0625bf54f63f3/sym.cpp)
-anchor the armor-capacity helper at `0x004637A0`. A resource-loader slice at
+EV-Nova-CE identifies `0x004637A0` as the armor-capacity helper: its
+[`src/debug-mode.c`](https://github.com/andrews05/EV-Nova-CE/blob/main/src/debug-mode.c#L72-L73)
+lines 72-73 ("Replace incorrect to call getShieldCapacity with getArmorCapacity")
+patch `CALL(0x00452745, 0x004637A0);`. A resource-loader slice at
 `0x004C3595` through `0x004C35E9` reads the signed 16-bit personality percentage
 from raw resource offset 40, divides by 100, and stores it as Float32.
 
@@ -59,18 +61,26 @@ all 516 Float32 armor captures match the original helper.
 
 ## Reproduce locally
 
-Supply your own matching executable and BRGR data under
-`.local/reference/EV Nova.exe` and `.local/reference/Nova Files/`, or pass
-`--exe`, `--nova-files`, and `--output` explicitly. No game binary, raw resource
-data, person names, or generated resource fixtures are committed.
+The oracle and comparator scripts are not kept in the tree. They live in the
+original PR commit under
+[`scripts/fidelity/`](https://github.com/SirStig/NovaSwift/tree/af05742dc8758e7baa3260fdcba788eb242b133d/scripts/fidelity)
+(`emulate_armor.py`, `compare_person_armor.py`, `compare_person_armor.swift`,
+`scan_missions.py`). To rerun them, check out that commit and supply your own
+matching executable and BRGR data under `.local/reference/EV Nova.exe` and
+`.local/reference/Nova Files/`, or pass `--exe`, `--nova-files`, and `--output`
+explicitly. No game binary, raw resource data, person names, or generated
+resource fixtures are committed.
 
 ```sh
 python3 -m venv .local/oracle-venv
 .local/oracle-venv/bin/python -m pip install unicorn==2.1.4
 .local/oracle-venv/bin/python scripts/fidelity/emulate_armor.py
 python3 scripts/fidelity/compare_person_armor.py
-swift test --filter PersSpawnTests
 ```
 
-Reports and local disassembly go into ignored `.local/reports/armor/`. The tool
-pins the executable hash and never launches the full game or Wine.
+The tools pin the executable hash and never launch the full game or Wine.
+The native regressions remain in the tree:
+
+```sh
+swift test --filter PersSpawnTests
+```

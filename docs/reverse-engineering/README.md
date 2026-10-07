@@ -43,6 +43,7 @@ nine documents can't disagree.
 | [OUTFITTERS.md](OUTFITTERS.md) | `oütf` | Slots and mass, availability gating, pricing, ammo linkage, `BuyRandom` stocking |
 | [EVENTS.md](EVENTS.md) | `crön` | Timed and triggered background events, the activate/hold/start/end lifecycle, galaxy news |
 | [ESCORTS.md](ESCORTS.md) | `përs`, `shïp` | Named NPCs, and the real hire/requisition/capture escort system (it lives in `shïp`, not `përs`) |
+| [PERSON_DEFENSE_BINARY.md](PERSON_DEFENSE_BINARY.md) | `përs` | `ShieldMod` scales armor as well as shields, checked against the original executable's armor-capacity helper |
 
 Covered elsewhere: mission and NCB scripting in [MISSIONS.md](../MISSIONS.md);
 hull and outfit stat aggregation in [SHIP_SYSTEM.md](../SHIP_SYSTEM.md);
