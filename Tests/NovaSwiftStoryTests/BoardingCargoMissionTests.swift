@@ -170,13 +170,64 @@ final class BoardingCargoMissionTests: XCTestCase {
         XCTAssertEqual(engine.player.credits, 40000)
     }
 
-    func testReturnCannotDeliverCargoMissingFromHold() {
+    func testReturnDeliversEvenIfCargoLeftHold() {
         let (engine, _) = engine(sampleMission())
         XCTAssertTrue(engine.accept(900))
         engine.missionShipBoarded(missionID: 900)
         engine.player.cargo[31] = nil
         engine.playerLanded(onSpob: 286)
-        XCTAssertTrue(engine.player.isMissionActive(900))
-        XCTAssertEqual(engine.player.credits, 0)
+        XCTAssertFalse(engine.player.isMissionActive(900), "pickup is required, keeping it in the hold is not")
+        XCTAssertNil(engine.player.cargo[31])
+        XCTAssertEqual(engine.player.credits, 40000)
+    }
+
+    func testNoCargoMissionWithPickupModesCompletesWithoutPhantomCargo() {
+        // Stock story missions often pair CargoType -1 / CargoQty -1 ("no cargo")
+        // with real pickup/dropoff modes. abs(-1) must not become a ton of -1.
+        for pickup in [0, 1, 2] {
+            let spec = MissionSpec(id: 900, travelStellar: 300, returnStellar: 286,
+                                   cargoType: -1, cargoQty: -1, cargoPickup: pickup, cargoDropoff: 1,
+                                   pay: 100, shipCount: pickup == 2 ? 1 : 0, shipGoal: pickup == 2 ? 2 : -1,
+                                   flags2: 0x0001)
+            let (engine, _) = engine(spec)
+            XCTAssertTrue(engine.accept(900), "pickup \(pickup)")
+            XCTAssertNil(engine.player.activeMission(900)!.resolvedCargoType)
+            XCTAssertNil(engine.player.activeMission(900)!.resolvedCargoQty)
+            engine.playerLanded(onSpob: 300)
+            if pickup == 2 { engine.missionShipBoarded(missionID: 900) }
+            XCTAssertNil(engine.player.cargo[-1], "pickup \(pickup)")
+            engine.player.cargo.removeAll()
+            engine.playerLanded(onSpob: 286)
+            XCTAssertFalse(engine.player.isMissionActive(900), "pickup \(pickup)")
+            XCTAssertNil(engine.player.cargo[-1], "pickup \(pickup)")
+            XCTAssertEqual(engine.player.credits, 100, "pickup \(pickup)")
+        }
+    }
+
+    func testLegacyPhantomCargoIsStrippedAndDoesNotBlock() {
+        let spec = MissionSpec(id: 900, returnStellar: 286,
+                               cargoType: -1, cargoQty: -1, cargoPickup: 0, cargoDropoff: 1, pay: 100)
+        let (engine, _) = engine(spec)
+        XCTAssertTrue(engine.accept(900))
+        // Older builds froze -1/1 at accept and loaded one phantom ton.
+        engine.player.activeMissions[0].resolvedCargoType = -1
+        engine.player.activeMissions[0].resolvedCargoQty = 1
+        engine.player.cargo[-1] = 1
+        engine.playerLanded(onSpob: 286)
+        XCTAssertFalse(engine.player.isMissionActive(900))
+        XCTAssertNil(engine.player.cargo[-1])
+        XCTAssertEqual(engine.player.credits, 100)
+    }
+
+    func testLegacyBoardedShipWithoutPickupStillCompletesOnReturn() {
+        let (engine, _) = engine(sampleMission())
+        XCTAssertTrue(engine.accept(900))
+        // Older builds counted the board goal on disable without loading cargo.
+        engine.player.activeMissions[0].shipObjectivesRemaining = 0
+        XCTAssertFalse(engine.player.activeMission(900)!.cargoPickedUp)
+        engine.playerLanded(onSpob: 286)
+        XCTAssertFalse(engine.player.isMissionActive(900))
+        XCTAssertNil(engine.player.cargo[31])
+        XCTAssertEqual(engine.player.credits, 40000)
     }
 }

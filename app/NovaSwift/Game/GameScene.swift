@@ -3753,6 +3753,9 @@ final class GameScene: SKScene {
         for (_, n) in aiLabelNodes { n.removeFromParent() }
         aiLabelNodes.removeAll()
         pendingEntrance.removeAll()
+        // Entity ids restart with each World, so stale escort tags could
+        // misattribute a new ship's death. `respawnEscorts` re-tags the wing.
+        escortRecordByEntity.removeAll()
         selectedPlanetID = nil
         shipBracket.isHidden = true
         planetBracket.isHidden = true

@@ -325,7 +325,7 @@ public final class StoryEngine {
     /// requiring more cargo than is currently free still shows up on the
     /// board, it just can't be accepted until room is made.
     public func canAccept(_ mission: MissionRes) -> Bool {
-        guard mission.requiresCargoSpace else { return true }
+        guard mission.requiresCargoSpace, mission.carriesCargo else { return true }
         return freeCargoSpace() >= abs(mission.cargoQty)
     }
 
@@ -430,8 +430,8 @@ public final class StoryEngine {
             resolvedCargoQty: resolvedCargoQty,
             acceptSystemID: player.currentSystem))
 
-        if cargoAtStart, resolvedCargoQty != 0 {
-            player.cargo[resolvedCargoType, default: 0] += resolvedCargoQty
+        if cargoAtStart, let cargo = carriedCargo(m, active: player.activeMission(missionID)) {
+            player.cargo[cargo.type, default: 0] += cargo.qty
             // LoadCargoText fires the moment the cargo is picked up — for an
             // "at start" pickup that is here, at accept.
             showMissionText(m.loadCargoText, for: m)
@@ -587,10 +587,8 @@ public final class StoryEngine {
             // Cargo pickup at the travel stellar.
             if m.cargoPickup == .atTravelStellar,
                StellarMatch.spob(code: m.travelStellar, spobID: spobID, game: game, initialSpob: initialSpob) {
-                let type = am.resolvedCargoType ?? m.cargoType
-                let qty = am.resolvedCargoQty ?? abs(m.cargoQty)
-                if !updated.cargoPickedUp, qty != 0 {
-                    player.cargo[type, default: 0] += qty
+                if !updated.cargoPickedUp, let cargo = carriedCargo(m, active: am) {
+                    player.cargo[cargo.type, default: 0] += cargo.qty
                     // LoadCargoText fires once, at the pickup — only on the
                     // first visit (before `cargoPickedUp` flips true).
                     showMissionText(m.loadCargoText, for: m)
@@ -654,10 +652,8 @@ public final class StoryEngine {
         guard let m = game.mission(missionID), m.shipGoal == .board || m.shipGoal == .rescue,
               var am = player.activeMission(missionID) else { return }
         if m.cargoPickup == .onSpecialShip, !am.cargoPickedUp {
-            let type = am.resolvedCargoType ?? m.cargoType
-            let qty = am.resolvedCargoQty ?? abs(m.cargoQty)
-            if qty != 0 {
-                player.cargo[type, default: 0] += qty
+            if let cargo = carriedCargo(m, active: am) {
+                player.cargo[cargo.type, default: 0] += cargo.qty
                 showMissionText(m.loadCargoText, for: m)
             }
             am.cargoPickedUp = true
@@ -703,7 +699,7 @@ public final class StoryEngine {
         // With no return leg, a pure ship objective completes here. Cargo with
         // a declared drop-off still needs delivery through playerLanded.
         let cargoDeliveryPending = m.cargoPickup != .none && m.cargoDropoff != .none
-            && (am.resolvedCargoQty ?? abs(m.cargoQty)) > 0
+            && carriedCargo(m, active: am) != nil
         if am.shipObjectivesRemaining == 0, m.returnStellar == -1, !cargoDeliveryPending {
             completeMission(missionID)
         }
@@ -1106,13 +1102,13 @@ public final class StoryEngine {
 
         // Returning cannot deliver cargo that has not been picked up yet, even
         // when there are no special-ship objectives (e.g. a travel pickup).
-        let qty = active.resolvedCargoQty ?? abs(m.cargoQty)
-        if m.cargoPickup != .none, qty > 0 {
-            guard active.cargoPickedUp else { return false }
-            if m.cargoDropoff != .none {
-                let type = active.resolvedCargoType ?? m.cargoType
-                guard (player.cargo[type] ?? 0) >= qty else { return false }
-            }
+        if m.cargoPickup != .none, carriedCargo(m, active: active) != nil, !active.cargoPickedUp {
+            // Legacy saves: older builds counted a board/rescue ship done
+            // without loading its CargoPickup 2 cargo, so such a mission sits
+            // at zero objectives with nothing picked up. Don't block it forever.
+            let legacyBoardPickup = m.cargoPickup == .onSpecialShip
+                && (m.shipGoal == .board || m.shipGoal == .rescue)
+            if !legacyBoardPickup { return false }
         }
 
         // Where does the mission want the player to end up?
@@ -1141,12 +1137,28 @@ public final class StoryEngine {
         // Use the concrete commodity/tonnage frozen at accept when present, so a
         // randomised cargo is *removed* in exactly the amount it was *added*.
         // Legacy saves (nil) fall back to the static mïsn fields.
+        var cargo = carriedCargo(m, active: active)
+        // Legacy saves from builds that loaded a phantom commodity -1 for
+        // no-cargo missions: strip exactly that phantom tonnage on release.
+        if cargo == nil, let type = active?.resolvedCargoType, type < 0,
+           let qty = active?.resolvedCargoQty, qty > 0 {
+            cargo = (type, qty)
+        }
+        guard let cargo else { return }
+        let held = player.cargo[cargo.type] ?? 0
+        let remaining = held - cargo.qty
+        player.cargo[cargo.type] = remaining > 0 ? remaining : nil
+    }
+
+    /// The concrete commodity and tonnage `m` moves, or `nil` when it carries no
+    /// cargo (`MissionRes.carriesCargo`). Prefers the values frozen at accept;
+    /// legacy saves (nil) fall back to the static mïsn fields.
+    private func carriedCargo(_ m: MissionRes, active: ActiveMission?) -> (type: Int, qty: Int)? {
+        guard m.carriesCargo else { return nil }
         let type = active?.resolvedCargoType ?? m.cargoType
         let qty = active?.resolvedCargoQty ?? abs(m.cargoQty)
-        guard qty != 0 else { return }
-        let held = player.cargo[type] ?? 0
-        let remaining = held - qty
-        player.cargo[type] = remaining > 0 ? remaining : nil
+        guard type >= 0, qty > 0 else { return nil }
+        return (type, qty)
     }
 
     /// Resolve a mission's cargo commodity + tonnage to concrete values, rolling
@@ -1154,8 +1166,10 @@ public final class StoryEngine {
     ///   • `CargoType == 1000` → a random standard commodity 0–5.
     ///   • `CargoQty  <= -2`   → `abs(qty)` ± 50% (uniform over `[½·n … 1½·n]`).
     /// Every other value passes through unchanged (`CargoType` literal, `CargoQty`
-    /// its absolute tonnage). Called exactly once per accept.
-    private func resolveCargo(for m: MissionRes) -> (type: Int, qty: Int) {
+    /// its absolute tonnage). Called exactly once per accept. A mission with no
+    /// cargo resolves to `nil`/`nil`, so nothing is ever added or removed.
+    private func resolveCargo(for m: MissionRes) -> (type: Int?, qty: Int?) {
+        guard m.carriesCargo else { return (nil, nil) }
         let type = m.cargoType == 1000 ? rng.int(6) : m.cargoType
         let qty: Int
         if m.cargoQty <= -2 {
@@ -1345,7 +1359,7 @@ public final class StoryEngine {
             }
         }
         if let t = targetSpob, let name = game.spob(t)?.displayName {
-            if m.cargoQty != 0, !am.visitedTravelStellar {
+            if m.carriesCargo, !am.visitedTravelStellar {
                 parts.append("Deliver cargo to \(name)")
             } else if !am.visitedTravelStellar, am.travelSpobID == t {
                 parts.append("Travel to \(name)")
