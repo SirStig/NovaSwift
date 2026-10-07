@@ -101,6 +101,11 @@ final class GameScene: SKScene {
     /// day doesn't change, so spawns stay deterministic frame-to-frame.
     var worldSeedDayProvider: (() -> Int)?
 
+    /// The destination world is ready after a hyperspace or gate arrival.
+    /// Mission ships and escorts must be attached here, after the old world has
+    /// been replaced, rather than in the earlier fuel/date/model commit.
+    var onSystemReloaded: ((_ systemID: Int) -> Void)?
+
     /// Mixes the system id with the in-game day into a world RNG seed. Wrapping
     /// arithmetic (SplitMix64-style constants) so it can never trap on overflow.
     static func worldSeed(systemID: Int, day: Int) -> UInt64 {
@@ -3558,6 +3563,7 @@ final class GameScene: SKScene {
         audio?.play(.hyperspaceArrive)
         jumpArriveGateID = nil
         Log.scene.debug("reloadSystem: now in \(self.systemName) [\(systemID)], \(w.npcs.count) NPCs")
+        onSystemReloaded?(systemID)
     }
 
     /// The destination gate opens with a bright ring as the player pops out, then

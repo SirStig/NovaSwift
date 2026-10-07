@@ -1485,7 +1485,8 @@ struct GameContainerView: View {
             advanceGameDay()                              // gate travel still costs a calendar day
             model.pilot.save()
             saveGame(reason: .jump)
-            syncNav(host)
+            // The scene reloads the destination world after this commit. Its
+            // onSystemReloaded hook then attaches mission ships and escorts.
         }
     }
 
@@ -1555,6 +1556,13 @@ struct GameContainerView: View {
     /// ship — needed every time `host` is (re)built, since neither survives a
     /// system rebuild on its own.
     private func syncNav(_ host: GameHost?) {
+        // In-place jumps commit nav/fuel/date first, then replace the world.
+        // Spawn into that finished destination world so its ships survive the
+        // replacement. A discarded host must not reattach an obsolete scene.
+        host?.scene.onSystemReloaded = { [weak host] systemID in
+            guard let host, self.host === host, nav.currentSystemID == systemID else { return }
+            syncNav(host)
+        }
         // Re-bind the auto-landing arrival callback for whatever scene is current
         // (this runs at every host build/rebuild) so the autopilot can commit the
         // landing through the same confirm-aware path as the manual Land key.
@@ -2073,7 +2081,8 @@ struct GameContainerView: View {
             advanceGameDay()                                   // each hyperjump is one calendar day
             model.pilot.save()
             saveGame(reason: .jump)                      // EV Nova saves on every hyperjump
-            syncNav(host)                                      // refresh course/HUD (ship instance persists the swap)
+            // Attach mission ships and escorts after reloadSystem has replaced
+            // the world, through the scene's onSystemReloaded hook.
         }
         return true
     }
