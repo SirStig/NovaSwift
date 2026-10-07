@@ -49,6 +49,7 @@ inputs and context behavior that were not verified.
 | [EVENTS.md](EVENTS.md) | `crön` | Timed and triggered background events, the activate/hold/start/end lifecycle, galaxy news |
 | [ESCORTS.md](ESCORTS.md) | `përs`, `shïp` | Named NPCs, and the real hire/requisition/capture escort system (it lives in `shïp`, not `përs`) |
 | [NCB_BINARY.md](NCB_BINARY.md) | NCB TEST expressions | Original cursor, counted-set, operator, and negation behavior; x86 comparison against the EV Nova CE Windows executable |
+| [PERSON_DEFENSE_BINARY.md](PERSON_DEFENSE_BINARY.md) | `përs` | `ShieldMod` scales armor as well as shields, checked against the original executable's armor-capacity helper |
 
 Covered elsewhere: mission and NCB scripting in [MISSIONS.md](../MISSIONS.md);
 hull and outfit stat aggregation in [SHIP_SYSTEM.md](../SHIP_SYSTEM.md);

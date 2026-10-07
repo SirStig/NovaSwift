@@ -64,6 +64,7 @@ public struct PersRes {
     /// `Credits`: credits the person carries (±25%), for boarding plunder. @36 (int32).
     public let credits: Int
     /// `ShieldMod`: percent shield scale (100 = stock, 130 = +30%, <0 = invincible). @40.
+    /// In the original a positive value also scales armor capacity, despite the Bible only mentioning shields.
     public let shieldMod: Int
     /// `HailPict`: `PICT` shown in the comms dialog instead of the ship's default. @42.
     public let hailPict: Int
