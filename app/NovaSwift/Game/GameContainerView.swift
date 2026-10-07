@@ -1720,6 +1720,9 @@ struct GameContainerView: View {
         default:              engine.missionShipDestroyed(missionID: missionID)
         }
         model.pilot.state = engine.player
+        // Mission boarding can add cargo in flight; keep the live hold and its
+        // HUD/capacity calculations in sync before checkpointing the pilot.
+        host?.scene.playerShip?.cargo = engine.player.cargo
         saveGame(reason: .timer)
     }
 

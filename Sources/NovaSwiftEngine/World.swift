@@ -528,9 +528,14 @@ public final class Ship {
     public var missionID: Int?
     /// This mission ship's objective from the player's side (`mïsn.ShipGoal`):
     /// what the player must *do* to it (destroy/disable/board/escort/…). Read by
-    /// the world when the ship is destroyed/disabled to fire the matching
+    /// the world when the ship is destroyed/disabled/boarded to fire the matching
     /// `missionShipGoalReached` event. nil = not a mission ship, or no goal.
     public var missionShipGoal: MissionShipGoal?
+    /// Whether this ship has already reported its board/rescue objective. Keep
+    /// the goal itself intact (rescue ships use it during boarding cleanup),
+    /// while reopening plunder cannot count the same ship a second time.
+    /// The host can also observe this transition when boarding outside a tick.
+    public fileprivate(set) var missionBoardingGoalReported = false
 
     /// Set on a ship launched as a stellar's defense fleet (`spöb.DefenseDude`)
     /// during a Demand-Tribute fight — the `spöb` id it's defending. The
@@ -2875,10 +2880,9 @@ public final class World {
             events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
             // A mission "disable this ship" objective is met the instant it's
             // crippled (a later kill doesn't un-meet it). Board/rescue objectives
-            // also need the ship disabled first, so report those here too and let
-            // the story layer decide what the disable means for each.
+            // remain outstanding until the player actually boards the hulk.
             if let mid = ship.missionID, let goal = ship.missionShipGoal,
-               goal == .disable || goal == .board || goal == .rescue {
+               goal == .disable {
                 events.append(.missionShipGoalReached(missionID: mid, entityID: ship.entityID,
                                                        goal: goal, byPlayer: ownerID == 0))
             }
@@ -2932,8 +2936,8 @@ public final class World {
                                              boomID: npc.explosionBoomID))
                     Log.combat.notice("\(LogTag.ship(id: npc.entityID, name: npc.name)) destroyed\(npc.killedByPlayer ? " by player" : "")")
                     // A destroyed mission ship meets a "destroy" (or "chase off",
-                    // which a kill satisfies) objective. `disable`/`board`/`rescue`
-                    // already fired when it was crippled; don't double-report those.
+                    // which a kill satisfies) objective. A kill is not a boarding
+                    // or rescue, and disabling already reported its own goal.
                     if let mid = npc.missionID, let goal = npc.missionShipGoal,
                        goal == .destroy || goal == .chaseOff {
                         events.append(.missionShipGoalReached(missionID: mid, entityID: npc.entityID,
@@ -3036,17 +3040,17 @@ public final class World {
     /// `player.currentTargetID`, so locking a target also makes the player's
     /// guided weapons track it. Returns the newly-locked ship, if any.
     ///
-    /// Ships in the player's own fleet are never picked: these hotkeys exist to
-    /// find something to *shoot*, and in the original game snapping to your own
-    /// escort — often the closest ship to you, since it flies in formation —
-    /// made the closest-target key useless in a fight. Escorts stay reachable by
-    /// clicking them or by Tab-cycling past every other ship.
+    /// Closest-ship includes living disabled hulks so they can be found for
+    /// boarding; closest-hostile excludes them because they cannot fight.
+    /// Ships in the player's own fleet are never picked: snapping to an escort
+    /// that flies in formation would crowd out other nearby contacts. Escorts
+    /// stay reachable by clicking them or by Tab-cycling past every other ship.
     @discardableResult
     public func selectNearestTarget(hostileOnly: Bool) -> Ship? {
         let candidates = npcs.filter { npc in
-            npc.isAlive && !npc.disabled && canDetect(npc, by: player)
+            npc.isAlive && canDetect(npc, by: player)
                 && !isPlayerFleetMember(npc.entityID)
-                && (!hostileOnly || isEffectivelyHostileToPlayer(npc))
+                && (!hostileOnly || (!npc.disabled && isEffectivelyHostileToPlayer(npc)))
         }
         guard let nearest = candidates.min(by: {
             ($0.position - player.position).length < ($1.position - player.position).length
@@ -3471,14 +3475,15 @@ public final class World {
         // this is the only call site (`board` only ever fires for the
         // player; NPCs don't board).
         diplomacy?.recordBoard(of: s.government)
-        // A `rescue` mission ship starts pre-disabled and is completed by
-        // *boarding* it (tow/rescue the derelict) — not by the disable transition
-        // that fires the other goals (it never gets an `applyHit` disable, so that
-        // path never ran for it). Report the goal met now. (`board` goals already
-        // fired on disable, so they're intentionally not re-reported here.)
-        if let mid = s.missionID, s.missionShipGoal == .rescue {
+        // Boarding is the actual goal for both board and rescue missions. This
+        // also handles ships that started disabled through their government,
+        // without requiring a damage-induced disable transition. Report each
+        // ship only once even if the player opens its plunder dialog again.
+        if let mid = s.missionID, let goal = s.missionShipGoal,
+           (goal == .board || goal == .rescue), !s.missionBoardingGoalReported {
+            s.missionBoardingGoalReported = true
             events.append(.missionShipGoalReached(missionID: mid, entityID: s.entityID,
-                                                  goal: .rescue, byPlayer: true))
+                                                  goal: goal, byPlayer: true))
         }
         return manifest
     }
@@ -3582,9 +3587,8 @@ public final class World {
     }
 
     /// Lock a specific ship by id (click-to-select). Unlike
-    /// `selectNearestTarget`, this allows disabled hulks (still valid targets
-    /// for boarding) and has no range gate — if it's on screen, it's
-    /// selectable.
+    /// `selectNearestTarget`, this has no range gate — if it's on screen, it's
+    /// selectable, including disabled hulks that can be boarded.
     @discardableResult
     public func selectTarget(id: Int) -> Ship? {
         guard let ship = npcs.first(where: { $0.entityID == id }), ship.isAlive else { return nil }

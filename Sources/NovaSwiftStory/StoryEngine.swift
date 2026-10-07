@@ -638,11 +638,36 @@ public final class StoryEngine {
     }
 
     /// A mission special ship was destroyed (combat reports this by mission id).
-    public func missionShipDestroyed(missionID: Int) { decrementShipObjective(missionID) }
-    /// A mission special ship was disabled (for disable/board goals).
-    public func missionShipDisabled(missionID: Int) { decrementShipObjective(missionID) }
-    /// A mission special ship was boarded.
-    public func missionShipBoarded(missionID: Int) { decrementShipObjective(missionID) }
+    public func missionShipDestroyed(missionID: Int) {
+        guard let m = game.mission(missionID), m.shipGoal == .destroy || m.shipGoal == .chaseOff else { return }
+        decrementShipObjective(missionID)
+    }
+    /// A mission special ship was disabled. Boarding is a separate objective:
+    /// disabling a target only makes it available to board.
+    public func missionShipDisabled(missionID: Int) {
+        guard game.mission(missionID)?.shipGoal == .disable else { return }
+        decrementShipObjective(missionID)
+    }
+    /// A mission special ship was successfully boarded. `CargoPickup == 2`
+    /// loads the mission's resolved cargo here, before OnShipDone/completion.
+    public func missionShipBoarded(missionID: Int) {
+        guard let m = game.mission(missionID), m.shipGoal == .board || m.shipGoal == .rescue,
+              var am = player.activeMission(missionID) else { return }
+        if m.cargoPickup == .onSpecialShip, !am.cargoPickedUp {
+            let type = am.resolvedCargoType ?? m.cargoType
+            let qty = am.resolvedCargoQty ?? abs(m.cargoQty)
+            if qty != 0 {
+                player.cargo[type, default: 0] += qty
+                showMissionText(m.loadCargoText, for: m)
+            }
+            am.cargoPickedUp = true
+            // An earlier visit cannot count as delivery of cargo only just
+            // loaded aboard. The travel-dropoff leg still needs a new landing.
+            if m.cargoDropoff == .atTravelStellar { am.visitedTravelStellar = false }
+            replace(am)
+        }
+        decrementShipObjective(missionID)
+    }
 
     /// The player's escort/target for a mission was destroyed when it shouldn't
     /// have been (e.g. an escort you were protecting) — fails the mission.
@@ -675,8 +700,11 @@ public final class StoryEngine {
             showMissionText(m.shipDoneText, for: m)
         }
 
-        // If there's no return leg required, finishing the ships completes it.
-        if am.shipObjectivesRemaining == 0, m.returnStellar == -1 {
+        // With no return leg, a pure ship objective completes here. Cargo with
+        // a declared drop-off still needs delivery through playerLanded.
+        let cargoDeliveryPending = m.cargoPickup != .none && m.cargoDropoff != .none
+            && (am.resolvedCargoQty ?? abs(m.cargoQty)) > 0
+        if am.shipObjectivesRemaining == 0, m.returnStellar == -1, !cargoDeliveryPending {
             completeMission(missionID)
         }
     }
@@ -1075,6 +1103,17 @@ public final class StoryEngine {
     private func landingCompletes(_ m: MissionRes, active: ActiveMission, spobID: Int) -> Bool {
         // All special-ship objectives must be done first.
         if active.shipObjectivesRemaining > 0 { return false }
+
+        // Returning cannot deliver cargo that has not been picked up yet, even
+        // when there are no special-ship objectives (e.g. a travel pickup).
+        let qty = active.resolvedCargoQty ?? abs(m.cargoQty)
+        if m.cargoPickup != .none, qty > 0 {
+            guard active.cargoPickedUp else { return false }
+            if m.cargoDropoff != .none {
+                let type = active.resolvedCargoType ?? m.cargoType
+                guard (player.cargo[type] ?? 0) >= qty else { return false }
+            }
+        }
 
         // Where does the mission want the player to end up?
         switch m.returnStellar {

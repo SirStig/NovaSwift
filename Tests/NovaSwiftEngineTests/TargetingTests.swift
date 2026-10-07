@@ -3,9 +3,9 @@ import XCTest
 import NovaSwiftKit
 
 /// The player's target-lock hotkeys: "closest ship" and "closest hostile".
-/// Both exist to find something to *shoot*, so neither ever picks a ship out of
-/// the player's own fleet — an escort flies in formation and is almost always
-/// the nearest ship to you, which made "target closest" useless in a fight.
+/// Closest-ship also finds boardable hulks; closest-hostile finds combatants.
+/// Neither picks a ship out of the player's own fleet — an escort flies in
+/// formation and is almost always the nearest ship to you.
 final class TargetingTests: XCTestCase {
 
     private func stats() -> ShipStats { ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3) }
@@ -89,13 +89,49 @@ final class TargetingTests: XCTestCase {
                        "the only real enemy is the one that isn't neutral and isn't yours")
     }
 
-    func testTargetNearestIgnoresHulksAndOutOfRangeShips() {
+    func testTargetNearestIncludesLivingHulks() {
         let world = makeWorld()
         let hulk = addShip(world, name: "Hulk", govt: 200, distance: 100)
         hulk.disabled = true
-        addShip(world, name: "Far", govt: 200, distance: World.targetLockRange + 500)
+        addShip(world, name: "Live", govt: 200, distance: 500)
 
-        XCTAssertNil(world.selectNearestTarget(hostileOnly: false),
-                     "a drifting hulk isn't a target and the only live ship is out of lock range")
+        XCTAssertEqual(world.selectNearestTarget(hostileOnly: false)?.entityID, hulk.entityID,
+                       "a disabled ship is still a target for boarding")
+    }
+
+    func testTargetNearestHostileSkipsDisabledHostiles() {
+        let world = makeWorld()
+        world.diplomacy = Diplomacy(govts: [govt(128), govt(201, flags1: 0x0004)])
+        let hulk = addShip(world, name: "Enemy Hulk", govt: 201, distance: 100)
+        hulk.disabled = true
+        let enemy = addShip(world, name: "Enemy", govt: 201, distance: 500)
+
+        XCTAssertEqual(world.selectNearestTarget(hostileOnly: true)?.entityID, enemy.entityID,
+                       "nearest hostile remains useful for finding ships that can fight")
+        enemy.armor = 0
+        XCTAssertNil(world.selectNearestTarget(hostileOnly: true))
+    }
+
+    func testTargetNearestStillRequiresLivingDetectableInRangeContacts() {
+        let world = makeWorld()
+        let wreck = addShip(world, name: "Wreck", govt: 200, distance: 50)
+        wreck.disabled = true
+        wreck.armor = 0
+        let hidden = addShip(world, name: "Cloaked Hulk", govt: 200, distance: 100)
+        hidden.disabled = true
+        hidden.cloakFlags = 0x0010
+        hidden.cloakLevel = 1
+        let far = addShip(world, name: "Far Hulk", govt: 200, distance: World.targetLockRange + 1)
+        far.disabled = true
+
+        XCTAssertNil(world.selectNearestTarget(hostileOnly: false))
+        world.player.cloakScannerFlags = 0x0008
+        XCTAssertEqual(world.selectNearestTarget(hostileOnly: false)?.entityID, hidden.entityID,
+                       "a cloak scanner can expose a boardable hulk")
+        hidden.armor = 0
+        XCTAssertNil(world.selectNearestTarget(hostileOnly: false), "the remaining hulk is out of range")
+        far.position = Vec2(0, World.targetLockRange)
+        XCTAssertEqual(world.selectNearestTarget(hostileOnly: false)?.entityID, far.entityID,
+                       "the lock range boundary is inclusive")
     }
 }
