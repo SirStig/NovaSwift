@@ -37,15 +37,24 @@ struct TradeQuantityPrompt: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(title).novaFont(.body, weight: .bold).foregroundStyle(.white)
-            HStack(spacing: 8) {
+            Text(title)
+                .novaFont(.body, weight: .bold).foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 NovaTextField(placeholder: "\(range.upperBound)", text: $text)
-                    .frame(width: 80)
+                    .frame(width: 96)
                     #if os(iOS)
                     .keyboardType(.numberPad)
                     #endif
+                    #if !os(tvOS)
+                    // The focused text field eats Escape before the Cancel
+                    // button's `.cancelAction` shortcut sees it, so catch it
+                    // here too (same approach as DevConsoleView's inputBar).
+                    .onKeyPress(.escape) { onCancel(); return .handled }
+                    #endif
                 Text("of \(range.upperBound) \(unitLabel) max")
                     .novaFont(.body).foregroundStyle(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 10) {
                 Spacer()
@@ -56,10 +65,13 @@ struct TradeQuantityPrompt: View {
             }
         }
         .padding(20)
-        .frame(width: 220)
+        .frame(width: 320)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.2)))
-        .novaResponsive()
+        // A sheet needs this form's intrinsic height. novaResponsive wraps it
+        // in a GeometryReader, whose ideal size can clip the footer on macOS.
+        .novaTextScale(1)
     }
 
     // Matches NovaDialog's footer-button style (the three-slice PICT chrome
@@ -80,5 +92,8 @@ struct TradeQuantityPrompt: View {
         }
         .buttonStyle(.novaPlain)
         .disabled(!enabled)
+        #if os(macOS) || os(iOS)
+        .keyboardShortcut(isDefault ? .defaultAction : .cancelAction)
+        #endif
     }
 }
