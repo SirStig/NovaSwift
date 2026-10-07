@@ -101,6 +101,11 @@ final class GameScene: SKScene {
     /// day doesn't change, so spawns stay deterministic frame-to-frame.
     var worldSeedDayProvider: (() -> Int)?
 
+    /// The destination world is ready after a hyperspace or gate arrival.
+    /// Mission ships and escorts must be attached here, after the old world has
+    /// been replaced, rather than in the earlier fuel/date/model commit.
+    var onSystemReloaded: ((_ systemID: Int) -> Void)?
+
     /// Mixes the system id with the in-game day into a world RNG seed. Wrapping
     /// arithmetic (SplitMix64-style constants) so it can never trap on overflow.
     static func worldSeed(systemID: Int, day: Int) -> UInt64 {
@@ -1405,191 +1410,7 @@ final class GameScene: SKScene {
         // The world fires each ready weapon mount itself (respecting reload and
         // ammo). We drain its events for SFX and render the live projectiles it
         // spawned, so firing reflects the real weapon system, not the raw input.
-        for event in world.drainEvents() {
-            switch event {
-            case let .weaponFired(shooterID, at, _, soundID, weaponID):
-                // Positional for every shooter — the player's own shots report
-                // right at the listener (near-zero distance = full volume), NPC
-                // fire attenuates/pans naturally by distance.
-                if let soundID {
-                    audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
-                }
-                // Flash the shooter's weapon-glow overlay (shän weapon layer), if
-                // its hull has one — but only for a weapon that actually declares
-                // `Flags2` 0x0200 ("uses the ship's weapon sprite"); every weapon
-                // fire used to trigger it unconditionally, flashing the overlay
-                // for guns/missiles that shouldn't touch it at all. Player is
-                // entityID 0; NPCs match by entity.
-                if weaponUsesShipSprite(weaponID) {
-                    if shooterID == 0 {
-                        if weaponGlowNode != nil { weaponGlowFlare = 1 }
-                    } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
-                        node.weaponGlowFlare = 1
-                    }
-                }
-            case let .beam(shooterID, _, from, _, _, soundID, weaponID):
-                // Geometry is drawn from `world.activeBeams` in `syncBeams()`;
-                // this event only carries the pulse-beam fire sound (`soundID`
-                // is nil for `loopSound` beams, which get their audio from
-                // `.beamLoopStart`/`.beamLoopStop` instead). `.beam` only fires
-                // once per real reload tick, same as `.weaponFired` — which
-                // plays unconditionally every shot — so a held trigger should
-                // click on every shot here too, not just the first.
-                if let soundID {
-                    audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
-                }
-                // Beams fire every reload tick same as bullets, so mirror
-                // .weaponFired's ship-weapon-sprite flash here — beam guidance
-                // never emits .weaponFired, so without this a hull's authored
-                // weapon-glow overlay (e.g. the Raven's) never lights up for
-                // its own beam weapons.
-                if weaponUsesShipSprite(weaponID) {
-                    if shooterID == 0 {
-                        if weaponGlowNode != nil { weaponGlowFlare = 1 }
-                    } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
-                        node.weaponGlowFlare = 1
-                    }
-                }
-            case let .beamLoopStart(shooterID, mountIndex, soundID):
-                // Beam geometry is now drawn from `world.activeBeams` in
-                // `syncBeams()`; this event only drives the continuous audio loop.
-                let key = "\(shooterID):\(mountIndex)"
-                if let soundID {
-                    activeBeamLoops[key] = (shooterID, soundID)
-                }
-            case let .beamLoopStop(shooterID, mountIndex):
-                let key = "\(shooterID):\(mountIndex)"
-                activeBeamLoops.removeValue(forKey: key)
-                audio?.stopLoop(key: key)
-            case let .explosion(at, radius, soundID, boomID):
-                spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius), boomID: boomID)
-                audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
-                addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
-            case let .shieldHit(at, weaponID):
-                spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: true)
-            case let .armorHit(at, weaponID):
-                spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: false)
-            case let .asteroidDebris(at, color, count):
-                spawnParticles(at: CGPoint(x: at.x, y: at.y), count: min(count, 20),
-                               color: SKColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
-                                              blue: CGFloat(color.b) / 255, alpha: 1),
-                               speed: 70, life: 0.7, size: 4, additive: false, grow: false, drag: 2.0)
-            case let .asteroidMined(cargoType, quantity, _):
-                // Player mining scoop collected an asteroid's yield — the host adds
-                // it to pilot cargo (clamped to free hold) and reports what stowed.
-                if let result = onAsteroidMined?(cargoType, quantity) {
-                    hud?.post("Mined \(result.stowed)t of \(result.name).")
-                } else {
-                    hud?.post("Cargo hold full — mined ore lost.")
-                }
-            case .targetAcquired:
-                audio?.play(.targetLock)
-                Haptics.play(.selection)
-            case let .shipArrived(entityID, _, fromHyperspace):
-                // Only inbound hyperspace jumps get the warp effect (played when the
-                // node is built); mid-system populate spawns appear silently.
-                if fromHyperspace { pendingEntrance[entityID] = .warpIn }
-            case let .shipLaunched(entityID, _):
-                // Lifting off a planet is silent in the original — no takeoff SFX
-                // (the old snd 390 "Airlock" cue on the player's own launch read as
-                // a weird "escape hatch" noise). NPC launches were already silent.
-                pendingEntrance[entityID] = .launch
-            case let .shipEmergedFromGate(entityID, gateSpobID, _):
-                // A gate flashes open, the ship grows out of it, then it closes.
-                pendingEntrance[entityID] = .launch
-                playGateArrivalFlourish(gateSpobID)
-            case let .shipDeparted(entityID, at, heading):
-                warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
-            case let .shipDepartedViaGate(entityID, gateSpobID, at):
-                // The AI-departure counterpart to `.shipEmergedFromGate`: the
-                // gate flashes open and the ship shrinks into it, instead of
-                // streaking off toward the edge.
-                playGateArrivalFlourish(gateSpobID)
-                gateDepartNode(id: entityID, gateSpobID: gateSpobID, at: CGPoint(x: at.x, y: at.y))
-            case let .shipLanded(entityID, spobID, at):
-                landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
-                if entityID == 0 { audio?.play(.docking); Haptics.play(.medium) }
-            case let .shipDisabled(entityID, at):
-                spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
-                if entityID == 0 { onPlayerDisabled?() }
-            case let .shipDying(entityID, at, boomID):
-                beginNPCDeathSequence(entityID: entityID, at: CGPoint(x: at.x, y: at.y), boomID: boomID)
-            case let .shipBoarded(entityID, _):
-                if entityID == 0 { onPlayerBoarded?() }
-            case let .shipScanned(scannerID, targetID, _):
-                // Only the player's own scan matters to the player — post the
-                // message and wire the contraband-fine consequence. NPC-on-NPC
-                // scans happen silently (no on-screen sweep); the green ring read
-                // as clutter over every passing ship.
-                if targetID == 0 {
-                    hud?.post("You are being scanned.")
-                    // -1 govt = independent (no scan law).
-                    if let govt = world.ship(id: scannerID)?.government, govt >= 0 {
-                        onPlayerScanned?(govt)
-                    }
-                }
-            case let .assistanceDelivered(entityID):
-                let name = world.ship(id: entityID)?.name ?? "Ally"
-                hud?.post("\(name) transfers fuel and makes repairs.")
-                audio?.play(.docking)
-            case let .personGrudge(pid):
-                persGrudges.insert(pid)
-                onPersGrudge?(pid)
-            case let .personDefeated(pid):
-                onPersDefeated?(pid)
-            case let .playerDestroyed(hadEscapePod):
-                // Kill any lingering fire/beam loop the moment the player dies (both
-                // paths), and — only for a real game-over, not an escape-pod ejection
-                // — play out the multi-burst wreck explosion while the host counts
-                // down to the menu.
-                audio?.stopAllLoops()
-                // Say it out loud. The wreck freezing and the controls going dead
-                // is not, on its own, legible as "you died" — players read it as
-                // the ship having glitched.
-                hud?.post(hadEscapePod ? "Your ship was destroyed — escape pod away."
-                                       : "Your ship has been destroyed.")
-                hud?.landPrompt = ""
-                hud?.landName = ""
-                hud?.landReady = false
-                if !hadEscapePod { beginPlayerDeathSequence() }
-                onPlayerDestroyed?(hadEscapePod)
-            case let .missionShipGoalReached(missionID, _, goal, byPlayer):
-                onMissionShipGoalReached?(missionID, goal, byPlayer)
-            case let .missionShipLost(missionID, goal):
-                onMissionShipLost?(missionID, goal)
-            case let .stellarDefendersLaunched(spobID, count, remaining):
-                onStellarDefendersLaunched?(spobID, count, remaining)
-            case let .stellarDominated(spobID):
-                onStellarDominated?(spobID)
-            case let .stellarDestroyed(spobID, at, boomID, sparks):
-                // Play the stellar's own `spöb.Explosion` where it stood — a
-                // planet-scale blast, so the radius is the body's, not a shot's.
-                let point = CGPoint(x: at.x, y: at.y)
-                let radius = CGFloat(world?.systemContext.bodies.first { $0.id == spobID }?.radius ?? 64)
-                spawnExplosion(at: point, radius: max(48, radius), boomID: boomID)
-                audio?.play(boomID.flatMap { galaxy?.game.boom($0)?.soundID } ?? 303,
-                            at: point, listener: scenePos)
-                addShake(at: point, radius: max(48, radius))
-                // `Explosion` in the 1000-1063 band means "Explosion + Sparks".
-                if sparks {
-                    spawnParticles(at: point, count: 90, color: SKColor(red: 1.0, green: 0.78, blue: 0.47, alpha: 1),
-                                   speed: 260, life: 1.1, size: 3, additive: true, grow: false)
-                }
-                onStellarDestroyed?(spobID)
-            case let .shipDestroyed(entityID, _, _):
-                // A player escort tied to a persistent record just died — drop it
-                // from the pilot roster so it doesn't respawn next system (and a
-                // hired one stops being billed). Resolved via the entity→record
-                // map since the Ship may already be torn down.
-                if let recordID = escortRecordByEntity[entityID] {
-                    escortRecordByEntity[entityID] = nil
-                    onEscortLost?(recordID)
-                }
-                npcDeathSequenceStarted.remove(entityID)
-            default:
-                break
-            }
-        }
+        processWorldEvents(listener: scenePos)
         lap("events")
         // "Auto-target after firing": on the shot that opens fire with nothing
         // locked, lock onto the nearest hostile.
@@ -1870,7 +1691,7 @@ final class GameScene: SKScene {
         var others: [(id: Int, dist: Double)] = []
         var escorts: [(id: Int, dist: Double)] = []
         for npc in world.npcs
-        where npc.isAlive && !npc.disabled && world.canDetect(npc, by: world.player) {
+        where npc.isAlive && world.canDetect(npc, by: world.player) {
             let d = (npc.position - p).length
             guard d <= World.targetLockRange else { continue }
             if world.isPlayerEscort(npc) {
@@ -2064,6 +1885,198 @@ final class GameScene: SKScene {
         world?.playerEscorts.first { $0.escortRecordID == recordID }
     }
 
+    /// Deliver world events after simulation and immediately after an input
+    /// action such as boarding. The boarding sheet pauses the scene; waiting
+    /// for the next step would discard its queued mission-goal event.
+    private func processWorldEvents(listener scenePos: CGPoint) {
+        guard let world else { return }
+        for event in world.drainEvents() {
+            switch event {
+            case let .weaponFired(shooterID, at, _, soundID, weaponID):
+                // Positional for every shooter — the player's own shots report
+                // right at the listener (near-zero distance = full volume), NPC
+                // fire attenuates/pans naturally by distance.
+                if let soundID {
+                    audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                }
+                // Flash the shooter's weapon-glow overlay (shän weapon layer), if
+                // its hull has one — but only for a weapon that actually declares
+                // `Flags2` 0x0200 ("uses the ship's weapon sprite"); every weapon
+                // fire used to trigger it unconditionally, flashing the overlay
+                // for guns/missiles that shouldn't touch it at all. Player is
+                // entityID 0; NPCs match by entity.
+                if weaponUsesShipSprite(weaponID) {
+                    if shooterID == 0 {
+                        if weaponGlowNode != nil { weaponGlowFlare = 1 }
+                    } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
+                        node.weaponGlowFlare = 1
+                    }
+                }
+            case let .beam(shooterID, _, from, _, _, soundID, weaponID):
+                // Geometry is drawn from `world.activeBeams` in `syncBeams()`;
+                // this event only carries the pulse-beam fire sound (`soundID`
+                // is nil for `loopSound` beams, which get their audio from
+                // `.beamLoopStart`/`.beamLoopStop` instead). `.beam` only fires
+                // once per real reload tick, same as `.weaponFired` — which
+                // plays unconditionally every shot — so a held trigger should
+                // click on every shot here too, not just the first.
+                if let soundID {
+                    audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
+                }
+                // Beams fire every reload tick same as bullets, so mirror
+                // .weaponFired's ship-weapon-sprite flash here — beam guidance
+                // never emits .weaponFired, so without this a hull's authored
+                // weapon-glow overlay (e.g. the Raven's) never lights up for
+                // its own beam weapons.
+                if weaponUsesShipSprite(weaponID) {
+                    if shooterID == 0 {
+                        if weaponGlowNode != nil { weaponGlowFlare = 1 }
+                    } else if let node = npcNodes[shooterID], node.weaponGlow != nil {
+                        node.weaponGlowFlare = 1
+                    }
+                }
+            case let .beamLoopStart(shooterID, mountIndex, soundID):
+                // Beam geometry is now drawn from `world.activeBeams` in
+                // `syncBeams()`; this event only drives the continuous audio loop.
+                let key = "\(shooterID):\(mountIndex)"
+                if let soundID {
+                    activeBeamLoops[key] = (shooterID, soundID)
+                }
+            case let .beamLoopStop(shooterID, mountIndex):
+                let key = "\(shooterID):\(mountIndex)"
+                activeBeamLoops.removeValue(forKey: key)
+                audio?.stopLoop(key: key)
+            case let .explosion(at, radius, soundID, boomID):
+                spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius), boomID: boomID)
+                audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
+            case let .shieldHit(at, weaponID):
+                spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: true)
+            case let .armorHit(at, weaponID):
+                spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: false)
+            case let .asteroidDebris(at, color, count):
+                spawnParticles(at: CGPoint(x: at.x, y: at.y), count: min(count, 20),
+                               color: SKColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
+                                              blue: CGFloat(color.b) / 255, alpha: 1),
+                               speed: 70, life: 0.7, size: 4, additive: false, grow: false, drag: 2.0)
+            case let .asteroidMined(cargoType, quantity, _):
+                // Player mining scoop collected an asteroid's yield — the host adds
+                // it to pilot cargo (clamped to free hold) and reports what stowed.
+                if let result = onAsteroidMined?(cargoType, quantity) {
+                    hud?.post("Mined \(result.stowed)t of \(result.name).")
+                } else {
+                    hud?.post("Cargo hold full — mined ore lost.")
+                }
+            case .targetAcquired:
+                audio?.play(.targetLock)
+                Haptics.play(.selection)
+            case let .shipArrived(entityID, _, fromHyperspace):
+                // Only inbound hyperspace jumps get the warp effect (played when the
+                // node is built); mid-system populate spawns appear silently.
+                if fromHyperspace { pendingEntrance[entityID] = .warpIn }
+            case let .shipLaunched(entityID, _):
+                // Lifting off a planet is silent in the original — no takeoff SFX
+                // (the old snd 390 "Airlock" cue on the player's own launch read as
+                // a weird "escape hatch" noise). NPC launches were already silent.
+                pendingEntrance[entityID] = .launch
+            case let .shipEmergedFromGate(entityID, gateSpobID, _):
+                // A gate flashes open, the ship grows out of it, then it closes.
+                pendingEntrance[entityID] = .launch
+                playGateArrivalFlourish(gateSpobID)
+            case let .shipDeparted(entityID, at, heading):
+                warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
+            case let .shipDepartedViaGate(entityID, gateSpobID, at):
+                // The AI-departure counterpart to `.shipEmergedFromGate`: the
+                // gate flashes open and the ship shrinks into it, instead of
+                // streaking off toward the edge.
+                playGateArrivalFlourish(gateSpobID)
+                gateDepartNode(id: entityID, gateSpobID: gateSpobID, at: CGPoint(x: at.x, y: at.y))
+            case let .shipLanded(entityID, spobID, at):
+                landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
+                if entityID == 0 { audio?.play(.docking); Haptics.play(.medium) }
+            case let .shipDisabled(entityID, at):
+                spawnDisableFlash(at: CGPoint(x: at.x, y: at.y))
+                if entityID == 0 { onPlayerDisabled?() }
+            case let .shipDying(entityID, at, boomID):
+                beginNPCDeathSequence(entityID: entityID, at: CGPoint(x: at.x, y: at.y), boomID: boomID)
+            case let .shipBoarded(entityID, _):
+                if entityID == 0 { onPlayerBoarded?() }
+            case let .shipScanned(scannerID, targetID, _):
+                // Only the player's own scan matters to the player — post the
+                // message and wire the contraband-fine consequence. NPC-on-NPC
+                // scans happen silently (no on-screen sweep); the green ring read
+                // as clutter over every passing ship.
+                if targetID == 0 {
+                    hud?.post("You are being scanned.")
+                    // -1 govt = independent (no scan law).
+                    if let govt = world.ship(id: scannerID)?.government, govt >= 0 {
+                        onPlayerScanned?(govt)
+                    }
+                }
+            case let .assistanceDelivered(entityID):
+                let name = world.ship(id: entityID)?.name ?? "Ally"
+                hud?.post("\(name) transfers fuel and makes repairs.")
+                audio?.play(.docking)
+            case let .personGrudge(pid):
+                persGrudges.insert(pid)
+                onPersGrudge?(pid)
+            case let .personDefeated(pid):
+                onPersDefeated?(pid)
+            case let .playerDestroyed(hadEscapePod):
+                // Kill any lingering fire/beam loop the moment the player dies (both
+                // paths), and — only for a real game-over, not an escape-pod ejection
+                // — play out the multi-burst wreck explosion while the host counts
+                // down to the menu.
+                audio?.stopAllLoops()
+                // Say it out loud. The wreck freezing and the controls going dead
+                // is not, on its own, legible as "you died" — players read it as
+                // the ship having glitched.
+                hud?.post(hadEscapePod ? "Your ship was destroyed — escape pod away."
+                                       : "Your ship has been destroyed.")
+                hud?.landPrompt = ""
+                hud?.landName = ""
+                hud?.landReady = false
+                if !hadEscapePod { beginPlayerDeathSequence() }
+                onPlayerDestroyed?(hadEscapePod)
+            case let .missionShipGoalReached(missionID, _, goal, byPlayer):
+                onMissionShipGoalReached?(missionID, goal, byPlayer)
+            case let .missionShipLost(missionID, goal):
+                onMissionShipLost?(missionID, goal)
+            case let .stellarDefendersLaunched(spobID, count, remaining):
+                onStellarDefendersLaunched?(spobID, count, remaining)
+            case let .stellarDominated(spobID):
+                onStellarDominated?(spobID)
+            case let .stellarDestroyed(spobID, at, boomID, sparks):
+                // Play the stellar's own `spöb.Explosion` where it stood — a
+                // planet-scale blast, so the radius is the body's, not a shot's.
+                let point = CGPoint(x: at.x, y: at.y)
+                let radius = CGFloat(world.systemContext.bodies.first { $0.id == spobID }?.radius ?? 64)
+                spawnExplosion(at: point, radius: max(48, radius), boomID: boomID)
+                audio?.play(boomID.flatMap { galaxy?.game.boom($0)?.soundID } ?? 303,
+                            at: point, listener: scenePos)
+                addShake(at: point, radius: max(48, radius))
+                // `Explosion` in the 1000-1063 band means "Explosion + Sparks".
+                if sparks {
+                    spawnParticles(at: point, count: 90, color: SKColor(red: 1.0, green: 0.78, blue: 0.47, alpha: 1),
+                                   speed: 260, life: 1.1, size: 3, additive: true, grow: false)
+                }
+                onStellarDestroyed?(spobID)
+            case let .shipDestroyed(entityID, _, _):
+                // A player escort tied to a persistent record just died — drop it
+                // from the pilot roster so it doesn't respawn next system (and a
+                // hired one stops being billed). Resolved via the entity→record
+                // map since the Ship may already be torn down.
+                if let recordID = escortRecordByEntity[entityID] {
+                    escortRecordByEntity[entityID] = nil
+                    onEscortLost?(recordID)
+                }
+                npcDeathSequenceStarted.remove(entityID)
+            default:
+                break
+            }
+        }
+    }
+
     // MARK: Boarding
 
     /// How close (world units) the player must be to a disabled hulk to board it.
@@ -2071,26 +2084,30 @@ final class GameScene: SKScene {
 
     /// The loot from a boardable hulk in reach — the current target if it's a
     /// disabled ship in range, otherwise the nearest disabled ship in range
-    /// (so the Board control "just works" near a wreck, since the target-cycle
-    /// hotkeys deliberately skip disabled ships). nil when nothing is boardable.
+    /// (so the Board control also works without first locking a wreck).
+    /// nil when nothing is boardable.
     func attemptBoard() -> World.BoardingManifest? {
         guard let w = world, w.player.isAlive else { return nil }
         let pos = w.player.position
         func boardable(_ s: Ship) -> Bool {
             s.isAlive && s.disabled && s !== w.player && (s.position - pos).length <= boardingRange
         }
+        // Deliver boarding effects before the host presents its paused plunder
+        // sheet, and drain them once so resuming cannot count the same event.
+        func board(_ ship: Ship) -> World.BoardingManifest? {
+            guard let manifest = w.board(shipID: ship.entityID) else { return nil }
+            processWorldEvents(listener: renderPoint(w.player))
+            return manifest
+        }
         // Prefer the explicit target, else the nearest disabled hulk in range.
-        // Use `board` (not `boardingManifest`) so the actual dock emits
-        // `.shipBoarded` — and, for a `rescue`-goal mission derelict, the
-        // goal-reached event that completes the rescue.
         if let tid = w.player.currentTargetID, let s = w.ship(id: tid), boardable(s) {
-            return w.board(shipID: tid)
+            return board(s)
         }
         let nearest = w.npcs.filter(boardable)
             .min { ($0.position - pos).length < ($1.position - pos).length }
         guard let hulk = nearest else { return nil }
         world?.selectTarget(id: hulk.entityID)   // lock it so the plunder targets it
-        return w.board(shipID: hulk.entityID)
+        return board(hulk)
     }
 
     /// The (possibly updated) manifest for a boarded ship, for refreshing the
@@ -3546,6 +3563,7 @@ final class GameScene: SKScene {
         audio?.play(.hyperspaceArrive)
         jumpArriveGateID = nil
         Log.scene.debug("reloadSystem: now in \(self.systemName) [\(systemID)], \(w.npcs.count) NPCs")
+        onSystemReloaded?(systemID)
     }
 
     /// The destination gate opens with a bright ring as the player pops out, then
@@ -3735,6 +3753,9 @@ final class GameScene: SKScene {
         for (_, n) in aiLabelNodes { n.removeFromParent() }
         aiLabelNodes.removeAll()
         pendingEntrance.removeAll()
+        // Entity ids restart with each World, so stale escort tags could
+        // misattribute a new ship's death. `respawnEscorts` re-tags the wing.
+        escortRecordByEntity.removeAll()
         selectedPlanetID = nil
         shipBracket.isHidden = true
         planetBracket.isHidden = true

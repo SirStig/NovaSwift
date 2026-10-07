@@ -209,6 +209,12 @@ public struct MissionRes: Sendable {
     public var requiresCargoSpace: Bool   { flags2 & 0x0001 != 0 }
     public var failIfPlayerDisabled: Bool { flags2 & 0x0004 != 0 }
 
+    /// True if this mission actually moves cargo. Bible: `CargoType -1` = no
+    /// special cargo and `CargoQty -1` = no cargo, so neither may become a
+    /// phantom ton via `abs(-1)`. `1000` (random standard commodity) and the
+    /// `<= -2` random tonnage codes both count as real cargo.
+    public var carriesCargo: Bool { cargoType >= 0 && cargoQty != -1 && cargoQty != 0 }
+
     /// The conventional "offer text" `dësc` id EV Nova shows in the mission
     /// listing: 3872 + the mission id (verified: mïsn 128 → dësc 4000).
     public var offerTextID: Int { 3872 + id }
