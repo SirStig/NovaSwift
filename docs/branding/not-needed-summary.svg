@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="194" viewBox="0 0 640 194" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<style>.hl{font-size:16px;font-weight:700;fill:#f0e6da}.sb{font-size:12px;fill:#a89a95}.nm{font-size:13px;fill:#c6bab5}</style>
+<rect width="640" height="194" rx="10" fill="#0d0a0e"/>
+<text x="20" y="32" class="hl">Not needed</text>
+<text x="20" y="52" class="sb">Parts of the original that NovaSwift replaces with its own engine, so there is nothing to port.</text>
+<text x="20" y="80" class="nm">Shareware registration</text><text x="620" y="80" class="sb" text-anchor="end">21 functions</text>
+<text x="20" y="102" class="nm">QuickTime</text><text x="620" y="102" class="sb" text-anchor="end">381 functions</text>
+<text x="20" y="124" class="nm">Image &amp; audio libraries</text><text x="620" y="124" class="sb" text-anchor="end">399 functions</text>
+<text x="20" y="146" class="nm">Networking</text><text x="620" y="146" class="sb" text-anchor="end">199 functions</text>
+<text x="20" y="168" class="nm">C runtime &amp; Win32 glue</text><text x="620" y="168" class="sb" text-anchor="end">805 functions</text>
+</svg>

@@ -26,22 +26,20 @@ Original behaviour is the default. The decompiled code is not in this repo; only
 written specs with function addresses are, in
 [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-Each square below is one function in the original executable, grouped by
-subsystem. Green ones have been checked against NovaSwift and match, either
-through the [fidelity plan](docs/reverse-engineering/FIDELITY_PLAN.md) or a
-line-by-line comparison. Amber ones differ and are being fixed, blue is gameplay
-code not checked yet, and dark grey is code with nothing to port. [docs/STATUS.md](docs/STATUS.md) explains the
-colours and what's left; the [website](https://sirstig.github.io/NovaSwift/#progress) has a version you can
-hover over.
+![How closely NovaSwift matches the original game](docs/branding/fidelity-summary.svg?v=e8842066)
 
-![One square per function in the original executable](docs/branding/progress-blocks.svg?v=58799898)
+Each row is one part of the game. A filled block is roughly 5% of that part's
+original code, checked against NovaSwift and behaving the same. Amber blocks are
+differences being fixed right now. For the function-by-function view, see
+[docs/STATUS.md](docs/STATUS.md) or the [website](https://sirstig.github.io/NovaSwift/#progress).
 
 ### Beyond the original
 
-NovaSwift's own features, one square per task. Green is done, amber partly done,
-outline planned.
+![NovaSwift's own features](docs/branding/features-summary.svg?v=a996abb9)
 
-![NovaSwift's own features](docs/branding/feature-blocks.svg?v=4978b310)
+### Not needed
+
+![Parts of the original NovaSwift doesn't need](docs/branding/not-needed-summary.svg?v=0f518ead)
 
 ## Screenshots
 
