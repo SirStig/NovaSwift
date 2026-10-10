@@ -521,11 +521,26 @@ final class GameDataController: ObservableObject {
     /// A background-music track shipped alongside the base data, if the player's
     /// copy includes one (EV Nova CE ships `Nova Music.mp3` in "Nova Files").
     /// Sound *effects* come from `snd ` resources; music is an external audio file.
+    /// The title music as `FUN_004ab5d0` finds it: the file named by `STR# 130`
+    /// #2, tried in the plug-ins folder first and then in Nova Files, each as
+    /// the bare name, `.mov`, then `.mp3`. Nothing when that string is absent
+    /// or no file matches (the original then plays no music).
     func musicTrackURL() -> URL? {
-        guard let baseDir = resolveBaseDir() else { return nil }
-        let tracks = Self.discoverAudioFiles(in: baseDir)
-        // Prefer a file that looks like the main music track.
-        return tracks.first { $0.lastPathComponent.lowercased().contains("music") } ?? tracks.first
+        guard let name = game?.stringList(130)?.string(at: 2), !name.isEmpty else { return nil }
+        let fm = FileManager.default
+        let baseDirs: [URL] = resolveBaseDir().map { [$0.appendingPathComponent("Nova Files"), $0] } ?? []
+        let folders: [String: [URL]] = ["Nova Plug-ins": resolvePluginDirs(), "Nova Files": baseDirs]
+        for candidate in OriginalAudio.musicCandidates(name: name) {
+            for dir in folders[candidate.folder] ?? [] {
+                let direct = dir.appendingPathComponent(candidate.file)
+                if fm.fileExists(atPath: direct.path) { return direct }
+                // Imported data may be nested a level deeper than the original's folders.
+                if let hit = Self.discoverAudioFiles(in: dir).first(where: {
+                    $0.lastPathComponent.caseInsensitiveCompare(candidate.file) == .orderedSame
+                }) { return hit }
+            }
+        }
+        return nil
     }
 
     /// The Galaxy Racing Network holovid for race outcome `index` (1-4), shipped
