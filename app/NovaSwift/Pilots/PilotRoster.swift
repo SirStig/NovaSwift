@@ -146,6 +146,26 @@ final class PilotRoster: ObservableObject {
         return save
     }
 
+    /// Save a pilot converted from an original EV Nova file (`EVNovaPilotImporter`)
+    /// as a new NovaSwift pilot. Returns the new save (nil if it couldn't be written).
+    @discardableResult
+    func importConverted(_ result: EVNovaPilotImportResult, game: NovaGame) -> PilotSave? {
+        let name = result.summary.pilotName
+        var save = PilotSave(displayName: name.isEmpty ? "Captain" : name,
+                             scenarioName: "Imported from EV Nova",
+                             player: result.player, game: game,
+                             dataFingerprint: Self.fingerprint(for: game))
+        do {
+            save = try archive.save(save, backup: false)
+            Log.pilot.notice("PilotRoster.importConverted: imported pilot \(save.id, privacy: .public) \"\(save.displayName, privacy: .public)\" from \(result.summary.format.rawValue, privacy: .public)")
+        } catch {
+            Log.pilot.error("PilotRoster.importConverted: failed to persist \"\(name, privacy: .public)\": \(String(describing: error), privacy: .public)")
+            return nil
+        }
+        refresh()
+        return save
+    }
+
     /// Adopt an already-live pilot state that was never created through this
     /// roster (e.g. the no-data-required demo path, or a dev autoplay session)
     /// into the durable archive for the first time, so it has a roster id and
