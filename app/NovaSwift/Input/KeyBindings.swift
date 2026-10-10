@@ -101,6 +101,30 @@ struct KeyBindings: Codable, Equatable {
         return nil
     }
 
+    /// Key Settings' edit (0x0048b6d0): bind `token` to `action` and leave any
+    /// other holder alone — duplicates are allowed while editing and refused
+    /// only at OK (`firstConflict`).
+    mutating func assign(_ action: GameAction, to token: String) { map[action] = token }
+
+    /// `ControlState_FindBindingConflict` 0x00466c10: the first action, in
+    /// `order`, whose key another action also holds.
+    func firstConflict(in order: [GameAction]) -> GameAction? {
+        var count: [String: Int] = [:]
+        for a in order { let t = token(for: a); if !t.isEmpty { count[t, default: 0] += 1 } }
+        return order.first { count[token(for: $0), default: 0] > 1 }
+    }
+
+    /// The keys Key Settings won't capture (`NovaInput_PeekActiveCommand`
+    /// 0x00466810 skips DIK 2–5, 0x3a–0x3f and 0x70–0x71): the number keys
+    /// 1–4 (the Escort Commands group keys), Caps Lock and F1–F5.
+    static func isCapturable(_ token: String) -> Bool {
+        if ["1", "2", "3", "4", "capslock"].contains(token) { return false }
+        // F1–F5 arrive as the AppKit function-key characters U+F704…U+F708.
+        if let scalar = token.unicodeScalars.first, token.unicodeScalars.count == 1,
+           (0xF704...0xF708).contains(scalar.value) { return false }
+        return true
+    }
+
     mutating func rebind(_ action: GameAction, to token: String) {
         // Clear any other action holding this token (no duplicate bindings).
         for (a, t) in map where t == token && a != action { map[a] = "" }
