@@ -53,7 +53,6 @@ let package = Package(
             path: "Sources/NovaSwiftPluginStore",
             resources: [
                 .copy("Resources/PluginCatalog.json"),
-                .copy("Resources/Screenshots"),
             ]
         ),
         .executableTarget(

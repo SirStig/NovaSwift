@@ -57,7 +57,7 @@ final class AppModel: ObservableObject {
     @Published var webImportActive = false
 
     /// Catalog browse/install state for the plug-in store (see `Store/`).
-    let store = PluginStoreModel()
+    let store = PluginsModel()
 
     /// Shared audio system: SFX + music, driven by `settings`. Used by the game
     /// scene (flight/combat SFX) and the launcher (UI clicks, music, sound test).

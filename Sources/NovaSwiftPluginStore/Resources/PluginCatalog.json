@@ -1,370 +1,553 @@
-[
-  {
-    "id": "frozen-heart",
-    "name": "The Frozen Heart",
-    "author": "Martin Turner",
-    "kind": "totalConversion",
-    "summary": "A classic story-driven total conversion — start a new pilot and head to the bar on Thallos.",
-    "description": "A story-heavy total conversion originally created for the first Escape Velocity and later ported to the Nova engine by Andrew Simmonds. Start a new pilot, land on Thallos, and visit the bar to begin. Includes its own documents folder with two encrypted files you're given access to later in the story — read it before you start.",
-    "tags": ["total conversion", "story", "classic"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/The_Frozen_Heart.zip",
-    "approxSizeMB": 12.35,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "femme-fatale",
-    "name": "Femme Fatale",
-    "author": "Martin Turner",
-    "kind": "totalConversion",
-    "summary": "The sequel to The Frozen Heart — a new pilot lands on Yëni Istanbul to begin.",
-    "description": "The direct sequel to The Frozen Heart, also by Martin Turner and ported to the Nova engine by Andrew Simmonds. Start a new pilot, land on Yëni Istanbul, and visit the bar. Read the included documentation first.",
-    "tags": ["total conversion", "story", "sequel"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Femme_Fatale.zip",
-    "approxSizeMB": 9.61,
-    "screenshotNames": ["1.jpg"],
-    "videoURL": null
-  },
-  {
-    "id": "polycon-ev",
-    "name": "Polycon EV",
-    "author": "AnubisTTP",
-    "kind": "totalConversion",
-    "summary": "A large original total conversion with its own galaxy, ships, and storyline.",
-    "description": "A full total conversion built from scratch by AnubisTTP with an original setting, galaxy, ships, and missions, distinct from the stock EV Nova universe. Quick-play launcher included, or install manually by swapping in the supplied Nova Files.",
-    "tags": ["total conversion", "original setting"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Polycon_EV.zip",
-    "approxSizeMB": 27.76,
-    "screenshotNames": ["1.jpg"],
-    "videoURL": null
-  },
-  {
-    "id": "ev-classic-for-nova",
-    "name": "EV Classic for Nova",
-    "author": "Ambrosia Software (original); ported by andrews05",
-    "kind": "totalConversion",
-    "summary": "The original Escape Velocity, faithfully ported onto the Nova engine.",
-    "description": "A port of Ambrosia Software's original Escape Velocity — the first game in the series — onto the EV Nova engine, designed to look and feel as close to the 1996 original as possible. Includes optional fix plug-ins (manual flares, an AI rocket-range hack, and a bundle of gameplay bug fixes) alongside the main scenario. Requires the included \"Sillycon\" font for authentic interface text.",
-    "tags": ["total conversion", "classic", "port"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EV_Classic_for_Nova.zip",
-    "approxSizeMB": 7.25,
-    "screenshotNames": ["1.jpg"],
-    "videoURL": null
-  },
-  {
-    "id": "ev-override-for-nova",
-    "name": "EV Override for Nova",
-    "author": "Ambrosia Software (original); ported by andrews05",
-    "kind": "totalConversion",
-    "summary": "The second game in the series, EV Override, ported onto the Nova engine.",
-    "description": "A port of Ambrosia Software's EV Override — the second game in the series — onto the EV Nova engine. Designed to match the original's look and feel; several other catalog entries (EVO Extras, EVO Facelift, Cold Fusion for Nova) build on top of this one. Requires the included \"Sillycon\" font.",
-    "tags": ["total conversion", "classic", "port"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EV_Override_for_Nova.zip",
-    "approxSizeMB": 8.86,
-    "screenshotNames": ["1.jpg"],
-    "videoURL": null
-  },
-  {
-    "id": "rev",
-    "name": "rEV",
-    "author": "Kris Quistorff; rebuilt by andrews05",
-    "kind": "patch",
-    "summary": "A major graphics and feature-enhancement pack for EV Classic for Nova.",
-    "description": "A graphical facelift and feature-enhancement pack for EV Classic for Nova, originally created by Kris Quistorff and rebuilt/expanded by andrews05. Ships as several optional pieces: rEV Data (small balanced feature enhancements, recommended), rEV xData (new outfits/weapons/ship variants), and rEV XL Ships (larger, more accurately-scaled ship sprites, best paired with xData). Install after EV Classic for Nova.",
-    "tags": ["patch", "graphics", "requires EV Classic for Nova"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/rEV_1.1.zip",
-    "approxSizeMB": 27.40,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "cold-fusion-for-nova",
-    "name": "Cold Fusion for Nova",
-    "author": "Dreamwave Studios; converted by Dr. Trowel",
-    "kind": "patch",
-    "summary": "A complete graphics replacement for EV Override, in thousands of colors.",
-    "description": "A full graphics replacement for EV Override — re-textured ships, outfits, planets/stations, explosions, asteroids, and interface art — rendered in thousands of colors rather than the original's dithered 256. No new ships, outfits, or missions, just a visual overhaul. Ships as six separate pieces (interface, planets, ships in space, shipyard/outfitter pics, shots & rocks, sparse planets) so you can pick which parts you want; install on top of EV Override for Nova.",
-    "tags": ["patch", "graphics", "requires EV Override for Nova"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Cold_Fusion_for_Nova_1.0.1.zip",
-    "approxSizeMB": 9.67,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "evo-facelift",
-    "name": "EVO Facelift",
-    "author": "Tim Morgan (Lightning Bolt Software); repackaged by andrews05",
-    "kind": "patch",
-    "summary": "A graphical facelift for EV Override — map colors, new station art, a splash screen, and more.",
-    "description": "A graphical facelift for EV Override for Nova, originally made by Tim Morgan of Lightning Bolt Software and repackaged for distribution by andrews05, with some fixes and rescaled sprites. Adds map colors, reorganized shipyard/outfitter art, new station sprites, and a 16-bit splash screen; bundles in Cold Fusion Planets and Sounds Galore. Not every component is required — Sounds Galore and the Range Extension plug are optional extras.",
-    "tags": ["patch", "graphics", "requires EV Override for Nova"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EVO_Facelift_1.0.7.zip",
-    "approxSizeMB": 21.12,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "evo-extras",
-    "name": "EVO Extras",
-    "author": "andrews05",
-    "kind": "gameplay",
-    "summary": "Six small gameplay plug-ins for EV Override, from bug-fix-style tweaks to a new UE mission string.",
-    "description": "A collection of six small, independent plug-ins for EV Override for Nova: Alien Artifact (reworks a classic Igadzra mission), Bonus Bays (unlocks purchasing UE/Voinian/Zidagar fighter bays), Mischievous Mods (a grab-bag of small annoyance fixes), Paaren Proceedings (a roughly 10-mission UE side story, with a quick-start pilot background to jump straight in), and Super Special (lets you keep extra weapons/shielding captured from certain named AI ships). Each comes in Facelift and non-Facelift variants; install only the ones you want.",
-    "tags": ["gameplay", "missions", "requires EV Override for Nova"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EVO_Extras.zip",
-    "approxSizeMB": 0.94,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "shields",
-    "name": "Shields",
-    "author": "andrews05",
-    "kind": "gameplay",
-    "summary": "A small plug-in adjusting ship shields, with a dedicated variant for ARPIA2.",
-    "description": "A small gameplay plug-in that adjusts ship shield behavior. Ships with two variants: a standard version and one specifically built for compatibility with the ARPIA2 total conversion — install whichever matches the scenario you're playing.",
-    "tags": ["gameplay", "small tweak"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Shields.zip",
-    "approxSizeMB": 0.29,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "collision-damage",
-    "name": "Collision Damage",
-    "author": "andrews05",
-    "kind": "gameplay",
-    "summary": "Ships take damage when they physically collide with each other.",
-    "description": "A small gameplay plug-in that adds damage when ships collide with one another in flight — stock EV Nova has no collision damage between ships, so this adds a bit of extra risk to crowded dogfights and close flying.",
-    "tags": ["gameplay", "small tweak", "difficulty"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Collision_Damage.zip",
-    "approxSizeMB": 0.001,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "dodge-that",
-    "name": "Dodge That",
-    "author": "andrews05",
-    "kind": "gameplay",
-    "summary": "Loosens missile tracking so incoming rockets are easier to dodge.",
-    "description": "A small gameplay plug-in that reduces missile/rocket tracking accuracy, giving the player more of a chance to physically dodge incoming ordnance rather than relying purely on point-defense or countermeasures.",
-    "tags": ["gameplay", "small tweak", "difficulty"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evstuff",
-    "sourceURL": "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Dodge_That.zip",
-    "approxSizeMB": 0.082,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "arpia2",
-    "name": "ARPIA2",
-    "author": "Peter \"Pace\" Craddock and the ARPIA Team",
-    "kind": "totalConversion",
-    "summary": "An acclaimed, puzzle-driven total conversion with a new galaxy, governments, and branching story.",
-    "description": "A large, highly-regarded total conversion by Peter \"Pace\" Craddock and the ARPIA Team (graphics, ship art, planet art, mission design credited across the team in-readme). Features an original galaxy, new governments, and a branching story with missions that expect the player to actually think — read the included ReadMe before diving in, especially for the riddle-solving sections. Do not delete any of the extra files/folders the plug-in installs alongside itself.",
-    "tags": ["total conversion", "story", "puzzles", "original setting"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/ARPIA2.zip",
-    "approxSizeMB": 37.22,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "white-dwarf",
-    "name": "White Dwarf",
-    "author": "DrFive",
-    "kind": "totalConversion",
-    "summary": "A fan sequel set a century after Nova, in a galaxy still recovering from a mysterious Calamity.",
-    "description": "A fan sequel total conversion by DrFive, set roughly a hundred years after the events of Nova (and after the same author's Brave New Void). The galaxy is still recovering from a mysterious \"Calamity\" that warped and ravaged known space seventy years earlier — and something may be stirring beyond the hyperlanes. In open beta as of this writing; expect an actively-developed, still-evolving scenario.",
-    "tags": ["total conversion", "story", "beta", "sequel"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/White%20Dwarf%20-%20Beta%201.3.zip",
-    "approxSizeMB": 380.8,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "brave-new-void",
-    "name": "Brave New Void",
-    "author": "DrFive",
-    "kind": "patch",
-    "summary": "A large-scale rebalance and expansion of the base Nova scenario, not a new galaxy.",
-    "description": "A \"total expansion\" plug-in for the base EV Nova scenario by DrFive (the same author as White Dwarf): rebalances combat, fixes bugs and design issues in the original game, and adds new ships, missions, outfits, and places to explore that aim to feel native to the Nova universe. Many of the stronger ship variants are gated behind side missions, hidden upgrades, or rare shipyards rather than being available outright.",
-    "tags": ["patch", "rebalance", "expansion"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Brave%20New%20Void.zip",
-    "approxSizeMB": 226.2,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "starfleet-adventures",
-    "name": "Starfleet Adventures",
-    "author": "Uncle Twitchy, later Dr. Trowel and astor",
-    "kind": "totalConversion",
-    "summary": "A Star Trek: The Original Series total conversion with an unusually large map and no fighters.",
-    "description": "A total conversion recasting Nova as 23rd-century Star Trek (The Original Series and the early movies). Notable design twists: no fighters, mostly Federation ships, \"upgrades\" come from hiring command crew rather than buying hardware, and most ships are inertialess, which changes combat significantly from stock Nova. Started by Uncle Twitchy and later carried on by Dr. Trowel and then astor; development has been quiet since its public alpha, so treat this as an unfinished but substantial labor of love rather than a polished release.",
-    "tags": ["total conversion", "star trek", "alpha", "unfinished"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Starfleet%20Adventures.zip",
-    "approxSizeMB": 109.3,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "ashen-galaxy",
-    "name": "Ashen Galaxy",
-    "author": "gray_shirt_ninja (graphics by Meowx)",
-    "kind": "totalConversion",
-    "summary": "A combat-focused human-vs-alien total conversion with dozens of ships across 200+ systems.",
-    "description": "A total conversion built around a thin but serviceable plot — humans fighting a technologically advanced alien threat — with gameplay centered heavily on combat. Adds dozens of original ships and weapons using Meowx's graphics set, spread across more than two hundred systems, with a campaign to keep you oriented while you fight.",
-    "tags": ["total conversion", "combat", "aliens"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Ashen%20Galaxy.zip",
-    "approxSizeMB": 48.9,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "brotherhood-of-the-kestrel",
-    "name": "Brotherhood of the Kestrel",
-    "author": "EV Nova community (consolidates the classic \"Empire\" plug-in series)",
-    "kind": "totalConversion",
-    "summary": "A consolidation of the classic \"Empire\" series of plug-ins into one total conversion.",
-    "description": "Brings together the long-running \"Empire\" series of community plug-ins (originally for EV Classic) into a single consolidated total conversion for the Nova engine. Attribution for the underlying Empire-series work is spread across multiple original contributors from the classic-EV era; this package is the community's effort to preserve and unify it.",
-    "tags": ["total conversion", "classic lineage"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Brotherhood%20of%20the%20Kestrel.zip",
-    "approxSizeMB": 63.1,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "acheron",
-    "name": "Acheron",
-    "author": "Crusader Alpha",
-    "kind": "totalConversion",
-    "summary": "A small, focused total conversion set in the Trikeratos Alliance, favoring depth over breadth.",
-    "description": "A compact total conversion by Crusader Alpha, released in 2008, that completely replaces the Nova scenario with new ships, weapons, missions, outfits, and graphics inside a deliberately small galaxy (the Trikeratos Alliance). Aims for depth over breadth — a tighter, more focused scenario rather than a sprawling one.",
-    "tags": ["total conversion", "focused", "original setting"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Acheron%201.1.zip",
-    "approxSizeMB": 17.44,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "realm-of-prey",
-    "name": "Realm of Prey",
-    "author": "Tim Isles; ported to Nova by Agee (MacDevil)",
-    "kind": "totalConversion",
-    "summary": "One of the best-regarded expansions for the original Escape Velocity, ported to the Nova engine.",
-    "description": "Originally one of the standout expansion sets for the first Escape Velocity, created by Tim Isles, later ported onto the Nova engine by Agee (MacDevil). Play it as its own scenario, distinct from stock Nova.",
-    "tags": ["total conversion", "classic lineage", "port"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Realm%20of%20Prey.zip",
-    "approxSizeMB": 30.5,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "pale",
-    "name": "Pale",
-    "author": "EV Nova community",
-    "kind": "patch",
-    "summary": "An ambitious expansion to EV Classic.",
-    "description": "Billed by the community as \"an ambitious expansion to EV Classic\" — install on top of EV Classic for Nova. Specific authorship details weren't confirmed while building this catalog entry; treat it as a community-maintained expansion rather than an officially attributed one.",
-    "tags": ["patch", "expansion", "requires EV Classic for Nova"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Pale.zip",
-    "approxSizeMB": 10.88,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "reign-of-the-ue",
-    "name": "Reign of the UE",
-    "author": "UE Patriot",
-    "kind": "patch",
-    "summary": "Continues the UE storyline after one of EV Override's major objectives is completed.",
-    "description": "An expansion plug-in by UE Patriot, originally written for the classic EV Override and since adapted for EV Override for Nova, that continues the UE storyline past one of Override's major campaign milestones.",
-    "tags": ["patch", "story", "requires EV Override for Nova"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/Reign%20of%20the%20UE.zip",
-    "approxSizeMB": 13.13,
-    "screenshotNames": [],
-    "videoURL": null
-  },
-  {
-    "id": "ev-game-expander",
-    "name": "EV Game Expander",
-    "author": "EV Nova community",
-    "kind": "patch",
-    "summary": "An all-new scenario that substantially expands EV Classic.",
-    "description": "Expands EV Classic for Nova with a substantially larger game environment. Specific authorship details weren't confirmed while building this catalog entry; treat it as a community-maintained expansion rather than an officially attributed one.",
-    "tags": ["patch", "expansion", "requires EV Classic for Nova"],
-    "requiresBase": true,
-    "prebundled": false,
-    "sourceHost": "evDownload",
-    "sourceURL": "https://download.escape-velocity.games/EV%20Game%20Expander%20for%20Nova%201.1.zip",
-    "approxSizeMB": 18.16,
-    "screenshotNames": [],
-    "videoURL": null
-  }
-]
+{
+  "schemaVersion": 1,
+  "updated": "2026-10-10",
+  "plugins": [
+    {
+      "id": "frozen-heart",
+      "name": "The Frozen Heart",
+      "author": "Martin Turner",
+      "version": "1.0",
+      "summary": "A classic story-driven total conversion — start a new pilot and head to the bar on Thallos.",
+      "description": "A story-heavy total conversion originally created for the first Escape Velocity and later ported to the Nova engine by Andrew Simmonds. Start a new pilot, land on Thallos, and visit the bar to begin. Includes its own documents folder with two encrypted files you're given access to later in the story — read it before you start.",
+      "tags": [
+        "story",
+        "classic"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/The_Frozen_Heart.zip"
+      ],
+      "sizeBytes": 12952692,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 23
+    },
+    {
+      "id": "femme-fatale",
+      "name": "Femme Fatale",
+      "author": "Martin Turner",
+      "version": "1.0",
+      "summary": "The sequel to The Frozen Heart — a new pilot lands on Yëni Istanbul to begin.",
+      "description": "The direct sequel to The Frozen Heart, also by Martin Turner and ported to the Nova engine by Andrew Simmonds. Start a new pilot, land on Yëni Istanbul, and visit the bar. Read the included documentation first.",
+      "tags": [
+        "story",
+        "sequel"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Femme_Fatale.zip"
+      ],
+      "sizeBytes": 10078167,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 22
+    },
+    {
+      "id": "polycon-ev",
+      "name": "Polycon EV",
+      "author": "AnubisTTP",
+      "version": "1.0",
+      "summary": "A large original total conversion with its own galaxy, ships, and storyline.",
+      "description": "A full total conversion built from scratch by AnubisTTP with an original setting, galaxy, ships, and missions, distinct from the stock EV Nova universe. Quick-play launcher included, or install manually by swapping in the supplied Nova Files.",
+      "tags": [
+        "original setting"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Polycon_EV.zip"
+      ],
+      "sizeBytes": 29104056,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 21
+    },
+    {
+      "id": "ev-classic-for-nova",
+      "name": "EV Classic for Nova",
+      "author": "Ambrosia Software (original); ported by andrews05",
+      "version": "1.0",
+      "summary": "The original Escape Velocity, faithfully ported onto the Nova engine.",
+      "description": "A port of Ambrosia Software's original Escape Velocity — the first game in the series — onto the EV Nova engine, designed to look and feel as close to the 1996 original as possible. Includes optional fix plug-ins (manual flares, an AI rocket-range hack, and a bundle of gameplay bug fixes) alongside the main scenario. Requires the included \"Sillycon\" font for authentic interface text.",
+      "tags": [
+        "classic",
+        "port"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EV_Classic_for_Nova.zip"
+      ],
+      "sizeBytes": 7599355,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 20
+    },
+    {
+      "id": "ev-override-for-nova",
+      "name": "EV Override for Nova",
+      "author": "Ambrosia Software (original); ported by andrews05",
+      "version": "1.0",
+      "summary": "The second game in the series, EV Override, ported onto the Nova engine.",
+      "description": "A port of Ambrosia Software's EV Override — the second game in the series — onto the EV Nova engine. Designed to match the original's look and feel; several other catalog entries (EVO Extras, EVO Facelift, Cold Fusion for Nova) build on top of this one. Requires the included \"Sillycon\" font.",
+      "tags": [
+        "classic",
+        "port"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EV_Override_for_Nova.zip"
+      ],
+      "sizeBytes": 9292633,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 19
+    },
+    {
+      "id": "rev",
+      "name": "rEV",
+      "author": "Kris Quistorff; rebuilt by andrews05",
+      "version": "1.1",
+      "summary": "A major graphics and feature-enhancement pack for EV Classic for Nova.",
+      "description": "A graphical facelift and feature-enhancement pack for EV Classic for Nova, originally created by Kris Quistorff and rebuilt/expanded by andrews05. Ships as several optional pieces: rEV Data (small balanced feature enhancements, recommended), rEV xData (new outfits/weapons/ship variants), and rEV XL Ships (larger, more accurately-scaled ship sprites, best paired with xData). Install after EV Classic for Nova.",
+      "tags": [
+        "patch",
+        "graphics"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/rEV_1.1.zip"
+      ],
+      "sizeBytes": 28727401,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [
+        "ev-classic-for-nova"
+      ],
+      "addedDate": "2026-10-10",
+      "popularity": 18
+    },
+    {
+      "id": "cold-fusion-for-nova",
+      "name": "Cold Fusion for Nova",
+      "author": "Dreamwave Studios; converted by Dr. Trowel",
+      "version": "1.0.1",
+      "summary": "A complete graphics replacement for EV Override, in thousands of colors.",
+      "description": "A full graphics replacement for EV Override — re-textured ships, outfits, planets/stations, explosions, asteroids, and interface art — rendered in thousands of colors rather than the original's dithered 256. No new ships, outfits, or missions, just a visual overhaul. Ships as six separate pieces (interface, planets, ships in space, shipyard/outfitter pics, shots & rocks, sparse planets) so you can pick which parts you want; install on top of EV Override for Nova.",
+      "tags": [
+        "patch",
+        "graphics"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Cold_Fusion_for_Nova_1.0.1.zip"
+      ],
+      "sizeBytes": 10144766,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [
+        "ev-override-for-nova"
+      ],
+      "addedDate": "2026-10-10",
+      "popularity": 17
+    },
+    {
+      "id": "evo-facelift",
+      "name": "EVO Facelift",
+      "author": "Tim Morgan (Lightning Bolt Software); repackaged by andrews05",
+      "version": "1.0.7",
+      "summary": "A graphical facelift for EV Override — map colors, new station art, a splash screen, and more.",
+      "description": "A graphical facelift for EV Override for Nova, originally made by Tim Morgan of Lightning Bolt Software and repackaged for distribution by andrews05, with some fixes and rescaled sprites. Adds map colors, reorganized shipyard/outfitter art, new station sprites, and a 16-bit splash screen; bundles in Cold Fusion Planets and Sounds Galore. Not every component is required — Sounds Galore and the Range Extension plug are optional extras.",
+      "tags": [
+        "patch",
+        "graphics"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EVO_Facelift_1.0.7.zip"
+      ],
+      "sizeBytes": 22146103,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [
+        "ev-override-for-nova"
+      ],
+      "addedDate": "2026-10-10",
+      "popularity": 16
+    },
+    {
+      "id": "evo-extras",
+      "name": "EVO Extras",
+      "author": "andrews05",
+      "version": "1.0",
+      "summary": "Six small gameplay plug-ins for EV Override, from bug-fix-style tweaks to a new UE mission string.",
+      "description": "A collection of six small, independent plug-ins for EV Override for Nova: Alien Artifact (reworks a classic Igadzra mission), Bonus Bays (unlocks purchasing UE/Voinian/Zidagar fighter bays), Mischievous Mods (a grab-bag of small annoyance fixes), Paaren Proceedings (a roughly 10-mission UE side story, with a quick-start pilot background to jump straight in), and Super Special (lets you keep extra weapons/shielding captured from certain named AI ships). Each comes in Facelift and non-Facelift variants; install only the ones you want.",
+      "tags": [
+        "gameplay",
+        "missions"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/EVO_Extras.zip"
+      ],
+      "sizeBytes": 989672,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [
+        "ev-override-for-nova"
+      ],
+      "addedDate": "2026-10-10",
+      "popularity": 15
+    },
+    {
+      "id": "shields",
+      "name": "Shields",
+      "author": "andrews05",
+      "version": "1.0",
+      "summary": "A small plug-in adjusting ship shields, with a dedicated variant for ARPIA2.",
+      "description": "A small gameplay plug-in that adjusts ship shield behavior. Ships with two variants: a standard version and one specifically built for compatibility with the ARPIA2 total conversion — install whichever matches the scenario you're playing.",
+      "tags": [
+        "gameplay",
+        "small tweak"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Shields.zip"
+      ],
+      "sizeBytes": 306398,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 14
+    },
+    {
+      "id": "collision-damage",
+      "name": "Collision Damage",
+      "author": "andrews05",
+      "version": "1.0",
+      "summary": "Ships take damage when they physically collide with each other.",
+      "description": "A small gameplay plug-in that adds damage when ships collide with one another in flight — stock EV Nova has no collision damage between ships, so this adds a bit of extra risk to crowded dogfights and close flying.",
+      "tags": [
+        "gameplay",
+        "small tweak",
+        "difficulty"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Collision_Damage.zip"
+      ],
+      "sizeBytes": 1220,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 13
+    },
+    {
+      "id": "dodge-that",
+      "name": "Dodge That",
+      "author": "andrews05",
+      "version": "1.0",
+      "summary": "Loosens missile tracking so incoming rockets are easier to dodge.",
+      "description": "A small gameplay plug-in that reduces missile/rocket tracking accuracy, giving the player more of a chance to physically dodge incoming ordnance rather than relying purely on point-defense or countermeasures.",
+      "tags": [
+        "gameplay",
+        "small tweak",
+        "difficulty"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://media.githubusercontent.com/media/andrews05/evstuff/master/plugins/Dodge_That.zip"
+      ],
+      "sizeBytes": 86132,
+      "homepageURL": "https://github.com/andrews05/evstuff",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 12
+    },
+    {
+      "id": "arpia2",
+      "name": "ARPIA2",
+      "author": "Peter \"Pace\" Craddock and the ARPIA Team",
+      "version": "1.0",
+      "summary": "An acclaimed, puzzle-driven total conversion with a new galaxy, governments, and branching story.",
+      "description": "A large, highly-regarded total conversion by Peter \"Pace\" Craddock and the ARPIA Team (graphics, ship art, planet art, mission design credited across the team in-readme). Features an original galaxy, new governments, and a branching story with missions that expect the player to actually think — read the included ReadMe before diving in, especially for the riddle-solving sections. Do not delete any of the extra files/folders the plug-in installs alongside itself.",
+      "tags": [
+        "story",
+        "puzzles",
+        "original setting"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/ARPIA2.zip"
+      ],
+      "sizeBytes": 39026861,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 11
+    },
+    {
+      "id": "white-dwarf",
+      "name": "White Dwarf",
+      "author": "DrFive",
+      "version": "1.3-beta",
+      "summary": "A fan sequel set a century after Nova, in a galaxy still recovering from a mysterious Calamity.",
+      "description": "A fan sequel total conversion by DrFive, set roughly a hundred years after the events of Nova (and after the same author's Brave New Void). The galaxy is still recovering from a mysterious \"Calamity\" that warped and ravaged known space seventy years earlier — and something may be stirring beyond the hyperlanes. In open beta as of this writing; expect an actively-developed, still-evolving scenario.",
+      "tags": [
+        "story",
+        "beta",
+        "sequel"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/White%20Dwarf%20-%20Beta%201.3.zip"
+      ],
+      "sizeBytes": 399293632,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 10
+    },
+    {
+      "id": "brave-new-void",
+      "name": "Brave New Void",
+      "author": "DrFive",
+      "version": "1.0",
+      "summary": "A large-scale rebalance and expansion of the base Nova scenario, not a new galaxy.",
+      "description": "A \"total expansion\" plug-in for the base EV Nova scenario by DrFive (the same author as White Dwarf): rebalances combat, fixes bugs and design issues in the original game, and adds new ships, missions, outfits, and places to explore that aim to feel native to the Nova universe. Many of the stronger ship variants are gated behind side missions, hidden upgrades, or rare shipyards rather than being available outright.",
+      "tags": [
+        "patch",
+        "rebalance",
+        "expansion"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Brave%20New%20Void.zip"
+      ],
+      "sizeBytes": 237149000,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 9
+    },
+    {
+      "id": "starfleet-adventures",
+      "name": "Starfleet Adventures",
+      "author": "Uncle Twitchy, later Dr. Trowel and astor",
+      "version": "1.0",
+      "summary": "A Star Trek: The Original Series total conversion with an unusually large map and no fighters.",
+      "description": "A total conversion recasting Nova as 23rd-century Star Trek (The Original Series and the early movies). Notable design twists: no fighters, mostly Federation ships, \"upgrades\" come from hiring command crew rather than buying hardware, and most ships are inertialess, which changes combat significantly from stock Nova. Started by Uncle Twitchy and later carried on by Dr. Trowel and then astor; development has been quiet since its public alpha, so treat this as an unfinished but substantial labor of love rather than a polished release.",
+      "tags": [
+        "star trek",
+        "alpha",
+        "unfinished"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Starfleet%20Adventures.zip"
+      ],
+      "sizeBytes": 114638116,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 8
+    },
+    {
+      "id": "ashen-galaxy",
+      "name": "Ashen Galaxy",
+      "author": "gray_shirt_ninja (graphics by Meowx)",
+      "version": "1.0",
+      "summary": "A combat-focused human-vs-alien total conversion with dozens of ships across 200+ systems.",
+      "description": "A total conversion built around a thin but serviceable plot — humans fighting a technologically advanced alien threat — with gameplay centered heavily on combat. Adds dozens of original ships and weapons using Meowx's graphics set, spread across more than two hundred systems, with a campaign to keep you oriented while you fight.",
+      "tags": [
+        "combat",
+        "aliens"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Ashen%20Galaxy.zip"
+      ],
+      "sizeBytes": 51245408,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 7
+    },
+    {
+      "id": "brotherhood-of-the-kestrel",
+      "name": "Brotherhood of the Kestrel",
+      "author": "EV Nova community (consolidates the classic \"Empire\" plug-in series)",
+      "version": "1.0",
+      "summary": "A consolidation of the classic \"Empire\" series of plug-ins into one total conversion.",
+      "description": "Brings together the long-running \"Empire\" series of community plug-ins (originally for EV Classic) into a single consolidated total conversion for the Nova engine. Attribution for the underlying Empire-series work is spread across multiple original contributors from the classic-EV era; this package is the community's effort to preserve and unify it.",
+      "tags": [
+        "classic lineage"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Brotherhood%20of%20the%20Kestrel.zip"
+      ],
+      "sizeBytes": 66198300,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 6
+    },
+    {
+      "id": "acheron",
+      "name": "Acheron",
+      "author": "Crusader Alpha",
+      "version": "1.1",
+      "summary": "A small, focused total conversion set in the Trikeratos Alliance, favoring depth over breadth.",
+      "description": "A compact total conversion by Crusader Alpha, released in 2008, that completely replaces the Nova scenario with new ships, weapons, missions, outfits, and graphics inside a deliberately small galaxy (the Trikeratos Alliance). Aims for depth over breadth — a tighter, more focused scenario rather than a sprawling one.",
+      "tags": [
+        "focused",
+        "original setting"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Acheron%201.1.zip"
+      ],
+      "sizeBytes": 18286745,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 5
+    },
+    {
+      "id": "realm-of-prey",
+      "name": "Realm of Prey",
+      "author": "Tim Isles; ported to Nova by Agee (MacDevil)",
+      "version": "1.0",
+      "summary": "One of the best-regarded expansions for the original Escape Velocity, ported to the Nova engine.",
+      "description": "Originally one of the standout expansion sets for the first Escape Velocity, created by Tim Isles, later ported onto the Nova engine by Agee (MacDevil). Play it as its own scenario, distinct from stock Nova.",
+      "tags": [
+        "classic lineage",
+        "port"
+      ],
+      "isTotalConversion": true,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Realm%20of%20Prey.zip"
+      ],
+      "sizeBytes": 31982456,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [],
+      "addedDate": "2026-10-10",
+      "popularity": 4
+    },
+    {
+      "id": "pale",
+      "name": "Pale",
+      "author": "EV Nova community",
+      "version": "1.0",
+      "summary": "An ambitious expansion to EV Classic.",
+      "description": "Billed by the community as \"an ambitious expansion to EV Classic\" — install on top of EV Classic for Nova. Specific authorship details weren't confirmed while building this catalog entry; treat it as a community-maintained expansion rather than an officially attributed one.",
+      "tags": [
+        "patch",
+        "expansion"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Pale.zip"
+      ],
+      "sizeBytes": 11412593,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [
+        "ev-classic-for-nova"
+      ],
+      "addedDate": "2026-10-10",
+      "popularity": 3
+    },
+    {
+      "id": "reign-of-the-ue",
+      "name": "Reign of the UE",
+      "author": "UE Patriot",
+      "version": "1.0",
+      "summary": "Continues the UE storyline after one of EV Override's major objectives is completed.",
+      "description": "An expansion plug-in by UE Patriot, originally written for the classic EV Override and since adapted for EV Override for Nova, that continues the UE storyline past one of Override's major campaign milestones.",
+      "tags": [
+        "patch",
+        "story"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/Reign%20of%20the%20UE.zip"
+      ],
+      "sizeBytes": 13774344,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [
+        "ev-override-for-nova"
+      ],
+      "addedDate": "2026-10-10",
+      "popularity": 2
+    },
+    {
+      "id": "ev-game-expander",
+      "name": "EV Game Expander",
+      "author": "EV Nova community",
+      "version": "1.1",
+      "summary": "An all-new scenario that substantially expands EV Classic.",
+      "description": "Expands EV Classic for Nova with a substantially larger game environment. Specific authorship details weren't confirmed while building this catalog entry; treat it as a community-maintained expansion rather than an officially attributed one.",
+      "tags": [
+        "patch",
+        "expansion"
+      ],
+      "isTotalConversion": false,
+      "downloadURLs": [
+        "https://download.escape-velocity.games/EV%20Game%20Expander%20for%20Nova%201.1.zip"
+      ],
+      "sizeBytes": 18982459,
+      "homepageURL": "https://download.escape-velocity.games/",
+      "license": "Fan-made plug-in. NovaSwift links to the author's original download and does not host or redistribute the file.",
+      "minNovaSwiftVersion": "1.0",
+      "dependencies": [
+        "ev-classic-for-nova"
+      ],
+      "addedDate": "2026-10-10",
+      "popularity": 1
+    }
+  ]
+}

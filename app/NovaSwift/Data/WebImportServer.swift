@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import NovaSwiftPluginStore
 
 /// A tiny local-Wi-Fi upload server for platforms with no file picker —
 /// tvOS first and foremost. While the Data Setup wizard's Apple TV import
@@ -31,6 +32,9 @@ final class WebImportServer: ObservableObject {
 
     /// Where uploads land. Set before `start()`.
     private var destinationDir: URL
+    /// Plug-in mode (Plugins screen): a .zip is one plug-in unpacked into its own
+    /// folder under `destinationDir`, instead of a whole game folder.
+    var unpackZipsAsPlugins = false
     private var listener: NWListener?
     /// Strong refs to in-flight connections (dropped on close).
     private var connections: [ObjectIdentifier: NWConnection] = [:]
@@ -50,6 +54,8 @@ final class WebImportServer: ObservableObject {
     private static let allowedExtensions: Set<String> = [
         "ndat", "rez", "zip", "mp3", "m4a", "aiff", "wav", "ttf", "otf", "mov", "mp4", "m4v",
     ]
+
+    func setDestination(_ url: URL) { destinationDir = url }
 
     init(destinationDir: URL) {
         self.destinationDir = destinationDir
@@ -224,6 +230,10 @@ final class WebImportServer: ObservableObject {
                  body: "Skipped \(name): not an EV Nova data/media file", on: connection)
             return
         }
+        if ext == "zip" && unpackZipsAsPlugins {
+            handlePluginZipUpload(request.body, name: name, on: connection)
+            return
+        }
         if ext == "zip" {
             handleZipUpload(request.body, name: name, on: connection)
             return
@@ -239,6 +249,28 @@ final class WebImportServer: ObservableObject {
             send(status: "200 OK", body: "OK", on: connection)
         } catch {
             send(status: "500 Internal Server Error", body: error.localizedDescription, on: connection)
+        }
+    }
+
+    private func handlePluginZipUpload(_ body: Data, name: String, on connection: NWConnection) {
+        let dest = destinationDir
+        Task { @MainActor in
+            let tmpZip = FileManager.default.temporaryDirectory
+                .appendingPathComponent("novaswift-upload-\(UUID().uuidString).zip")
+            do {
+                try body.write(to: tmpZip)
+                let id = (name as NSString).deletingPathExtension
+                try await Task.detached(priority: .userInitiated) {
+                    _ = try PluginInstaller.install(archiveAt: tmpZip, id: id, into: dest)
+                }.value
+                if !self.receivedFiles.contains(name) { self.receivedFiles.append(name) }
+                self.onFileReceived()
+                self.send(status: "200 OK", body: "OK", on: connection)
+            } catch {
+                try? FileManager.default.removeItem(at: tmpZip)
+                self.send(status: "500 Internal Server Error",
+                          body: error.localizedDescription, on: connection)
+            }
         }
     }
 

@@ -53,6 +53,7 @@ struct HailDialogView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { onClose() }
 
+            #if !os(tvOS)
             // The comm window's key shortcuts (0x0047fa40): Return, E and Esc
             // close the channel, R requests assistance, G says greetings.
             Group {
@@ -64,6 +65,7 @@ struct HailDialogView: View {
                 Button("") { onGreetings() }.keyboardShortcut("g", modifiers: [])
             }
             .opacity(0).frame(width: 0, height: 0).allowsHitTesting(false)
+            #endif
 
             if let graphics, let frameImage {
                 // NovaMenu does its own GeometryReader-based scaling against the
