@@ -3,9 +3,9 @@
 <rect width="432" height="1357" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">EV Nova CE executable: 3199 functions, one square each</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Checked: matches the original (528)</text>
+<text x="30" y="55" class="lg">Checked: matches the original (589)</text>
 <rect x="16" y="64" width="9" height="9" fill="#e3a52b"/>
-<text x="30" y="73" class="lg">Differs: fix in progress (130)</text>
+<text x="30" y="73" class="lg">Differs: fix in progress (69)</text>
 <rect x="16" y="82" width="9" height="9" fill="#3d5f8c"/>
 <text x="30" y="91" class="lg">Gameplay, not yet checked (49)</text>
 <rect x="16" y="100" width="9" height="9" fill="none" stroke="#8d807c"/>
@@ -510,7 +510,7 @@
 <rect x="128" y="532" width="7" height="7" fill="#3fb950"><title>Stellar_SelectRandomAdjacentDestination @ 0x0046e9e0 (84 B) — Checked: matches the original — AI-12</title></rect>
 <rect x="136" y="532" width="7" height="7" fill="#3fb950"><title>Stellar_CountValidLinkedStellarDestinations @ 0x0046ebb0 (57 B) — Checked: matches the original</title></rect>
 <rect x="144" y="532" width="7" height="7" fill="#3a3236"><title>NovaUi_HideTravelSelectionSprite @ 0x0046ef80 (34 B) — Not gameplay, nothing to port</title></rect>
-<rect x="152" y="532" width="7" height="7" fill="#3fb950"><title>Stellar_GetJumpSequenceDuration60Hz @ 0x0046efb0 (23 B) — Checked: matches the original</title></rect>
+<rect x="152" y="532" width="7" height="7" fill="#3fb950"><title>Stellar_GetJumpSequenceDuration60Hz @ 0x0046efb0 (23 B) — Checked: matches the original — FL-04</title></rect>
 <rect x="160" y="532" width="7" height="7" fill="#3fb950"><title>Stellar_AreStellarsEquivalent @ 0x0046efd0 (296 B) — Checked: matches the original</title></rect>
 <rect x="168" y="532" width="7" height="7" fill="#3a3236"><title>NovaUi_DrawTravelDestinationServicesWindow @ 0x0047cfe0 (415 B) — Not gameplay, nothing to port</title></rect>
 <rect x="176" y="532" width="7" height="7" fill="#e3a52b"><title>NovaUi_RunTravelNewsWindow @ 0x0047d180 (485 B) — Differs: fix in progress</title></rect>
@@ -816,33 +816,33 @@
 <rect x="344" y="675" width="7" height="7" fill="#3fb950"><title>ResourceArchive_OpenAllRezInNovaFiles @ 0x00872640 (29 B) — Checked: matches the original</title></rect>
 <rect x="352" y="675" width="7" height="7" fill="#3fb950"><title>ResourceArchive_OpenAllRezInNovaPlugins @ 0x0087265d (81 B) — Checked: matches the original — UI-16</title></rect>
 <rect x="360" y="675" width="7" height="7" fill="#3a3236"><title>Resource_LoadPixPatAsImage @ 0x0087293e (1026 B) — Not gameplay, nothing to port</title></rect>
-<text x="16" y="705" class="gh">Dialogs &amp; preferences</text><text x="416" y="705" class="gn" text-anchor="end">155 functions · 13 matched</text>
-<rect x="16" y="712" width="7" height="7" fill="#e3a52b"><title>NovaUi_RefreshGameplayPanels @ 0x0045d320 (690 B) — Differs: fix in progress</title></rect>
-<rect x="24" y="712" width="7" height="7" fill="#e3a52b"><title>NovaText_StripLeadingArticle @ 0x004665f0 (541 B) — Differs: fix in progress</title></rect>
+<text x="16" y="705" class="gh">Dialogs &amp; preferences</text><text x="416" y="705" class="gn" text-anchor="end">155 functions · 27 matched</text>
+<rect x="16" y="712" width="7" height="7" fill="#3fb950"><title>NovaUi_RefreshGameplayPanels @ 0x0045d320 (690 B) — Checked: matches the original</title></rect>
+<rect x="24" y="712" width="7" height="7" fill="#3fb950"><title>NovaText_StripLeadingArticle @ 0x004665f0 (541 B) — Checked: matches the original</title></rect>
 <rect x="32" y="712" width="7" height="7" fill="#3fb950"><title>ControlState_FindBindingConflict @ 0x00466c10 (47 B) — Checked: matches the original</title></rect>
 <rect x="40" y="712" width="7" height="7" fill="#3fb950"><title>NovaText_FormatDateString @ 0x00468450 (419 B) — Checked: matches the original — UI-11</title></rect>
 <rect x="48" y="712" width="7" height="7" fill="#3fb950"><title>NovaText_FormatLongDateString @ 0x00468600 (416 B) — Checked: matches the original — UI-11</title></rect>
-<rect x="56" y="712" width="7" height="7" fill="#e3a52b"><title>NovaText_SplitPascalStringAtNewline @ 0x0046e6d0 (175 B) — Differs: fix in progress</title></rect>
+<rect x="56" y="712" width="7" height="7" fill="#3fb950"><title>NovaText_SplitPascalStringAtNewline @ 0x0046e6d0 (175 B) — Checked: matches the original</title></rect>
 <rect x="64" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_DestroyWindowGuarded @ 0x0046e8e0 (35 B) — Not gameplay, nothing to port</title></rect>
-<rect x="72" y="712" width="7" height="7" fill="#e3a52b"><title>Menu_RunAboutNovaDialog @ 0x00486120 (139 B) — Differs: fix in progress</title></rect>
+<rect x="72" y="712" width="7" height="7" fill="#3fb950"><title>Menu_RunAboutNovaDialog @ 0x00486120 (139 B) — Checked: matches the original</title></rect>
 <rect x="80" y="712" width="7" height="7" fill="#3a3236"><title>View_ResetCameraAndHover @ 0x00486790 (238 B) — Not gameplay, nothing to port</title></rect>
 <rect x="88" y="712" width="7" height="7" fill="#3a3236"><title>Menu_RunSettingsDialog @ 0x00488650 (2929 B) — Not gameplay, nothing to port</title></rect>
 <rect x="96" y="712" width="7" height="7" fill="#3fb950"><title>Menu_RunKeySettingsDialog @ 0x0048b280 (1083 B) — Checked: matches the original</title></rect>
 <rect x="104" y="712" width="7" height="7" fill="#3fb950"><title>Menu_KeySettingsHandleInput @ 0x0048b6d0 (396 B) — Checked: matches the original</title></rect>
 <rect x="112" y="712" width="7" height="7" fill="#3a3236"><title>Menu_KeySettingsDraw @ 0x0048b860 (836 B) — Not gameplay, nothing to port</title></rect>
-<rect x="120" y="712" width="7" height="7" fill="#e3a52b"><title>Ui_ShowConfirmDialog @ 0x004977d0 (293 B) — Differs: fix in progress</title></rect>
-<rect x="128" y="712" width="7" height="7" fill="#e3a52b"><title>NovaUi_ShowTextConfirmCodeDialog @ 0x00497900 (608 B) — Differs: fix in progress</title></rect>
+<rect x="120" y="712" width="7" height="7" fill="#3fb950"><title>Ui_ShowConfirmDialog @ 0x004977d0 (293 B) — Checked: matches the original</title></rect>
+<rect x="128" y="712" width="7" height="7" fill="#3fb950"><title>NovaUi_ShowTextConfirmCodeDialog @ 0x00497900 (608 B) — Checked: matches the original</title></rect>
 <rect x="136" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_ScrollSelectionText @ 0x00499270 (453 B) — Not gameplay, nothing to port</title></rect>
 <rect x="144" y="712" width="7" height="7" fill="#3a3236"><title>FUN_0049d630 @ 0x0049d630 (1 B) — Not gameplay, nothing to port</title></rect>
 <rect x="152" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_ResetModalWindows @ 0x0049ed00 (434 B) — Not gameplay, nothing to port</title></rect>
-<rect x="160" y="712" width="7" height="7" fill="#e3a52b"><title>NovaUi_InitThreeStateButtonArt @ 0x004a2f50 (939 B) — Differs: fix in progress</title></rect>
+<rect x="160" y="712" width="7" height="7" fill="#3fb950"><title>NovaUi_InitThreeStateButtonArt @ 0x004a2f50 (939 B) — Checked: matches the original</title></rect>
 <rect x="168" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_ShutdownThreeStateButtonArt @ 0x004a3300 (61 B) — Not gameplay, nothing to port</title></rect>
 <rect x="176" y="712" width="7" height="7" fill="#3fb950"><title>NovaUi_ProjectSystemToOverlayGrid @ 0x004a9bf0 (282 B) — Checked: matches the original</title></rect>
 <rect x="184" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_ClearMainWindowAndHoldFrame @ 0x004ab180 (37 B) — Not gameplay, nothing to port</title></rect>
 <rect x="192" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_ProgressCallbackNoOp @ 0x004ab3a0 (1 B) — Not gameplay, nothing to port</title></rect>
 <rect x="200" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_AddProgressAndRedraw @ 0x004ab3b0 (22 B) — Not gameplay, nothing to port</title></rect>
-<rect x="208" y="712" width="7" height="7" fill="#e3a52b"><title>NovaUi_RedrawProgressBar @ 0x004ab3d0 (503 B) — Differs: fix in progress</title></rect>
-<rect x="216" y="712" width="7" height="7" fill="#e3a52b"><title>FUN_004ab820 @ 0x004ab820 (164 B) — Differs: fix in progress</title></rect>
+<rect x="208" y="712" width="7" height="7" fill="#3fb950"><title>NovaUi_RedrawProgressBar @ 0x004ab3d0 (503 B) — Checked: matches the original</title></rect>
+<rect x="216" y="712" width="7" height="7" fill="#3fb950"><title>FUN_004ab820 @ 0x004ab820 (164 B) — Checked: matches the original</title></rect>
 <rect x="224" y="712" width="7" height="7" fill="#3a3236"><title>NovaUi_SetInterfaceActive @ 0x004ab980 (79 B) — Not gameplay, nothing to port</title></rect>
 <rect x="232" y="712" width="7" height="7" fill="#3a3236"><title>Settings_InitColors @ 0x004ad7c0 (413 B) — Not gameplay, nothing to port</title></rect>
 <rect x="240" y="712" width="7" height="7" fill="#3a3236"><title>NovaPrefs_ResetToDefaults @ 0x004b4320 (219 B) — Not gameplay, nothing to port</title></rect>
@@ -856,11 +856,11 @@
 <rect x="304" y="712" width="7" height="7" fill="#3a3236"><title>Prefs_SetPilotsPathPrefix @ 0x004bd0c0 (149 B) — Not gameplay, nothing to port</title></rect>
 <rect x="312" y="712" width="7" height="7" fill="#3a3236"><title>NovaPrefs_LoadOrInit @ 0x004c7400 (989 B) — Not gameplay, nothing to port</title></rect>
 <rect x="320" y="712" width="7" height="7" fill="#3a3236"><title>NovaPrefs_SaveToDisk @ 0x004c7820 (1278 B) — Not gameplay, nothing to port</title></rect>
-<rect x="328" y="712" width="7" height="7" fill="#e3a52b"><title>NameString_StripSubtitleSuffix @ 0x004cd230 (84 B) — Differs: fix in progress</title></rect>
+<rect x="328" y="712" width="7" height="7" fill="#3fb950"><title>NameString_StripSubtitleSuffix @ 0x004cd230 (84 B) — Checked: matches the original</title></rect>
 <rect x="336" y="712" width="7" height="7" fill="#3fb950"><title>Ui_InstallGameplayInterfaceLayout @ 0x004cda50 (1360 B) — Checked: matches the original</title></rect>
 <rect x="344" y="712" width="7" height="7" fill="#3a3236"><title>FUN_004cea90 @ 0x004cea90 (32 B) — Not gameplay, nothing to port</title></rect>
-<rect x="352" y="712" width="7" height="7" fill="#e3a52b"><title>FUN_004ceac0 @ 0x004ceac0 (550 B) — Differs: fix in progress</title></rect>
-<rect x="360" y="712" width="7" height="7" fill="#e3a52b"><title>Dialog_ParseItemList @ 0x004cef50 (384 B) — Differs: fix in progress</title></rect>
+<rect x="352" y="712" width="7" height="7" fill="#3fb950"><title>FUN_004ceac0 @ 0x004ceac0 (550 B) — Checked: matches the original</title></rect>
+<rect x="360" y="712" width="7" height="7" fill="#3fb950"><title>Dialog_ParseItemList @ 0x004cef50 (384 B) — Checked: matches the original</title></rect>
 <rect x="368" y="712" width="7" height="7" fill="#3a3236"><title>UiWindow_Destroy @ 0x004cf890 (204 B) — Not gameplay, nothing to port</title></rect>
 <rect x="376" y="712" width="7" height="7" fill="#3a3236"><title>UiPanel_GetEntryInfo @ 0x004cf960 (124 B) — Not gameplay, nothing to port</title></rect>
 <rect x="384" y="712" width="7" height="7" fill="#3a3236"><title>UiPanel_SetEntryRect @ 0x004cf9f0 (73 B) — Not gameplay, nothing to port</title></rect>
@@ -876,7 +876,7 @@
 <rect x="64" y="720" width="7" height="7" fill="#3a3236"><title>UiControl_GetValue @ 0x004cfd80 (14 B) — Not gameplay, nothing to port</title></rect>
 <rect x="72" y="720" width="7" height="7" fill="#3a3236"><title>FUN_004cfd90 @ 0x004cfd90 (23 B) — Not gameplay, nothing to port</title></rect>
 <rect x="80" y="720" width="7" height="7" fill="#3a3236"><title>UiWindow_MarkDirty @ 0x004cfdb0 (12 B) — Not gameplay, nothing to port</title></rect>
-<rect x="88" y="720" width="7" height="7" fill="#e3a52b"><title>UiWindow_RunInteractionLoop @ 0x004cfdd0 (1979 B) — Differs: fix in progress</title></rect>
+<rect x="88" y="720" width="7" height="7" fill="#3fb950"><title>UiWindow_RunInteractionLoop @ 0x004cfdd0 (1979 B) — Checked: matches the original</title></rect>
 <rect x="96" y="720" width="7" height="7" fill="#3a3236"><title>FUN_004d0610 @ 0x004d0610 (43 B) — Not gameplay, nothing to port</title></rect>
 <rect x="104" y="720" width="7" height="7" fill="#3a3236"><title>UiWindow_ResizeBackingStore @ 0x004d18b0 (371 B) — Not gameplay, nothing to port</title></rect>
 <rect x="112" y="720" width="7" height="7" fill="#3a3236"><title>UiWindow_OffsetPosition @ 0x004d1a30 (38 B) — Not gameplay, nothing to port</title></rect>
@@ -902,7 +902,7 @@
 <rect x="272" y="720" width="7" height="7" fill="#3a3236"><title>WindowBackbuffer_CreateForRect @ 0x0051196b (763 B) — Not gameplay, nothing to port</title></rect>
 <rect x="280" y="720" width="7" height="7" fill="#3a3236"><title>FUN_008721c2 @ 0x008721c2 (58 B) — Not gameplay, nothing to port</title></rect>
 <rect x="288" y="720" width="7" height="7" fill="#3a3236"><title>FUN_008721fc @ 0x008721fc (171 B) — Not gameplay, nothing to port</title></rect>
-<rect x="296" y="720" width="7" height="7" fill="#e3a52b"><title>FUN_008722b0 @ 0x008722b0 (30 B) — Differs: fix in progress</title></rect>
+<rect x="296" y="720" width="7" height="7" fill="#3fb950"><title>FUN_008722b0 @ 0x008722b0 (30 B) — Checked: matches the original</title></rect>
 <rect x="304" y="720" width="7" height="7" fill="#3fb950"><title>Settings_LoadIniAndPrefs @ 0x00872310 (101 B) — Checked: matches the original</title></rect>
 <rect x="312" y="720" width="7" height="7" fill="#3fb950"><title>Settings_PollKeyX2Mode @ 0x00872375 (15 B) — Checked: matches the original</title></rect>
 <rect x="320" y="720" width="7" height="7" fill="#3a3236"><title>FUN_008723ba @ 0x008723ba (15 B) — Not gameplay, nothing to port</title></rect>
@@ -972,27 +972,27 @@
 <rect x="32" y="736" width="7" height="7" fill="#3a3236"><title>FUN_008757c0 @ 0x008757c0 (14 B) — Not gameplay, nothing to port</title></rect>
 <rect x="40" y="736" width="7" height="7" fill="#3a3236"><title>FUN_008757d0 @ 0x008757d0 (11 B) — Not gameplay, nothing to port</title></rect>
 <rect x="48" y="736" width="7" height="7" fill="#3a3236"><title>FUN_00875920 @ 0x00875920 (111 B) — Not gameplay, nothing to port</title></rect>
-<text x="16" y="766" class="gh">Rendering</text><text x="416" y="766" class="gn" text-anchor="end">407 functions · 25 matched</text>
+<text x="16" y="766" class="gh">Rendering</text><text x="416" y="766" class="gn" text-anchor="end">407 functions · 53 matched</text>
 <rect x="16" y="773" width="7" height="7" fill="#3fb950"><title>Ship_UpdateVisualState @ 0x00428340 (15644 B) — Checked: matches the original — WP-13, WP-17, OS-04, UI-17</title></rect>
 <rect x="24" y="773" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawListRowCallback @ 0x00448a30 (53 B) — Checked: matches the original</title></rect>
 <rect x="32" y="773" width="7" height="7" fill="#3fb950"><title>NovaUi_SetupGameplayPanelColors @ 0x0045cfc0 (100 B) — Checked: matches the original</title></rect>
 <rect x="40" y="773" width="7" height="7" fill="#3a3236"><title>NovaUi_BlitGameplayClipRect @ 0x0045d287 (145 B) — Not gameplay, nothing to port</title></rect>
-<rect x="48" y="773" width="7" height="7" fill="#e3a52b"><title>NovaUi_DrawPlayerFuelLevelBar @ 0x0045f086 (1169 B) — Differs: fix in progress</title></rect>
+<rect x="48" y="773" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawPlayerFuelLevelBar @ 0x0045f086 (1169 B) — Checked: matches the original</title></rect>
 <rect x="56" y="773" width="7" height="7" fill="#3a3236"><title>DrawContext_DrawCenteredPascalStringInBounds @ 0x004622f0 (79 B) — Not gameplay, nothing to port</title></rect>
 <rect x="64" y="773" width="7" height="7" fill="#3a3236"><title>Rect_FilledSideDim @ 0x00462340 (66 B) — Not gameplay, nothing to port</title></rect>
 <rect x="72" y="773" width="7" height="7" fill="#3a3236"><title>Sprite_GetFrameFullWidth @ 0x00462390 (47 B) — Not gameplay, nothing to port</title></rect>
 <rect x="80" y="773" width="7" height="7" fill="#3a3236"><title>Sprite_GetFrameFullHeight @ 0x004623d0 (47 B) — Not gameplay, nothing to port</title></rect>
-<rect x="88" y="773" width="7" height="7" fill="#e3a52b"><title>DrawContext_DrawGroupedUInt @ 0x00465af0 (281 B) — Differs: fix in progress</title></rect>
+<rect x="88" y="773" width="7" height="7" fill="#3fb950"><title>DrawContext_DrawGroupedUInt @ 0x00465af0 (281 B) — Checked: matches the original</title></rect>
 <rect x="96" y="773" width="7" height="7" fill="#3a3236"><title>Rect_CenterImageInRect @ 0x00466540 (170 B) — Not gameplay, nothing to port</title></rect>
 <rect x="104" y="773" width="7" height="7" fill="#3a3236"><title>Anim_EaseFrameProgress @ 0x00467d60 (109 B) — Not gameplay, nothing to port</title></rect>
 <rect x="112" y="773" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawSystemFactionConflictStatus @ 0x00468d90 (655 B) — Checked: matches the original — UI-14</title></rect>
-<rect x="120" y="773" width="7" height="7" fill="#e3a52b"><title>NovaRender_SetSystemSpaceBackgroundColor @ 0x0046bbf0 (80 B) — Differs: fix in progress</title></rect>
+<rect x="120" y="773" width="7" height="7" fill="#3fb950"><title>NovaRender_SetSystemSpaceBackgroundColor @ 0x0046bbf0 (80 B) — Checked: matches the original</title></rect>
 <rect x="128" y="773" width="7" height="7" fill="#3a3236"><title>Sprite_SetContainerIfChanged @ 0x0046cc60 (47 B) — Not gameplay, nothing to port</title></rect>
-<rect x="136" y="773" width="7" height="7" fill="#e3a52b"><title>Ship_ResolveShipTintColor @ 0x0046e470 (189 B) — Differs: fix in progress</title></rect>
+<rect x="136" y="773" width="7" height="7" fill="#3fb950"><title>Ship_ResolveShipTintColor @ 0x0046e470 (189 B) — Checked: matches the original</title></rect>
 <rect x="144" y="773" width="7" height="7" fill="#3a3236"><title>NovaRender_ReleaseMainWindowOwnerGuarded @ 0x0046e8b0 (35 B) — Not gameplay, nothing to port</title></rect>
-<rect x="152" y="773" width="7" height="7" fill="#e3a52b"><title>NovaEffects_QueuedAmbientStarParticles @ 0x0046ebf0 (483 B) — Differs: fix in progress</title></rect>
-<rect x="160" y="773" width="7" height="7" fill="#e3a52b"><title>NovaEffects_ClearAmbientStarParticles @ 0x0046ede0 (110 B) — Differs: fix in progress</title></rect>
-<rect x="168" y="773" width="7" height="7" fill="#e3a52b"><title>NovaEffects_UpdateAmbientStarParticles @ 0x0046ee50 (92 B) — Differs: fix in progress</title></rect>
+<rect x="152" y="773" width="7" height="7" fill="#3fb950"><title>NovaEffects_QueuedAmbientStarParticles @ 0x0046ebf0 (483 B) — Checked: matches the original</title></rect>
+<rect x="160" y="773" width="7" height="7" fill="#3fb950"><title>NovaEffects_ClearAmbientStarParticles @ 0x0046ede0 (110 B) — Checked: matches the original</title></rect>
+<rect x="168" y="773" width="7" height="7" fill="#3fb950"><title>NovaEffects_UpdateAmbientStarParticles @ 0x0046ee50 (92 B) — Checked: matches the original</title></rect>
 <rect x="176" y="773" width="7" height="7" fill="#3a3236"><title>DrawContext_PushCurrentAndSet @ 0x0046f8e0 (48 B) — Not gameplay, nothing to port</title></rect>
 <rect x="184" y="773" width="7" height="7" fill="#3a3236"><title>DrawContext_RestorePreviousCurrent @ 0x0046f910 (13 B) — Not gameplay, nothing to port</title></rect>
 <rect x="192" y="773" width="7" height="7" fill="#3a3236"><title>DrawContext_DestroyIfOwned @ 0x0046f920 (18 B) — Not gameplay, nothing to port</title></rect>
@@ -1042,7 +1042,7 @@
 <rect x="144" y="781" width="7" height="7" fill="#3a3236"><title>SpriteList_ReleaseMembers @ 0x004754a0 (172 B) — Not gameplay, nothing to port</title></rect>
 <rect x="152" y="781" width="7" height="7" fill="#3a3236"><title>Sprite_AddFrame @ 0x00475740 (86 B) — Not gameplay, nothing to port</title></rect>
 <rect x="160" y="781" width="7" height="7" fill="#3a3236"><title>Sprite_InvokeDrawOrUpdateProc @ 0x00475800 (39 B) — Not gameplay, nothing to port</title></rect>
-<rect x="168" y="781" width="7" height="7" fill="#e3a52b"><title>Sprite_SetCurrentFrame @ 0x00475830 (257 B) — Differs: fix in progress</title></rect>
+<rect x="168" y="781" width="7" height="7" fill="#3fb950"><title>Sprite_SetCurrentFrame @ 0x00475830 (257 B) — Checked: matches the original</title></rect>
 <rect x="176" y="781" width="7" height="7" fill="#3a3236"><title>Sprite_SetUpdateCallback @ 0x00475940 (40 B) — Not gameplay, nothing to port</title></rect>
 <rect x="184" y="781" width="7" height="7" fill="#3a3236"><title>Sprite_SetDrawProcValidated @ 0x00475970 (225 B) — Not gameplay, nothing to port</title></rect>
 <rect x="192" y="781" width="7" height="7" fill="#3a3236"><title>Sprite_SetFrameRange @ 0x00475a60 (123 B) — Not gameplay, nothing to port</title></rect>
@@ -1102,24 +1102,24 @@
 <rect x="224" y="789" width="7" height="7" fill="#3a3236"><title>SWParticles_ResetEntries @ 0x0047b8c0 (128 B) — Not gameplay, nothing to port</title></rect>
 <rect x="232" y="789" width="7" height="7" fill="#3a3236"><title>SWParticles_SetViewOrigin @ 0x0047b940 (20 B) — Not gameplay, nothing to port</title></rect>
 <rect x="240" y="789" width="7" height="7" fill="#3a3236"><title>SWParticles_RestoreSavedPixels @ 0x0047bb30 (664 B) — Not gameplay, nothing to port</title></rect>
-<rect x="248" y="789" width="7" height="7" fill="#e3a52b"><title>SWParticles_DrawParticles @ 0x0047bdd0 (1454 B) — Differs: fix in progress</title></rect>
+<rect x="248" y="789" width="7" height="7" fill="#3fb950"><title>SWParticles_DrawParticles @ 0x0047bdd0 (1454 B) — Checked: matches the original</title></rect>
 <rect x="256" y="789" width="7" height="7" fill="#3a3236"><title>SWParticles_UpdateDirtyPixels @ 0x0047c3a0 (1092 B) — Not gameplay, nothing to port</title></rect>
-<rect x="264" y="789" width="7" height="7" fill="#e3a52b"><title>SWParticles_Update @ 0x0047c800 (208 B) — Differs: fix in progress</title></rect>
-<rect x="272" y="789" width="7" height="7" fill="#e3a52b"><title>NovaRender_RedrawAndPresentFrame @ 0x004873b0 (3083 B) — Differs: fix in progress</title></rect>
+<rect x="264" y="789" width="7" height="7" fill="#3fb950"><title>SWParticles_Update @ 0x0047c800 (208 B) — Checked: matches the original</title></rect>
+<rect x="272" y="789" width="7" height="7" fill="#3fb950"><title>NovaRender_RedrawAndPresentFrame @ 0x004873b0 (3083 B) — Checked: matches the original</title></rect>
 <rect x="280" y="789" width="7" height="7" fill="#3a3236"><title>NovaRender_RestoreClippedRegion @ 0x00487fcd (176 B) — Not gameplay, nothing to port</title></rect>
 <rect x="288" y="789" width="7" height="7" fill="#3a3236"><title>NovaRender_PresentBlockingTransitionFrame @ 0x0048b230 (27 B) — Not gameplay, nothing to port</title></rect>
 <rect x="296" y="789" width="7" height="7" fill="#3a3236"><title>NovaUi_BlitPictThumbnailCached @ 0x00497b70 (374 B) — Not gameplay, nothing to port</title></rect>
-<rect x="304" y="789" width="7" height="7" fill="#e3a52b"><title>NovaUi_DrawSelectionDialogContent @ 0x00499870 (922 B) — Differs: fix in progress</title></rect>
+<rect x="304" y="789" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawSelectionDialogContent @ 0x00499870 (922 B) — Checked: matches the original</title></rect>
 <rect x="312" y="789" width="7" height="7" fill="#3a3236"><title>FUN_0049da80 @ 0x0049da80 (38 B) — Not gameplay, nothing to port</title></rect>
 <rect x="320" y="789" width="7" height="7" fill="#3a3236"><title>FUN_0049eec0 @ 0x0049eec0 (21 B) — Not gameplay, nothing to port</title></rect>
-<rect x="328" y="789" width="7" height="7" fill="#e3a52b"><title>NovaUi_DrawThreeStateButton @ 0x004a3340 (1852 B) — Differs: fix in progress</title></rect>
+<rect x="328" y="789" width="7" height="7" fill="#3fb950"><title>NovaUi_DrawThreeStateButton @ 0x004a3340 (1852 B) — Checked: matches the original</title></rect>
 <rect x="336" y="789" width="7" height="7" fill="#3a3236"><title>NovaUi_InitializeFlightViewSurfaces @ 0x004ab9d4 (950 B) — Not gameplay, nothing to port</title></rect>
-<rect x="344" y="789" width="7" height="7" fill="#e3a52b"><title>SpriteWorld_InitializeFlightViewSpritePools @ 0x004abd8d (1442 B) — Differs: fix in progress</title></rect>
+<rect x="344" y="789" width="7" height="7" fill="#3fb950"><title>SpriteWorld_InitializeFlightViewSpritePools @ 0x004abd8d (1442 B) — Checked: matches the original</title></rect>
 <rect x="352" y="789" width="7" height="7" fill="#3a3236"><title>Ship_InitializeMainInterface @ 0x004ac380 (468 B) — Not gameplay, nothing to port</title></rect>
 <rect x="360" y="789" width="7" height="7" fill="#3a3236"><title>FUN_004ac950 @ 0x004ac950 (363 B) — Not gameplay, nothing to port</title></rect>
-<rect x="368" y="789" width="7" height="7" fill="#e3a52b"><title>FUN_004ad960 @ 0x004ad960 (5125 B) — Differs: fix in progress</title></rect>
-<rect x="376" y="789" width="7" height="7" fill="#e3a52b"><title>SpriteWorld_RebuildSessionSpritePools @ 0x004af020 (5890 B) — Differs: fix in progress</title></rect>
-<rect x="384" y="789" width="7" height="7" fill="#e3a52b"><title>FUN_004b0a30 @ 0x004b0a30 (486 B) — Differs: fix in progress</title></rect>
+<rect x="368" y="789" width="7" height="7" fill="#3fb950"><title>FUN_004ad960 @ 0x004ad960 (5125 B) — Checked: matches the original</title></rect>
+<rect x="376" y="789" width="7" height="7" fill="#3fb950"><title>SpriteWorld_RebuildSessionSpritePools @ 0x004af020 (5890 B) — Checked: matches the original</title></rect>
+<rect x="384" y="789" width="7" height="7" fill="#3fb950"><title>FUN_004b0a30 @ 0x004b0a30 (486 B) — Checked: matches the original</title></rect>
 <rect x="392" y="789" width="7" height="7" fill="#3a3236"><title>FUN_004b42f0 @ 0x004b42f0 (46 B) — Not gameplay, nothing to port</title></rect>
 <rect x="400" y="789" width="7" height="7" fill="#3a3236"><title>Sprite_CompileFramesAndDiscardSourceData @ 0x004b4cf0 (277 B) — Not gameplay, nothing to port</title></rect>
 <rect x="408" y="789" width="7" height="7" fill="#3a3236"><title>FUN_004b6810 @ 0x004b6810 (49 B) — Not gameplay, nothing to port</title></rect>
@@ -1180,8 +1180,8 @@
 <rect x="48" y="805" width="7" height="7" fill="#3fb950"><title>DrawContext_TileImageInRect @ 0x004bbdc0 (451 B) — Checked: matches the original</title></rect>
 <rect x="56" y="805" width="7" height="7" fill="#3a3236"><title>FontCache_NoOpCleanup @ 0x004bc300 (1 B) — Not gameplay, nothing to port</title></rect>
 <rect x="64" y="805" width="7" height="7" fill="#3a3236"><title>NovaGameSession_BuildStartupCurveTable @ 0x004bc310 (186 B) — Not gameplay, nothing to port</title></rect>
-<rect x="72" y="805" width="7" height="7" fill="#e3a52b"><title>FontCache_InitializeDefaultFamilies @ 0x004bc3e0 (109 B) — Differs: fix in progress</title></rect>
-<rect x="80" y="805" width="7" height="7" fill="#e3a52b"><title>FontFamily_CreateFontHandle @ 0x004bc450 (363 B) — Differs: fix in progress</title></rect>
+<rect x="72" y="805" width="7" height="7" fill="#3fb950"><title>FontCache_InitializeDefaultFamilies @ 0x004bc3e0 (109 B) — Checked: matches the original</title></rect>
+<rect x="80" y="805" width="7" height="7" fill="#3fb950"><title>FontFamily_CreateFontHandle @ 0x004bc450 (363 B) — Checked: matches the original</title></rect>
 <rect x="88" y="805" width="7" height="7" fill="#3a3236"><title>FontCache_CreateFamilyEntry @ 0x004bc5c0 (56 B) — Not gameplay, nothing to port</title></rect>
 <rect x="96" y="805" width="7" height="7" fill="#3a3236"><title>FontFamily_FindHandleBySizeAndStyle @ 0x004bc600 (56 B) — Not gameplay, nothing to port</title></rect>
 <rect x="104" y="805" width="7" height="7" fill="#3a3236"><title>FontCache_GetFamilyEntryByIndex @ 0x004bc640 (30 B) — Not gameplay, nothing to port</title></rect>
@@ -1197,18 +1197,18 @@
 <rect x="184" y="805" width="7" height="7" fill="#3fb950"><title>FUN_004bcc70 @ 0x004bcc70 (180 B) — Checked: matches the original</title></rect>
 <rect x="192" y="805" width="7" height="7" fill="#3fb950"><title>DrawContext_DrawPascalStringInFilledRect @ 0x004bcd30 (77 B) — Checked: matches the original</title></rect>
 <rect x="200" y="805" width="7" height="7" fill="#3fb950"><title>NovaTextView_Draw @ 0x004bcf30 (70 B) — Checked: matches the original</title></rect>
-<rect x="208" y="805" width="7" height="7" fill="#e3a52b"><title>FUN_004cf1c0 @ 0x004cf1c0 (1397 B) — Differs: fix in progress</title></rect>
+<rect x="208" y="805" width="7" height="7" fill="#3fb950"><title>FUN_004cf1c0 @ 0x004cf1c0 (1397 B) — Checked: matches the original</title></rect>
 <rect x="216" y="805" width="7" height="7" fill="#3a3236"><title>UiWindow_SetDrawCallback @ 0x004cfa40 (19 B) — Not gameplay, nothing to port</title></rect>
-<rect x="224" y="805" width="7" height="7" fill="#e3a52b"><title>FUN_004d0a50 @ 0x004d0a50 (277 B) — Differs: fix in progress</title></rect>
+<rect x="224" y="805" width="7" height="7" fill="#3fb950"><title>FUN_004d0a50 @ 0x004d0a50 (277 B) — Checked: matches the original</title></rect>
 <rect x="232" y="805" width="7" height="7" fill="#3a3236"><title>FUN_004d0b70 @ 0x004d0b70 (83 B) — Not gameplay, nothing to port</title></rect>
-<rect x="240" y="805" width="7" height="7" fill="#e3a52b"><title>FUN_004d0bd0 @ 0x004d0bd0 (287 B) — Differs: fix in progress</title></rect>
-<rect x="248" y="805" width="7" height="7" fill="#e3a52b"><title>UiWindow_Draw @ 0x004d0d00 (2505 B) — Differs: fix in progress</title></rect>
+<rect x="240" y="805" width="7" height="7" fill="#3fb950"><title>FUN_004d0bd0 @ 0x004d0bd0 (287 B) — Checked: matches the original</title></rect>
+<rect x="248" y="805" width="7" height="7" fill="#3fb950"><title>UiWindow_Draw @ 0x004d0d00 (2505 B) — Checked: matches the original</title></rect>
 <rect x="256" y="805" width="7" height="7" fill="#3a3236"><title>NovaUi_BlitDirtyWindowSurfaces @ 0x004d16f0 (169 B) — Not gameplay, nothing to port</title></rect>
 <rect x="264" y="805" width="7" height="7" fill="#3a3236"><title>DrawContext_SaveAndSetOwnerContext @ 0x004d17a0 (11 B) — Not gameplay, nothing to port</title></rect>
 <rect x="272" y="805" width="7" height="7" fill="#3a3236"><title>NovaRender_GetMainWindowOwner @ 0x004d17b0 (6 B) — Not gameplay, nothing to port</title></rect>
 <rect x="280" y="805" width="7" height="7" fill="#3a3236"><title>UiWindow_GetDrawContextHandle @ 0x004d17c0 (15 B) — Not gameplay, nothing to port</title></rect>
 <rect x="288" y="805" width="7" height="7" fill="#3a3236"><title>FUN_004d1810 @ 0x004d1810 (120 B) — Not gameplay, nothing to port</title></rect>
-<rect x="296" y="805" width="7" height="7" fill="#e3a52b"><title>NovaList_Draw @ 0x004d2010 (980 B) — Differs: fix in progress</title></rect>
+<rect x="296" y="805" width="7" height="7" fill="#3fb950"><title>NovaList_Draw @ 0x004d2010 (980 B) — Checked: matches the original</title></rect>
 <rect x="304" y="805" width="7" height="7" fill="#3a3236"><title>FUN_004d8b00 @ 0x004d8b00 (18 B) — Not gameplay, nothing to port</title></rect>
 <rect x="312" y="805" width="7" height="7" fill="#3a3236"><title>Palette_BuildDepthLookupTable @ 0x004db31b (452 B) — Not gameplay, nothing to port</title></rect>
 <rect x="320" y="805" width="7" height="7" fill="#3a3236"><title>FUN_004db4df @ 0x004db4df (20 B) — Not gameplay, nothing to port</title></rect>
@@ -1309,9 +1309,9 @@
 <rect x="280" y="821" width="7" height="7" fill="#3a3236"><title>FUN_004fc390 @ 0x004fc390 (26 B) — Not gameplay, nothing to port</title></rect>
 <rect x="288" y="821" width="7" height="7" fill="#3a3236"><title>FUN_004fc3b0 @ 0x004fc3b0 (26 B) — Not gameplay, nothing to port</title></rect>
 <rect x="296" y="821" width="7" height="7" fill="#3fb950"><title>FUN_004fca30 @ 0x004fca30 (130 B) — Checked: matches the original</title></rect>
-<rect x="304" y="821" width="7" height="7" fill="#e3a52b"><title>FUN_004fcac0 @ 0x004fcac0 (76 B) — Differs: fix in progress</title></rect>
-<rect x="312" y="821" width="7" height="7" fill="#e3a52b"><title>Pict_DecodePixmapRows @ 0x004fcc00 (1165 B) — Differs: fix in progress</title></rect>
-<rect x="320" y="821" width="7" height="7" fill="#e3a52b"><title>Pict_ParseDirectBitsRect @ 0x004fd0a0 (2672 B) — Differs: fix in progress</title></rect>
+<rect x="304" y="821" width="7" height="7" fill="#3fb950"><title>FUN_004fcac0 @ 0x004fcac0 (76 B) — Checked: matches the original</title></rect>
+<rect x="312" y="821" width="7" height="7" fill="#3fb950"><title>Pict_DecodePixmapRows @ 0x004fcc00 (1165 B) — Checked: matches the original</title></rect>
+<rect x="320" y="821" width="7" height="7" fill="#3fb950"><title>Pict_ParseDirectBitsRect @ 0x004fd0a0 (2672 B) — Checked: matches the original</title></rect>
 <rect x="328" y="821" width="7" height="7" fill="#3a3236"><title>FUN_004fdb60 @ 0x004fdb60 (38 B) — Not gameplay, nothing to port</title></rect>
 <rect x="336" y="821" width="7" height="7" fill="#3a3236"><title>FUN_004fdc70 @ 0x004fdc70 (64 B) — Not gameplay, nothing to port</title></rect>
 <rect x="344" y="821" width="7" height="7" fill="#3a3236"><title>FUN_004fdcb0 @ 0x004fdcb0 (279 B) — Not gameplay, nothing to port</title></rect>
@@ -1379,33 +1379,33 @@
 <rect x="40" y="837" width="7" height="7" fill="#3a3236"><title>DrawContext_DarkenColorComponents @ 0x00519fb1 (135 B) — Not gameplay, nothing to port</title></rect>
 <rect x="48" y="837" width="7" height="7" fill="#3a3236"><title>Region_IsEmpty @ 0x0051a2c0 (38 B) — Not gameplay, nothing to port</title></rect>
 <rect x="56" y="837" width="7" height="7" fill="#3a3236"><title>FUN_0051a307 @ 0x0051a307 (36 B) — Not gameplay, nothing to port</title></rect>
-<rect x="64" y="837" width="7" height="7" fill="#e3a52b"><title>DrawContext_StoreScaledValue @ 0x00873065 (60 B) — Differs: fix in progress</title></rect>
-<text x="16" y="867" class="gh">Sound &amp; music</text><text x="416" y="867" class="gn" text-anchor="end">41 functions · 2 matched</text>
-<rect x="16" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_PlaySpatialByDistance @ 0x004692e0 (409 B) — Differs: fix in progress</title></rect>
-<rect x="24" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_QueueCenteredSound @ 0x0046aad0 (45 B) — Differs: fix in progress</title></rect>
-<rect x="32" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_PreStageJumpSoundBySeconds @ 0x0046ab00 (93 B) — Differs: fix in progress</title></rect>
-<rect x="40" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_UpdateCenteredGainFromPreference @ 0x0046ab60 (64 B) — Differs: fix in progress</title></rect>
-<rect x="48" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_PreloadTransitionEffects @ 0x0048b250 (43 B) — Differs: fix in progress</title></rect>
-<rect x="56" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_PlayTransitionEffectsWait @ 0x0048bc20 (104 B) — Differs: fix in progress</title></rect>
-<rect x="64" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_PreloadGameplayData @ 0x004b0740 (741 B) — Differs: fix in progress</title></rect>
+<rect x="64" y="837" width="7" height="7" fill="#3fb950"><title>DrawContext_StoreScaledValue @ 0x00873065 (60 B) — Checked: matches the original</title></rect>
+<text x="16" y="867" class="gh">Sound &amp; music</text><text x="416" y="867" class="gn" text-anchor="end">41 functions · 21 matched</text>
+<rect x="16" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_PlaySpatialByDistance @ 0x004692e0 (409 B) — Checked: matches the original</title></rect>
+<rect x="24" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_QueueCenteredSound @ 0x0046aad0 (45 B) — Checked: matches the original</title></rect>
+<rect x="32" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_PreStageJumpSoundBySeconds @ 0x0046ab00 (93 B) — Checked: matches the original</title></rect>
+<rect x="40" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_UpdateCenteredGainFromPreference @ 0x0046ab60 (64 B) — Checked: matches the original</title></rect>
+<rect x="48" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_PreloadTransitionEffects @ 0x0048b250 (43 B) — Checked: matches the original</title></rect>
+<rect x="56" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_PlayTransitionEffectsWait @ 0x0048bc20 (104 B) — Checked: matches the original</title></rect>
+<rect x="64" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_PreloadGameplayData @ 0x004b0740 (741 B) — Checked: matches the original — FL-04</title></rect>
 <rect x="72" y="874" width="7" height="7" fill="#3fb950"><title>NovaSound_LoadDecodedById @ 0x004bc2a0 (91 B) — Checked: matches the original</title></rect>
-<rect x="80" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_Initialize @ 0x004d6290 (414 B) — Differs: fix in progress</title></rect>
+<rect x="80" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_Initialize @ 0x004d6290 (414 B) — Checked: matches the original</title></rect>
 <rect x="88" y="874" width="7" height="7" fill="#3a3236"><title>FUN_004d6440 @ 0x004d6440 (111 B) — Not gameplay, nothing to port</title></rect>
 <rect x="96" y="874" width="7" height="7" fill="#3a3236"><title>NovaAudio_GetOutputLevelByte @ 0x004d64b0 (31 B) — Not gameplay, nothing to port</title></rect>
-<rect x="104" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_FillVoiceSlotDescriptor @ 0x004d64f0 (85 B) — Differs: fix in progress</title></rect>
-<rect x="112" y="874" width="7" height="7" fill="#e3a52b"><title>Audio_AllocateVoiceSlot @ 0x004d6550 (518 B) — Differs: fix in progress</title></rect>
-<rect x="120" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_CountActiveByHandle @ 0x004d6770 (87 B) — Differs: fix in progress</title></rect>
-<rect x="128" y="874" width="7" height="7" fill="#e3a52b"><title>NovaAudio_UnregisterCallbacks @ 0x004d67d0 (191 B) — Differs: fix in progress</title></rect>
+<rect x="104" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_FillVoiceSlotDescriptor @ 0x004d64f0 (85 B) — Checked: matches the original</title></rect>
+<rect x="112" y="874" width="7" height="7" fill="#3fb950"><title>Audio_AllocateVoiceSlot @ 0x004d6550 (518 B) — Checked: matches the original</title></rect>
+<rect x="120" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_CountActiveByHandle @ 0x004d6770 (87 B) — Checked: matches the original</title></rect>
+<rect x="128" y="874" width="7" height="7" fill="#3fb950"><title>NovaAudio_UnregisterCallbacks @ 0x004d67d0 (191 B) — Checked: matches the original</title></rect>
 <rect x="136" y="874" width="7" height="7" fill="#3a3236"><title>FUN_004d6890 @ 0x004d6890 (102 B) — Not gameplay, nothing to port</title></rect>
-<rect x="144" y="874" width="7" height="7" fill="#e3a52b"><title>NovaSound_ExpandIma4Samples @ 0x004d6900 (625 B) — Differs: fix in progress</title></rect>
-<rect x="152" y="874" width="7" height="7" fill="#e3a52b"><title>FUN_004d6b90 @ 0x004d6b90 (348 B) — Differs: fix in progress</title></rect>
+<rect x="144" y="874" width="7" height="7" fill="#3fb950"><title>NovaSound_ExpandIma4Samples @ 0x004d6900 (625 B) — Checked: matches the original</title></rect>
+<rect x="152" y="874" width="7" height="7" fill="#3fb950"><title>FUN_004d6b90 @ 0x004d6b90 (348 B) — Checked: matches the original</title></rect>
 <rect x="160" y="874" width="7" height="7" fill="#3a3236"><title>FUN_004d6d00 @ 0x004d6d00 (40 B) — Not gameplay, nothing to port</title></rect>
-<rect x="168" y="874" width="7" height="7" fill="#e3a52b"><title>FUN_004d6d30 @ 0x004d6d30 (241 B) — Differs: fix in progress</title></rect>
-<rect x="176" y="874" width="7" height="7" fill="#e3a52b"><title>NovaSound_DecodePayload @ 0x004d6e60 (956 B) — Differs: fix in progress</title></rect>
+<rect x="168" y="874" width="7" height="7" fill="#3fb950"><title>FUN_004d6d30 @ 0x004d6d30 (241 B) — Checked: matches the original</title></rect>
+<rect x="176" y="874" width="7" height="7" fill="#3fb950"><title>NovaSound_DecodePayload @ 0x004d6e60 (956 B) — Checked: matches the original</title></rect>
 <rect x="184" y="874" width="7" height="7" fill="#3a3236"><title>FUN_004eef70 @ 0x004eef70 (76 B) — Not gameplay, nothing to port</title></rect>
 <rect x="192" y="874" width="7" height="7" fill="#3a3236"><title>FUN_004f27d0 @ 0x004f27d0 (41 B) — Not gameplay, nothing to port</title></rect>
 <rect x="200" y="874" width="7" height="7" fill="#3a3236"><title>FUN_004fc430 @ 0x004fc430 (166 B) — Not gameplay, nothing to port</title></rect>
-<rect x="208" y="874" width="7" height="7" fill="#e3a52b"><title>FUN_004fc570 @ 0x004fc570 (1034 B) — Differs: fix in progress</title></rect>
+<rect x="208" y="874" width="7" height="7" fill="#3fb950"><title>FUN_004fc570 @ 0x004fc570 (1034 B) — Checked: matches the original — FL-04</title></rect>
 <rect x="216" y="874" width="7" height="7" fill="#3a3236"><title>FUN_00503d30 @ 0x00503d30 (90 B) — Not gameplay, nothing to port</title></rect>
 <rect x="224" y="874" width="7" height="7" fill="#3a3236"><title>NovaAudioBackend_StartOutput @ 0x00507300 (882 B) — Not gameplay, nothing to port</title></rect>
 <rect x="232" y="874" width="7" height="7" fill="#3a3236"><title>FUN_005076a0 @ 0x005076a0 (376 B) — Not gameplay, nothing to port</title></rect>
@@ -1419,9 +1419,9 @@
 <rect x="296" y="874" width="7" height="7" fill="#3a3236"><title>FUN_00507d0b @ 0x00507d0b (11 B) — Not gameplay, nothing to port</title></rect>
 <rect x="304" y="874" width="7" height="7" fill="#3a3236"><title>FUN_00507d16 @ 0x00507d16 (128 B) — Not gameplay, nothing to port</title></rect>
 <rect x="312" y="874" width="7" height="7" fill="#3a3236"><title>FUN_00507d96 @ 0x00507d96 (128 B) — Not gameplay, nothing to port</title></rect>
-<rect x="320" y="874" width="7" height="7" fill="#e3a52b"><title>FUN_00507e20 @ 0x00507e20 (348 B) — Differs: fix in progress</title></rect>
+<rect x="320" y="874" width="7" height="7" fill="#3fb950"><title>FUN_00507e20 @ 0x00507e20 (348 B) — Checked: matches the original</title></rect>
 <rect x="328" y="874" width="7" height="7" fill="#3fb950"><title>FUN_00507f90 @ 0x00507f90 (868 B) — Checked: matches the original</title></rect>
-<rect x="336" y="874" width="7" height="7" fill="#e3a52b"><title>NovaMusic_SwitchBackgroundTrack @ 0x00534380 (442 B) — Differs: fix in progress</title></rect>
+<rect x="336" y="874" width="7" height="7" fill="#3fb950"><title>NovaMusic_SwitchBackgroundTrack @ 0x00534380 (442 B) — Checked: matches the original</title></rect>
 <text x="16" y="904" class="gh">Shareware registration</text><text x="416" y="904" class="gn" text-anchor="end">21 functions · 1 matched</text>
 <rect x="16" y="911" width="7" height="7" fill="#3a3236"><title>LicenseDigest_ScaleBySessionByte @ 0x00416090 (11 B) — Not gameplay, nothing to port</title></rect>
 <rect x="24" y="911" width="7" height="7" fill="#3a3236"><title>LicenseDigest_AccumulateByte @ 0x004160a0 (13 B) — Not gameplay, nothing to port</title></rect>
