@@ -87,18 +87,19 @@ struct MainMenuAssets {
         // "ATMOS" wordmark shown when nothing is hovered.
         var rolloverFrames: [CGImage] = []
         var rolloverSize = CGSize(width: 136, height: 98)
-        if let rolloverSpin = game.spin(607), let sheet = rle(rolloverSpin.spriteID) {
+        if let sheet = game.spinSheet(607) {
             rolloverFrames = sheet.frameCGImages(0..<sheet.frameCount).map(\.image)
             rolloverSize = CGSize(width: sheet.frameWidth, height: sheet.frameHeight)
         }
 
+        // Menu buttons are spïn 600-605 (0x004ad960), each an rlëD or PICT sheet.
         let specs: [(MainMenuAction, Int)] = [
-            (.newPilot, 8050), (.openPilot, 8051), (.quitNova, 8052),
-            (.enterShip, 8053), (.setPrefs, 8054), (.aboutNova, 8055),
+            (.newPilot, 600), (.openPilot, 601), (.quitNova, 602),
+            (.enterShip, 603), (.setPrefs, 604), (.aboutNova, 605),
         ]
         var buttons: [ButtonArt] = []
         for (i, spec) in specs.enumerated() {
-            guard let sheet = rle(spec.1) else { continue }
+            guard let sheet = game.spinSheet(spec.1) else { continue }
             // Normal (frame 0) + pressed (frame 1) from one grid build, not two.
             let pair = sheet.frameCGImages(0...1)
             guard let n = pair.first(where: { $0.index == 0 })?.image,
