@@ -171,11 +171,21 @@ public struct PaymentWindow: Sendable, Equatable {
         haggleWorks = rand(100) <= 35
     }
 
-    /// The original's line: "Pay us <price> credits."
-    public static func prompt(price: Int, game: NovaGame) -> String {
+    /// The original's line (0x004826a0): "Pay me <amount> credits." when the
+    /// player has a ship targeted, else "Pay us ...".
+    public static func prompt(price: Int, game: NovaGame, hasShipTarget: Bool = false) -> String {
         let list = game.stringList(2002)
         let unit = price < 2 ? (list?.string(at: 32) ?? "credit") : (list?.string(at: 33) ?? "credits")
-        return "\(list?.string(at: 188) ?? "Pay us") \(price) \(unit)."
+        let lead = hasShipTarget ? (list?.string(at: 187) ?? "Pay me") : (list?.string(at: 188) ?? "Pay us")
+        return "\(lead) \(formatAmount(price)) \(unit)."
+    }
+
+    /// The comm amount format (0x00465af0): plain below 1000, `N,NNN` below a
+    /// million, `N.NNM` from there.
+    public static func formatAmount(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        if n < 1_000_000 { return "\(n / 1000),\(String(format: "%03d", n % 1000))" }
+        return "\(n / 1_000_000).\(String(format: "%02d", (n % 1_000_000) / 10_000))M"
     }
 
     public mutating func press(_ press: Press) -> Result {

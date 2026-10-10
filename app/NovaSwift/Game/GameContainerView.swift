@@ -637,6 +637,8 @@ struct GameContainerView: View {
     /// rebuild idempotent regardless of that delivery-order race.
     @State private var hostSystemID: Int?
     @State private var showMenu = false
+    /// When the in-flight route mini map was last raised (S-1, 0x004a9b30).
+    @State private var routeMapShownAt: Date?
 
     /// Whether pausing opens the port's sidebar menu. Follows the setting on desktop;
     /// always on for mobile, which has no keyboard and reaches the sidebar only via
@@ -836,6 +838,24 @@ struct GameContainerView: View {
                         .transition(.opacity)
                 }
 
+                if let shown = routeMapShownAt, !nav.showingMap {
+                    // 0x00439bb0: full for 118 ticks, fading over the next 32
+                    // (60 Hz), gone at 150; the original clears its flag at 500.
+                    TimelineView(.animation) { tl in
+                        let ticks = tl.date.timeIntervalSince(shown) * 60
+                        let alpha = ticks < 118 ? 1.0 : max(0, 1 - (ticks - 118) / 32)
+                        GalaxyMapView(nav: nav, pilot: model.pilot, onJump: {}, onClose: {},
+                                      fullscreen: false, miniMap: true)
+                            .frame(width: 240, height: 240)
+                            .opacity(0.85 * alpha)
+                    }
+                    .allowsHitTesting(false)
+                    .task(id: shown) {
+                        try? await Task.sleep(nanoseconds: 2_600_000_000)
+                        if routeMapShownAt == shown { routeMapShownAt = nil }
+                    }
+                }
+
                 MessageLogView(hud: host.hud)
 
                 EscortCommandPanelView(hud: host.hud)
@@ -953,7 +973,7 @@ struct GameContainerView: View {
                 // The ship comm's payment window (DLOG 1008, AI-42).
                 if let payment = shipPayment, let game = host.game {
                     NegotiationView(graphics: host.graphics,
-                                    message: PaymentWindow.prompt(price: payment.window.price, game: game),
+                                    message: PaymentWindow.prompt(price: payment.window.price, game: game, hasShipTarget: true),
                                     primaryLabel: host.graphics?.buttonLabel(SpaceportLabel.acceptPrice, fallback: "Accept Price") ?? "Accept Price",
                                     secondaryLabel: host.graphics?.buttonLabel(SpaceportLabel.lowerPrice, fallback: "Lower Price") ?? "Lower Price",
                                     onPrimary: { pressShipPayment(.pay) },
@@ -1096,6 +1116,11 @@ struct GameContainerView: View {
             // dismisses the overlay stealing focus can silently lose the race on
             // macOS — the scene view has to actually reclaim key status first.
             if !open { grabSceneFocus(reason: "menu closed") }
+        }
+        .onChange(of: nav.currentSystemID) { _, _ in
+            // The jump sequence redraws the route map on hop arrival
+            // (0x0044f3d0) when a route remains.
+            if !nav.route.isEmpty, landedSpobID == nil { routeMapShownAt = Date() }
         }
         .onChange(of: nav.showingMap) { _, open in
             // The Galaxy Map is a full-screen planning overlay — freeze the sim and
@@ -3283,6 +3308,7 @@ struct GameContainerView: View {
             // plotted route's next hop.
             host?.scene.clearTravelSelection()
             nav.selectHyperspace()
+            routeMapShownAt = Date()
         case .dismissMessage:
             host?.hud.dismissMessage()
         case .playerInfo:

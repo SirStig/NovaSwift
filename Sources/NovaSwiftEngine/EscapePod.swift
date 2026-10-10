@@ -70,6 +70,15 @@ extension World {
             player.armor = -1
             player.currentTargetID = nil
             selfDestructCountdown = -1
+            // Ships docked with the player (control mode 0x0F aimed at it,
+            // within 16 px on each axis) go down too (0x00415b00).
+            for npc in npcs where npc.isAlive {
+                guard let rec = originalAI.record(for: npc.entityID), rec.mode == OriginalAIMode.boardHold,
+                      rec.primary == World.playerEntityID || rec.secondary.shipID == World.playerEntityID,
+                      abs(npc.position.x - player.position.x) <= 16, abs(npc.position.y - player.position.y) <= 16
+                else { continue }
+                npc.armor = -1
+            }
         }
     }
 

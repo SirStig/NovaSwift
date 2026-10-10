@@ -184,6 +184,12 @@ extension StoryEngine {
     /// The generic news body (STR# 8101), shown when no crön news applies.
     public func genericNews() -> String? { randomStringListEntry(8101) }
 
+    /// The news window's headline (0x0047d600): a random STR# 8100 entry, else
+    /// STR# 2002 #190.
+    public func newsHeadline() -> String {
+        randomStringListEntry(8100) ?? game.stringList(2002)?.string(at: 190) ?? ""
+    }
+
     /// A random entry of a `STR#` list.
     func randomStringListEntry(_ strListID: Int) -> String? {
         guard let strings = game.stringList(strListID)?.strings, !strings.isEmpty else { return nil }

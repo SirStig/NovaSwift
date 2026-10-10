@@ -1085,6 +1085,10 @@ struct HolovidView: View {
     /// galaxy is currently generating news.
     /// The one news body the original shows (MS-20): this station's crön
     /// news if any, else a generic item from STR# 8101.
+    private var headline: String {
+        StoryEngine(game: game, player: pilot.state,
+                    seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id) &+ 1).newsHeadline()
+    }
     private var news: [String] {
         let engine = StoryEngine(game: game, player: pilot.state,
                                  seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
@@ -1094,9 +1098,10 @@ struct HolovidView: View {
 
     var body: some View {
         let items = news
-        let bodyText = items.isEmpty
-            ? "The news networks are quiet. Nothing of note is happening in this region of the galaxy right now."
+        let storyText = items.isEmpty
+            ? " " + OriginalText(game: game).misc(191)
             : items.joined(separator: "\n\n")
+        let bodyText = headline.isEmpty ? storyText : headline + "\n\n" + storyText
         if let frame = graphics.pict(newsPictID) {
             let fw = CGFloat(frame.width), fh = CGFloat(frame.height)
             let textW = fw * 0.80
