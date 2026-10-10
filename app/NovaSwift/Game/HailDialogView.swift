@@ -137,9 +137,11 @@ struct HailDialogView: View {
                        action: state.topButtonTitle == requestLandingTitle(graphics) ? onRequestLanding : onGreetings,
                        graphics: graphics)
             .novaPlace(space, -243, 36.5)         // item 1 (top): (27,184)-(173,210)
-        responseButton(state.tributeTitle, width: 120, enabled: state.tributeEnabled,
-                       action: onDemandTribute, graphics: graphics)
-            .novaPlace(space, -243, 66.5)         // item 2 (middle): (27,214)-(173,240)
+        if state.tributeVisible {
+            responseButton(state.tributeTitle, width: 120, enabled: state.tributeEnabled,
+                           action: onDemandTribute, graphics: graphics)
+                .novaPlace(space, -243, 66.5)         // item 2 (middle): (27,214)-(173,240)
+        }
         responseButton(graphics.buttonLabel(SpaceportLabel.closeChannel, fallback: "Close Channel"),
                        width: 120, action: onClose, graphics: graphics)
             .novaPlace(space, -243, 96.5)         // item 0 (bottom): (27,244)-(173,270)

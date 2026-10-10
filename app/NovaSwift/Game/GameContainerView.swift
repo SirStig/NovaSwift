@@ -3482,7 +3482,10 @@ struct GameContainerView: View {
                 var line = shipCommLine(session.openingPrompt, session)
                 if session.appendsPilotName { line += model.pilot.state.pilotName + "." }
                 shipState.responseText = line
-                if scene.originalKeepsPressingPlayer(entityID: entityID) {
+                if session.isPlayerEscort {
+                    // STR# 150 #32.
+                    shipState.assistTitle = host?.game?.stringList(150)?.string(at: 32) ?? "Release"
+                } else if scene.originalKeepsPressingPlayer(entityID: entityID) {
                     // STR# 150 #25.
                     shipState.assistTitle = host?.game?.stringList(150)?.string(at: 25) ?? "Beg For Mercy"
                 }
@@ -3534,10 +3537,12 @@ struct GameContainerView: View {
         }
         if model.pilot.state.hasDominated(spob.id) {
             state.tributeTitle = label(SpaceportLabel.release, "Release")
-            state.tributeEnabled = !spob.startsDominated
+            state.tributeEnabled = true
+            state.tributeVisible = !spob.startsDominated
         } else {
             state.tributeTitle = label(SpaceportLabel.demandTribute, "Demand Tribute")
             state.tributeEnabled = true
+            state.tributeVisible = true
         }
         state.landable = landingRefusalReason(spob: spob) == nil
     }
@@ -3823,7 +3828,11 @@ struct GameContainerView: View {
     }
 
     private func hailShowsAssistButton(_ state: HailDialogState) -> Bool {
-        if case .ship = state.kind { return true }
+        // A government with Flags2 0x0001 takes the middle button away.
+        if case let .ship(entityID, _) = state.kind {
+            if let session = shipComm, session.entityID == entityID { return !session.noAssistance }
+            return true
+        }
         return false
     }
 
@@ -4367,6 +4376,8 @@ struct HailDialogState {
     /// dominated world; dimmed on an always-dominated one).
     var tributeTitle = "Demand Tribute"
     var tributeEnabled = true
+    /// Hidden (not dimmed) on an always-dominated stellar (0x004a0f90).
+    var tributeVisible = true
     /// Ship hails: the middle button — "Request Assistance", or "Beg For
     /// Mercy" while the ship presses its attack (AI-42).
     var assistTitle = "Request Assistance"
