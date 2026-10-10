@@ -2382,6 +2382,8 @@ final class GameScene: SKScene {
         guard let world else { return }
         for event in world.drainEvents() {
             switch event {
+            case let .playerCloakChanged(engaging):
+                audio?.playSound(engaging ? 381 : 380)
             case let .combatChatter(soundID):
                 let length = audio?.playChatter(soundID) ?? 0
                 if length > 0 {

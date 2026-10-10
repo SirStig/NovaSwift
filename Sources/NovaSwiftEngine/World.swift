@@ -1430,6 +1430,7 @@ public final class World {
     /// The original NPC AI, which drives every brained NPC.
     public let originalAI = OriginalAI()
     /// `Frame_QueueCombatChatter`'s single slot (category, government, voice).
+    var playerCloakWasEngaged = false
     var pendingChatter: (category: Int, govt: Int, voice: Int)?
     /// Set by the host while an escort chatter sound is still playing
     /// (`DAT_00591a8c`); a queued line waits for it.
@@ -4859,6 +4860,12 @@ public final class World {
     /// burns none), or — for the player — while spinning up a jump unless the
     /// hull has Flags2 0x0400.
     private func stepCloak(_ dt: Double) {
+        defer {
+            if player.cloakEngaged != playerCloakWasEngaged {
+                playerCloakWasEngaged = player.cloakEngaged
+                emit(.playerCloakChanged(engaging: player.cloakEngaged))
+            }
+        }
         let ticks = dt * OriginalClock.ticksPerSecond
         for s in allShips where s.hasCloak {
             if s.cloakEngaged {

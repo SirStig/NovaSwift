@@ -104,6 +104,48 @@ final class AICombatFidelityTests: XCTestCase {
         XCTAssertFalse(w.originalAI.isThreatenedByEnemy(supporter, of: context, host: host(w)))
     }
 
+    // MARK: Sweep leftovers
+
+    /// D-2: a led NPC in velocity-match flies Newtonian; unled stays inertialess.
+    func testLedInertialessShipInVelocityMatchFliesNewtonian() {
+        let w = world()
+        let leader = npc("Leader", govt: 128, at: Vec2(0, 0))
+        let escort = npc("Escort", govt: 128, at: Vec2(100, 0))
+        escort.inertialess = true
+        w.addNPC(leader); w.addNPC(escort)
+        escort.velocityMatchLed = false
+        XCTAssertTrue(escort.isInertialessNow)
+        escort.velocityMatchLed = true
+        XCTAssertFalse(escort.isInertialessNow)
+    }
+
+    /// D-4: engaging then disengaging the player's cloak emits one event each.
+    func testPlayerCloakToggleEmitsOneEventEachWay() {
+        let w = world()
+        w.player.cloakFlags = 1
+        w.player.maxFuel = 300; w.player.fuel = 300
+        func changes() -> [Bool] {
+            w.drainEvents().compactMap { e -> Bool? in
+                if case let .playerCloakChanged(engaging) = e { return engaging } else { return nil }
+            }
+        }
+        w.togglePlayerCloak()
+        w.step(1.0 / 30.0)
+        var seen = changes()
+        w.togglePlayerCloak()
+        w.step(1.0 / 30.0)
+        seen += changes()
+        XCTAssertEqual(seen, [true, false])
+    }
+
+    /// C-2: a negative shän compress reads as 100.
+    func testNegativeCompressReadsAsNone() {
+        var d = [UInt8](repeating: 0, count: 200)
+        d[136] = 0xff; d[137] = 0xce   // -50
+        let shan = ShanRes(Resource(type: NovaType.shan, id: 128, name: "S", data: Data(d)))
+        XCTAssertEqual(shan.upCompress.x, 100)
+    }
+
     // MARK: Disable-only fire (A1)
 
     /// 0x004192d0: a boarder's hit on its own target leaves armor at 1; the

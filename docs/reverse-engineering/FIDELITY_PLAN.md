@@ -3699,3 +3699,8 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
    NovaSwift save slots with it (FL-03).
 5. Hitch behaviour (Q-FL-13) and persisting offer rolls / aux ships in `.evpilot` (Q-MS-06).
 6. Whether any FIX-only item listed at the end of §3 should be kept as a toggle instead.
+
+## AI / spawn / weapons sweep fixes (fix/ai-combat)
+
+Done from `ai_spawn_comm.md` and `weapons_flight.md`: A1, A2, A3, A4, A5/A6/B-13, A7, A8, B-1 to B-6, B-8 to B-12, B-14, C-1, C-2, D-1 to D-4, and ai_spawn_comm #2, #4, #6, #9 to #19 and #20 (hull availability, gate hold). Pinned by `AICombatFidelityTests`, `BoardingTests`, `ShipSystemTests`.
+Left: B-7 holds the lead aim and the ±150/±80 px creep but has no test; chatter categories 0 (order acknowledged) and 2 (target destroyed) wait on the escort key branch and a hook at 0x00437780; the capture name prompt (#119) and the comm/capture window text (#22) are UI; the fleet RNG draw shapes in #20 and A9/C-3/C-4 are presentation or stream-only; the përs 0x0002 afterburner arm is kept until its caller is traced.

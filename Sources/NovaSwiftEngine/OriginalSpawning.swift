@@ -463,7 +463,12 @@ extension Spawner {
         var slot = 0
         for escort in fleet.escorts {
             let count = world.rng.range(escort.max - escort.min + 1) + escort.min
-            for _ in 0..<max(0, count) {
+            // An escort hull that isn't available (AppearOn) spawns no ships
+            // (0x004259b0).
+            let hullAvailable = galaxy.game.ship(escort.shipID).map {
+                $0.appearOn.isEmpty || world.shipSpawnEligible(escort.shipID)
+            } ?? false
+            for _ in 0..<(hullAvailable ? max(0, count) : 0) {
                 guard world.npcs.count < OriginalSpawnRules.npcSlots else { break }
                 let span = 2 * OriginalSpawnRules.escortScatter
                 let offset = Vec2(Double(world.rng.range(span) - OriginalSpawnRules.escortScatter),
@@ -483,7 +488,10 @@ extension Spawner {
                 originalFleetCargo(fleet, ship: e, shipID: escort.shipID, world: world)
                 if let gateID = gateID(of: lead, world: world) {
                     e.position = lead.position
-                    world.addNPC(e, arrival: .gate(spobID: gateID))
+                    let eid = world.addNPC(e, arrival: .gate(spobID: gateID))
+                    // A gate-emerging escort waits Rand(15) + 5 ticks longer
+                    // than the usual 60 inside the gate.
+                    world.escortGateEmergences[eid] = (gateID, 60 + Double(world.rng.range(15) + 5))
                 } else {
                     world.addNPC(e, arrival: .hyperspace)
                 }

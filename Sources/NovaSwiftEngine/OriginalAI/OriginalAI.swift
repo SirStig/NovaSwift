@@ -265,6 +265,8 @@ public final class OriginalAI {
 
     /// `Ship_CanShipUseAfterburner` (0x0046b260), rolled once at spawn.
     func canUseAfterburner(_ ship: Ship, host: OriginalAIHost) -> Bool {
+        // A ship some other active ship is swarming never uses one.
+        if records.contains(where: { $0.key != ship.entityID && $0.value.swarmMate == ship.entityID }) { return false }
         let hull = host.hull(of: ship)
         if hull.flags & 0x0400 != 0 { return false }
         if let pid = ship.personID, let world = (host as? WorldAIHost)?.world,

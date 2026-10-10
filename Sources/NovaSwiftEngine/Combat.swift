@@ -1018,6 +1018,9 @@ public enum WorldEvent {
     /// 0x004311f0): play `soundID` unpositioned, and keep
     /// `World.combatChatterPlaying` set until it ends.
     case combatChatter(soundID: Int)
+    /// The player's cloak started engaging (snd 381) or clearing (snd 380),
+    /// from any cause (0x004680d0 / 0x00468190, D-4).
+    case playerCloakChanged(engaging: Bool)
     case weaponFired(shooterID: Int, at: Vec2, heading: Double, soundID: Int?, weaponID: Int = -1)
     /// `mountIndex` lets the renderer correlate this shot with an active
     /// `beamLoopStart` on the same mount (continuous beams reposition one
