@@ -6,11 +6,13 @@ public enum PluginInstallError: Error, LocalizedError {
     case unsupportedArchive
     case prebundledCannotBeDeleted
     case checksumMismatch
+    case macArchive(String)
 
     public var errorDescription: String? {
         switch self {
-        case .unsupportedArchive: return "Couldn't open this file as a plug-in. Only .zip archives and loose .rez/.ndat files are supported."
+        case .unsupportedArchive: return "Couldn't open this file as a plug-in. Supported: .zip, StuffIt (.sit/.hqx/.sea/.bin) and loose .rez/.ndat files."
         case .prebundledCannotBeDeleted: return "Prebundled plug-ins can be disabled but not deleted."
+        case .macArchive(let why): return why
         case .checksumMismatch: return "The download doesn't match the checksum in the catalog, so it was discarded."
         }
     }
@@ -63,6 +65,15 @@ public enum PluginInstaller {
         do {
             if isZip(zipURL) {
                 try fm.unzipItem(at: zipURL, to: destDir)
+            } else if let nm = originalName ?? Optional(zipURL.lastPathComponent),
+                      !GameLibrary.resourceExtensions.contains((nm as NSString).pathExtension.lowercased()),
+                      let head = try? Data(contentsOf: zipURL), MacArchive.recognizes(head, name: nm) {
+                // Classic Mac archive (.sit/.hqx/.sea/.bin): resource forks become .ndat files.
+                do { try MacArchive.extractArchive(at: zipURL, name: nm, to: destDir) }
+                catch let e as MacArchiveError {
+                    try? fm.removeItem(at: destDir)
+                    throw PluginInstallError.macArchive(e.errorDescription ?? "Couldn't open this archive.")
+                }
             } else {
                 let name = originalName ?? zipURL.lastPathComponent
                 guard GameLibrary.resourceExtensions.contains((name as NSString).pathExtension.lowercased()) else {
@@ -70,6 +81,9 @@ public enum PluginInstaller {
                 }
                 try fm.copyItem(at: zipURL, to: destDir.appendingPathComponent(name))
             }
+        } catch let e as PluginInstallError {
+            try? fm.removeItem(at: destDir)
+            throw e
         } catch {
             try? fm.removeItem(at: destDir)
             throw PluginInstallError.unsupportedArchive
