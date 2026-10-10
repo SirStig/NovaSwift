@@ -663,4 +663,16 @@ final class EconomyFidelityTests: XCTestCase {
         XCTAssertTrue(panic.rollsSelfDestruct { _ in 55 })
         XCTAssertFalse(panic.rollsSelfDestruct { _ in 0 }, "one roll per loot action")
     }
+
+    /// D-12: price nibbles decode by bit priority 1 → 2 → 4 (0x00469d30).
+    func testPriceNibbleDecodesByBitPriority() {
+        XCTAssertEqual(PriceLevel(nibble: 1), .low)
+        XCTAssertEqual(PriceLevel(nibble: 3), .low)
+        XCTAssertEqual(PriceLevel(nibble: 5), .low)
+        XCTAssertEqual(PriceLevel(nibble: 7), .low)
+        XCTAssertEqual(PriceLevel(nibble: 6), .medium)
+        XCTAssertEqual(PriceLevel(nibble: 4), .high)
+        XCTAssertEqual(PriceLevel(nibble: 8), .notTraded)
+        XCTAssertEqual(PriceLevel(nibble: 0), .notTraded)
+    }
 }

@@ -17,6 +17,9 @@ import NovaSwiftKit
 /// Every roll draws `NovaRandom_Range` from the world's one generator.
 public final class OriginalAI {
     public private(set) var records: [Int: OriginalAIShipState] = [:]
+    /// Set by the host after each player escort order (the Escort Commands
+    /// panel re-shows only when the order changed something).
+    public var lastEscortOrderChanged = false
     private var hulls: [Int: OriginalAIHull] = [:]
     private var stellarCache: (ids: [Int], value: [OriginalAIStellar])?
     private var persFlagCache: [Int: Int] = [:]

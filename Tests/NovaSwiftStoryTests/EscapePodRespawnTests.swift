@@ -52,6 +52,32 @@ final class EscapePodRespawnTests: XCTestCase {
         XCTAssertNil(EscapePodRespawn.respawnStellar(from: 128, state: state, game: game, isVisible: { _ in true }))
     }
 
+    /// D-8: a map-charted (level 2) neighbour qualifies; a "land only when
+    /// destroyed" port qualifies only as a wreck (0x004677a0 / 0x0046e440).
+    func testRespawnCountsChartedSystemsAndTheDestroyedRule() {
+        let game = world()
+        var state = PlayerState(currentSystem: 128)
+        state.exploredSystems = [128]
+        state.chartSystems([131])
+        XCTAssertEqual(EscapePodRespawn.respawnStellar(from: 128, state: state, game: game,
+                                                       isVisible: { _ in true })?.spob, 131)
+        var wreck = [UInt8](repeating: 0, count: 1100)
+        Bytes.i32(&wreck, 6, 0x01 | 0x08 | 0x80)
+        Bytes.i16(&wreck, 20, -1)
+        Bytes.i16(&wreck, 22, -32767)
+        let g2 = makeGame([
+            system(128, links: [129], spobs: []),
+            system(129, links: [128], spobs: [129]),
+            Resource(type: NovaType.spob, id: 129, name: "W", data: Data(wreck)),
+        ])
+        var s2 = PlayerState(currentSystem: 128)
+        s2.exploredSystems = [128, 129]
+        XCTAssertNil(EscapePodRespawn.respawnStellar(from: 128, state: s2, game: g2, isVisible: { _ in true }),
+                     "intact: not usable")
+        s2.markStellarShotDown(129, onDay: 0)
+        XCTAssertEqual(EscapePodRespawn.respawnStellar(from: 128, state: s2, game: g2, isVisible: { _ in true })?.spob, 129)
+    }
+
     func testRespawnHonoursMinStatus() {
         let game = makeGame([
             system(128, links: [129], spobs: []),

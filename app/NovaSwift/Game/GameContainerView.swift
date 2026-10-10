@@ -179,11 +179,19 @@ final class GameHost {
                     let radius = CGFloat(sprite?.frameWidth ?? 48) / 2
                     // `spöb.X/Y` is authored +y-down (same convention as `sÿst.X/Y`);
                     // flip to this engine/SpriteKit's +y-up world.
-                    return PlanetVisual(id: spob.id, name: spob.name,
-                                        position: CGPoint(x: spob.x, y: -spob.y),
-                                        texture: tex, radius: radius,
-                                        government: spob.government,
-                                        isUninhabited: spob.isUninhabited || wreck)
+                    var visual = PlanetVisual(id: spob.id, name: spob.name,
+                                              position: CGPoint(x: spob.x, y: -spob.y),
+                                              texture: tex, radius: radius,
+                                              government: spob.government,
+                                              isUninhabited: spob.isUninhabited || wreck,
+                                              isHypergate: spob.isHypergate, isWormhole: spob.isWormhole)
+                    let anim = GameScene.stellarAnimation(spob: spob, sheet: entry.sprite,
+                                                          destroyed: game.spobDestroyedSprite(spob.id))
+                    visual.frames = anim.frames
+                    visual.destroyedFrames = anim.destroyedFrames
+                    visual.animator = anim.animator
+                    visual.animatesOnlyWhenDestroyed = spob.animatesOnlyWhenDestroyed
+                    return visual
                 }
                 // Placement. Loading a pilot that was saved while docked lifts off
                 // from that pad — EV Nova only saves on landing, so "where I saved"
@@ -652,6 +660,9 @@ struct GameContainerView: View {
     /// rebuild idempotent regardless of that delivery-order race.
     @State private var hostSystemID: Int?
     @State private var showMenu = false
+    /// When the in-flight route mini map was last raised (S-1, 0x004a9b30).
+    @State private var routeMapShownAt: Date?
+    @State private var routeMapUnitsPerPixel = 0.5625
 
     /// Whether pausing opens the port's sidebar menu. Follows the setting on desktop;
     /// always on for mobile, which has no keyboard and reaches the sidebar only via
@@ -847,16 +858,45 @@ struct GameContainerView: View {
                                   fullscreen: model.settings.fullscreenGalaxyMap,
                                   gateSelection: .init(
                                     originSystem: nav.currentSystemID,
-                                    destinations: game.gateDestinations(from: gate),
+                                    destinations: game.gateDestinations(from: gate, hidden: game.hiddenSystemIDs(for: model.pilot.state)),
                                     onSelect: { destGate, destSystem in
                                         performGateJump(toSystem: destSystem, arriveAtGate: destGate)
                                     }))
                         .transition(.opacity)
                 }
 
+                if let shown = routeMapShownAt, !nav.showingMap {
+                    // 0x00439bb0: full for 118 ticks, fading over the next 32
+                    // (60 Hz), gone at 150; the original clears its flag at 500.
+                    // A square of a quarter of the view width, at least 200,
+                    // in the top-left corner (0x004ab9d4).
+                    GeometryReader { geo in
+                        let side = max(200, (geo.size.width * 0.25).rounded())
+                        TimelineView(.animation) { tl in
+                            let ticks = tl.date.timeIntervalSince(shown) * 60
+                            let alpha = ticks < 118 ? 1.0 : max(0, 1 - (ticks - 118) / 32)
+                            GalaxyMapView(nav: nav, pilot: model.pilot, onJump: {}, onClose: {},
+                                          fullscreen: false, miniMap: true,
+                                          miniMapUnitsPerPixel: routeMapUnitsPerPixel)
+                                .frame(width: side, height: side)
+                                .opacity(alpha)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                    .task(id: shown) {
+                        try? await Task.sleep(nanoseconds: 8_400_000_000)   // the flag lasts 500 ticks
+                        if routeMapShownAt == shown { routeMapShownAt = nil }
+                    }
+                }
+
                 GeometryReader { geo in
                     MessageLogView(hud: host.hud, rightInset: touchRightInset(host, in: geo.size))
                 }
+
+                EscortCommandPanelView(hud: host.hud)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, 60).padding(.leading, 12)
 
                 // Multiplayer session chat — only rendered while a session is
                 // live (started from the in-game menu). Passive cluster; empty
@@ -969,7 +1009,7 @@ struct GameContainerView: View {
                 // The ship comm's payment window (DLOG 1008, AI-42).
                 if let payment = shipPayment, let game = host.game {
                     NegotiationView(graphics: host.graphics,
-                                    message: PaymentWindow.prompt(price: payment.window.price, game: game),
+                                    message: PaymentWindow.prompt(price: payment.window.price, game: game, hasShipTarget: true),
                                     primaryLabel: host.graphics?.buttonLabel(SpaceportLabel.acceptPrice, fallback: "Accept Price") ?? "Accept Price",
                                     secondaryLabel: host.graphics?.buttonLabel(SpaceportLabel.lowerPrice, fallback: "Lower Price") ?? "Lower Price",
                                     onPrimary: { pressShipPayment(.pay) },
@@ -1108,11 +1148,19 @@ struct GameContainerView: View {
             // macOS — the scene view has to actually reclaim key status first.
             if !open { grabSceneFocus(reason: "menu closed") }
         }
+        .onChange(of: nav.currentSystemID) { _, _ in
+            // The jump sequence redraws the route map on hop arrival
+            // (0x0044f3d0) when a route remains.
+            if !nav.route.isEmpty, landedSpobID == nil { routeMapShownAt = Date() }
+        }
         .onChange(of: nav.showingMap) { _, open in
             // The Galaxy Map is a full-screen planning overlay — freeze the sim and
             // its audio behind it (like every other in-flight menu), then hand focus
             // back to flight on close.
             setMenuPaused(open, reason: "showingMap=\(open)")
+            // Closing the map in flight re-syncs the route head (0x004a4fd0 →
+            // 0x004a8080): a plotted route re-arms when its head is linked.
+            if !open, gateMapOrigin == nil, landedSpobID == nil { nav.rearmRoute() }
             if !open { grabSceneFocus(reason: "map closed") }
         }
         .onChange(of: gateMapOrigin) { _, id in
@@ -1122,6 +1170,8 @@ struct GameContainerView: View {
         .onChange(of: nav.plan) { _, _ in
             syncNavCourseToHUD(host)
         }
+        .onChange(of: model.pilot.state.setBits) { _, _ in refreshNavVisibility() }
+        .onChange(of: model.pilot.state.currentSystem) { _, _ in refreshNavVisibility() }
         .onChange(of: hailDialogState != nil) { _, open in
             setMenuPaused(open, reason: "hailDialogState=\(open)")
             if !open { grabSceneFocus(reason: "hail dialog closed") }
@@ -1395,6 +1445,10 @@ struct GameContainerView: View {
     /// Logs every attempt/outcome (subsystem com.novaswift.app, category Input) so
     /// the failure mode is visible in Console without attaching a debugger.
     private func grabSceneFocus(reason: String, attempt: Int = 0) {
+        // Entering spaceflight and leaving a dialog flush the key state
+        // (`NovaInputQueue_FlushAllCommands` 0x004b68d0): a key held through
+        // the dialog reads as up until it is pressed again.
+        if attempt == 0 { host?.input.flushKeyboard() }
         reclaimingSceneFocus = true
         DispatchQueue.main.async {
             isSceneFocused = true
@@ -1630,8 +1684,10 @@ struct GameContainerView: View {
     /// is required.
     private func performGateJump(toSystem destSystem: Int, arriveAtGate destGate: Int) {
         guard let host, !host.scene.isJumping else { return }
+        host.scene.gateTransitSpobID = gateMapOrigin
         gateMapOrigin = nil
         host.scene.beginGateJump(toSystem: destSystem, arriveAtGate: destGate) {
+            host.scene.gateTransitSpobID = nil
             hostSystemID = destSystem                     // set first: suppress the host-rebuild onChange
             nav.arriveViaGate(at: destSystem)
             storyArrival(in: destSystem)
@@ -1777,7 +1833,16 @@ struct GameContainerView: View {
     /// Reattach `nav`'s live-fuel/multi-jump sources to the current session's
     /// ship — needed every time `host` is (re)built, since neither survives a
     /// system rebuild on its own.
+    /// Push the story's system visibility into the nav model (which then
+    /// revalidates the plotted route, D-1) — on every control-bit change and
+    /// system change, as 0x00432470 runs after them.
+    private func refreshNavVisibility() {
+        guard let game = model.data.game else { return }
+        nav.hiddenSystems = game.hiddenSystemIDs(for: model.pilot.state)
+    }
+
     private func syncNav(_ host: GameHost?) {
+        refreshNavVisibility()
         // In-place jumps commit nav/fuel/date first, then replace the world.
         // Spawn into that finished destination world so its ships survive the
         // replacement. A discarded host must not reattach an obsolete scene.
@@ -1794,6 +1859,11 @@ struct GameContainerView: View {
         host?.scene.onTravelStellarSelected = { nav.disarmJump() }
         host?.scene.onLandingCleared = { id in postLandingClearance(id) }
         host?.scene.persGrudgeProvider = { id in model.pilot.state.persHoldsGrudge(id) }
+        host?.scene.stellarIFFColorProvider = { id in
+            guard let game = model.data.game, let spob = game.spob(id) else { return nil }
+            let c = RadarIFF.stellarColor(spob, state: model.pilot.state, game: game, system: nav.currentSystemID)
+            return Color(red: Double(c.r) / 65535, green: Double(c.g) / 65535, blue: Double(c.b) / 65535)
+        }
         // Every status-bar line gets the original's wildcard pass, so a quote's
         // <PSN>/<PN>/{G …} never reaches the screen raw.
         if let game = host?.game {
@@ -1998,6 +2068,7 @@ struct GameContainerView: View {
         // The original nav panel names the armed next hop, or "Unexplored
         // System" (#346) until it has been visited (UI-10).
         hud.navJumpArmed = nav.jumpArmed
+        hud.navHyperspaceMode = nav.plan.hyperspaceMode
         if let hop = nav.route.first, let system = nav.system(hop) {
             let visited = model.pilot.state.exploredSystems.contains(hop) || model.pilot.chartedSystems.contains(hop)
             hud.navNextHopName = visited ? system.displayName
@@ -2312,6 +2383,15 @@ struct GameContainerView: View {
         model.pilot.state.currentSystem = systemID
         model.pilot.state.exploredSystems.insert(systemID)
         guard let game = model.data.game, game.system(systemID) != nil else { return }
+        // The pilot's system went hidden and the pilot moved to its twin
+        // (0x00448090): the original only retags the player, ships, shots and
+        // objects with the twin's index, so nothing is rebuilt.
+        if keepPosition, let group = game.reputationMap().groups[nav.currentSystemID], group.contains(systemID) {
+            model.pilot.state.shareTwinDiscovery(game.reputationMap())
+            hostSystemID = systemID
+            nav.currentSystemID = systemID
+            return
+        }
         // Docked, the original only stashes the move for the launch tail
         // (MS-18): `M` launches at the new system's first nav stellar, `N`
         // skips the launch snap and keeps the old stellar's coordinates.
@@ -2666,10 +2746,12 @@ struct GameContainerView: View {
         // close it. The monitor already covers every binding onKeyPress did.
         .background(FlightKeyboardMonitor(input: host.input, bindings: model.bindings,
                                           isActive: { flightControlsVisible },
-                                          onDiscrete: handleDiscrete))
+                                          onDiscrete: handleDiscrete,
+                                          onRawKey: escortGroupKey))
         #else
         .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
-                                   onDiscrete: handleDiscrete))
+                                   onDiscrete: handleDiscrete,
+                                   onRawKey: escortGroupKey))
         #endif
     }
 
@@ -3331,11 +3413,22 @@ struct GameContainerView: View {
         case .selectNav1, .selectNav2, .selectNav3, .selectNav4:
             let index = [GameAction.selectNav1, .selectNav2, .selectNav3, .selectNav4].firstIndex(of: action) ?? 0
             host?.scene.selectNavStellar(index: index)
+        case .routeMapZoomOut, .routeMapZoomIn:
+            // While the map is up: x4/3 out up to 2.0, x0.75 in down to 0.5.
+            guard let shown = routeMapShownAt, Date().timeIntervalSince(shown) * 60 <= 500 else { return }
+            if action == .routeMapZoomOut, routeMapUnitsPerPixel <= 2.0 { routeMapUnitsPerPixel *= 4.0 / 3 }
+            else if action == .routeMapZoomIn, routeMapUnitsPerPixel > 0.5 { routeMapUnitsPerPixel *= 0.75 }
+            else { return }
+            routeMapShownAt = Date()
+            model.audio.play(.uiSelect)
+        case .cycleHyperspaceLink:
+            if nav.cycleHyperspaceLink() { routeMapShownAt = Date() }
         case .hyperspaceArm:
             // H: the travel channel goes back to hyperspace, re-arming the
             // plotted route's next hop.
             host?.scene.clearTravelSelection()
-            nav.rearmRoute()
+            nav.selectHyperspace()
+            routeMapShownAt = Date()
         case .dismissMessage:
             host?.hud.dismissMessage()
         case .playerInfo:
@@ -3361,17 +3454,27 @@ struct GameContainerView: View {
             host?.scene.recallPlayerFighters()
         case .eject:
             host?.scene.requestEject()
+        // F / D / V / C / Alt-C (slots 0x30–0x33): to the group picked in the
+        // Escort Commands panel while it is up, else to every escort.
         case .commandEscortAggressive:
-            host?.scene.commandEscorts(.aggressive)
+            host?.scene.escortOrder(OriginalEscortCommand.attack)
         case .commandEscortDefensive:
-            host?.scene.commandEscorts(.defensive)
-        case .commandEscortEvasive:
-            host?.scene.commandEscorts(.evasive)
+            host?.scene.escortOrder(OriginalEscortCommand.defend)
+        case .commandEscortEvasive, .commandEscortFormation:
+            host?.scene.escortOrder(OriginalEscortCommand.formation)
         case .commandEscortHold:
-            host?.scene.commandEscorts(.hold)
+            host?.scene.escortOrder(OriginalEscortCommand.hold)
+        case .commandEscortReturnHangar:
+            host?.scene.escortOrder(OriginalEscortCommand.returnToHangar)
         case .openEscorts:
-            model.audio.play(.uiSelect)
-            showEscortsPanel = true
+            if model.settings.enhancements.modernKeyBindings {
+                // The port's layout: E opens the Escorts window.
+                model.audio.play(.uiSelect)
+                showEscortsPanel = true
+            } else {
+                // The original: E shows the in-flight Escort Commands panel.
+                host?.scene.escortPanelPressE()
+            }
         case .shipInfo:
             model.audio.play(.uiSelect)
             showShipInfoPanel = true
@@ -3386,6 +3489,14 @@ struct GameContainerView: View {
         default:
             break
         }
+    }
+
+    /// Keys 1–5 while the Escort Commands panel is up pick a group, and no
+    /// command bound to them fires (0x00469ca0 / 0x00469cf0). Returns whether
+    /// the key was consumed.
+    private func escortGroupKey(_ token: String) -> Bool {
+        guard let k = ["1", "2", "3", "4", "5"].firstIndex(of: token), let scene = host?.scene else { return false }
+        return scene.escortGroupKey(k)
     }
 
     /// Hail whatever `GameScene.attemptHail()` resolves to — the current
@@ -3511,7 +3622,10 @@ struct GameContainerView: View {
                 var line = shipCommLine(session.openingPrompt, session)
                 if session.appendsPilotName { line += model.pilot.state.pilotName + "." }
                 shipState.responseText = line
-                if scene.originalKeepsPressingPlayer(entityID: entityID) {
+                if session.isPlayerEscort {
+                    // STR# 150 #32.
+                    shipState.assistTitle = host?.game?.stringList(150)?.string(at: 32) ?? "Release"
+                } else if scene.originalKeepsPressingPlayer(entityID: entityID) {
                     // STR# 150 #25.
                     shipState.assistTitle = host?.game?.stringList(150)?.string(at: 25) ?? "Beg For Mercy"
                 }
@@ -3563,10 +3677,12 @@ struct GameContainerView: View {
         }
         if model.pilot.state.hasDominated(spob.id) {
             state.tributeTitle = label(SpaceportLabel.release, "Release")
-            state.tributeEnabled = !spob.startsDominated
+            state.tributeEnabled = true
+            state.tributeVisible = !spob.startsDominated
         } else {
             state.tributeTitle = label(SpaceportLabel.demandTribute, "Demand Tribute")
             state.tributeEnabled = true
+            state.tributeVisible = true
         }
         state.landable = landingRefusalReason(spob: spob) == nil
     }
@@ -3852,7 +3968,11 @@ struct GameContainerView: View {
     }
 
     private func hailShowsAssistButton(_ state: HailDialogState) -> Bool {
-        if case .ship = state.kind { return true }
+        // A government with Flags2 0x0001 takes the middle button away.
+        if case let .ship(entityID, _) = state.kind {
+            if let session = shipComm, session.entityID == entityID { return !session.noAssistance }
+            return true
+        }
         return false
     }
 
@@ -4405,6 +4525,8 @@ struct HailDialogState {
     /// dominated world; dimmed on an always-dominated one).
     var tributeTitle = "Demand Tribute"
     var tributeEnabled = true
+    /// Hidden (not dimmed) on an always-dominated stellar (0x004a0f90).
+    var tributeVisible = true
     /// Ship hails: the middle button — "Request Assistance", or "Beg For
     /// Mercy" while the ship presses its attack (AI-42).
     var assistTitle = "Request Assistance"
@@ -4417,11 +4539,13 @@ struct KeyboardControls: ViewModifier {
     let input: InputController
     let bindings: KeyBindings
     var onDiscrete: (GameAction) -> Void = { _ in }
+    var onRawKey: (String) -> Bool = { _ in false }
 
     func body(content: Content) -> some View {
         content.onKeyPress(phases: [.down, .up]) { press in
             let pressed = press.phase == .down
             let token = KeyToken.from(press)
+            if pressed, onRawKey(token) { return .handled }
             // If keys reach the scene at all but nothing binds, or nothing ever
             // logs here on press, it confirms the ship-won't-move failure is
             // upstream of this view (focus never grabbed — see grabSceneFocus)

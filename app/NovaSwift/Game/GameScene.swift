@@ -1,4 +1,5 @@
 import SpriteKit
+import SwiftUI
 import CoreImage
 import GameController
 import NovaSwiftKit
@@ -24,51 +25,16 @@ struct PlanetVisual {
     var isHypergate: Bool = false
     var isWormhole: Bool = false
     var isGate: Bool { isHypergate || isWormhole }
-    /// Every frame of this stellar's sprite sheet, for an animated `spöb`
-    /// (`AnimDelay > 0`). Empty when the stellar is a single static frame, which
-    /// is every base-game body.
+    /// Every frame of this stellar's intact sprite sheet, when it has more than
+    /// one (`Stellar_UpdateStellarSprites` animates any multi-frame sheet).
     var frames: [SKTexture] = []
-    /// `spöb.AnimDelay` in seconds between frames.
-    var animDelaySec: Double = 0
-    /// `spöb.Frame0Bias`: hold frame 0 this many times longer than the rest, so a
-    /// rotating beacon can rest between sweeps. <= 1 = no bias.
-    var frame0Bias: Int = 1
-    /// `Flags2` 0x0001 — return to frame 0 between each subsequent frame.
-    var showsFirstFrameBetween = false
-    /// `Flags2` 0x0002 — pick the next frame at random instead of cycling.
-    var picksFramesRandomly = false
-    /// `Flags2` 0x0080 — only animate once the stellar has been destroyed.
+    /// The destroyed (wreck) sheet's frames, shown while the stellar is destroyed.
+    var destroyedFrames: [SKTexture] = []
+    /// The frame stepper (`StellarAnimator`), nil for a single-frame stellar.
+    var animator: StellarAnimator?
+    /// `Flags2` 0x0080 — animate only while destroyed (otherwise only while intact).
     var animatesOnlyWhenDestroyed = false
-    var isAnimated: Bool { animDelaySec > 0 && frames.count > 1 }
-
-    /// Which frame to show at `clock` seconds into the animation. Implements the
-    /// Bible/TMPL frame rules: `Frame0Bias` stretches frame 0, `Flags2` 0x0001
-    /// interleaves frame 0 between every other, and 0x0002 picks at random.
-    /// `randomSeed` keeps the random mode stable per stellar rather than
-    /// strobing every draw.
-    func frameIndex(clock: Double, randomSeed: Int) -> Int {
-        let n = frames.count
-        guard n > 1, animDelaySec > 0 else { return 0 }
-        // Frame 0 occupies `bias` slots; every other frame occupies one.
-        let bias = max(1, frame0Bias)
-        let cycleSlots = showsFirstFrameBetween
-            ? (n - 1) * (bias + 1)              // 0,1,0,2,0,3… with frame 0 stretched
-            : bias + (n - 1)
-        let slot = Int(clock / animDelaySec) % max(1, cycleSlots)
-        if picksFramesRandomly {
-            // Deterministic per (stellar, slot) so the frame holds for its whole
-            // slot instead of flickering every rendered frame.
-            var h = UInt64(bitPattern: Int64(randomSeed &* 2_654_435_761 &+ slot))
-            h ^= h >> 33; h = h &* 0xFF51AFD7ED558CCD; h ^= h >> 33
-            return Int(h % UInt64(n))
-        }
-        if showsFirstFrameBetween {
-            let pair = bias + 1
-            let idx = slot / pair
-            return (slot % pair) < bias ? 0 : min(n - 1, idx + 1)
-        }
-        return slot < bias ? 0 : min(n - 1, slot - bias + 1)
-    }
+    var isAnimated: Bool { animator != nil }
 }
 
 /// The live game scene. Runs the `NovaSwiftEngine` simulation and draws it: an
@@ -162,6 +128,9 @@ final class GameScene: SKScene {
     /// Whether the pilot holds a grudge against përs `id` (its HailQuote
     /// Flags 0x0004 gate); set by the container from the pilot.
     var persGrudgeProvider: ((Int) -> Bool)?
+    /// The IFF stellar colour of a stellar id (0x00466030, `RadarIFF`),
+    /// supplied by the host from the pilot state.
+    var stellarIFFColorProvider: ((Int) -> Color?)?
     /// Sim time, and per ship the time of its last HailQuote and whether it
     /// has quoted at all (the original's +0xac / +0xbc).
     private var hailQuoteClock: Double = 0
@@ -241,6 +210,8 @@ final class GameScene: SKScene {
     /// ("animate only when destroyed"). Kept in sync by the container on system
     /// build and whenever a stellar is destroyed or regenerates.
     var destroyedStellarIDs: Set<Int> = []
+    /// The hypergate the player is jumping through (keeps its sheet open).
+    var gateTransitSpobID: Int?
     /// Host gate: whether a pêrs may spawn now (ActiveOn NCB + not defeated).
     var persSpawnEligible: ((Int) -> Bool)?
     /// Host gate: whether a hull with a non-blank `shïp.AppearOn` may spawn now.
@@ -315,8 +286,12 @@ final class GameScene: SKScene {
     // Edge-triggered warning state: true once the klaxon/red-alert for that
     // threshold has played, reset only after recovering with a little hysteresis
     // so crossing back and forth right at the line doesn't retrigger every frame.
-    private var shieldWarned = false
-    private var hullWarned = false
+    private var redAlert = RedAlertCue()
+    /// The in-flight Escort Commands panel (input A / HUD M3).
+    private(set) var escortPanel = EscortCommandPanel()
+    private var rawCallAccumulator: Double = 0
+    private var klaxxonOn = false
+    private var redAlertBlink: SKSpriteNode?
 
     private let cameraNode = SKCameraNode()
     private var shipNode: SKNode!
@@ -716,7 +691,6 @@ final class GameScene: SKScene {
     /// node without a linear scan. Rebuilt in `buildPlanets`, cleared on reload.
     private var planetNodeByID: [Int: SKNode] = [:]
     /// Shared clock for animated `spöb` frame cycling (see `updateAnimatedStellars`).
-    private var stellarAnimClock: Double = 0
     /// Set by `reloadSystem` when the arrival is *out of a gate*, consumed by the
     /// gate open→close flourish once the new system's nodes are built.
     private var pendingGateArrivalID: Int?
@@ -1008,6 +982,12 @@ final class GameScene: SKScene {
     private let planetBracket = SKShapeNode()
     private var lockedShipBracketID: Int?
     private var lockedPlanetBracketID: Int?
+    /// The Classic HUD's target reticles: four 16-px corner cicns each, for
+    /// the ship target (cicn 10008 + frame, 0x0042ede0) and the selected
+    /// stellar (cicn 10000 + frame, 0x0042eac0).
+    private var cicnTextureCache: [Int: SKTexture?] = [:]
+    /// The reticle zoom-in (0x00735494 / 0x00735490): 256 px when a target is
+    /// picked on screen, shrinking 60 px a tick to 0.
     private var npcNodes: [Int: NPCNode] = [:]
     private var asteroidNodes: [Int: AsteroidNode] = [:]
     private var asteroidTextureCache: [Int: [SKTexture]] = [:]
@@ -1925,17 +1905,131 @@ final class GameScene: SKScene {
     /// below the threshold; a little hysteresis on the recovery side (threshold
     /// + 5%) keeps a value hovering right at the line from retriggering every
     /// ~12 Hz HUD tick.
-    private func updateWarnings(shieldFraction: Double, armorFraction: Double) {
-        if shieldFraction <= 0.25 {
-            if !shieldWarned { audio?.play(.lowShieldWarning); shieldWarned = true }
-        } else if shieldFraction > 0.30 {
-            shieldWarned = false
+    /// The original's two alarm cues (M-1): snd 370 "Red Alert" on the first
+    /// ship to start threatening the player's squad (a 60-frame rising-edge
+    /// check, `RedAlertCue`), with the cicn 18000/18001 blink when the sound
+    /// volume is below 2 of 7; snd 371 "Klaxxon" only while the player's
+    /// death timer runs.
+    private func updateWarnings(dt: Double) {
+        rawCallAccumulator += dt * OriginalClock.rawCallsPerSecond
+        let calls = Int(rawCallAccumulator)
+        rawCallAccumulator -= Double(calls)
+        tickEscortPanel(frames: calls)
+        let volume = settings.muteAll ? 0 : settings.masterVolume * settings.sfxVolume
+        guard let world = self.world else { return }
+        if redAlert.advance(rawCalls: calls, lowVolume: volume * 7 < 2, inEscapePod: world.playerInEscapePod,
+                            threat: { world.isAnyShipThreatToPlayerSquad }) {
+            audio?.play(.redAlert)
         }
-        if armorFraction <= 0.15 {
-            if !hullWarned { audio?.play(.criticalHullWarning); hullWarned = true }
-        } else if armorFraction > 0.20 {
-            hullWarned = false
+        if world.isPlayerDeathTimerRunning {
+            // Klaxxon only plays when no voice already has it (0x0044b120:2856).
+            if audio?.isPlaying(371) != true {
+                audio?.playSound(371, priority: OriginalAudio.Priority.klaxxon)
+            }
+        } else if klaxxonOn {
+            audio?.stopSound(371)
         }
+        klaxxonOn = world.isPlayerDeathTimerRunning
+        updateRedAlertBlink()
+    }
+
+    // MARK: Escort Commands panel
+
+    /// `TickCount` now, in 60 Hz ticks.
+    private var tickCount60: Double { effectClock * 60 }
+
+    /// E: show the panel (beep), or "no escorts" (#51), or hide it.
+    func escortPanelPressE() {
+        guard let world else { return }
+        switch escortPanel.pressE(hasEscorts: world.playerEscortRoster().any, now: tickCount60) {
+        case .opened:
+            audio?.play(.uiSelect)
+        case .noEscorts:
+            if let line = galaxy?.game.stringList(2002)?.string(at: 51) { hud?.post(line) }
+            audio?.play(.uiError)
+        case .closed:
+            audio?.play(.uiSelect)
+        }
+        publishEscortPanel()
+    }
+
+    /// A number key while the panel is up: pick a group. Returns false (key
+    /// not consumed) while the panel is hidden.
+    func escortGroupKey(_ k: Int) -> Bool {
+        guard escortPanel.isOpen, let world else { return false }
+        let roster = world.playerEscortRoster()
+        if escortPanel.pressGroupKey(k, hasCategory: { roster.perCategory[$0] > 0 }, now: tickCount60) {
+            audio?.play(.targetLock)
+        }
+        publishEscortPanel()
+        return true
+    }
+
+    /// F / D / V / C / Alt-C: the order goes to the selected group while the
+    /// panel is up, to every escort otherwise.
+    func escortOrder(_ code: Int) {
+        let category = escortPanel.order(code)
+        commandEscortGroup(category: category, command: code)
+        if world?.lastEscortOrderChanged == true { escortPanel.orderTaken(now: tickCount60) }
+        publishEscortPanel()
+    }
+
+    private func tickEscortPanel(frames: Int) {
+        guard let world else { return }
+        let roster = world.playerEscortRoster()
+        let was = escortPanel
+        escortPanel.tick(frames: frames, now: tickCount60, liveEscorts: roster.live,
+                         fighterOut: { roster.fighterOut[$0] })
+        if escortPanel != was || escortPanel.isOpen { publishEscortPanel(roster) }
+    }
+
+    private func publishEscortPanel(_ roster: World.EscortRoster? = nil) {
+        guard let hud else { return }
+        guard escortPanel.isOpen, let world else {
+            if hud.escortPanel != nil { hud.escortPanel = nil }
+            return
+        }
+        let roster = roster ?? world.playerEscortRoster()
+        let list = galaxy?.game.stringList(2002)
+        func s(_ i: Int) -> String { list?.string(at: i) ?? "" }
+        func orderText(_ o: Int) -> String {
+            switch o {
+            case 1: return s(145)
+            case 2: return s(146)
+            case 3: return s(148)
+            case 4: return s(147)
+            default: return s(149)
+            }
+        }
+        var rows = [EscortPanelDisplay.Row(label: s(144), order: "", enabled: roster.any,
+                                           selected: escortPanel.group == -1)]
+        for c in 0..<4 {
+            let live = roster.perCategory[c] > 0
+            rows.append(.init(label: s(140 + c), order: live ? orderText(escortPanel.orders[c]) : "",
+                              enabled: live, selected: escortPanel.group == c))
+        }
+        let display = EscortPanelDisplay(title: s(133), rows: rows, level: escortPanel.level)
+        if hud.escortPanel != display { hud.escortPanel = display }
+    }
+
+    /// The low-volume Red Alert blink (`FUN_0042cc30`): cicn 18000 + parity
+    /// at the playfield's top-right corner while the counter runs.
+    private func updateRedAlertBlink() {
+        guard let frame = redAlert.blinkFrame, let tex = cicnTexture(18000 + frame) else {
+            redAlertBlink?.isHidden = true
+            return
+        }
+        if redAlertBlink == nil {
+            let n = SKSpriteNode()
+            n.zPosition = 50
+            cameraNode.addChild(n)
+            redAlertBlink = n
+        }
+        guard let n = redAlertBlink else { return }
+        n.texture = tex
+        n.size = tex.size()
+        n.position = CGPoint(x: size.width / 2 - tex.size().width / 2, y: size.height / 2 - tex.size().height / 2)
+        n.isHidden = false
     }
 
     // MARK: Hailing + target-lock
@@ -2225,7 +2319,8 @@ final class GameScene: SKScene {
     /// AI-35: an order to one EscortType group of the player's escorts.
     func commandEscortGroup(category: Int?, command: Int) {
         guard let world else { return }
-        world.originalAI.commandPlayerEscortGroup(category: category, command: command, world: world)
+        world.lastEscortOrderChanged =
+            world.originalAI.commandPlayerEscortGroup(category: category, command: command, world: world) != nil
     }
 
     // MARK: Persistent escort roster ↔ live wing
@@ -3119,8 +3214,9 @@ final class GameScene: SKScene {
 
     /// The original nav panel (0x0045e400; UI-10): "Hyperspace" (#345) with
     /// the armed next hop (dimmed until clear of the no-jump zone with a jump
-    /// of fuel), else "Stellar Navigation" (#343) with the selected stellar,
-    /// else "Nav System Off" (#342).
+    /// of fuel), or "Hyperspace" / "No Destination" (#344) in travel mode 3
+    /// with nothing armed, else "Stellar Navigation" (#343) with the selected
+    /// stellar, else "Nav System Off" (#342).
     private func updateOriginalNavText() {
         guard let hud else { return }
         hud.noTargetText = misc(349)
@@ -3128,6 +3224,10 @@ final class GameScene: SKScene {
             hud.navTitle = misc(345)
             hud.navName = hud.navNextHopName
             hud.navNameDim = !(isClearOfNoJumpZone && world.player.fuel >= ShipFuel.perJump) && !isJumping
+        } else if hud.navHyperspaceMode, selectedPlanetID == nil {
+            hud.navTitle = misc(345)
+            hud.navName = misc(344)
+            hud.navNameDim = false
         } else if let id = selectedPlanetID {
             hud.navTitle = misc(343)
             hud.navName = planetVisuals.first { $0.id == id }?.name ?? misc(344)
@@ -4284,6 +4384,11 @@ final class GameScene: SKScene {
     /// Advance the jump one frame and return the `ControlIntent` that flies it.
     /// Called from `update` in place of manual input while `jumpPhase != .none`.
     private func stepJump(_ dt: Double) -> ControlIntent {
+        defer {
+            // "No hyperspace effects" (g_nv_noHyperspaceEffects): the flash colour
+            // goes black and the brighten ramp is never set (0x00872384).
+            if settings.noHyperspaceEffects { jumpFlash?.isHidden = true; jumpFlash?.alpha = 0 }
+        }
         jumpClock += dt
         let p = world.player
         var intent = ControlIntent()
@@ -4418,6 +4523,7 @@ final class GameScene: SKScene {
     /// `stretch` elongates the lines along the travel direction.
     private func showJumpStreaks(intensity: CGFloat, stretch: CGFloat) {
         guard let streaks = jumpStreaks else { return }
+        if settings.noHyperspaceEffects { streaks.isHidden = true; return }
         streaks.isHidden = false
         streaks.alpha = intensity * 0.7
         streaks.yScale = stretch
@@ -4629,14 +4735,59 @@ final class GameScene: SKScene {
     /// TCs use it for rotating beacons, pulsing stations and flickering wrecks.
     private func updateAnimatedStellars(_ dt: TimeInterval) {
         guard planetVisuals.contains(where: \.isAnimated) else { return }
-        stellarAnimClock += dt
-        for p in planetVisuals where p.isAnimated {
-            // `Flags2` 0x0080: the wreck animates, the intact body doesn't.
-            if p.animatesOnlyWhenDestroyed && !destroyedStellarIDs.contains(p.id) { continue }
+        let ticks = dt * 30
+        for i in planetVisuals.indices where planetVisuals[i].animator != nil {
+            let p = planetVisuals[i]
             guard let sprite = planetNodeByID[p.id] as? SKSpriteNode else { continue }
-            let idx = p.frameIndex(clock: stellarAnimClock, randomSeed: p.id)
-            if idx < p.frames.count { sprite.texture = p.frames[idx] }
+            let destroyed = destroyedStellarIDs.contains(p.id)
+            let sheet = destroyed && !p.destroyedFrames.isEmpty ? p.destroyedFrames : p.frames
+            // Animate iff destroyed == Flags2 0x0080; otherwise rest on frame 0.
+            guard destroyed == p.animatesOnlyWhenDestroyed, sheet.count > 1 else {
+                if let first = sheet.first { sprite.texture = first }
+                world.stellarFrames[p.id] = 0
+                continue
+            }
+            let engaged = p.animator?.isGate == true && gateIsEngaged(p)
+            let frame = planetVisuals[i].animator!.step(ticks: ticks, engaged: engaged) { Int.random(in: 0..<max(1, $0)) }
+            world.stellarFrames[p.id] = frame
+            if frame < sheet.count { sprite.texture = sheet[frame] }
         }
+    }
+
+    /// A gate is "engaged" while the player jumps through it, an enabled ship
+    /// leaves it (AI state 0x15 aimed at it), or one heads to it (states 0x01 /
+    /// 0x14) within twice the sheet width on both axes — 1.1 times that once
+    /// the gate is past its transition frame.
+    private func gateIsEngaged(_ p: PlanetVisual) -> Bool {
+        if gateTransitSpobID == p.id { return true }
+        guard let world, let a = p.animator else { return false }
+        let past = a.current >= a.transitionFrame
+        let reach = Double(p.radius * 4) * (past ? 1.1 : 1)
+        for npc in world.npcs where npc.isAlive && !npc.disabled {
+            guard let rec = world.originalAI.record(for: npc.entityID) else { continue }
+            if rec.state == OriginalAIState.gateEmerge, rec.secondary.stellarID == p.id { return true }
+            if rec.state == OriginalAIState.travel || rec.state == OriginalAIState.gateEntry,
+               rec.secondary.stellarID == p.id,
+               abs(npc.position.x - Double(p.position.x)) < reach,
+               abs(npc.position.y - Double(p.position.y)) < reach { return true }
+        }
+        return false
+    }
+
+    /// The frames and stepper for a stellar whose intact or destroyed sheet has
+    /// more than one frame; the common single-frame body gets neither.
+    static func stellarAnimation(spob: SpobRes, sheet: SpriteSheet?, destroyed: SpriteSheet?)
+        -> (frames: [SKTexture], destroyedFrames: [SKTexture], animator: StellarAnimator?) {
+        func textures(_ s: SpriteSheet?) -> [SKTexture] {
+            guard let s, s.frameCount > 1 else { return [] }
+            return (0..<s.frameCount).compactMap { s.frameCGImage($0) }.map { SKTexture(cgImage: $0) }
+        }
+        let frames = textures(sheet), wreck = textures(destroyed)
+        let count = max(frames.count, wreck.count)
+        guard count > 1 else { return ([], [], nil) }
+        let animator = StellarAnimator(frameCount: count, delay: max(0, spob.animationDelay),
+                                       bias: spob.frame0Bias, flags2: spob.flags2, custPic: spob.landingPictID)
+        return (frames, wreck, animator)
     }
 
     private func makePlanetVisuals(systemID: Int, game: NovaGame) -> [PlanetVisual] {
@@ -4648,10 +4799,7 @@ final class GameScene: SKScene {
             // Animated stellars (`spöb.AnimDelay` > 0) carry their whole sheet so
             // the scene can cycle it; static ones (every base-game body) don't,
             // which keeps the common case a single texture.
-            var frames: [SKTexture] = []
-            if entry.spob.isAnimated, let sheet = entry.sprite, sheet.frameCount > 1 {
-                frames = (0..<sheet.frameCount).compactMap { sheet.frameCGImage($0) }.map { SKTexture(cgImage: $0) }
-            }
+            let anim = Self.stellarAnimation(spob: entry.spob, sheet: entry.sprite, destroyed: game.spobDestroyedSprite(entry.spob.id))
             var v = PlanetVisual(id: entry.spob.id, name: entry.spob.name,
                                  position: CGPoint(x: entry.spob.x, y: -entry.spob.y),
                                  texture: tex, radius: radius,
@@ -4659,11 +4807,9 @@ final class GameScene: SKScene {
                                  isUninhabited: entry.spob.isUninhabited,
                                  isHypergate: entry.spob.isHypergate,
                                  isWormhole: entry.spob.isWormhole)
-            v.frames = frames
-            v.animDelaySec = Double(max(0, entry.spob.animationDelay)) / 30.0
-            v.frame0Bias = entry.spob.frame0Bias
-            v.showsFirstFrameBetween = entry.spob.showsFirstFrameBetween
-            v.picksFramesRandomly = entry.spob.picksFramesRandomly
+            v.frames = anim.frames
+            v.destroyedFrames = anim.destroyedFrames
+            v.animator = anim.animator
             v.animatesOnlyWhenDestroyed = entry.spob.animatesOnlyWhenDestroyed
             return v
         }
@@ -5025,6 +5171,8 @@ final class GameScene: SKScene {
         guard world?.playerInEscapePod != true else { return false } // nor does a drifting pod
         // A disabled ship can't engage — a silent refusal (0x0044c1a3; FL-04).
         guard world?.player.disabled != true else { return false }
+        // A tractor-beam lock on another ship holds it in place (0x00415b80).
+        if let p = world?.player, let lock = p.velocityMatchTargetID, lock != p.entityID { return false }
         if isClearOfNoJumpZone {
             clearCannotJumpOverlays()
             return true
@@ -5143,6 +5291,17 @@ final class GameScene: SKScene {
     private func isEffectivelyHostileToPlayer(_ npc: Ship) -> Bool {
         if isEntityAttackingPlayer(npc.entityID) { return true }
         return world.isEffectivelyHostileToPlayer(npc)
+    }
+
+    /// The IFF ship colours of `Ship_GetShipRadarColor` 0x00465f00: disabled
+    /// theme grey 0x4000, threat red, squad green, everything else pure blue.
+    static func iffColor(_ c: World.IFFClass) -> Color {
+        switch c {
+        case .disabled: return Color(red: 0.25, green: 0.25, blue: 0.25)
+        case .threat:   return Color(red: 1, green: 0, blue: 0)
+        case .squad:    return Color(red: 0, green: 1, blue: 0)
+        case .other:    return Color(red: 0, green: 0, blue: 1)
+        }
     }
 
     private func relationship(for npc: Ship) -> RadarRelationship {
@@ -5328,6 +5487,19 @@ final class GameScene: SKScene {
     /// Zoom-in offset: 256 when a target is picked, shrinking ~60 per 30 Hz tick.
     private var reticleZoom: CGFloat = 0
 
+    /// A cicn as a texture (the original's interface sprites are cicn runs).
+    private func cicnTexture(_ id: Int) -> SKTexture? {
+        if let cached = cicnTextureCache[id] { return cached }
+        var tex: SKTexture?
+        if let res = galaxy?.game.resources.resource(NovaType.cicn, id),
+           let sheet = try? CICN.decode(res.data), let cg = sheet.makeCGImage() {
+            tex = SKTexture(cgImage: cg)
+            tex?.filteringMode = .nearest
+        }
+        cicnTextureCache[id] = tex
+        return tex
+    }
+
     private func updateShipReticle(ship: Ship, radius: CGFloat, newTarget: Bool) {
         if reticleCorners.isEmpty {
             for _ in 0..<4 {
@@ -5338,7 +5510,13 @@ final class GameScene: SKScene {
         }
         if newTarget { reticleZoom = 256 } else { reticleZoom = max(0, reticleZoom - 1800 * CGFloat(frameDT)) }
         let rel = relationship(for: ship)
-        let base = rel == .disabled ? 12 : (ship.escortRecordID != nil ? 8 : (rel == .hostile ? 0 : 4))
+        let base: Int
+        switch world.reticleClass(of: ship) {   // squad / threat / disabled as in 0x0042ede0
+        case .threat: base = 0
+        case .other: base = 4
+        case .squad: base = 8
+        case .disabled: base = 12
+        }
         let off = radius.rounded(.up) + reticleZoom + 16
         let sp = renderPoint(ship), cx = sp.x, cy = sp.y
         let corners = [(-off, off), (off, off), (off, -off), (-off, -off)]
@@ -5886,8 +6064,10 @@ final class GameScene: SKScene {
         // Real ship-system state: shields, armor, fuel (with whole-jump readout),
         // cargo, and the active weapon + ammo.
         hud.shield = p.shieldFraction
-        hud.armor = p.maxArmor > 0 ? p.armorFraction : 1
-        hud.fuel = p.maxFuel > 0 ? p.fuel / p.maxFuel : 0
+        // An armor max of 0 draws a full bar only while armor > 0 (0x0045ebe8).
+        hud.armor = p.maxArmor > 0 ? p.armorFraction : (p.armor > 0 ? 1 : 0)
+        // No fuel fill at all while the player is disabled (0x0045f086).
+        hud.fuel = p.maxFuel > 0 && !p.disabled ? p.fuel / p.maxFuel : 0
         hud.maxFuel = p.maxFuel
         hud.jumps = Int((p.fuel / 100).rounded(.down))
         hud.ionization = p.ionizeMax > 0 ? min(1, p.ionCharge / p.ionizeMax) : 0
@@ -5900,7 +6080,7 @@ final class GameScene: SKScene {
             if hud.navJumpArmed { hud.post(misc(30)) }
         }
         hud.canJumpNow = isClearOfNoJumpZone
-        updateWarnings(shieldFraction: hud.shield, armorFraction: hud.armor)
+        updateWarnings(dt: dt)
         updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
         updateNavTargetHUD()
         hud.cargoUsed = p.cargoUsed
@@ -5965,7 +6145,8 @@ final class GameScene: SKScene {
             let dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
             guard dx * dx + dy * dy <= 1 else { return nil }
             return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv),
-                                isTarget: pv.id == selectedPlanetID, worldRadius: pv.radius)
+                                isTarget: pv.id == selectedPlanetID, worldRadius: pv.radius,
+                                iffColor: playerHasIFF ? stellarIFFColorProvider?(pv.id) : nil)
         }
         // A cloaked ship drops off the player's radar entirely unless its own
         // device flags it "visible on radar" regardless (oütf ModType 17
@@ -6007,7 +6188,8 @@ final class GameScene: SKScene {
             // Bible's `ïntf` rule and stays two-tone until an IFF is fitted.
             let rel = relationship(for: npc)
             let large = largeHulls && (galaxy?.game.ship(npc.shipTypeID)?.mass ?? 0) >= 100
-            return RadarContact(x: dx, y: dy, relationship: rel, isTarget: isTarget, large: large)
+            return RadarContact(x: dx, y: dy, relationship: rel, isTarget: isTarget, large: large,
+                                iffColor: playerHasIFF ? Self.iffColor(world.radarIFFClass(of: npc)) : nil)
         }
     }
 

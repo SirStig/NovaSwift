@@ -58,7 +58,11 @@ final class SpriteMaskTests: XCTestCase {
         b[0 * words + 1] |= 1 << (70 - 64)          // B opaque at (70, 0)
         let mb = SpriteMaskSet(width: w, height: h, frameCount: 1, bits: b)
         XCTAssertTrue(ma.overlaps(frame: 0, left: 0, top: 0, mb, otherFrame: 0, otherLeft: 60, otherTop: 1))
-        XCTAssertFalse(ma.overlaps(frame: 0, left: 0, top: 0, mb, otherFrame: 0, otherLeft: 61, otherTop: 1))
+        // A's run ends where B's next one starts: the original's run walk
+        // reports a hit for that order (oracle, 0x00472190), not for the reverse.
+        XCTAssertTrue(ma.overlaps(frame: 0, left: 0, top: 0, mb, otherFrame: 0, otherLeft: 61, otherTop: 1))
+        XCTAssertFalse(mb.overlaps(frame: 0, left: 61, top: 1, ma, otherFrame: 0, otherLeft: 0, otherTop: 0))
+        XCTAssertFalse(ma.overlaps(frame: 0, left: 0, top: 0, mb, otherFrame: 0, otherLeft: 62, otherTop: 1))
         XCTAssertTrue(mb.overlaps(frame: 0, left: 60, top: 1, ma, otherFrame: 0, otherLeft: 0, otherTop: 0))
     }
 

@@ -213,6 +213,7 @@ public final class Galaxy {
     private var fleetCatalogCache: [FleetRes]?
     private var hullMaskCache: [Int: HullCollisionMask?] = [:]
     private var shotMaskCache: [Int: SpriteMaskSet?] = [:]
+    private var stellarMaskCache: [Int: SpriteMaskSet?] = [:]
 
     public init(game: NovaGame, flightTuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
@@ -271,6 +272,14 @@ public final class Galaxy {
         }
         hullMaskCache[shipTypeID] = .some(result)
         return result
+    }
+
+    /// A stellar's collision masks (`spöb` id), cached.
+    public func stellarCollisionMask(_ spobID: Int) -> SpriteMaskSet? {
+        if let hit = stellarMaskCache[spobID] { return hit }
+        let mask = game.spobCollisionMask(spobID)
+        stellarMaskCache[spobID] = .some(mask)
+        return mask
     }
 
     /// A shot graphic's collision masks (`spïn` id), cached.

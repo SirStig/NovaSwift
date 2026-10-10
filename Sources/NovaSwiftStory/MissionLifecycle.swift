@@ -269,10 +269,11 @@ extension StoryEngine {
     /// there. Deadlines don't fail anything while docked.
     public func playerLanded(onSpob spobID: Int) {
         player.landedSpob = spobID
-        if let sys = game.systemContaining(spob: spobID) {
+        if let sys = owningSystem(ofSpob: spobID) {
             player.landedSystems = (player.landedSystems ?? []).union([sys])
             player.exploredSystems.insert(sys)
         }
+        player.shareTwinDiscovery(game.reputationMap())
         refreshOffersOnLanding(at: spobID)
         ensureSerials()
         var anySuccess = false

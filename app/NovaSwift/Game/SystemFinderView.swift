@@ -1,5 +1,6 @@
 import SwiftUI
 import NovaSwiftKit
+import NovaSwiftEngine
 
 /// "Named System" search — DITL #2000 idx8 (`novaswift-extract ditl "data/EV Nova/Nova.rez" 2000`,
 /// item 8, 130×25, bottom-left of the Map dialog's button row). The real dialog has no room to
@@ -19,34 +20,40 @@ struct SystemFinderView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
 
+    /// Discovery level > 0 (visited, revealed or charted), in system order.
     private var known: [SystRes] {
         guard nav.game != nil else { return [] }
-        let explored = pilot.state.exploredSystems
-        let charted = pilot.chartedSystems
-        let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
-        return nav.systems()
-            .filter {
-                let vis = nav.visibility(of: $0.id, explored: explored, adjacent: adjacent, charted: charted)
-                return vis == .explored || vis == .chartered
-            }
-            .sorted { $0.displayName < $1.displayName }
+        return nav.systems().filter { pilot.state.isSystemExplored($0.id) }
     }
 
     private var filtered: [SystRes] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return q.isEmpty ? known : known.filter { $0.displayName.lowercased().hasPrefix(q.lowercased()) }   // the original Find matches a prefix
+        let q = StarMapFind.normalize(query)
+        guard !q.isEmpty else { return known.sorted { $0.displayName < $1.displayName } }
+        return known.filter { StarMapFind.normalize($0.displayName).starts(with: q) }
+            .sorted { $0.displayName < $1.displayName }
+    }
+
+    /// Return in the search field is the original's Find: the longest-common-
+    /// prefix winner (0x004aab30), or a failure beep.
+    private func submit() {
+        if let id = StarMapFind.find(query, in: known.map { ($0.id, $0.displayName) }),
+           let system = nav.system(id) { pick(system) }
+    }
+
+    private func pick(_ system: SystRes) {
+        // The original's Find only selects the system and re-centres; the
+        // `autoRoutePlotting` enhancement plots a course there too.
+        if nav.autoRoutePlotting { nav.plotCourse(to: system.id) }
+        nav.selectedSystemID = system.id
+        onSelect(system)
+        dismiss()
     }
 
     var body: some View {
         NavigationStack {
             List(filtered, id: \.id) { system in
                 Button {
-                    // The original's Find only selects the system (UI-18); the
-                    // `autoRoutePlotting` enhancement plots a course there too.
-                    if nav.autoRoutePlotting { nav.plotCourse(to: system.id) }
-                    else { nav.click(system: system.id) }
-                    onSelect(system)
-                    dismiss()
+                    pick(system)
                 } label: {
                     HStack {
                         Text(system.displayName).novaFont(.body)
@@ -65,6 +72,7 @@ struct SystemFinderView: View {
                 }
             }
             .searchable(text: $query, prompt: "System name")
+            .onSubmit(of: .search) { submit() }
             .navigationTitle("Named System")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

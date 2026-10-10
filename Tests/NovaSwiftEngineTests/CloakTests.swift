@@ -229,20 +229,26 @@ final class CloakTests: XCTestCase {
         let world = World(player: observer)
         world.systemMurk = 60
         XCTAssertEqual(world.effectiveMurk(for: observer), 60)
-        observer.murkModifier = 20   // a murk-reducing outfit
-        XCTAssertEqual(world.effectiveMurk(for: observer), 40)
+        observer.murkModifier = 20   // ModVal is added (0x0046c250)
+        XCTAssertEqual(world.effectiveMurk(for: observer), 80)
+        observer.murkModifier = -90  // floors at 0
+        XCTAssertEqual(world.effectiveMurk(for: observer), 0)
+        world.systemMurk = -5        // a negative system murk counts as 0
+        observer.murkModifier = 30
+        XCTAssertEqual(world.effectiveMurk(for: observer), 30)
+        observer.murkModifier = 200  // caps at 100
+        XCTAssertEqual(world.effectiveMurk(for: observer), 100)
     }
 
-    func testEffectiveMurkCapsAtOneHundredButNotBelowZero() {
+    func testEffectiveMurkClampsToZeroAndOneHundred() {
         let observer = Ship(name: "O", stats: stats())
         let world = World(player: observer)
         world.systemMurk = 90
-        observer.murkModifier = -50   // a murk-worsening outfit pushes past the 100 cap
-        XCTAssertEqual(world.effectiveMurk(for: observer), 100, "murk is documented 0-100 at the high end")
-
+        observer.murkModifier = 50    // a murk-adding outfit pushes past the 100 cap
+        XCTAssertEqual(world.effectiveMurk(for: observer), 100)
         world.systemMurk = 0
-        observer.murkModifier = 10   // a murk-reducing outfit can push it negative
-        XCTAssertEqual(world.effectiveMurk(for: observer), -10, "can still go negative — a distinct \"hides the starfield\" state")
+        observer.murkModifier = -10   // a murk-reducing outfit floors at 0 (0x0046c250)
+        XCTAssertEqual(world.effectiveMurk(for: observer), 0)
     }
 }
 

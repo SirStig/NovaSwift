@@ -3714,6 +3714,18 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
 5. Hitch behaviour (Q-FL-13) and persisting offer rolls / aux ships in `.evpilot` (Q-MS-06).
 6. Whether any FIX-only item listed at the end of §3 should be kept as a toggle instead.
 
+## Star map / HUD / input sweep (fix/ui-starmap)
+
+Done: classic star map zoom steps and button gates, route drawing, Find (0x004aab30) selecting only, political
+overlay, route mini map in flight (H and hop arrival), shipyard/hire list order and per-flag hide rules (0x00469e90),
+bar Hire Escort gate, one-shot quantity prompt, trade-center status strip and keys, shop grid arrow keys, bribe prompt
+wording and amount format, news headline, comm middle button rules, self-destruct docked boarders, landing PICT fallback.
+Also done: trade strip with escort free space and the disaster sentence (exe separators), route mini map with its
+original size, cycle key and zoom keys (60 Hz ticks confirmed), tractor-beam lock (jump gate, drag, speed/turn cut),
+squad-jump push sync, StellarAnimator port incl. hypergate open/close, deadly-stellar pixel masks, the run-walk
+abutment quirk (oracle-confirmed), "no hyperspace effects" preference.
+Closed after the merge with main: D-7 (MapReveal returns the first visible twin; test fixtures given distinct positions), the deadly-stellar mask uses the current animated frame, and a light tractor owner is pulled toward a heavy victim (sign confirmed with the oracle). The mini map keys were checked against the exe: `\` is bindable slot 0x0d (DIK 0x2b), `-` / `=` are fixed DIK 0x0c / 0x0d tests with no modifier held.
+
 ## Missions / economy sweep (fix/missions-economy)
 
 Done: the missions_session and economy_save reports' offers, cargo, special-ship, BBS, status-bar

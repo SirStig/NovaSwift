@@ -495,6 +495,18 @@ extension StoryEngine {
     /// the ordinary cargo first, mission cargo rides in the player ship.
     func freeCargoSpace() -> Int { PilotEconomy.remainingCargoSpace(player, galaxy: Galaxy(game: game)) }
 
+    /// Where a mission on offer would send the player — the same stellar
+    /// `<DST>` names in its briefing. Lets the Mission BBS answer "where is
+    /// this?" before the player commits, which the original never could.
+    public func offerDestination(for m: MissionRes) -> (spobID: Int, systemID: Int, stellar: String, system: String)? {
+        let active = player.activeMission(m.id)
+        guard let spobID = active?.travelSpobID ?? offerTargets(for: m).travelSpob,
+              let spob = game.spob(spobID),
+              let sysID = owningSystem(ofSpob: spobID), let sys = game.system(sysID)
+        else { return nil }
+        return (spobID, sys.id, spob.displayName, sys.displayName)
+    }
+
     /// The system the starmap preselects when opened from an offer or the
     /// BBS (0x0043c470 key 6, 0x00442510 button 4): only for mïsn Flags
     /// 0x0100 — the travel stellar's system, else the return stellar's.

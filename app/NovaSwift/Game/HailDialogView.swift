@@ -164,9 +164,11 @@ struct HailDialogView: View {
                        action: state.topButtonTitle == requestLandingTitle(graphics) ? onRequestLanding : onGreetings,
                        graphics: graphics)
             .ditlPlace(space, d, top)
-        responseButton(state.tributeTitle, rect: mid, enabled: state.tributeEnabled,
-                       action: onDemandTribute, graphics: graphics)
-            .ditlPlace(space, d, mid)
+        if state.tributeVisible {
+            responseButton(state.tributeTitle, rect: mid, enabled: state.tributeEnabled,
+                           action: onDemandTribute, graphics: graphics)
+                .ditlPlace(space, d, mid)
+        }
         responseButton(graphics.buttonLabel(SpaceportLabel.closeChannel, fallback: "Close Channel"),
                        rect: bottom, action: onClose, graphics: graphics)
             .ditlPlace(space, d, bottom)

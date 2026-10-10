@@ -428,3 +428,36 @@ struct EscortsView: View {
         .padding(20)
         .background(Color.black)
 }
+
+/// The in-flight Escort Commands panel (`Ui_DrawTargetCategoryPanel`
+/// 0x0049e430), composited over the playfield by 0x00439bb0 at
+/// level / 32: a title and five rows — All plus the four EscortTypes — each
+/// with its group's current order; empty groups dim, the selected row lit.
+struct EscortCommandPanelView: View {
+    @ObservedObject var hud: GameHUDModel
+
+    var body: some View {
+        if let panel = hud.escortPanel {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(panel.title)
+                    .novaFont(.hud, weight: .bold, size: 11)
+                    .foregroundStyle(.white)
+                ForEach(Array(panel.rows.enumerated()), id: \.offset) { index, row in
+                    HStack(spacing: 8) {
+                        Text("\(index + 1)  \(row.label)")
+                        Spacer(minLength: 12)
+                        Text(row.order)
+                    }
+                    .novaFont(.hud, weight: row.selected ? .bold : .regular, size: 10)
+                    .foregroundStyle(row.enabled ? (row.selected ? Color.green : Color.white) : Color(white: 0.25))
+                }
+            }
+            .padding(6)
+            .frame(width: 200, alignment: .leading)
+            .background(Color.black.opacity(0.85))
+            .border(Color(white: 0.4), width: 1)
+            .opacity(Double(panel.level) / 32)
+            .allowsHitTesting(false)
+        }
+    }
+}

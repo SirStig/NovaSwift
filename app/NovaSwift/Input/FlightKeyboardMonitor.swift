@@ -41,6 +41,9 @@ struct FlightKeyboardMonitor: NSViewRepresentable {
     let isActive: () -> Bool
     /// Fires a discrete (fire-once) action — open menu, land, jump, target, …
     var onDiscrete: (GameAction) -> Void = { _ in }
+    /// Sees a key-down token first while flying; returning true consumes it
+    /// (the Escort Commands panel's group keys).
+    var onRawKey: (String) -> Bool = { _ in false }
 
     func makeNSView(context: Context) -> PassthroughView {
         context.coordinator.sync(self)
@@ -59,6 +62,7 @@ struct FlightKeyboardMonitor: NSViewRepresentable {
         private var bindings: KeyBindings?
         private var isActive: (() -> Bool)?
         private var onDiscrete: ((GameAction) -> Void)?
+        private var onRawKey: ((String) -> Bool)?
         private var monitor: Any?
         /// Bare modifiers currently held, so a release drives the matching
         /// binding off exactly like a key-up.
@@ -69,6 +73,7 @@ struct FlightKeyboardMonitor: NSViewRepresentable {
             bindings = v.bindings
             isActive = v.isActive
             onDiscrete = v.onDiscrete
+            onRawKey = v.onRawKey
         }
 
         func install() {
@@ -96,6 +101,10 @@ struct FlightKeyboardMonitor: NSViewRepresentable {
                 // Let menu-shortcut chords (⌘…) reach the menu bar untouched.
                 if event.modifierFlags.contains(.command) { return event }
                 let pressed = event.type == .keyDown
+                if active, pressed, !event.isARepeat, let token = Self.token(for: event),
+                   onRawKey?(token) == true {
+                    return nil
+                }
                 if let token = Self.token(for: event), let action = bindings?.action(for: token) {
                     apply(action, pressed: pressed, isRepeat: event.isARepeat, active: active)
                 }
@@ -130,6 +139,10 @@ struct FlightKeyboardMonitor: NSViewRepresentable {
         /// its release always lands. Discrete actions only fire while active.
         private func apply(_ action: GameAction, pressed: Bool, isRepeat: Bool, active: Bool) {
             guard let input else { return }
+            // A press while an overlay owns the keyboard never reaches flight
+            // (the original flushes the key table around its dialogs); a
+            // release always lands.
+            if pressed, !active, action.flightEffect != .none { return }
             switch action.flightEffect {
             case .turnLeft: input.keyboard.turnLeft = pressed
             case .turnRight: input.keyboard.turnRight = pressed

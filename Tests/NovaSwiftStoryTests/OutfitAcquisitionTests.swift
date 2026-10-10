@@ -22,6 +22,7 @@ final class OutfitAcquisitionTests: XCTestCase {
     private func system(_ id: Int, links: [Int]) -> Resource {
         var b = [UInt8](repeating: 0, count: 420)
         for (i, l) in links.prefix(16).enumerated() { put16(&b, 4 + i * 2, l) }
+        put16(&b, 0, id * 10)   // distinct positions: these systems are not twins
         put16(&b, 102, -1)
         return Resource(type: NovaType.syst, id: id, name: "Sys\(id)", data: Data(b))
     }

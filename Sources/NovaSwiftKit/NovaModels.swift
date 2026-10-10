@@ -591,6 +591,13 @@ public struct ShipRes {
     /// shows greyed-out; these bits mean "omit it from the shipyard list
     /// entirely" instead.
     public var hidesWhenLocked: Bool { flags3 & 0x0100 != 0 || flags3 & 0x0200 != 0 }
+    /// `Flags3` 0x0100: hide the class while its Availability fails.
+    public var hidesWhenUnavailable: Bool { flags3 & 0x0100 != 0 }
+    /// `Flags3` 0x0200: hide the class while its Require bits fail.
+    public var hidesWhenRequireUnmet: Bool { flags3 & 0x0200 != 0 }
+    /// `Flags3` 0x4000: when listed, hides every later-index class with the
+    /// same DispWeight.
+    public var suppressesLaterSameWeight: Bool { flags3 & 0x4000 != 0 }
     /// Bible `Flags3` 0x0010: "Ship ignores gravity". The original engine never
     /// tests this bit, so the simulation doesn't either (FL-19).
     public var ignoresGravity: Bool { flags3 & 0x0010 != 0 }
@@ -875,6 +882,8 @@ public struct SpobRes {
     public let techLevel: Int
     public let government: Int
     public let landingPictID: Int
+    /// The raw Graphic field (@4, 0...63); landing art falls back to PICT `10000 + it` (0x0048e970).
+    public let graphicRaw: Int
     /// Custom ambient `snd ` id for this stellar's spaceport (e.g. a station's
     /// own hum), or nil to use no special ambience. Verified empirically: Holpa
     /// Station (#299, government #129 "Auroran Empire") carries id 10033,
@@ -1121,6 +1130,7 @@ public struct SpobRes {
         techLevel = i16(d, 12)
         government = i16(d, 20)
         landingPictID = u16(d, 24)
+        graphicRaw = i16(d, 4)
         minStatus = i16(d, 22)
         let flags2v = UInt32(u16(d, 32))
         flags2 = flags2v
@@ -1256,6 +1266,18 @@ public struct NovaGame {
         return shipSprite(shipID).map(PICTSpriteSheet.masks(of:))
     }
 
+    /// A stellar's collision mask, resolved like `spobSprite`.
+    public func spobCollisionMask(_ spobID: Int) -> SpriteMaskSet? {
+        guard let spob = spob(spobID) else { return nil }
+        if let spin = spin(spob.graphicSpinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return collisionMask(rleID: spin.spriteID)
+        }
+        if resources.resource(NovaType.rleD, spob.graphicSpinID) != nil {
+            return collisionMask(rleID: spob.graphicSpinID)
+        }
+        return nil
+    }
+
     /// A shot graphic's collision mask, resolved like `weaponSprite(spinID:)`.
     public func weaponCollisionMask(spinID: Int) -> SpriteMaskSet? {
         guard let spin = spin(spinID) else { return nil }
@@ -1312,6 +1334,49 @@ public struct NovaGame {
             cache.spobSystemIndex = idx
         }
         return cache.spobSystemIndex?[spobID]
+    }
+
+    /// The system that owns `spobID` while the systems in `hidden` are out of
+    /// the galaxy — `NovaResources_EvaluateAvailability` 0x00448090 step 3:
+    /// systems are walked in ascending index; a visible system not already
+    /// claimed claims its whole same-position twin group and then takes every
+    /// stellar it lists that has no owner yet. So a stellar belongs to the
+    /// lowest-index **visible** system that lists it, and only the first
+    /// visible member of a twin group claims stellars. When no visible system
+    /// owns it, the first system listing it at all (the second loop of
+    /// `System_FindSystemContainingStellar` 0x0046e790).
+    public func systemContaining(spob spobID: Int, hidden: Set<Int>) -> Int? {
+        let groups = reputationMap().groups
+        var claimed = Set<Int>()
+        for row in ownerTable() where !hidden.contains(row.id) && !claimed.contains(row.id) {
+            for member in groups[row.id] ?? [row.id] { claimed.insert(member) }
+            if row.spobs.contains(spobID) { return row.id }
+        }
+        return systemContaining(spob: spobID)
+    }
+
+    /// The first visible member of `systemID`'s twin group (lowest id first),
+    /// or nil — `System_ResolveVisibleSystemForTravel` 0x0046b920. It walks
+    /// the chain from its root, so a visible system with a lower visible twin
+    /// resolves to that twin.
+    public func visibleTwin(of systemID: Int, hidden: Set<Int>) -> Int? {
+        (reputationMap().groups[systemID] ?? [systemID]).first { !hidden.contains($0) }
+    }
+
+    /// Every system as (id, stellars), ascending — the walk order of the
+    /// ownership pass. Built once.
+    private func ownerTable() -> [(id: Int, spobs: [Int])] {
+        memo("NovaGame.ownerTable") {
+            systems().sorted { $0.id < $1.id }.map { (id: $0.id, spobs: $0.spobs) }
+        }
+    }
+
+    /// The systems whose `Visibility` NCB test is non-empty, as (id, test),
+    /// ascending. Every other system is always visible. Built once.
+    public func visibilityGatedSystems() -> [(id: Int, test: String)] {
+        memo("NovaGame.visibilityGatedSystems") {
+            systems().filter { !$0.visibility.isEmpty }.sorted { $0.id < $1.id }.map { (id: $0.id, test: $0.visibility) }
+        }
     }
 
     /// A value derived from this data set, built once by `build` and kept for the
@@ -1415,12 +1480,14 @@ public struct NovaGame {
     /// linked gate's `spöb` and the system that holds it. Skips links that don't
     /// resolve to a real gate in a real system (bad/self data), deduped by
     /// destination system so the galaxy map draws one line per reachable system.
-    public func gateDestinations(from gate: SpobRes) -> [(gateSpobID: Int, systemID: Int)] {
+    /// `hidden` is the systems the story hides: a gate's system is found
+    /// visible-first (`System_FindSystemContainingStellar` 0x0046e790).
+    public func gateDestinations(from gate: SpobRes, hidden: Set<Int> = []) -> [(gateSpobID: Int, systemID: Int)] {
         var seenSystems = Set<Int>()
         var out: [(Int, Int)] = []
         for linkID in gate.hyperLinks {
             guard linkID != gate.id, let linked = spob(linkID), linked.isGate,
-                  let sysID = systemContaining(spob: linkID), seenSystems.insert(sysID).inserted
+                  let sysID = systemContaining(spob: linkID, hidden: hidden), seenSystems.insert(sysID).inserted
             else { continue }
             out.append((linkID, sysID))
         }
@@ -1436,12 +1503,13 @@ public struct NovaGame {
     /// Each candidate carries its own system.
     public func wormholeExitCandidates(from wormhole: SpobRes, currentSystem: Int? = nil,
                                        isVisible: (Int) -> Bool = { _ in true }) -> [(gateSpobID: Int, systemID: Int)] {
+        let hidden = Set(visibilityGatedSystems().map(\.id).filter { !isVisible($0) })
         if !wormhole.hyperLinks.isEmpty {
-            return gateDestinations(from: wormhole).filter { isVisible($0.systemID) }
+            return gateDestinations(from: wormhole, hidden: hidden).filter { isVisible($0.systemID) }
         }
         var out: [(Int, Int)] = []
         for s in spobs() where s.id != wormhole.id && s.isWormhole && s.hyperLinks.isEmpty {
-            guard let sys = systemContaining(spob: s.id), sys != currentSystem, isVisible(sys) else { continue }
+            guard let sys = systemContaining(spob: s.id, hidden: hidden), sys != currentSystem, isVisible(sys) else { continue }
             out.append((s.id, sys))
         }
         return out

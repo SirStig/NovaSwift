@@ -51,6 +51,39 @@ extension World {
         return selectTarget(id: next.entityID)
     }
 
+    /// `Ship_IsAnyShipThreatToPlayerSquad` 0x00410060.
+    public var isAnyShipThreatToPlayerSquad: Bool {
+        npcs.contains { $0.isAlive && isThreatToPlayerSquad($0) }
+    }
+
+    /// How the IFF and the target reticle class a ship.
+    public enum IFFClass: Equatable, Sendable { case disabled, threat, squad, other }
+
+    /// The radar IFF class of `npc` — `Ship_GetShipRadarColor` 0x00465f00:
+    /// disabled grey, then a threat to the squad red, then the squad green
+    /// (led by the player and not a defense-fleet ship, or led by a ship the
+    /// player leads), everything else blue. Government plays no part.
+    public func radarIFFClass(of npc: Ship) -> IFFClass {
+        if npc.disabled { return .disabled }
+        if isThreatToPlayerSquad(npc) { return .threat }
+        return isSquadForIFF(npc) ? .squad : .other
+    }
+
+    /// The target reticle's frame set (`NovaUi_UpdateShipTargetReticle`
+    /// 0x0042ede0): disabled (frames 12–15), the squad (8–11), a threat
+    /// (0–3), else 4–7 — the squad is tested before the threat here.
+    public func reticleClass(of npc: Ship) -> IFFClass {
+        if npc.disabled { return .disabled }
+        if isSquadForIFF(npc) { return .squad }
+        return isThreatToPlayerSquad(npc) ? .threat : .other
+    }
+
+    private func isSquadForIFF(_ npc: Ship) -> Bool {
+        guard let leader = npc.brain?.leaderID else { return false }
+        if leader == Self.playerEntityID { return originalAI.record(for: npc.entityID)?.defenseHome == nil }
+        return ship(id: leader)?.brain?.leaderID == Self.playerEntityID
+    }
+
     /// `Ship_IsThreatToPlayerSquad` (0x0040f6d0): not coasting on its
     /// maneuver timer, not disabled, not in one of the disengaged states, and
     /// targeting the player or a ship the player leads directly. A ship with no

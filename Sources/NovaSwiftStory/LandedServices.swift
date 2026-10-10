@@ -32,7 +32,7 @@ public enum LandedServices {
     /// stellar is dominated (tested last, so it wins).
     public static func commodityScale(spob: SpobRes, state: PlayerState, game: NovaGame) -> Double {
         var scale = 1.25
-        if spob.government >= 128, let system = game.systemContaining(spob: spob.id),
+        if spob.government >= 128, let system = game.owningSystem(ofSpob: spob.id, state: state),
            systemReputation(state, system: system, game: game) < 0 {
             scale = 1.1
         }
@@ -181,6 +181,15 @@ public enum LandedServices {
         let commodity = Commodity(rawValue: o.commodity).map { game.commodityName($0) } ?? ""
         return o.name + " " + text.misc(0xc0) + " " + text.misc(o.priceDelta < 1 ? 0xc2 : 0xc1)
             + " " + text.misc(0xb5) + " " + commodity + "."
+    }
+
+    /// Whether the disaster at `spobID` raised (true) or lowered (false) the
+    /// price of trade row `cargoID`; nil without one (STR# 2002 #204 / #205).
+    public static func disasterRaised(cargoID: Int, at spobID: Int, state: PlayerState, game: NovaGame) -> Bool? {
+        for (c, delta) in activeDisasterDeltas(at: spobID, state: state, game: game) where c.cargoID == cargoID {
+            return delta > 0
+        }
+        return nil
     }
 
     /// The stellar an active disaster affects: its own `Stellar`, or for

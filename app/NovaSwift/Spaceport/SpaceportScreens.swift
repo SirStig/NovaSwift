@@ -25,6 +25,20 @@ private let gridRows = 5
 private let gridSlotCount = gridCols * gridRows
 private let gridHeight = gridTileSize.height * CGFloat(gridRows)
 
+/// Arrow-key movement over the 4-wide shop grid (0x004903c0 / 0x00493fc0):
+/// returns the new index, or nil when the key is not an arrow.
+private func gridMove(_ key: KeyEquivalent, from index: Int, count: Int) -> Int? {
+    let target: Int
+    switch key {
+    case .leftArrow: target = index - 1
+    case .rightArrow: target = index + 1
+    case .upArrow: target = index - gridCols
+    case .downArrow: target = index + gridCols
+    default: return nil
+    }
+    return (0..<count).contains(target) ? target : index
+}
+
 // MARK: - Trade Center (commodity exchange)
 
 /// One row in the Trade dialog: a standard `Commodity` at its Low/Med/High
@@ -37,6 +51,7 @@ private struct TradeRow: Identifiable {
     let name: String
     let level: PriceLevel
     let price: Int
+    var disaster = false
     /// The two junk rows can name the same junk, so rows are keyed by
     /// commodity and level.
     var id: Int { cargoID * 8 + level.rawValue }
@@ -55,11 +70,12 @@ struct TradeCenterView: View {
     @Environment(\.novaTheme) private var theme
 
     @State private var selected = 0
-    /// Tons the next Buy/Sell tap transacts — editable via `qtyControl`'s
-    /// `TradeQuantityPrompt` (real DITL #1003) instead of only the fixed
-    /// `tradeStep` default.
-    @State private var pendingQty = tradeStep
-    @State private var showQtyPrompt = false
+    /// Which of Buy/Sell the Alt-click quantity prompt (DLOG 1003) was opened
+    /// for. The prompt performs one transaction; a plain click always moves
+    /// `tradeStep` tons (0x0049e8e0 / 0x0048c730).
+    @State private var qtyMode: TradeQtyMode?
+    private enum TradeQtyMode { case buy, sell }
+    @FocusState private var keysFocused: Bool
     private var game: NovaGame { graphics.game }
     /// The trade center's rows (`LandedServices.tradeRows`): the price scale
     /// follows the system reputation and domination, an active disaster
@@ -69,7 +85,7 @@ struct TradeCenterView: View {
         LandedServices.tradeRows(at: spob, state: pilot.state, game: game).map { row in
             let name = Commodity.standard(cargoID: row.cargoID).map(game.commodityName)
                 ?? game.junk(row.cargoID)?.name ?? "\(row.cargoID)"
-            return TradeRow(cargoID: row.cargoID, name: name, level: row.level, price: row.price)
+            return TradeRow(cargoID: row.cargoID, name: name, level: row.level, price: row.price, disaster: row.disaster)
         }
     }
 
@@ -100,12 +116,12 @@ struct TradeCenterView: View {
                     let buyRect = d.rect(12, top: 221, left: 60, bottom: 246, right: 159)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
                                ditl: buyRect, enabled: canBuy,
-                               onQuantity: canBuy ? { showQtyPrompt = true } : nil) { buy() }
+                               onQuantity: canBuy ? { qtyMode = .buy } : nil) { buy(tradeStep) }
                         .ditlPlace(space, d, buyRect)
                     let sellRect = d.rect(13, top: 221, left: 166, bottom: 246, right: 265)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
                                ditl: sellRect, enabled: canSell,
-                               onQuantity: canSell ? { showQtyPrompt = true } : nil) { sell() }
+                               onQuantity: canSell ? { qtyMode = .sell } : nil) { sell(tradeStep) }
                         .ditlPlace(space, d, sellRect)
                     let doneRect = d.rect(0, top: 221, left: 272, bottom: 246, right: 371)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
@@ -116,24 +132,58 @@ struct TradeCenterView: View {
                 fallback
             }
         }
-        .sheet(isPresented: $showQtyPrompt) {
-            TradeQuantityPrompt(title: qtyPromptTitle, range: 1...qtyUpperBound, initial: pendingQty,
-                                 onConfirm: { pendingQty = $0; showQtyPrompt = false },
-                                 onCancel: { showQtyPrompt = false })
+        .sheet(isPresented: Binding(get: { qtyMode != nil }, set: { if !$0 { qtyMode = nil } })) {
+            if let mode = qtyMode {
+                // Prefilled with the maximum; one transaction on OK.
+                let upper = qtyUpperBound(mode)
+                TradeQuantityPrompt(title: misc(371, "Enter quantity:"), range: 1...max(1, upper), initial: upper,
+                                    onConfirm: { qty in
+                                        qtyMode = nil
+                                        if mode == .buy { buy(qty) } else { sell(qty) }
+                                    },
+                                    onCancel: { qtyMode = nil })
+            }
+        }
+        .focusable()
+        .focusEffectDisabled()
+        .focused($keysFocused)
+        .onAppear { keysFocused = true }
+        .onKeyPress(phases: .down) { press in tradeKey(press) }
+    }
+
+    /// Keyboard control (0x0048d5a0 / 0x0048c730): Tab, Shift-Tab and the up
+    /// and down arrows cycle the rows (wrapping), `b` buys, `s` sells, Return
+    /// or Escape closes.
+    private func tradeKey(_ press: KeyPress) -> KeyPress.Result {
+        let n = market.count
+        switch press.key {
+        case .tab:
+            guard n > 0 else { return .handled }
+            selected = press.modifiers.contains(.shift) ? (selected + n - 1) % n : (selected + 1) % n
+            return .handled
+        case .downArrow: if n > 0 { selected = (selected + 1) % n }; return .handled
+        case .upArrow: if n > 0 { selected = (selected + n - 1) % n }; return .handled
+        case .return, .escape: onDone(); return .handled
+        default: break
+        }
+        switch press.characters.lowercased() {
+        case "b": if canBuy { buy(tradeStep) }; return .handled
+        case "s": if canSell { sell(tradeStep) }; return .handled
+        default: return .ignored
         }
     }
 
-    private var qtyPromptTitle: String {
-        current.map { "How many tons of \($0.name)?" } ?? "How many tons?"
-    }
-    /// Advisory max for the prompt's field — the greater of what's affordable/
-    /// holdable to buy and what's held to sell, so either action stays in
-    /// range; `buyCargo`/`sellCargo` clamp again for real.
-    private var qtyUpperBound: Int {
-        guard let c = current else { return max(1, pendingQty) }
-        let buyLimit = c.price > 0 ? min(pilot.cargoFree(galaxy: galaxy), pilot.state.credits / c.price) : pilot.cargoFree(galaxy: galaxy)
-        let sellLimit = pilot.held(cargo: c.cargoID, game: game)
-        return max(1, buyLimit, sellLimit)
+    /// The prompt's ceiling: buy `min(fleet free, credits / price, 32000)`,
+    /// sell `min(held, 32000)`.
+    private func qtyUpperBound(_ mode: TradeQtyMode) -> Int {
+        guard let c = current else { return 1 }
+        switch mode {
+        case .buy:
+            let afford = c.price > 0 ? pilot.state.credits / c.price : 32000
+            return min(pilot.cargoFree(galaxy: galaxy), afford, 32000)
+        case .sell:
+            return min(pilot.held(cargo: c.cargoID, game: game), 32000)
+        }
     }
 
     // Column widths sum to the DITL rows' 352px; Geneva 10 fits the 13px row
@@ -211,13 +261,13 @@ struct TradeCenterView: View {
         guard let c = current else { return false }
         return pilot.held(cargo: c.cargoID, game: game) > 0
     }
-    private func buy() {
+    private func buy(_ tons: Int) {
         guard let c = current else {
             Log.spaceport.error("Trade buy tapped with no commodity row selected at spöb \(spob.id, privacy: .public) — no-op")
             return
         }
         let free = pilot.cargoFree(galaxy: galaxy)
-        let bought = pilot.buyCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price, cargoFree: free)
+        let bought = pilot.buyCargo(id: c.cargoID, tons: min(tons, 32000), unitPrice: c.price, cargoFree: free)
         if bought == 0 {
             Log.spaceport.notice("Trade buy no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) price=\(c.price, privacy: .public)cr/ton credits=\(pilot.state.credits, privacy: .public) cargoFree=\(free, privacy: .public)")
         } else {
@@ -225,13 +275,13 @@ struct TradeCenterView: View {
             onLiveSync()
         }
     }
-    private func sell() {
+    private func sell(_ tons: Int) {
         guard let c = current else {
             Log.spaceport.error("Trade sell tapped with no commodity row selected at spöb \(spob.id, privacy: .public) — no-op")
             return
         }
         let held = pilot.held(cargo: c.cargoID, game: game)
-        let sold = pilot.sellCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price, game: game)
+        let sold = pilot.sellCargo(id: c.cargoID, tons: min(tons, 32000), unitPrice: c.price, game: game)
         if sold == 0 {
             Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
         } else {
@@ -240,7 +290,12 @@ struct TradeCenterView: View {
         }
     }
     /// Middle "level" column text for a row: Low/Med/High.
-    private func rowLabel(_ row: TradeRow) -> String { row.level.label }
+    private func rowLabel(_ row: TradeRow) -> String {
+        if row.disaster, let up = LandedServices.disasterRaised(cargoID: row.cargoID, at: spob.id, state: pilot.state, game: game) {
+            return misc(up ? 204 : 205, row.level.label)
+        }
+        return row.level.label
+    }
     private func rowLabelColor(_ row: TradeRow) -> Color { levelColor(row.level) }
     private func levelColor(_ l: PriceLevel) -> Color {
         switch l {
@@ -278,6 +333,7 @@ struct OutfitterView: View {
     @State private var selectedID: Int?
     @State private var topRow = 0
     @State private var hintDismissed = false
+    @FocusState private var gridFocused: Bool
     /// Non-nil while the quantity prompt is open — which of Buy/Sell opened it
     /// decides which transaction `transact(_:_:_:)` runs on confirm.
     @State private var qtyPromptMode: QtyPromptMode?
@@ -351,12 +407,23 @@ struct OutfitterView: View {
     var body: some View {
         outfitterBody
             .onAppear { if ownedAtOpen == nil { ownedAtOpen = pilot.state.outfits } }
+            .focusable().focusEffectDisabled().focused($gridFocused)
+            .onAppear { gridFocused = true }
+            .onKeyPress(phases: .down) { press in
+                let ids = stock.map(\.id)
+                guard let cur = ids.firstIndex(of: selectedID ?? ids.first ?? -1),
+                      let next = gridMove(press.key, from: cur, count: ids.count) else { return .ignored }
+                selectedID = ids[next]
+                let row = next / gridCols
+                if row < currentTopRow { topRow = row } else if row >= currentTopRow + gridRows { topRow = row - gridRows + 1 }
+                return .handled
+            }
             .gameHint(GameHints.outfitter, active: showHints, dismissed: $hintDismissed)
             .animation(.easeInOut(duration: 0.25), value: hintDismissed)
             .sheet(isPresented: Binding(get: { qtyPromptMode != nil }, set: { if !$0 { qtyPromptMode = nil } })) {
                 if let mode = qtyPromptMode, let o = selected {
                     TradeQuantityPrompt(title: "How many \(o.lowercasePluralDisplayName)?",
-                                         range: 1...max(1, qtyUpperBound(mode, o)), initial: 1, unitLabel: "items",
+                                         range: 1...max(1, qtyUpperBound(mode, o)), initial: max(1, qtyUpperBound(mode, o)), unitLabel: "items",
                                          onConfirm: { qty in transact(mode, o, qty); qtyPromptMode = nil },
                                          onCancel: { qtyPromptMode = nil })
                 }
@@ -585,6 +652,7 @@ struct ShipyardView: View {
     @State private var topRow = 0
     /// The full Ship Info card, opened by tapping the large preview picture.
     @State private var showInfo = false
+    @FocusState private var gridFocused: Bool
     private var game: NovaGame { graphics.game }
     /// Tech-level-eligible stock on today's galaxy-wide `BuyRandom` roll (a
     /// purchase redraws its class), with any hulls that opt into full hiding
@@ -631,6 +699,17 @@ struct ShipyardView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: showInfo)
+        .focusable().focusEffectDisabled().focused($gridFocused)
+        .onAppear { gridFocused = true }
+        .onKeyPress(phases: .down) { press in
+            let ids = stock.map(\.id)
+            guard let cur = ids.firstIndex(of: selectedID ?? ids.first ?? -1),
+                  let next = gridMove(press.key, from: cur, count: ids.count) else { return .ignored }
+            selectedID = ids[next]
+            let row = next / gridCols
+            if row < currentTopRow { topRow = row } else if row >= currentTopRow + gridRows { topRow = row - gridRows + 1 }
+            return .handled
+        }
     }
 
     @ViewBuilder private var shipyardMenu: some View {
@@ -884,7 +963,7 @@ struct BarView: View {
                         // option is only live where there's a shipyard to hire from.
                         let hire = d.rect(4, top: 125, left: 6, bottom: 151, right: 152)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
-                                   ditl: hire, enabled: spob.hasShipyard) { showHire = true }
+                                   ditl: hire, enabled: pilot.canAddEscort()) { showHire = true }
                             .ditlPlace(space, d, hire)
                         let holo = d.rect(2, top: 154, left: 6, bottom: 180, right: 152)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.holovid, fallback: "Holovid"),
@@ -1036,6 +1115,10 @@ struct HolovidView: View {
     /// galaxy is currently generating news.
     /// The one news body the original shows (MS-20): this station's crön
     /// news if any, else a generic item from STR# 8101.
+    private var headline: String {
+        StoryEngine(game: game, player: pilot.state,
+                    seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id) &+ 1).newsHeadline()
+    }
     private var news: [String] {
         let engine = StoryEngine(game: game, player: pilot.state,
                                  seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
@@ -1045,9 +1128,10 @@ struct HolovidView: View {
 
     var body: some View {
         let items = news
-        let bodyText = items.isEmpty
-            ? "The news networks are quiet. Nothing of note is happening in this region of the galaxy right now."
+        let storyText = items.isEmpty
+            ? " " + OriginalText(game: game).misc(191)
             : items.joined(separator: "\n\n")
+        let bodyText = headline.isEmpty ? storyText : headline + "\n\n" + storyText
         if let frame = graphics.pict(newsPictID) {
             let fw = CGFloat(frame.width), fh = CGFloat(frame.height)
             let textW = fw * 0.80

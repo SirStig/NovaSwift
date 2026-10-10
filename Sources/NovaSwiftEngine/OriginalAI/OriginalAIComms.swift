@@ -90,6 +90,9 @@ public enum OriginalComms {
         public let plunderer: Bool
         /// A ShipBehav-1 mission ship (local_20).
         public let missionProtector: Bool
+        /// A non-mission escort of the player: the middle button reads
+        /// "Release" (STR# 150 #32).
+        public let isPlayerEscort: Bool
         /// The opening prompt (0, 2, 4, 5 or 8).
         public let openingPrompt: Int
         /// Prompt 8 ("Glad to see you, ") is followed by the pilot's name.
@@ -367,7 +370,9 @@ extension OriginalAI {
         return OriginalComms.Session(entityID: ship.entityID, variant: variant, personality: personality,
                                      price: price, bribable: bribable, assistFree: free, rankDefends: rankDefends,
                                      noAssistance: noAssistance, assistanceMuted: muted, xenophobic: xenophobic,
-                                     plunderer: plunderer, missionProtector: protector, openingPrompt: opening,
+                                     plunderer: plunderer, missionProtector: protector,
+                                     isPlayerEscort: leader(of: ship) == World.playerEntityID && ship.missionID == nil,
+                                     openingPrompt: opening,
                                      appendsPilotName: appendsName, greeting: greeting)
     }
 

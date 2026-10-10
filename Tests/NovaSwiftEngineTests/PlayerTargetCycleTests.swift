@@ -67,6 +67,43 @@ final class PlayerTargetCycleTests: XCTestCase {
         rec.primary = World.playerEntityID
         XCTAssertEqual(world.selectNearestHostileThreat()?.entityID, attacker.entityID)
         XCTAssertEqual(world.selectNearestEngaged()?.entityID, idle.entityID)
+        // 0x0040f6d0: a disengaged state or a running maneuver timer is no threat.
+        rec.state = 0x0b
+        XCTAssertFalse(world.isThreatToPlayerSquad(attacker))
+        rec.state = 3
+        rec.maneuverTimer = 5
+        XCTAssertFalse(world.isThreatToPlayerSquad(attacker))
+    }
+
+    @discardableResult
+    private func threaten(_ world: World, _ ship: Ship, target: Int = World.playerEntityID) -> OriginalAIShipState {
+        let rec = world.originalAI.ensureRecord(ship, host: WorldAIHost(world: world, ai: world.originalAI))
+        rec.state = 3
+        rec.primary = target
+        rec.maneuverTimer = 0
+        return rec
+    }
+
+    /// H1 / M2: the IFF and reticle classes come from the squad and threat
+    /// state, never the government (0x00465f00, 0x0042ede0).
+    func testIFFClassesFollowSquadAndThreat() {
+        let world = makeWorld()
+        let idle = addShip(world, "HostileIdle", distance: 100)
+        XCTAssertEqual(world.radarIFFClass(of: idle), .other, "a ship not attacking is blue")
+        threaten(world, idle)
+        XCTAssertEqual(world.radarIFFClass(of: idle), .threat)
+        let escort = addShip(world, "Escort", distance: 50, escort: true)
+        XCTAssertEqual(world.radarIFFClass(of: escort), .squad)
+        let fighter = addShip(world, "Fighter", distance: 60)
+        fighter.brain?.leaderID = escort.entityID
+        XCTAssertEqual(world.radarIFFClass(of: fighter), .squad, "led by a ship the player leads")
+        escort.disabled = true
+        XCTAssertEqual(world.radarIFFClass(of: escort), .disabled)
+        // The reticle tests the squad before the threat.
+        let turncoat = addShip(world, "Turncoat", distance: 70, escort: true)
+        threaten(world, turncoat)
+        XCTAssertEqual(world.radarIFFClass(of: turncoat), .threat)
+        XCTAssertEqual(world.reticleClass(of: turncoat), .squad)
     }
 
     /// `Ship_IsThreatToPlayerSquad` (0x0040f6d0): any engaged state counts,

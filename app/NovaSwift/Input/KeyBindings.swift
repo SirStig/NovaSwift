@@ -15,8 +15,10 @@ struct KeyBindings: Codable, Equatable {
     /// hostile (Alt the nearest ship), N clears the travel selection (Alt the
     /// ship target), 1–4 pick nav destinations; Y hails (Alt-Y the planet),
     /// L lands, M is the map, H arms the route, J jumps, B boards; Return
-    /// dismisses a message, P opens Player Info, I mission info, E escorts and
-    /// F / D / V order them.
+    /// dismisses a message, P opens Player Info, I mission info, E shows the
+    /// Escort Commands panel and F / D / V / C (Alt-C) order them; U toggles
+    /// the cloak (slot 0x29, DIK 0x16 — C is the escort Formation key in the
+    /// original table, 0x004b4400).
     ///
     /// Known clash: every Control-arrow chord is a reserved macOS shortcut
     /// (Mission Control / move a Space), which the WindowServer takes before
@@ -32,7 +34,7 @@ struct KeyBindings: Codable, Equatable {
             .afterburner: "z",
             .firePrimary: "space", .fireSecondary: "control",
             .selectSecondaryNext: "w", .selectSecondaryPrev: "opt+w", .clearSecondary: "s",
-            .toggleCloak: "c", .recallFighters: "g",
+            .toggleCloak: "u", .recallFighters: "",
             .eject: "opt+x", .selfDestruct: "opt+-",
             .targetNext: "`", .targetPrevious: "~", .targetEscortNext: "opt+`",
             .nearestHostile: "r", .targetNearest: "opt+r",
@@ -43,8 +45,10 @@ struct KeyBindings: Codable, Equatable {
             .dismissMessage: "return", .playerInfo: "p", .missionInfo: "i",
             .openEscorts: "e",
             .commandEscortAggressive: "f", .commandEscortDefensive: "d", .commandEscortHold: "v",
+            .commandEscortFormation: "c", .commandEscortReturnHangar: "opt+c",
             .commandEscortEvasive: "", .shipInfo: "", .pauseGame: "",
-            .openMenu: "escape",
+            .openMenu: "escape", .cycleHyperspaceLink: "\\",
+            .routeMapZoomOut: "-", .routeMapZoomIn: "=",
         ]
         #if !os(macOS)
         m[.fireSecondary] = "return"
@@ -85,6 +89,7 @@ struct KeyBindings: Codable, Equatable {
         .selectNav1: "1", .selectNav2: "2", .selectNav3: "3", .selectNav4: "4",
         .hyperspaceArm: "h", .dismissMessage: "", .playerInfo: "", .missionInfo: "",
         .clearSecondary: "s", .hailStellar: "opt+y", .selfDestruct: "opt+-",
+        .commandEscortFormation: "", .commandEscortReturnHangar: "",
     ]
 
     func token(for action: GameAction) -> String { map[action] ?? "" }
@@ -95,6 +100,30 @@ struct KeyBindings: Codable, Equatable {
             return action
         }
         return nil
+    }
+
+    /// Key Settings' edit (0x0048b6d0): bind `token` to `action` and leave any
+    /// other holder alone — duplicates are allowed while editing and refused
+    /// only at OK (`firstConflict`).
+    mutating func assign(_ action: GameAction, to token: String) { map[action] = token }
+
+    /// `ControlState_FindBindingConflict` 0x00466c10: the first action, in
+    /// `order`, whose key another action also holds.
+    func firstConflict(in order: [GameAction]) -> GameAction? {
+        var count: [String: Int] = [:]
+        for a in order { let t = token(for: a); if !t.isEmpty { count[t, default: 0] += 1 } }
+        return order.first { count[token(for: $0), default: 0] > 1 }
+    }
+
+    /// The keys Key Settings won't capture (`NovaInput_PeekActiveCommand`
+    /// 0x00466810 skips DIK 2–5, 0x3a–0x3f and 0x70–0x71): the number keys
+    /// 1–4 (the Escort Commands group keys), Caps Lock and F1–F5.
+    static func isCapturable(_ token: String) -> Bool {
+        if ["1", "2", "3", "4", "capslock"].contains(token) { return false }
+        // F1–F5 arrive as the AppKit function-key characters U+F704…U+F708.
+        if let scalar = token.unicodeScalars.first, token.unicodeScalars.count == 1,
+           (0xF704...0xF708).contains(scalar.value) { return false }
+        return true
     }
 
     mutating func rebind(_ action: GameAction, to token: String) {

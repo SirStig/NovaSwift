@@ -86,14 +86,16 @@ public enum Commodity: Int, CaseIterable, Sendable {
 public enum PriceLevel: Int, Sendable, Equatable {
     case notTraded = 0, low, medium, high
 
-    /// Decode from a `spöb` price nibble (0 = not traded, 1 = low, 2 = med, 4 = high).
+    /// Decode from a `spöb` price nibble. The original tests the bits in
+    /// priority order — 1 low, then 2 medium, then 4 high — so a nibble with
+    /// several bits (3, 5, 7 → low; 6 → medium) reads as its lowest one, and
+    /// 0 or 8 is not traded (`Stellar_ExtractTravelFlagConnectiveValue`
+    /// 0x00469d30).
     public init(nibble: Int) {
-        switch nibble {
-        case 1:  self = .low
-        case 2:  self = .medium
-        case 4:  self = .high
-        default: self = .notTraded
-        }
+        if nibble & 1 != 0 { self = .low }
+        else if nibble & 2 != 0 { self = .medium }
+        else if nibble & 4 != 0 { self = .high }
+        else { self = .notTraded }
     }
 
     public var isTraded: Bool { self != .notTraded }
@@ -120,6 +122,13 @@ extension SpobRes {
     public var isUninhabited: Bool         { flags & 0x20 != 0 }
     public var hasBar: Bool                { flags & 0x40 != 0 }
     public var landsOnlyWhenDestroyed: Bool { flags & 0x80 != 0 }
+
+    /// `Stellar_IsStellarUsableForTravel` 0x0046e440: Flags 0x0001 set, not a
+    /// hypergate or wormhole, and `destroyed` matching what Flags 0x0080 asks
+    /// for (a "land only when destroyed" port is usable only as a wreck).
+    public func usableForTravel(destroyed: Bool) -> Bool {
+        canLand && !isGate && destroyed == landsOnlyWhenDestroyed
+    }
 
     /// Whether the player can dock here at all. (Uninhabited rocks that carry no
     /// "can land" bit are still fly-by scenery.)

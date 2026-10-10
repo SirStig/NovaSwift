@@ -193,6 +193,7 @@ struct AuthenticMainMenuView: View {
     @State private var appeared = false
     @State private var sheet: Sheet?
     @State private var hoveredAction: MainMenuAction?
+    @FocusState private var menuFocused: Bool
     /// How many frames of the shutter-strip run have played. Starts at 0 (the
     /// retracted state, pixel-identical to the backdrop) and counts up to each
     /// strip's last frame, where it rests.
@@ -205,7 +206,7 @@ struct AuthenticMainMenuView: View {
     /// on entry rather than a loading delay.
     private static let slideFrameInterval: TimeInterval = 1.0 / 20.0
     private enum Sheet: String, Identifiable {
-        case newPilot, openPilot, settings, about, plugins, importData
+        case newPilot, openPilot, settings, about, plugins, importData, acknowledgements
         var id: String { rawValue }
     }
 
@@ -260,12 +261,17 @@ struct AuthenticMainMenuView: View {
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .overlay { dialogOverlay }
+        .focusable()
+        .focusEffectDisabled()
+        .focused($menuFocused)
+        .onKeyPress(phases: .down) { press in menuKey(press) }
         .onDisappear {
             slideTimer?.invalidate()
             slideTimer = nil
         }
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
+            menuFocused = true
             startSlideAnimation()               // cölr Slide1-3 shutter flourish
             model.prepareAudioAndData()         // ensure main-menu background music is playing
         }
@@ -296,6 +302,7 @@ struct AuthenticMainMenuView: View {
                     }
                 case .plugins:    PluginsView(onClose: { sheet = nil })
                 case .importData: DataSetupWizard(onClose: { sheet = nil }, startAtImport: true)
+                case .acknowledgements: acknowledgements
                 }
             }
             .transition(.opacity)
@@ -566,6 +573,43 @@ struct AuthenticMainMenuView: View {
                 // strip of its row has finished sliding.
                 .opacity(slideSettled(MainMenuReadout.slideIndex(forButton: i)) ? 1 : 0)
                 .allowsHitTesting(slideSettled(MainMenuReadout.slideIndex(forButton: i)))
+        }
+    }
+
+    /// The main menu's keys (`NovaCommand_DispatchToMode` 0x004872a0): N New
+    /// Pilot, O Open Pilot, Q Quit, E Enter Ship, P Preferences, A About, and
+    /// X the Acknowledgements text (dësc 32766).
+    private func menuKey(_ press: KeyPress) -> KeyPress.Result {
+        guard sheet == nil, press.modifiers.isEmpty || press.modifiers == .shift else { return .ignored }
+        switch press.characters.lowercased() {
+        case "n": activate(.newPilot)
+        case "o": activate(.openPilot)
+        case "q": activate(.quitNova)
+        case "e": activate(.enterShip)
+        case "p": activate(.setPrefs)
+        case "a": activate(.aboutNova)
+        case "x":
+            model.audio.play(.uiSelect)
+            sheet = .acknowledgements
+        default: return .ignored
+        }
+        return .handled
+    }
+
+    /// dësc 0x7ffe shown in the story-text reader.
+    @ViewBuilder private var acknowledgements: some View {
+        ZStack {
+            Color.black.opacity(0.5).ignoresSafeArea()
+            NovaDialog(title: "", width: 480,
+                       buttons: [NovaDialogButton(title: "OK", isDefault: true) { sheet = nil }]) {
+                ScrollView {
+                    Text(model.data.game?.descText(32766) ?? "")
+                        .novaFont(.body)
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxHeight: 360)
+            }
         }
     }
 

@@ -66,9 +66,11 @@ extension NovaGame {
             twins["\(s.x),\(s.y)", default: []].append(s.id)
         }
         func visibleTwin(_ id: Int) -> Int? {
-            if isVisible(id) { return id }
+            // The first visible member of the twin group, even when `id` itself
+            // is visible but a lower member is too (0x0046b920).
             guard let s = byID[id] else { return nil }
-            return twins["\(s.x),\(s.y)"]?.sorted().first(where: isVisible)
+            if let group = twins["\(s.x),\(s.y)"]?.sorted(), let first = group.first(where: isVisible) { return first }
+            return isVisible(id) ? id : nil
         }
         var visited: Set<Int> = []
         var order: [Int] = []

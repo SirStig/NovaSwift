@@ -18,6 +18,11 @@ struct ControlsView: View {
     /// the live controller's name and per-vendor button labels.
     @State private var padGeneration = 0
     @State private var device: InputDevice = .keyboard
+    /// Key Settings edits a shadow copy (0x00734bc8): OK commits it, Cancel
+    /// discards it, Reset only previews the defaults (0x0048b280).
+    @State private var draft: KeyBindings?
+    /// The row OK refused on: it holds a key another row also holds.
+    @State private var conflict: GameAction?
 
     private enum InputDevice: String, CaseIterable, Identifiable {
         case keyboard = "Keyboard", controller = "Controller"
@@ -46,8 +51,10 @@ struct ControlsView: View {
             Section {
                 Button(role: .destructive) {
                     if device == .keyboard {
-                        model.bindings.resetToDefaults(modern: model.settings.enhancements.modernKeyBindings)
-                        model.commitBindings()
+                        var preview = keys
+                        preview.resetToDefaults(modern: model.settings.enhancements.modernKeyBindings)
+                        draft = preview
+                        conflict = nil
                     } else {
                         model.padBindings.resetToDefaults()
                         model.commitPadBindings()
@@ -59,15 +66,19 @@ struct ControlsView: View {
         }
         .novaResponsive()
         .navigationTitle("Controls")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { draft = nil; dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) { Button("Done") { commitKeys() } }
+        }
         .focusable()
+        .onAppear { if draft == nil { draft = model.bindings } }
         .onKeyPress(phases: .down) { press in
             guard let action = capturing else { return .ignored }
             let token = KeyToken.from(press)
             if token == "escape" || token.isEmpty { capturing = nil; return .handled }
-            model.bindings.rebind(action, to: token)
-            model.commitBindings()
-            capturing = nil
+            capture(token, for: action)
             return .handled
         }
         #if os(macOS)
@@ -91,11 +102,46 @@ struct ControlsView: View {
     #if os(macOS)
     private func captureModifier(_ flags: NSEvent.ModifierFlags) {
         guard let action = capturing, let token = bareModifierToken(flags) else { return }
-        model.bindings.rebind(action, to: token)
-        model.commitBindings()
-        capturing = nil
+        capture(token, for: action)
     }
     #endif
+
+    /// The bindings being edited.
+    private var keys: KeyBindings { draft ?? model.bindings }
+
+    /// Every keyboard row, in display order.
+    private var keyRows: [GameAction] { GameAction.Category.allCases.flatMap { actions(in: $0) } }
+
+    /// A captured key binds the row and moves to the next one (0x0048b6d0);
+    /// a key the original refuses is ignored.
+    private func capture(_ token: String, for action: GameAction) {
+        guard KeyBindings.isCapturable(token) else { beep(); return }
+        var edited = keys
+        edited.assign(action, to: token)
+        draft = edited
+        conflict = nil
+        let rows = keyRows
+        if let i = rows.firstIndex(of: action), i + 1 < rows.count { capturing = rows[i + 1] } else { capturing = nil }
+    }
+
+    /// OK: refused (beep, conflicting row selected) while two rows share a
+    /// key; otherwise the shadow copy becomes the live table.
+    private func commitKeys() {
+        capturing = nil
+        if let clash = keys.firstConflict(in: keyRows) {
+            conflict = clash
+            beep()
+            return
+        }
+        if let draft { model.bindings = draft; model.commitBindings() }
+        dismiss()
+    }
+
+    private func beep() {
+        #if os(macOS)
+        NSSound.beep()
+        #endif
+    }
 
     private func actions(in category: GameAction.Category) -> [GameAction] {
         GameAction.allCases.filter { $0.category == category }
@@ -108,8 +154,8 @@ struct ControlsView: View {
             CursorButton {
                 capturing = (capturing == action) ? nil : action
             } label: {
-                bindingChip(capturing == action ? "Press a key…" : KeyToken.label(model.bindings.token(for: action)),
-                            highlighted: capturing == action)
+                bindingChip(capturing == action ? "Press a key…" : KeyToken.label(keys.token(for: action)),
+                            highlighted: capturing == action || conflict == action)
             }
         }
     }

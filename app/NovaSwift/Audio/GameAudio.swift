@@ -28,8 +28,7 @@ final class GameAudio: ObservableObject {
         case uiSelect            // menu/button click
         case uiError             // rejected action
         case targetLock          // acquired a target
-        case lowShieldWarning    // Klaxxon
-        case criticalHullWarning // Red Alert
+        case redAlert            // a ship starts threatening the player's squad
         case docking             // player set down on a spöb
         case launch              // player lifted off from a spöb
 
@@ -40,8 +39,7 @@ final class GameAudio: ObservableObject {
             case .uiSelect:            return 150   // "Beep1"
             case .uiError:             return 152   // "Beep3"
             case .targetLock:          return 151   // "Beep2"
-            case .lowShieldWarning:    return 371   // "Klaxxon"
-            case .criticalHullWarning: return 370   // "Red Alert"
+            case .redAlert:            return 370   // "Red Alert"
             case .docking, .launch:    return 390   // "Airlock"
             }
         }
@@ -52,8 +50,7 @@ final class GameAudio: ObservableObject {
             case .hyperspaceCharge:    return P.warpUp
             case .hyperspaceArrive:    return P.warpOut
             case .uiSelect, .uiError, .targetLock: return P.beep
-            case .lowShieldWarning:    return P.klaxxon
-            case .criticalHullWarning: return P.redAlert
+            case .redAlert:            return P.redAlert
             case .docking, .launch:    return P.airlock
             }
         }
@@ -61,7 +58,7 @@ final class GameAudio: ObservableObject {
         /// Played only when no voice is already playing it (0x0044f3d0:85 for
         /// Warp out, :1707 for Klaxxon).
         var playsOnlyWhenSilent: Bool {
-            self == .hyperspaceArrive || self == .lowShieldWarning
+            self == .hyperspaceArrive
         }
     }
 

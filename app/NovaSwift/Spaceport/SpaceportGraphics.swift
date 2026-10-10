@@ -155,8 +155,8 @@ final class SpaceportGraphics {
 
     /// A planet's landing landscape PICT (10000-range), if it defines one.
     func landscape(for spob: SpobRes) -> CGImage? {
-        let id = spob.landingPictID
-        guard id > 0, id != 0xFFFF else { return nil }
+        // CustPicID when >= 128, else Graphic + 10000 (0x0048e970).
+        let id = spob.landingPictID >= 128 && spob.landingPictID != 0xFFFF ? spob.landingPictID : spob.graphicRaw + 10000
         return pict(id)
     }
 

@@ -46,6 +46,7 @@ final class OutfitMechanicsTests: XCTestCase {
         var b = [UInt8](repeating: 0, count: 420)
         for (i, l) in links.prefix(16).enumerated() { put16(&b, 4 + i * 2, l) }
         for (i, s) in spobs.prefix(16).enumerated() { put16(&b, 36 + i * 2, s) }
+        put16(&b, 0, id * 10)   // distinct positions: these systems are not twins
         put16(&b, 102, govt)
         return Resource(type: NovaType.syst, id: id, name: "Sys\(id)", data: Data(b))
     }

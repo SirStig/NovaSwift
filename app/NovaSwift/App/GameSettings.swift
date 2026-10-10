@@ -421,6 +421,9 @@ struct GameSettings: Codable, Equatable {
     var colorblindMode: ColorblindMode = .none
     /// Reduce flashing / rapid motion (exhaust flicker, screen shake, jump flash).
     var reduceFlashing: Bool = false
+    /// The original's "no hyperspace effects" preference (prefs +0x78, `g_nv_noHyperspaceEffects`
+    /// 0x005914e0): the jump's white flash and streak build-up are skipped. Off by default.
+    var noHyperspaceEffects: Bool = false
     /// Global UI scale factor (0.8…1.4).
     var uiScale: Double = 1.0
 
@@ -524,6 +527,7 @@ struct GameSettings: Codable, Equatable {
         highContrastHUD       = v(.highContrastHUD, d.highContrastHUD)
         colorblindMode        = v(.colorblindMode, d.colorblindMode)
         reduceFlashing        = v(.reduceFlashing, d.reduceFlashing)
+        noHyperspaceEffects   = v(.noHyperspaceEffects, d.noHyperspaceEffects)
         uiScale               = v(.uiScale, d.uiScale)
     }
 }
