@@ -1,24 +1,58 @@
 import SwiftUI
 import NovaSwiftKit
 import NovaSwiftPluginStore
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
-/// Rounded icon tile: the catalog icon, or a symbol for the plug-in's kind.
+/// Rounded icon tile: the catalog icon, else (for installed plug-ins) one built
+/// from the plug-in's own resources, else a symbol for the plug-in's kind.
 struct PluginIconTile: View {
+    @EnvironmentObject private var model: AppModel
     let entry: PluginCatalogEntry
     var size: CGFloat = 56
+    @State private var generated: Image?
+
+    private var isInstalled: Bool { model.store.status(for: entry).isInstalled }
 
     var body: some View {
         RemoteImage(url: entry.iconURL) {
             ZStack {
-                LinearGradient(colors: [tint.opacity(0.75), tint.opacity(0.35)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: entry.kind.symbolName)
-                    .font(.system(size: size * 0.42, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
+                symbolTile
+                if let generated {
+                    generated.resizable().aspectRatio(contentMode: .fit).padding(size * 0.08)
+                        .background(Color.black.opacity(0.35))
+                }
             }
+        }
+        .task(id: "\(entry.id)|\(isInstalled)|\(entry.iconURL == nil)") {
+            generated = nil
+            guard isInstalled else { return }
+            let id = entry.id, root = model.data.importedPluginsDir
+            let data = await Task.detached(priority: .utility) {
+                PluginIconGenerator.iconPNG(for: id, pluginsRoot: root)
+            }.value
+            guard let data else { return }
+            #if canImport(UIKit)
+            if let ui = UIImage(data: data) { generated = Image(uiImage: ui) }
+            #elseif canImport(AppKit)
+            if let ns = NSImage(data: data) { generated = Image(nsImage: ns) }
+            #endif
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+    }
+
+    private var symbolTile: some View {
+        ZStack {
+            LinearGradient(colors: [tint.opacity(0.75), tint.opacity(0.35)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image(systemName: entry.kind.symbolName)
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+        }
     }
 
     private var tint: Color {
