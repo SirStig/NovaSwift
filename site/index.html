@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles.css?v=7" />
+  <link rel="stylesheet" href="styles.css?v=8" />
 </head>
 <body>
   <div class="space-bg" aria-hidden="true"></div>
@@ -35,8 +35,7 @@
         <b>NOVA<i>·</i>SWIFT</b>
       </a>
       <div class="nav-links">
-        <a href="#progress">Fidelity</a>
-        <a href="#beyond">Features</a>
+        <a href="#progress">Progress</a>
         <a href="#new">Screenshots</a>
         <a href="#get">Get it</a>
       </div>
@@ -79,56 +78,26 @@
 
   <main id="main">
 
-  <!-- ═══ FIDELITY ═══ -->
+  <!-- ═══ PROGRESS ═══ -->
   <section class="section" id="progress">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Fidelity</p>
+        <p class="eyebrow">Progress</p>
         <h2>Checked against the original code.</h2>
         <p>We decompiled the original game and compared every part of it with NovaSwift. Original behaviour is the
            default; a few optional Enhancements live in Settings.</p>
       </div>
-
-      <div class="grid-card summary-card">
-        <img src="assets/fidelity-summary.svg" alt="How much of the original game's code has been compared with NovaSwift, by area" />
-        <p class="note">This shows how much has been compared, not that the game is finished. NovaSwift is in beta and
-           still has bugs. Found something that plays differently?
-           <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Open an issue</a>.</p>
+      <div class="summary-pair">
+        <div class="grid-card summary-card">
+          <img src="assets/fidelity-summary.svg" alt="How much of the original game's code has been compared with NovaSwift, by area" />
+        </div>
+        <div class="grid-card summary-card">
+          <img src="assets/features-summary.svg" alt="Progress on NovaSwift's own features" />
+        </div>
       </div>
-
-      <details class="grid-card" open>
-        <summary>Every function, one square each</summary>
-        <p>One square per function in the original. Green: compared and matching. Teal: done differently on purpose,
-           like saves and controls. Hover or tap a square for details.</p>
-        <div id="grid-exe" class="grid-exe"><p class="grid-note">Loading…</p></div>
-      </details>
-    </div>
-  </section>
-
-  <!-- ═══ BEYOND ═══ -->
-  <section class="section" id="beyond">
-    <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">Beyond the original</p>
-        <h2>NovaSwift's own features.</h2>
-        <p>One square per task. Linux and Windows run through a Godot frontend on the same Swift engine.</p>
-      </div>
-      <div class="grid-card">
-        <div id="grid-features"><p class="grid-note">Loading…</p></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="not-needed">
-    <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">Not needed</p>
-        <h2>Parts NovaSwift replaces with its own engine.</h2>
-        <p>The original's C runtime, Windows glue, QuickTime, image and audio libraries, networking and shareware code. Decompiled and mapped, but there is nothing to port.</p>
-      </div>
-      <div class="grid-card">
-        <div id="grid-internal" class="grid-exe"><p class="grid-note">Loading…</p></div>
-      </div>
+      <p class="note">This shows how much has been compared, not that the game is finished. NovaSwift is in beta and
+         still has bugs. <a href="progress.html">See the details</a> or
+         <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">report something that plays differently</a>.</p>
     </div>
   </section>
 
@@ -307,6 +276,5 @@
   </footer>
 
   <script src="starfield.js?v=2"></script>
-  <script src="progress.js?v=2"></script>
 </body>
 </html>

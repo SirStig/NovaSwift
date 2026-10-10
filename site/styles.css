@@ -440,3 +440,5 @@ details.grid-card > summary::-webkit-details-marker { display: none; }
 details.grid-card > summary::before { content: "▸ "; color: var(--muted); }
 details.grid-card[open] > summary::before { content: "▾ "; }
 details.grid-card[open] > summary { margin-bottom: var(--s2); }
+.summary-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+@media (max-width: 860px) { .summary-pair { grid-template-columns: 1fr; } }

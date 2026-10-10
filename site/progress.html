@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NOVA Swift: progress details</title>
+  <meta name="description" content="A fan rebuild of EV Nova (2002) in Swift, checked against the original game's code. Runs on Mac, iPad, iPhone and Apple TV. You need your own copy of the game." />
+
+  <link rel="icon" type="image/png" href="assets/favicon-256.png" />
+  <link rel="apple-touch-icon" href="assets/app-icon-180.png" />
+
+  <meta property="og:title" content="NOVA Swift: EV Nova for Mac, iPad, iPhone and Apple TV" />
+  <meta property="og:description" content="A fan rebuild of the 2002 space game in Swift. Native on Mac, iPad, iPhone and Apple TV." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="assets/launch-banner.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css?v=8" />
+</head>
+<body>
+  <div class="space-bg" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+
+  <!-- ═══ NAV ═══ -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html">
+        <img src="assets/app-icon-96.png" alt="" width="34" height="34" />
+        <b>NOVA<i>·</i>SWIFT</b>
+      </a>
+      <div class="nav-links">
+        <a href="index.html">Home</a>
+        <a href="#functions">Original code</a>
+        <a href="#features">Features</a>
+        <a href="#not-needed">Not needed</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="GitHub repository">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
+          <span>GitHub</span>
+        </a>
+        <a class="btn btn-primary sm" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Get the beta</a>
+      </div>
+    </div>
+  </nav>
+
+  <span id="top"></span>
+
+  <!-- ═══ 
+
+  <main id="main">
+  <section class="section" id="functions">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Original code</p>
+        <h2>Every function in the original, one square each.</h2>
+        <p>Green: compared with NovaSwift and matching (some after a fix). Teal: done differently on purpose, like saves and controls. Hover or tap a square for its name, address and status. How the colours are assigned is explained in <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.</p>
+      </div>
+      <div class="grid-card">
+        <div id="grid-exe" class="grid-exe"><p class="grid-note">Loading…</p></div>
+      </div>
+    </div>
+  </section>
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Beyond the original</p>
+        <h2>NovaSwift's own features, one square per task.</h2>
+        <p>Linux and Windows run through a Godot frontend on the same Swift engine.</p>
+      </div>
+      <div class="grid-card">
+        <div id="grid-features"><p class="grid-note">Loading…</p></div>
+      </div>
+    </div>
+  </section>
+  <section class="section" id="not-needed">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Not needed</p>
+        <h2>Parts NovaSwift replaces with its own engine.</h2>
+        <p>The original's C runtime, Windows glue, QuickTime, image and audio libraries, networking and shareware code. Decompiled and mapped, but there is nothing to port.</p>
+      </div>
+      <div class="grid-card">
+        <div id="grid-internal" class="grid-exe"><p class="grid-note">Loading…</p></div>
+      </div>
+    </div>
+  </section>
+  </main>
+
+  <!-- ═══ FOOTER ═══ -->
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-top">
+        <a class="brand" href="index.html">
+          <img src="assets/app-icon-96.png" alt="" width="30" height="30" />
+          <b>NOVA<i>·</i>SWIFT</b>
+        </a>
+        <div class="footer-links">
+          <a href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Issues</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/GET_THE_DATA.md" target="_blank" rel="noopener">Get the data</a>
+          <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/CHARTER.md" target="_blank" rel="noopener">Charter</a>
+        </div>
+      </div>
+      <p class="legal">
+        EV Nova and its data are copyrighted and are not distributed here; you supply your own copy.
+        This project's code is open source. It is a fan preservation project, not affiliated with or endorsed by
+        Ambrosia Software or ATMOS. The artwork on this page is original to NOVA Swift.
+        AI tools were used in its development.
+      </p>
+    </div>
+  </footer>
+
+  <script src="starfield.js?v=2"></script>
+  <script src="progress.js?v=2"></script>
+</body>
+</html>
