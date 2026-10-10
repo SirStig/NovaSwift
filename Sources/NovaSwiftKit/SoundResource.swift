@@ -24,6 +24,7 @@ public struct NovaSound {
 public enum SndDecoder {
     // Sound Manager command ids we care about.
     private static let bufferCmd: UInt16 = 81
+    private static let soundCmd: UInt16 = 80
 
     /// Sampled-sound header encodings.
     private static let stdEncoding: UInt8 = 0x00      // standard header (8-bit PCM)
@@ -36,6 +37,7 @@ public enum SndDecoder {
         case nonImmediateSample
         case unsupportedEncoding(UInt8)
         case unsupportedCompression(String)
+        case multiChannel
 
         public var description: String {
             switch self {
@@ -43,12 +45,27 @@ public enum SndDecoder {
             case .unsupportedCommand: return "snd has no immediate buffer command"
             case .nonImmediateSample: return "snd uses a non-immediate sample pointer"
             case .unsupportedEncoding(let e): return "snd sample encoding 0x\(String(e, radix: 16)) unsupported"
-            case .unsupportedCompression(let f): return "snd compression '\(f)' unsupported (only ima4)"
+            case .unsupportedCompression(let f): return "snd compression '\(f)' unsupported (only NONE/ima4)"
+            case .multiChannel: return "snd has more than one channel (the original plays nothing)"
             }
         }
     }
 
-    /// Decode a `snd ` resource body into a `NovaSound`.
+    /// Decode a `snd ` resource body into a `NovaSound`, by the original's
+    /// rules (`FUN_004d6d30` header offset, `NovaSound_DecodePayload` 0x004d6e60):
+    ///
+    /// - format 1 skips `numModifiers × 6` bytes, format 2 its reference count;
+    ///   any other format is rejected.
+    /// - The first command that is `bufferCmd` (0x8051) **or** `soundCmd`
+    ///   (0x8050) with the data-offset bit gives the header offset.
+    /// - Standard header: 8-bit, data at +0x16. Extended (0xFF): must be mono,
+    ///   sample size at +0x30, data at +0x40. Compressed (0xFE): mono, format
+    ///   `NONE` or `ima4`, sample size at +0x3E, data at +0x40. A multi-channel
+    ///   sound, or any other compression, plays **nothing**.
+    /// - The sample bytes are everything from the data start to the end of the
+    ///   resource; the header's own length/frame fields are ignored, so a short
+    ///   or over-long count never fails the decode.
+    /// - Loop points are never used (the mixer has none).
     public static func decode(_ data: Data) throws -> NovaSound {
         let r = BinaryReader(data, bigEndian: true)
 
@@ -56,11 +73,8 @@ public enum SndDecoder {
         let format = try r.readU16()
         switch format {
         case 1:
-            let numDataFormats = try r.readU16()
-            if numDataFormats != 0 {
-                _ = try r.readU16()   // firstDataFormatID
-                _ = try r.readU32()   // initialization options
-            }
+            let numDataFormats = Int(try r.readU16())
+            try r.advance(numDataFormats * 6)   // (id u16, init options u32) each
         case 2:
             _ = try r.readU16()       // reference count (ignored)
         default:
@@ -68,93 +82,72 @@ public enum SndDecoder {
         }
 
         let numCommands = try r.readU16()
-        // We only support the standard "one immediate bufferCmd" layout Nova emits.
-        guard numCommands >= 1 else { throw Error.unsupportedCommand }
         var sampleOffset: Int? = nil
         for _ in 0..<numCommands {
-            var cmd = try r.readU16()
+            let cmd = try r.readU16()
             _ = try r.readU16()               // param1
-            let param2 = try r.readU32()      // param2 (offset to sound header when dataOffsetBit set)
-            let hasOffset = (cmd & 0x8000) != 0
-            cmd &= 0x7FFF
-            if cmd == bufferCmd && hasOffset { sampleOffset = Int(param2) }
+            let param2 = try r.readU32()      // offset to the sound header
+            if sampleOffset == nil, cmd == 0x8000 | bufferCmd || cmd == 0x8000 | soundCmd {
+                sampleOffset = Int(param2)
+            }
         }
         guard let headerOffset = sampleOffset else { throw Error.unsupportedCommand }
 
         // --- Sampled Sound Header -----------------------------------------
-        try r.seek(headerOffset)
-        let samplePtr = try r.readU32()
-        guard samplePtr == 0 else { throw Error.nonImmediateSample }  // must be immediate
+        let bytes = [UInt8](data)
+        func u32(_ at: Int) -> UInt32? {
+            guard at >= 0, at + 4 <= bytes.count else { return nil }
+            return UInt32(bytes[at]) << 24 | UInt32(bytes[at+1]) << 16 | UInt32(bytes[at+2]) << 8 | UInt32(bytes[at+3])
+        }
+        func u16(_ at: Int) -> Int? {
+            guard at >= 0, at + 2 <= bytes.count else { return nil }
+            return Int(bytes[at]) << 8 | Int(bytes[at+1])
+        }
+        let h = headerOffset
+        guard let rateFixed = u32(h + 8), h + 0x14 < bytes.count else { throw Error.unsupportedCommand }
+        let sampleRate = Double(rateFixed) / 65536.0
+        let rate = sampleRate > 0 ? sampleRate : 22050
+        let encoding = bytes[h + 0x14]
 
-        var length = Int(try r.readU32())            // #samples (std) or #channels (ext/cmp)
-        let sampleRate = Double(try r.readU32()) / 65536.0
-        _ = try r.readU32()                          // loopStart
-        _ = try r.readU32()                          // loopEnd
-        let encoding = try r.readU8()
-        _ = try r.readU8()                           // baseFrequency
-
+        let dataStart: Int
+        let bits: Int
+        let compression: String
         switch encoding {
         case stdEncoding:
-            // `length` samples of unsigned 8-bit PCM follow immediately.
-            var out = [Float](); out.reserveCapacity(length)
-            for _ in 0..<length {
-                let b = try r.readU8()
-                out.append((Float(b) - 127.5) / 127.5)
-            }
-            return NovaSound(sampleRate: sampleRate > 0 ? sampleRate : 22050, samples: out)
-
-        case extEncoding, cmpEncoding:
-            // For the extended/compressed headers the earlier field was the channel
-            // count; the real frame count is the next u32.
-            let channels = max(1, length)
-            length = Int(try r.readU32())            // number of frames
-            try r.advance(10)                        // AIFF sample rate (80-bit extended)
-            _ = try r.readU32()                      // markerChunk
-
-            if encoding == extEncoding {
-                _ = try r.readU32()                  // instrumentChunk
-                _ = try r.readU32()                  // AESRecording
-                let sampleSize = Int(try r.readI16())
-                try r.advance(14)                    // future1(2) + future2..4 (12)
-                let out = try readUncompressed(r, frames: length, channels: channels, bits: sampleSize)
-                return NovaSound(sampleRate: sampleRate > 0 ? sampleRate : 22050, samples: out)
-            } else {
-                var fmt = ""
-                for _ in 0..<4 { fmt.append(Character(UnicodeScalar(try r.readU8()))) }
-                _ = try r.readU32()                  // future2
-                _ = try r.readU32()                  // stateVars
-                _ = try r.readU32()                  // leftOverSamples
-                _ = try r.readI16()                  // compressionID
-                _ = try r.readI16()                  // packetSize
-                _ = try r.readI16()                  // snthID
-                _ = try r.readI16()                  // sampleSize
-                guard fmt == "ima4" else { throw Error.unsupportedCompression(fmt) }
-                let out = try readIMA4(r, packets: length * channels)
-                return NovaSound(sampleRate: sampleRate > 0 ? sampleRate : 22050, samples: out)
-            }
-
+            dataStart = h + 0x16; bits = 8; compression = "NONE"
+        case extEncoding:
+            guard let channels = u32(h + 4), channels <= 1 else { throw Error.multiChannel }
+            guard let size = u16(h + 0x30) else { throw Error.unsupportedEncoding(encoding) }
+            dataStart = h + 0x40; bits = size; compression = "NONE"
+        case cmpEncoding:
+            guard let channels = u32(h + 4), channels <= 1 else { throw Error.multiChannel }
+            guard let fmt = u32(h + 0x28), let size = u16(h + 0x3E) else { throw Error.unsupportedEncoding(encoding) }
+            let name = String(bytes: [UInt8(fmt >> 24), UInt8((fmt >> 16) & 0xFF),
+                                      UInt8((fmt >> 8) & 0xFF), UInt8(fmt & 0xFF)], encoding: .macOSRoman) ?? "?"
+            guard name == "NONE" || name == "ima4" else { throw Error.unsupportedCompression(name) }
+            dataStart = h + 0x40; bits = size; compression = name
         default:
             throw Error.unsupportedEncoding(encoding)
         }
-    }
+        let payload = dataStart < bytes.count ? Array(bytes[dataStart...]) : []
 
-    // MARK: Uncompressed extended-header PCM (8- or 16-bit)
-
-    private static func readUncompressed(_ r: BinaryReader, frames: Int, channels: Int, bits: Int) throws -> [Float] {
-        let total = frames * max(1, channels)
-        var out = [Float](); out.reserveCapacity(frames)
-        if bits <= 8 {
-            for i in 0..<total where i % channels == 0 {   // take first channel
-                let b = try r.readU8()
-                out.append((Float(b) - 127.5) / 127.5)
+        if compression == "ima4" {
+            let out = decodeIMA4(payload, packets: payload.count / 34)
+            return NovaSound(sampleRate: rate, samples: out)
+        }
+        var out = [Float]()
+        if bits == 16 {
+            out.reserveCapacity(payload.count / 2)
+            var i = 0
+            while i + 1 < payload.count {
+                let s = Int16(bitPattern: UInt16(payload[i]) << 8 | UInt16(payload[i+1]))
+                out.append(Float(s) / 32768.0)
+                i += 2
             }
         } else {
-            for i in 0..<total {
-                let s = Int(try r.readI16())
-                if i % channels == 0 { out.append(Float(s) / 32768.0) }
-            }
+            out = payload.map { (Float($0) - 127.5) / 127.5 }
         }
-        return out
+        return NovaSound(sampleRate: rate, samples: out)
     }
 
     // MARK: IMA-4 (ADPCM) decode — 34-byte packets → 64 samples each
@@ -179,17 +172,19 @@ public enum SndDecoder {
         return ((v >> 3) != 0 ? -1.0 : 1.0) * (Double(v & 7) + 0.5)
     }
 
-    private static func readIMA4(_ r: BinaryReader, packets: Int) throws -> [Float] {
+    private static func decodeIMA4(_ bytes: [UInt8], packets: Int) -> [Float] {
         var out = [Float](); out.reserveCapacity(packets * 64)
+        var p = 0
         for _ in 0..<packets {
             // 2-byte preamble: predictor (top 9 bits) + step index (low 7 bits).
-            let c = Int(try r.readI16())
+            let c = Int(Int16(bitPattern: UInt16(bytes[p]) << 8 | UInt16(bytes[p+1])))
+            p += 2
             var si = c & 0x7F
             var predictor = Double(c - si)
             if si > 88 { si = 88 }
             var step = imaStepTable[si]
             for _ in 0..<32 {                     // 32 bytes → 64 nibbles
-                let b = Int(try r.readU8())
+                let b = Int(bytes[p]); p += 1
                 for ni in 0..<2 {
                     let v = ni == 1 ? (b >> 4) : (b & 0x0F)
                     si += imaIndexTable[v]
