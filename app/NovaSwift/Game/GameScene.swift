@@ -767,12 +767,20 @@ final class GameScene: SKScene {
     /// delay (ShipStart-1 goal ships; auxiliary ships).
     func scheduleMissionArrival(missionID: Int, dudeID: Int, count: Int, goal: MissionShipGoal,
                                 behavior: MissionShipBehavior, auxiliary: Bool,
+                                preferredShipID: Int? = nil,
                                 name: String = "", subtitle: String = "") {
         guard let world else { return }
         let delay = auxiliary ? world.missionAuxDelay() : world.missionRearmDelay(goal: goal, behavior: behavior)
         world.scheduleMissionArrival(missionID: missionID, dudeID: dudeID, count: count, goal: goal,
                                      behavior: behavior, auxiliary: auxiliary, delayCalls: delay,
+                                     preferredShipID: preferredShipID,
                                      name: name, subtitle: subtitle)
+    }
+
+    /// Live auxiliary ships per mission, collected once as the player leaves
+    /// the system (0x0041ad50).
+    func collectSurvivingAuxiliaryShips() -> [Int: Int] {
+        world?.collectSurvivingAuxiliaryShips() ?? [:]
     }
 
     /// Whether one of `missionID`'s live ships is in view — inside the visible
@@ -819,11 +827,12 @@ final class GameScene: SKScene {
                            arrival: World.ArrivalMode = .hyperspace,
                            navStellarIndex: Int? = nil,
                            startsCloaked: Bool = false,
+                           preferredShipID: Int? = nil,
                            name: String = "", subtitle: String = "") -> [Int] {
         world?.spawnMissionShips(missionID: missionID, dudeID: dudeID, count: count,
                                  goal: goal, behavior: behavior, government: government,
                                  arrival: arrival, navStellarIndex: navStellarIndex,
-                                 startsCloaked: startsCloaked,
+                                 startsCloaked: startsCloaked, preferredShipID: preferredShipID,
                                  name: name, subtitle: subtitle) ?? []
     }
 
@@ -2675,11 +2684,15 @@ final class GameScene: SKScene {
     /// leave after accepting its LinkMission"). A no-op if that person isn't
     /// currently spawned in this system.
     /// AI-39: swap a përs ship for its accepted mission's special ship.
-    func replacePersWithMissionShip(personID: Int, mission: MissionRes, name: String, subtitle: String) {
-        guard let world, let ship = world.npcs.first(where: { $0.personID == personID }) else { return }
-        world.replaceWithMissionShip(entityID: ship.entityID, missionID: mission.id, dudeID: mission.shipDude,
-                                     goal: mission.shipGoal, behavior: mission.shipBehaviorMode,
-                                     name: name, subtitle: subtitle)
+    /// Returns the hull the replacement flies, or nil when nothing was replaced.
+    @discardableResult
+    func replacePersWithMissionShip(personID: Int, mission: MissionRes, name: String, subtitle: String) -> Int? {
+        guard let world, let ship = world.npcs.first(where: { $0.personID == personID }) else { return nil }
+        guard let id = world.replaceWithMissionShip(entityID: ship.entityID, missionID: mission.id,
+                                                    dudeID: mission.shipDude,
+                                                    goal: mission.shipGoal, behavior: mission.shipBehaviorMode,
+                                                    name: name, subtitle: subtitle) else { return nil }
+        return world.ship(id: id)?.shipTypeID
     }
 
     func sendPersonDeparting(personID: Int) {

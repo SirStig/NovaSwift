@@ -1985,6 +1985,7 @@ struct GameContainerView: View {
     /// Called before `advanceGameDay` so a just-in-time delivery completes before
     /// the calendar tick could trip its deadline.
     private func handleStoryLanding(spobID: Int) {
+        creditSurvivingAuxShips()
         guard let game = model.data.game else { return }
         let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
         engine.playerLanded(onSpob: spobID)
@@ -2030,16 +2031,26 @@ struct GameContainerView: View {
     private func spawnActiveMissionShips() {
         guard let scene = host?.scene, let game = model.data.game else { return }
         let currentSys = nav.currentSystemID
+        // Slots saved before ShipSyst was resolved at accept get it now.
+        let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+        if model.pilot.state.activeMissions.contains(where: { $0.shipSystemResolved != true }) {
+            engine.resolveLegacyMissionShipSystems()
+            model.pilot.state = engine.player
+        }
         for am in model.pilot.state.activeMissions {
             guard let m = game.mission(am.missionID), !scene.hasMissionShips(m.id) else { continue }
 
-            // Goal ships. Escort/observe are passive (they complete by landing, so
-            // their objective count is 0) — those always (re)spawn while the
-            // mission is active; kill/disable/board objectives don't respawn once
-            // met (`shipObjectivesRemaining == 0`).
-            let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe
-            let goalEligible = m.hasShipObjective && (passiveGoal || am.shipObjectivesRemaining > 0)
-            let goalSystemMatches = missionSystemMatches(code: m.shipSystem, active: am, currentSystem: currentSys, game: game)
+            // Special ships (0x0041d6e0) spawn whenever the slot's resolved
+            // ShipSyst is this system, whatever the ShipGoal — a −1 goal's
+            // escorts, pursuers and ambushers included. Escort/observe and
+            // goal-less ships always (re)spawn while the mission is active;
+            // kill/disable/board objectives don't respawn once met.
+            let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe || m.shipGoal == .none
+            let goalEligible = m.shipCount > 0 && m.shipDude >= 128
+                && (passiveGoal || am.shipObjectivesRemaining > 0)
+            let goalSystemMatches = engine.shipSystemMatches(am, currentSystem: currentSys)
+            let shipName = engine.missionShipName(am, m)
+            let shipSubtitle = engine.missionShipSubtitle(am, m)
             if goalEligible, goalSystemMatches {
                 // `mïsn.ShipName`/`ShipSubtitle` name the mission's special ships
                 // on the target display, instead of their bare hull type.
@@ -2049,8 +2060,8 @@ struct GameContainerView: View {
                     scene.scheduleMissionArrival(missionID: m.id, dudeID: m.shipDude,
                                                  count: max(1, m.shipCount), goal: m.shipGoal,
                                                  behavior: m.shipBehaviorMode, auxiliary: false,
-                                                 name: missionShipName(m, game: game),
-                                                 subtitle: missionShipSubtitle(m, game: game))
+                                                 preferredShipID: am.lockedShipType,
+                                                 name: shipName, subtitle: shipSubtitle)
                 } else {
                     scene.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
                                             count: max(1, m.shipCount), goal: m.shipGoal,
@@ -2058,10 +2069,10 @@ struct GameContainerView: View {
                                             arrival: arrivalMode(forShipStart: m.shipStart),
                                             navStellarIndex: (-16 ... -1).contains(m.shipStart) ? -1 - m.shipStart : nil,
                                             startsCloaked: m.shipStart == 2,
-                                            name: missionShipName(m, game: game),
-                                            subtitle: missionShipSubtitle(m, game: game))
+                                            preferredShipID: am.lockedShipType,
+                                            name: shipName, subtitle: shipSubtitle)
                 }
-            } else if m.hasShipObjective {
+            } else if m.shipCount > 0 {
                 Log.story.debug("spawnActiveMissionShips: mission \(m.id) goal ships not spawned (eligible=\(goalEligible), systemMatches=\(goalSystemMatches), shipSystem=\(m.shipSystem), currentSys=\(currentSys), remaining=\(am.shipObjectivesRemaining))")
             }
 
@@ -2070,7 +2081,7 @@ struct GameContainerView: View {
             // side; without Flags 0x0010 each one spends the mission's budget.
             let auxLeft = m.infiniteAuxShips ? m.auxShipCount : (am.auxShipsRemaining ?? m.auxShipCount)
             if auxLeft > 0, m.auxShipDude >= 128,
-               missionSystemMatches(code: m.auxShipSystem, active: am, currentSystem: currentSys, game: game) {
+               engine.auxSystemMatches(am, m, currentSystem: currentSys) {
                 scene.scheduleMissionArrival(missionID: m.id, dudeID: m.auxShipDude, count: auxLeft,
                                              goal: .none, behavior: .standard, auxiliary: true)
             }
@@ -2096,6 +2107,7 @@ struct GameContainerView: View {
     /// becomes explored, nebula events fire (for `hops` crossed on the way
     /// too), and the mission-offer rolls are drawn afresh (UI-04, OS-14).
     private func storyArrival(in systemID: Int, via hops: [Int] = []) {
+        creditSurvivingAuxShips()
         guard let game = model.data.game else {
             model.pilot.state.currentSystem = systemID
             model.pilot.state.exploredSystems.insert(systemID)
@@ -2154,24 +2166,17 @@ struct GameContainerView: View {
         saveGame(reason: .event)
     }
 
-    /// `mïsn.ShipName` (a `STR#` id), resolved to the name this mission's special
-    /// ships fly under. Empty when the mission names none, which leaves each
-    /// ship showing its hull type as before.
-    private func missionShipName(_ m: MissionRes, game: NovaGame) -> String {
-        guard m.shipNameStrID > 0,
-              let list = game.stringList(m.shipNameStrID),
-              let first = list.strings.first(where: { !$0.isEmpty }) else { return "" }
-        return first
-    }
-
-    /// `mïsn.ShipSubtitle` (a `STR#` id), resolved to the line shown beneath the
-    /// ship's name on the target display (e.g. "Federation Navy"). Empty when
-    /// the mission sets none, which is the common case.
-    private func missionShipSubtitle(_ m: MissionRes, game: NovaGame) -> String {
-        guard m.shipSubtitleStrID > 0,
-              let list = game.stringList(m.shipSubtitleStrID),
-              let first = list.strings.first(where: { !$0.isEmpty }) else { return "" }
-        return first
+    /// Live auxiliary ships go back to their missions' budgets as the player
+    /// leaves the system (0x0041ad50), capped at AuxShipCount.
+    private func creditSurvivingAuxShips() {
+        guard let scene = host?.scene, let game = model.data.game else { return }
+        for (missionID, count) in scene.collectSurvivingAuxiliaryShips() {
+            guard let m = game.mission(missionID), !m.infiniteAuxShips,
+                  let i = model.pilot.state.activeMissions.firstIndex(where: { $0.missionID == missionID })
+            else { continue }
+            let left = model.pilot.state.activeMissions[i].auxShipsRemaining ?? m.auxShipCount
+            model.pilot.state.activeMissions[i].auxShipsRemaining = min(m.auxShipCount, left + count)
+        }
     }
 
     /// Map a `mïsn.ShipStart` code to a spawn arrival: `1` = jump in from
@@ -2181,33 +2186,6 @@ struct GameContainerView: View {
         code == 1 ? .hyperspace : .populate
     }
 
-    /// Whether a `ShipSyst`/`AuxShipSyst` selector `code` resolves to
-    /// `currentSystem`. Handles −6 follow-player, −3/−4 the travel/return
-    /// stellar's system, −1 the accept ("initial") system, −5 a system adjacent
-    /// to the initial, −2 a deterministic random system (stable per mission), and
-    /// a specific id.
-    private func missionSystemMatches(code: Int, active am: ActiveMission,
-                                      currentSystem: Int, game: NovaGame) -> Bool {
-        func systemOf(_ spob: Int?) -> Int? {
-            spob.flatMap { s in game.systems().first { $0.spobs.contains(s) }?.id }
-        }
-        switch code {
-        case -6:                       return true                              // follow the player
-        case -3:                       return systemOf(am.travelSpobID) == currentSystem
-        case -4:                       return systemOf(am.returnSpobID) == currentSystem
-        case -1:                       return am.acceptSystemID == currentSystem // initial
-        case -5:                                                                 // adjacent to initial
-            guard let initial = am.acceptSystemID else { return false }
-            return game.systemNeighbors(initial).contains(currentSystem)
-        case -2:                                                                 // random, frozen per mission
-            let systems = game.systems().map(\.id).sorted()
-            guard !systems.isEmpty else { return false }
-            let h = UInt64(bitPattern: Int64(am.missionID)) &* 0x9E3779B97F4A7C15
-            return systems[Int(h % UInt64(systems.count))] == currentSystem
-        case let sid where sid >= 128: return sid == currentSystem              // specific
-        default:                       return false
-        }
-    }
 
     /// Story `M`/`N` op: relocate the player to `systemID`. The persistent
     /// `currentSystem` is already updated by the engine; when the player is in
@@ -2934,7 +2912,13 @@ struct GameContainerView: View {
         guard let missionID, let mission = game.mission(missionID) else { return }
         flightMissionEngine = engine
         flightMissionPersonID = personID
-        engine.present(mission)
+        if !engine.present(mission) {
+            // A can't-refuse offer with no text activated silently.
+            model.pilot.state = engine.player
+            model.pilot.save()
+            flightMissionEngine = nil
+            flightMissionPersonID = nil
+        }
     }
 
     /// Accept the current in-flight `pêrs` LinkMission offer, honoring the
@@ -2957,11 +2941,17 @@ struct GameContainerView: View {
             }
             // "Replace the ship with the mission's special ship" (0x0040), for a
             // one-ship mission (AI-39).
-            if pers.replacedByMissionShip, let game = host?.game, offer.mission.shipCount == 1,
-               offer.mission.shipDude >= 128 {
-                host?.scene.replacePersWithMissionShip(personID: pid, mission: offer.mission,
-                                                       name: missionShipName(offer.mission, game: game),
-                                                       subtitle: missionShipSubtitle(offer.mission, game: game))
+            if pers.replacedByMissionShip, offer.mission.shipCount == 1, offer.mission.shipDude >= 128,
+               let am = engine.player.activeMission(offer.mission.id) {
+                let hull = host?.scene.replacePersWithMissionShip(personID: pid, mission: offer.mission,
+                                                                  name: engine.missionShipName(am, offer.mission),
+                                                                  subtitle: engine.missionShipSubtitle(am, offer.mission))
+                // Under Flags 0x0800 the replacement's hull becomes the slot's
+                // locked hull (0x0041cf40).
+                if let hull, offer.mission.flags1 & 0x0800 != 0,
+                   let i = model.pilot.state.activeMissions.firstIndex(where: { $0.missionID == offer.mission.id }) {
+                    model.pilot.state.activeMissions[i].lockedShipType = hull
+                }
             }
         }
         model.pilot.save()

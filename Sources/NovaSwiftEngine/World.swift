@@ -585,6 +585,10 @@ public final class Ship {
     /// while reopening plunder cannot count the same ship a second time.
     /// The host can also observe this transition when boarding outside a tick.
     public fileprivate(set) var missionBoardingGoalReported = false
+    /// A mission's auxiliary ship (`AuxShipDude`, owner +0x8a), not one of its
+    /// special ships. Survivors go back to the mission's aux budget when the
+    /// player leaves the system (0x0041ad50).
+    public var missionAuxiliary = false
 
     /// Set on a ship launched as a stellar's defense fleet (`spöb.DefenseDude`)
     /// during a Demand-Tribute fight — the `spöb` id it's defending. The
@@ -1856,6 +1860,7 @@ public final class World {
                                   jumpBearing: Double? = nil,
                                   startsCloaked: Bool = false,
                                   preferredShipID: Int? = nil,
+                                  auxiliary: Bool = false,
                                   name: String = "", subtitle: String = "") -> [Int] {
         guard count > 0, let galaxy = galaxy, let dude = galaxy.game.dude(dudeID) else { return [] }
         var placed: [Int] = []
@@ -1867,11 +1872,15 @@ public final class World {
         case .populate, .launch: break
         }
         for i in 0..<count {
-            let roll = rng.int(in: 0...9999)
-            // A përs replacement keeps the përs's hull when the dude flies it.
+            // A slot's locked hull (mïsn Flags 0x0800), or a përs
+            // replacement's own hull, when the dude flies it; otherwise each
+            // ship rolls among the dude's available hulls — a special ship
+            // falls back to all of them (0x0041cf40), an auxiliary ship
+            // doesn't spawn without one (0x0041c9f0).
             let preferred = preferredShipID.flatMap { id in dude.ships.contains { $0.shipID == id } ? id : nil }
-            guard let shipID = preferred ?? dude.pickShip(roll: roll) else { continue }
-            let govt = government ?? (dude.govt >= 128 ? dude.govt : nil)
+            guard let shipID = preferred ?? missionHull(dude, allowUnavailable: !auxiliary) else { continue }
+            // The dude's government, raw: one with none is independent.
+            let govt = government ?? (dude.govt >= 128 ? dude.govt : independentGovt)
             var (pos, ang) = missionSpawnPose(arrival: arrival, bearing: batchBearing)
             // AI-14 (0x0041af90): an escort objective's ships sit within ±256 px
             // of the origin; a negative ShipStart puts them exactly on that nav
@@ -1885,7 +1894,10 @@ public final class World {
             guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang,
                                                    skillScale: galaxy.skillVarianceScale(classOf: shipID, rng: &rng),
                                                    includeDefaultItems: false, defaultItemCapabilities: true) else { continue }
-            let brain = AIBrain(aiType: dude.aiType, govt: ship.government)
+            // The dude's AI type, or the hull's InherentAI when it has none.
+            let ai = dude.aiTypeRaw >= 1 ? dude.aiType
+                : AIType(raw: galaxy.game.ship(shipID)?.inherentAI ?? dude.aiTypeRaw)
+            let brain = AIBrain(aiType: ai, govt: ship.government)
             brain.behaviorOverride = behavior
             if behavior == .protectPlayer {
                 // Fly as one of the player's escorts — the escort logic then makes
@@ -1897,6 +1909,7 @@ public final class World {
             ship.brain = brain
             ship.missionID = missionID
             ship.missionShipGoal = goal
+            ship.missionAuxiliary = auxiliary
             ship.dudeID = dudeID
             // Mission ships take their düde's Booty credits too (EC-18).
             assignBootyCredits(ship, dude: dude)
@@ -1923,6 +1936,36 @@ public final class World {
             events.append(.missionShipsSpawned(missionID: missionID, entityIDs: placed))
         }
         return placed
+    }
+
+    /// `Dude_SelectShipTypeIndexFromDudeDef` 0x0046b4b0: `Rand(total)` over
+    /// the dude's hulls whose AppearOn passes; with `allowUnavailable`, all of
+    /// them when none does.
+    func missionHull(_ dude: DudeRes, allowUnavailable: Bool) -> Int? {
+        func pick(_ entries: [(Int, Int)]) -> Int? {
+            let total = entries.reduce(0) { $0 + $1.1 }
+            guard total > 0 else { return nil }
+            return OriginalSpawnRules.cumulativePick(entries, roll: rng.range(total))
+        }
+        let available = dude.ships.filter { entry in
+            guard let res = galaxy?.game.ship(entry.shipID) else { return false }
+            return res.appearOn.isEmpty || shipSpawnEligible(entry.shipID)
+        }.map { ($0.shipID, $0.prob) }
+        if let id = pick(available) { return id }
+        return allowUnavailable ? pick(dude.ships.map { ($0.shipID, $0.prob) }) : nil
+    }
+
+    /// Surviving auxiliary ships per mission (0x0041ad50): when the player
+    /// leaves the system, each live aux ship of a still-active mission goes
+    /// back to that mission's budget. Destroyed ones don't. Each ship is
+    /// counted once: collecting clears its mark.
+    public func collectSurvivingAuxiliaryShips() -> [Int: Int] {
+        var counts: [Int: Int] = [:]
+        for npc in npcs where npc.missionAuxiliary && npc.isAlive {
+            if let mid = npc.missionID { counts[mid, default: 0] += 1 }
+            npc.missionAuxiliary = false
+        }
+        return counts
     }
 
     /// AI-39 (0x00454910): a përs whose accepted LinkMission has Flags 0x0040
@@ -1962,6 +2005,8 @@ public final class World {
         public let name: String
         public let subtitle: String
         public var callsLeft: Int
+        /// The slot's locked hull (mïsn Flags 0x0800), if any.
+        public var preferredShipID: Int? = nil
     }
 
     /// Queue a mission batch to jump in after `delayCalls` maintenance ticks.
@@ -1969,11 +2014,13 @@ public final class World {
                                        goal: MissionShipGoal = .none,
                                        behavior: MissionShipBehavior = .standard,
                                        auxiliary: Bool, delayCalls: Int,
+                                       preferredShipID: Int? = nil,
                                        name: String = "", subtitle: String = "") {
         guard count > 0 else { return }
         pendingMissionArrivals.append(PendingMissionArrival(
             missionID: missionID, dudeID: dudeID, count: count, goal: goal, behavior: behavior,
-            auxiliary: auxiliary, name: name, subtitle: subtitle, callsLeft: max(0, delayCalls)))
+            auxiliary: auxiliary, name: name, subtitle: subtitle, callsLeft: max(0, delayCalls),
+            preferredShipID: preferredShipID))
     }
 
     /// The original's ShipStart-1 rearm delay: 30 maintenance ticks for an
@@ -2005,6 +2052,8 @@ public final class World {
             let placed = spawnMissionShips(missionID: batch.missionID, dudeID: batch.dudeID, count: batch.count,
                                            goal: batch.goal, behavior: batch.behavior, arrival: .hyperspace,
                                            jumpBearing: batch.auxiliary ? nil : previousSystemBearing,
+                                           preferredShipID: batch.preferredShipID,
+                                           auxiliary: batch.auxiliary,
                                            name: batch.name, subtitle: batch.subtitle)
             if batch.auxiliary, !placed.isEmpty {
                 events.append(.missionAuxShipsArrived(missionID: batch.missionID, count: placed.count))

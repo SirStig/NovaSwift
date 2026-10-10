@@ -126,7 +126,7 @@ struct TradeCenterView: View {
     private var qtyUpperBound: Int {
         guard let c = current else { return max(1, pendingQty) }
         let buyLimit = c.price > 0 ? min(pilot.cargoFree(galaxy: galaxy), pilot.state.credits / c.price) : pilot.cargoFree(galaxy: galaxy)
-        let sellLimit = pilot.held(cargo: c.cargoID)
+        let sellLimit = pilot.held(cargo: c.cargoID, game: game)
         return max(1, buyLimit, sellLimit)
     }
 
@@ -143,7 +143,7 @@ struct TradeCenterView: View {
             }
             .frame(height: 17, alignment: .top)
             ForEach(Array(market.enumerated()), id: \.offset) { i, row in
-                let held = pilot.held(cargo: row.cargoID)
+                let held = pilot.held(cargo: row.cargoID, game: game)
                 HStack(spacing: 0) {
                     NovaText(row.name, size: 10, color: theme.listText, width: 160)
                     NovaText(rowLabel(row), size: 10, color: rowLabelColor(row), width: 62, align: .center)
@@ -200,7 +200,7 @@ struct TradeCenterView: View {
     }
     private var canSell: Bool {
         guard let c = current else { return false }
-        return pilot.held(cargo: c.cargoID) > 0
+        return pilot.held(cargo: c.cargoID, game: game) > 0
     }
     private func buy() {
         guard let c = current else {
@@ -221,8 +221,8 @@ struct TradeCenterView: View {
             Log.spaceport.error("Trade sell tapped with no commodity row selected at spöb \(spob.id, privacy: .public) — no-op")
             return
         }
-        let held = pilot.held(cargo: c.cargoID)
-        let sold = pilot.sellCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price)
+        let held = pilot.held(cargo: c.cargoID, game: game)
+        let sold = pilot.sellCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price, game: game)
         if sold == 0 {
             Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
         } else {
@@ -901,6 +901,7 @@ struct BarView: View {
                             onDone: { showHolovid = false })
             }
         }
+        .overlay { StoryTextOverlay(services: services) }
         .onAppear { services.onCloseSpaceportScreen = onDone }   // a `Q` from an accept leaves the bar
         .task(id: nextOffer) { await offerPatron(after: nextOffer == 0 ? 15 : 30 + Int.random(in: 0..<30)) }
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
@@ -923,7 +924,12 @@ struct BarView: View {
             return
         }
         Log.spaceport.debug("Bar patron offers mission \(mission.id, privacy: .public) at spöb \(spob.id, privacy: .public)")
-        e.present(mission)
+        if !e.present(mission) {
+            // A can't-refuse offer with no text activated silently.
+            pilot.state = e.player
+            pilot.save()
+            nextOffer += 1
+        }
     }
 
     private func accept(_ offer: MissionOffer) {

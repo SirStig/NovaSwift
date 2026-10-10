@@ -685,9 +685,10 @@ class NovaWorld: Node2D {
     /// landings — the same figure the flight HUD's cargo readout carries once
     /// `launch()` seeds the ship from it).
     @Callable(autoSnakeCase: true) func commodityHeld(index: Int) -> Int {
+        guard let galaxy = self.galaxy else { return 0 }
         let m = market()
         guard index >= 0, index < m.count else { return 0 }
-        return PilotEconomy.held(pilot, cargo: m[index].commodity.cargoID)
+        return PilotEconomy.held(pilot, cargo: m[index].commodity.cargoID, game: galaxy.game)
     }
 
     /// Buy up to `tons` of commodity row `index` at its current price, capped by
@@ -705,9 +706,11 @@ class NovaWorld: Node2D {
     /// the tonnage actually sold.
     @discardableResult
     @Callable(autoSnakeCase: true) func sellCommodity(index: Int, tons: Int) -> Int {
+        guard let galaxy = self.galaxy else { return 0 }
         let m = market()
         guard index >= 0, index < m.count else { return 0 }
-        return PilotEconomy.sellCommodity(&pilot, m[index].commodity, tons: tons, unitPrice: m[index].price)
+        return PilotEconomy.sellCommodity(&pilot, m[index].commodity, tons: tons, unitPrice: m[index].price,
+                                          game: galaxy.game)
     }
 
     // MARK: Event drains
