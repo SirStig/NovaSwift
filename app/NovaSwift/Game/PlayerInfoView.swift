@@ -33,11 +33,19 @@ struct PlayerInfoView: View {
     enum Tab: CaseIterable { case general, cargo, extras, honors }
 
     private var game: NovaGame { graphics.game }
-    private static let frameSize = CGSize(width: 413, height: 227)
+    private static let stockFrameSize = CGSize(width: 413, height: 227)
+
+    /// DLOG/DITL #1017 from the loaded data: the stretchable frame takes the
+    /// DLOG's size and every item its DITL rect (stock values as fallback).
+    private var ditl: DITLPlacement {
+        let stock = DITLPlacement(game, 1017, window: Self.stockFrameSize)
+        return DITLPlacement(game, 1017, window: stock.windowSize)
+    }
+    private var frameSize: CGSize { ditl.window }
 
     var body: some View {
         GeometryReader { geo in
-            let scale = novaFrameScale(frame: Self.frameSize, viewport: geo.size)
+            let scale = novaFrameScale(frame: frameSize, viewport: geo.size)
             frameBody
                 .cursorScaleEffect(scale)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
@@ -45,39 +53,43 @@ struct PlayerInfoView: View {
     }
 
     @ViewBuilder private var frameBody: some View {
-        let space = NovaSpace(width: Self.frameSize.width, height: Self.frameSize.height)
+        let space = NovaSpace(width: frameSize.width, height: frameSize.height)
+        let d = ditl
+        let paneRect = d.rect(5, top: 40, left: 4, bottom: 181, right: 409)
+        let jettison = d.rect(6, top: 195, left: 60, bottom: 220, right: 210)
+        let done = d.rect(0, top: 195, left: 293, bottom: 220, right: 392)
         ZStack(alignment: .topLeading) {
             frameArt
-            tabButton(.general, SpaceportLabel.infoGeneral, "General", cx: -199.5)
-            tabButton(.cargo,   SpaceportLabel.infoCargo,   "Cargo",   cx: -99.5)
-            tabButton(.extras,  SpaceportLabel.infoExtras,  "Extras",  cx: 0.5)
-            tabButton(.honors,  SpaceportLabel.infoHonors,  "Honors",  cx: 100.5)
+            tabButton(.general, SpaceportLabel.infoGeneral, "General", d.rect(1, top: 8, left: 7, bottom: 33, right: 106))
+            tabButton(.cargo,   SpaceportLabel.infoCargo,   "Cargo",   d.rect(2, top: 8, left: 107, bottom: 33, right: 206))
+            tabButton(.extras,  SpaceportLabel.infoExtras,  "Extras",  d.rect(3, top: 8, left: 207, bottom: 33, right: 306))
+            tabButton(.honors,  SpaceportLabel.infoHonors,  "Honors",  d.rect(4, top: 8, left: 307, bottom: 33, right: 406))
 
             ScrollView(showsIndicators: false) {
                 pane
             }
             .cursorScrollable()
-            .frame(width: 405, height: 141)
+            .frame(width: paneRect.width, height: paneRect.height)
             .clipped()
-            .novaPlace(space, -202.5, -73.5)
+            .ditlPlace(space, d, paneRect)
 
             NovaButton(graphics: graphics,
                        title: graphics.buttonLabel(SpaceportLabel.jettisonCargo, fallback: "Jettison Cargo"),
-                       width: 124, enabled: onJettison != nil && pilot.state.usedCargoSpace > 0) {
+                       ditl: jettison, enabled: onJettison != nil && pilot.state.usedCargoSpace > 0) {
                 confirmingJettison = true
             }
             .alert(game.stringList(2002)?.string(at: 291) ?? "", isPresented: $confirmingJettison) {
                 Button(graphics.buttonLabel(50, fallback: "Yes"), role: .destructive) { onJettison?() }
                 Button(graphics.buttonLabel(51, fallback: "No"), role: .cancel) {}
             }
-            .novaPlace(space, -146.5, 81.5)
+            .ditlPlace(space, d, jettison)
 
             NovaButton(graphics: graphics,
                        title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: 73, action: onDone)
-                .novaPlace(space, 86.5, 81.5)
+                       ditl: done, action: onDone)
+                .ditlPlace(space, d, done)
         }
-        .frame(width: Self.frameSize.width, height: Self.frameSize.height, alignment: .topLeading)
+        .frame(width: frameSize.width, height: frameSize.height, alignment: .topLeading)
     }
 
     /// The dialog's own stretchable frame: fixed 40px caps, middle stretched to
@@ -89,21 +101,20 @@ struct PlayerInfoView: View {
                 Image(decorative: mid, scale: 1).resizable()
                 Image(decorative: bottom, scale: 1).resizable().frame(height: 40)
             }
-            .frame(width: Self.frameSize.width, height: Self.frameSize.height)
+            .frame(width: frameSize.width, height: frameSize.height)
         } else {
             RoundedRectangle(cornerRadius: 6).fill(Color(white: 0.12))
-                .frame(width: Self.frameSize.width, height: Self.frameSize.height)
+                .frame(width: frameSize.width, height: frameSize.height)
         }
     }
 
     /// One tab button at DITL row y=8. The active tab renders in the art's
     /// clicked (depressed) state, exactly how the game marks the open tab.
-    private func tabButton(_ t: Tab, _ labelIndex: Int, _ fallback: String, cx: CGFloat) -> some View {
+    private func tabButton(_ t: Tab, _ labelIndex: Int, _ fallback: String, _ rect: CGRect) -> some View {
         InfoTabButton(graphics: graphics,
                       title: graphics.buttonLabel(labelIndex, fallback: fallback),
                       selected: tab == t) { tab = t }
-            .novaPlace(NovaSpace(width: Self.frameSize.width, height: Self.frameSize.height),
-                       cx, -105.5)
+            .ditlPlace(NovaSpace(width: frameSize.width, height: frameSize.height), ditl, rect)
     }
 
     // MARK: - Pane text

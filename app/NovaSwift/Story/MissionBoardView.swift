@@ -283,39 +283,48 @@ private struct MissionInfoSheet: View {
     var body: some View {
         Group {
             if let image = graphics.pict(Self.pictID) {
+                // Rects resolve through DITL #1012 (stock rects as fallback).
+                let d = DITLPlacement(graphics.game, 1012, frame: image)
                 MissionPictFrame(image: image) { space in
                     // item 2: (13,1)-(206,13) 193x12 — selected mission's title
+                    let title = d.rect(2, top: 1, left: 13, bottom: 13, right: 206)
                     HStack(spacing: 4) {
-                        NovaText(offer.title, size: 11, width: 163, align: .leading, weight: .bold)
+                        NovaText(offer.title, size: 11, width: max(0, title.width - 30),
+                                 align: .leading, weight: .bold)
                         if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                         if let storylineTag, let onOpenStoryline {
                             StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
                         }
                     }
-                    .frame(width: 193, alignment: .leading)
-                    .novaPlace(space, -222.5, -76.5)
+                    .frame(width: title.width, alignment: .leading)
+                    .ditlPlace(space, d, title)
                     // item 6: (343,4)-(465,16) 122x12 — its reward
+                    let reward = d.rect(6, top: 4, left: 343, bottom: 16, right: 465)
                     NovaText(offer.mission.pay.creditsAbbreviated, size: 11,
-                             color: Color(red: 1, green: 0.85, blue: 0.4), width: 122, align: .trailing)
-                        .novaPlace(space, 107.5, -73.5)
+                             color: Color(red: 1, green: 0.85, blue: 0.4), width: reward.width, align: .trailing)
+                        .ditlPlace(space, d, reward)
                     // item 1: (9,24)-(204,108) 195x84 — other offers here
-                    offersList.novaPlace(space, -226.5, -53.5)
+                    let list = d.rect(1, top: 24, left: 9, bottom: 108, right: 204)
+                    offersList(list.size).ditlPlace(space, d, list)
                     // item 3: (218,26)-(460,117) 242x91 — briefing text
+                    let brief = d.rect(3, top: 26, left: 218, bottom: 117, right: 460)
                     ScrollView(showsIndicators: false) {
-                        NovaText(offer.briefingText, size: 10, width: 242, align: .leading)
+                        NovaText(offer.briefingText, size: 10, width: brief.width, align: .leading)
                     }
                     .cursorScrollable()
-                    .frame(width: 242, height: 91)
-                    .novaPlace(space, -17.5, -51.5)
+                    .frame(width: brief.width, height: brief.height)
+                    .ditlPlace(space, d, brief)
                     // item 4: (57,125)-(156,150) 99x25 — refuse
                     if offer.canRefuse {
-                        NovaButton(graphics: graphics, title: offer.refuseButton, width: 73, action: onDecline)
-                            .novaPlace(space, -178.5, 47.5)
+                        let refuse = d.rect(4, top: 125, left: 57, bottom: 150, right: 156)
+                        NovaButton(graphics: graphics, title: offer.refuseButton, ditl: refuse, action: onDecline)
+                            .ditlPlace(space, d, refuse)
                     }
                     // item 0: (290,125)-(389,150) 99x25 — accept
-                    NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
+                    let accept = d.rect(0, top: 125, left: 290, bottom: 150, right: 389)
+                    NovaButton(graphics: graphics, title: offer.acceptButton, ditl: accept,
                                enabled: offer.canAccept, action: onAccept)
-                        .novaPlace(space, 54.5, 47.5)
+                        .ditlPlace(space, d, accept)
                 }
             } else {
                 fallback
@@ -323,14 +332,14 @@ private struct MissionInfoSheet: View {
         }
     }
 
-    private var offersList: some View {
+    private func offersList(_ size: CGSize) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(offered, id: \.id) { mission in
                     Button { onSelect(mission) } label: {
                         NovaText(resolvedName(mission), size: 10,
                                  color: mission.id == offer.mission.id ? .white : Color(white: 0.6),
-                                 width: 191, align: .leading)
+                                 width: max(0, size.width - 4), align: .leading)
                             .padding(.vertical, 1)
                     }
                     .buttonStyle(.novaPlain)
@@ -338,7 +347,7 @@ private struct MissionInfoSheet: View {
             }
         }
         .cursorScrollable()
-        .frame(width: 195, height: 84)
+        .frame(width: size.width, height: size.height)
     }
 
     /// Data present but no frame PICT decoded (e.g. running on data missing
@@ -410,6 +419,14 @@ struct MissionSingleDialog: View {
     private static let topHeight: CGFloat = 9
     private static let bottomHeight: CGFloat = 40
 
+    /// DITL/DLOG #1016 from the loaded data: the frame takes the DLOG's size
+    /// and every item its DITL rect (stock values as fallback).
+    private var ditl: DITLPlacement {
+        let stock = DITLPlacement(graphics.game, 1016,
+                                  window: CGSize(width: Self.frameWidth, height: Self.frameHeight))
+        return DITLPlacement(graphics.game, 1016, window: stock.windowSize)
+    }
+
     private var index: Int? { offered.firstIndex { $0.id == offer.mission.id } }
 
     private var movieFilename: String? {
@@ -421,7 +438,7 @@ struct MissionSingleDialog: View {
     // at its true relative size instead of appearing in a native sheet.
     var body: some View {
         GeometryReader { geo in
-            let scale = novaFrameScale(frame: CGSize(width: Self.frameWidth, height: Self.frameHeight),
+            let scale = novaFrameScale(frame: ditl.windowSize,
                                        viewport: geo.size)
             frameBody
                 .cursorScaleEffect(scale)
@@ -470,13 +487,16 @@ struct MissionSingleDialog: View {
             if let top = graphics.pict(Self.upperID), let middle = graphics.pict(Self.middleID),
                let bottom = graphics.pict(Self.lowerID) {
                 MissionThreeSliceFrame(top: top, middle: middle, bottom: bottom,
-                                        width: Self.frameWidth, height: Self.frameHeight,
+                                        width: ditl.windowSize.width, height: ditl.windowSize.height,
                                         topHeight: Self.topHeight, bottomHeight: Self.bottomHeight) { space in
+                    let d = ditl
                     // item 2: (12,9)-(427,276) 415x267 — briefing pane
+                    let pane = d.rect(2, top: 9, left: 12, bottom: 276, right: 427)
                     ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 6) {
-                                NovaText(offer.title, size: 11, width: 368, align: .leading, weight: .bold)
+                                NovaText(offer.title, size: 11, width: max(0, pane.width - 47),
+                                         align: .leading, weight: .bold)
                                 if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                                 if let storylineTag, let onOpenStoryline {
                                     StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
@@ -491,7 +511,7 @@ struct MissionSingleDialog: View {
                                 Image(decorative: cg, scale: 1)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 407, maxHeight: 140)
+                                    .frame(maxWidth: max(0, pane.width - 8), maxHeight: 140)
                             }
                             // A holovid clip attached to this briefing (e.g. ARPIA2's
                             // gas-miner intro) — the player chooses to watch it rather
@@ -504,27 +524,30 @@ struct MissionSingleDialog: View {
                                 .buttonStyle(.novaPlain)
                                 .foregroundStyle(novaAmber)
                             }
-                            NovaText(offer.briefingText, size: 10, width: 411, align: .leading)
+                            NovaText(offer.briefingText, size: 10, width: max(0, pane.width - 4), align: .leading)
                         }
                         .padding(.top, 2).padding(.leading, 2)
                     }
                     .cursorScrollable()
-                    .frame(width: 415, height: 267)
-                    .novaPlace(space, -208.5, -149.5)
+                    .frame(width: pane.width, height: pane.height)
+                    .ditlPlace(space, d, pane)
 
                     if offer.canRefuse {
                         // item 1: (117,285)-(216,310) — refuse, paired with item 0
-                        NovaButton(graphics: graphics, title: offer.refuseButton, width: 73, action: onDecline)
-                            .novaPlace(space, -103.5, 126.5)
+                        let refuse = d.rect(1, top: 285, left: 117, bottom: 310, right: 216)
+                        NovaButton(graphics: graphics, title: offer.refuseButton, ditl: refuse, action: onDecline)
+                            .ditlPlace(space, d, refuse)
                         // item 0: (225,285)-(324,310) — accept, paired with item 1
-                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
+                        let accept = d.rect(0, top: 285, left: 225, bottom: 310, right: 324)
+                        NovaButton(graphics: graphics, title: offer.acceptButton, ditl: accept,
                                    enabled: offer.canAccept, action: onAccept)
-                            .novaPlace(space, 4.5, 126.5)
+                            .ditlPlace(space, d, accept)
                     } else {
                         // item 5: (173,285)-(272,310) — accept, centered (no refuse)
-                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
+                        let accept = d.rect(5, top: 285, left: 173, bottom: 310, right: 272)
+                        NovaButton(graphics: graphics, title: offer.acceptButton, ditl: accept,
                                    enabled: offer.canAccept, action: onAccept)
-                            .novaPlace(space, -47.5, 126.5)
+                            .ditlPlace(space, d, accept)
                     }
 
                     if offered.count > 1, let index {
@@ -532,12 +555,12 @@ struct MissionSingleDialog: View {
                         pageButton(system: "chevron.left", enabled: index > 0) {
                             onPage(offered[index - 1])
                         }
-                        .novaPlace(space, 119.5, 128.5)
+                        .ditlPlace(space, d, d.rect(8, top: 287, left: 340, bottom: 310, right: 363))
                         // item 9: (373,287)-(396,310) 23x23 — next offer
                         pageButton(system: "chevron.right", enabled: index < offered.count - 1) {
                             onPage(offered[index + 1])
                         }
-                        .novaPlace(space, 152.5, 128.5)
+                        .ditlPlace(space, d, d.rect(9, top: 287, left: 373, bottom: 310, right: 396))
                     }
                 }
             } else {
