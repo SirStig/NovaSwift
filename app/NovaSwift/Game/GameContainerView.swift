@@ -586,16 +586,21 @@ final class GameHost {
             Log.hud.error("makeHUDStyle: no ïntf(\(intfID)) or ïntf(128) resource — falling back to GameHUDView")
             return nil
         }
-        guard let pictData = game.resources.resource(NovaType.pict, intf.backgroundPictID)?.data else {
-            Log.hud.error("makeHUDStyle: backdrop PICT #\(intf.backgroundPictID) missing — falling back to GameHUDView")
+        // 0x004cda50 clamps StatusBkgnd to >= 128; a missing backdrop draws
+        // PICT 128 instead of leaving the status bar out.
+        let backdropID = max(128, intf.backgroundPictID)
+        guard let pictData = (game.resources.resource(NovaType.pict, backdropID)
+                              ?? game.resources.resource(NovaType.pict, 128))?.data else {
+            Log.hud.error("makeHUDStyle: backdrop PICT #\(backdropID) and PICT #128 missing — falling back to GameHUDView")
             return nil
         }
-        guard let sheet = try? PICT.decode(pictData) else {
-            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) failed to decode — falling back to GameHUDView")
+        let sheet: SpriteSheet
+        do { sheet = try PICT.decode(pictData) } catch {
+            Log.hud.error("makeHUDStyle: PICT #\(backdropID) failed to decode (\(String(describing: error), privacy: .public)) — falling back to GameHUDView")
             return nil
         }
         guard let cg = sheet.makeCGImage() else {
-            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) decoded but makeCGImage() failed — falling back to GameHUDView")
+            Log.hud.error("makeHUDStyle: PICT #\(backdropID) decoded but makeCGImage() failed — falling back to GameHUDView")
             return nil
         }
         // A radar/status rect with zero or negative width/height (a bad ïntf
