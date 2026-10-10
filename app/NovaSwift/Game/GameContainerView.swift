@@ -179,11 +179,19 @@ final class GameHost {
                     let radius = CGFloat(sprite?.frameWidth ?? 48) / 2
                     // `spöb.X/Y` is authored +y-down (same convention as `sÿst.X/Y`);
                     // flip to this engine/SpriteKit's +y-up world.
-                    return PlanetVisual(id: spob.id, name: spob.name,
-                                        position: CGPoint(x: spob.x, y: -spob.y),
-                                        texture: tex, radius: radius,
-                                        government: spob.government,
-                                        isUninhabited: spob.isUninhabited || wreck)
+                    var visual = PlanetVisual(id: spob.id, name: spob.name,
+                                              position: CGPoint(x: spob.x, y: -spob.y),
+                                              texture: tex, radius: radius,
+                                              government: spob.government,
+                                              isUninhabited: spob.isUninhabited || wreck,
+                                              isHypergate: spob.isHypergate, isWormhole: spob.isWormhole)
+                    let anim = GameScene.stellarAnimation(spob: spob, sheet: entry.sprite,
+                                                          destroyed: game.spobDestroyedSprite(spob.id))
+                    visual.frames = anim.frames
+                    visual.destroyedFrames = anim.destroyedFrames
+                    visual.animator = anim.animator
+                    visual.animatesOnlyWhenDestroyed = spob.animatesOnlyWhenDestroyed
+                    return visual
                 }
                 // Placement. Loading a pilot that was saved while docked lifts off
                 // from that pad — EV Nova only saves on landing, so "where I saved"
@@ -1637,8 +1645,10 @@ struct GameContainerView: View {
     /// is required.
     private func performGateJump(toSystem destSystem: Int, arriveAtGate destGate: Int) {
         guard let host, !host.scene.isJumping else { return }
+        host.scene.gateTransitSpobID = gateMapOrigin
         gateMapOrigin = nil
         host.scene.beginGateJump(toSystem: destSystem, arriveAtGate: destGate) {
+            host.scene.gateTransitSpobID = nil
             hostSystemID = destSystem                     // set first: suppress the host-rebuild onChange
             nav.arriveViaGate(at: destSystem)
             storyArrival(in: destSystem)

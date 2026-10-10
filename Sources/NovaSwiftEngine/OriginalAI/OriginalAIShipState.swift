@@ -94,7 +94,7 @@ public enum OriginalAIRef: Equatable, Sendable {
         return nil
     }
 
-    var stellarID: Int? {
+    public var stellarID: Int? {
         if case let .stellar(id) = self { return id }
         return nil
     }
