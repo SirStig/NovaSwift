@@ -90,15 +90,19 @@ struct PluginDetailView: View {
                         Button { model.store.install(entry, data: model.data) } label: {
                             Label(entry.sizeBytes.map { "Get  \u{00B7}  \(formatPluginSize($0))" } ?? "Get",
                                   systemImage: "arrow.down.circle.fill")
-                        }.novaProminentButton().disabled(entry.downloadURLs.isEmpty)
+                        }.novaProminentButton().disabled(entry.downloadURLs.isEmpty || model.store.isOffline)
                     case .updateAvailable:
                         Button { model.store.install(entry, data: model.data) } label: {
                             Label("Update to v\(entry.version)", systemImage: "arrow.triangle.2.circlepath")
-                        }.novaProminentButton()
+                        }.novaProminentButton().disabled(model.store.isOffline)
                         manageButtons
                     case .installed:
                         manageButtons
                     }
+                }
+                if model.store.isOffline && !status.isInstalled {
+                    Label("You're offline. Connect to download.", systemImage: "wifi.slash")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 if status.isInstalled { enableControl }
             }

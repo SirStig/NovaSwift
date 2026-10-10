@@ -94,6 +94,24 @@ final class PluginCatalogTests: XCTestCase {
         XCTAssertEqual(r.document.plugins.map(\.id), ["keep"])
     }
 
+    func testOfflinePathNeverBlocksOnNetwork() async throws {
+        let cache = tmp().appendingPathComponent("c.json")
+        // Startup path: no fetch at all, returns instantly from the bundled copy.
+        let p = PluginCatalogProvider(cacheFile: cache, bundled: PluginCatalogDocument(plugins: [entry("b")])) { _ in
+            XCTFail("offline() must not touch the network"); throw URLError(.cancelled)
+        }
+        let start = p.offline()
+        XCTAssertEqual(start.source, .bundled)
+        XCTAssertFalse(start.isOffline)
+        // After a failed fetch the result is flagged offline but still has content.
+        let down = PluginCatalogProvider(cacheFile: cache, bundled: PluginCatalogDocument(plugins: [entry("b")])) { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+        let r = await down.load()
+        XCTAssertTrue(r.isOffline)
+        XCTAssertEqual(r.document.plugins.map(\.id), ["b"])
+    }
+
     // MARK: browser / manager state
 
     func testFiltersAndSorts() {

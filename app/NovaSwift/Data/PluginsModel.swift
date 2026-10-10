@@ -18,6 +18,8 @@ final class PluginsModel: ObservableObject {
     @Published private(set) var source: PluginCatalogSource = .bundled
     @Published private(set) var remoteError: String?
     @Published private(set) var isRefreshing = false
+    /// The online list couldn't be reached. Browsing the saved catalog still works; downloads don't.
+    var isOffline: Bool { remoteError != nil }
     @Published private(set) var transfers: [String: Transfer] = [:]
     @Published private(set) var installedVersions: [String: String] = [:]
 
@@ -59,7 +61,7 @@ final class PluginsModel: ObservableObject {
 
     /// Installs or updates `entry`, fetching any missing dependencies first.
     func install(_ entry: PluginCatalogEntry, data: GameDataController) {
-        guard tasks[entry.id] == nil, !entry.downloadURLs.isEmpty else { return }
+        guard tasks[entry.id] == nil, !entry.downloadURLs.isEmpty, !isOffline else { return }
         transfers[entry.id] = .working(nil)
         let root = data.importedPluginsDir
         tasks[entry.id] = Task { [weak self] in

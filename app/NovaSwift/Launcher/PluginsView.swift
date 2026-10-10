@@ -112,7 +112,7 @@ struct PluginsView: View {
                     Label(notice, systemImage: "wifi.slash").font(.footnote).foregroundStyle(.secondary)
                 }
                 let updates = model.store.browser.updatesAvailable
-                if !updates.isEmpty && filter != .updates {
+                if !updates.isEmpty && filter != .updates && !model.store.isOffline {
                     Button { model.store.updateAll(data: model.data) } label: {
                         Label("Update all (\(updates.count))", systemImage: "arrow.triangle.2.circlepath")
                     }.novaBorderedButton()
@@ -143,11 +143,9 @@ struct PluginsView: View {
     }
 
     private var catalogNotice: String? {
-        switch model.store.source {
-        case .remote: return nil
-        case .cache: return "Showing the last catalog downloaded. Couldn't reach the online list just now."
-        case .bundled: return "Showing the catalog that came with the app. Couldn't reach the online list just now."
-        }
+        guard model.store.isOffline else { return nil }
+        let which = model.store.source == .cache ? "the last catalog downloaded" : "the catalog that came with the app"
+        return "You're offline. Showing \(which); downloads and updates are off until you reconnect."
     }
 
     @ViewBuilder private var searchField: some View {

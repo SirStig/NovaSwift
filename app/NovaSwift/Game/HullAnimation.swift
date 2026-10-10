@@ -32,16 +32,20 @@ struct HullAnim {
     var baseOpacity: CGFloat = 1
 
     init() {}
-    init(_ shan: ShanRes) {
+    /// - Parameter animations: the "Ship Animations" preference. Off, the
+    ///   original loads every hull with a single set (0x004b4ee0), so no
+    ///   banking, animation or extra alt sets.
+    init(_ shan: ShanRes) { self.init(shan, animations: GameSettings.load().shipAnimations) }
+    init(_ shan: ShanRes, animations: Bool) {
         framesPerSet = max(1, shan.framesPerSet)
-        setCount = max(1, shan.baseSetCount)
+        setCount = animations ? max(1, shan.baseSetCount) : 1
         mode = shan.extraFrames
         animDelaySec = Double(max(1, shan.animDelay)) / 30.0
         weapDecay = shan.weapDecay
         blinkMode = shan.blinkMode
         blink = shan.blinkValues
         hidesLightsWhenDisabled = shan.hidesLightsWhenDisabled
-        altSetCount = shan.hasAltLayer ? shan.altSetCount : 0
+        altSetCount = shan.hasAltLayer ? (animations ? shan.altSetCount : 1) : 0
         baseOpacity = CGFloat(shan.baseOpacity)
     }
 

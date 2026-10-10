@@ -604,6 +604,9 @@ final class GameDataController: ObservableObject {
     /// first, then every discovered plugin directory, each the same
     /// direct-hit-then-recursive-search way `raceVideoURL` always has.
     func videoURL(named name: String) -> URL? {
+        // Ui_PlayMovieFileModal 0x0049db00 returns at once under the
+        // "QuickTime Movies" preference being off.
+        guard GameSettings.load().playMovies else { return nil }
         // Ui_PlayMovieFileModal (0x0049db00): "Nova Plug-ins" first, then "Nova Files".
         let dirs = (resolvePluginDirs() + [resolveBaseDir()]).compactMap { $0 }
         let fm = FileManager.default

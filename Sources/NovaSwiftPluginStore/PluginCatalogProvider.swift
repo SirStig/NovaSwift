@@ -25,6 +25,8 @@ public struct PluginCatalogResult: Sendable {
     public let source: PluginCatalogSource
     /// Why the remote fetch failed, when we fell back.
     public let remoteError: String?
+    /// True when the online list could not be reached; what's shown is a saved copy.
+    public var isOffline: Bool { remoteError != nil }
 }
 
 /// Loads the catalog: remote first, then the on-disk copy of the last good
@@ -54,7 +56,7 @@ public struct PluginCatalogProvider: Sendable {
     }
 
     public static let urlSessionFetch: Fetch = { url in
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         req.setValue("NovaSwift", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {

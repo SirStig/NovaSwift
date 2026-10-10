@@ -131,50 +131,22 @@ final class GameScene: SKScene {
     /// The IFF stellar colour of a stellar id (0x00466030, `RadarIFF`),
     /// supplied by the host from the pilot state.
     var stellarIFFColorProvider: ((Int) -> Color?)?
-    /// Sim time, and per ship the time of its last HailQuote and whether it
-    /// has quoted at all (the original's +0xac / +0xbc).
-    private var hailQuoteClock: Double = 0
-    private var lastHailQuote: [Int: Double] = [:]
-    private var hailQuoted: Set<Int> = []
+    /// Per-ship HailQuote latches and the original's rate gates (0x00433050).
+    private let quoteBroadcaster = PersQuoteBroadcaster()
+    /// Whether përs `id`'s LinkMission can be offered now (Flags 0x0400 gate),
+    /// supplied by the container from the pilot + story state.
+    var persMissionAvailableProvider: ((PersRes) -> Bool)?
 
-    /// The përs HailQuote broadcast over the status bar (0x00433050; UI-11):
-    /// for each visible përs with a quote whose Flags gates pass — disabled
-    /// only with 0x0020; 0x0010 waits until it threatens the player's squad
-    /// and then speaks at once; 0x0004 needs a grudge; 0x0008 needs it not to
-    /// be hostile; 0x0080 only once per ship — a 1-in-140 chance per raw sim
-    /// call, only while the bar is idle and 45 s after that ship's last quote.
-    /// The LinkMission (0x0400) and player-class (0x1000–0x4000) gates are not
-    /// modelled.
+    /// The përs HailQuote broadcast (UI-11) — see `PersQuoteBroadcaster`.
     private func broadcastHailQuotes(elapsed: Double) {
         guard let hud, let game = galaxy?.game else { return }
-        hailQuoteClock += elapsed
-        let calls = elapsed / OriginalClock.rawCallSeconds
-        let chance = 1 - pow(139.0 / 140.0, calls)
-        for npc in world.npcs where npc.isAlive {
-            guard let pid = npc.personID, let pers = game.pers(pid), pers.hailQuote >= 1,
-                  world.canTarget(npc, by: world.player), !world.player.isEffectivelyCloaked else { continue }
-            if npc.disabled != pers.hailQuoteWhenDisabled { continue }
-            // Flags 0x0800 stays silent while the ship is in AI state 2 (0x00433050).
-            if npc.personFlags & 0x0800 != 0, world.originalAI.record(for: npc.entityID)?.state == OriginalAIState.departJump { continue }
-            var forced = false
-            if pers.hailQuoteWhenAttacking, !npc.disabled {
-                guard !hailQuoted.contains(npc.entityID), world.isThreatToPlayerSquad(npc) else { continue }
-                forced = true
-            }
-            if pers.hailQuoteWhenGrudge, persGrudgeProvider?(pid) != true { continue }
-            if pers.hailQuoteWhenLikes, isEffectivelyHostileToPlayer(npc) { continue }
-            if pers.quoteOnce, hailQuoted.contains(npc.entityID) { continue }
-            let rested = hailQuoteClock > (lastHailQuote[npc.entityID] ?? -.infinity) + 45
-            guard forced || (hud.isMessageIdle && rested && Double.random(in: 0..<1) < chance) else { continue }
-            let quote = game.singleString(pers.hailQuote + 4999) ?? game.stringList(7101)?.string(at: pers.hailQuote)
-            guard let quote, !quote.isEmpty else { continue }
-            // `<OSN>` is the speaking përs (0x00426d10 → 0x004444f0); the
-            // HUD's own pass fills the player tags.
-            hud.post(quote.replacingOccurrences(of: "<OSN>", with: pers.name), rawCalls: 0x1a4)
-            audio?.play(.uiSelect)
-            hailQuoted.insert(npc.entityID)
-            lastHailQuote[npc.entityID] = hailQuoteClock
-        }
+        let posted = quoteBroadcaster.step(
+            world: world, game: game, elapsed: elapsed, barBusy: !hud.isMessageIdle,
+            grudge: { [weak self] in self?.persGrudgeProvider?($0) == true },
+            hostile: { [weak self] in self?.isEffectivelyHostileToPlayer($0) ?? false },
+            missionAvailable: { [weak self] in self?.persMissionAvailableProvider?($0) ?? true },
+            roll: { Double.random(in: 0..<1) })
+        if !posted.isEmpty { audio?.play(.uiSelect) }
     }
     /// The gate the last in-place system reload emerged from (nil for a
     /// hyperspace arrival) — picks the arrival line's wording (UI-11).
@@ -1381,7 +1353,7 @@ final class GameScene: SKScene {
             }
             layer.stars.append(star)
             layer.bases.append(base)
-            layer.factors.append(CGFloat(OriginalRendering.starFactor(random35: Int.random(in: 0..<35), parallax: true)))
+            layer.factors.append(CGFloat(OriginalRendering.starFactor(random35: Int.random(in: 0..<35), parallax: settings.parallaxStarfield)))
             layer.container.addChild(star)
         }
         addChild(layer.container)
@@ -2152,8 +2124,10 @@ final class GameScene: SKScene {
         let id = p.shipTypeID
         rotationTextures = game.shipSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         engineGlowTextures = game.engineGlowSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
-        lightTextures = game.lightSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
-        weaponGlowTextures = game.weaponGlowSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
+        // "Running Lights" / "Weapon Effects" off: the original skips those
+        // overlay layers when it builds the ship (0x004b4ee0).
+        lightTextures = !settings.runningLights ? [] : game.lightSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
+        weaponGlowTextures = !settings.weaponEffects ? [] : game.weaponGlowSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         altTextures = game.altSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         shieldTextures = game.shieldSprite(id).map { SpriteTextures.rotationFrames(from: $0) } ?? []
         hullAnim = game.shan(id).map(HullAnim.init) ?? HullAnim()
@@ -2958,8 +2932,7 @@ final class GameScene: SKScene {
     func entity(at scenePoint: CGPoint) -> DevEntityRef? {
         let p = Vec2(Double(scenePoint.x), Double(scenePoint.y))
         let hitTolerance = 24.0
-        if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + hitTolerance })
-            .min(by: { ($0.position - p).length < ($1.position - p).length }) {
+        if let ship = pickableShip(at: p) {
             return .ship(id: ship.entityID, name: ship.name)
         }
         if let planet = planetVisuals.filter({ pv in
@@ -2990,6 +2963,20 @@ final class GameScene: SKScene {
         }
     }
 
+    /// The mouse pick of 0x00438fc7: the first ship (slot order) that is alive,
+    /// that this player may target (not hidden by a cloak the scanner can't
+    /// see through, and without hull Flags2 0x0004 unless the scanner reveals
+    /// it: `canTarget`) and whose sprite rect holds the point. The rect is the
+    /// square sprite frame, grown by 16 on every side when narrower than 48 px.
+    private func pickableShip(at p: Vec2) -> Ship? {
+        world.npcs.first { npc in
+            guard npc.isAlive, world.canTarget(npc, by: world.player) else { return false }
+            let half = npc.radius * 2 < 48 ? npc.radius + 16 : npc.radius
+            let d = npc.position - p
+            return abs(d.x) <= half && abs(d.y) <= half
+        }
+    }
+
     /// Click/tap hit-test in scene space (== world space here): nearest ship
     /// first, then nearest planet; clears the selection if nothing was hit.
     /// Called by `GameContainerView` off a tap gesture on the `SpriteView`.
@@ -3012,8 +2999,7 @@ final class GameScene: SKScene {
         // `AIBrain.formationStation`), so a stingy tolerance made them an easy
         // miss even when the click was visibly "on" the ship.
         let hitTolerance = 24.0
-        if let ship = world.npcs.filter({ ($0.position - p).length <= $0.radius + hitTolerance })
-            .min(by: { ($0.position - p).length < ($1.position - p).length }) {
+        if let ship = pickableShip(at: p) {
             Log.input.debug("selectAt hit ship entityID=\(ship.entityID, privacy: .public) name=\(ship.name, privacy: .public) dist=\((ship.position - p).length, privacy: .public) radius=\(ship.radius, privacy: .public)")
             selectShip(ship.entityID)
             return true
@@ -3444,7 +3430,8 @@ final class GameScene: SKScene {
             // Smoke / spark trail: drop a puff at the shot's tail each frame for
             // weapons that carry a Trail or the smoke flags. Cached per weapon so
             // this stays a dictionary lookup, not a re-decode.
-            if s.weaponID >= 128, let trail = trailInfo(for: s.weaponID) {
+            if s.weaponID >= 128, settings.smokeTrails || !(trailInfo(for: s.weaponID)?.smoke ?? false),
+               let trail = trailInfo(for: s.weaponID) {
                 let tail = CGPoint(x: node.position.x - CGFloat(cos(s.facing)) * 4,
                                    y: node.position.y - CGFloat(sin(s.facing)) * 4)
                 if trail.smoke, !settings.modernHUD,
@@ -4822,8 +4809,7 @@ final class GameScene: SKScene {
     private func clearSystemNodes() {
         landingClearance.removeAll()
         landingRequestID = nil
-        hailQuoted.removeAll()
-        lastHailQuote.removeAll()
+        quoteBroadcaster.reset()
         for n in planetNodes { n.removeFromParent() }
         planetNodes.removeAll()
         planetNodeByID.removeAll()
@@ -5233,7 +5219,7 @@ final class GameScene: SKScene {
     private func npcLightTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcLightCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, let sheet = galaxy?.game.lightSprite(shipTypeID) {
+        if shipTypeID >= 128, settings.runningLights, let sheet = galaxy?.game.lightSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcLightCache[shipTypeID] = textures
@@ -5256,7 +5242,7 @@ final class GameScene: SKScene {
     private func npcWeaponGlowTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcWeaponGlowCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
+        if shipTypeID >= 128, settings.weaponEffects, let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcWeaponGlowCache[shipTypeID] = textures
@@ -5537,7 +5523,9 @@ final class GameScene: SKScene {
             }
         }
         if newTarget { navCursorZoom = 256 } else { navCursorZoom = max(0, navCursorZoom - 1800 * CGFloat(frameDT)) }
-        let base = destroyedStellarIDs.contains(pv.id) ? 4 : 0
+        // Frames 4-7 are for a stellar the player has dominated (stellar byte
+        // +0x46, the one that pays tribute), not a destroyed one (0x0042eac0).
+        let base = world.dominatedStellars.contains(pv.id) ? 4 : 0
         let half = pv.texture.map { max($0.size().width, $0.size().height) / 2 } ?? 64
         let off = half.rounded(.up) + navCursorZoom + 16
         let corners = [(-off, off), (off, off), (off, -off), (-off, -off)]

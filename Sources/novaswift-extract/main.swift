@@ -886,7 +886,7 @@ case "ai":
     print("populated with \(world.npcs.count) NPC(s); jumpRadius \(Int(world.systemContext.jumpRadius))")
 
     var arrivals = 0, departures = 0, kills = 0, shots = 0, beams = 0, hullHits = 0
-    var landings = 0, launches = 0, disables = 0, jumpIns = 0, scans = 0
+    var landings = 0, launches = 0, disables = 0, jumpIns = 0, scans = 0, overlays = 0
     var scansOfPlayer = 0
     var stateHistogram: [String: Int] = [:]
     var originalStates: [Int: Int] = [:]
@@ -946,6 +946,7 @@ case "ai":
             case .weaponFired: shots += 1
             case .beam(_, _, _, _, let hit, _, _): if hit { beams += 1 }
             case .shieldHit, .armorHit: hullHits += 1
+            case .overlayMessage: overlays += 1
             case let .shipScanned(_, targetID, _): scans += 1; if targetID == 0 { scansOfPlayer += 1 }
             default: break
             }
@@ -986,7 +987,7 @@ case "ai":
     print("after \(Int(seconds))s:  live NPCs \(world.npcs.count)   projectiles \(world.projectiles.count)")
     print("  arrivals \(arrivals) (jump-in \(jumpIns), launch \(launches))   departures \(departures)   landings \(landings)")
     print("  kills \(kills)   disabled \(disables)   shots fired \(shots)   beam hits \(beams)   hull hits \(hullHits)")
-    print("  scans \(scans) (of player \(scansOfPlayer))")
+    print("  scans \(scans) (of player \(scansOfPlayer))   overlay messages (distress/quotes) \(overlays)")
     print("  max hostile NPC pairs in system \(maxHostilePairs)")
     let hist = stateHistogram.sorted { $0.value > $1.value }
         .map { "\($0.key)×\($0.value)" }.joined(separator: "  ")

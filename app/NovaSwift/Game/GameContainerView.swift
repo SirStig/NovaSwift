@@ -544,8 +544,9 @@ final class GameHost {
         // scene can select the live set/heading — not just the first 36 frames.
         if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.allFrames(from: sheet) }
         if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.allFrames(from: glow) }
-        if let lights = game.lightSprite(shipID) { lightTextures = SpriteTextures.allFrames(from: lights) }
-        if let wg = game.weaponGlowSprite(shipID) { weaponGlowTextures = SpriteTextures.allFrames(from: wg) }
+        let prefs = GameSettings.load()
+        if prefs.runningLights, let lights = game.lightSprite(shipID) { lightTextures = SpriteTextures.allFrames(from: lights) }
+        if prefs.weaponEffects, let wg = game.weaponGlowSprite(shipID) { weaponGlowTextures = SpriteTextures.allFrames(from: wg) }
         if let alt = game.altSprite(shipID) { altTextures = SpriteTextures.allFrames(from: alt) }
         // The shän shield-bubble layer (single-frame overlay), only present when a
         // "Shields" graphics plug-in populated it — nil/empty for stock hulls.
@@ -1333,23 +1334,23 @@ struct GameContainerView: View {
 
     var body: some View {
         gameStackWithMidLifecycle
-        .alert(model.data.game?.stringList(2002)?.string(at: 119) ?? "Name your new ship.",
-               isPresented: Binding(get: { captureNamePrompt != nil },
-                                    set: { if !$0 { captureNamePrompt = nil } })) {
-            TextField("Ship name", text: Binding(get: { captureNamePrompt?.text ?? "" },
-                                                 set: { captureNamePrompt?.text = String($0.prefix(63)) }))
-            Button("OK") {
+        .classicTextPrompt(
+            isPresented: Binding(get: { captureNamePrompt != nil },
+                                 set: { if !$0 { captureNamePrompt = nil } }),
+            prompt: model.data.game?.stringList(2002)?.string(at: 119) ?? "Name your new ship.",
+            text: Binding(get: { captureNamePrompt?.text ?? "" },
+                          set: { captureNamePrompt?.text = $0 }),
+            onOK: { name in
                 if let p = captureNamePrompt {
                     captureNamePrompt = nil
-                    takeCommandOfCapturedShip(p.cap, name: p.text)
+                    takeCommandOfCapturedShip(p.cap, name: name)
                 }
-            }
-            Button("Cancel", role: .cancel) {
+            },
+            onCancel: {
                 captureNamePrompt = nil
                 pendingCaptureChoice = nil
                 host?.hud.post(model.data.game?.stringList(2002)?.string(at: 122) ?? "Cancelled.")
-            }
-        }
+            })
         // Leaving the game unsuppresses the UI cursor so it works on the menus.
         .onDisappear { CursorTargets.shared.suppressed = false }
         // Keep cursor suppression tracking who owns the screen. `wirePadController`
@@ -1859,6 +1860,12 @@ struct GameContainerView: View {
         host?.scene.onTravelStellarSelected = { nav.disarmJump() }
         host?.scene.onLandingCleared = { id in postLandingClearance(id) }
         host?.scene.persGrudgeProvider = { id in model.pilot.state.persHoldsGrudge(id) }
+        host?.scene.persMissionAvailableProvider = { pers in
+            guard let game = host?.game else { return true }
+            let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+            return PersEncounter.offeredMission(pers, player: model.pilot.state, game: game, engine: engine,
+                                                boarding: pers.offerMissionOnBoard) != nil
+        }
         host?.scene.stellarIFFColorProvider = { id in
             guard let game = model.data.game, let spob = game.spob(id) else { return nil }
             let c = RadarIFF.stellarColor(spob, state: model.pilot.state, game: game, system: nav.currentSystemID)
@@ -1870,6 +1877,9 @@ struct GameContainerView: View {
             host?.hud.expandText = { text in
                 OriginalText(game: game).expandStatusText(text, player: model.pilot.state)
             }
+            var patterns: [Int: CGImage] = [:]
+            for id in 128..<138 { if let cg = game.pixPatSheet(id)?.makeCGImage() { patterns[id] = cg } }
+            host?.hud.radarPatterns = patterns
         }
         // Feed a mission special-ship's completed goal back into the story engine
         // (decrement the objective, complete the mission if it was the last one).
@@ -4462,7 +4472,14 @@ struct MessageLogView: View {
             Spacer()
             HStack {
                 if let m = hud.message {
-                    Text(m.text)
+                    // One Pascal string in one rect: the original fills the
+                    // rect before drawing, so a new message replaces the old
+                    // line outright and anything past the rect is clipped
+                    // (no ellipsis). Updated in place (no per-message
+                    // identity), so a fading old view can never sit beside
+                    // the new text in the stack.
+                    Text(m.text.replacingOccurrences(of: "\r", with: " ")
+                            .replacingOccurrences(of: "\n", with: " "))
                         #if os(iOS)
                         .novaFont(.hud, weight: .semibold, size: 12)
                         #else
@@ -4470,8 +4487,10 @@ struct MessageLogView: View {
                         #endif
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                        .fixedSize(horizontal: true, vertical: false)
                         .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .clipped()
                         .transition(.opacity)
                 }
                 Spacer(minLength: 0)
