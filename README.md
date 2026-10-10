@@ -41,7 +41,7 @@ in ways a code comparison doesn't catch. If something plays differently, please
 
 ### Beyond the original
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=95150f5b)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=ac37cb5f)
 
 ### Not needed
 
@@ -64,15 +64,15 @@ in ways a code comparison doesn't catch. If something plays differently, please
 | ![Story Guide](docs/branding/screenshots/story-guide.webp) | ![Host Lobby](docs/branding/screenshots/host-lobby.webp) |
 | Each campaign as a list of steps, with the mission that unlocks the next one. | Co-op rules: PvP, real damage, friendly fire, permadeath, trading. |
 
-| Presentation presets | Plug-in manager |
+| Presentation presets | Plugins |
 |---|---|
 | ![Presentation presets](docs/branding/screenshots/presentation-modes.webp) | ![Plug-in manager](docs/branding/screenshots/plugin-manager.webp) |
-| Classic, Enhanced or Nova Swift, then adjust single items. | Import, reorder and toggle plug-ins. |
+| Classic, Enhanced or Nova Swift, then adjust single items. | Install, import, reorder and toggle plug-ins. |
 
-| Plug-in store | Debug suite |
+| Plug-in catalog | Debug suite |
 |---|---|
 | ![Plug-in store](docs/branding/screenshots/plugin-store.png) | ![Debug suite](docs/branding/screenshots/dev-console.webp) |
-| Community plug-ins and total conversions. | Live logs, frame timing, an inspector and a console. |
+| Community plug-ins and total conversions, installed in one tap. | Live logs, frame timing, an inspector and a console. |
 
 ## What's in it
 
@@ -102,7 +102,12 @@ Settings ▸ Enhancements. All are off by default:
 - Touch controls, and full controller support on every platform
   ([CONTROLS.md](docs/CONTROLS.md))
 - Story Guide and storyline map, tutorial hints, storyline tags
-- In-app plug-in store and manager
+- Plugins: a mod manager that browses the community catalog (one-tap installs, works
+  offline for what you already have), imports your own files including old Mac
+  `.sit` and `.hqx` archives, and enables, disables, reorders and deletes plug-ins.
+  The catalog lives in [NovaSwift-Plugins](https://github.com/SirStig/NovaSwift-Plugins);
+  anyone can add a plug-in by pull request.
+- Import your old EV Nova pilots: Windows `.plt` files and classic Mac pilots
 - Co-op multiplayer over local Wi-Fi or Game Center ([MULTIPLAYER.md](docs/MULTIPLAYER.md))
 - iCloud sync of imported game data ([ICLOUD_SYNC.md](docs/ICLOUD_SYNC.md))
 - Apple TV with a 10-foot UI ([TVOS.md](docs/TVOS.md))
@@ -185,8 +190,8 @@ data/base/               Your EV Nova data (git-ignored)
 EV Nova and its data are copyrighted. This project does not redistribute them.
 
 - Base game data: you must own EV Nova. The tools only read your copy.
-- Community plug-ins: the fetch script and the in-app store only download plug-ins
-  their authors distribute for free, under their own terms.
+- Community plug-ins: the catalog links to public downloads. A plug-in is only
+  rehosted when its readme allows redistribution, and authors can ask for removal.
 - This project's code is open source; see [LICENSE](LICENSE).
 
 The reverse-engineering docs describe behaviour in prose, short formulas and

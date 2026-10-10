@@ -215,46 +215,56 @@
    ]
   },
   {
-   "name": "Plug-in store and manager",
+   "name": "Plugins (mod manager)",
    "tasks": [
     {
-     "name": "Offline catalog (23 entries)",
+     "name": "Community catalog on GitHub, add plug-ins by pull request",
      "status": "done",
-     "where": "Sources/NovaSwiftPluginStore/Resources/PluginCatalog.json"
+     "where": "SirStig/NovaSwift-Plugins"
     },
     {
-     "name": "Download and install from original hosts",
+     "name": "One-tap install from direct links",
      "status": "done",
-     "where": "PluginDownloader, PluginInstaller"
+     "where": "PluginsModel, PluginInstaller"
     },
     {
-     "name": "Store browse, details, screenshots",
+     "name": "Full-screen browse, filters, search, details",
      "status": "done",
-     "where": "Store/PluginStoreView.swift"
+     "where": "app/NovaSwift/Plugins/"
     },
     {
-     "name": "Import a plug-in or .zip",
+     "name": "Works offline for installed plug-ins",
      "status": "done",
-     "where": "Launcher/PluginsView.swift"
+     "where": "cached catalog, bundled fallback"
     },
     {
-     "name": "Enable, disable, delete",
+     "name": "Enable, disable, delete, load order",
      "status": "done",
      "where": "PluginsView.swift"
     },
     {
-     "name": "Manual load order",
+     "name": "Failed-to-load list",
      "status": "done",
-     "where": "GameDataController.movePlugin"
+     "where": "GameLibrary PluginLoadFailureSink"
+    },
+    {
+     "name": "Import local files and old Mac .sit/.hqx/.bin",
+     "status": "partial",
+     "where": "StuffIt methods 13/15 not supported"
+    },
+    {
+     "name": "Icons and screenshots for catalog entries",
+     "status": "planned"
+    },
+    {
+     "name": "Rehost plug-ins whose authors allow it",
+     "status": "partial",
+     "where": "archive job in progress"
     },
     {
      "name": "Plug-ins bundled with the app",
      "status": "partial",
      "where": "hooks exist, none ship"
-    },
-    {
-     "name": "Enhancement packs (HD art, audio)",
-     "status": "planned"
     }
    ]
   },
@@ -702,8 +712,8 @@
     },
     {
      "name": "Map every saved field to a NovaSwift pilot",
-     "status": "partial",
-     "where": "Sources/NovaSwiftStory/EVNovaPilotImport.swift (a few fields have no counterpart and are listed in the import summary)"
+     "status": "done",
+     "where": "EVNovaPilotImport.swift (only fields the original never reads are skipped)"
     },
     {
      "name": "Warn about plug-in content that isn't installed",

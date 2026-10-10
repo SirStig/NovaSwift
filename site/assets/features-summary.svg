@@ -113,7 +113,7 @@
 <rect x="536" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="553" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
 <text x="580" y="186" class="pc">100%</text>
-<text x="20" y="210" class="nm">Plug-in store and manager</text>
+<text x="20" y="210" class="nm">Plugins (mod manager)</text>
 <rect x="230" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="264" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -126,15 +126,15 @@
 <rect x="383" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="400" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="417" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="434" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="451" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="468" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="434" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
+<rect x="451" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
+<rect x="468" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="485" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="502" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="519" y="198" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="519" y="198" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="536" y="198" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="553" y="198" width="14" height="14" rx="2" fill="#2b2730"/>
-<text x="580" y="210" class="pc">75%</text>
+<text x="580" y="210" class="pc">60%</text>
 <text x="20" y="234" class="nm">Controller support</text>
 <rect x="230" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -388,9 +388,9 @@
 <rect x="349" y="486" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="366" y="486" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="383" y="486" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="400" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="417" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="434" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
+<rect x="400" y="486" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="417" y="486" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="434" y="486" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="451" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="468" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="485" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
@@ -398,7 +398,7 @@
 <rect x="519" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="536" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
 <rect x="553" y="486" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="498" class="pc">50%</text>
+<text x="580" y="498" class="pc">67%</text>
 <text x="20" y="522" class="nm">Plug-in editor</text>
 <rect x="230" y="510" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="510" width="14" height="14" rx="2" fill="#e3a52b"/>

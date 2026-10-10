@@ -3,9 +3,9 @@
 <rect width="592" height="639" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (101)</text>
+<text x="30" y="55" class="lg">Done (102)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
-<text x="124" y="55" class="lg">Partly done (12)</text>
+<text x="124" y="55" class="lg">Partly done (13)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
 <text x="255" y="55" class="lg">Planned (43)</text>
 <text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">9 of 14 done</text>
@@ -51,15 +51,17 @@
 <rect x="246" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Share sheet export — Done</title></rect>
 <rect x="261" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: List of past reports — Done</title></rect>
 <rect x="276" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Also reachable from debug tools — Done</title></rect>
-<text x="16" y="227" class="gh">Plug-in store and manager</text><text x="576" y="227" class="gn" text-anchor="end">6 of 8 done</text>
-<rect x="216" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Offline catalog (23 entries) — Done</title></rect>
-<rect x="231" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Download and install from original hosts — Done</title></rect>
-<rect x="246" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Store browse, details, screenshots — Done</title></rect>
-<rect x="261" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Import a plug-in or .zip — Done</title></rect>
-<rect x="276" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Enable, disable, delete — Done</title></rect>
-<rect x="291" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Manual load order — Done</title></rect>
-<rect x="306" y="215" width="12" height="12" fill="#e3a52b"><title>Plug-in store and manager: Plug-ins bundled with the app — Partly done</title></rect>
-<rect x="321.5" y="215.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in store and manager: Enhancement packs (HD art, audio) — Planned</title></rect>
+<text x="16" y="227" class="gh">Plugins (mod manager)</text><text x="576" y="227" class="gn" text-anchor="end">6 of 10 done</text>
+<rect x="216" y="215" width="12" height="12" fill="#3fb950"><title>Plugins (mod manager): Community catalog on GitHub, add plug-ins by pull request — Done</title></rect>
+<rect x="231" y="215" width="12" height="12" fill="#3fb950"><title>Plugins (mod manager): One-tap install from direct links — Done</title></rect>
+<rect x="246" y="215" width="12" height="12" fill="#3fb950"><title>Plugins (mod manager): Full-screen browse, filters, search, details — Done</title></rect>
+<rect x="261" y="215" width="12" height="12" fill="#3fb950"><title>Plugins (mod manager): Works offline for installed plug-ins — Done</title></rect>
+<rect x="276" y="215" width="12" height="12" fill="#3fb950"><title>Plugins (mod manager): Enable, disable, delete, load order — Done</title></rect>
+<rect x="291" y="215" width="12" height="12" fill="#3fb950"><title>Plugins (mod manager): Failed-to-load list — Done</title></rect>
+<rect x="306" y="215" width="12" height="12" fill="#e3a52b"><title>Plugins (mod manager): Import local files and old Mac .sit/.hqx/.bin — Partly done</title></rect>
+<rect x="321.5" y="215.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plugins (mod manager): Icons and screenshots for catalog entries — Planned</title></rect>
+<rect x="336" y="215" width="12" height="12" fill="#e3a52b"><title>Plugins (mod manager): Rehost plug-ins whose authors allow it — Partly done</title></rect>
+<rect x="351" y="215" width="12" height="12" fill="#e3a52b"><title>Plugins (mod manager): Plug-ins bundled with the app — Partly done</title></rect>
 <text x="16" y="254" class="gh">Controller support</text><text x="576" y="254" class="gn" text-anchor="end">8 of 8 done</text>
 <rect x="216" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Gamepad flight — Done</title></rect>
 <rect x="231" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Controller cursor for all menus — Done</title></rect>
@@ -151,10 +153,10 @@
 <rect x="261.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Particles, bloom, post effects — Planned</title></rect>
 <rect x="276.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Performance tiers — Planned</title></rect>
 <rect x="291.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Smooth rotation, frame interpolation — Planned</title></rect>
-<text x="16" y="551" class="gh">Pilot converter</text><text x="576" y="551" class="gn" text-anchor="end">3 of 6 done</text>
+<text x="16" y="551" class="gh">Pilot converter</text><text x="576" y="551" class="gn" text-anchor="end">4 of 6 done</text>
 <rect x="216" y="539" width="12" height="12" fill="#3fb950"><title>Pilot converter: Read Windows EV Nova CE .plt pilots (decrypt the XOR blocks) — Done</title></rect>
 <rect x="231" y="539" width="12" height="12" fill="#e3a52b"><title>Pilot converter: Read classic Mac EV Nova pilots (resource fork, MacBinary/AppleDouble) — Partly done</title></rect>
-<rect x="246" y="539" width="12" height="12" fill="#e3a52b"><title>Pilot converter: Map every saved field to a NovaSwift pilot — Partly done</title></rect>
+<rect x="246" y="539" width="12" height="12" fill="#3fb950"><title>Pilot converter: Map every saved field to a NovaSwift pilot — Done</title></rect>
 <rect x="261" y="539" width="12" height="12" fill="#3fb950"><title>Pilot converter: Warn about plug-in content that isn't installed — Done</title></rect>
 <rect x="276" y="539" width="12" height="12" fill="#3fb950"><title>Pilot converter: Import screen with a preview before creating the pilot — Done</title></rect>
 <rect x="291" y="539" width="12" height="12" fill="#e3a52b"><title>Pilot converter: Round-trip tests against the original's own save code — Partly done</title></rect>
