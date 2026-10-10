@@ -105,16 +105,19 @@
     fetch(url).then(function (r) { return r.json(); }).then(cb).catch(function () {});
   }
 
+  // The original's runtime, QuickTime, libraries, networking and shareware code:
+  // NovaSwift replaces them with its own engine, so they get their own section.
+  var INTERNAL = ["C runtime & Win32 glue", "QuickTime", "Image & audio libraries",
+                  "Networking", "Shareware registration"];
+
   var exe = document.getElementById("grid-exe");
+  var internalBox = document.getElementById("grid-internal");
   if (exe) load("assets/progress.json", function (d) {
     var label = {};
-    var statuses = d.statuses.map(function (s) {
-      label[s.key] = s.label;
-      return { key: s.key, color: s.color, label: s.label, count: d.totals.counts[s.key] };
-    });
-    var groups = d.groups.map(function (g) {
+    d.statuses.forEach(function (s) { label[s.key] = s.label; });
+    function toGroup(g) {
       var note = g.f.length + " functions";
-      if (g.counts.done || g.counts.partly) note += " · " + g.counts.done + " matched";
+      if (INTERNAL.indexOf(g.title) < 0 && g.f.length - g.counts.library > 0) note += " · " + g.pct + "% done";
       return {
         title: g.title,
         note: note,
@@ -126,8 +129,18 @@
           };
         })
       };
-    });
-    render(exe, statuses, groups);
+    }
+    function statusesFor(groups) {
+      var count = {};
+      groups.forEach(function (g) { g.squares.forEach(function (q) { count[q.status] = (count[q.status] || 0) + 1; }); });
+      return d.statuses.map(function (s) {
+        return { key: s.key, color: s.color, label: s.label, count: count[s.key] || 0 };
+      });
+    }
+    var main = d.groups.filter(function (g) { return INTERNAL.indexOf(g.title) < 0; }).map(toGroup);
+    var internal = d.groups.filter(function (g) { return INTERNAL.indexOf(g.title) >= 0; }).map(toGroup);
+    render(exe, statusesFor(main), main);
+    if (internalBox) render(internalBox, statusesFor(internal), internal);
   });
 
   var feat = document.getElementById("grid-features");

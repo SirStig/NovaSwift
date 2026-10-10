@@ -26,7 +26,7 @@ Original behaviour is the default. The decompiled code is not in this repo; only
 written specs with function addresses are, in
 [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-![How closely NovaSwift matches the original game](docs/branding/fidelity-summary.svg?v=e8842066)
+![How closely NovaSwift matches the original game](docs/branding/fidelity-summary.svg?v=20256bd4)
 
 Each row is one part of the game. A filled block is roughly 5% of that part's
 original code, checked against NovaSwift and behaving the same. Amber blocks are

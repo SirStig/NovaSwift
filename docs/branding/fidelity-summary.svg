@@ -284,11 +284,11 @@
 <rect x="451" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="468" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="485" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="502" y="366" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="519" y="366" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="536" y="366" width="14" height="14" rx="2" fill="#e3a52b"/>
-<rect x="553" y="366" width="14" height="14" rx="2" fill="#e3a52b"/>
-<text x="580" y="378" class="pc">81%</text>
+<rect x="502" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="519" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="536" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="553" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
+<text x="580" y="378" class="pc">100%</text>
 <text x="20" y="402" class="nm">Dialogs &amp; preferences</text>
 <rect x="230" y="390" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="390" width="14" height="14" rx="2" fill="#3fb950"/>
