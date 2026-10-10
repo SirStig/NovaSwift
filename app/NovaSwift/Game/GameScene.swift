@@ -4744,10 +4744,12 @@ final class GameScene: SKScene {
             // Animate iff destroyed == Flags2 0x0080; otherwise rest on frame 0.
             guard destroyed == p.animatesOnlyWhenDestroyed, sheet.count > 1 else {
                 if let first = sheet.first { sprite.texture = first }
+                world.stellarFrames[p.id] = 0
                 continue
             }
             let engaged = p.animator?.isGate == true && gateIsEngaged(p)
             let frame = planetVisuals[i].animator!.step(ticks: ticks, engaged: engaged) { Int.random(in: 0..<max(1, $0)) }
+            world.stellarFrames[p.id] = frame
             if frame < sheet.count { sprite.texture = sheet[frame] }
         }
     }

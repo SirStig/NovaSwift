@@ -3724,8 +3724,7 @@ Also done: trade strip with escort free space and the disaster sentence (exe sep
 original size, cycle key and zoom keys (60 Hz ticks confirmed), tractor-beam lock (jump gate, drag, speed/turn cut),
 squad-jump push sync, StellarAnimator port incl. hypergate open/close, deadly-stellar pixel masks, the run-walk
 abutment quirk (oracle-confirmed), "no hyperspace effects" preference.
-Open: D-7 MapReveal first-visible-twin (existing fixtures place all systems at one point), stellar mask uses frame 0,
-tractor pull of a light owner toward a heavy victim.
+Closed after the merge with main: D-7 (MapReveal returns the first visible twin; test fixtures given distinct positions), the deadly-stellar mask uses the current animated frame, and a light tractor owner is pulled toward a heavy victim (sign confirmed with the oracle). The mini map keys were checked against the exe: `\` is bindable slot 0x0d (DIK 0x2b), `-` / `=` are fixed DIK 0x0c / 0x0d tests with no modifier held.
 
 ## Missions / economy sweep (fix/missions-economy)
 

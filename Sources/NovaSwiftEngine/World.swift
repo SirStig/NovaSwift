@@ -1441,6 +1441,9 @@ public final class World {
     public var spawner: Spawner?
     /// The original NPC AI, which drives every brained NPC.
     public let originalAI = OriginalAI()
+    /// Each animated stellar's current frame, pushed in by the renderer so the
+    /// deadly-stellar pixel test uses the sprite on screen.
+    public var stellarFrames: [Int: Int] = [:]
     /// `Frame_QueueCombatChatter`'s single slot (category, government, voice).
     var playerCloakWasEngaged = false
     var pendingChatter: (category: Int, govt: Int, voice: Int)?
@@ -2697,7 +2700,7 @@ public final class World {
     }
 
     /// `Stellar_ApplyDeadlyCollision` (0x0043aed0): the hull's and the stellar's
-    /// sprite masks overlap (frame 0 for the stellar). Falls back to the
+    /// sprite masks overlap (the stellar at its current animation frame, `stellarFrames`). Falls back to the
     /// bounding circles when either art is missing.
     private func touchesDeadlyStellar(_ ship: Ship, _ body: StellarBody) -> Bool {
         guard let galaxy, let hull = galaxy.hullCollisionMask(ship.shipTypeID),
@@ -2705,7 +2708,8 @@ public final class World {
             return (ship.position - body.position).length < body.radius + ship.radius
         }
         let a = ContactSprite.hull(hull.mask, frame: hull.frame(angle: ship.angle), at: ship.position)
-        let b = ContactSprite.hull(stellar, frame: 0, at: body.position)
+        let b = ContactSprite.hull(stellar, frame: min(max(0, stellarFrames[body.id] ?? 0), stellar.frameCount - 1),
+                                   at: body.position)
         return SpriteContact.boundsOverlap(a, b) && SpriteContact.masksOverlap(a, b)
     }
 
@@ -3560,7 +3564,9 @@ public final class World {
         if let body = cast.hitStellar {
             applyStellarHit(body, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID)
         } else if let h = cast.hitShip {
-            if spec.impact < 0, h.entityID != ship.entityID { applyBeamLock(owner: ship, victim: h) }
+            if spec.impact < 0, h.entityID != ship.entityID {
+                applyBeamLock(owner: ship, victim: h, impact: spec.impact, hitPoint: cast.end)
+            }
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization, ionizeColor: spec.ionizeColor,
                      piercing: spec.penetratesShields, weaponID: spec.id,
@@ -4610,7 +4616,7 @@ public final class World {
     /// A tractor-beam hit (impact < 0) from `owner` on `victim` (0x0042f270):
     /// a victim whose three quarters mass fits the owner is held by the owner;
     /// a much heavier one holds the owner to itself.
-    private func applyBeamLock(owner: Ship, victim: Ship) {
+    private func applyBeamLock(owner: Ship, victim: Ship, impact: Double, hitPoint: Vec2) {
         guard victim.massTons > 0, !victim.isPlanetTypeShip else { return }
         if victim.massTons * 0.75 <= owner.massTons {
             victim.velocityMatchTargetID = owner.entityID
@@ -4618,6 +4624,18 @@ public final class World {
         } else if owner.massTons > 0, !owner.isPlanetTypeShip {
             if owner.velocityMatchTargetID == nil { owner.velocityMatchTargetID = owner.entityID }
             owner.beamLockTicksLeft = 30
+            // The light owner is dragged toward the heavy victim: its velocity
+            // takes impact / mass along the bearing victim -> hit point with
+            // the negative impact, i.e. toward the victim (oracle-checked sign,
+            // 0x0043b670 / 0x0043b4a0), unless the hit is within 50 px of the
+            // victim's centre on both axes.
+            let toVictim = victim.position - hitPoint
+            if abs(toVictim.x) >= 50 || abs(toVictim.y) >= 50 {
+                let step = OriginalClock.perSecond(-impact / owner.massTons)
+                owner.addPolarVelocityWithClamp(heading: toVictim.angle, step: step, max: owner.stats.maxSpeed)
+                let cap = owner.effectiveMaxSpeed
+                owner.velocity = Vec2(max(-cap, min(cap, owner.velocity.x)), max(-cap, min(cap, owner.velocity.y)))
+            }
         }
     }
 
