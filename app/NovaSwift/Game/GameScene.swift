@@ -1,4 +1,5 @@
 import SpriteKit
+import SwiftUI
 import CoreImage
 import GameController
 import NovaSwiftKit
@@ -161,6 +162,9 @@ final class GameScene: SKScene {
     /// Whether the pilot holds a grudge against përs `id` (its HailQuote
     /// Flags 0x0004 gate); set by the container from the pilot.
     var persGrudgeProvider: ((Int) -> Bool)?
+    /// The IFF stellar colour of a stellar id (0x00466030, `RadarIFF`),
+    /// supplied by the host from the pilot state.
+    var stellarIFFColorProvider: ((Int) -> Color?)?
     /// Sim time, and per ship the time of its last HailQuote and whether it
     /// has quoted at all (the original's +0xac / +0xbc).
     private var hailQuoteClock: Double = 0
@@ -303,8 +307,10 @@ final class GameScene: SKScene {
     // Edge-triggered warning state: true once the klaxon/red-alert for that
     // threshold has played, reset only after recovering with a little hysteresis
     // so crossing back and forth right at the line doesn't retrigger every frame.
-    private var shieldWarned = false
-    private var hullWarned = false
+    private var redAlert = RedAlertCue()
+    private var rawCallAccumulator: Double = 0
+    private var klaxxonOn = false
+    private var redAlertBlink: SKSpriteNode?
 
     private let cameraNode = SKCameraNode()
     private var shipNode: SKNode!
@@ -971,6 +977,17 @@ final class GameScene: SKScene {
     private let planetBracket = SKShapeNode()
     private var lockedShipBracketID: Int?
     private var lockedPlanetBracketID: Int?
+    /// The Classic HUD's target reticles: four 16-px corner cicns each, for
+    /// the ship target (cicn 10008 + frame, 0x0042ede0) and the selected
+    /// stellar (cicn 10000 + frame, 0x0042eac0).
+    private var shipReticleCorners: [SKSpriteNode] = []
+    private var planetReticleCorners: [SKSpriteNode] = []
+    private var cicnTextureCache: [Int: SKTexture?] = [:]
+    /// The reticle zoom-in (0x00735494 / 0x00735490): 256 px when a target is
+    /// picked on screen, shrinking 60 px a tick to 0.
+    private var shipReticleZoom: CGFloat = 0
+    private var planetReticleZoom: CGFloat = 0
+    private var lastReticleClock: Double = 0
     private var npcNodes: [Int: NPCNode] = [:]
     private var asteroidNodes: [Int: AsteroidNode] = [:]
     private var asteroidTextureCache: [Int: [SKTexture]] = [:]
@@ -1718,6 +1735,7 @@ final class GameScene: SKScene {
         if intent.firePrimary, !wasFiring { onPlayerFired?() }
         wasFiring = intent.firePrimary
         effectClock += dt
+        updateWarnings(dt: dt)
         updateBeamLoopPositions(listener: scenePos)
         updateFlashes(dt)
         updateParticles(dt)
@@ -1852,17 +1870,49 @@ final class GameScene: SKScene {
     /// below the threshold; a little hysteresis on the recovery side (threshold
     /// + 5%) keeps a value hovering right at the line from retriggering every
     /// ~12 Hz HUD tick.
-    private func updateWarnings(shieldFraction: Double, armorFraction: Double) {
-        if shieldFraction <= 0.25 {
-            if !shieldWarned { audio?.play(.lowShieldWarning); shieldWarned = true }
-        } else if shieldFraction > 0.30 {
-            shieldWarned = false
+    /// The original's two alarm cues (M-1): snd 370 "Red Alert" on the first
+    /// ship to start threatening the player's squad (a 60-frame rising-edge
+    /// check, `RedAlertCue`), with the cicn 18000/18001 blink when the sound
+    /// volume is below 2 of 7; snd 371 "Klaxxon" only while the player's
+    /// death timer runs.
+    private func updateWarnings(dt: Double) {
+        rawCallAccumulator += dt * OriginalClock.rawCallsPerSecond
+        let calls = Int(rawCallAccumulator)
+        rawCallAccumulator -= Double(calls)
+        let volume = settings.muteAll ? 0 : settings.masterVolume * settings.sfxVolume
+        guard let world = self.world else { return }
+        if redAlert.advance(rawCalls: calls, lowVolume: volume * 7 < 2, inEscapePod: world.playerInEscapePod,
+                            threat: { world.isAnyShipThreatToPlayerSquad }) {
+            audio?.play(.redAlert)
         }
-        if armorFraction <= 0.15 {
-            if !hullWarned { audio?.play(.criticalHullWarning); hullWarned = true }
-        } else if armorFraction > 0.20 {
-            hullWarned = false
+        if world.isPlayerDeathTimerRunning {
+            let here = CGPoint(x: world.player.position.x, y: world.player.position.y)
+            audio?.startOrUpdateLoop(key: "klaxxon", soundID: 371, at: here, listener: here)
+        } else if klaxxonOn {
+            audio?.stopLoop(key: "klaxxon")
         }
+        klaxxonOn = world.isPlayerDeathTimerRunning
+        updateRedAlertBlink()
+    }
+
+    /// The low-volume Red Alert blink (`FUN_0042cc30`): cicn 18000 + parity
+    /// at the playfield's top-right corner while the counter runs.
+    private func updateRedAlertBlink() {
+        guard let frame = redAlert.blinkFrame, let tex = cicnTexture(18000 + frame) else {
+            redAlertBlink?.isHidden = true
+            return
+        }
+        if redAlertBlink == nil {
+            let n = SKSpriteNode()
+            n.zPosition = 50
+            cameraNode.addChild(n)
+            redAlertBlink = n
+        }
+        guard let n = redAlertBlink else { return }
+        n.texture = tex
+        n.size = tex.size()
+        n.position = CGPoint(x: size.width / 2 - tex.size().width / 2, y: size.height / 2 - tex.size().height / 2)
+        n.isHidden = false
     }
 
     // MARK: Hailing + target-lock
@@ -4973,6 +5023,17 @@ final class GameScene: SKScene {
         return world.isEffectivelyHostileToPlayer(npc)
     }
 
+    /// The IFF ship colours of `Ship_GetShipRadarColor` 0x00465f00: disabled
+    /// theme grey 0x4000, threat red, squad green, everything else pure blue.
+    static func iffColor(_ c: World.IFFClass) -> Color {
+        switch c {
+        case .disabled: return Color(red: 0.25, green: 0.25, blue: 0.25)
+        case .threat:   return Color(red: 1, green: 0, blue: 0)
+        case .squad:    return Color(red: 0, green: 1, blue: 0)
+        case .other:    return Color(red: 0, green: 0, blue: 1)
+        }
+    }
+
     private func relationship(for npc: Ship) -> RadarRelationship {
         if npc.disabled { return .disabled }
         // Your own escorts always read as friendly (green), whatever their base
@@ -5104,7 +5165,97 @@ final class GameScene: SKScene {
     /// position, color (relationship for ships; landable blue / not-landable
     /// red for planets, matching the manual), and a lock-on pulse that only
     /// restarts when the locked id actually changes.
+    /// A cicn as a texture (the original's interface sprites are cicn runs).
+    private func cicnTexture(_ id: Int) -> SKTexture? {
+        if let cached = cicnTextureCache[id] { return cached }
+        var tex: SKTexture?
+        if let res = galaxy?.game.resources.resource(NovaType.cicn, id),
+           let sheet = try? CICN.decode(res.data) {
+            tex = SpriteTextures.allFrames(from: sheet).first
+            tex?.filteringMode = .nearest
+        }
+        cicnTextureCache[id] = tex
+        return tex
+    }
+
+    /// Place four corner cicns (`base` + 0…3: top-left, top-right,
+    /// bottom-right, bottom-left) around `center`, each corner's inner edge
+    /// `offset` px from it — the original's
+    /// `(x ∓ offset) − 16 / (x ± offset)` layout. False when the art is missing.
+    private func placeReticle(_ corners: inout [SKSpriteNode], base: Int, center: CGPoint, offset: CGFloat) -> Bool {
+        let textures = (0..<4).map { cicnTexture(base + $0) }
+        guard textures.allSatisfy({ $0 != nil }) else { return false }
+        if corners.isEmpty {
+            corners = (0..<4).map { _ in
+                let n = SKSpriteNode()
+                n.zPosition = 1
+                selectionLayer.addChild(n)
+                return n
+            }
+        }
+        let signs: [(CGFloat, CGFloat)] = [(-1, 1), (1, 1), (1, -1), (-1, -1)]
+        for i in 0..<4 {
+            let n = corners[i], t = textures[i]!
+            n.texture = t
+            n.size = t.size()
+            n.position = CGPoint(x: center.x + signs[i].0 * (offset + t.size().width / 2),
+                                 y: center.y + signs[i].1 * (offset + t.size().height / 2))
+            n.isHidden = false
+        }
+        return true
+    }
+
+    private func hideReticle(_ corners: [SKSpriteNode]) { for n in corners { n.isHidden = true } }
+
+    /// Whether `p` is inside the visible playfield (the zoom-in only starts
+    /// when the new target is in view).
+    private func isInView(_ p: CGPoint) -> Bool {
+        let half = CGSize(width: size.width * cameraZoom / 2, height: size.height * cameraZoom / 2)
+        let c = cameraNode.position
+        return abs(p.x - c.x) <= half.width && abs(p.y - c.y) <= half.height
+    }
+
     private func updateSelectionBrackets() {
+        let ticks = CGFloat(max(0, effectClock - lastReticleClock)) * CGFloat(OriginalClock.ticksPerSecond)
+        lastReticleClock = effectClock
+        shipReticleZoom = max(0, shipReticleZoom - 60 * ticks)
+        planetReticleZoom = max(0, planetReticleZoom - 60 * ticks)
+        updateShapeBrackets()
+        guard !settings.modernHUD else {
+            hideReticle(shipReticleCorners); hideReticle(planetReticleCorners)
+            return
+        }
+        // Classic: the original's cicn corners, coloured by the squad/threat
+        // class (frames 0 threat, 4 other, 8 squad, 12 disabled), no pulse.
+        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
+            let base: Int
+            switch world.reticleClass(of: ship) {
+            case .threat: base = 0
+            case .other: base = 4
+            case .squad: base = 8
+            case .disabled: base = 12
+            }
+            let width = (npcNodes[tid]?.radius ?? CGFloat(ship.radius)) * 2
+            let center = CGPoint(x: ship.position.x, y: ship.position.y)
+            if placeReticle(&shipReticleCorners, base: 10008 + base, center: center,
+                            offset: (width / 2).rounded(.up) + shipReticleZoom.rounded()) {
+                shipBracket.isHidden = true
+            }
+        } else {
+            hideReticle(shipReticleCorners)
+        }
+        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
+            let base = world.dominatedStellars.contains(pid) ? 4 : 0
+            if placeReticle(&planetReticleCorners, base: 10000 + base, center: pv.position,
+                            offset: pv.radius.rounded(.up) + planetReticleZoom.rounded()) {
+                planetBracket.isHidden = true
+            }
+        } else {
+            hideReticle(planetReticleCorners)
+        }
+    }
+
+    private func updateShapeBrackets() {
         if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
             let radius = npcNodes[tid]?.radius ?? CGFloat(ship.radius)
             shipBracket.position = CGPoint(x: ship.position.x, y: ship.position.y)
@@ -5114,6 +5265,7 @@ final class GameScene: SKScene {
                 lockedShipBracketID = tid
                 shipBracket.path = bracketPath(size: radius * 2 + 14)
                 restartPulse(shipBracket)
+                shipReticleZoom = isInView(shipBracket.position) ? 256 : 0
             }
         } else if lockedShipBracketID != nil {
             lockedShipBracketID = nil
@@ -5131,6 +5283,7 @@ final class GameScene: SKScene {
                 lockedPlanetBracketID = pid
                 planetBracket.path = bracketPath(size: pv.radius * 2 + 18)
                 restartPulse(planetBracket)
+                planetReticleZoom = isInView(pv.position) ? 256 : 0
             }
         } else if lockedPlanetBracketID != nil {
             lockedPlanetBracketID = nil
@@ -5509,8 +5662,10 @@ final class GameScene: SKScene {
         // Real ship-system state: shields, armor, fuel (with whole-jump readout),
         // cargo, and the active weapon + ammo.
         hud.shield = p.shieldFraction
-        hud.armor = p.maxArmor > 0 ? p.armorFraction : 1
-        hud.fuel = p.maxFuel > 0 ? p.fuel / p.maxFuel : 0
+        // An armor max of 0 draws a full bar only while armor > 0 (0x0045ebe8).
+        hud.armor = p.maxArmor > 0 ? p.armorFraction : (p.armor > 0 ? 1 : 0)
+        // No fuel fill at all while the player is disabled (0x0045f086).
+        hud.fuel = p.maxFuel > 0 && !p.disabled ? p.fuel / p.maxFuel : 0
         hud.maxFuel = p.maxFuel
         hud.jumps = Int((p.fuel / 100).rounded(.down))
         hud.ionization = p.ionizeMax > 0 ? min(1, p.ionCharge / p.ionizeMax) : 0
@@ -5523,7 +5678,6 @@ final class GameScene: SKScene {
             if hud.navJumpArmed { hud.post(misc(30)) }
         }
         hud.canJumpNow = isClearOfNoJumpZone
-        updateWarnings(shieldFraction: hud.shield, armorFraction: hud.armor)
         updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
         updateNavTargetHUD()
         hud.cargoUsed = p.cargoUsed
@@ -5578,7 +5732,8 @@ final class GameScene: SKScene {
             let dy = -(Double(pv.position.y) - shipPos.y) / Double(radarRange)
             guard dx * dx + dy * dy <= 1 else { return nil }
             return RadarContact(x: dx, y: dy, relationship: relationship(forPlanet: pv),
-                                isTarget: pv.id == selectedPlanetID, worldRadius: pv.radius)
+                                isTarget: pv.id == selectedPlanetID, worldRadius: pv.radius,
+                                iffColor: playerHasIFF ? stellarIFFColorProvider?(pv.id) : nil)
         }
         // A cloaked ship drops off the player's radar entirely unless its own
         // device flags it "visible on radar" regardless (oütf ModType 17
@@ -5620,7 +5775,8 @@ final class GameScene: SKScene {
             // Bible's `ïntf` rule and stays two-tone until an IFF is fitted.
             let rel = relationship(for: npc)
             let large = largeHulls && (galaxy?.game.ship(npc.shipTypeID)?.mass ?? 0) >= 100
-            return RadarContact(x: dx, y: dy, relationship: rel, isTarget: isTarget, large: large)
+            return RadarContact(x: dx, y: dy, relationship: rel, isTarget: isTarget, large: large,
+                                iffColor: playerHasIFF ? Self.iffColor(world.radarIFFClass(of: npc)) : nil)
         }
     }
 

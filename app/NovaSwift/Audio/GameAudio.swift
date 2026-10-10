@@ -27,8 +27,7 @@ final class GameAudio: ObservableObject {
         case uiSelect            // menu/button click
         case uiError             // rejected action
         case targetLock          // acquired a target
-        case lowShieldWarning    // shields/hull crossed below a safe threshold
-        case criticalHullWarning // hull critically low
+        case redAlert            // a ship starts threatening the player's squad
         case docking             // player set down on a spöb
         case launch              // player lifted off from a spöb
 
@@ -39,8 +38,7 @@ final class GameAudio: ObservableObject {
             case .uiSelect:            return 150   // "Beep1"
             case .uiError:             return 152   // "Beep3"
             case .targetLock:          return 151   // "Beep2"
-            case .lowShieldWarning:    return 371   // "Klaxxon"
-            case .criticalHullWarning: return 370   // "Red Alert"
+            case .redAlert:            return 370   // "Red Alert"
             case .docking, .launch:    return 390   // "Airlock"
             }
         }

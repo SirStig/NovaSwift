@@ -86,26 +86,31 @@ struct AuthenticHUDView: View {
             ? min(frac, Double(model.jumps) * 100 / model.maxFuel)
             : frac
         let partialFrac = max(0, frac - fullFrac)
-        // Whole-jump portion, left-anchored.
-        if fullFrac > 0 {
-            Rectangle().fill(color(style.intf.fuelFull))
-                .novaPlace(layout, x: CGFloat(r.left), y: CGFloat(r.top),
-                           w: CGFloat(r.width) * fullFrac, h: CGFloat(r.height))
-        }
-        // Partial (sub-jump) remainder, butted against the whole-jump portion.
-        if partialFrac > 0 {
-            Rectangle().fill(color(style.intf.fuelPartial))
-                .novaPlace(layout, x: CGFloat(r.left) + CGFloat(r.width) * fullFrac, y: CGFloat(r.top),
-                           w: CGFloat(r.width) * partialFrac, h: CGFloat(r.height))
-        }
+        // Whole-jump portion, then the sub-jump remainder butted against it.
+        if fullFrac > 0 { segment(layout, r, from: 0, to: fullFrac, style.intf.fuelFull) }
+        if partialFrac > 0 { segment(layout, r, from: fullFrac, to: frac, style.intf.fuelPartial) }
     }
 
-    /// A status bar drawn left-anchored inside its rect, filled to `value` (0…1).
+    /// A status bar filled to `value` (0…1) from its rect's anchored end
+    /// (0x0045ea66 / 0x0045ebe8).
     private func bar(_ layout: NovaLayout, _ r: NovaRect, _ value: Double, _ c: NovaColor) -> some View {
-        let v = CGFloat(min(1, max(0, value)))
+        segment(layout, r, from: 0, to: min(1, max(0, value)), c)
+    }
+
+    /// The part of a bar rect between fractions `a` and `b` of its length.
+    /// The original fills a wide rect from the left and a tall one (height
+    /// ≥ width) from the bottom, in whole pixels.
+    private func segment(_ layout: NovaLayout, _ r: NovaRect, from a: Double, to b: Double, _ c: NovaColor) -> some View {
+        let w = CGFloat(r.width), h = CGFloat(r.height)
+        let tall = h >= w
+        let len = tall ? h : w
+        let start = (len * CGFloat(a)).rounded(.down), end = (len * CGFloat(b)).rounded(.down)
+        let size = max(0, end - start)
         return Rectangle().fill(color(c))
-            .novaPlace(layout, x: CGFloat(r.left), y: CGFloat(r.top),
-                       w: CGFloat(r.width) * v, h: CGFloat(r.height))
+            .novaPlace(layout,
+                       x: tall ? CGFloat(r.left) : CGFloat(r.left) + start,
+                       y: tall ? CGFloat(r.top) + h - end : CGFloat(r.top),
+                       w: tall ? w : size, h: tall ? size : h)
     }
 
     /// The real target-lock display, laid out like EV Nova's: the target's name
@@ -352,8 +357,8 @@ private struct RadarContactsView: View {
     ///
     /// Without one, the original draws every contact in DimRadar and only the
     /// selected target blinks BrightRadar (OS-05).
-    private func radarColor(_ rel: RadarRelationship) -> Color {
-        if model.hasIFF { return rel.color }
+    private func radarColor(_ rel: RadarRelationship, iff: Color? = nil) -> Color {
+        if model.hasIFF { return iff ?? rel.color }
         return novaSwiftUIColor(dimRadar)
     }
 
@@ -380,6 +385,12 @@ private struct RadarContactsView: View {
                 TimelineView(.periodic(from: .now, by: 0.35)) { timeline in
                     let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.35) % 2 == 0
                     Canvas { ctx, size in
+                        // With an IFF the radar rect is filled black before
+                        // the contacts (0x0045d0a0, L2); without one the
+                        // interface PICT shows through.
+                        if model.hasIFF {
+                            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
+                        }
                         // Interference static (OS-05): this refresh shows only
                         // noise over the whole scope, no contacts.
                         if model.radarStatic {
@@ -395,7 +406,7 @@ private struct RadarContactsView: View {
                         for b in model.planetBlips {
                             let d = radarPlanetBlipDiameter(worldRadius: b.worldRadius)
                             let r = CGRect(x: cx + b.x * radius - d / 2, y: cy + b.y * radius - d / 2, width: d, height: d)
-                            ctx.stroke(Path(ellipseIn: r), with: .color(radarColor(b.relationship)), lineWidth: 1)
+                            ctx.stroke(Path(ellipseIn: r), with: .color(radarColor(b.relationship, iff: b.iffColor)), lineWidth: 1)
                             if b.isTarget && blinkOn {
                                 let ring = r.insetBy(dx: -2.5, dy: -2.5)
                                 ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)
@@ -421,7 +432,7 @@ private struct RadarContactsView: View {
                                 ctx.fill(Path(r), with: .color(novaSwiftUIColor(blinkOn ? brightRadar : dimRadar)))
                                 continue
                             }
-                            ctx.fill(b.large ? Path(r) : Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
+                            ctx.fill(b.large ? Path(r) : Path(ellipseIn: r), with: .color(radarColor(b.relationship, iff: b.iffColor)))
                             if b.isTarget && blinkOn {
                                 let ring = r.insetBy(dx: -2.5, dy: -2.5)
                                 ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)

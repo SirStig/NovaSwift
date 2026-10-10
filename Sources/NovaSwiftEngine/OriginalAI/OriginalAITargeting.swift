@@ -48,6 +48,13 @@ extension OriginalAI {
         return host.ship(target).map { leader(of: $0) == World.playerEntityID } ?? false
     }
 
+    /// `Ship_IsThreatToPlayerSquad` for `ship` in a live world. A ship the
+    /// original AI doesn't run is no threat.
+    public func isThreatToPlayerSquad(_ ship: Ship, world: World) -> Bool {
+        guard let rec = records[ship.entityID] else { return false }
+        return isThreatToPlayerSquad(rec, ship: ship, host: WorldAIHost(world: world, ai: self))
+    }
+
     /// `Ship_IsShipAcquirableAsTarget(candidate, acquirer)` (0x0040faa0):
     /// whether `acquirer` is attacking `candidate` (or one of its squad).
     func isAttacking(_ acquirer: Ship, _ candidate: Ship, host: OriginalAIHost) -> Bool {

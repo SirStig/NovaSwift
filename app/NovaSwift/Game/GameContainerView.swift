@@ -1769,6 +1769,11 @@ struct GameContainerView: View {
         host?.scene.onTravelStellarSelected = { nav.disarmJump() }
         host?.scene.onLandingCleared = { id in postLandingClearance(id) }
         host?.scene.persGrudgeProvider = { id in model.pilot.state.persHoldsGrudge(id) }
+        host?.scene.stellarIFFColorProvider = { id in
+            guard let game = model.data.game, let spob = game.spob(id) else { return nil }
+            let c = RadarIFF.stellarColor(spob, state: model.pilot.state, game: game, system: nav.currentSystemID)
+            return Color(red: Double(c.r) / 65535, green: Double(c.g) / 65535, blue: Double(c.b) / 65535)
+        }
         // Feed a mission special-ship's completed goal back into the story engine
         // (decrement the objective, complete the mission if it was the last one).
         host?.scene.onMissionShipGoalReached = { missionID, goal, _ in

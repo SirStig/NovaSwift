@@ -251,6 +251,9 @@ struct RadarContact {
     /// A ship of 100 t or more seen through a density scanner (oütf ModType
     /// 13): the original draws it as a 3×3 box (0x0045d600; OS-05).
     var large: Bool = false
+    /// The original IFF colour of this contact (0x00465f00 ships, 0x00466030
+    /// stellars), set only while an IFF is owned. The authentic HUD draws it.
+    var iffColor: Color? = nil
 }
 
 /// Maps a stellar object's world-space visual radius to its radar blip diameter
