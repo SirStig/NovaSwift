@@ -1,4 +1,5 @@
 import SwiftUI
+import NovaSwiftKit
 
 /// The transition between the launcher and the game: loads/merges the data set
 /// while showing progress, so entering the game feels distinct and never blocks
@@ -118,7 +119,11 @@ struct LoadingView: View {
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
-                NovaProgressBar(value: progress)
+                if model.settings.modernMainMenu {
+                    NovaProgressBar(value: progress)
+                } else {
+                    ClassicProgressBar(value: progress, rect: model.data.game?.colr()?.progressBar)
+                }
             }
             .frame(maxWidth: 380)
             // The phase label swaps between stages; crossfade it rather than
@@ -197,5 +202,51 @@ private struct NovaProgressBar: View {
         }
         .frame(height: 10)
         .animation(.easeOut(duration: 0.28), value: value)
+    }
+}
+
+/// The original's flat loading bar (see `LoadingProgressBar`): ProgOutline
+/// frame, ProgBright fill inside a 1-px ProgDim frame out to
+/// `left + 1 + fraction·198`, black beyond, sized by cölr ProgressBar and
+/// opening from its middle row one pixel per 2 ticks.
+private struct ClassicProgressBar: View {
+    var value: Double
+    var rect: NovaRect?
+    @Environment(\.novaTheme) private var theme
+    @State private var openingStep = 0
+
+    private var width: Int { max(rect?.width ?? 204, 4) }
+    private var height: Int { max(rect?.height ?? 10, 4) }
+
+    var body: some View {
+        let w = width, h = height
+        Canvas { ctx, _ in
+            func px(_ l: Int, _ t: Int, _ r: Int, _ b: Int) -> CGRect {
+                CGRect(x: l, y: t, width: max(0, r - l), height: max(0, b - t))
+            }
+            func frame(_ r: CGRect, _ c: Color) {
+                guard r.width > 0, r.height > 0 else { return }
+                ctx.stroke(Path(r.insetBy(dx: 0.5, dy: 0.5)), with: .color(c), lineWidth: 1)
+            }
+            if let open = LoadingProgressBar.openingExtent(top: 0, bottom: h, step: openingStep) {
+                frame(px(0, open.top, w, open.bottom), theme.progOutline)
+                ctx.fill(Path(px(1, open.top + 1, w - 1, open.bottom - 1)), with: .color(.black))
+                return
+            }
+            frame(px(0, 0, w, h), theme.progOutline)
+            let fill = LoadingProgressBar.fillRight(left: 0, right: w, done: min(max(value, 0), 1), total: 1)
+            ctx.fill(Path(px(2, 2, fill - 1, h - 2)), with: .color(theme.progBright))
+            frame(px(1, 1, fill, h - 1), theme.progDim)
+            ctx.fill(Path(px(fill, 1, w - 1, h - 1)), with: .color(.black))
+        }
+        .frame(width: CGFloat(w), height: CGFloat(h))
+        .task {
+            // 2 ticks of the original's 60 Hz clock per opening step.
+            while LoadingProgressBar.openingExtent(top: 0, bottom: h, step: openingStep) != nil {
+                try? await Task.sleep(for: .milliseconds(33))
+                if Task.isCancelled { return }
+                openingStep += 1
+            }
+        }
     }
 }

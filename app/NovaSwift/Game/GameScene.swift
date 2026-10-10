@@ -49,6 +49,7 @@ final class GameScene: SKScene {
             world?.playerPersGrudges = persGrudges
             if let e = persSpawnEligible { world?.persSpawnEligible = e }
             if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
+            if let e = missionBoardStandsDown { world?.missionBoardStandsDown = e }
             if let room = playerHoldHasRoom { world?.playerHoldHasRoom = room }
             if let left = stellarStrengthLeft { world?.stellarArmor = left() }
         }
@@ -153,6 +154,8 @@ final class GameScene: SKScene {
             guard let pid = npc.personID, let pers = game.pers(pid), pers.hailQuote >= 1,
                   world.canTarget(npc, by: world.player), !world.player.isEffectivelyCloaked else { continue }
             if npc.disabled != pers.hailQuoteWhenDisabled { continue }
+            // Flags 0x0800 stays silent while the ship is in AI state 2 (0x00433050).
+            if npc.personFlags & 0x0800 != 0, world.originalAI.record(for: npc.entityID)?.state == OriginalAIState.departJump { continue }
             var forced = false
             if pers.hailQuoteWhenAttacking, !npc.disabled {
                 guard !hailQuoted.contains(npc.entityID), world.isThreatToPlayerSquad(npc) else { continue }
@@ -165,7 +168,9 @@ final class GameScene: SKScene {
             guard forced || (hud.isMessageIdle && rested && Double.random(in: 0..<1) < chance) else { continue }
             let quote = game.singleString(pers.hailQuote + 4999) ?? game.stringList(7101)?.string(at: pers.hailQuote)
             guard let quote, !quote.isEmpty else { continue }
-            hud.post(quote, rawCalls: 0x1a4)
+            // `<OSN>` is the speaking përs (0x00426d10 → 0x004444f0); the
+            // HUD's own pass fills the player tags.
+            hud.post(quote.replacingOccurrences(of: "<OSN>", with: pers.name), rawCalls: 0x1a4)
             audio?.play(.uiSelect)
             hailQuoted.insert(npc.entityID)
             lastHailQuote[npc.entityID] = hailQuoteClock
@@ -211,6 +216,13 @@ final class GameScene: SKScene {
     var persSpawnEligible: ((Int) -> Bool)?
     /// Host gate: whether a hull with a non-blank `shïp.AppearOn` may spawn now.
     var shipSpawnEligible: ((Int) -> Bool)?
+    /// The cargo panel's pilot-side figures (0x004612c0): the commodity rows
+    /// (the trade bins, mission cargo excluded), the Special line and the
+    /// fleet's cargo capacity. Polled a few times a second.
+    var cargoPanelProvider: (() -> (rows: [(name: String, tons: Int)], special: String, fleetCapacity: Int))?
+    private var cargoPanelTick = 0
+    /// Host gate: whether boarding mission `id`'s ship stands its attackers down.
+    var missionBoardStandsDown: ((Int) -> Bool)?
     /// The player's mining scoop collected (cargoType, quantity) from a destroyed
     /// asteroid; the host adds it to pilot cargo (clamped to free hold) and returns
     /// the tonnage actually stowed plus the commodity's display name, or nil if the
@@ -291,6 +303,7 @@ final class GameScene: SKScene {
     /// sequence. Entries are removed once `.shipDestroyed` retires the entityID.
     private var npcDeathSequenceStarted: Set<Int> = []
     private var shipSprite: SKSpriteNode?
+    private var debrisPodFrames: [SKTexture]?
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
     private var thruster: SKNode!
@@ -387,6 +400,9 @@ final class GameScene: SKScene {
         let endSize: CGFloat
         let startAlpha: CGFloat
         let drag: CGFloat
+        /// SWParticles (0x0047bdd0): one solid 1-px point, no drag or size change,
+        /// opaque until the last 32 ticks of life.
+        var classic = false
     }
     private var activeParticles: [Particle] = []
     private var particlePool: [SKSpriteNode] = []
@@ -495,6 +511,9 @@ final class GameScene: SKScene {
     /// System murk (`sÿst.Murk`) fog overlay — a camera-space dark veil whose
     /// opacity tracks `World.effectiveMurk(for:)`.
     private var murkFog: SKSpriteNode?
+    private var currentMurk = 0
+    private var debrisPuffNodes: [SKSpriteNode] = []
+    private var murkOrigin = CGPoint.zero
     /// Space backdrop for systems with no `sÿst.BkgndColor` (near-black blue).
     private static let defaultBackdrop = SKColor(red: 0.02, green: 0.02, blue: 0.06, alpha: 1)
     /// Last applied `World.systemBackgroundColor`, so the backdrop/fog only
@@ -620,12 +639,18 @@ final class GameScene: SKScene {
     private var forgivingLanding: Bool { settings.enhancements.forgivingLanding }
     /// The speed below which a landing is allowed, px/s: the forgiving overall
     /// limit, or the original's per-axis 0.75 px/tick.
-    private var landingSpeedLimit: Double { forgivingLanding ? 130 : OriginalClock.perSecond(0.75) }
+    private var landingSpeedLimit: Double { forgivingLanding ? 130 : PlayerLanding.perAxisSpeedLimit }
 
     /// The original's landing envelope (0x00457580): `|dx|` and `|dy|` both
     /// inside `round(spriteWidth × 1.75)` (75 without a sprite).
     private func landingReach(_ body: StellarBody) -> Double {
-        forgivingLanding ? body.radius + 70 : (body.radius * 2 * 1.75).rounded()
+        forgivingLanding ? body.radius + 70 : PlayerLanding.reach(radius: body.radius)
+    }
+
+    /// The original's per-axis speed gate (0.75 px/tick), or the forgiving
+    /// overall limit.
+    private func isSlowEnoughToLand(_ p: Ship) -> Bool {
+        forgivingLanding ? p.velocity.length <= landingSpeedLimit : PlayerLanding.isSlowEnough(p.velocity)
     }
 
     /// Whether `p` may set down on `body` right now.
@@ -741,12 +766,20 @@ final class GameScene: SKScene {
     /// delay (ShipStart-1 goal ships; auxiliary ships).
     func scheduleMissionArrival(missionID: Int, dudeID: Int, count: Int, goal: MissionShipGoal,
                                 behavior: MissionShipBehavior, auxiliary: Bool,
+                                preferredShipID: Int? = nil,
                                 name: String = "", subtitle: String = "") {
         guard let world else { return }
         let delay = auxiliary ? world.missionAuxDelay() : world.missionRearmDelay(goal: goal, behavior: behavior)
         world.scheduleMissionArrival(missionID: missionID, dudeID: dudeID, count: count, goal: goal,
                                      behavior: behavior, auxiliary: auxiliary, delayCalls: delay,
+                                     preferredShipID: preferredShipID,
                                      name: name, subtitle: subtitle)
+    }
+
+    /// Live auxiliary ships per mission, collected once as the player leaves
+    /// the system (0x0041ad50).
+    func collectSurvivingAuxiliaryShips() -> [Int: Int] {
+        world?.collectSurvivingAuxiliaryShips() ?? [:]
     }
 
     /// Whether one of `missionID`'s live ships is in view — inside the visible
@@ -793,11 +826,12 @@ final class GameScene: SKScene {
                            arrival: World.ArrivalMode = .hyperspace,
                            navStellarIndex: Int? = nil,
                            startsCloaked: Bool = false,
+                           preferredShipID: Int? = nil,
                            name: String = "", subtitle: String = "") -> [Int] {
         world?.spawnMissionShips(missionID: missionID, dudeID: dudeID, count: count,
                                  goal: goal, behavior: behavior, government: government,
                                  arrival: arrival, navStellarIndex: navStellarIndex,
-                                 startsCloaked: startsCloaked,
+                                 startsCloaked: startsCloaked, preferredShipID: preferredShipID,
                                  name: name, subtitle: subtitle) ?? []
     }
 
@@ -829,6 +863,9 @@ final class GameScene: SKScene {
         guard world?.systemContext.bodies.contains(where: { $0.id == spobID && isPlayerLandTarget($0) }) == true else { return false }
         autoLandTargetID = spobID
         selectedPlanetID = spobID
+        // The autopilot is the Land press: request clearance so the 250 px arm
+        // runs for this body, or `canLand` never passes and it hovers forever.
+        if !forgivingLanding, landingRequestID != spobID { requestLandingClearance(spobID) }
         return true
     }
 
@@ -948,22 +985,12 @@ final class GameScene: SKScene {
     /// The Classic HUD's target reticles: four 16-px corner cicns each, for
     /// the ship target (cicn 10008 + frame, 0x0042ede0) and the selected
     /// stellar (cicn 10000 + frame, 0x0042eac0).
-    private var shipReticleCorners: [SKSpriteNode] = []
-    private var planetReticleCorners: [SKSpriteNode] = []
     private var cicnTextureCache: [Int: SKTexture?] = [:]
     /// The reticle zoom-in (0x00735494 / 0x00735490): 256 px when a target is
     /// picked on screen, shrinking 60 px a tick to 0.
-    private var shipReticleZoom: CGFloat = 0
-    private var planetReticleZoom: CGFloat = 0
-    private var lastReticleClock: Double = 0
     private var npcNodes: [Int: NPCNode] = [:]
     private var asteroidNodes: [Int: AsteroidNode] = [:]
     private var asteroidTextureCache: [Int: [SKTexture]] = [:]
-    /// Active `loopSound` beam voices, keyed by "`shooterID`:`mountIndex`" —
-    /// repositioned every frame in `update(_:)` so a firing ship's continuous
-    /// beam loop pans/attenuates as it (or the player) moves, and stopped when
-    /// the world emits `.beamLoopStop` or the shooter no longer resolves.
-    private var activeBeamLoops: [String: (shooterID: Int, soundID: Int)] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
     private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
     private var npcShieldCache: [Int: [SKTexture]] = [:]
@@ -979,6 +1006,8 @@ final class GameScene: SKScene {
         let container = SKNode()
         var stars: [SKSpriteNode] = []
         var bases: [CGPoint] = []
+        /// Original field only: each star's extra drift over the world scroll.
+        var factors: [CGFloat] = []
         let parallax: CGFloat
         let tile: CGFloat
         init(parallax: CGFloat, tile: CGFloat) { self.parallax = parallax; self.tile = tile }
@@ -1116,7 +1145,7 @@ final class GameScene: SKScene {
     }
 
     override func didMove(to view: SKView) {
-        backgroundColor = Self.defaultBackdrop
+        backgroundColor = settings.modernHUD ? Self.defaultBackdrop : .black
         scaleMode = .resizeFill
         #if os(macOS)
         // Needed for `mouseMoved` (the "Aim toward mouse cursor" option) to fire;
@@ -1132,13 +1161,13 @@ final class GameScene: SKScene {
         applySystemBackdrop()
         buildStarfield()
         buildPlanets()
-        npcLayer.zPosition = 9
+        npcLayer.zPosition = 0          // ship z is banded per container (see syncNPCs)
         addChild(npcLayer)
-        projectileLayer.zPosition = 11
+        projectileLayer.zPosition = 8   // shots draw under ships (0x004ab9d4 layer chain)
         addChild(projectileLayer)
         effectsLayer.zPosition = 12
         addChild(effectsLayer)
-        selectionLayer.zPosition = 13
+        selectionLayer.zPosition = 40   // cursors on top
         for bracket in [shipBracket, planetBracket] {
             bracket.fillColor = .clear
             bracket.lineWidth = 1.5
@@ -1148,7 +1177,7 @@ final class GameScene: SKScene {
         addChild(selectionLayer)
         // AI debug overlay sits above ships/selection but below transient
         // effects; stays empty until the debug suite turns it on.
-        aiDebugLayer.zPosition = 14
+        aiDebugLayer.zPosition = 45
         addChild(aiDebugLayer)
         buildShip()
         if arrivedViaJump {
@@ -1329,7 +1358,38 @@ final class GameScene: SKScene {
         max(1600, max(size.width, size.height) * cameraZoom * 1.3)
     }
 
+    /// Classic/Enhanced draw the original's ambient field (0x0046ebf0): at most
+    /// 20 opaque spïn-700 stars at native size, each streaming past at
+    /// (1 + Random(35)·0.01)× the world's scroll. Nova Swift keeps the dense
+    /// three-layer field.
+    private var usesOriginalStarfield: Bool { !settings.modernHUD }
+
+    private func buildOriginalStarfield() {
+        let frames = galaxy?.game.starfieldSprite().map { SpriteTextures.rotationFrames(from: $0, rotationCount: 16) } ?? []
+        let count = OriginalRendering.starCount(viewHeight: Double(size.height * cameraZoom))
+        let tile = requiredStarTile
+        let layer = StarLayer(parallax: 1, tile: tile)
+        layer.container.zPosition = -100
+        for _ in 0..<count {
+            let base = CGPoint(x: .random(in: -tile/2...tile/2), y: .random(in: -tile/2...tile/2))
+            let star: SKSpriteNode
+            if let tex = frames.randomElement() {
+                tex.filteringMode = spriteFilter
+                star = SKSpriteNode(texture: tex)
+            } else {
+                star = SKSpriteNode(color: .white, size: CGSize(width: 2, height: 2))
+            }
+            layer.stars.append(star)
+            layer.bases.append(base)
+            layer.factors.append(CGFloat(OriginalRendering.starFactor(random35: Int.random(in: 0..<35), parallax: true)))
+            layer.container.addChild(star)
+        }
+        addChild(layer.container)
+        starLayers.append(layer)
+    }
+
     private func buildStarfield() {
+        if usesOriginalStarfield { buildOriginalStarfield(); return }
         let density = max(0.2, settings.starfieldDensity)
         // Parallax = each layer's scroll speed as a fraction of ship motion. EV Nova's
         // field barely parallaxes and scrolls close to 1:1, so we push these up (near
@@ -1374,7 +1434,10 @@ final class GameScene: SKScene {
     /// an iOS rotation) — otherwise stars would only fill the old, smaller area.
     override func didChangeSize(_ oldSize: CGSize) {
         super.didChangeSize(oldSize)
-        guard !starLayers.isEmpty, requiredStarTile > starLayers[0].tile else { return }
+        guard !starLayers.isEmpty,
+              requiredStarTile > starLayers[0].tile
+                || (usesOriginalStarfield && starLayers[0].stars.count != OriginalRendering.starCount(viewHeight: Double(size.height * cameraZoom)))
+        else { return }
         for layer in starLayers { layer.container.removeFromParent() }
         starLayers.removeAll()
         buildStarfield()
@@ -1382,13 +1445,14 @@ final class GameScene: SKScene {
 
     private func buildShip() {
         let node = SKNode()
-        node.zPosition = 10
+        node.zPosition = 9.5   // same band as NPC ships, drawn last
 
         // Real engine-glow art, added first so it renders behind the hull.
         if let first = engineGlowTextures.first {
             let glow = SKSpriteNode(texture: first)
             glow.texture?.filteringMode = spriteFilter
             glow.blendMode = .add
+            glow.zPosition = 0.45   // glow sits above the hull and alt layers (0x004af020)
             glow.isHidden = true
             node.addChild(glow)
             engineGlowSprite = glow
@@ -1397,17 +1461,9 @@ final class GameScene: SKScene {
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = spriteFilter
-            // `oütf` ModType 43 (paint): a deliberately-chosen custom hull
-            // color overrides the government's own subtle tint outright,
-            // rather than blending with it — there's no sane way to mix "the
-            // player chose this color" with "this government's fleet color."
-            if let paint = world.player.paintColor {
-                sprite.color = SKColor(red: CGFloat(paint.r), green: CGFloat(paint.g),
-                                       blue: CGFloat(paint.b), alpha: 1)
-                sprite.colorBlendFactor = 0.7
-            } else {
-                applyGovernmentShipColor(to: sprite, government: world.player.government)
-            }
+            // The original's tint resolver (0x0046e470): the player gets only the
+            // oütf ModType 43 paint, never the gövt colour.
+            applyShipTint(to: sprite, isPlayer: true, persColor: nil, government: world.player.government)
             node.addChild(sprite)
             shipSprite = sprite
             shipRadius = max(first.size().width, first.size().height) / 2
@@ -1477,6 +1533,7 @@ final class GameScene: SKScene {
             let shield = SKSpriteNode(texture: first)
             shield.texture?.filteringMode = spriteFilter
             shield.zPosition = 1
+            shield.blendMode = .add   // shield layer is additive in the original
             shield.isHidden = true
             node.addChild(shield)
             shieldSprite = shield
@@ -1703,13 +1760,13 @@ final class GameScene: SKScene {
         if intent.firePrimary, !wasFiring { onPlayerFired?() }
         wasFiring = intent.firePrimary
         effectClock += dt
-        updateWarnings(dt: dt)
-        updateBeamLoopPositions(listener: scenePos)
         updateFlashes(dt)
         updateParticles(dt)
+        updateSmokePuffs(dt)
         updateSpriteAnims(dt)
         lap("effects")
         syncProjectiles()
+        syncDebrisPuffs()
         lap("sync.projectiles")
         syncBeams()
         lap("sync.beams")
@@ -1758,7 +1815,7 @@ final class GameScene: SKScene {
             alt.texture = altTextures[hullAnim.frameIndex(set: set, heading: heading, count: altTextures.count)]
         }
         if let wg = weaponGlowNode, !weaponGlowTextures.isEmpty {
-            weaponGlowFlare *= hullAnim.weaponGlowDecay(dt: dt)
+            weaponGlowFlare = hullAnim.weaponGlowAfter(weaponGlowFlare, dt: dt)
             wg.texture = weaponGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: weaponGlowTextures.count)]
             wg.isHidden = weaponGlowFlare <= 0.02
             wg.alpha = weaponGlowFlare
@@ -1820,13 +1877,23 @@ final class GameScene: SKScene {
         // sequence left the Land prompt live, so dying next to a planet let the
         // player simply set down and walk away from their own destruction.
         canLandNow = p.isAlive && !world.playerInEscapePod && bestBody.map { canLand(on: $0, p) } ?? false
-        if let id = bestID, inReach, p.isAlive {
-            let name = world.systemContext.bodies.first { $0.id == id }
-                .flatMap { _ in planetVisuals.first { $0.id == id }?.name } ?? "the spaceport"
-            hud?.landPrompt = canLandNow ? "Press \(landControlLabel()) to land on \(name)"
-                                         : "Slow down to land on \(name)"
+        if let id = bestID, let body = bestBody, inReach, p.isAlive {
+            let name = planetVisuals.first { $0.id == id }?.name ?? "the spaceport"
+            let prompt = PlayerLanding.prompt(canLandNow: canLandNow,
+                                         slowEnough: isSlowEnoughToLand(p),
+                                         needsRequest: !forgivingLanding && !landingClearance.contains(body.id),
+                                         cloaked: p.isEffectivelyCloaked)
+            switch prompt {
+            case .land: hud?.landPrompt = "Press \(landControlLabel()) to land on \(name)"
+            case .request: hud?.landPrompt = "Press \(landControlLabel()) to request landing on \(name)"
+            case .slowDown: hud?.landPrompt = "Slow down to land on \(name)"
+            case .none: hud?.landPrompt = ""
+            }
             hud?.landName = name
-            hud?.landReady = canLandNow
+            // The Land control does something useful (requests clearance or
+            // lands): on touch it must stay pressable before clearance, or the
+            // two-press flow could never start.
+            hud?.landReady = prompt == .land || prompt == .request
         } else {
             hud?.landPrompt = ""
             hud?.landName = ""
@@ -1855,10 +1922,12 @@ final class GameScene: SKScene {
             audio?.play(.redAlert)
         }
         if world.isPlayerDeathTimerRunning {
-            let here = CGPoint(x: world.player.position.x, y: world.player.position.y)
-            audio?.startOrUpdateLoop(key: "klaxxon", soundID: 371, at: here, listener: here)
+            // Klaxxon only plays when no voice already has it (0x0044b120:2856).
+            if audio?.isPlaying(371) != true {
+                audio?.playSound(371, priority: OriginalAudio.Priority.klaxxon)
+            }
         } else if klaxxonOn {
-            audio?.stopLoop(key: "klaxxon")
+            audio?.stopSound(371)
         }
         klaxxonOn = world.isPlayerDeathTimerRunning
         updateRedAlertBlink()
@@ -2345,7 +2414,7 @@ final class GameScene: SKScene {
         // with before its real radius (needed for `formationStation`) is known.
         let slot = world.playerEscorts.count
         let heading = AIBrain.wingHeading(for: player)
-        guard let ship = galaxy.makeLoadedShip(shipType, government: player.government,
+        guard let ship = galaxy.makeLoadedShip(shipType, government: independentGovt,
                                                at: player.position, angle: heading,
                                                skillScale: galaxy.skillVarianceScale(classOf: nil, rng: &world.rng)) else { return false }
         ship.position = AIBrain.formationStation(leaderPosition: player.position, leaderRadius: player.radius,
@@ -2379,6 +2448,13 @@ final class GameScene: SKScene {
                 world.addNPC(ship, arrival: .hyperspace)
             }
         } else {
+            // #21 (0x00422400 from a pilot load): around the player at
+            // `Rand(50) + 50` px on a `Rand(360)` bearing, on the player's
+            // heading.
+            let bearing = Double(world.rng.range(360)) * .pi / 180
+            let dist = Double(world.rng.range(50) + 50)
+            ship.position = player.position + Vec2.heading(bearing) * dist
+            ship.angle = player.angle
             world.addNPC(ship, arrival: .populate)
         }
         world.recruitEscort(ship)
@@ -2472,12 +2548,27 @@ final class GameScene: SKScene {
         guard let world else { return }
         for event in world.drainEvents() {
             switch event {
+            case let .debrisPuffSound(at):
+                audio?.play(372, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+            case let .areaBlast(at, blastRadius):
+                spawnAreaBlast(at: CGPoint(x: at.x, y: at.y), blastRadius: blastRadius)
+            case let .playerCloakChanged(engaging):
+                audio?.playSound(engaging ? 381 : 380)
+            case let .combatChatter(soundID):
+                let length = audio?.playChatter(soundID) ?? 0
+                if length > 0 {
+                    run(.sequence([.wait(forDuration: length),
+                                   .run { [weak self] in self?.world?.combatChatterPlaying = false }]))
+                } else {
+                    world.combatChatterPlaying = false
+                }
             case let .weaponFired(shooterID, at, _, soundID, weaponID):
                 // Positional for every shooter — the player's own shots report
                 // right at the listener (near-zero distance = full volume), NPC
                 // fire attenuates/pans naturally by distance.
                 if let soundID {
-                    audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                    audio?.playWeaponFire(soundID: soundID, weaponID: weaponID, isPlayer: shooterID == 0,
+                                          at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 }
                 // Flash the shooter's weapon-glow overlay (shän weapon layer), if
                 // its hull has one — but only for a weapon that actually declares
@@ -2501,7 +2592,8 @@ final class GameScene: SKScene {
                 // plays unconditionally every shot — so a held trigger should
                 // click on every shot here too, not just the first.
                 if let soundID {
-                    audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
+                    audio?.playWeaponFire(soundID: soundID, weaponID: weaponID, isPlayer: shooterID == 0,
+                                          at: CGPoint(x: from.x, y: from.y), listener: scenePos)
                 }
                 // Beams fire every reload tick same as bullets, so mirror
                 // .weaponFired's ship-weapon-sprite flash here — beam guidance
@@ -2515,20 +2607,14 @@ final class GameScene: SKScene {
                         node.weaponGlowFlare = 1
                     }
                 }
-            case let .beamLoopStart(shooterID, mountIndex, soundID):
-                // Beam geometry is now drawn from `world.activeBeams` in
-                // `syncBeams()`; this event only drives the continuous audio loop.
-                let key = "\(shooterID):\(mountIndex)"
-                if let soundID {
-                    activeBeamLoops[key] = (shooterID, soundID)
-                }
-            case let .beamLoopStop(shooterID, mountIndex):
-                let key = "\(shooterID):\(mountIndex)"
-                activeBeamLoops.removeValue(forKey: key)
-                audio?.stopLoop(key: key)
+            case .beamLoopStart, .beamLoopStop:
+                // Continuous beams are drawn from `world.activeBeams`; their
+                // sound is the per-shot `.beam` one (wëap Flags 0x0010 =
+                // retrigger only when that snd has ended), not a loop.
+                break
             case let .explosion(at, radius, soundID, boomID):
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius), boomID: boomID)
-                audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                if let soundID { audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos) }
                 addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
             case let .shieldHit(at, weaponID):
                 spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: true)
@@ -2687,8 +2773,9 @@ final class GameScene: SKScene {
                 let point = CGPoint(x: at.x, y: at.y)
                 let radius = CGFloat(world.systemContext.bodies.first { $0.id == spobID }?.radius ?? 64)
                 spawnExplosion(at: point, radius: max(48, radius), boomID: boomID)
-                audio?.play(boomID.flatMap { galaxy?.game.boom($0)?.soundID } ?? 303,
-                            at: point, listener: scenePos)
+                if let sound = boomID.flatMap({ galaxy?.game.boom($0)?.soundID }) {
+                    audio?.play(sound, at: point, listener: scenePos)
+                }
                 addShake(at: point, radius: max(48, radius))
                 // `Explosion` in the 1000-1063 band means "Explosion + Sparks".
                 if sparks {
@@ -2774,11 +2861,15 @@ final class GameScene: SKScene {
     /// leave after accepting its LinkMission"). A no-op if that person isn't
     /// currently spawned in this system.
     /// AI-39: swap a përs ship for its accepted mission's special ship.
-    func replacePersWithMissionShip(personID: Int, mission: MissionRes, name: String, subtitle: String) {
-        guard let world, let ship = world.npcs.first(where: { $0.personID == personID }) else { return }
-        world.replaceWithMissionShip(entityID: ship.entityID, missionID: mission.id, dudeID: mission.shipDude,
-                                     goal: mission.shipGoal, behavior: mission.shipBehaviorMode,
-                                     name: name, subtitle: subtitle)
+    /// Returns the hull the replacement flies, or nil when nothing was replaced.
+    @discardableResult
+    func replacePersWithMissionShip(personID: Int, mission: MissionRes, name: String, subtitle: String) -> Int? {
+        guard let world, let ship = world.npcs.first(where: { $0.personID == personID }) else { return nil }
+        guard let id = world.replaceWithMissionShip(entityID: ship.entityID, missionID: mission.id,
+                                                    dudeID: mission.shipDude,
+                                                    goal: mission.shipGoal, behavior: mission.shipBehaviorMode,
+                                                    name: name, subtitle: subtitle) else { return nil }
+        return world.ship(id: id)?.shipTypeID
     }
 
     func sendPersonDeparting(personID: Int) {
@@ -2795,6 +2886,7 @@ final class GameScene: SKScene {
         world?.playerPersGrudges = persGrudges
         if let e = persSpawnEligible { world?.persSpawnEligible = e }
         if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
+        if let e = missionBoardStandsDown { world?.missionBoardStandsDown = e }
     }
 
     /// Take the credits aboard a boarded hulk; returns the amount.
@@ -2815,9 +2907,9 @@ final class GameScene: SKScene {
     /// Siphon a boarded hulk's jump fuel into the player; returns units taken.
     func plunderFuel(_ id: Int) -> Double { world?.takePlunderFuel(from: id) ?? 0 }
     /// Ammunition a boarded hulk holds for weapons the player also carries.
-    func ammoAboard(_ id: Int) -> Int { world?.ammoAboard(id) ?? 0 }
+    func ammoAboard(_ id: Int, freeMass: Int = .max) -> Int { world?.ammoAboard(id, freeMass: freeMass) ?? 0 }
     /// Transfer a boarded hulk's matching ammunition into the player's weapons.
-    func plunderAmmo(_ id: Int) -> Int { world?.takePlunderAmmo(from: id) ?? 0 }
+    func plunderAmmo(_ id: Int, freeMass: Int = .max) -> Int { world?.takePlunderAmmo(from: id, freeMass: freeMass) ?? 0 }
 
     /// Roll to capture a boarded hulk. On success returns the captured hull's
     /// live entityID / shïp type / name, but doesn't decide what happens to
@@ -2825,9 +2917,23 @@ final class GameScene: SKScene {
     /// and commits via `recruitCapturedEscort` or its own flagship swap.
     /// nil on failure.
     func attemptCapture(_ id: Int) -> (entityID: Int, shipType: Int, name: String)? {
-        guard let world, let cap = world.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)) else { return nil }
+        guard let world, let cap = world.attemptCapture(shipID: id, roll: world.rng.range(100)) else { return nil }
         return (id, cap.shipTypeID, cap.name)
     }
+
+    /// The crew-scuttle roll after a successful capture: one in ten, drawn
+    /// from the world's generator (0x00482940).
+    func rollCaptureScuttle() -> Bool { world.rng.range(10) == 0 }
+
+    /// The persistent roster record of a live player escort, if it is one.
+    func escortRecordID(forEntity id: Int) -> Int? { world?.ship(id: id)?.escortRecordID }
+
+    /// The three digits (1-9 each) of the default captured-ship name.
+    func rollCaptureNameDigits() -> String { (0..<3).map { _ in String(world.rng.range(9) + 1) }.joined() }
+
+    /// The player's hull crew; a captain with none sends the prize straight
+    /// into the wing without the take-command question.
+    var playerHullCrew: Int { world.player.crew }
 
     /// Commit the "use as escort" outcome for a hulk `attemptCapture` already
     /// rolled a success for.
@@ -3238,8 +3344,9 @@ final class GameScene: SKScene {
             thruster.isHidden = true
             return
         }
-        thruster.isHidden = !active
-        guard active else { return }
+        // The original draws no plume when a hull has no glow art (Classic).
+        thruster.isHidden = !active || !settings.modernHUD
+        guard active, settings.modernHUD else { return }
         // Sit at the tail (opposite heading) and point backward, with a flicker.
         let back = -angle
         let tail = CGPoint(x: sin(angle) * -shipRadius * 0.7, y: cos(angle) * -shipRadius * 0.7)
@@ -3263,6 +3370,32 @@ final class GameScene: SKScene {
     /// a torpedo points where it flies, a spinning mine animates — falling back to
     /// a soft additive dot for weapons that ship no graphic. Nodes are reused
     /// across frames and re-textured in place (cheap); same-weapon volleys batch.
+    /// The 32 debris-puff slots (0x0043b170): drawn where the pool says,
+    /// opaque until the last 32 ticks of life, then fading out.
+    private func syncDebrisPuffs() {
+        if debrisPodFrames == nil {
+            debrisPodFrames = galaxy?.game.shipSprite(Ship.escapePodShipID).map { SpriteTextures.allFrames(from: $0) } ?? []
+        }
+        let frames = debrisPodFrames ?? []
+        while debrisPuffNodes.count < world.debrisPuffs.count {
+            let node = SKSpriteNode(texture: frames.first ?? projectileTexture)
+            node.zPosition = 13
+            effectsLayer.addChild(node)
+            debrisPuffNodes.append(node)
+        }
+        for (node, puff) in zip(debrisPuffNodes, world.debrisPuffs) {
+            guard puff.life > 0 else { node.isHidden = true; continue }
+            node.isHidden = false
+            node.position = CGPoint(x: puff.position.x, y: puff.position.y)
+            node.alpha = CGFloat(puff.opacity)
+            // Sprite_SetCurrentFrame: the pod frame follows the velocity bearing.
+            if !frames.isEmpty {
+                let bearing = OriginalMath.bearingRadians(of: puff.velocity) * 180 / .pi
+                node.texture = frames[max(0, min(frames.count - 1, Int(Double(frames.count) * bearing / 360)))]
+            }
+        }
+    }
+
     private func syncProjectiles() {
         let shots = world.projectiles
         while projectileNodes.count < shots.count {
@@ -3295,6 +3428,7 @@ final class GameScene: SKScene {
                 node.size = node.texture?.size() ?? CGSize(width: 12, height: 12)
                 node.colorBlendFactor = 0
                 node.blendMode = .alpha
+                applyMurk(to: node, at: node.position)
             } else {
                 // Generic glowing bolt.
                 node.texture = projectileTexture
@@ -3313,7 +3447,10 @@ final class GameScene: SKScene {
             if s.weaponID >= 128, let trail = trailInfo(for: s.weaponID) {
                 let tail = CGPoint(x: node.position.x - CGFloat(cos(s.facing)) * 4,
                                    y: node.position.y - CGFloat(sin(s.facing)) * 4)
-                if trail.smoke {
+                if trail.smoke, !settings.modernHUD,
+                   spawnSmokePuff(at: tail, weaponID: s.weaponID, big: trail.big) {
+                    // drawn as the original's cicn smoke sprite
+                } else if trail.smoke {
                     spawnParticles(at: tail, count: 1, color: trail.color,
                                    speed: trail.big ? 12 : 8, life: trail.big ? 0.9 : 0.55,
                                    size: trail.big ? 10 : 6, additive: false, grow: true, drag: 2.5)
@@ -3368,7 +3505,7 @@ final class GameScene: SKScene {
             node.anchorPoint = CGPoint(x: 0, y: 0.5)   // pivot at the muzzle end
             node.colorBlendFactor = 1
             node.blendMode = .add
-            node.zPosition = 12
+            node.zPosition = 20   // beams draw above explosions
             effectsLayer.addChild(node)
             beamNodes.append(node)
         }
@@ -3501,7 +3638,7 @@ final class GameScene: SKScene {
             s.fillColor = .clear
             s.lineCap = .round
             s.blendMode = .add
-            s.zPosition = 12
+            s.zPosition = 20
             s.isAntialiased = true
             effectsLayer.addChild(s)
             lightningNodes.append(s)
@@ -3809,6 +3946,8 @@ final class GameScene: SKScene {
             seen.insert(npc.entityID)
             let node = npcNodes[npc.entityID] ?? makeNPCNode(for: npc)
             node.container.position = renderPoint(npc)
+            // Bands: disabled hulks sink under shots (8), escorts sit under other ships (9).
+            node.container.zPosition = npc.disabled ? 6.5 : (npc.escortRecordID != nil ? 8.5 : 9)
             node.container.alpha = screenRevealsCloaked ? 1.0 : CGFloat(1 - npc.effectiveCloakLevel)
             node.animClock += frameDT
             node.blinkClock += frameDT
@@ -3822,6 +3961,7 @@ final class GameScene: SKScene {
                 tri.zRotation = -CGFloat(renderHeading(npc))
             }
             updateIonizeTint(node.ionizeTint, hullTexture: node.sprite?.texture, ship: npc)
+            if let hull = node.sprite { applyMurk(to: hull, at: node.container.position) }
             if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {
                 glow.texture = node.engineGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.engineGlowTextures.count)]
             }
@@ -3840,7 +3980,7 @@ final class GameScene: SKScene {
                 alt.texture = node.altTextures[node.hullAnim.frameIndex(set: altSet, heading: heading, count: node.altTextures.count)]
             }
             if let wg = node.weaponGlow, !node.weaponGlowTextures.isEmpty {
-                node.weaponGlowFlare *= node.hullAnim.weaponGlowDecay(dt: frameDT)
+                node.weaponGlowFlare = node.hullAnim.weaponGlowAfter(node.weaponGlowFlare, dt: frameDT)
                 wg.texture = node.weaponGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.weaponGlowTextures.count)]
                 wg.isHidden = node.weaponGlowFlare <= 0.02
                 wg.alpha = node.weaponGlowFlare
@@ -3886,6 +4026,7 @@ final class GameScene: SKScene {
             let glow = SKSpriteNode(texture: first)
             glow.texture?.filteringMode = spriteFilter
             glow.blendMode = .add
+            glow.zPosition = 0.45
             glow.isHidden = true
             n.container.addChild(glow)
             n.engineGlow = glow
@@ -3896,7 +4037,9 @@ final class GameScene: SKScene {
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = spriteFilter
-            applyGovernmentShipColor(to: sprite, government: npc.government)
+            applyShipTint(to: sprite, isPlayer: false,
+                          persColor: npc.personID.flatMap { galaxy?.game.pers($0) }?.color,
+                          government: npc.government)
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
@@ -3976,6 +4119,7 @@ final class GameScene: SKScene {
             let shield = SKSpriteNode(texture: first)
             shield.texture?.filteringMode = spriteFilter
             shield.zPosition = 1
+            shield.blendMode = .add
             shield.isHidden = true
             n.container.addChild(shield)
             n.shield = shield
@@ -4099,7 +4243,7 @@ final class GameScene: SKScene {
         guard c != appliedBackdrop else { return }
         appliedBackdrop = c
         if c == NovaColor(r: 0, g: 0, b: 0) {
-            backgroundColor = Self.defaultBackdrop
+            backgroundColor = settings.modernHUD ? Self.defaultBackdrop : .black
             murkFog?.color = .black
         } else {
             let tint = SKColor(red: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
@@ -4110,17 +4254,42 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Fog opacity tracks `World.effectiveMurk(for:)` (0 = clear, 100 = the
-    /// Bible's own "question your glasses prescription"); a negative value
-    /// hides the starfield entirely instead of thickening the fog.
+    /// Murk is a per-sprite distance fog (0x00438db0), not a veil: each
+    /// ship, stellar and shot is mixed toward the system's background colour
+    /// by `MurkFog.level / 32`. A negative murk hides the starfield instead.
     private func updateMurkFog() {
         applySystemBackdrop()   // re-tints after an in-place jump world swap
         let murk = world.effectiveMurk(for: world.player)
-        for layer in starLayers { layer.container.isHidden = world.systemMurk < 0 }
-        guard let murkFog else { return }
-        let alpha = CGFloat(max(0, min(100, murk))) / 100 * 0.85
-        murkFog.alpha = alpha
-        murkFog.isHidden = alpha <= 0.001
+        currentMurk = murk
+        murkOrigin = renderPoint(world.player)
+        // The background sprites take their own fixed level (0x0042e590).
+        let starAlpha = 1 - CGFloat(MurkFog.backgroundLevel(murk: max(0, murk))) / 32
+        for layer in starLayers {
+            layer.container.isHidden = murk < 0
+            layer.container.alpha = starAlpha
+        }
+        murkFog?.isHidden = true
+        for node in planetNodes {
+            if let sprite = node as? SKSpriteNode { applyMurk(to: sprite, at: node.position) }
+        }
+    }
+
+    /// Mixes `sprite` toward the background colour for its distance from the
+    /// player; a sprite whose tint is in use for something else is left alone.
+    private func applyMurk(to sprite: SKSpriteNode, at point: CGPoint) {
+        let level = MurkFog.level(murk: currentMurk, dx: Double(point.x - murkOrigin.x),
+                                  dy: Double(point.y - murkOrigin.y))
+        if level == 0 {
+            if sprite.userData?["murk"] != nil { sprite.colorBlendFactor = 0; sprite.userData?["murk"] = nil }
+            return
+        }
+        guard sprite.colorBlendFactor == 0 || sprite.userData?["murk"] != nil else { return }
+        let c = world.systemBackgroundColor
+        sprite.color = SKColor(red: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
+                               blue: CGFloat(c.b) / 255, alpha: 1)
+        sprite.colorBlendFactor = CGFloat(level) / 32
+        if sprite.userData == nil { sprite.userData = NSMutableDictionary() }
+        sprite.userData?["murk"] = true
     }
 
     /// Begin the player's hyperspace jump to `destSystemID` along the map
@@ -4152,10 +4321,10 @@ final class GameScene: SKScene {
             // off the instant the jump commits.
             audio?.startHyperspaceCharge()
         } else {
-            if hyperspaceCueTicks60 == nil { hyperspaceCueTicks60 = galaxy?.hyperspaceCueTicks60 }
+            if hyperspaceCueTicks60 == nil { hyperspaceCueTicks60 = galaxy?.hyperspaceWarpUpSoundTicks60 }
             let multiplier = galaxy?.jumpDurationMultiplier(hull: world.player.shipTypeID ?? -1) ?? 1.3
             world.playerJump = PlayerHyperjump(bearing: outboundHeading, fastJump: fastJump,
-                                               cueTicks60: hyperspaceCueTicks60 ?? PlayerHyperjump.defaultCueTicks60,
+                                               soundTicks60: hyperspaceCueTicks60 ?? 0,
                                                multiplier: multiplier)
             jumpPhase = .engaged
             jumpSpinUpStarted = false
@@ -4207,7 +4376,8 @@ final class GameScene: SKScene {
         jumpClock = 0
         world.player.velocity = Vec2()      // you're sitting on the gate — no run-up
         jumpPhase = .flash                   // straight to the white-out; no maneuver
-        audio?.startHyperspaceCharge()
+        // Gate travel has no Warp up; the original plays only Warp out
+        // (Stellar_EnterHypergate 0x00456480), which the arrival does.
         Log.scene.debug("beginGateJump -> system \(systemID), emerge at gate \(destGateID)")
     }
 
@@ -4233,7 +4403,10 @@ final class GameScene: SKScene {
             clearCannotJumpOverlays()                  // every tick the jump timer runs (FL-23)
             if jump.phase == .spinUp, !jumpSpinUpStarted {
                 jumpSpinUpStarted = true
-                audio?.startHyperspaceCharge()         // the Warp up cue starts with the spin-up
+                audio?.startWarpUp(multiplier: jump.multiplier)   // played at the hull's multiplier
+            }
+            if jump.phase == .spinUp, jump.warpUpCut {
+                audio?.stopWarpUp()                    // cut at 350 / multiplier (FL-04)
             }
             if jump.phase == .spinUp, jump.progress > 0 {
                 let ramp = min(jump.progress, 50) / 50
@@ -4248,7 +4421,7 @@ final class GameScene: SKScene {
             switch jump.phase {
             case .fired:
                 jumpCommitted = true
-                audio?.stopHyperspaceCharge()
+                audio?.stopWarpUp()
                 // The abandoned fighters ride on the arrival line (UI-11).
                 lastJumpAbandonedFighters = world.returnJumpingFighters()
                 jumpCommit?()                          // app model: fuel, route, days, pilot
@@ -4262,7 +4435,7 @@ final class GameScene: SKScene {
                 // Ship disabled - hyperspace field collapsed (STR# 2002 #35): the
                 // boom flash and Warp out, no system change.
                 world.playerJump = nil
-                audio?.stopHyperspaceCharge()
+                audio?.stopWarpUp()
                 audio?.play(.hyperspaceArrive)
                 hud?.post(galaxy?.game.stringList(2002)?.string(at: 35)
                           ?? "Ship disabled - hyperspace field collapsed.")
@@ -4663,8 +4836,6 @@ final class GameScene: SKScene {
         asteroidNodes.removeAll()
         for (_, n) in freeflightNodes { n.container.removeFromParent() }
         freeflightNodes.removeAll()
-        for (key, _) in activeBeamLoops { audio?.stopLoop(key: key) }
-        activeBeamLoops.removeAll()
         // Beam + flash sprites live on effectsLayer, cleared just below; drop our
         // handles so the pools rebuild for the new system.
         effectsLayer.removeAllChildren()
@@ -4674,6 +4845,8 @@ final class GameScene: SKScene {
         flashPool.removeAll()
         activeParticles.removeAll()
         particlePool.removeAll()
+        for p in smokePuffs { p.node.removeFromParent() }
+        smokePuffs.removeAll()
         activeAnims.removeAll()
         animPool.removeAll()
         for (_, n) in aiLabelNodes { n.removeFromParent() }
@@ -4832,8 +5005,8 @@ final class GameScene: SKScene {
             return
         }
         guard let thruster = n.thruster else { return }
-        thruster.isHidden = !active
-        guard active else { return }
+        thruster.isHidden = !active || !settings.modernHUD
+        guard active, settings.modernHUD else { return }
         let tail = CGPoint(x: sin(npc.angle) * -Double(n.radius) * 0.7,
                            y: cos(npc.angle) * -Double(n.radius) * 0.7)
         thruster.position = tail
@@ -5164,6 +5337,24 @@ final class GameScene: SKScene {
     /// skipped and only governments that actually specify a colour recolour their
     /// fleet. A partial `colorBlendFactor` tints the hull while keeping its
     /// shading, rather than flattening it to a silhouette.
+    private func applyShipTint(to sprite: SKSpriteNode, isPlayer: Bool, persColor: Int?, government: Int) {
+        var paint555: Int?
+        if isPlayer, let p = world.player.paintColor {
+            func c5(_ v: Double) -> Int { max(0, min(31, Int((v * 31).rounded()))) }
+            paint555 = (c5(Double(p.r)) << 10) | (c5(Double(p.g)) << 5) | c5(Double(p.b))
+        }
+        let tint = OriginalRendering.shipTint(isPlayer: isPlayer, paint555: paint555,
+                                              persColor555: persColor, govtShipColor: nil)
+        if !tint.isNeutral {
+            // A per-channel multiply by v/32.
+            let m = tint.multipliers
+            sprite.color = SKColor(red: m.r, green: m.g, blue: m.b, alpha: 1)
+            sprite.colorBlendFactor = 1
+        } else if !isPlayer, settings.modernHUD {
+            applyGovernmentShipColor(to: sprite, government: government)   // Nova Swift keeps its fleet tint
+        }
+    }
+
     private func applyGovernmentShipColor(to sprite: SKSpriteNode, government: Int) {
         guard let sc = galaxy?.game.govt(government)?.shipColor,
               !(sc.r == 255 && sc.g == 255 && sc.b == 255),
@@ -5260,107 +5451,123 @@ final class GameScene: SKScene {
     /// position, color (relationship for ships; landable blue / not-landable
     /// red for planets, matching the manual), and a lock-on pulse that only
     /// restarts when the locked id actually changes.
+    /// The original's ship target reticle (0x0042ede0): four corner sprites from
+    /// cicn 10008-10023 (4 categories x 4 corners), shown in Classic/Enhanced.
+    private lazy var reticleTextures: [SKTexture] = {
+        guard let res = galaxy?.game.resources else { return [] }
+        var out: [SKTexture] = []
+        for id in 10008..<10024 {
+            guard let r = res.resource(NovaType.cicn, id), let sheet = try? CICN.decode(r.data),
+                  let cg = sheet.makeCGImage() else { return [] }
+            let t = SKTexture(cgImage: cg)
+            t.filteringMode = spriteFilter
+            out.append(t)
+        }
+        return out
+    }()
+    /// The stellar selection cursor: cicn 10000-10007 (0x0042eac0). Frames 0-3
+    /// normally, 4-7 for a destroyed stellar.
+    private lazy var navCursorTextures: [SKTexture] = {
+        guard let res = galaxy?.game.resources else { return [] }
+        var out: [SKTexture] = []
+        for id in 10000..<10008 {
+            guard let r = res.resource(NovaType.cicn, id), let sheet = try? CICN.decode(r.data),
+                  let cg = sheet.makeCGImage() else { return [] }
+            let t = SKTexture(cgImage: cg)
+            t.filteringMode = spriteFilter
+            out.append(t)
+        }
+        return out
+    }()
+    private var navCursorCorners: [SKSpriteNode] = []
+    private var navCursorZoom: CGFloat = 0
+    private var reticleCorners: [SKSpriteNode] = []
+    /// Zoom-in offset: 256 when a target is picked, shrinking ~60 per 30 Hz tick.
+    private var reticleZoom: CGFloat = 0
+
     /// A cicn as a texture (the original's interface sprites are cicn runs).
     private func cicnTexture(_ id: Int) -> SKTexture? {
         if let cached = cicnTextureCache[id] { return cached }
         var tex: SKTexture?
         if let res = galaxy?.game.resources.resource(NovaType.cicn, id),
-           let sheet = try? CICN.decode(res.data) {
-            tex = SpriteTextures.allFrames(from: sheet).first
+           let sheet = try? CICN.decode(res.data), let cg = sheet.makeCGImage() {
+            tex = SKTexture(cgImage: cg)
             tex?.filteringMode = .nearest
         }
         cicnTextureCache[id] = tex
         return tex
     }
 
-    /// Place four corner cicns (`base` + 0…3: top-left, top-right,
-    /// bottom-right, bottom-left) around `center`, each corner's inner edge
-    /// `offset` px from it — the original's
-    /// `(x ∓ offset) − 16 / (x ± offset)` layout. False when the art is missing.
-    private func placeReticle(_ corners: inout [SKSpriteNode], base: Int, center: CGPoint, offset: CGFloat) -> Bool {
-        let textures = (0..<4).map { cicnTexture(base + $0) }
-        guard textures.allSatisfy({ $0 != nil }) else { return false }
-        if corners.isEmpty {
-            corners = (0..<4).map { _ in
-                let n = SKSpriteNode()
-                n.zPosition = 1
+    private func updateShipReticle(ship: Ship, radius: CGFloat, newTarget: Bool) {
+        if reticleCorners.isEmpty {
+            for _ in 0..<4 {
+                let n = SKSpriteNode(texture: reticleTextures[0])
                 selectionLayer.addChild(n)
-                return n
+                reticleCorners.append(n)
             }
         }
-        let signs: [(CGFloat, CGFloat)] = [(-1, 1), (1, 1), (1, -1), (-1, -1)]
-        for i in 0..<4 {
-            let n = corners[i], t = textures[i]!
-            n.texture = t
-            n.size = t.size()
-            n.position = CGPoint(x: center.x + signs[i].0 * (offset + t.size().width / 2),
-                                 y: center.y + signs[i].1 * (offset + t.size().height / 2))
+        if newTarget { reticleZoom = 256 } else { reticleZoom = max(0, reticleZoom - 1800 * CGFloat(frameDT)) }
+        let rel = relationship(for: ship)
+        let base: Int
+        switch world.reticleClass(of: ship) {   // squad / threat / disabled as in 0x0042ede0
+        case .threat: base = 0
+        case .other: base = 4
+        case .squad: base = 8
+        case .disabled: base = 12
+        }
+        let off = radius.rounded(.up) + reticleZoom + 16
+        let sp = renderPoint(ship), cx = sp.x, cy = sp.y
+        let corners = [(-off, off), (off, off), (off, -off), (-off, -off)]
+        for (i, n) in reticleCorners.enumerated() {
+            n.texture = reticleTextures[base + i]
+            n.size = n.texture!.size()
+            n.position = CGPoint(x: cx + corners[i].0, y: cy + corners[i].1)
             n.isHidden = false
         }
-        return true
     }
 
-    private func hideReticle(_ corners: [SKSpriteNode]) { for n in corners { n.isHidden = true } }
-
-    /// Whether `p` is inside the visible playfield (the zoom-in only starts
-    /// when the new target is in view).
-    private func isInView(_ p: CGPoint) -> Bool {
-        let half = CGSize(width: size.width * cameraZoom / 2, height: size.height * cameraZoom / 2)
-        let c = cameraNode.position
-        return abs(p.x - c.x) <= half.width && abs(p.y - c.y) <= half.height
+    private func updateNavCursor(pv: PlanetVisual, newTarget: Bool) {
+        if navCursorCorners.isEmpty {
+            for _ in 0..<4 {
+                let n = SKSpriteNode(texture: navCursorTextures[0])
+                selectionLayer.addChild(n)
+                navCursorCorners.append(n)
+            }
+        }
+        if newTarget { navCursorZoom = 256 } else { navCursorZoom = max(0, navCursorZoom - 1800 * CGFloat(frameDT)) }
+        let base = destroyedStellarIDs.contains(pv.id) ? 4 : 0
+        let half = pv.texture.map { max($0.size().width, $0.size().height) / 2 } ?? 64
+        let off = half.rounded(.up) + navCursorZoom + 16
+        let corners = [(-off, off), (off, off), (off, -off), (-off, -off)]
+        for (i, n) in navCursorCorners.enumerated() {
+            n.texture = navCursorTextures[base + i]
+            n.size = n.texture!.size()
+            n.position = CGPoint(x: pv.position.x + corners[i].0, y: pv.position.y + corners[i].1)
+            n.isHidden = false
+        }
     }
 
     private func updateSelectionBrackets() {
-        let ticks = CGFloat(max(0, effectClock - lastReticleClock)) * CGFloat(OriginalClock.ticksPerSecond)
-        lastReticleClock = effectClock
-        shipReticleZoom = max(0, shipReticleZoom - 60 * ticks)
-        planetReticleZoom = max(0, planetReticleZoom - 60 * ticks)
-        updateShapeBrackets()
-        guard !settings.modernHUD else {
-            hideReticle(shipReticleCorners); hideReticle(planetReticleCorners)
-            return
-        }
-        // Classic: the original's cicn corners, coloured by the squad/threat
-        // class (frames 0 threat, 4 other, 8 squad, 12 disabled), no pulse.
-        if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
-            let base: Int
-            switch world.reticleClass(of: ship) {
-            case .threat: base = 0
-            case .other: base = 4
-            case .squad: base = 8
-            case .disabled: base = 12
-            }
-            let width = (npcNodes[tid]?.radius ?? CGFloat(ship.radius)) * 2
-            let center = CGPoint(x: ship.position.x, y: ship.position.y)
-            if placeReticle(&shipReticleCorners, base: 10008 + base, center: center,
-                            offset: (width / 2).rounded(.up) + shipReticleZoom.rounded()) {
-                shipBracket.isHidden = true
-            }
-        } else {
-            hideReticle(shipReticleCorners)
-        }
-        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
-            let base = world.dominatedStellars.contains(pid) ? 4 : 0
-            if placeReticle(&planetReticleCorners, base: 10000 + base, center: pv.position,
-                            offset: pv.radius.rounded(.up) + planetReticleZoom.rounded()) {
-                planetBracket.isHidden = true
-            }
-        } else {
-            hideReticle(planetReticleCorners)
-        }
-    }
-
-    private func updateShapeBrackets() {
+        let useNavCursor = !settings.modernHUD && navCursorTextures.count == 8
+        if selectedPlanetID == nil || !useNavCursor { for n in navCursorCorners { n.isHidden = true } }
+        let useReticle = !settings.modernHUD && reticleTextures.count == 16
+        if !(world.player.currentTargetID != nil) || !useReticle { for n in reticleCorners { n.isHidden = true } }
         if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
             let radius = npcNodes[tid]?.radius ?? CGFloat(ship.radius)
-            shipBracket.position = CGPoint(x: ship.position.x, y: ship.position.y)
+            if useReticle {
+                shipBracket.isHidden = true
+                let isNew = lockedShipBracketID != tid
+                lockedShipBracketID = tid
+                updateShipReticle(ship: ship, radius: radius, newTarget: isNew)
+            } else {
+            shipBracket.position = renderPoint(ship)   // interpolated like the ship it brackets
             shipBracket.isHidden = false
             shipBracket.strokeColor = factionColor(for: ship)
             if lockedShipBracketID != tid {
                 lockedShipBracketID = tid
                 shipBracket.path = bracketPath(size: radius * 2 + 14)
                 restartPulse(shipBracket)
-                shipReticleZoom = isInView(shipBracket.position) ? 256 : 0
+            }
             }
         } else if lockedShipBracketID != nil {
             lockedShipBracketID = nil
@@ -5368,7 +5575,12 @@ final class GameScene: SKScene {
             shipBracket.removeAllActions()
         }
 
-        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
+        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }), useNavCursor {
+            planetBracket.isHidden = true
+            let isNew = lockedPlanetBracketID != pid
+            lockedPlanetBracketID = pid
+            updateNavCursor(pv: pv, newTarget: isNew)
+        } else if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
             let landable = world.systemContext.bodies.first { $0.id == pid }?.canLand ?? false
             planetBracket.position = pv.position
             planetBracket.isHidden = false
@@ -5378,7 +5590,6 @@ final class GameScene: SKScene {
                 lockedPlanetBracketID = pid
                 planetBracket.path = bracketPath(size: pv.radius * 2 + 18)
                 restartPulse(planetBracket)
-                planetReticleZoom = isInView(pv.position) ? 256 : 0
             }
         } else if lockedPlanetBracketID != nil {
             lockedPlanetBracketID = nil
@@ -5388,24 +5599,6 @@ final class GameScene: SKScene {
     }
 
     // MARK: Combat effects
-
-    /// Reposition every active beam loop against the shooter's current
-    /// position each frame (positional volume/pan), and clean up any whose
-    /// shooter no longer resolves — a defensive fallback for the normal case
-    /// of the world sending an explicit `.beamLoopStop`.
-    private func updateBeamLoopPositions(listener: CGPoint) {
-        guard !activeBeamLoops.isEmpty else { return }
-        for (key, loop) in activeBeamLoops {
-            guard let shooter = world.ship(id: loop.shooterID) else {
-                activeBeamLoops.removeValue(forKey: key)
-                audio?.stopLoop(key: key)
-                continue
-            }
-            audio?.startOrUpdateLoop(key: key, soundID: loop.soundID,
-                                     at: CGPoint(x: shooter.position.x, y: shooter.position.y),
-                                     listener: listener)
-        }
-    }
 
     /// An explosion effect: plays the real `bööm` sprite animation when `boomID`
     /// resolves to authored art, always with a short spark accent and a soft
@@ -5466,6 +5659,28 @@ final class GameScene: SKScene {
                        speed: 90, life: 0.3, size: 3, additive: true, grow: false)
     }
 
+    /// `Shot_SpawnAreaImpactEffects` (0x004211d0): trunc(B × 0.04) bööm-1 sprites
+    /// at `Rand(trunc(B × 0.5)) − B × 0.25` per axis, each starting
+    /// `Rand(8) + 4` ticks late, then trunc(B × 0.16) bööm-0 sprites at
+    /// `Rand(B) − B × 0.5` starting `Rand(16) + 8` ticks late.
+    private func spawnAreaBlast(at point: CGPoint, blastRadius b: Int) {
+        let bd = Double(b)
+        func puff(boom: Int, spread: Int, shift: Double, delayRange: Int, delayBase: Int) {
+            guard let tex = boomTextures(boom) else { return }
+            let dx = Double(world.rng.range(max(1, spread))) - shift
+            let dy = Double(world.rng.range(max(1, spread))) - shift
+            let delay = Double(world.rng.range(delayRange) + delayBase) / OriginalClock.ticksPerSecond
+            let p = CGPoint(x: point.x + CGFloat(dx), y: point.y + CGFloat(dy))
+            run(.sequence([.wait(forDuration: delay),
+                           .run { [weak self] in
+                               self?.spawnSpriteAnim(frames: tex.frames, frameDuration: tex.frameDuration,
+                                                     at: p, diameter: max(bd * 0.3, 5))
+                           }]))
+        }
+        for _ in 0..<Int(bd * 0.04) { puff(boom: 129, spread: Int(bd * 0.5), shift: bd * 0.25, delayRange: 8, delayBase: 4) }
+        for _ in 0..<Int(bd * 0.16) { puff(boom: 128, spread: b, shift: bd * 0.5, delayRange: 16, delayBase: 8) }
+    }
+
     /// Decoded, cached explosion frames + per-frame duration for a `bööm` id.
     /// Resolves the bööm's `graphicSpinID` → `rlëD` sheet once and derives the
     /// frame duration from `FrameAdvance` (Bible: 100 ⇒ 30 fps, like `SpinRate`),
@@ -5490,7 +5705,8 @@ final class GameScene: SKScene {
     /// sequence finishes (`updateSpriteAnims`).
     private func spawnSpriteAnim(frames: [SKTexture], frameDuration: Double,
                                  at point: CGPoint, diameter: CGFloat) {
-        guard !frames.isEmpty else { return }
+        // The explosion sprite pool holds 32 (0x004af020); a 33rd is not drawn.
+        guard !frames.isEmpty, activeAnims.count < OriginalRendering.explosionPoolSize else { return }
         let node = animPool.popLast() ?? {
             let s = SKSpriteNode(texture: frames[0])
             s.zPosition = 14
@@ -5498,7 +5714,7 @@ final class GameScene: SKScene {
             return s
         }()
         node.texture = frames[0]
-        node.blendMode = .alpha           // real bööm art carries its own mask
+        node.blendMode = .add             // bööm layers are additive (rlëD black ground)
         node.colorBlendFactor = 0
         node.alpha = 1
         node.isHidden = false
@@ -5540,7 +5756,8 @@ final class GameScene: SKScene {
                                 additive: Bool, grow: Bool, drag: CGFloat = 1.5,
                                 cone: (angle: CGFloat, spread: CGFloat)? = nil) {
         guard count > 0, !settings.reduceFlashing else { return }
-        let n = min(count, maxParticles - activeParticles.count)
+        let classic = !settings.modernHUD
+        let n = min(count, (classic ? OriginalRendering.particlePoolSize : maxParticles) - activeParticles.count)
         guard n > 0 else { return }
         for _ in 0..<n {
             let node = particlePool.popLast() ?? {
@@ -5552,9 +5769,9 @@ final class GameScene: SKScene {
             }()
             let dir: CGFloat = cone.map { $0.angle + .random(in: -$0.spread...$0.spread) }
                 ?? .random(in: 0...(2 * .pi))
-            let spd = speed * CGFloat.random(in: 0.4...1.0)
-            let startSize = size * CGFloat.random(in: 0.7...1.2)
-            node.blendMode = additive ? .add : .alpha
+            let spd = classic ? speed : speed * CGFloat.random(in: 0.4...1.0)
+            let startSize = classic ? 1 : size * CGFloat.random(in: 0.7...1.2)
+            node.blendMode = (additive && !classic) ? .add : .alpha
             node.colorBlendFactor = 1
             node.color = color
             node.isHidden = false
@@ -5563,9 +5780,66 @@ final class GameScene: SKScene {
             node.size = CGSize(width: startSize, height: startSize)
             activeParticles.append(Particle(
                 node: node, vx: cos(dir) * spd, vy: sin(dir) * spd,
-                age: 0, life: life * Double.random(in: 0.6...1.0),
-                startSize: startSize, endSize: grow ? startSize * 2.4 : startSize * 0.4,
-                startAlpha: additive ? 1.0 : 0.85, drag: drag))
+                age: 0, life: classic ? life : life * Double.random(in: 0.6...1.0),
+                startSize: startSize, endSize: classic ? startSize : (grow ? startSize * 2.4 : startSize * 0.4),
+                startAlpha: classic ? 1 : (additive ? 1.0 : 0.85), drag: classic ? 0 : drag,
+                classic: classic))
+        }
+    }
+
+    // MARK: Smoke sprites (cicn 1000 / 1008 sets, pool of 64)
+
+    private struct SmokePuff { let node: SKSpriteNode; var age: Double; let life: Double; let frames: [SKTexture] }
+    private var smokePuffs: [SmokePuff] = []
+    private var smokeFrameCache: [Int: [SKTexture]] = [:]
+    private var smokeSetCache: [Int: Int] = [:]
+
+    /// The 8 frames of the smoke set starting at cicn `base` (empty when absent).
+    private func smokeFrames(base: Int) -> [SKTexture] {
+        if let hit = smokeFrameCache[base] { return hit }
+        var out: [SKTexture] = []
+        if let res = galaxy?.game.resources {
+            for id in base..<(base + 8) {
+                guard let r = res.resource(NovaType.cicn, id), let sheet = try? CICN.decode(r.data),
+                      let cg = sheet.makeCGImage() else { out = []; break }
+                let t = SKTexture(cgImage: cg); t.filteringMode = spriteFilter
+                out.append(t)
+            }
+        }
+        smokeFrameCache[base] = out
+        return out
+    }
+
+    /// Original smoke (pool of 64, only when cicn 1000 exists): the weapon's
+    /// SmokeSet picks cicn 1000 + 8n; the flag-only default is 1000 (small) or
+    /// 1008 (big). Returns false when the art is missing or the pool is full.
+    private func spawnSmokePuff(at point: CGPoint, weaponID: Int, big: Bool) -> Bool {
+        guard smokePuffs.count < OriginalRendering.smokePoolSize else { return true }
+        let set: Int
+        if let c = smokeSetCache[weaponID] { set = c } else {
+            set = galaxy?.game.weapon(weaponID)?.smokeSet ?? -1
+            smokeSetCache[weaponID] = set
+        }
+        let frames = smokeFrames(base: set >= 0 ? 1000 + 8 * set : (big ? 1008 : 1000))
+        guard frames.count == 8 else { return false }
+        let node = SKSpriteNode(texture: frames[0])
+        node.position = point
+        node.zPosition = 7
+        effectsLayer.addChild(node)
+        smokePuffs.append(SmokePuff(node: node, age: 0, life: big ? 0.9 : 0.55, frames: frames))
+        return true
+    }
+
+    private func updateSmokePuffs(_ dt: Double) {
+        guard !smokePuffs.isEmpty else { return }
+        var i = 0
+        while i < smokePuffs.count {
+            smokePuffs[i].age += dt
+            let p = smokePuffs[i]
+            if p.age >= p.life { p.node.removeFromParent(); smokePuffs.remove(at: i); continue }
+            let idx = min(7, Int(p.age / p.life * 8))
+            if p.node.texture !== p.frames[idx] { p.node.texture = p.frames[idx]; p.node.size = p.frames[idx].size() }
+            i += 1
         }
     }
 
@@ -5583,6 +5857,14 @@ final class GameScene: SKScene {
                 p.node.isHidden = true
                 particlePool.append(p.node)
                 activeParticles.remove(at: i)
+                continue
+            }
+            if p.classic {
+                let ticksLeft = Int(((p.life - p.age) * 30).rounded(.up))
+                p.node.alpha = CGFloat(OriginalRendering.particleAlpha(life: ticksLeft))
+                p.node.position.x += activeParticles[i].vx * fdt
+                p.node.position.y += activeParticles[i].vy * fdt
+                i += 1
                 continue
             }
             // Linear velocity damping (no pow overload ambiguity), clamped to 0.
@@ -5624,7 +5906,7 @@ final class GameScene: SKScene {
                     let at = CGPoint(x: CGFloat(p.x) + .random(in: -22...22),
                                      y: CGFloat(p.y) + .random(in: -22...22))
                     self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4, boomID: deathBoom)
-                    self.audio?.play(303, at: at, listener: at)
+                    self.playBoomSound(deathBoom, at: at)
                     self.addShake(at: at, radius: 60)
                 }
             ]))
@@ -5637,7 +5919,7 @@ final class GameScene: SKScene {
                 if let p = hull?.position {
                     let at = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))
                     self.spawnExplosion(at: at, radius: 96, boomID: deathBoom)
-                    self.audio?.play(303, at: at, listener: at)
+                    self.playBoomSound(deathBoom, at: at)
                     self.addShake(at: at, radius: 110)
                 }
                 if self.playerShip === hull { self.shipNode?.isHidden = true }
@@ -5652,6 +5934,14 @@ final class GameScene: SKScene {
     /// the wreck in `npcs` for the same duration — `syncNPCs` naturally tears
     /// its node down the instant `.shipDestroyed` finally drops it, which lands
     /// right as this sequence's last burst fires.
+    /// A death burst's sound: the bööm's own snd (none when it has none),
+    /// heard from the player's position like every other explosion.
+    private func playBoomSound(_ boomID: Int?, at point: CGPoint) {
+        guard let sound = boomID.flatMap({ galaxy?.game.boom($0)?.soundID }) else { return }
+        let p = world.player.position
+        audio?.play(sound, at: point, listener: CGPoint(x: p.x, y: p.y))
+    }
+
     private func beginNPCDeathSequence(entityID: Int, at point: CGPoint, boomID: Int?) {
         guard npcDeathSequenceStarted.insert(entityID).inserted else { return }
         let bursts = 9
@@ -5664,7 +5954,7 @@ final class GameScene: SKScene {
                     let at = CGPoint(x: point.x + .random(in: -22...22),
                                      y: point.y + .random(in: -22...22))
                     self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4, boomID: boomID)
-                    self.audio?.play(303, at: at, listener: at)
+                    self.playBoomSound(boomID, at: at)
                     self.addShake(at: at, radius: 60)
                 }
             ]))
@@ -5674,7 +5964,7 @@ final class GameScene: SKScene {
             .run { [weak self] in
                 guard let self else { return }
                 self.spawnExplosion(at: point, radius: 96, boomID: boomID)
-                self.audio?.play(303, at: point, listener: point)
+                self.playBoomSound(boomID, at: point)
                 self.addShake(at: point, radius: 110)
             }
         ]))
@@ -5731,6 +6021,21 @@ final class GameScene: SKScene {
         }
         for layer in starLayers {
             layer.container.position = cam
+            if !layer.factors.isEmpty {
+                // Wrap across the view (+ 2 star widths a side), as the original does.
+                let w = size.width * cameraZoom + 12, h = size.height * cameraZoom + 12
+                func wrapSpan(_ v: CGFloat, _ span: CGFloat) -> CGFloat {
+                    var r = (v + span / 2).truncatingRemainder(dividingBy: span)
+                    if r < 0 { r += span }
+                    return r - span / 2
+                }
+                for (i, star) in layer.stars.enumerated() {
+                    let p = 1 + layer.factors[i]
+                    star.position = CGPoint(x: wrapSpan(layer.bases[i].x - cam.x * p, w),
+                                            y: wrapSpan(layer.bases[i].y - cam.y * p, h))
+                }
+                continue
+            }
             for (i, star) in layer.stars.enumerated() {
                 let base = layer.bases[i]
                 star.position = CGPoint(x: wrap(base.x - cam.x * layer.parallax, layer.tile),
@@ -5773,10 +6078,19 @@ final class GameScene: SKScene {
             if hud.navJumpArmed { hud.post(misc(30)) }
         }
         hud.canJumpNow = isClearOfNoJumpZone
+        updateWarnings(dt: dt)
         updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
         updateNavTargetHUD()
         hud.cargoUsed = p.cargoUsed
-        hud.cargoCapacity = p.cargoCapacity
+        cargoPanelTick += 1
+        if let provider = cargoPanelProvider, cargoPanelTick % 10 == 1 {
+            let panel = provider()
+            hud.cargoByCommodity = panel.rows
+            hud.cargoSpecial = panel.special
+            hud.cargoCapacity = panel.fleetCapacity
+        } else if cargoPanelProvider == nil {
+            hud.cargoCapacity = p.cargoCapacity
+        }
         // The weapon readout tracks the selected *secondary* (what the secondary
         // trigger / weapon-switch control fires), matching EV Nova's status bar.
         // A guns-only ship (no secondary fitted) correctly shows nothing here —
@@ -5788,7 +6102,9 @@ final class GameScene: SKScene {
             // weapon had unlimited ammo, even while it's really being consumed.
             hud.weaponAmmo = mount.spec.hidesAmmoCount ? -1 : mount.ammo   // -1 = unlimited
         } else {
-            hud.weaponName = ""
+            // No secondary selected (`+0x72 == −1`): the panel reads STR#
+            // 2002 #350 (0x00460ec0).
+            hud.weaponName = galaxy?.game.stringList(2002)?.string(at: 350) ?? ""
             hud.weaponAmmo = -1
         }
         hud.hasSecondary = !p.secondaryWeaponIDs.isEmpty

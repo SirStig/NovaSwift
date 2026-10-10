@@ -60,26 +60,42 @@ extension OriginalAI {
     public func commandPlayerEscortGroup(category: Int?, command: Int, world: World) -> String? {
         let F = OriginalEscortCommand.self
         let host = WorldAIHost(world: world, ai: self)
+        // The order keys first set the standing order of the category, or of
+        // all four (0x0044b120), which every escort of that EscortType then
+        // copies each frame (0x004048a0).
+        if let category, (0..<4).contains(category) {
+            categoryCommand[category] = command
+        } else if category == nil {
+            categoryCommand = [command, command, command, command]
+        }
         var changed = false
         var reported = command
+        // Chatter: one acknowledging escort, picked as the loop goes (the
+        // first speaker, then each later one on a coin flip).
+        var chatterGovt = -2, chatterVoice = -1
+        var voiced = false
         for ship in world.npcs where ship.isAlive && leader(of: ship) == World.playerEntityID {
             let rec = ensureRecord(ship, host: host)
-            if let category, host.hull(of: ship).escortClass != category { continue }
+            let hull = host.hull(of: ship)
+            if let category, hull.escortClass != category { continue }
+            let muted = hull.flags2 & 0x0010 != 0
+            var thisChanged = false
             if command != rec.playerOrder {
+                rec.escortCommandPending = true
                 if rec.behavior == 5 {
                     rec.playerOrder = command
-                    rec.escortCommandPending = command == F.returnToHangar
-                    changed = true
+                    thisChanged = true
                 } else if command == F.returnToHangar {
                     if rec.playerOrder != F.formation {
                         rec.playerOrder = F.formation
                         reported = F.formation
-                        changed = true
+                        thisChanged = true
                     }
                 } else {
                     rec.playerOrder = command
-                    changed = true
+                    thisChanged = true
                 }
+                if thisChanged && !muted { voiced = true }
             }
             // The port's wing-order readout follows the original order.
             switch rec.playerOrder {
@@ -91,15 +107,37 @@ extension OriginalAI {
             if rec.playerOrder == F.attack, let targetID = world.player.currentTargetID,
                targetID != rec.primary, !world.isPlayerFleetMember(targetID) {
                 rec.primary = targetID
-                changed = true
+                thisChanged = true
             }
             if command != F.returnToHangar, rec.behavior == 5, rec.state == OriginalAIState.returnToLeader {
                 rec.primary = nil
                 rec.secondary = .none
-                changed = true
+                if chatterGovt < -1 || host.random(2) == 0 {
+                    chatterVoice = rec.voice
+                    chatterGovt = hull.attributesGovt
+                }
+                thisChanged = true
+            }
+            if thisChanged { changed = true }
+            if changed, !muted, chatterGovt < -1 || host.random(2) == 0 {
+                chatterGovt = hull.attributesGovt
+                chatterVoice = rec.voice
             }
         }
-        guard changed, let list = world.galaxy?.game.stringList(2002) else { return nil }
+        guard changed else { return nil }
+        defer {
+            // The acknowledgement (category 0, or 1 for an Attack on a ship
+            // outside the squad) once the readout is up.
+            if voiced {
+                var chatterCategory = 0
+                if reported == F.attack, let t = world.player.currentTargetID.flatMap({ world.ship(id: $0) }),
+                   leader(of: t) != World.playerEntityID {
+                    chatterCategory = 1
+                }
+                world.queueCombatChatter(category: chatterCategory, govt: max(-1, chatterGovt), voice: chatterVoice)
+            }
+        }
+        guard let list = world.galaxy?.game.stringList(2002) else { return nil }
         func s(_ i: Int) -> String { list.string(at: i) ?? "" }
         let group: String
         switch category {
@@ -124,6 +162,21 @@ extension OriginalAI {
         let text = s(134) + group + " " + s(action)
         world.postOverlayMessage(text, frames: 250)
         return text
+    }
+
+    /// Chatter category 2 (0x00437780): a player escort (behavior above 2) in
+    /// the attack state whose target was just destroyed calls it out, unless
+    /// its hull mutes chatter (Flags2 0x10).
+    func escortsSawKill(of victim: Ship, world: World) {
+        let host = WorldAIHost(world: world, ai: self)
+        for ship in world.npcs where ship.isAlive && ship.entityID != victim.entityID
+            && leader(of: ship) == World.playerEntityID {
+            guard let rec = records[ship.entityID], rec.primary == victim.entityID,
+                  rec.behavior > 2, rec.state == OriginalAIState.attack else { continue }
+            let hull = host.hull(of: ship)
+            guard hull.flags2 & 0x0010 == 0 else { continue }
+            world.queueCombatChatter(category: 2, govt: hull.attributesGovt, voice: rec.voice)
+        }
     }
 
     // MARK: NPC-fleet orders (Ship_IssueEscortOrders 0x004152e0)
@@ -210,13 +263,20 @@ extension OriginalAI {
             rec.behavior = hull.inherentAI
             rec.state = S.idle
             rec.mode = OriginalAIMode.idle
-            rec.jumpTimer = 0
+            rec.jumpTimer = -1
         }
         guard let leaderID, let leaderShip = host.ship(leaderID), leaderShip.isAlive else {
             releaseToDefault()
             return
         }
         let leaderRec = records[leaderID]
+
+        if leaderShip.isPlayer {
+            // A player escort outside a mission fleet flies for no government,
+            // and keeps a chatter voice of 0 or 1.
+            if ship.missionID == nil { ship.government = independentGovt }
+            if rec.voice != 0 && rec.voice != 1 { rollVoice(rec, hull: hull, host: host) }
+        }
 
         // The leader is preparing to jump: mirror its destination and follow
         // its spin-up (state 0x0B). An inertialess escort jumps on its own.
@@ -228,7 +288,7 @@ extension OriginalAI {
         if npcFollowMode || npcJumpPrep || leaderJump > 0 {
             rec.secondary = leaderRec?.secondary ?? .none
             rec.primary = nil
-            if !leaderShip.isPlayer && ship.inertialess {
+            if !leaderShip.isPlayer && ship.isInertialessNow {
                 setLeader(ship, nil)
                 rec.behavior = hull.inherentAI
                 rec.state = S.departJump
@@ -245,10 +305,15 @@ extension OriginalAI {
         }
 
         if leaderShip.isPlayer {
-            rec.escortCommand = rec.playerOrder
-            if rec.escortCommand == F.returnToHangar {
-                if rec.behavior != 5 || !rec.escortCommandPending { rec.escortCommand = F.formation }
+            // The standing order of this escort's category; −1 is Formation,
+            // and Return only holds for a carried fighter that was ordered.
+            let category = hull.escortClass
+            rec.playerOrder = (0..<4).contains(category) ? categoryCommand[category] : -1
+            if rec.playerOrder == -1 { rec.playerOrder = F.formation }
+            if rec.playerOrder == F.returnToHangar, rec.behavior != 5 || !rec.escortCommandPending {
+                rec.playerOrder = F.formation
             }
+            rec.escortCommand = rec.playerOrder
         } else if leader(of: leaderShip) == World.playerEntityID, let sub = leaderRec {
             // A wingman of one of the player's escorts mirrors its orders.
             if sub.escortCommand == F.defend || sub.escortCommand == F.attack {
@@ -277,7 +342,7 @@ extension OriginalAI {
 
         switch rec.escortCommand {
         case F.defend, F.attack:
-            rec.jumpTimer = 0
+            rec.jumpTimer = -1
             rec.maneuverTimer = -1
             let defend = rec.escortCommand == F.defend
             if defend, let pid = rec.primary, let t = host.ship(pid) {
@@ -288,6 +353,12 @@ extension OriginalAI {
             if rec.primary == nil {
                 rec.primary = bestAssistTarget(ship, radius: defend ? 0x226 : -1, host: host)
                 if !defend { rec.secondary = .none }
+                // A player fighter or medium escort calls out its new target,
+                // one time in three (chatter category 1).
+                if leaderShip.isPlayer, rec.primary != nil, host.chatterIdle,
+                   hull.escortClass < 2, hull.flags2 & 0x0010 == 0, host.random(3) == 0 {
+                    host.queueChatter(category: 1, govt: hull.attributesGovt, voice: rec.voice)
+                }
             }
             if rec.primary == nil {
                 rec.state = S.escortStation
@@ -305,13 +376,12 @@ extension OriginalAI {
             rec.secondary = .ship(leaderID)
         default:
             // Formation: hold station; keep (or pick) a ship pressing the
-            // squad only as a turret target.
-            rec.jumpTimer = 0
+            // squad only as a turret target, while it is inside the class's
+            // stock weapon envelope (0x00411600 with bank −1).
+            rec.jumpTimer = -1
             rec.maneuverTimer = -1
-            if let pid = rec.primary, let t = host.ship(pid) {
-                let d = t.position - ship.position
-                let reach = host.maxWeaponRange(ship)
-                if d.x * d.x + d.y * d.y > reach * reach { rec.primary = nil }
+            if let pid = rec.primary, let t = host.ship(pid), !host.withinStockWeaponRange(ship, of: t) {
+                rec.primary = nil
             }
             if rec.primary == nil { randomTargetPressingLeader(rec, ship: ship, host: host) }
             rec.state = S.escortStation

@@ -1,5 +1,6 @@
 import Foundation
 import NovaSwiftKit
+import NovaSwiftEngine
 
 /// How a lane offer (bar, main spaceport, trade centre, shipyard, outfitter)
 /// ended, which decides whether it comes up again this visit (0x00448670).
@@ -46,13 +47,59 @@ extension StoryEngine {
     }
 
     /// Landing at a stellar other than the one the lists were last built for
-    /// rerolls them and puts every refused or accepted lane offer back.
+    /// rerolls them and rebuilds the offer lists (0x00457580). Landing also
+    /// resets the lane-offer context (0x00443780).
     func refreshOffersOnLanding(at spobID: Int) {
+        offerState.context = nil
         if offerState.listStellar != spobID {
             rerollMissionOffers()
             offerState.removed = []
+            offerState.listStellar = spobID
+            buildOfferLists(atSpob: spobID)
         }
-        offerState.listStellar = spobID
+    }
+
+    /// `Mission_EvaluateMissionLists` 0x0043cf00: list 0 (mission computer)
+    /// and list 1 (every other spaceport location) from the missions eligible
+    /// now and not active, each sorted by DispWeight, highest first (ties in
+    /// id order); their targets are resolved here.
+    func buildOfferLists(atSpob spobID: Int?) {
+        let lanes: [MissionOfferLocation] = [.bar, .mainSpaceport, .tradeCenter, .shipyard, .outfitter]
+        var computer: [MissionRes] = [], lane: [MissionRes] = []
+        for m in game.missions() {
+            if m.availLocation == .missionComputer {
+                if isEligible(m, at: .missionComputer, spobID: spobID) { computer.append(m) }
+            } else if lanes.contains(m.availLocation), isEligible(m, at: m.availLocation, spobID: spobID) {
+                lane.append(m)
+            }
+        }
+        func order(_ a: MissionRes, _ b: MissionRes) -> Bool {
+            a.displayWeight != b.displayWeight ? a.displayWeight > b.displayWeight : a.id < b.id
+        }
+        computer.sort(by: order)
+        lane.sort(by: order)
+        for m in computer + lane { _ = offerTargets(for: m) }
+        var o = offerState
+        o.computerList = computer.map(\.id)
+        o.laneList = lane.map(\.id)
+        offerState = o
+    }
+
+    /// After an accept while landed (the tail of 0x0043f100): the accepted
+    /// mission and every listed one that is no longer eligible leave both
+    /// lists. Nothing is ever added.
+    func compactOfferLists(accepted missionID: Int) {
+        var o = offerState
+        let spob = player.landedSpob
+        func keep(_ id: Int) -> Bool {
+            guard id != missionID, let m = game.mission(id) else { return false }
+            let ok = isEligible(m, at: m.availLocation, spobID: spob)
+            if !ok { Log.mission.debug("suppressing previously available mission \(id)") }
+            return ok
+        }
+        o.computerList = o.computerList?.filter(keep)
+        o.laneList = o.laneList?.filter(keep)
+        offerState = o
     }
 
     /// The stellar random destinations are measured from: the one the player
@@ -323,11 +370,19 @@ extension StoryEngine {
         return offered
     }
 
-    /// The next lane offer at `location` (0x00448670): the first eligible
-    /// mission for this AvailLoc not yet refused, accepted or activation-failed.
-    /// Switching to any context other than the main spaceport (3) re-arms the
-    /// activation-failed ones. The bar calls this again after each offer; the
-    /// main spaceport once per landing; the shops when opened.
+    /// The landing's mission-computer list (list 0): fixed when the player
+    /// landed, compacted only by accepts.
+    public func missionComputerList(spob spobID: Int?) -> [MissionRes] {
+        if offerState.computerList == nil { buildOfferLists(atSpob: spobID) }
+        return (offerState.computerList ?? []).compactMap { game.mission($0) }
+    }
+
+    /// The next lane offer at `location` (0x00448670): the first mission of
+    /// the landing's list 1 with this AvailLoc that is not marked shown and is
+    /// still eligible now. Switching to any context other than the main
+    /// spaceport (3) re-arms the activation-failed ones. The bar calls this
+    /// on its timer, the main spaceport once per landing, the shops when
+    /// opened and then on their idle timer.
     public func nextLaneOffer(at location: MissionOfferLocation, spob spobID: Int) -> MissionRes? {
         var o = offerState
         if o.context != location.rawValue {
@@ -335,40 +390,94 @@ extension StoryEngine {
             o.context = location.rawValue
             offerState = o
         }
-        return missionsOffered(at: location, spob: spobID)
-            .first { !o.removed.contains($0.id) && !o.shown.contains($0.id) }
+        if offerState.laneList == nil { buildOfferLists(atSpob: spobID) }
+        for id in offerState.laneList ?? [] {
+            guard let m = game.mission(id), m.availLocation == location,
+                  !offerState.shown.contains(id), !offerState.removed.contains(id) else { continue }
+            if isEligible(m, at: location, spobID: spobID) { return m }
+        }
+        return nil
+    }
+
+    /// Leaving the spaceport window or a shop (trade centre, outfitter,
+    /// shipyard) resets the lane-offer context (0x00448660), so coming back
+    /// to the same screen re-offers the missions whose activation failed.
+    public func clearLaneOfferContext() {
+        offerState.context = nil
     }
 
     /// Record how a lane offer ended. `accept`/`decline` do this themselves
     /// for lane missions; exposed for callers that close an offer otherwise.
+    /// A closed offer leaves list 1 (0x00448670 compacts it out).
     public func recordLaneOffer(_ missionID: Int, _ outcome: MissionOfferOutcome) {
         switch outcome {
-        case .closed:           offerState.removed.insert(missionID)
-        case .activationFailed: offerState.shown.insert(missionID)
+        case .closed:
+            offerState.removed.insert(missionID)
+            offerState.laneList?.removeAll { $0 == missionID }
+        case .activationFailed:
+            offerState.shown.insert(missionID)
         }
     }
 
-    /// Resolve targets for every mission offerable at this stellar, so every
-    /// screen of this landing shows the same destinations.
-    func prepareOffers(atSpob spobID: Int) {
-        let lanes: [MissionOfferLocation] = [.missionComputer, .bar, .mainSpaceport, .tradeCenter, .shipyard, .outfitter]
-        for m in game.missions() where lanes.contains(m.availLocation) && isEligible(m, at: m.availLocation, spobID: spobID) {
-            _ = offerTargets(for: m)
-        }
-    }
 
     /// Build a presentable offer (resolving briefing text + buttons) and hand it
-    /// to the UI via `GameServices`.
-    public func present(_ mission: MissionRes) {
+    /// to the UI via `GameServices` (`NovaUi_RunMissionOfferWindow` 0x00442510).
+    /// A can't-refuse offer whose offer text is empty opens no window: it
+    /// activates at once, silently. Returns whether a window was presented.
+    @discardableResult
+    public func present(_ mission: MissionRes) -> Bool {
+        let text = briefingText(for: mission)
+        if mission.cannotBeRefused, text.isEmpty {
+            Log.mission.debug("present: mission \(mission.id) has no offer text and can't be refused — activating silently")
+            accept(mission.id)
+            return false
+        }
+        let labels = offerButtonLabels(for: mission)
         let offer = MissionOffer(
             mission: mission,
             title: resolvedName(for: mission),
-            briefingText: briefingText(for: mission),
+            briefingText: text,
             pictureID: game.desc(mission.offerTextID)?.pictureID,
-            acceptButton: mission.acceptButton.isEmpty ? "Accept" : mission.acceptButton,
-            refuseButton: mission.refuseButton.isEmpty ? "Decline" : mission.refuseButton,
+            acceptButton: labels.accept, refuseButton: labels.refuse,
             canRefuse: !mission.cannotBeRefused, canAccept: canAccept(mission))
         services?.presentMissionOffer(offer)
+        return true
+    }
+
+    /// The offer window's button labels (0x00442510): the mïsn's AcceptButton
+    /// and RefuseButton, each kept only when its first character, lowercased,
+    /// is a letter a–z. A blanked accept label reads STR# 150 #50 "Yes" — #27
+    /// "Okay" when the offer can't be refused — and a blanked refuse label
+    /// #51 "No".
+    public func offerButtonLabels(for m: MissionRes) -> (accept: String, refuse: String) {
+        func usable(_ s: String) -> Bool {
+            guard let c = s.unicodeScalars.first else { return false }
+            let lower = Character(c).lowercased()
+            return lower.count == 1 && ("a"..."z").contains(lower)
+        }
+        func button(_ index: Int, _ fallback: String) -> String {
+            let s = stringListEntry(150, index: index) ?? ""
+            return s.isEmpty ? fallback : s
+        }
+        let accept = usable(m.acceptButton) ? m.acceptButton
+            : (m.cannotBeRefused ? button(27, "Okay") : button(50, "Yes"))
+        let refuse = usable(m.refuseButton) ? m.refuseButton : button(51, "No")
+        return (accept, refuse)
+    }
+
+    /// Why the Mission BBS won't open (0x0043c470), or nil when it opens: all
+    /// 16 slots taken (STR# 2002 #351 + " 16 " + #352), or nothing on list 0
+    /// that is still eligible (#353).
+    public func missionBBSRefusal(spob spobID: Int?) -> String? {
+        if player.activeMissions.count >= PlayerState.missionSlotCount {
+            let a = stringListEntry(2002, index: 0x15f) ?? ""
+            let b = stringListEntry(2002, index: 0x160) ?? ""
+            return a + " \(PlayerState.missionSlotCount) " + b
+        }
+        let any = missionComputerList(spob: spobID).contains {
+            isEligible($0, at: .missionComputer, spobID: spobID)
+        }
+        return any ? nil : (stringListEntry(2002, index: 0x161) ?? "")
     }
 
     /// Whether accepting would get past activation's cargo check: the rolled
@@ -379,9 +488,12 @@ extension StoryEngine {
         return cargoCapacity() >= qty && freeCargoSpace() >= qty
     }
 
-    func cargoCapacity() -> Int { game.ship(player.shipType)?.cargoSpace ?? 0 }
+    /// The player ship's own capacity, cargo pods included (0x0046a730).
+    func cargoCapacity() -> Int { PilotEconomy.shipCargoCapacity(player, galaxy: Galaxy(game: game)) }
 
-    func freeCargoSpace() -> Int { cargoCapacity() - player.usedCargoSpace }
+    /// The room left in the player ship (0x0046a7c0): freighter escorts take
+    /// the ordinary cargo first, mission cargo rides in the player ship.
+    func freeCargoSpace() -> Int { PilotEconomy.remainingCargoSpace(player, galaxy: Galaxy(game: game)) }
 
     /// Where a mission on offer would send the player — the same stellar
     /// `<DST>` names in its briefing. Lets the Mission BBS answer "where is
@@ -393,6 +505,16 @@ extension StoryEngine {
               let sysID = owningSystem(ofSpob: spobID), let sys = game.system(sysID)
         else { return nil }
         return (spobID, sys.id, spob.displayName, sys.displayName)
+    }
+
+    /// The system the starmap preselects when opened from an offer or the
+    /// BBS (0x0043c470 key 6, 0x00442510 button 4): only for mïsn Flags
+    /// 0x0100 — the travel stellar's system, else the return stellar's.
+    public func offerHighlightSystem(for m: MissionRes) -> Int? {
+        guard m.flags1 & 0x0100 != 0 else { return nil }
+        let t = offerTargets(for: m)
+        guard let spob = t.travelSpob ?? t.returnSpob else { return nil }
+        return game.systemContaining(spob: spob)
     }
 
     /// The fully-resolved offer briefing for a mission (conditionals + `<…>`

@@ -1,5 +1,8 @@
 # Scope — Plug-in System, In-App Editor & Save-Game Editing
 
+> **Superseded by [PLUGIN_TOOLKIT.md](PLUGIN_TOOLKIT.md)**, which covers the full
+> editor and HD extensions. Kept for its architecture notes.
+
 > **Mostly a plan.** The plug-in manager, store, load order and native `.evpilot`
 > saves exist. The resource write path, resource editor and pilot editor do not.
 

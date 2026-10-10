@@ -393,7 +393,7 @@ public final class StoryEngine {
         for rankID in player.activeRanks {
             bits |= game.rank(rankID)?.contribute ?? 0
         }
-        for (cronID, rt) in player.cronRuntime where rt.isActive {
+        for (cronID, rt) in player.cronRuntime where rt.contributes {
             bits |= game.cron(cronID)?.contribute ?? 0
         }
         return bits
@@ -629,9 +629,17 @@ public final class StoryEngine {
         public let failed: Bool
     }
 
-    /// Summaries of every currently-accepted mission, in acceptance order.
+    /// The active missions in slot order (0x00445dc0 and the cargo panel run
+    /// slots 0…15; a new mission takes the first free slot).
+    func missionsInSlotOrder() -> [ActiveMission] {
+        player.activeMissions.enumerated()
+            .sorted { ($0.element.slot ?? $0.offset, $0.offset) < ($1.element.slot ?? $1.offset, $1.offset) }
+            .map(\.element)
+    }
+
+    /// Summaries of every currently-accepted mission, in slot order.
     public func activeMissionSummaries() -> [MissionSummary] {
-        player.activeMissions.compactMap { am in
+        missionsInSlotOrder().compactMap { am in
             guard let m = game.mission(am.missionID) else { return nil }
             // `mïsn.Flags` 0x0400: "Mission is invisible and won't appear in the
             // mission info dialog." Background bookkeeping missions the storyline
@@ -720,41 +728,57 @@ public final class StoryEngine {
         }
     }
 
-    /// A trimmed one-liner describing an accepted mission, for compact list rows.
-    ///
-    /// Uses the mission's own `mïsn.QuickBrief` `dësc` when it has one — that is
-    /// exactly what the field is for, and it's what the original shows in the
-    /// mission list. Only when a mission leaves it unset do we fall back to
-    /// collapsing the full offer pitch, which is what this always did before
-    /// `QuickBrief` was wired up (and which reads as a truncated wall of text).
+    /// What the Mission Info pane shows for an accepted mission: its
+    /// QuickBrief dësc with the wildcards expanded (0x00446e00), and nothing
+    /// when the mission sets none.
     private func missionQuickBrief(for m: MissionRes, active: ActiveMission) -> String {
-        func collapsed(_ id: Int) -> String {
-            let full = resolveMissionText(game.descText(id, context: textContext), for: m, active: active)
-            return full.split(whereSeparator: \.isNewline).joined(separator: " ")
-                .trimmingCharacters(in: .whitespaces)
-        }
-        let quick = collapsed(m.quickBriefText)
-        return quick.isEmpty ? collapsed(m.offerTextID) : quick
+        guard m.quickBriefText >= 128 else { return "" }
+        return resolveMissionText(game.descText(m.quickBriefText, context: textContext), for: m, active: active)
     }
 
-    /// The systems that currently hold an active-mission destination — used by the
-    /// galaxy map to draw its orange "go here" arrows.
+    /// The systems the starmap marks for the active missions
+    /// (`Mission_RebuildMissionTargetSystemList` 0x004aa980), in slot order:
+    /// the travel stellar's system — the return stellar's once the travel
+    /// leg is done and the two differ — unless mïsn Flags 0x0002 hides it;
+    /// plus, with Flags 0x0200, the special ships' system. Invisible (0x0400)
+    /// missions are marked like any other.
     public func missionDestinationSystemIDs() -> [Int] {
-        Array(Set(activeMissionSummaries().compactMap(\.destinationSystemID))).sorted()
+        missionMarks().map(\.systemID)
     }
 
-    /// Mission destinations with names attached, for the galaxy map's "go here"
-    /// arrow label. One entry per destination system; when several accepted
-    /// missions share a destination, their names are joined so the label still
-    /// reads as one line (mirrors EV Nova's map dialog, which lists mission
-    /// names next to the pointer).
+    /// The starmap's mission marks with the missions that put them there.
+    /// One entry per system.
     public func missionDestinations() -> [(systemID: Int, names: [String])] {
-        var bySystem: [Int: [String]] = [:]
-        for s in activeMissionSummaries() {
-            guard let sys = s.destinationSystemID else { continue }
-            bySystem[sys, default: []].append(s.name)
+        var order: [Int] = []
+        var names: [Int: [String]] = [:]
+        for mark in missionMarks() {
+            if names[mark.systemID] == nil { order.append(mark.systemID) }
+            names[mark.systemID, default: []].append(mark.name)
         }
-        return bySystem.map { (systemID: $0.key, names: $0.value) }.sorted { $0.systemID < $1.systemID }
+        return order.map { (systemID: $0, names: names[$0] ?? []) }
+    }
+
+    private func missionMarks() -> [(systemID: Int, name: String)] {
+        var marks: [(systemID: Int, name: String)] = []
+        for am in missionsInSlotOrder() {
+            guard let m = game.mission(am.missionID) else { continue }
+            let name = resolveMissionText(m.displayName, for: m, active: am)
+            func active(_ spob: Int?) -> Int? {
+                spob.flatMap { game.systemContaining(spob: $0) }
+            }
+            var sys = active(am.travelSpobID)
+            if let ret = am.returnSpobID, ret != am.travelSpobID, am.visitedTravelStellar,
+               let r = active(ret) {
+                sys = r
+            }
+            let hidden = m.flags1 & 0x0002 != 0
+            if let sys, !hidden { marks.append((sys, name)) }
+            if m.flags1 & 0x0200 != 0, !hidden, m.shipCount > 0,
+               let shipSys = am.shipSystemID, shipSys >= 0, let v = visibleTwin(shipSys) {
+                marks.append((v, name))
+            }
+        }
+        return marks
     }
 
     /// The `{…}`-conditional context for this pilot (control bits + gender),

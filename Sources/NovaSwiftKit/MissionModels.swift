@@ -444,6 +444,11 @@ public struct DescRes: Sendable {
     /// The movie filename (e.g. "Race 1.mov") this description points to, or
     /// `nil` when it has none. Movie playback itself is out of scope here.
     public let movieFilename: String?
+    /// The dësc Flags short after the 32-byte MovieFile: 0x0001 plays the
+    /// movie after the text instead of before it. 0 when absent.
+    public let flags: Int
+    /// The movie plays after the text is dismissed (Flags 0x0001).
+    public var moviePlaysAfterText: Bool { flags & 0x0001 != 0 }
 
     public init(_ r: Resource) {
         id = r.id
@@ -452,12 +457,16 @@ public struct DescRes: Sendable {
         text = cstr(d, 0, d.count)
         let trailerStart = min(stringEnd + 1, d.endIndex)
         guard d.distance(from: trailerStart, to: d.endIndex) >= 2 else {
-            pictureID = nil; movieFilename = nil; return
+            pictureID = nil; movieFilename = nil; flags = 0; return
         }
+        let flagsAt = trailerStart + 34
+        flags = d.distance(from: flagsAt, to: d.endIndex) >= 2
+            ? (Int(d[flagsAt]) << 8) | Int(d[flagsAt + 1]) : 0
         let pid = (Int(d[trailerStart]) << 8) | Int(d[trailerStart + 1])
         pictureID = pid != 0 ? pid : nil
         let movieStart = trailerStart + 2
-        let name = cstr(d, d.distance(from: d.startIndex, to: movieStart), d.distance(from: movieStart, to: d.endIndex))
+        let name = cstr(d, d.distance(from: d.startIndex, to: movieStart),
+                        min(32, d.distance(from: movieStart, to: d.endIndex)))
         movieFilename = name.isEmpty ? nil : name
     }
 }

@@ -51,14 +51,6 @@ extension World {
         return selectTarget(id: next.entityID)
     }
 
-    /// Whether `npc` is coming after the player's squad —
-    /// `Ship_IsThreatToPlayerSquad` 0x0040f6d0: active, not disabled, its
-    /// maneuver timer run out, not in a disengaged AI state, and targeting
-    /// the player or a ship the player leads.
-    public func isThreatToPlayerSquad(_ npc: Ship) -> Bool {
-        originalAI.isThreatToPlayerSquad(npc, world: self)
-    }
-
     /// `Ship_IsAnyShipThreatToPlayerSquad` 0x00410060.
     public var isAnyShipThreatToPlayerSquad: Bool {
         npcs.contains { $0.isAlive && isThreatToPlayerSquad($0) }
@@ -90,6 +82,15 @@ extension World {
         guard let leader = npc.brain?.leaderID else { return false }
         if leader == Self.playerEntityID { return originalAI.record(for: npc.entityID)?.defenseHome == nil }
         return ship(id: leader)?.brain?.leaderID == Self.playerEntityID
+    }
+
+    /// `Ship_IsThreatToPlayerSquad` (0x0040f6d0): not coasting on its
+    /// maneuver timer, not disabled, not in one of the disengaged states, and
+    /// targeting the player or a ship the player leads directly. A ship with no
+    /// AI record (the player, a remote player) is never a threat.
+    public func isThreatToPlayerSquad(_ npc: Ship) -> Bool {
+        guard !npc.isPlayer, let rec = originalAI.record(for: npc.entityID) else { return false }
+        return originalAI.isThreatToPlayerSquad(rec, ship: npc, host: WorldAIHost(world: self, ai: originalAI))
     }
 
     /// R: the nearest ship threatening the player's squad, not disabled, with

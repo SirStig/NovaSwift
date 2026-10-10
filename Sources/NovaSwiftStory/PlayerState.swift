@@ -67,8 +67,22 @@ public struct ActiveMission: Codable, Hashable, Sendable {
     public var serial: Int?
     /// AI-14: auxiliary ships the mission can still bring in (nil = its
     /// full `AuxShipCount`). Spent as they jump in unless the mission has
-    /// Flags 0x0010.
+    /// Flags 0x0010; survivors are credited back when the player leaves.
     public var auxShipsRemaining: Int?
+    /// The special ships' system, resolved once at accept (0x0043e6f0):
+    /// a system id, or −6 to follow the player. nil = no system (no ships),
+    /// or a save from before this was resolved at accept.
+    public var shipSystemID: Int?
+    /// `shipSystemID` has been resolved for this slot (so a nil is final).
+    public var shipSystemResolved: Bool?
+    /// The one hull every special ship of this slot flies (mïsn Flags
+    /// 0x0800, rolled at accept); nil = each ship rolls its own.
+    public var lockedShipType: Int?
+    /// The `mïsn.ShipSubtitle` STR# entry (1-based) rolled at accept.
+    public var shipSubtitleEntry: Int?
+    /// The mission slot (0…15) this mission occupies: activation takes the
+    /// first free one, and the mission lists run in slot order.
+    public var slot: Int?
 
     public var isFailed: Bool { failed ?? false }
     /// The mission cargo is aboard: loaded and not yet delivered.
@@ -125,9 +139,13 @@ public struct CronRuntime: Codable, Hashable, Sendable {
         self.pendingStart = pendingStart
     }
 
-    /// The event counts as running — for Contribute bits and news — from the
-    /// day it triggers until it deactivates, holdoffs included.
+    /// The event counts as running — for news — from the day it triggers until
+    /// it deactivates, holdoffs included; Contribute bits use `contributes`.
     public var isActive: Bool { active ?? (startedDate != nil) }
+
+    /// The event's Contribute bits count (0x0046cca0): active and its holdoff
+    /// counter below 1 — not while it waits out its pre-holdoff.
+    public var contributes: Bool { isActive && (holdoff ?? 0) < 1 }
 }
 
 /// Where a mission offered at the current landing would send the player, and
@@ -170,6 +188,13 @@ public struct MissionOfferState: Codable, Sendable {
     public var shown: Set<Int> = []
     /// The offer context last run (the `AvailLoc` value).
     public var context: Int?
+    /// The landing's offer lists (`Mission_EvaluateMissionLists` 0x0043cf00):
+    /// list 0 holds the mission computer's missions, list 1 every other
+    /// spaceport location's (bar, main spaceport, shops), each by DispWeight.
+    /// Built when the player lands somewhere new or a mission succeeds there;
+    /// an accept only removes entries, it never adds any. nil = not built.
+    public var computerList: [Int]?
+    public var laneList: [Int]?
 
     public init() {}
 }
@@ -271,6 +296,9 @@ public struct StockRerolls: Codable, Sendable, Equatable {
 public struct PlayerState: Codable, Sendable {
     // Identity
     public var pilotName: String
+    /// The pilot's nickname, the new-pilot dialog's second name field —
+    /// `<PNN>`. nil or empty (older saves) reads as the full name.
+    public var nickname: String?
     public var isMale: Bool
     public var unregisteredDays: Int
     /// The original's per-pilot Strict Play option, chosen at creation (default

@@ -684,20 +684,95 @@
     {
      "name": "Smooth rotation, frame interpolation",
      "status": "planned"
-    },
-    {
-     "name": "HD sprite packs",
-     "status": "planned"
-    },
-    {
-     "name": "Spatial audio, dynamic music",
-     "status": "planned"
     }
    ]
   },
   {
-   "name": "Editors",
+   "name": "Pilot converter",
    "tasks": [
+    {
+     "name": "Read Windows EV Nova CE .plt pilots (decrypt the XOR blocks)",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Read classic Mac EV Nova pilots (resource fork, MacBinary/AppleDouble)",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Map every saved field to a NovaSwift pilot",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Warn about plug-in content that isn't installed",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Import screen with a preview before creating the pilot",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Round-trip tests against the original's own save code",
+     "status": "planned",
+     "where": "not started"
+    }
+   ]
+  },
+  {
+   "name": "Plug-in editor",
+   "tasks": [
+    {
+     "name": "Resource write path and round-trip tests",
+     "status": "planned"
+    },
+    {
+     "name": "Schemas for every resource type",
+     "status": "planned"
+    },
+    {
+     "name": "Browser, hex editor and previews",
+     "status": "planned"
+    },
+    {
+     "name": "Ship, outfit and weapon editors",
+     "status": "planned"
+    },
+    {
+     "name": "Galaxy editor",
+     "status": "planned"
+    },
+    {
+     "name": "Mission and control-bit editor",
+     "status": "planned"
+    },
+    {
+     "name": "Validation against the original's rules",
+     "status": "planned"
+    },
+    {
+     "name": "Test in engine",
+     "status": "planned"
+    },
+    {
+     "name": "Export to Windows and Mac plug-in formats",
+     "status": "planned"
+    },
+    {
+     "name": "Publish to the plug-in store",
+     "status": "planned"
+    },
+    {
+     "name": "Command-line tool",
+     "status": "planned"
+    },
+    {
+     "name": "Templates and guides",
+     "status": "planned"
+    },
     {
      "name": "Editable native pilot saves",
      "status": "done",
@@ -709,15 +784,48 @@
      "where": "debug mode only"
     },
     {
-     "name": "Resource write path",
-     "status": "planned"
-    },
-    {
-     "name": "In-app resource editor",
-     "status": "planned"
-    },
-    {
      "name": "Pilot editor",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "HD plug-in extensions",
+   "tasks": [
+    {
+     "name": "Extension format keyed to original resources",
+     "status": "planned"
+    },
+    {
+     "name": "Fallback to classic resources",
+     "status": "planned"
+    },
+    {
+     "name": "HD sprites with smooth rotation",
+     "status": "planned"
+    },
+    {
+     "name": "Normal-mapped lighting",
+     "status": "planned"
+    },
+    {
+     "name": "3D model import (glTF, USDZ)",
+     "status": "planned"
+    },
+    {
+     "name": "Live 3D in modern presentations",
+     "status": "planned"
+    },
+    {
+     "name": "Bake 3D models into classic sprite sheets",
+     "status": "planned"
+    },
+    {
+     "name": "High-quality sound and music packs",
+     "status": "planned"
+    },
+    {
+     "name": "HD landing and planet art",
      "status": "planned"
     }
    ]

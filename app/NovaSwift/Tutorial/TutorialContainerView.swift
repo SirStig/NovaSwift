@@ -167,7 +167,13 @@ struct TutorialContainerView: View {
     }
 
     private func landAttempt() {
-        guard let scene = host?.scene, let id = scene.attemptLand() else { return }
+        guard let scene = host?.scene else { return }
+        // The sandbox skips the request/clearance exchange: a press inside the
+        // 250 px arm counts as already cleared.
+        if let sel = scene.selectNearestLandableIfNoneSelected(), scene.isWithinClearanceRange(sel) {
+            scene.requestLandingClearance(sel, clearedNow: true)
+        }
+        guard let id = scene.attemptLand() else { return }
         _ = id
         host?.hud.post("Docking clamps engaged — nicely done, Captain.")
         run.complete(.land)

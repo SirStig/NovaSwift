@@ -25,6 +25,7 @@ struct SettingsView: View {
     /// a tester hitting something odd shouldn't have to find a developer switch
     /// first. See `BugReportView`.
     @State private var showBugReport = false
+    @State private var showAbout = false
 
     var body: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
@@ -84,6 +85,9 @@ struct SettingsView: View {
             BugReportView()
                 .environmentObject(model)
                 .environmentObject(model.pilot)
+        }
+        .overlay {
+            if showAbout { AboutView(onClose: { showAbout = false }) }
         }
         // Debug: the full first-run wizard from the welcome step (no `startAtImport`),
         // so the whole guide can be reviewed even after data is imported.
@@ -449,6 +453,14 @@ struct SettingsView: View {
                 showBugReport = true
             } label: {
                 Label("Report a Bug", systemImage: "ladybug")
+            }
+            // The authentic main menu's About button shows the data's own
+            // dësc 32767, as the original does; the port's About lives here.
+            Button {
+                model.audio.play(.uiSelect)
+                showAbout = true
+            } label: {
+                Label("About NovaSwift", systemImage: "info.circle")
             }
         } header: {
             sectionHeader("Support", icon: "lifepreserver")

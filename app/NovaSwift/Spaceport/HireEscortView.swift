@@ -41,33 +41,24 @@ struct HireEscortView: View {
     /// Today's galaxy day — the seed for the per-day availability roll.
     private var day: Int { pilot.state.date.julianDay }
 
-    /// Ships offered for hire here today. The pool is what this planet's
-    /// *shipyard* deals in — `game.shipsSold(at:day:)` is tech-level-eligible and
-    /// returns nothing when the spöb has no shipyard, so a bar without a shipyard
-    /// offers no escorts (you can only hire hulls the port actually stocks). From
-    /// that pool, only the hulls whose `HireRandom` roll passes today are on
-    /// offer, so it's a random planet-specific subset that changes day to day —
-    /// never every ship. A hull the player hasn't unlocked for purchase
-    /// (mission/story-gated `Availability`/`Require` — same `lockState` the
-    /// Shipyard's own stock uses, see `ItemLocking.swift`) is dropped entirely
-    /// when it opts into full hiding, same as the Shipyard; otherwise it's still
-    /// listed but locked (see `buttons(_:)`'s `canHire`). Grouped by escort
-    /// category, then fee, the way the escort menu clusters
-    /// fighters/medium/warships/freighters. Passing `day: nil` uses the
-    /// shipyard's tech eligibility without its separate `BuyRandom` stock roll —
-    /// hire availability is the `HireRandom` roll's job.
+    /// Ships offered for hire here today: the hulls whose `HireRandom` roll
+    /// passes today, a random subset that changes day to day.
+    ///
+    /// The hire list is the shipyard list in hire mode (0x00469e90): tech and
+    /// SpecialTech, the day's HireRandom roll, the Flags3 hides, then
+    /// DispWeight order — at any stellar with a bar, shipyard or not.
     private var stock: [ShipRes] {
-        game.shipsSold(at: spob, day: nil, hire: true,
-                       excluded: { !pilot.escortAvailableToday($0, day: day) || lockState(for: $0) == .hidden })
-            .sorted { ($0.escortCategory, hirePrice($0)) < ($1.escortCategory, hirePrice($1)) }
+        let state = pilot.state
+        return game.shipyardList(
+            at: spob, hire: true,
+            stocked: { pilot.escortAvailableToday($0, day: day) },
+            availabilityPasses: { NCBTest($0.availBits).evaluate(state) },
+            requirePasses: { ($0.require & game.contributedBits(pilot: state)) == $0.require })
     }
     private func hirePrice(_ s: ShipRes) -> Int { pilot.escortHirePrice(s, at: spob, galaxy: galaxy) }
     /// The original's cap: six hired or captured escorts (EC-19).
     private var wingHasRoom: Bool { pilot.canAddEscort() }
     private var selected: ShipRes? { stock.first { $0.id == selectedID } ?? stock.first }
-    private func lockState(for s: ShipRes) -> LockState {
-        game.lockState(for: s, pilot: pilot.state)
-    }
 
     private static func categoryLabel(_ c: Int) -> String {
         switch c {
@@ -81,25 +72,30 @@ struct HireEscortView: View {
 
     var body: some View {
         if let frame = graphics.frame(.shipyard) {
+            // DITL #1004 item positions, matched to the Shipyard exactly, and
+            // following a plug-in's replacement DITL the same way.
+            let d = DITLPlacement(graphics.game, 1004, frame: frame)
+            let pane = d.delta(5, stock: CGRect(x: 354, y: 10, width: 192, height: 267))
+            let pict = d.delta(7, stock: CGRect(x: 557, y: 8, width: 200, height: 200))
             NovaMenu(frame: frame, overlay: true) { space in
-                // DITL #1004 item positions, matched to the Shipyard exactly.
                 grid.frame(width: hireGridTileSize.width * CGFloat(hireGridCols), height: hireGridHeight)
-                    .clipped().novaPlace(space, -373.5, -152.5)
+                    .clipped()
+                    .ditlPlace(space, d, 4, stock: CGRect(x: 9, y: 8, width: 333, height: 271), at: -373.5, -152.5)
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.up.fill",
                                enabled: currentTopRow > 0) { scroll(-1) }
-                    .novaPlace(space, -241.5, 126.5)
+                    .ditlPlace(space, d, 11, stock: CGRect(x: 141, y: 288, width: 25, height: 25), at: -241.5, 126.5)
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
                                enabled: currentTopRow < maxTopRow) { scroll(1) }
-                    .novaPlace(space, -211.5, 126.5)
-                detail.frame(width: 190, height: 265, alignment: .topLeading)
-                    .clipped().novaPlace(space, -28.5, -150.5)
+                    .ditlPlace(space, d, 12, stock: CGRect(x: 171, y: 288, width: 25, height: 25), at: -211.5, 126.5)
+                detail.frame(width: 190 + pane.dw, height: 265 + pane.dh, alignment: .topLeading)
+                    .clipped().novaPlace(space, -28.5 + pane.dx, -150.5 + pane.dy)
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
-                        .frame(width: 200, height: 200).clipped()
-                        .novaPlace(space, 174.5, -152.5)
+                        .frame(width: 200 + pict.dw, height: 200 + pict.dh).clipped()
+                        .novaPlace(space, 174.5 + pict.dx, -152.5 + pict.dy)
                 }
-                info(space)
-                buttons(space)
+                info(space, d)
+                buttons(space, d)
             }
         } else {
             fallback
@@ -128,7 +124,7 @@ struct HireEscortView: View {
                     ItemTile(name: s.displayName, image: picture?.image,
                              pixelated: picture?.isDedicated == false,
                              selected: (selectedID ?? stock.first?.id) == s.id,
-                             locked: lockState(for: s) != .available)
+                             locked: !NCBTest(s.availBits).evaluate(pilot.state))
                         .onTapGesture { selectedID = s.id }
                         .cursorClickable { selectedID = s.id }
                 } else {
@@ -175,14 +171,14 @@ struct HireEscortView: View {
         }
     }
 
-    private func info(_ space: NovaSpace) -> some View {
+    private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 8) {
             infoRow("Hire:", s.map { hireCreditString(hirePrice($0)) } ?? "—")
             infoRow("Per day:", s.map { hireCreditString($0.escortDailyFee) } ?? "—")
             infoRow("You Have:", hireCreditString(pilot.state.credits))
         }
-        .novaPlace(space, 232, 46)
+        .ditlPlace(space, d, 8, stock: CGRect(x: 614, y: 214, width: 143, height: 100), at: 232, 46)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -192,8 +188,10 @@ struct HireEscortView: View {
         }
     }
 
-    @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
+    @ViewBuilder private func buttons(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
+        // Hiring checks the credits and the Availability test only; Require
+        // gates buying, not hiring (0x00498dc0).
         let canHire = (s.map { pilot.state.credits >= hirePrice($0) && NCBTest($0.availBits).evaluate(pilot.state) } ?? false)
             && wingHasRoom
         NovaButton(graphics: graphics,
@@ -205,10 +203,10 @@ struct HireEscortView: View {
                 Log.spaceport.debug("Hired escort \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(price, privacy: .public)cr")
             }
         }
-        .novaPlace(space, -18, 128)
+        .ditlPlace(space, d, 0, stock: CGRect(x: 365, y: 289, width: 109, height: 25), at: -18, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                    width: 83, action: onDone)
-            .novaPlace(space, 98, 128)
+            .ditlPlace(space, d, 6, stock: CGRect(x: 480, y: 289, width: 109, height: 25), at: 98, 128)
     }
 
     private var fallback: some View {

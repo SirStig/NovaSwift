@@ -157,10 +157,18 @@ public final class OriginalAIShipState {
     var swarmMate: Int?
     /// `escort_command_code`: 0 Formation, 1 Defend, 2 Attack, 3 Return, 4 Hold.
     public internal(set) var escortCommand = -1
+    /// `+0xc4`: this escort has been given an order since it spawned (set by
+    /// any order change, cleared at spawn). A carried fighter only obeys
+    /// Return to Hangar with it set, and a player category's standing order
+    /// lapses once no escort of that category holds it.
     var escortCommandPending = false
-    /// `+0xc90a`: the order the player last gave this escort (0 Formation by
-    /// default), kept per ship as the original does.
-    public internal(set) var playerOrder = 0
+    /// `+0xc90a` for a player escort: copied every frame from the player's
+    /// standing order for its EscortType (`OriginalAI.categoryCommand`); −1
+    /// (the spawn value) reads as Formation.
+    public internal(set) var playerOrder = -1
+    /// `+0xc922`: the chatter voice (0 or 1), from `Rand(2)` or the hull's
+    /// attribute government's fixed voice; −1 until rolled.
+    var voice = -1
     /// Scope-6 flag: some ship holds this one as its squad leader.
     var isSquadLeader = false
     var resolvedLeader: Int?

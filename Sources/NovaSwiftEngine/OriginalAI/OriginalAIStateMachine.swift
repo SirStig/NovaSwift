@@ -325,7 +325,7 @@ extension OriginalAI {
             }
             rec.secondary = .ship(pid)
             var range = Double(Int16(truncatingIfNeeded: Int((10 - Self.turnDeg(ship)) * 30 + 50)))
-            if ship.inertialess { range *= 4 }
+            if ship.isInertialessNow { range *= 4 }
             rec.mode = Self.inBox(ship.position, target.position, range) ? M.boardHold : M.formationHold
             return
         }
@@ -514,7 +514,7 @@ extension OriginalAI {
         } else if !isBoarded(pid) || rec.maneuverTimer > 0 {
             rec.secondary = .ship(pid)
             var range = (10 - Self.turnDeg(ship)) * 30
-            if ship.inertialess { range *= 4 }
+            if ship.isInertialessNow { range *= 4 }
             if dx > range || dy > range {
                 rec.mode = dx > range * 2 || dy > range * 2 ? M.holdAtDistance : M.formationHold
             } else {

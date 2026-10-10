@@ -75,6 +75,8 @@ extension World {
                 hostile = diplomacy?.areEnemies(body.government, ship.government) ?? false
             }
             guard hostile else { continue }
+            // A non-player in the arrival state is never a battery target (0x004629e0).
+            if !ship.isPlayer, originalAI.record(for: ship.entityID)?.state == OriginalAIState.arrival { continue }
             let d = (ship.position - body.position).length
             if d <= bestD { bestD = d; best = ship }
         }

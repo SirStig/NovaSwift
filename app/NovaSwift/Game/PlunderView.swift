@@ -70,7 +70,6 @@ struct PlunderView: View {
     /// PICT #8515 "Plunder" (`Nova Graphics 3.rez`) — not added to
     /// `SpaceportGraphics.Frame` per instructions; a local constant instead.
     private static let framePictID = 8515
-    fileprivate static let frameSize = CGSize(width: 309, height: 198)
 
     private var hasCargo: Bool { cargoLines.contains { $0.amount != "0" } }
     private var totalCargoTons: Int { cargoLines.compactMap { Int($0.amount) }.reduce(0, +) }
@@ -83,23 +82,27 @@ struct PlunderView: View {
                 .onTapGesture(perform: onDismiss)
 
             if let graphics, let frame = graphics.pict(Self.framePictID) {
+                // Rects resolve through DITL #1011 (stock rects as fallback) so a
+                // plug-in's replacement DITL moves and resizes the controls.
+                let d = DITLPlacement(graphics.game, 1011, frame: frame)
                 NovaMenu(frame: frame, overlay: true) { space in
-                    manifest.ditlPlace(space, left: 11, top: 7)
+                    let panel = d.rect(4, top: 7, left: 11, bottom: 103, right: 298)
+                    manifest(panel.size).ditlPlace(space, d, panel)
                     // Row 1: Energy / Cargo / Credits
-                    button(graphics, "Energy", width: 63, enabled: energyAboard > 0, action: onTakeEnergy)
-                        .ditlPlace(space, left: 16, top: 110)
-                    button(graphics, "Cargo", width: 63, enabled: hasCargo, action: onTakeCargo)
-                        .ditlPlace(space, left: 110, top: 110)
-                    button(graphics, "Credits", width: 63, enabled: creditsAboard > 0, action: onTakeCredits)
-                        .ditlPlace(space, left: 204, top: 110)
+                    ditlButton(graphics, space, d, d.rect(5, top: 110, left: 16, bottom: 135, right: 105),
+                               "Energy", enabled: energyAboard > 0, action: onTakeEnergy)
+                    ditlButton(graphics, space, d, d.rect(1, top: 110, left: 110, bottom: 135, right: 199),
+                               "Cargo", enabled: hasCargo, action: onTakeCargo)
+                    ditlButton(graphics, space, d, d.rect(3, top: 110, left: 204, bottom: 135, right: 293),
+                               "Credits", enabled: creditsAboard > 0, action: onTakeCredits)
                     // Row 2: Ammo / Capture Ship
-                    button(graphics, "Ammo", width: 63, enabled: ammoAboard > 0, action: onTakeAmmo)
-                        .ditlPlace(space, left: 35, top: 138)
-                    button(graphics, "Capture Ship", width: 120, enabled: captureChance != nil, action: onCaptureShip)
-                        .ditlPlace(space, left: 129, top: 138)
+                    ditlButton(graphics, space, d, d.rect(2, top: 138, left: 35, bottom: 163, right: 124),
+                               "Ammo", enabled: ammoAboard > 0, action: onTakeAmmo)
+                    ditlButton(graphics, space, d, d.rect(6, top: 138, left: 129, bottom: 163, right: 275),
+                               "Capture Ship", enabled: captureChance != nil, action: onCaptureShip)
                     // Row 3: Abort (isolated, bottom-centered)
-                    button(graphics, "Abort", width: 100, enabled: true, action: onDismiss)
-                        .ditlPlace(space, left: 91, top: 166)
+                    ditlButton(graphics, space, d, d.rect(0, top: 166, left: 91, bottom: 191, right: 217),
+                               "Abort", enabled: true, action: onDismiss)
                 }
             } else {
                 fallbackPanel
@@ -108,10 +111,14 @@ struct PlunderView: View {
         .novaResponsive()
     }
 
-    @ViewBuilder
-    private func button(_ graphics: SpaceportGraphics, _ title: String, width: CGFloat,
-                        enabled: Bool, action: @escaping () -> Void) -> some View {
-        NovaButton(graphics: graphics, title: title, width: width, enabled: enabled, action: action)
+    /// A three-slice button filling DITL rect `rect` (the caps are 13 px each,
+    /// so the middle spans the rest).
+    private func ditlButton(_ graphics: SpaceportGraphics, _ space: NovaSpace, _ d: DITLPlacement,
+                            _ rect: CGRect, _ title: String,
+                            enabled: Bool, action: @escaping () -> Void) -> some View {
+        NovaButton(graphics: graphics, title: title, width: max(0, rect.width - 26),
+                   enabled: enabled, action: action)
+            .ditlPlace(space, d, rect)
     }
 
     /// Item [4]: the disabled 287×96 readout. Title and the "Cargo:"/"Ammo:"/
@@ -131,7 +138,7 @@ struct PlunderView: View {
     /// writeup). This engine doesn't model pilot registration status, so the
     /// row is only shown when `captureChance` is non-nil, without that
     /// qualifier.
-    private var manifest: some View {
+    private func manifest(_ size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             NovaText("Select what to plunder from this ship:", size: 11, color: novaAmber, weight: .bold)
             manifestRow("Cargo:", hasCargo ? "\(totalCargoTons) tons" : "None")
@@ -144,7 +151,7 @@ struct PlunderView: View {
                      size: 10, color: Color(white: 0.65))
         }
         .padding(6)
-        .frame(width: 287, height: 96, alignment: .topLeading)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
         .background(Color.black.opacity(0.55))
         .clipped()
     }
@@ -196,16 +203,6 @@ struct PlunderView: View {
         }
         .buttonStyle(.novaPlain)
         .disabled(!enabled)
-    }
-}
-
-/// `.novaPlace` takes a frame-centre offset (`cx, cy`); DITL rects give
-/// top-left pixel coordinates. This converts directly at the call site so
-/// each button above can cite its real DITL `left`/`top` verbatim instead of
-/// pre-subtracted numbers.
-private extension View {
-    func ditlPlace(_ space: NovaSpace, left: CGFloat, top: CGFloat) -> some View {
-        novaPlace(space, left - PlunderView.frameSize.width / 2, top - PlunderView.frameSize.height / 2)
     }
 }
 

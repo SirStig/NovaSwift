@@ -345,6 +345,16 @@ final class GameHost {
                 guard let ship = scanGame.ship(id), !ship.appearOn.isEmpty else { return true }
                 return StoryEngine(game: scanGame, player: store.state).evaluate(test: ship.appearOn)
             }
+            // The status bar's cargo panel (0x004612c0): the commodity bins,
+            // the Special line, and the fleet's capacity for Free.
+            scene.cargoPanelProvider = { [weak pilotStore] in
+                guard let state = pilotStore?.state else { return ([], "", 0) }
+                return GameContainerView.cargoPanel(state, game: scanGame)
+            }
+            scene.missionBoardStandsDown = { id in
+                guard let m = scanGame.mission(id) else { return false }
+                return m.flags1 & 0x0001 != 0 && m.shipCount == 1
+            }
             // Mining: the player's scoop collected a destroyed asteroid's yield —
             // add it to cargo (clamped to free hold) and report what was stowed.
             scene.onAsteroidMined = { [weak pilotStore] cargoType, quantity in
@@ -378,6 +388,7 @@ final class GameHost {
             scene.onPlayerDestroyed = { [weak pilotStore] in
                 guard let pilotStore else { return }
                 if pilotStore.state.strictPlayDeathDeletesPilot { model.deleteStrictPlayPilot() }
+                else { model.killedPilotID = pilotStore.rosterID }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
                     model.returnToMainMenu()
                 }
@@ -586,16 +597,20 @@ final class GameHost {
             Log.hud.error("makeHUDStyle: no ïntf(\(intfID)) or ïntf(128) resource — falling back to GameHUDView")
             return nil
         }
-        guard let pictData = game.resources.resource(NovaType.pict, intf.backgroundPictID)?.data else {
-            Log.hud.error("makeHUDStyle: backdrop PICT #\(intf.backgroundPictID) missing — falling back to GameHUDView")
+        // 0x004cda50 clamps StatusBkgnd to >= 128; a missing backdrop draws
+        // PICT 128 instead of leaving the status bar out.
+        let backdropID = max(128, intf.backgroundPictID)
+        guard let pictData = (game.resources.resource(NovaType.pict, backdropID)
+                              ?? game.resources.resource(NovaType.pict, 128))?.data else {
+            Log.hud.error("makeHUDStyle: backdrop PICT #\(backdropID) and PICT #128 missing — falling back to GameHUDView")
             return nil
         }
-        guard let sheet = try? PICT.decode(pictData) else {
-            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) failed to decode — falling back to GameHUDView")
+        guard let sheet = PICT.decodeLogged(pictData, id: backdropID) else {
+            Log.hud.error("makeHUDStyle: PICT #\(backdropID) failed to decode — falling back to GameHUDView")
             return nil
         }
         guard let cg = sheet.makeCGImage() else {
-            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) decoded but makeCGImage() failed — falling back to GameHUDView")
+            Log.hud.error("makeHUDStyle: PICT #\(backdropID) decoded but makeCGImage() failed — falling back to GameHUDView")
             return nil
         }
         // A radar/status rect with zero or negative width/height (a bad ïntf
@@ -729,6 +744,9 @@ struct GameContainerView: View {
     @State private var boardRefresh = 0
     /// A hulk that just rolled a successful capture, awaiting the player's
     /// "use as escort" vs. "take command of it" choice (nil = no pending choice).
+    /// The captured-ship name prompt (`nv_ShowPrompt`, STR# 2002 #119): the
+    /// prize and the text being edited.
+    @State private var captureNamePrompt: (cap: (entityID: Int, shipType: Int, name: String), text: String)?
     @State private var pendingCaptureChoice: (entityID: Int, shipType: Int, name: String)?
     /// Credit cost of "Request Assistance" by how the hailed crew feels about
     /// the player (`GameScene.AssistanceTier`) — allies help for free; a
@@ -872,7 +890,9 @@ struct GameContainerView: View {
                     }
                 }
 
-                MessageLogView(hud: host.hud)
+                GeometryReader { geo in
+                    MessageLogView(hud: host.hud, rightInset: touchRightInset(host, in: geo.size))
+                }
 
                 EscortCommandPanelView(hud: host.hud)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1094,15 +1114,10 @@ struct GameContainerView: View {
                 // in flight (a crön advances the clock). A single OK dismisses it.
                 if let story = flightMissionServices.storyText {
                     Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
-                    NovaDialog(title: story.title.isEmpty ? "Mission" : story.title,
-                               width: 480,
-                               buttons: [NovaDialogButton(title: "OK", isDefault: true) {
-                                   flightMissionServices.storyText = nil
-                               }]) {
-                        Text(story.text)
-                            .novaFont(.body)
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
+                    DescTextDialog(title: story.title, text: story.text,
+                                   graphicID: flightMissionServices.storyDescID
+                                       .flatMap { host.game?.desc($0)?.pictureID }) {
+                        flightMissionServices.storyText = nil
                     }
                     .transition(.opacity)
                 }
@@ -1304,19 +1319,37 @@ struct GameContainerView: View {
                             isPresented: Binding(get: { pendingCaptureChoice != nil },
                                                  set: { if !$0 { pendingCaptureChoice = nil } }),
                             presenting: pendingCaptureChoice) { cap in
-            Button("Take Command") { takeCommandOfCapturedShip(cap) }
+            Button("Take Command") { openCaptureNamePrompt(cap) }
             // Only offered under the escort-wing cap — a full wing can still
             // take command of the captured hull, just not add it as an escort.
             if model.pilot.canAddEscort() {
                 Button("Use as Escort") { recruitCapturedShipAsEscort(cap) }
             }
         } message: { cap in
-            Text("\(cap.name.isEmpty ? "The ship" : cap.name) is yours. Fly it yourself, or add it to your escort wing?")
+            Text(model.data.game?.stringList(2002)?.string(at: 118)
+                 ?? "Do you want to use this ship as an escort, or would you rather trade places with its captain and use it as your own ship?")
         }
     }
 
     var body: some View {
         gameStackWithMidLifecycle
+        .alert(model.data.game?.stringList(2002)?.string(at: 119) ?? "Name your new ship.",
+               isPresented: Binding(get: { captureNamePrompt != nil },
+                                    set: { if !$0 { captureNamePrompt = nil } })) {
+            TextField("Ship name", text: Binding(get: { captureNamePrompt?.text ?? "" },
+                                                 set: { captureNamePrompt?.text = String($0.prefix(63)) }))
+            Button("OK") {
+                if let p = captureNamePrompt {
+                    captureNamePrompt = nil
+                    takeCommandOfCapturedShip(p.cap, name: p.text)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                captureNamePrompt = nil
+                pendingCaptureChoice = nil
+                host?.hud.post(model.data.game?.stringList(2002)?.string(at: 122) ?? "Cancelled.")
+            }
+        }
         // Leaving the game unsuppresses the UI cursor so it works on the menus.
         .onDisappear { CursorTargets.shared.suppressed = false }
         // Keep cursor suppression tracking who owns the screen. `wirePadController`
@@ -1330,7 +1363,13 @@ struct GameContainerView: View {
         // Commands read `debug`/`model` live at call time (they close over
         // `self`), so registering once per session is enough — a jump
         // rebuild doesn't need to re-wire them the way pad bindings do.
-        .onAppear { registerConsoleCommands() }
+        .onAppear {
+            registerConsoleCommands()
+            if let notice = model.pendingLoadNotice {
+                model.pendingLoadNotice = nil
+                flightMissionServices.storyText = (title: "", text: notice)
+            }
+        }
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
         // Push any settings change into the live scene's own copy so display
         // options (ship bars, planet labels, smooth sprites, engine glow, screen
@@ -1825,6 +1864,13 @@ struct GameContainerView: View {
             let c = RadarIFF.stellarColor(spob, state: model.pilot.state, game: game, system: nav.currentSystemID)
             return Color(red: Double(c.r) / 65535, green: Double(c.g) / 65535, blue: Double(c.b) / 65535)
         }
+        // Every status-bar line gets the original's wildcard pass, so a quote's
+        // <PSN>/<PN>/{G …} never reaches the screen raw.
+        if let game = host?.game {
+            host?.hud.expandText = { text in
+                OriginalText(game: game).expandStatusText(text, player: model.pilot.state)
+            }
+        }
         // Feed a mission special-ship's completed goal back into the story engine
         // (decrement the objective, complete the mission if it was the last one).
         host?.scene.onMissionShipGoalReached = { missionID, goal, _ in
@@ -2056,6 +2102,7 @@ struct GameContainerView: View {
     /// Called before `advanceGameDay` so a just-in-time delivery completes before
     /// the calendar tick could trip its deadline.
     private func handleStoryLanding(spobID: Int) {
+        creditSurvivingAuxShips()
         guard let game = model.data.game else { return }
         let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
         engine.playerLanded(onSpob: spobID)
@@ -2101,16 +2148,26 @@ struct GameContainerView: View {
     private func spawnActiveMissionShips() {
         guard let scene = host?.scene, let game = model.data.game else { return }
         let currentSys = nav.currentSystemID
+        // Slots saved before ShipSyst was resolved at accept get it now.
+        let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+        if model.pilot.state.activeMissions.contains(where: { $0.shipSystemResolved != true }) {
+            engine.resolveLegacyMissionShipSystems()
+            model.pilot.state = engine.player
+        }
         for am in model.pilot.state.activeMissions {
             guard let m = game.mission(am.missionID), !scene.hasMissionShips(m.id) else { continue }
 
-            // Goal ships. Escort/observe are passive (they complete by landing, so
-            // their objective count is 0) — those always (re)spawn while the
-            // mission is active; kill/disable/board objectives don't respawn once
-            // met (`shipObjectivesRemaining == 0`).
-            let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe
-            let goalEligible = m.hasShipObjective && (passiveGoal || am.shipObjectivesRemaining > 0)
-            let goalSystemMatches = missionSystemMatches(code: m.shipSystem, active: am, currentSystem: currentSys, game: game)
+            // Special ships (0x0041d6e0) spawn whenever the slot's resolved
+            // ShipSyst is this system, whatever the ShipGoal — a −1 goal's
+            // escorts, pursuers and ambushers included. Escort/observe and
+            // goal-less ships always (re)spawn while the mission is active;
+            // kill/disable/board objectives don't respawn once met.
+            let passiveGoal = m.shipGoal == .escort || m.shipGoal == .observe || m.shipGoal == .none
+            let goalEligible = m.shipCount > 0 && m.shipDude >= 128
+                && (passiveGoal || am.shipObjectivesRemaining > 0)
+            let goalSystemMatches = engine.shipSystemMatches(am, currentSystem: currentSys)
+            let shipName = engine.missionShipName(am, m)
+            let shipSubtitle = engine.missionShipSubtitle(am, m)
             if goalEligible, goalSystemMatches {
                 // `mïsn.ShipName`/`ShipSubtitle` name the mission's special ships
                 // on the target display, instead of their bare hull type.
@@ -2120,8 +2177,8 @@ struct GameContainerView: View {
                     scene.scheduleMissionArrival(missionID: m.id, dudeID: m.shipDude,
                                                  count: max(1, m.shipCount), goal: m.shipGoal,
                                                  behavior: m.shipBehaviorMode, auxiliary: false,
-                                                 name: missionShipName(m, game: game),
-                                                 subtitle: missionShipSubtitle(m, game: game))
+                                                 preferredShipID: am.lockedShipType,
+                                                 name: shipName, subtitle: shipSubtitle)
                 } else {
                     scene.spawnMissionShips(missionID: m.id, dudeID: m.shipDude,
                                             count: max(1, m.shipCount), goal: m.shipGoal,
@@ -2129,10 +2186,10 @@ struct GameContainerView: View {
                                             arrival: arrivalMode(forShipStart: m.shipStart),
                                             navStellarIndex: (-16 ... -1).contains(m.shipStart) ? -1 - m.shipStart : nil,
                                             startsCloaked: m.shipStart == 2,
-                                            name: missionShipName(m, game: game),
-                                            subtitle: missionShipSubtitle(m, game: game))
+                                            preferredShipID: am.lockedShipType,
+                                            name: shipName, subtitle: shipSubtitle)
                 }
-            } else if m.hasShipObjective {
+            } else if m.shipCount > 0 {
                 Log.story.debug("spawnActiveMissionShips: mission \(m.id) goal ships not spawned (eligible=\(goalEligible), systemMatches=\(goalSystemMatches), shipSystem=\(m.shipSystem), currentSys=\(currentSys), remaining=\(am.shipObjectivesRemaining))")
             }
 
@@ -2141,7 +2198,7 @@ struct GameContainerView: View {
             // side; without Flags 0x0010 each one spends the mission's budget.
             let auxLeft = m.infiniteAuxShips ? m.auxShipCount : (am.auxShipsRemaining ?? m.auxShipCount)
             if auxLeft > 0, m.auxShipDude >= 128,
-               missionSystemMatches(code: m.auxShipSystem, active: am, currentSystem: currentSys, game: game) {
+               engine.auxSystemMatches(am, m, currentSystem: currentSys) {
                 scene.scheduleMissionArrival(missionID: m.id, dudeID: m.auxShipDude, count: auxLeft,
                                              goal: .none, behavior: .standard, auxiliary: true)
             }
@@ -2167,6 +2224,7 @@ struct GameContainerView: View {
     /// becomes explored, nebula events fire (for `hops` crossed on the way
     /// too), and the mission-offer rolls are drawn afresh (UI-04, OS-14).
     private func storyArrival(in systemID: Int, via hops: [Int] = []) {
+        creditSurvivingAuxShips()
         guard let game = model.data.game else {
             model.pilot.state.currentSystem = systemID
             model.pilot.state.exploredSystems.insert(systemID)
@@ -2225,24 +2283,46 @@ struct GameContainerView: View {
         saveGame(reason: .event)
     }
 
-    /// `mïsn.ShipName` (a `STR#` id), resolved to the name this mission's special
-    /// ships fly under. Empty when the mission names none, which leaves each
-    /// ship showing its hull type as before.
-    private func missionShipName(_ m: MissionRes, game: NovaGame) -> String {
-        guard m.shipNameStrID > 0,
-              let list = game.stringList(m.shipNameStrID),
-              let first = list.strings.first(where: { !$0.isEmpty }) else { return "" }
-        return first
+    /// The cargo panel's rows, Special line and fleet capacity (0x004612c0).
+    static func cargoPanel(_ state: PlayerState, game: NovaGame)
+        -> (rows: [(name: String, tons: Int)], special: String, fleetCapacity: Int) {
+        let mission = PilotEconomy.missionCargo(state, game: game)
+        var rows: [(name: String, tons: Int)] = []
+        for c in Commodity.allCases {
+            let tons = (state.cargo[c.cargoID] ?? 0) - (mission[c.cargoID] ?? 0)
+            if tons > 0 { rows.append((game.commodityName(c), tons)) }
+        }
+        let loaded = state.activeMissions.filter { am in
+            am.isCarryingCargo && (am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1) != -1
+        }
+        let junk = state.cargo.filter { $0.key >= 128 && $0.value > 0 }.keys.sorted()
+        var special = ""
+        if !loaded.isEmpty || !junk.isEmpty {
+            let misc = game.stringList(2002)
+            if loaded.count == 1, let am = loaded.first {
+                let type = am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1
+                special = Commodity(rawValue: type).map { game.commodityName($0) }
+                    ?? game.junk(type)?.name ?? (misc?.string(at: 21) ?? "")
+            } else if loaded.isEmpty, junk.count == 1 {
+                special = game.junk(junk[0])?.name ?? ""
+            } else {
+                special = misc?.string(at: 21) ?? "Multiple"
+            }
+        }
+        return (rows, special, PilotEconomy.cargoCapacity(state, galaxy: Galaxy(game: game)))
     }
 
-    /// `mïsn.ShipSubtitle` (a `STR#` id), resolved to the line shown beneath the
-    /// ship's name on the target display (e.g. "Federation Navy"). Empty when
-    /// the mission sets none, which is the common case.
-    private func missionShipSubtitle(_ m: MissionRes, game: NovaGame) -> String {
-        guard m.shipSubtitleStrID > 0,
-              let list = game.stringList(m.shipSubtitleStrID),
-              let first = list.strings.first(where: { !$0.isEmpty }) else { return "" }
-        return first
+    /// Live auxiliary ships go back to their missions' budgets as the player
+    /// leaves the system (0x0041ad50), capped at AuxShipCount.
+    private func creditSurvivingAuxShips() {
+        guard let scene = host?.scene, let game = model.data.game else { return }
+        for (missionID, count) in scene.collectSurvivingAuxiliaryShips() {
+            guard let m = game.mission(missionID), !m.infiniteAuxShips,
+                  let i = model.pilot.state.activeMissions.firstIndex(where: { $0.missionID == missionID })
+            else { continue }
+            let left = model.pilot.state.activeMissions[i].auxShipsRemaining ?? m.auxShipCount
+            model.pilot.state.activeMissions[i].auxShipsRemaining = min(m.auxShipCount, left + count)
+        }
     }
 
     /// Map a `mïsn.ShipStart` code to a spawn arrival: `1` = jump in from
@@ -2252,33 +2332,6 @@ struct GameContainerView: View {
         code == 1 ? .hyperspace : .populate
     }
 
-    /// Whether a `ShipSyst`/`AuxShipSyst` selector `code` resolves to
-    /// `currentSystem`. Handles −6 follow-player, −3/−4 the travel/return
-    /// stellar's system, −1 the accept ("initial") system, −5 a system adjacent
-    /// to the initial, −2 a deterministic random system (stable per mission), and
-    /// a specific id.
-    private func missionSystemMatches(code: Int, active am: ActiveMission,
-                                      currentSystem: Int, game: NovaGame) -> Bool {
-        func systemOf(_ spob: Int?) -> Int? {
-            spob.flatMap { game.owningSystem(ofSpob: $0, state: model.pilot.state) }
-        }
-        switch code {
-        case -6:                       return true                              // follow the player
-        case -3:                       return systemOf(am.travelSpobID) == currentSystem
-        case -4:                       return systemOf(am.returnSpobID) == currentSystem
-        case -1:                       return am.acceptSystemID == currentSystem // initial
-        case -5:                                                                 // adjacent to initial
-            guard let initial = am.acceptSystemID else { return false }
-            return game.systemNeighbors(initial).contains(currentSystem)
-        case -2:                                                                 // random, frozen per mission
-            let systems = game.systems().map(\.id).sorted()
-            guard !systems.isEmpty else { return false }
-            let h = UInt64(bitPattern: Int64(am.missionID)) &* 0x9E3779B97F4A7C15
-            return systems[Int(h % UInt64(systems.count))] == currentSystem
-        case let sid where sid >= 128: return sid == currentSystem              // specific
-        default:                       return false
-        }
-    }
 
     /// Story `M`/`N` op: relocate the player to `systemID`. The persistent
     /// `currentSystem` is already updated by the engine; when the player is in
@@ -2806,7 +2859,7 @@ struct GameContainerView: View {
                 cargoLines: m.cargo.map { PlunderLine(label: commodityLabel($0.commodity),
                                                       amount: "\($0.tons)") },
                 creditsAboard: m.credits,
-                ammoAboard: scene.ammoAboard(m.shipID),
+                ammoAboard: scene.ammoAboard(m.shipID, freeMass: plunderFreeMass),
                 energyAboard: Int(scene.fuelAboard(m.shipID).rounded()),
                 captureChance: m.captureChance,
                 onTakeCargo: { plunderPress(scene, m.shipID) { plunderTakeCargo(scene, shipID: m.shipID) } },
@@ -2901,7 +2954,7 @@ struct GameContainerView: View {
         // own cargo/speed readouts are separate manually-synced caches too, and
         // were missing from this sync entirely, so buying one of these left the
         // sidebar showing stale numbers until the next takeoff rebuilt the ship.
-        host.hud.cargoCapacity = lo.cargoCapacity
+        host.hud.cargoCapacity = PilotEconomy.cargoCapacity(state, galaxy: galaxy)   // the fleet's, for Free (0x004612c0)
         host.hud.cargoUsed = state.usedCargoSpace
         host.hud.maxSpeed = lo.speed
     }
@@ -2979,8 +3032,14 @@ struct GameContainerView: View {
     /// "Ammo" plunder button — top up the player's matching weapons from the
     /// hulk's magazines. Ammunition lives on the in-flight weapon mounts (no
     /// separate save field), so this needs no pilot write.
+    /// The player's free mass, which bounds how many plundered rounds fit.
+    private var plunderFreeMass: Int {
+        guard let galaxy = host?.galaxy else { return .max }
+        return model.pilot.freeMass(galaxy: galaxy)
+    }
+
     private func plunderTakeAmmo(_ scene: GameScene, shipID: Int) {
-        let rounds = scene.plunderAmmo(shipID)
+        let rounds = scene.plunderAmmo(shipID, freeMass: plunderFreeMass)
         guard rounds > 0 else { return }
         plunderPanic?.looted(.ammo)
         host?.hud.post("Transferred \(rounds) round\(rounds == 1 ? "" : "s") of ammunition.")
@@ -3016,7 +3075,13 @@ struct GameContainerView: View {
         guard let missionID, let mission = game.mission(missionID) else { return }
         flightMissionEngine = engine
         flightMissionPersonID = personID
-        engine.present(mission)
+        if !engine.present(mission) {
+            // A can't-refuse offer with no text activated silently.
+            model.pilot.state = engine.player
+            model.pilot.save()
+            flightMissionEngine = nil
+            flightMissionPersonID = nil
+        }
     }
 
     /// Accept the current in-flight `pêrs` LinkMission offer, honoring the
@@ -3039,11 +3104,17 @@ struct GameContainerView: View {
             }
             // "Replace the ship with the mission's special ship" (0x0040), for a
             // one-ship mission (AI-39).
-            if pers.replacedByMissionShip, let game = host?.game, offer.mission.shipCount == 1,
-               offer.mission.shipDude >= 128 {
-                host?.scene.replacePersWithMissionShip(personID: pid, mission: offer.mission,
-                                                       name: missionShipName(offer.mission, game: game),
-                                                       subtitle: missionShipSubtitle(offer.mission, game: game))
+            if pers.replacedByMissionShip, offer.mission.shipCount == 1, offer.mission.shipDude >= 128,
+               let am = engine.player.activeMission(offer.mission.id) {
+                let hull = host?.scene.replacePersWithMissionShip(personID: pid, mission: offer.mission,
+                                                                  name: engine.missionShipName(am, offer.mission),
+                                                                  subtitle: engine.missionShipSubtitle(am, offer.mission))
+                // Under Flags 0x0800 the replacement's hull becomes the slot's
+                // locked hull (0x0041cf40).
+                if let hull, offer.mission.flags1 & 0x0800 != 0,
+                   let i = model.pilot.state.activeMissions.firstIndex(where: { $0.missionID == offer.mission.id }) {
+                    model.pilot.state.activeMissions[i].lockedShipType = hull
+                }
             }
         }
         model.pilot.save()
@@ -3088,8 +3159,14 @@ struct GameContainerView: View {
             return
         }
         // One capture in ten ends with the crew scuttling the ship.
-        if Int.random(in: 0..<10) == 0 {
+        if scene.rollCaptureScuttle() {
             hulkSelfDestructs(scene, shipID)
+            return
+        }
+        // A full wing means no capture at all (#124); the hulk stays.
+        guard model.pilot.canAddEscort() else {
+            host?.hud.post(host?.game?.stringList(2002)?.string(at: 124) ?? "You can't command any more escorts.")
+            refreshBoard(scene, shipID: shipID)
             return
         }
         plunderPanic = nil
@@ -3098,7 +3175,12 @@ struct GameContainerView: View {
         if let pid = capturedPers {
             model.pilot.state.recordPersDefeated(pid)
         }
-        pendingCaptureChoice = cap
+        // A captain with no crew of his own isn't asked: the prize escorts.
+        if scene.playerHullCrew < 1 {
+            recruitCapturedShipAsEscort(cap)
+        } else {
+            pendingCaptureChoice = cap
+        }
     }
 
     /// "Use as escort" outcome: register the captured hull in the persistent
@@ -3122,12 +3204,22 @@ struct GameContainerView: View {
     /// .captured` — just applied to the ship being stepped out of). Mirrors
     /// the mission `C/E/H` ship-swap path: the hull change lands in
     /// `PlayerState` first, then `rebuildFlightHost` picks it up.
-    private func takeCommandOfCapturedShip(_ cap: (entityID: Int, shipType: Int, name: String)) {
+    /// Ask for the new ship's name; the default is the hull's class name and
+    /// three digits from 1 to 9 (0x00482940).
+    private func openCaptureNamePrompt(_ cap: (entityID: Int, shipType: Int, name: String)) {
+        let cls = model.data.game?.ship(cap.shipType)?.name ?? cap.name
+        let digits = host?.scene.rollCaptureNameDigits() ?? "111"
+        pendingCaptureChoice = nil
+        captureNamePrompt = (cap, String("\(cls) \(digits)".prefix(63)))
+    }
+
+    private func takeCommandOfCapturedShip(_ cap: (entityID: Int, shipType: Int, name: String), name: String? = nil) {
         guard let game = model.data.game else { return }
         // The old hull joins the wing when there is room (STR# 2002 #304/#305).
         let kept = PilotEconomy.takeCommandOfCapturedHull(&model.pilot.state, hull: cap.shipType, game: game)
         host?.hud.post(game.stringList(2002)?.string(at: kept ? 304 : 305)
                        ?? (kept ? "You retained your old ship as an escort." : "You were unable to retain your old ship as an escort."))
+        if let name, !name.isEmpty { model.pilot.state.shipName = name }
         model.pilot.save()
         pendingCaptureChoice = nil
         rebuildFlightHost(reason: "captured-ship command swap")
@@ -3459,7 +3551,8 @@ struct GameContainerView: View {
                 host?.hud.post(host?.game?.stringList(2002)?.string(at: 53) ?? "")   // "No response."
                 return
             }
-            if let govt { model.audio.playHailVoice(govt: govt, hostile: hostile) }
+            // No voice line: the original's voice banks (snd 1000+) are only
+            // escort-command chatter (Frame_UpdateCombatChatter 0x004311f0).
             // The comm identifies a generic ship by its government's `CommName`
             // (Bible: "the short string to show for ships of this government when
             // they are hailed"), not its internal ship name. `nonTalkative`
@@ -3495,10 +3588,29 @@ struct GameContainerView: View {
                     model.pilot.state.markPersQuoteShown(pid); model.pilot.save()
                 }
             }
+            // The window's two identifier lines (0x0047fb70): "Class: <hull>
+            // (<subtitle>)" and, below it, "Status:" with Hostile while the
+            // ship keeps pressing the player, else Escort / Hired Escort for
+            // the player's own wing (STR# 2002 #195, #196, #174, #168, #166).
+            let strs = host?.game?.stringList(2002)
+            var classLine = (strs?.string(at: 195) ?? "Class:") + " "
+            if let hull = host?.game?.ship(shipTypeID) {
+                classLine += hull.name
+                if !hull.subtitle.isEmpty { classLine += " (\(hull.subtitle))" }
+            }
             var shipState = HailDialogState(
                 kind: .ship(entityID: entityID, shipTypeID: shipTypeID),
-                name: displayName, govtLabel: govt?.targetCode ?? "", hostile: hostile,
+                name: displayName, govtLabel: classLine, hostile: hostile,
                 responseText: response, customPictID: customPictID)
+            let statusLabel = strs?.string(at: 196) ?? "Status:"
+            if scene.originalKeepsPressingPlayer(entityID: entityID) {
+                shipState.statusText = statusLabel + " " + (strs?.string(at: 174) ?? "Hostile")
+                shipState.statusHostile = true
+            } else if let recordID = scene.escortRecordID(forEntity: entityID) {
+                let hired = model.pilot.state.escort(id: recordID)?.origin == .hired
+                shipState.statusText = statusLabel + " " + (hired ? (strs?.string(at: 166) ?? "Hired Escort")
+                                                                  : (strs?.string(at: 168) ?? "Escort"))
+            }
             // The original AI's comm window (AI-42/43): one session of rolls
             // per hail; the opening line and the Greetings text come from it,
             // and the middle button begs for mercy while the ship presses on.
@@ -4328,6 +4440,11 @@ struct GameLoadingView: View {
 /// the line, like the original.
 struct MessageLogView: View {
     @ObservedObject var hud: GameHUDModel
+    /// Width the status-bar sidebar takes on the right.
+    var rightInset: CGFloat = 0
+
+    /// The original's message rect is one 26 px line (0x0087550b).
+    static let lineHeight: CGFloat = 26
 
     /// Mirrors `ContextualActionsView.bottomPadding` — sits flush with the true
     /// bottom edge (just clearing the safe area on iOS, which already clears
@@ -4352,12 +4469,16 @@ struct MessageLogView: View {
                         .novaFont(.hud, weight: .semibold)
                         #endif
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
                         .transition(.opacity)
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(.leading, 16).padding(.bottom, bottomPadding)
+            // One line, clipped to the original's rect: left + 25 to
+            // right − sidebar − 50 (0x0087550b).
+            .padding(.leading, 16).padding(.trailing, rightInset + 50).padding(.bottom, bottomPadding)
         }
         .novaResponsive()
         .allowsHitTesting(false)

@@ -189,7 +189,7 @@ final class PilotStore: ObservableObject {
     func cargoFree(galaxy: Galaxy) -> Int { PilotEconomy.cargoFree(state, galaxy: galaxy) }
     func freeMass(galaxy: Galaxy) -> Int { PilotEconomy.freeMass(state, galaxy: galaxy) }
     func owned(outfit id: Int) -> Int { PilotEconomy.owned(state, outfit: id) }
-    func held(cargo id: Int) -> Int { PilotEconomy.held(state, cargo: id) }
+    func held(cargo id: Int, game: NovaGame) -> Int { PilotEconomy.held(state, cargo: id, game: game) }
     func maxJumpHops(galaxy: Galaxy) -> Int { PilotEconomy.maxJumpHops(state, galaxy: galaxy) }
     func hasInstantJump(galaxy: Galaxy) -> Bool { PilotEconomy.hasInstantJump(state, galaxy: galaxy) }
     func jumpSpeedFactor(galaxy: Galaxy) -> Double { PilotEconomy.jumpSpeedFactor(state, galaxy: galaxy) }
@@ -212,8 +212,8 @@ final class PilotStore: ObservableObject {
     }
 
     @discardableResult
-    func sellCargo(id: Int, tons: Int, unitPrice: Int) -> Int {
-        let n = PilotEconomy.sellCargo(&state, id: id, tons: tons, unitPrice: unitPrice)
+    func sellCargo(id: Int, tons: Int, unitPrice: Int, game: NovaGame) -> Int {
+        let n = PilotEconomy.sellCargo(&state, id: id, tons: tons, unitPrice: unitPrice, game: game)
         if n > 0 { save() }
         return n
     }
@@ -237,8 +237,8 @@ final class PilotStore: ObservableObject {
     }
 
     @discardableResult
-    func sellCommodity(_ c: Commodity, tons: Int, unitPrice: Int) -> Int {
-        sellCargo(id: c.cargoID, tons: tons, unitPrice: unitPrice)
+    func sellCommodity(_ c: Commodity, tons: Int, unitPrice: Int, game: NovaGame) -> Int {
+        sellCargo(id: c.cargoID, tons: tons, unitPrice: unitPrice, game: game)
     }
 
     func effectiveCost(_ o: OutfRes, galaxy: Galaxy) -> Int {

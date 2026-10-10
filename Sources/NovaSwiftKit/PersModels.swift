@@ -95,6 +95,9 @@ public struct PersRes {
     /// `GrantCount`: max items given; the actual count is between
     /// `GrantCount/2` and `GrantCount` (Bible). @310.
     public let grantCount: Int
+    /// `Color` @378: the ship's 15-bit 0RRRRRGGGGGBBBBB tint; 0 means none
+    /// (the original's ship tint resolver 0x0046e470 then uses neutral).
+    public let color: Int
 
     public init(_ r: Resource) {
         id = r.id
@@ -123,6 +126,7 @@ public struct PersRes {
         grantCount = itemClass < 1 ? 0 : max(0, pi16(d, 310))
         grantProb = itemClass < 1 ? 0 : min(100, max(0, pi16(d, 312)))
         flags2 = pu16(d, 382)
+        color = Int(pu16(d, 378))
     }
 
     /// True if boarding this person can yield outfit loot (`GrantClass` set and a

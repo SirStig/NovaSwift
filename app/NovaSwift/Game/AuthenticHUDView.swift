@@ -55,6 +55,9 @@ struct AuthenticHUDView: View {
             // subtree; falls back to Geneva when the named family isn't a font
             // the player has imported (see hudFontFamily).
             .environment(\.novaHUDFontFamily, hudFontFamily)
+            // ïntf font sizes are used exactly as given, in the status bar's
+            // own pixels: scale them with the canvas like the chrome.
+            .novaTextScale(layout.scale)
         }
         .allowsHitTesting(false)
     }
@@ -274,6 +277,17 @@ struct AuthenticHUDView: View {
     /// value), centered, with the labels dim and the values bright.
     private var cargoReadout: some View {
         VStack(spacing: 2) {
+            // One row per commodity aboard (0x004612c0), then Free (the
+            // fleet's room) and, with mission cargo or junk, Special.
+            ForEach(Array(model.cargoByCommodity.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 4) {
+                    Text(row.name).novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                    Spacer(minLength: 2)
+                    Text("\(row.tons)").novaFont(.hud, size: subtitleSize).monospacedDigit()
+                        .foregroundStyle(color(style.intf.brightText))
+                }
+            }
             HStack(spacing: 4) {
                 Text("Free:").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
@@ -281,11 +295,20 @@ struct AuthenticHUDView: View {
                     .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
                     .foregroundStyle(color(style.intf.brightText))
             }
+            if !model.cargoSpecial.isEmpty {
+                HStack(spacing: 4) {
+                    Text("Special:").novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                    Text(model.cargoSpecial).novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.brightText))
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                }
+            }
             Spacer(minLength: 2)
             VStack(spacing: 1) {
                 Text("Credits:").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
-                Text(model.credits.creditsAbbreviated)
+                Text(model.credits.creditsHUD)
                     .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
                     .foregroundStyle(color(style.intf.brightText))
             }
@@ -302,17 +325,14 @@ struct AuthenticHUDView: View {
     /// the generic `.hud` role size if a given `ïntf` (e.g. an unusual
     /// government skin) leaves the field zeroed.
     ///
-    /// The `hudTextTighten` factor pulls the readouts back toward the original's
-    /// compact look: the status bar's `NovaCanvas(fit: .right)` scales to fill
-    /// the *window* height (≈1.25× the 767pt design height on a desktop window),
-    /// which scaled the text up in proportion; the original's text sat visibly
-    /// smaller against the same chrome, so we shrink it a touch to match.
-    private static let hudTextTighten: CGFloat = 0.8
+    /// The sizes are the ïntf's own (`Ui_InstallGameplayInterfaceLayout`
+    /// 0x004cda50 uses them unscaled); the canvas scale is applied through
+    /// `novaTextScale` above, so they track the chrome at any window size.
     private var statusSize: CGFloat {
-        (style.intf.statusFontSize > 0 ? CGFloat(style.intf.statusFontSize) : NovaFontRole.hud.baseSize) * Self.hudTextTighten
+        (style.intf.statusFontSize > 0 ? CGFloat(style.intf.statusFontSize) : NovaFontRole.hud.baseSize)
     }
     private var subtitleSize: CGFloat {
-        (style.intf.subtitleFontSize > 0 ? CGFloat(style.intf.subtitleFontSize) : NovaFontRole.hud.baseSize) * Self.hudTextTighten
+        (style.intf.subtitleFontSize > 0 ? CGFloat(style.intf.subtitleFontSize) : NovaFontRole.hud.baseSize)
     }
 
     private func origin(_ r: NovaRect) -> CGPoint { CGPoint(x: r.left, y: r.top) }
@@ -382,8 +402,8 @@ private struct RadarContactsView: View {
                 // The locked/selected contact blinks a bright white ring on top of
                 // its own dot, driven independently of the HUD's own refresh rate —
                 // same `TimelineView` idiom as the galaxy map's blinking markers.
-                TimelineView(.periodic(from: .now, by: 0.35)) { timeline in
-                    let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.35) % 2 == 0
+                TimelineView(.periodic(from: .now, by: 0.25)) { timeline in
+                    let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.25) % 2 == 0
                     Canvas { ctx, size in
                         // With an IFF the radar rect is filled black before
                         // the contacts (0x0045d0a0, L2); without one the

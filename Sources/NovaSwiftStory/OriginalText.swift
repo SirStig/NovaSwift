@@ -11,6 +11,22 @@ public struct OriginalText {
 
     public init(game: NovaGame) { self.game = game }
 
+    /// A status-bar line with the original's text expansion applied: the
+    /// `{G …}`/`{b…}`/`{P…}` conditionals (0x0044a4d0) and the `<…>` wildcards
+    /// (0x004444f0) — `<PN>`, `<PSN>`, `<PST>`, ranks and so on, with
+    /// `<OSN>` naming `speaker` (the përs whose HailQuote this is, via
+    /// 0x00426d10). Mission tags with no mission behind them read `[Error]`,
+    /// as in the original; no raw `<XXX>` tag survives.
+    public func expandStatusText(_ text: String, speaker: String? = nil, player: PlayerState) -> String {
+        guard text.contains("{") || text.contains("<") else { return text }
+        var out = text
+        if out.contains("{") {
+            out = NovaDescFormatter.render(out, context: NovaTextContext(
+                isBitSet: { [player] in player.setBits.contains($0) }, isMale: player.isMale))
+        }
+        return MissionText.resolve(out, fields: nil, player: player, game: game, otherShipName: speaker)
+    }
+
     /// STR# 2002 entry `n` (1-based), or "" when the data lacks it.
     public func misc(_ n: Int) -> String { game.stringList(2002)?.string(at: n) ?? "" }
 

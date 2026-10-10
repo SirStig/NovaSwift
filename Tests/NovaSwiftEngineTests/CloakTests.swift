@@ -251,3 +251,44 @@ final class CloakTests: XCTestCase {
         XCTAssertEqual(world.effectiveMurk(for: observer), 0)
     }
 }
+
+final class MurkFogTests: XCTestCase {
+    func testLevelFollowsSquaredDistance() {
+        XCTAssertEqual(MurkFog.level(murk: 100, dx: 100, dy: 100), 24)
+        XCTAssertEqual(MurkFog.level(murk: 100, dx: 200, dy: 0), 31)
+        XCTAssertEqual(MurkFog.level(murk: 0, dx: 500, dy: 500), 0)
+        XCTAssertEqual(MurkFog.level(murk: 30, dx: 0, dy: 0), 0)
+    }
+}
+
+final class DebrisPuffTests: XCTestCase {
+    func testBackgroundLevelRoundsAndClamps() {
+        XCTAssertEqual(MurkFog.backgroundLevel(murk: 0), 0)
+        XCTAssertEqual(MurkFog.backgroundLevel(murk: 1), 2)
+        XCTAssertEqual(MurkFog.backgroundLevel(murk: 20), 18)
+        XCTAssertEqual(MurkFog.backgroundLevel(murk: 100), 29)
+    }
+
+    func testPuffCadenceMatchesOriginal() {
+        // 0x00433050: max(10, round(Armor / PodCount x 0.4)) raw calls.
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 1000, podCount: 4), 100)
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 300, podCount: 5), 24)
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 100, podCount: 10), 10)
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 50, podCount: 1), 20)
+    }
+
+    func testExactHalfArmorBranch() {
+        XCTAssertTrue(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: 0x0002, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 151, hullArmor: 300, personFlags: 0x0002, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: nil, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: 0x0004, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: 0x0002, govtFlags: 0x0100))
+    }
+
+    func testPuffFades() {
+        var p = DebrisPuff(); p.life = 40
+        XCTAssertEqual(p.opacity, 1)
+        p.life = 16
+        XCTAssertEqual(p.opacity, 0.5)
+    }
+}

@@ -660,28 +660,41 @@ models, so later batches can rely on them.
   player's flight while `World.playerJump` is set (weapons cold): brake (×0.99203847/tick, 1.0 ×
   thrust inside `max(turn+1, 20)°`, ends at both `|trunc(v)| < 2` px/tick; inertialess bleeds its
   scalar), spin-up (×0.98006866 unless fast jump; fires at timer ≥ 30 ticks from seed 2 *and*
-  cue end = `cue60 / multiplier`, cue = snd 128 in 60 Hz ticks, 350 fallback, multiplier from
-  shïp Flags 0x1/0x2/0x4), tunnel (`min(progress, 50)` px/tick position step within
+  once the Warp up voice has stopped: it plays snd 128 `multiplier` times faster and is cut at
+  `350 / multiplier`, so the wait is `min(snd ticks, 350) / multiplier`; multiplier from shïp
+  Flags 0x1/0x2/0x4), tunnel (`min(progress, 50)` px/tick position step within
   `max(turn, 30)°`), disabled collapse (STR# 2002 #35). `GameScene` draws it and swaps the world
   in place at the fire as before. Presentation: the Mac fade starts when progress passes 55 and
   fades out over 1.5 s after arrival, with control returned at once; `ceHyperspaceLook` keeps
   only the boom flash. The old sequence is `quickHyperjump`.
-- **Not reproduced.** The Warp up cue is played as the existing loop at normal pitch (the original
-  plays it at the multiplier's speed); the timing uses the computed length, so only the sound
-  differs. Streak intensity follows `min(progress, 50)` (the original's streak pass is unresolved).
+- **Jump-sequence length (render/sound sweep D-1, done).** `Stellar_GetJumpSequenceDuration60Hz`
+  (0x0046efb0) is **always 350 ticks**: the preload 0x004b0740 seeds both entries with 350 and only
+  replaces them when its WAV/AIFF/VOC/Ogg file probe (0x004fc570) recognises the `snd ` 128/129
+  bytes, which a Mac `snd ` never does. The progress ramp uses 350, and 0x0044f3d0:368-381 cuts
+  the warp-up voice at `elapsed60 > 350 / multiplier`. The stock snd 128 (134016 frames at
+  22050 Hz = 364.7 ticks) is therefore always cut, so a plain hull fires 350 / 1.3 ticks ≈ 4.49 s
+  after spin-up starts. A plug-in's snd 128 changes the timing only when it is shorter than
+  350 ticks (the jump then fires at its end, but not before the 30-tick timer) and never changes
+  the ramp. `PlayerHyperjump.cueTicks60` is the constant; `soundTicks60` is the sound's own length.
+  The Warp up voice is a one-shot at the multiplier's speed (pitch rises with it), priority 32000,
+  started only when no Warp up voice sounds, stopped at the cut (`GameAudio.startWarpUp` /
+  `stopWarpUp`).
+- **Not reproduced.** Streak intensity follows `min(progress, 50)` (the original's streak pass is unresolved).
   Escorts don't run the original's spin-up sync (state 0x0B; Batch 6). x2 mode is not modelled.
 - **Original** (decomp `travel.cpp`, `docs/player_hyperspace.md`):
   1. **Brake** (0x0044F127 / 0x0044F275): turn to face opposite the velocity, damp 0.99203847 per
      tick (`0x005755f0`), and within `max(turn+1, 20)°` apply 1.0 × thrust backward. Ends when
      both `|trunc(v)| < 2` px/tick.
   2. **Spin-up** (0x0044C528 / 0x0044C704): damp 0.98006866 per tick and turn to the map bearing.
-     The jump timer must reach ≥ 30 ticks *and* the "Warp up" snd 128 cue must have finished. The
-     cue is 6.078 s divided by `max(scale × 1.3, 0.5)`, where scale is 0.7 / 1.3 / 1.6 / 1.0 for
-     shïp Flags 0x1 / 0x2 / 0x4 / none. That gives 6.68 / 3.60 / 2.92 / 4.68 s.
-  3. **Tunnel** (0x0044CCAF): progress = `elapsed60 × mult / (dur60 × 0.01) − 35/mult`. Once it is
+     The jump timer must reach ≥ 30 ticks *and* the "Warp up" voice must have stopped. It plays
+     `mult` times faster and is cut at `350 / mult` ticks, where mult is `max(scale × 1.3, 0.5)`
+     and scale is 0.7 / 1.3 / 1.6 / 1.0 for shïp Flags 0x1 / 0x2 / 0x4 / none. With the stock
+     sound that gives 6.41 / 3.45 / 2.80 / 4.49 s.
+  3. **Tunnel** (0x0044CCAF): progress = `elapsed60 × mult / (350 × 0.01) − 35/mult`. Once it is
      > 0 and the ship is aligned within `max(turn, 30)°`, the position (not the velocity) steps
      `min(progress, 50)` px per tick along the heading.
-  4. **Fire** at cue end (0x0044F3D0 / 0x0044F660).
+  4. **Fire** once the Warp up voice has stopped (0x0044F3D0 / 0x0044F660); Warp out (snd 130,
+     priority 0x32) plays only if no Warp out voice is sounding.
   5. **Disabled collapse** (0x0044B037 / 0x0044B120): a disabled player's engaged jump collapses.
 - **NovaSwift.** `App/Game/GameScene.swift:3402` `stepJump`: `.align` with "No braking"; a burst
   at 4 × top speed for 0.45 s / jumpSpeed (0.18 s instant, :3433); a 0.14 s flash.
@@ -692,8 +705,9 @@ models, so later batches can rely on them.
   option. All jump mechanics and timings (brake, cue-timed spin-up, tunnel, arrival) stay
   Windows-exact either way; the fade is drawn over them and never delays them.
 - **Impact** high. **Confidence** high.
-- **Test.** A ship moving at full speed with no flag 0x1/0x2/0x4 takes brake time + 4.68 s from
-  engage to fire. A Flags 0x4 hull takes brake + 2.92 s.
+- **Test.** A ship moving at full speed with no flag 0x1/0x2/0x4 takes brake time + 4.49 s from
+  engage to fire. A Flags 0x4 hull takes brake + 2.80 s. A 600-tick snd 128 fires at 4.49 s; a
+  156-tick one at 2.0 s with the same ramp (`OriginalHyperjumpTests`).
 
 #### FL-05 · Travel days and calendar ticks — **DONE** (pod and DatePostInc days: OS-02, MS)
 - **Done.** `Galaxy.hyperspaceTravelDays` (oracle-pinned table in `OriginalHyperjumpTests`), the
@@ -3019,7 +3033,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 #### AI-22 · NPC hyperjump in place — **DONE**
 - **Status.** Brake, mode 3 out of the centre, mode 4 spin-up for the Warp-up cue / multiplier, position ramp, vanish in place (`Ship.departsInPlace`). Jump-ins slide at 50 px/tick − 1.165 per *raw call* (the override runs once per 21 ms call with no frame scale, 0x00433050, so the slide is ≈ 700 px and ships rest ≈ 1400 px out, not at the spawner's assumed 1000; the hand-back speed is the last call's) from where the Spawner placed them (AI-12 owns the pose: `OriginalSpawnRules.jumpInRadius` = 2098.004 px with the exe's 1.165, escorts ±150 px, mission ships ±256 px); the AI no longer re-places them at 2102.64.
 - **Original.** State 2 brakes to < 0.35 px/tick. Mode 4 then points outward from (0,0) and spins
-  up for `JumpSequenceDuration60Hz / classMultiplier` (≈ 6.08 s base; FL-04) before deactivating.
+  up for `JumpSequenceDuration60Hz / classMultiplier` (350 ticks, ≈ 5.83 s before the multiplier; FL-04) before deactivating.
   Inside 1000 px of the centre it first thrusts outward (mode 3). Retreat uses the same sequence
   once the attacker is beyond 251 px per axis, and mode 5 (away from the attacker) inside it.
 - **NovaSwift.** `Engine/AIBrain.swift:990` `depart`, `:964` `flee` (cruise to jumpRadius, despawn
@@ -3712,3 +3726,16 @@ squad-jump push sync, StellarAnimator port incl. hypergate open/close, deadly-st
 abutment quirk (oracle-confirmed), "no hyperspace effects" preference.
 Open: D-7 MapReveal first-visible-twin (existing fixtures place all systems at one point), stellar mask uses frame 0,
 tractor pull of a light owner toward a heavy victim.
+
+## Missions / economy sweep (fix/missions-economy)
+
+Done: the missions_session and economy_save reports' offers, cargo, special-ship, BBS, status-bar
+cargo panel, hire/shipyard list, pilot-open items, murk as a per-sprite distance fog (`MurkFog`,
+0x00438db0), background-sprite murk level (0x0042e590; the tiled star layers keep their own
+wrap), debris puffs (`DebrisPuffs.swift`, 0x00428090 / 0x0043b170; drawn as grey dots, the puff
+art is not identified) and the ambush hail quote's 'STR ' override. Offer movies autoplay with Skip.
+Left: hail-quote wildcard expansion (rides on main's `expandStatusText`).
+## AI / spawn / weapons sweep fixes (fix/ai-combat)
+
+Done from `ai_spawn_comm.md` and `weapons_flight.md`: A1, A2, A3, A4, A5/A6/B-13, A7, A8, B-1 to B-6, B-8 to B-12, B-14, C-1, C-2, D-1 to D-4, and ai_spawn_comm #2, #4, #6, #9 to #19 and #20 (hull availability, gate hold). Pinned by `AICombatFidelityTests`, `BoardingTests`, `ShipSystemTests`.
+Also done: chatter categories 0 and 2, the capture name prompt (#119), comm and capture window text and keys (#22), A9 (area blasts, pod debris), C-3, C-4, and the B-7 test. Not done: #20's RNG draw shapes (they change only the random stream), the pod-debris sound (DAT_00591a80, id unknown) and the pers-flag debris arm at 0x00433050 l.904.

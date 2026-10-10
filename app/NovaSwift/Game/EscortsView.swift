@@ -114,37 +114,48 @@ struct EscortsView: View {
 
     // MARK: - The authentic frame + placed items
 
+    /// DITL #1022 resolved from the loaded data (stock rects as fallback), so a
+    /// plug-in's replacement layout moves these items.
+    private var ditl: DITLPlacement {
+        DITLPlacement(game ?? graphics?.game, 1022, window: space.size)
+    }
+
     private var frameLayer: some View {
-        ZStack(alignment: .topLeading) {
+        let d = ditl
+        let summary = d.rect(9, top: 9, left: 14, bottom: 67, right: 206)
+        let order = d.rect(11, top: 79, left: 14, bottom: 131, right: 206)
+        let list = d.rect(10, top: 30, left: 217, bottom: 230, right: 417)
+        return ZStack(alignment: .topLeading) {
             art
 
-            // Item 9: (14,9)-(206,67) 192×58 — wing summary, on the PICT's box.
+            // Item 9: wing summary, on the PICT's box.
             VStack(spacing: 3) {
                 NovaText(hasEscorts ? "Escort Wing" : "No escorts",
                          size: 12, color: hasEscorts ? .white : Color(white: 0.5), weight: .bold)
                 NovaText(hasEscorts ? "\(escorts.count) ship\(escorts.count == 1 ? "" : "s") under command"
                                     : "Capture or hire ships to command",
-                         size: 10, color: Color(white: 0.6), width: 180, align: .center)
+                         size: 10, color: Color(white: 0.6), width: max(0, summary.width - 12), align: .center)
             }
-            .frame(width: 192, height: 58)
-            .novaPlace(space, -198, -120.5)
+            .frame(width: summary.width, height: summary.height)
+            .ditlPlace(space, d, summary)
 
-            // Item 11: (14,79)-(206,131) 192×52 — current standing order.
+            // Item 11: current standing order.
             NovaText(hasEscorts ? "Order: \(currentOrder?.title ?? "Mixed")" : "—",
-                     size: 11, color: hasEscorts ? novaAmber : Color(white: 0.4), width: 180, align: .center)
-                .frame(width: 192, height: 52)
-                .novaPlace(space, -198, -50.5)
+                     size: 11, color: hasEscorts ? novaAmber : Color(white: 0.4),
+                     width: max(0, order.width - 12), align: .center)
+                .frame(width: order.width, height: order.height)
+                .ditlPlace(space, d, order)
 
-            // Item 10: (217,30)-(417,230) 200×200 — the roster list / empty state.
+            // Item 10: the roster list / empty state.
             roster
-                .frame(width: 200, height: 200)
-                .novaPlace(space, 5, -99.5)
+                .frame(width: list.width, height: list.height)
+                .ditlPlace(space, d, list)
 
             // Items 2,3,1,0 top-to-bottom — the four escort-command buttons.
-            commandButton(.aggressive).novaPlace(space, -183, 11.5)  // item 2 (141,29)
-            commandButton(.defensive).novaPlace(space, -183, 39.5)   // item 3 (169,29)
-            commandButton(.evasive).novaPlace(space, -183, 67.5)     // item 1 (197,29)
-            commandButton(.hold).novaPlace(space, -183, 95.5)        // item 0 (225,29)
+            commandButton(.aggressive, d.rect(2, top: 141, left: 29, bottom: 167, right: 175), d)
+            commandButton(.defensive, d.rect(3, top: 169, left: 29, bottom: 195, right: 175), d)
+            commandButton(.evasive, d.rect(1, top: 197, left: 29, bottom: 223, right: 175), d)
+            commandButton(.hold, d.rect(0, top: 225, left: 29, bottom: 251, right: 175), d)
         }
         .frame(width: Self.frameW, height: Self.frameH, alignment: .topLeading)
     }
@@ -244,8 +255,8 @@ struct EscortsView: View {
 
     /// A 146×26 authentic command button. Enabled only when there's a wing to
     /// command; the wing's current standing order is shown in the order panel.
-    private func commandButton(_ order: EscortOrder) -> some View {
-        authButton(onGroupCommand == nil ? order.title : originalTitle(order), width: 120, enabled: hasEscorts) {
+    private func commandButton(_ order: EscortOrder, _ rect: CGRect, _ d: DITLPlacement) -> some View {
+        authButton(onGroupCommand == nil ? order.title : originalTitle(order), width: max(0, rect.width - 26), enabled: hasEscorts) {
             guard hasEscorts else { return }
             if let onGroupCommand {
                 onGroupCommand(group, originalCommand(order))
@@ -253,6 +264,7 @@ struct EscortsView: View {
                 onCommand(order)
             }
         }
+        .ditlPlace(space, d, rect)
     }
 
     /// The original's order for a command button: Attack, Defend, Formation,

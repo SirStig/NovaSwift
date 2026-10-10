@@ -122,16 +122,65 @@ public enum LandedServices {
             .map(\.name)
     }
 
-    /// The trade window's disaster sentence (0x0048d6f0): "<name> has raised /
-    /// lowered the price of <commodity>." for the first active disaster here.
-    public static func disasterSentence(at spobID: Int, state: PlayerState, game: NovaGame) -> String? {
+    /// The trade center's status strip (0x0048d6f0, DITL item 12): a summary
+    /// of the mission cargo and the junk not on the two junk rows ("#363 N
+    /// tons #391 #367 #392 #368"), a blank line, then the player ship's free
+    /// space ("#364 [#365]: N ton(s)") and — with freighter escorts — the
+    /// escorts' ("#364 #366: N ton(s)"). Junk on `junkRows` is left out.
+    public static func tradeStatus(state: PlayerState, game: NovaGame, shipCapacity own: Int,
+                                   fleetCapacity fleet: Int, junkRows: Set<Int>) -> String {
         let text = OriginalText(game: game)
-        for id in (state.activeDisasters ?? [:]).keys.sorted() {
-            guard let o = game.oops(id), disasterStellar(o, state: state) == spobID else { continue }
-            let commodity = o.commodityEnum.map(game.commodityName) ?? ""
-            return "\(o.name) \(text.misc(192)) \(text.misc(o.priceDelta > 0 ? 193 : 194)) \(text.misc(181)) \(commodity)."
+        func tons(_ n: Int) -> String { text.misc(n == 1 ? 1 : 2) }
+        var missions = 0, missionTons = 0
+        for am in state.activeMissions where am.isCarryingCargo {
+            let type = am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1
+            let qty = am.resolvedCargoQty ?? game.mission(am.missionID).map { abs($0.cargoQty) } ?? 0
+            guard type != -1, qty >= 0 else { continue }
+            missions += 1
+            missionTons += qty
         }
-        return nil
+        var junks = 0, junkTons = 0
+        for (id, n) in state.cargo where id >= 128 && n > 0 && !junkRows.contains(id) {
+            junks += 1
+            junkTons += n
+        }
+        var s = ""
+        if missions + junks > 0 {
+            s += text.misc(0x16b) + " "
+            let total = missionTons + junkTons
+            if total > 0 { s += "\(total) \(tons(total)) " + text.misc(0x187) + " " }
+            if missions > 0 {
+                s += text.misc(0x16f)
+                if junks > 0 { s += " " + text.misc(0x188) + " " }
+            }
+            if junks > 0 { s += text.misc(0x170) }
+            s += "\r\r"
+        }
+        let used = state.usedCargoSpace
+        s += text.misc(0x16c)
+        if own < fleet { s += " " + text.misc(0x16d) }
+        s += ": "
+        var ownUsed = used
+        if own < fleet { ownUsed = max(0, used - missionTons - (fleet - own)) + missionTons }
+        let ownFree = max(0, own - ownUsed)
+        s += "\(ownFree) \(tons(ownFree))"
+        if own < fleet {
+            let escortFree = max(0, fleet - used)
+            s += "\r" + text.misc(0x16c) + " " + text.misc(0x16e) + ": \(escortFree) \(tons(escortFree))"
+        }
+        return s
+    }
+
+    /// The trade center's disaster line (0x0048d6f0, DITL item 15): the first
+    /// active disaster at this stellar — "<name> #192 #193|#194 #181
+    /// <commodity>." (#194 when it lowers the price). nil when none.
+    public static func tradeDisasterLine(at spobID: Int, state: PlayerState, game: NovaGame) -> String? {
+        let text = OriginalText(game: game)
+        guard let o = (state.activeDisasters ?? [:]).keys.sorted().compactMap({ game.oops($0) })
+            .first(where: { disasterStellar($0, state: state) == spobID }) else { return nil }
+        let commodity = Commodity(rawValue: o.commodity).map { game.commodityName($0) } ?? ""
+        return o.name + " " + text.misc(0xc0) + " " + text.misc(o.priceDelta < 1 ? 0xc2 : 0xc1)
+            + " " + text.misc(0xb5) + " " + commodity + "."
     }
 
     /// Whether the disaster at `spobID` raised (true) or lowered (false) the

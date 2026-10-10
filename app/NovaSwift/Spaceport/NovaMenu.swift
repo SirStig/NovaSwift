@@ -137,9 +137,9 @@ struct NovaText: View {
     }
 }
 
-/// An authentic three-slice EV Nova button (left cap + tiling middle + right cap
+/// An authentic three-slice EV Nova button (left cap + stretched middle + right cap
 /// PICTs 7500–7508) with its label drawn on top. `width` is the middle span, so
-/// the button is `26 + width` wide overall — matching the game's geometry.
+/// the button is `capL + width + capR` wide (26 + width with the stock caps).
 struct NovaButton: View {
     let graphics: SpaceportGraphics
     let title: String
@@ -239,7 +239,10 @@ struct NovaIconButtonStyle: ButtonStyle {
 }
 
 /// The square icon button's visual, independent of `Button` machinery so the
-/// tvOS cursor path can draw it directly (see `NovaIconButton.body`).
+/// tvOS cursor path can draw it directly (see `NovaIconButton.body`). The
+/// original labels these buttons `^`, `&`, `+` or `-`, which
+/// `NovaUi_DrawThreeStateButton` draws as 2-px-pen vector glyphs instead of
+/// text; the SF Symbol names callers pass map onto those glyphs.
 struct NovaIconButtonFace: View {
     let graphics: SpaceportGraphics
     let systemName: String
@@ -249,24 +252,87 @@ struct NovaIconButtonFace: View {
 
     var body: some View {
         let slices = graphics.buttonSlices(state)
-        HStack(spacing: 0) {
-            slice(slices.left)
-            slice(slices.right)
-        }
-        .frame(width: 26, height: 25)
-        .overlay(
-            Image(systemName: systemName)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(enabled ? theme.buttonUp : theme.buttonGrey)
-        )
+        ThreeStateButtonArt(slices: slices, totalWidth: CGFloat(slices.left?.width ?? 12)
+                                + CGFloat(slices.right?.width ?? 12),
+                            label: Self.glyphLabel(systemName), state: state, theme: theme)
     }
 
-    @ViewBuilder private func slice(_ image: CGImage?) -> some View {
-        if let image {
-            Image(decorative: image, scale: 1).interpolation(.high).resizable()
-                .frame(width: 13, height: 25)
-        } else {
-            Color(white: 0.2).frame(width: 13, height: 25)
+    static func glyphLabel(_ systemName: String) -> String {
+        if systemName.hasPrefix("arrowtriangle.up") || systemName.hasPrefix("chevron.up") { return "^" }
+        if systemName.hasPrefix("arrowtriangle.down") || systemName.hasPrefix("chevron.down") { return "&" }
+        if systemName.hasPrefix("plus") { return "+" }
+        if systemName.hasPrefix("minus") { return "-" }
+        return ""
+    }
+}
+
+/// The original three-state button drawing (`NovaUi_DrawThreeStateButton`
+/// 0x004a3340): masked caps at their own PICT widths, stretched to the button
+/// height; the unmasked middle stretched across the span between them; then
+/// either a vector glyph (`^ & + -`) or the label in the cölr button font and
+/// size, centred.
+struct ThreeStateButtonArt: View {
+    let slices: (left: CGImage?, middle: CGImage?, right: CGImage?)
+    let totalWidth: CGFloat
+    var height: CGFloat = 25
+    let label: String
+    let state: SpaceportGraphics.ButtonState
+    var theme: NovaUITheme = .fallback
+    /// Overrides the cölr label colour (the player-info tabs use their own).
+    var labelColor: Color? = nil
+
+    var body: some View {
+        let layout = ThreeStateButton.layout(width: Int(totalWidth.rounded()),
+                                             leftCapWidth: slices.left?.width,
+                                             rightCapWidth: slices.right?.width)
+        ZStack(alignment: .topLeading) {
+            piece(slices.middle, CGFloat(layout.middleWidth)).offset(x: CGFloat(layout.middleX))
+            piece(slices.left, CGFloat(layout.leftCapWidth))
+            piece(slices.right, CGFloat(layout.rightCapWidth)).offset(x: CGFloat(layout.rightCapX))
+            labelView
+        }
+        .frame(width: totalWidth, height: height, alignment: .topLeading)
+    }
+
+    @ViewBuilder private var labelView: some View {
+        let colour = labelColor ?? stateColour
+        if let segs = ThreeStateButton.glyph(label, width: Int(totalWidth.rounded()), height: Int(height)) {
+            Path { p in
+                // QuickDraw's 2x2 pen hangs below-right of the path.
+                for g in segs {
+                    p.move(to: CGPoint(x: CGFloat(g.fromX) + 1, y: CGFloat(g.fromY) + 1))
+                    p.addLine(to: CGPoint(x: CGFloat(g.toX) + 1, y: CGFloat(g.toY) + 1))
+                }
+            }
+            .stroke(colour, style: StrokeStyle(lineWidth: 2, lineCap: .square))
+            .frame(width: totalWidth, height: height)
+        } else if !label.isEmpty {
+            // cölr ButtonFont / ButtonFontSz used as given (no size cap).
+            Text(label)
+                .font(.custom(theme.buttonFont ?? NovaFontRole.button.family,
+                              size: theme.buttonFontSize ?? 12))
+                .foregroundStyle(colour)
+                .fixedSize()
+                .frame(width: totalWidth, height: height)
+        }
+    }
+
+    private var stateColour: Color {
+        switch state {
+        case .normal:  return theme.buttonUp
+        case .clicked: return theme.buttonDown
+        case .grey:    return theme.buttonGrey
+        }
+    }
+
+    @ViewBuilder private func piece(_ image: CGImage?, _ w: CGFloat) -> some View {
+        if w > 0 {
+            if let image {
+                Image(decorative: image, scale: 1).interpolation(.none).resizable()
+                    .frame(width: w, height: height)
+            } else {
+                Color.black.frame(width: w, height: height)
+            }
         }
     }
 }
@@ -289,7 +355,8 @@ struct NovaButtonStyle: ButtonStyle {
 }
 
 /// The three-slice button's visual, independent of `Button` machinery so the
-/// tvOS cursor path can draw it directly (see `NovaButton.body`).
+/// tvOS cursor path can draw it directly (see `NovaButton.body`). `width` is the
+/// middle span; the caps add their own PICT widths (13 each in the stock data).
 struct NovaButtonFace: View {
     let graphics: SpaceportGraphics
     let title: String
@@ -299,43 +366,9 @@ struct NovaButtonFace: View {
 
     var body: some View {
         let slices = graphics.buttonSlices(state)
-        HStack(spacing: 0) {
-            slice(slices.left, 13)
-            slice(slices.middle, width)
-            slice(slices.right, 13)
-        }
-        .frame(width: 26 + width, height: 25)
-        .overlay(
-            // Geneva 12, fixed in frame pixels like all authentic-screen text
-            // (verified against the vendored NovaJS `button.ts` text style).
-            // `.novaFont(.button)` is for native chrome — its 15pt base and
-            // 13pt floor overflow a 25px-tall authentic button. cölr.buttonFont
-            // overrides the family when the data supplies (and registers) one.
-            Text(title)
-                // cölr.buttonFontSz sizes the label when the data supplies a
-                // plausible one; 12pt otherwise (what fits the 25px-tall
-                // authentic button art), capped so an oversized TC value can't
-                // overflow the slices.
-                .font(.custom(theme.buttonFont ?? NovaFontRole.button.family,
-                              size: min(theme.buttonFontSize ?? 12, 16)))
-                .foregroundStyle(labelColor(state))
-        )
-    }
-
-    @ViewBuilder private func slice(_ image: CGImage?, _ w: CGFloat) -> some View {
-        if let image {
-            Image(decorative: image, scale: 1).interpolation(.high).resizable()
-                .frame(width: w, height: 25)
-        } else {
-            Color(white: 0.2).frame(width: w, height: 25)
-        }
-    }
-
-    private func labelColor(_ state: SpaceportGraphics.ButtonState) -> Color {
-        switch state {
-        case .normal:  return theme.buttonUp
-        case .clicked: return theme.buttonDown
-        case .grey:    return theme.buttonGrey
-        }
+        ThreeStateButtonArt(slices: slices,
+                            totalWidth: CGFloat(slices.left?.width ?? 12) + width
+                                + CGFloat(slices.right?.width ?? 12),
+                            label: title, state: state, theme: theme)
     }
 }

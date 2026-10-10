@@ -38,12 +38,19 @@ struct MissionInfoView: View {
     /// frame. Item [5] sits below the frame (an unused off-screen control) and
     /// isn't drawn; the two header labels ([2],[6]) are baked into the PICT art,
     /// so only the interactive items are placed here.
-    private enum Item {
-        static let list    = (left: 9,   top: 24,  w: 195, h: 84)  // idx1 — mission list
-        static let desc    = (left: 218, top: 26,  w: 242, h: 91)  // idx3 — briefing/where-to-go
-        static let abort   = (left: 57,  top: 125, w: 99,  h: 25)  // idx4 — "Abort Mission"
-        static let done    = (left: 290, top: 125, w: 99,  h: 25)  // idx0 — "Done"
+    /// The stock rects are the fallback; each resolves through the loaded
+    /// DITL #1012 so a plug-in's replacement layout takes effect.
+    private struct Items {
+        let list, desc, abort, done: DITLItemRect
+        init(_ game: NovaGame?) {
+            let l = ditlItemLookup(game, 1012)
+            list  = l(1, (left: 9,   top: 24,  w: 195, h: 84))  // idx1 — mission list
+            desc  = l(3, (left: 218, top: 26,  w: 242, h: 91))  // idx3 — briefing/where-to-go
+            abort = l(4, (left: 57,  top: 125, w: 99,  h: 25))  // idx4 — "Abort Mission"
+            done  = l(0, (left: 290, top: 125, w: 99,  h: 25))  // idx0 — "Done"
+        }
     }
+    private var items: Items { Items(game) }
 
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
     private let missionOrange = Color(red: 1.0, green: 0.52, blue: 0.0)
@@ -102,25 +109,33 @@ struct MissionInfoView: View {
                 Image(decorative: frame, scale: 1).interpolation(.high).resizable()
                     .frame(width: nw, height: nh)
 
+                // The current date beside the header (0x00446e00), in item 6.
+                NovaText(OriginalText(game: game).date(for: pilot.state), size: 10,
+                         color: Color(white: 0.75), width: 122, align: .trailing)
+                    .novaPlace(space, 343 - nw / 2, 4 - nh / 2)
+
                 missionList
-                    .frame(width: CGFloat(Item.list.w), height: CGFloat(Item.list.h), alignment: .top)
+                    .frame(width: CGFloat(items.list.w), height: CGFloat(items.list.h), alignment: .top)
                     .clipped()
-                    .novaPlace(space, cx(Item.list, nw), cy(Item.list, nh))
+                    .novaPlace(space, cx(items.list, nw), cy(items.list, nh))
 
                 description
-                    .frame(width: CGFloat(Item.desc.w), height: CGFloat(Item.desc.h), alignment: .topLeading)
+                    .frame(width: CGFloat(items.desc.w), height: CGFloat(items.desc.h), alignment: .topLeading)
                     .clipped()
-                    .novaPlace(space, cx(Item.desc, nw), cy(Item.desc, nh))
+                    .novaPlace(space, cx(items.desc, nw), cy(items.desc, nh))
 
-                NovaButton(graphics: graphics, title: "Abort Mission",
-                           width: CGFloat(Item.abort.w - 26),
+                // STR# 150 #35 "Abort" and #5 "Done" (0x00446e00).
+                NovaButton(graphics: graphics,
+                           title: graphics.buttonLabel(SpaceportLabel.abort, fallback: "Abort"),
+                           width: CGFloat(items.abort.w - 26),
                            enabled: selected?.canAbort ?? false,
                            action: abortSelected)
-                    .novaPlace(space, cx(Item.abort, nw), cy(Item.abort, nh))
+                    .novaPlace(space, cx(items.abort, nw), cy(items.abort, nh))
 
-                NovaButton(graphics: graphics, title: "Done",
-                           width: CGFloat(Item.done.w - 26), action: onClose)
-                    .novaPlace(space, cx(Item.done, nw), cy(Item.done, nh))
+                NovaButton(graphics: graphics,
+                           title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                           width: CGFloat(items.done.w - 26), action: onClose)
+                    .novaPlace(space, cx(items.done, nw), cy(items.done, nh))
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .cursorScaleEffect(scale)
@@ -134,7 +149,7 @@ struct MissionInfoView: View {
             VStack {
                 Spacer()
                 NovaText("No active missions.", size: 11, color: Color(white: 0.6),
-                         width: CGFloat(Item.list.w), align: .center)
+                         width: CGFloat(items.list.w), align: .center)
                 Spacer()
             }
         } else {
@@ -145,7 +160,7 @@ struct MissionInfoView: View {
                             Button { selectedID = m.id } label: {
                                 NovaText((m.failed ? "• " : "") + m.name, size: 11,
                                          color: m.id == selectedID ? .white : Color(white: 0.78),
-                                         width: CGFloat(Item.list.w) - 24, align: .leading)
+                                         width: CGFloat(items.list.w) - 24, align: .leading)
                                     .padding(.vertical, 3).padding(.leading, 5)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .contentShape(Rectangle())
@@ -163,40 +178,15 @@ struct MissionInfoView: View {
         }
     }
 
+    /// The pane holds only the selected mission's QuickBrief, its wildcards
+    /// expanded (0x00446e00) — no objective, destination or deadline lines.
     @ViewBuilder
     private var description: some View {
         if let m = selected {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 5) {
-                    NovaText((m.failed ? "• " : "") + m.name, size: 11, color: amber,
-                             width: CGFloat(Item.desc.w), align: .leading, weight: .bold)
-
-                    // The current objective, with live progress folded in (ship
-                    // kills counted, the active travel/return leg named).
-                    if !m.objective.isEmpty {
-                        NovaText("Objective: \(m.objective)", size: 10, color: amber,
-                                 width: CGFloat(Item.desc.w), align: .leading)
-                    }
-
-                    // Where to go — the concrete destination stellar + system,
-                    // the same one the galaxy-map arrow points at.
-                    if !m.destinationSpob.isEmpty {
-                        NovaText("Destination: \(m.destinationSpob)\(m.destinationSystem.isEmpty ? "" : " (\(m.destinationSystem))")",
-                                 size: 10, color: missionOrange, width: CGFloat(Item.desc.w), align: .leading)
-                    }
-                    if let deadline = m.deadline {
-                        NovaText("Deadline: \(deadline.description)", size: 10,
-                                 color: Color(white: 0.62), width: CGFloat(Item.desc.w), align: .leading)
-                    }
-                    if !m.payload.isEmpty {
-                        NovaText(m.payload, size: 10, color: Color(white: 0.82),
-                                 width: CGFloat(Item.desc.w), align: .leading)
-                    }
-                }
+                NovaText(m.payload, size: 10, color: Color(white: 0.82),
+                         width: CGFloat(items.desc.w), align: .leading)
             }
-        } else {
-            NovaText("You are not currently on any missions.", size: 10,
-                     color: Color(white: 0.62), width: CGFloat(Item.desc.w), align: .leading)
         }
     }
 }

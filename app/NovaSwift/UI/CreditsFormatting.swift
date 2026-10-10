@@ -1,17 +1,33 @@
 import Foundation
+import NovaSwiftKit
+
+/// The currency word the original appends after a grouped amount: STR# 2002
+/// #34 ("cr" in the stock data), drawn after a space. Refreshed from the
+/// loaded data set so a TC's own word shows up (see `GameDataController`).
+enum CreditsFormatting {
+    nonisolated(unsafe) static var suffix = "cr"
+
+    static func refresh(from game: NovaGame) {
+        if let s = game.stringList(2002)?.string(at: 34), !s.isEmpty { suffix = s }
+        else { suffix = "cr" }
+    }
+}
 
 extension Int {
-    /// The credit balance in EV Nova's compact, abbreviated form — millions as
-    /// "1.10M cr", large thousands as "12.4k cr", smaller amounts spelled out
-    /// in full with grouping ("850 cr"). Used everywhere the UI shows a credit
-    /// amount (HUD, Pilot Info, Shipyard/Outfitter/Trade Center, missions,
-    /// gambling) so every screen agrees on one format instead of each re-deriving
-    /// its own — and so a long full number never overflows a fixed-width field.
+    /// The status bar's credits figure (FUN_00465af0): below 1,000 plain;
+    /// below a million "N,NNN"; else "N.NNM" with the hundredths truncated.
+    var creditsHUD: String {
+        let n = self
+        if n < 1000 { return "\(n)" }
+        if n < 1_000_000 { return "\(n / 1000)," + String(format: "%03d", n % 1000) }
+        return "\(n / 1_000_000)." + String(format: "%02d", (n % 1_000_000) / 10_000) + "M"
+    }
+
+    /// A credit amount the way the original draws it: the grouped number of
+    /// `DrawContext_DrawGroupedUInt` 0x00465af0 ("850", "12,345", "1.23M" —
+    /// the millions truncated, not rounded), then " " and STR# 2002 #34.
+    /// Used everywhere the UI shows a credit amount so every screen agrees.
     var creditsAbbreviated: String {
-        let n = self, a = abs(n)
-        if a >= 1_000_000 { return String(format: "%.2fM cr", Double(n) / 1_000_000) }
-        if a >= 10_000 { return String(format: "%.1fk cr", Double(n) / 1_000) }
-        let f = NumberFormatter(); f.numberStyle = .decimal
-        return (f.string(from: NSNumber(value: n)) ?? "\(n)") + " cr"
+        NovaNumberFormat.grouped(self) + " " + CreditsFormatting.suffix
     }
 }

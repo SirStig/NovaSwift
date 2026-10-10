@@ -435,6 +435,7 @@ extension OriginalAI {
                   c.disabled, c.missionID == nil else { continue }
             let hull = host.hull(of: c)
             let lowAI = (records[c.entityID]?.behavior ?? hull.inherentAI) < 3 || hull.inherentAI < 3
+                || c.formerWingRole != nil
             guard c.isPlayer || lowAI || lethal, hull.crew > 0 else { continue }
             if leader(of: c) != World.playerEntityID, host.areAllied(ship.government, c.government) { continue }
             let d = c.position - ship.position

@@ -7,9 +7,11 @@ import NovaSwiftKit
 /// and drives background music. One instance lives on `AppModel` and is shared by
 /// the launcher (UI clicks, music, sound test) and the game scene (flight SFX).
 ///
-/// Combat / AI systems trigger sound by calling `play(_:at:listener:)` with an
-/// explicit `snd ` id (a weapon's or explosion's own sound); `GameEvent` covers
-/// the fixed engine/UI sounds that aren't data-driven.
+/// Sounds follow the original's rules (`OriginalAudio`): every play carries the
+/// call site's priority into a 16-voice list of which 8 are heard; positional
+/// sounds use the 200 px / 850²/d² law with a 1/8 floor and play mono; a
+/// same-sound guard (`NovaAudio_CountActiveByHandle`) stops wëap Flags 0x0010
+/// weapons, Warp out and Klaxxon from stacking.
 @MainActor
 final class GameAudio: ObservableObject {
     private let engine = GameAudioEngine()
@@ -18,12 +20,11 @@ final class GameAudio: ObservableObject {
     private var musicURL: URL?
     private var screenAllowsMusic = false
 
-    /// Fixed sounds not carried by weapon/outfit data. The default ids are real
-    /// EV Nova base resources (verified present in the shipping data); a plug-in
-    /// that lacks one simply produces no sound.
+    /// Fixed sounds not carried by weapon/outfit data, with the priority their
+    /// original call sites pass and whether they are guarded against stacking.
     enum GameEvent {
         case hyperspaceCharge    // spinning up for a jump
-        case hyperspaceArrive    // popping out into a new system
+        case hyperspaceArrive    // Warp out
         case uiSelect            // menu/button click
         case uiError             // rejected action
         case targetLock          // acquired a target
@@ -42,6 +43,23 @@ final class GameAudio: ObservableObject {
             case .docking, .launch:    return 390   // "Airlock"
             }
         }
+
+        var priority: Int {
+            let P = OriginalAudio.Priority.self
+            switch self {
+            case .hyperspaceCharge:    return P.warpUp
+            case .hyperspaceArrive:    return P.warpOut
+            case .uiSelect, .uiError, .targetLock: return P.beep
+            case .redAlert:            return P.redAlert
+            case .docking, .launch:    return P.airlock
+            }
+        }
+
+        /// Played only when no voice is already playing it (0x0044f3d0:85 for
+        /// Warp out, :1707 for Klaxxon).
+        var playsOnlyWhenSilent: Bool {
+            self == .hyperspaceArrive
+        }
     }
 
     // MARK: Setup
@@ -49,128 +67,198 @@ final class GameAudio: ObservableObject {
     /// Point the library at freshly-loaded game data and start the engine.
     func attach(game: NovaGame?) {
         library.attach(game: game)
+        weaponSoundRules.removeAll()
         engine.start()
         applyVolumes()
     }
 
-    /// Locate a background music track shipped alongside the base data, if any.
+    /// The title music file (`GameDataController.musicTrackURL`, STR# 130 #2).
     func setMusic(url: URL?) { musicURL = url }
 
     /// Re-read volumes/toggles after the user changes settings.
     func apply(settings: GameSettings) {
         self.settings = settings
         applyVolumes()
-        updateMusicState()
+        updateMusicState(restart: false)
     }
 
     private func applyVolumes() {
         let master = settings.muteAll ? 0 : Float(settings.masterVolume)
         engine.masterVolume = master
         engine.sfxVolume = Float(settings.sfxVolume)
-        engine.musicVolume = Float(settings.musicVolume)
+        // Music level is the original's preference-derived movie volume
+        // (`musicGains`), applied on the player node.
+        engine.musicVolume = 1
     }
 
     // MARK: Music
 
+    /// The music slider as the original's 0…8 sound preference.
+    private var musicPreference: Int { Int((settings.musicVolume * 8).rounded()) }
+
+    /// `pref × 0x30` at start, `pref × 0x20` while playing (QuickTime 0…256).
+    private var musicGains: (start: Float, playing: Float) {
+        let p = musicPreference
+        return (Float(OriginalAudio.musicStartVolume(preference: p)) / 256,
+                Float(OriginalAudio.musicPlayingVolume(preference: p)) / 256)
+    }
+
     /// Start (or keep) music according to the current settings.
-    func startMusicIfEnabled() { updateMusicState() }
+    func startMusicIfEnabled() { updateMusicState(restart: false) }
 
-    /// The authentic EV Nova main menu is the only screen background music
-    /// plays over; it stops the moment the player enters the launcher, a
-    /// loading screen, or gameplay.
+    /// The authentic EV Nova main menu is the only screen music plays over.
+    /// Entering it starts the track from the top (0x004ab5d0 runs on every
+    /// main-menu entry); leaving it fades it out (0x004ab820).
     func setMusicAllowed(_ allowed: Bool) {
+        let entering = allowed && !screenAllowsMusic
+        let leaving = !allowed && screenAllowsMusic
         screenAllowsMusic = allowed
-        updateMusicState()
+        if leaving { engine.fadeOutMusic(); return }
+        if entering { musicPlayedThisVisit = false }
+        updateMusicState(restart: entering)
     }
 
-    private func updateMusicState() {
-        guard screenAllowsMusic else {
-            engine.stopMusic(); return
-        }
-        guard let url = musicURL else {
-            Log.audio.debug("updateMusicState: no music track found (musicTrackURL() returned nil)")
-            engine.stopMusic(); return
-        }
-        guard settings.musicEnabled, !settings.muteAll, settings.musicVolume > 0 else {
-            Log.audio.debug("updateMusicState: music suppressed by settings (enabled=\(self.settings.musicEnabled, privacy: .public) muteAll=\(self.settings.muteAll, privacy: .public) volume=\(self.settings.musicVolume, privacy: .public))")
-            engine.stopMusic(); return
-        }
-        engine.startMusic(url: url)
+    private var musicEnabled: Bool {
+        settings.musicEnabled && !settings.muteAll && settings.musicVolume > 0
     }
+
+    private func updateMusicState(restart: Bool) {
+        guard screenAllowsMusic, musicEnabled, let url = musicURL else {
+            if musicURL == nil { Log.audio.debug("updateMusicState: no title music (STR# 130 #2 not found)") }
+            engine.stopMusic(); return
+        }
+        let gains = musicGains
+        if restart || (!engine.isMusicPlaying && !musicPlayedThisVisit) {
+            musicPlayedThisVisit = true
+            engine.startMusic(url: url, startGain: gains.start, playingGain: gains.playing)
+        } else {
+            engine.setMusicGain(gains.playing)
+        }
+    }
+
+    /// The track plays once per main-menu visit; a settings change must not
+    /// replay a track that already ended. Reset on each main-menu entry.
+    private var musicPlayedThisVisit = false
 
     func stopMusic() { engine.stopMusic() }
 
-    /// Stop every looping SFX voice (beam weapons, ambient). Call when leaving the
-    /// game so a loop that was sounding at death/exit doesn't carry into the menu.
-    func stopAllLoops() { engine.stopAllLoops() }
+    /// Stop every looping SFX voice (spaceport ambient, the quick-jump charge)
+    /// and every one-shot voice. Called when leaving the game.
+    func stopAllLoops() {
+        engine.stopAllLoops()
+        engine.stop(soundID: 0)
+    }
 
     /// Freeze/thaw the sustained game audio (music + looping SFX) while an in-flight
-    /// overlay menu is open (Escorts, Hail, Galaxy/Gate Map, the in-game menu and
-    /// the Story map it opens). Resumes exactly where it left off; the menu's own UI
-    /// beeps keep sounding while paused.
+    /// overlay menu is open. Resumes exactly where it left off.
     func setPaused(_ paused: Bool) { engine.setSustainedAudioPaused(paused) }
 
     // MARK: SFX
 
-    /// Play a fixed engine/UI event. Interface beeps use the interface-volume
-    /// slider; world events use the effects volume.
+    /// Play a fixed engine/UI event at its original priority. Interface beeps
+    /// also follow the interface-volume slider.
     func play(_ event: GameEvent) {
+        if event.playsOnlyWhenSilent, engine.isPlaying(soundID: event.soundID) { return }
         switch event {
-        case .uiSelect, .uiError:
-            playSound(event.soundID, volume: Float(settings.uiVolume))
+        case .uiSelect, .uiError, .targetLock:
+            playSound(event.soundID, priority: event.priority, gainScale: Float(settings.uiVolume))
         default:
-            playSound(event.soundID)
+            playSound(event.soundID, priority: event.priority)
         }
     }
 
-    /// Play a `snd ` id centred (no attenuation/pan). Combat/UI systems use this
-    /// with a weapon's own sound id.
-    func playSound(_ id: Int, volume: Float = 1) {
+    /// `nv_PlaySound`: play a `snd ` id centred at full volume.
+    func playSound(_ id: Int, priority: Int = OriginalAudio.Priority.beep, gainScale: Float = 1) {
         guard !settings.muteAll else { return }
         guard let buffer = library.buffer(for: id) else {
             Log.audio.debug("playSound(\(id, privacy: .public)): no buffer (missing snd or undecodable)")
             return
         }
-        engine.play(buffer, volume: volume)
+        engine.play(buffer, soundID: id, priority: priority,
+                    volume: OriginalAudio.unityVolume, gainScale: gainScale)
     }
 
-    /// Play a `snd ` id positioned in the world relative to the listener (the
-    /// player ship / camera). Distance attenuates volume; horizontal offset pans.
-    /// `range` is the world distance at which the sound fades to silence.
-    func play(_ id: Int, at source: CGPoint, listener: CGPoint, range: CGFloat = 3000) {
+    /// Play an escort chatter line unpositioned and report its length in
+    /// seconds (0 if it can't play), so the world can hold the next line until
+    /// this one ends (`DAT_00591a8c`).
+    func playChatter(_ id: Int) -> Double {
+        guard !settings.muteAll, let buffer = library.buffer(for: id) else { return 0 }
+        engine.play(buffer, soundID: id, priority: OriginalAudio.Priority.klaxxon,
+                    volume: OriginalAudio.unityVolume, gainScale: Float(settings.uiVolume))
+        return Double(buffer.frameLength) / max(1, buffer.format.sampleRate)
+    }
+
+    /// `NovaAudio_PlaySpatialByDistance`: play a `snd ` id at a world point
+    /// heard from `listener` (the player). Mono; never quieter than 1/8.
+    func play(_ id: Int, at source: CGPoint, listener: CGPoint,
+              priority: Int = OriginalAudio.Priority.explosion) {
         guard !settings.muteAll, let buffer = library.buffer(for: id) else { return }
-        let dx = source.x - listener.x
-        let dy = source.y - listener.y
-        let dist = (dx * dx + dy * dy).squareRoot()
-        let atten = Float(max(0, 1 - dist / max(1, range)))
-        guard atten > 0.001 else { return }
-        // Pan by horizontal offset, softened so far-left/right isn't fully mono-side.
-        let pan = Float(max(-1, min(1, dx / max(1, range)))) * 0.85
-        engine.play(buffer, volume: atten, pan: pan)
+        let volume = OriginalAudio.spatialVolume(dx: Double(source.x - listener.x),
+                                                 dy: Double(source.y - listener.y),
+                                                 master: OriginalAudio.unityVolume)
+        engine.play(buffer, soundID: id, priority: priority, volume: volume)
     }
 
-    /// Start (or reposition) a continuous positional loop, keyed by a
-    /// caller-chosen id (e.g. one per firing ship+mount) — for `loopSound`
-    /// weapons, so a held beam trigger sounds like one sustained loop instead
-    /// of a one-shot sample retriggered every reload tick. Stops the loop if
-    /// it's fully attenuated by distance.
-    func startOrUpdateLoop(key: String, soundID: Int, at source: CGPoint, listener: CGPoint, range: CGFloat = 3000) {
-        guard !settings.muteAll, let buffer = library.buffer(for: soundID) else { return }
-        let dx = source.x - listener.x
-        let dy = source.y - listener.y
-        let dist = (dx * dx + dy * dy).squareRoot()
-        let atten = Float(max(0, 1 - dist / max(1, range)))
-        let pan = Float(max(-1, min(1, dx / max(1, range)))) * 0.85
-        guard atten > 0.001 else { engine.stopLoop(id: key); return }
-        engine.playLoop(id: key, buffer: buffer, volume: atten, pan: pan)
+    /// Whether any voice is playing `snd ` `id` (`NovaAudio_CountActiveByHandle`).
+    func isPlaying(_ id: Int) -> Bool { engine.isPlaying(soundID: id) }
+
+    /// `NovaAudio_UnregisterCallbacks`: stop every voice of `snd ` `id`.
+    func stopSound(_ id: Int) { engine.stop(soundID: id) }
+
+    // MARK: Weapons
+
+    private struct WeaponSoundRule {
+        var retriggerOnlyWhenDone: Bool   // wëap Flags 0x0010
+        var playerPriority: Int
+        var pointDefense: Bool            // guidance 9/10
+        var carried: Bool                 // guidance 99 (fighter bay)
     }
 
-    /// Stop a loop started by `startOrUpdateLoop`. No-op if not looping.
+    /// Per-weapon sound rule, read once from the wëap.
+    private var weaponSoundRules: [Int: WeaponSoundRule] = [:]
+
+    private func weaponRule(_ weaponID: Int) -> WeaponSoundRule {
+        if let hit = weaponSoundRules[weaponID] { return hit }
+        let w = library.loadedGame?.weapon(weaponID)
+        let guidance = w?.guidanceRaw ?? -1
+        let rule = WeaponSoundRule(
+            retriggerOnlyWhenDone: w?.loopSound ?? false,
+            playerPriority: OriginalAudio.Priority.playerWeapon(guidance: guidance, flags: Int(w?.flagsRaw ?? 0)),
+            pointDefense: guidance == 9 || guidance == 10,
+            carried: guidance == 99)
+        weaponSoundRules[weaponID] = rule
+        return rule
+    }
+
+    /// A weapon's fire sound, as the original's call sites play it:
+    /// `Weapon_FireShipWeapons` (NPCs, priority 4, at the shooter),
+    /// `Weapon_FirePlayerWeaponBank` (the player, 5/6, at full volume),
+    /// point defense (`Weapon_SelectTurretTargetWithinArc`, 3, at the shooter)
+    /// and an NPC bay launch (`Ship_LaunchShipFromCarrierBay`, 5). wëap Flags
+    /// 0x0010 makes it play only when no voice anywhere is already playing
+    /// that sound — every weapon kind, not just beams; a retrigger-when-done,
+    /// not a loop (the bay launch ignores it).
+    func playWeaponFire(soundID: Int, weaponID: Int, isPlayer: Bool, at source: CGPoint, listener: CGPoint) {
+        let rule = weaponRule(weaponID)
+        let P = OriginalAudio.Priority.self
+        if !(rule.carried && !isPlayer), rule.retriggerOnlyWhenDone, engine.isPlaying(soundID: soundID) { return }
+        if rule.pointDefense {
+            play(soundID, at: source, listener: listener, priority: P.turret)
+        } else if isPlayer {
+            play(soundID, at: listener, listener: listener, priority: rule.playerPriority)
+        } else if rule.carried {
+            play(soundID, at: source, listener: listener, priority: P.carrierLaunch)
+        } else {
+            play(soundID, at: source, listener: listener, priority: P.npcWeapon)
+        }
+    }
+
+    // MARK: Looping SFX (spaceport ambience, the quickHyperjump charge)
+
+    /// Stop a loop started by `startAmbient`. No-op if not looping.
     func stopLoop(key: String) { engine.stopLoop(id: key) }
 
-    /// Key for the landed-spaceport ambience loop (`SpobRes.ambientSoundID`) —
-    /// unlike weapon loops this isn't positional (no in-world source/listener),
-    /// it's just "on" for as long as the player is landed.
+    /// Key for the landed-spaceport ambience loop (`SpobRes.ambientSoundID`).
     private static let ambientLoopKey = "spaceport-ambient"
 
     /// Start (or switch) the ambient loop for the spöb the player just landed
@@ -186,34 +274,53 @@ final class GameAudio: ObservableObject {
     /// Stop the landed-spaceport ambience — called on takeoff.
     func stopAmbient() { engine.stopLoop(id: Self.ambientLoopKey) }
 
-    /// Key for the hyperspace charge-up loop — kept looping (rather than fired
-    /// as a one-shot) specifically so it can be silenced the instant the jump
-    /// commits, instead of running to the end of the underlying sample and
-    /// bleeding into the destination system.
+    /// The `quickHyperjump` enhancement's charge-up loop, cut when its jump commits.
     private static let hyperspaceChargeLoopKey = "hyperspace-charge"
 
-    /// Start the "spinning up for a jump" loop — called as a jump begins.
     func startHyperspaceCharge() {
         guard !settings.muteAll, let buffer = library.buffer(for: GameEvent.hyperspaceCharge.soundID) else { return }
         engine.playLoop(id: Self.hyperspaceChargeLoopKey, buffer: buffer, volume: Float(settings.sfxVolume), pan: 0)
     }
 
-    /// Stop the charge-up loop — called the instant the jump commits (flash peak).
     func stopHyperspaceCharge() { engine.stopLoop(id: Self.hyperspaceChargeLoopKey) }
 
-    // MARK: Hailing
+    // MARK: The original jump cue
 
-    /// Play a hailed government's voice line — the "Acknowledge" bank normally,
-    /// "Target" if that government is hostile to the player — picking a random
-    /// real variant. No-op for governments that can't be hailed or have nothing
-    /// to say (`gövt.cantBeHailed` / `nonTalkative`).
-    func playHailVoice(govt: GovtRes, hostile: Bool) {
-        guard !govt.cantBeHailed, !govt.nonTalkative else { return }
-        let base = 1000 + govt.voiceType * 100 + (hostile ? 10 : 0)
-        let available = Set(availableSoundIDs())
-        let variants = (0...9).map { base + $0 }.filter { available.contains($0) }
-        guard let id = variants.randomElement() else { return }
-        playSound(id, volume: Float(settings.uiVolume))
+    /// The pre-staged Warp up voice (0x004b0740 / 0x0046ab00): snd 128 played
+    /// once, `multiplier` times faster (voice rate `65536 / multiplier`… the
+    /// descriptor's step), at priority 32000, and only when no Warp up voice
+    /// is sounding.
+    func startWarpUp(multiplier: Double) {
+        let id = GameEvent.hyperspaceCharge.soundID
+        guard !settings.muteAll, !engine.isPlaying(soundID: id),
+              let buffer = library.buffer(for: id, rate: multiplier) else { return }
+        engine.play(buffer, soundID: id, priority: OriginalAudio.Priority.warpUp,
+                    volume: OriginalAudio.unityVolume)
+    }
+
+    /// The cut at `350 / multiplier` ticks (0x0044f3d0:368-381).
+    func stopWarpUp() { engine.stop(soundID: GameEvent.hyperspaceCharge.soundID) }
+
+    // MARK: Main menu
+
+    /// `FUN_0048bc20`: a main-menu command plays snd 600, waits for it to end,
+    /// plays snd 601, then acts.
+    func playMenuTransition(then action: @escaping @MainActor () -> Void) {
+        playSound(600, priority: OriginalAudio.Priority.menuTransition)
+        func waitThenAct() {
+            if engine.isPlaying(soundID: 600) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { waitThenAct() }
+                return
+            }
+            playSound(601, priority: OriginalAudio.Priority.menuTransition)
+            action()
+        }
+        waitThenAct()
+    }
+
+    /// A menu shutter strip starts (snd 602) or lands (snd 603) (`FUN_0048bfb0`).
+    func playMenuSlide(landed: Bool) {
+        playSound(landed ? 603 : 602, priority: OriginalAudio.Priority.warpOut)
     }
 
     // MARK: Sound test (Settings)

@@ -56,7 +56,7 @@ struct MissionBoardView: View {
             } else {
                 ForEach(offered, id: \.id) { mission in
                     HStack(spacing: 4) {
-                        Button { engine?.present(mission) } label: {
+                        Button { present(mission) } label: {
                             HStack(spacing: 6) {
                                 NovaText(engine?.resolvedName(for: mission) ?? mission.displayName, size: 11, width: width - 65, align: .leading)
                                 Spacer(minLength: 0)
@@ -74,6 +74,7 @@ struct MissionBoardView: View {
                 }
             }
         }
+        .overlay { StoryTextOverlay(services: services) }
         .onAppear(perform: buildEngine)
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
@@ -92,13 +93,13 @@ struct MissionBoardView: View {
                 case .missionComputer:
                     MissionInfoSheet(graphics: graphics, offer: offer, offered: offered,
                                       resolvedName: { engine?.resolvedName(for: $0) ?? $0.displayName },
-                                      onSelect: { engine?.present($0) },
+                                      onSelect: { present($0) },
                                       onAccept: { accept(offer) }, onDecline: { decline(offer) },
                                       storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
                                       onShowDestination: showDestinationAction(for: offer))
                 case .bar:
                     MissionSingleDialog(graphics: graphics, offer: offer, offered: offered,
-                                        onPage: { engine?.present($0) },
+                                        onPage: { present($0) },
                                         onAccept: { accept(offer) }, onDecline: { decline(offer) },
                                         storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
                                         onShowDestination: showDestinationAction(for: offer))
@@ -109,7 +110,7 @@ struct MissionBoardView: View {
                 default:
                     MissionInfoSheet(graphics: graphics, offer: offer, offered: offered,
                                       resolvedName: { engine?.resolvedName(for: $0) ?? $0.displayName },
-                                      onSelect: { engine?.present($0) },
+                                      onSelect: { present($0) },
                                       onAccept: { accept(offer) }, onDecline: { decline(offer) },
                                       storylineTag: tag, onOpenStoryline: tag.map { t in { openStoryline(t.key) } },
                                       onShowDestination: showDestinationAction(for: offer))
@@ -122,7 +123,7 @@ struct MissionBoardView: View {
         let e = StoryEngine(game: game, player: pilot.state, services: services,
                             seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
         engine = e
-        offered = e.missionsOffered(at: location, spob: spob.id)
+        offered = list(e)
         if graphics == nil { graphics = SpaceportGraphics(game: game) }
         // The preview chart needs a nav model anchored at the port we're standing
         // on, so "you are here" and the hyperspace web read correctly.
@@ -130,11 +131,30 @@ struct MissionBoardView: View {
         mapNav.configure(game: game, startSystemID: here)
     }
 
-    /// The "show me where this goes" action for an offer, or nil when the job
-    /// has no destination to point at (a pure combat or bit-flipping mission).
+    /// The offer's Map command with its preselected system: only mïsn Flags
+    /// 0x0100 marks the destination (0x00442510 button 4); nil otherwise.
     private func showDestinationAction(for offer: MissionOffer) -> (() -> Void)? {
-        guard let dest = engine?.offerDestination(for: offer.mission) else { return nil }
-        return { mapPreview = DestinationPreviewTarget(systemID: dest.systemID, label: dest.stellar) }
+        guard let sys = engine?.offerHighlightSystem(for: offer.mission) else { return nil }
+        let label = game.system(sys)?.displayName ?? ""
+        return { mapPreview = DestinationPreviewTarget(systemID: sys, label: label) }
+    }
+
+    /// The landing's mission-computer list (fixed at landing, compacted by
+    /// accepts) or, for any other location, the live list.
+    private func list(_ e: StoryEngine) -> [MissionRes] {
+        location == .missionComputer ? e.missionComputerList(spob: spob.id)
+            : e.missionsOffered(at: location, spob: spob.id)
+    }
+
+    /// Present an offer; a can't-refuse one with no offer text activates
+    /// silently, so the pilot is written back either way.
+    private func present(_ mission: MissionRes) {
+        guard let engine else { return }
+        if !engine.present(mission) {
+            pilot.state = engine.player
+            pilot.save()
+            offered = list(engine)
+        }
     }
 
     private func openStoryline(_ key: String) {
@@ -148,7 +168,7 @@ struct MissionBoardView: View {
         pilot.state = engine.player
         pilot.save()
         services.pendingOffer = nil
-        offered = engine.missionsOffered(at: location, spob: spob.id)
+        offered = list(engine)
     }
 
     private func decline(_ offer: MissionOffer) {
@@ -159,11 +179,9 @@ struct MissionBoardView: View {
     }
 }
 
-/// A small chart pin beside a mission offer's title: opens the galaxy map
-/// centred on where the job would send the player, with the destination
-/// carrying the same orange "go here" marker an accepted mission gets. Not in
-/// the original — EV Nova's BBS made you accept first and find out after — but
-/// it's the single most-asked-for quality-of-life addition to that screen.
+/// A small chart pin beside a mission offer's title: the offer window's Map
+/// command, shown only for missions whose mïsn Flags 0x0100 preselect their
+/// destination system on the starmap (0x00442510), as in the original.
 struct DestinationMapBadge: View {
     let action: () -> Void
 
@@ -283,39 +301,49 @@ private struct MissionInfoSheet: View {
     var body: some View {
         Group {
             if let image = graphics.pict(Self.pictID) {
+                // Rects resolve through DITL #1012 (stock rects as fallback).
+                let d = DITLPlacement(graphics.game, 1012, frame: image)
                 MissionPictFrame(image: image) { space in
                     // item 2: (13,1)-(206,13) 193x12 — selected mission's title
+                    let title = d.rect(2, top: 1, left: 13, bottom: 13, right: 206)
                     HStack(spacing: 4) {
-                        NovaText(offer.title, size: 11, width: 163, align: .leading, weight: .bold)
+                        NovaText(offer.title, size: 11, width: max(0, title.width - 30),
+                                 align: .leading, weight: .bold)
                         if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                         if let storylineTag, let onOpenStoryline {
                             StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
                         }
                     }
-                    .frame(width: 193, alignment: .leading)
-                    .novaPlace(space, -222.5, -76.5)
+                    .frame(width: title.width, alignment: .leading)
+                    .ditlPlace(space, d, title)
                     // item 6: (343,4)-(465,16) 122x12 — its reward
+                    let reward = d.rect(6, top: 4, left: 343, bottom: 16, right: 465)
                     NovaText(offer.mission.pay.creditsAbbreviated, size: 11,
-                             color: Color(red: 1, green: 0.85, blue: 0.4), width: 122, align: .trailing)
-                        .novaPlace(space, 107.5, -73.5)
+                             color: Color(red: 1, green: 0.85, blue: 0.4), width: reward.width, align: .trailing)
+                        .ditlPlace(space, d, reward)
                     // item 1: (9,24)-(204,108) 195x84 — other offers here
-                    offersList.novaPlace(space, -226.5, -53.5)
+                    let list = d.rect(1, top: 24, left: 9, bottom: 108, right: 204)
+                    offersList(list.size).ditlPlace(space, d, list)
                     // item 3: (218,26)-(460,117) 242x91 — briefing text
+                    let brief = d.rect(3, top: 26, left: 218, bottom: 117, right: 460)
                     ScrollView(showsIndicators: false) {
-                        NovaText(offer.briefingText, size: 10, width: 242, align: .leading)
+                        NovaText(offer.briefingText, size: 10, width: brief.width, align: .leading)
                     }
                     .cursorScrollable()
-                    .frame(width: 242, height: 91)
-                    .novaPlace(space, -17.5, -51.5)
+                    .frame(width: brief.width, height: brief.height)
+                    .ditlPlace(space, d, brief)
                     // item 4: (57,125)-(156,150) 99x25 — refuse
                     if offer.canRefuse {
-                        NovaButton(graphics: graphics, title: offer.refuseButton, width: 73, action: onDecline)
-                            .novaPlace(space, -178.5, 47.5)
+                        let refuse = d.rect(4, top: 125, left: 57, bottom: 150, right: 156)
+                        NovaButton(graphics: graphics, title: offer.refuseButton, ditl: refuse, action: onDecline)
+                            .ditlPlace(space, d, refuse)
                     }
                     // item 0: (290,125)-(389,150) 99x25 — accept
-                    NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
-                               enabled: offer.canAccept, action: onAccept)
-                        .novaPlace(space, 54.5, 47.5)
+                    let accept = d.rect(0, top: 125, left: 290, bottom: 150, right: 389)
+                    // Always live: a failed activation shows its no-room text
+                    // and closes the window (0x0043f100, 0x004a1670).
+                    NovaButton(graphics: graphics, title: offer.acceptButton, ditl: accept, action: onAccept)
+                        .ditlPlace(space, d, accept)
                 }
             } else {
                 fallback
@@ -323,14 +351,14 @@ private struct MissionInfoSheet: View {
         }
     }
 
-    private var offersList: some View {
+    private func offersList(_ size: CGSize) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(offered, id: \.id) { mission in
                     Button { onSelect(mission) } label: {
                         NovaText(resolvedName(mission), size: 10,
                                  color: mission.id == offer.mission.id ? .white : Color(white: 0.6),
-                                 width: 191, align: .leading)
+                                 width: max(0, size.width - 4), align: .leading)
                             .padding(.vertical, 1)
                     }
                     .buttonStyle(.novaPlain)
@@ -338,7 +366,7 @@ private struct MissionInfoSheet: View {
             }
         }
         .cursorScrollable()
-        .frame(width: 195, height: 84)
+        .frame(width: size.width, height: size.height)
     }
 
     /// Data present but no frame PICT decoded (e.g. running on data missing
@@ -358,7 +386,6 @@ private struct MissionInfoSheet: View {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()
                 Button(offer.acceptButton, action: onAccept).novaProminentButton()
-                    .disabled(!offer.canAccept)
             }
         }
         .padding(20)
@@ -410,10 +437,36 @@ struct MissionSingleDialog: View {
     private static let topHeight: CGFloat = 9
     private static let bottomHeight: CGFloat = 40
 
+    /// DITL/DLOG #1016 from the loaded data: the frame takes the DLOG's size
+    /// and every item its DITL rect (stock values as fallback).
+    private var ditl: DITLPlacement {
+        let stock = DITLPlacement(graphics.game, 1016,
+                                  window: CGSize(width: Self.frameWidth, height: Self.frameHeight))
+        return DITLPlacement(graphics.game, 1016, window: stock.windowSize)
+    }
+
     private var index: Int? { offered.firstIndex { $0.id == offer.mission.id } }
 
     private var movieFilename: String? {
         model.data.game?.desc(offer.mission.offerTextID)?.movieFilename
+    }
+    /// dësc Flags 0x0001: the movie plays after the window closes.
+    private var movieAfterText: Bool {
+        model.data.game?.desc(offer.mission.offerTextID)?.moviePlaysAfterText ?? false
+    }
+    /// The button action waiting for an after-text movie to finish.
+    @State private var afterMovie: (() -> Void)?
+
+    /// Run a button's action — after the dësc movie when it plays after the
+    /// text (0x00442510).
+    private func finish(_ action: @escaping () -> Void) {
+        if movieAfterText, movieFilename != nil, moviePlayer == nil, afterMovie == nil {
+            afterMovie = action
+            playMovie()
+            if moviePlayer == nil { afterMovie = nil; action() }
+        } else {
+            action()
+        }
     }
 
     // Rendered as a full-screen overlay at the shared 1024×768 reference scale
@@ -421,13 +474,16 @@ struct MissionSingleDialog: View {
     // at its true relative size instead of appearing in a native sheet.
     var body: some View {
         GeometryReader { geo in
-            let scale = novaFrameScale(frame: CGSize(width: Self.frameWidth, height: Self.frameHeight),
+            let scale = novaFrameScale(frame: ditl.windowSize,
                                        viewport: geo.size)
             frameBody
                 .cursorScaleEffect(scale)
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .overlay { if moviePlayer != nil { moviePlayerOverlay } }
+        // The offer's dësc movie plays by itself before the text, unless its
+        // Flags put it after (0x00442510).
+        .onAppear { if !movieAfterText { playMovie() } }
     }
 
     /// The briefing's holovid, full-screen over the whole dialog — mirrors
@@ -463,6 +519,10 @@ struct MissionSingleDialog: View {
     private func dismissMovie() {
         moviePlayer?.pause()
         moviePlayer = nil
+        if let action = afterMovie {
+            afterMovie = nil
+            action()
+        }
     }
 
     @ViewBuilder private var frameBody: some View {
@@ -470,13 +530,16 @@ struct MissionSingleDialog: View {
             if let top = graphics.pict(Self.upperID), let middle = graphics.pict(Self.middleID),
                let bottom = graphics.pict(Self.lowerID) {
                 MissionThreeSliceFrame(top: top, middle: middle, bottom: bottom,
-                                        width: Self.frameWidth, height: Self.frameHeight,
+                                        width: ditl.windowSize.width, height: ditl.windowSize.height,
                                         topHeight: Self.topHeight, bottomHeight: Self.bottomHeight) { space in
+                    let d = ditl
                     // item 2: (12,9)-(427,276) 415x267 — briefing pane
+                    let pane = d.rect(2, top: 9, left: 12, bottom: 276, right: 427)
                     ScrollView(showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 6) {
-                                NovaText(offer.title, size: 11, width: 368, align: .leading, weight: .bold)
+                                NovaText(offer.title, size: 11, width: max(0, pane.width - 47),
+                                         align: .leading, weight: .bold)
                                 if let onShowDestination { DestinationMapBadge(action: onShowDestination) }
                                 if let storylineTag, let onOpenStoryline {
                                     StorylineTagBadge(title: storylineTag.title, action: onOpenStoryline)
@@ -491,40 +554,32 @@ struct MissionSingleDialog: View {
                                 Image(decorative: cg, scale: 1)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 407, maxHeight: 140)
+                                    .frame(maxWidth: max(0, pane.width - 8), maxHeight: 140)
                             }
-                            // A holovid clip attached to this briefing (e.g. ARPIA2's
-                            // gas-miner intro) — the player chooses to watch it rather
-                            // than it auto-playing over the text they're trying to read.
-                            if movieFilename != nil {
-                                Button(action: playMovie) {
-                                    Label("Play Clip", systemImage: "play.circle.fill")
-                                        .font(.system(size: 11, weight: .semibold))
-                                }
-                                .buttonStyle(.novaPlain)
-                                .foregroundStyle(novaAmber)
-                            }
-                            NovaText(offer.briefingText, size: 10, width: 411, align: .leading)
+                            NovaText(offer.briefingText, size: 10, width: max(0, pane.width - 4), align: .leading)
                         }
                         .padding(.top, 2).padding(.leading, 2)
                     }
                     .cursorScrollable()
-                    .frame(width: 415, height: 267)
-                    .novaPlace(space, -208.5, -149.5)
+                    .frame(width: pane.width, height: pane.height)
+                    .ditlPlace(space, d, pane)
 
                     if offer.canRefuse {
                         // item 1: (117,285)-(216,310) — refuse, paired with item 0
-                        NovaButton(graphics: graphics, title: offer.refuseButton, width: 73, action: onDecline)
-                            .novaPlace(space, -103.5, 126.5)
+                        let refuse = d.rect(1, top: 285, left: 117, bottom: 310, right: 216)
+                        NovaButton(graphics: graphics, title: offer.refuseButton, ditl: refuse, action: { finish(onDecline) })
+                            .ditlPlace(space, d, refuse)
                         // item 0: (225,285)-(324,310) — accept, paired with item 1
-                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
-                                   enabled: offer.canAccept, action: onAccept)
-                            .novaPlace(space, 4.5, 126.5)
+                        let accept = d.rect(0, top: 285, left: 225, bottom: 310, right: 324)
+                        NovaButton(graphics: graphics, title: offer.acceptButton, ditl: accept,
+                                   action: { finish(onAccept) })
+                            .ditlPlace(space, d, accept)
                     } else {
                         // item 5: (173,285)-(272,310) — accept, centered (no refuse)
-                        NovaButton(graphics: graphics, title: offer.acceptButton, width: 73,
-                                   enabled: offer.canAccept, action: onAccept)
-                            .novaPlace(space, -47.5, 126.5)
+                        let accept = d.rect(5, top: 285, left: 173, bottom: 310, right: 272)
+                        NovaButton(graphics: graphics, title: offer.acceptButton, ditl: accept,
+                                   action: { finish(onAccept) })
+                            .ditlPlace(space, d, accept)
                     }
 
                     if offered.count > 1, let index {
@@ -532,12 +587,12 @@ struct MissionSingleDialog: View {
                         pageButton(system: "chevron.left", enabled: index > 0) {
                             onPage(offered[index - 1])
                         }
-                        .novaPlace(space, 119.5, 128.5)
+                        .ditlPlace(space, d, d.rect(8, top: 287, left: 340, bottom: 310, right: 363))
                         // item 9: (373,287)-(396,310) 23x23 — next offer
                         pageButton(system: "chevron.right", enabled: index < offered.count - 1) {
                             onPage(offered[index + 1])
                         }
-                        .novaPlace(space, 152.5, 128.5)
+                        .ditlPlace(space, d, d.rect(9, top: 287, left: 373, bottom: 310, right: 396))
                     }
                 }
             } else {
@@ -571,7 +626,6 @@ struct MissionSingleDialog: View {
                 if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
                 Spacer()
                 Button(offer.acceptButton, action: onAccept).novaProminentButton()
-                    .disabled(!offer.canAccept)
             }
         }
         .padding(20)

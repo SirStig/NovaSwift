@@ -14,9 +14,10 @@ import NovaSwiftKit
 /// 2. **Spin-up** (0x0044c528 / 0x0044c704). The velocity damps × 0.98006866 per
 ///    tick (not for a fast-jump hull) while the ship turns onto the map bearing.
 ///    The jump fires once the jump timer (seeded 2) reaches 30 ticks *and* the
-///    "Warp up" cue (snd 128) has played out; the cue plays at the hull's
-///    duration multiplier, so it lasts `cue / multiplier` 60 Hz ticks.
-/// 3. **Tunnel** (0x0044ccaf). With `progress = elapsed60 × mult / (cue × 0.01)
+///    "Warp up" voice (snd 128, played at the hull's duration multiplier) is no
+///    longer sounding. That voice is cut at `350 / multiplier` 60 Hz ticks, so
+///    the wait is `min(snd length, 350) / multiplier`.
+/// 3. **Tunnel** (0x0044ccaf). With `progress = elapsed60 × mult / (350 × 0.01)
 ///    − 35 / mult` positive and the nose within `max(turn, 30)°` of the bearing,
 ///    the *position* steps `min(progress, 50)` px per tick along the heading.
 /// 4. **Collapse** (0x0044b037 / 0x0044b120). A disabled player's jump collapses;
@@ -34,9 +35,16 @@ public struct PlayerHyperjump: Sendable {
     /// Class Flags2 0x0020 or an owned ModType-37 outfit
     /// (`Ship_CheckSpecialLoadoutCapability` 0x0046d080).
     public let fastJump: Bool
-    /// Length of the "Warp up" cue in 60 Hz ticks (`numFrames × 60 / rate`,
-    /// 350 when the sound is missing).
-    public let cueTicks60: Double
+    /// The jump-sequence length in 60 Hz ticks (`Stellar_GetJumpSequenceDuration60Hz`
+    /// 0x0046efb0). The preload 0x004b0740 seeds it with 350 and only replaces it
+    /// when its WAV/AIFF/VOC/Ogg file probe (0x004fc570) recognises the `snd `
+    /// 128 bytes, which a Mac `snd ` never matches, so it is always 350: the
+    /// progress ramp and the warp-up cut both use this, never the sound's length.
+    public let cueTicks60: Double = PlayerHyperjump.defaultCueTicks60
+    /// The real length of the "Warp up" sound (snd 128) in 60 Hz ticks at normal
+    /// rate, or 0 when there is none (no voice to wait for). Only decides when
+    /// the voice stops on its own before the 350-tick cut.
+    public let soundTicks60: Double
     /// The hull's jump-duration multiplier (`durationMultiplier(hullFlags:)`).
     public let multiplier: Double
 
@@ -58,26 +66,27 @@ public struct PlayerHyperjump: Sendable {
     static let stoppedVelocity = 2.0                 // px/tick, per axis
 
     public init(bearing: Double, fastJump: Bool,
-                cueTicks60: Double = PlayerHyperjump.defaultCueTicks60, multiplier: Double = 1.3) {
+                soundTicks60: Double = PlayerHyperjump.defaultCueTicks60, multiplier: Double = 1.3) {
         let deg = (Int((bearing * 180 / .pi).rounded()) % 360 + 360) % 360
         self.bearing = Double(deg) * .pi / 180
         self.fastJump = fastJump
-        self.cueTicks60 = max(1, cueTicks60)
+        self.soundTicks60 = max(0, soundTicks60)
         self.multiplier = max(0.5, multiplier)
     }
 
     /// shïp Flags 0x0001 / 0x0002 / 0x0004 scale the jump (0.7 / 1.3 / 1.6, else
     /// 1.0), times 1.3 and floored at 0.5 (loader 0x004bd3c0): the cue plays this
-    /// much faster, so a plain hull's spin-up lasts 364 / 1.3 ticks ≈ 4.67 s.
+    /// much faster, so a plain hull's spin-up lasts 350 / 1.3 ticks ≈ 4.49 s.
     public static func durationMultiplier(hullFlags: Int) -> Double {
         let scale = hullFlags & 0x1 != 0 ? 0.7 : hullFlags & 0x2 != 0 ? 1.3 : hullFlags & 0x4 != 0 ? 1.6 : 1.0
         return max(scale * 1.3, 0.5)
     }
 
-    /// The "Warp up" cue's length in 60 Hz ticks, truncated as the preload does.
-    public static func cueTicks60(of sound: NovaSound?) -> Double {
-        guard let sound, sound.sampleRate > 0, sound.frameCount > 0 else { return defaultCueTicks60 }
-        return Double(max(1, min(0x7fff, Int(Double(sound.frameCount) * 60 / sound.sampleRate))))
+    /// The "Warp up" sound's own length in 60 Hz ticks (0 when missing). It
+    /// only bounds the wait from below the fixed 350-tick cut.
+    public static func soundTicks60(of sound: NovaSound?) -> Double {
+        guard let sound, sound.sampleRate > 0, sound.frameCount > 0 else { return 0 }
+        return Double(sound.frameCount) * 60 / sound.sampleRate
     }
 
     /// The tunnel ramp's progress.
@@ -85,8 +94,13 @@ public struct PlayerHyperjump: Sendable {
         elapsed60 * multiplier / (cueTicks60 * 0.01) - Self.progressOffset / multiplier
     }
 
-    /// Whether the cue, playing at `multiplier`, has finished.
-    var cueDone: Bool { elapsed60 >= cueTicks60 / multiplier }
+    /// Whether the warp-up voice has stopped: it ends by itself after
+    /// `soundTicks60 / multiplier`, or is cut at `350 / multiplier` (0x0044f3d0).
+    var cueDone: Bool { elapsed60 >= min(soundTicks60, cueTicks60) / multiplier }
+
+    /// Whether the original has cut the warp-up voice by now (`elapsed60 >
+    /// 350 / multiplier`); the app stops the sound when this turns true.
+    public var warpUpCut: Bool { elapsed60 > cueTicks60 / multiplier }
 
     /// Fly one step of the engaged jump. The caller skips the normal flight
     /// model for the player while this runs.
@@ -121,7 +135,7 @@ public struct PlayerHyperjump: Sendable {
                 player.throttleSpeed = max(0, player.throttleSpeed - thrust * dt)
                 steerInertialess(player, thrust: thrust, dt: dt)
             } else {
-                let reverse = player.velocity.angle + .pi
+                let reverse = OriginalMath.bearingRadians(of: player.velocity) + .pi
                 turn(player, toward: reverse, stepDeg: turnDeg * ticks)
                 let off = abs(angleDelta(from: player.angle, to: reverse)) * 180 / .pi
                 if off < max(turnDeg + 1, 20) {
@@ -254,8 +268,9 @@ extension Galaxy {
         return short < 1 ? 1 : short
     }
 
-    /// The "Warp up" cue (snd 128) in 60 Hz ticks: the spin-up length.
-    public var hyperspaceCueTicks60: Double { PlayerHyperjump.cueTicks60(of: game.sound(128)) }
+    /// The "Warp up" sound (snd 128) in 60 Hz ticks, 0 when missing. The
+    /// jump sequence itself is always 350 ticks (`PlayerHyperjump.cueTicks60`).
+    public var hyperspaceWarpUpSoundTicks60: Double { PlayerHyperjump.soundTicks60(of: game.sound(128)) }
 
     /// The hull's jump-duration multiplier (`PlayerHyperjump.durationMultiplier`).
     public func jumpDurationMultiplier(hull shipID: Int) -> Double {
