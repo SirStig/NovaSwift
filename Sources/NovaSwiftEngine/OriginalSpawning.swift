@@ -384,7 +384,7 @@ extension Spawner {
         }
         let bearing = Double(world.rng.range(360)) * .pi / 180
         ship.position = Vec2(sin(bearing), cos(bearing)) * OriginalSpawnRules.jumpInRadius
-        ship.angle = (Vec2() - ship.position).angle
+        ship.angle = OriginalMath.bearingRadians(from: ship.position, to: Vec2())
         world.addNPC(ship, arrival: .hyperspace)
     }
 

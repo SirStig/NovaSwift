@@ -576,13 +576,11 @@ extension OriginalAI {
 
     // MARK: Geometry
 
-    /// Compass bearing (0 = up, clockwise) from `a` to `b`, in degrees [0, 360).
+    /// Compass bearing (0 = up, clockwise) from `a` to `b`: the original's
+    /// whole-degree table bearing (`Math_BearingFromPointToPoint` 0x0043b670,
+    /// C-1), in [0, 360).
     static func bearingDeg(_ a: Vec2, _ b: Vec2) -> Double {
-        let d = b - a
-        if d.x == 0 && d.y == 0 { return 0 }
-        var deg = atan2(d.x, d.y) * 180 / .pi
-        if deg < 0 { deg += 360 }
-        return deg
+        Double(OriginalMath.bearing(from: a, to: b))
     }
 
     static func headingDeg(_ ship: Ship) -> Double {
