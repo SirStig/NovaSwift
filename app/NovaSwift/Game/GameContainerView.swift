@@ -639,6 +639,7 @@ struct GameContainerView: View {
     @State private var showMenu = false
     /// When the in-flight route mini map was last raised (S-1, 0x004a9b30).
     @State private var routeMapShownAt: Date?
+    @State private var routeMapUnitsPerPixel = 0.5625
 
     /// Whether pausing opens the port's sidebar menu. Follows the setting on desktop;
     /// always on for mobile, which has no keyboard and reaches the sidebar only via
@@ -841,17 +842,24 @@ struct GameContainerView: View {
                 if let shown = routeMapShownAt, !nav.showingMap {
                     // 0x00439bb0: full for 118 ticks, fading over the next 32
                     // (60 Hz), gone at 150; the original clears its flag at 500.
-                    TimelineView(.animation) { tl in
-                        let ticks = tl.date.timeIntervalSince(shown) * 60
-                        let alpha = ticks < 118 ? 1.0 : max(0, 1 - (ticks - 118) / 32)
-                        GalaxyMapView(nav: nav, pilot: model.pilot, onJump: {}, onClose: {},
-                                      fullscreen: false, miniMap: true)
-                            .frame(width: 240, height: 240)
-                            .opacity(0.85 * alpha)
+                    // A square of a quarter of the view width, at least 200,
+                    // in the top-left corner (0x004ab9d4).
+                    GeometryReader { geo in
+                        let side = max(200, (geo.size.width * 0.25).rounded())
+                        TimelineView(.animation) { tl in
+                            let ticks = tl.date.timeIntervalSince(shown) * 60
+                            let alpha = ticks < 118 ? 1.0 : max(0, 1 - (ticks - 118) / 32)
+                            GalaxyMapView(nav: nav, pilot: model.pilot, onJump: {}, onClose: {},
+                                          fullscreen: false, miniMap: true,
+                                          miniMapUnitsPerPixel: routeMapUnitsPerPixel)
+                                .frame(width: side, height: side)
+                                .opacity(alpha)
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .allowsHitTesting(false)
                     .task(id: shown) {
-                        try? await Task.sleep(nanoseconds: 2_600_000_000)
+                        try? await Task.sleep(nanoseconds: 8_400_000_000)   // the flag lasts 500 ticks
                         if routeMapShownAt == shown { routeMapShownAt = nil }
                     }
                 }
@@ -3303,6 +3311,16 @@ struct GameContainerView: View {
         case .selectNav1, .selectNav2, .selectNav3, .selectNav4:
             let index = [GameAction.selectNav1, .selectNav2, .selectNav3, .selectNav4].firstIndex(of: action) ?? 0
             host?.scene.selectNavStellar(index: index)
+        case .routeMapZoomOut, .routeMapZoomIn:
+            // While the map is up: x4/3 out up to 2.0, x0.75 in down to 0.5.
+            guard let shown = routeMapShownAt, Date().timeIntervalSince(shown) * 60 <= 500 else { return }
+            if action == .routeMapZoomOut, routeMapUnitsPerPixel <= 2.0 { routeMapUnitsPerPixel *= 4.0 / 3 }
+            else if action == .routeMapZoomIn, routeMapUnitsPerPixel > 0.5 { routeMapUnitsPerPixel *= 0.75 }
+            else { return }
+            routeMapShownAt = Date()
+            model.audio.play(.uiSelect)
+        case .cycleHyperspaceLink:
+            if nav.cycleHyperspaceLink() { routeMapShownAt = Date() }
         case .hyperspaceArm:
             // H: the travel channel goes back to hyperspace, re-arming the
             // plotted route's next hop.

@@ -64,6 +64,8 @@ struct GalaxyMapView: View {
     /// 0x004a99f0): the same drawing, centred on the current system at the
     /// HUD map zoom, with no chrome and no input.
     var miniMap: Bool = false
+    /// The mini map's own zoom in map units per pixel (0x005759e0).
+    var miniMapUnitsPerPixel: Double = 0.5625
 
     // Zoom is points-per-map-unit. Median link length in the data is ~37 units,
     // so 2.4 puts directly-linked systems ~90pt apart — a comfortable local view.
@@ -137,9 +139,10 @@ struct GalaxyMapView: View {
             }
             .background(Color.black)
             .onAppear {
-                zoom = Self.classicDefaultZoom
+                zoom = CGFloat(1 / miniMapUnitsPerPixel)
                 rebuildMissionDestinations()
             }
+            .onChange(of: miniMapUnitsPerPixel) { _, v in zoom = CGFloat(1 / v) }
         } else {
             mapBody
         }

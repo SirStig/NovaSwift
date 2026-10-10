@@ -161,6 +161,18 @@ final class NavigationModel: ObservableObject {
         plan.shiftClick(id, current: currentSystemID, linked: isLinked)
     }
 
+    /// The cycle key (0x0044b120): step the armed link through the current
+    /// system's resolvable links, wrapping, and arm it. False without links.
+    @discardableResult
+    func cycleHyperspaceLink(forward: Bool = true) -> Bool {
+        let links = Array(visibleNeighbors(currentSystemID).prefix(16))
+        guard !links.isEmpty else { return false }
+        let at = jumpArmed ? route.first.flatMap { links.firstIndex(of: $0) } : nil
+        let next = at.map { (($0 + (forward ? 1 : links.count - 1)) % links.count) } ?? (forward ? 0 : links.count - 1)
+        click(system: links[next])
+        return true
+    }
+
     /// Re-arm the route's first hop when it is linked to the current system
     /// (H, closing the map, a gate arrival: 0x004a8080). Otherwise nothing
     /// changes. Returns whether a jump is now armed.

@@ -61,6 +61,10 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     case commandEscortFormation
     /// Alt-C: carried fighters return to their hangar (order 3).
     case commandEscortReturnHangar
+    /// \: step the armed hyperspace link through the current system's links (slot 0x0d).
+    case cycleHyperspaceLink
+    /// Route mini map zoom out / in while it is up (0x0044b120 ~3665).
+    case routeMapZoomOut, routeMapZoomIn
 
     var id: String { rawValue }
 
@@ -90,7 +94,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
              .targetPrevious, .targetEscortNext, .clearShipTarget,
              .selectNav1, .selectNav2, .selectNav3, .selectNav4: return .targeting
         case .land, .hyperjump, .galaxyMap, .autopilot, .hailTarget, .board, .openEscorts,
-             .hyperspaceArm, .hailStellar: return .navigation
+             .hyperspaceArm, .hailStellar, .cycleHyperspaceLink, .routeMapZoomOut, .routeMapZoomIn: return .navigation
         case .clearSecondary: return .combat
         case .pauseGame, .openMenu, .shipInfo, .dismissMessage, .playerInfo, .missionInfo: return .interface
         }
@@ -136,6 +140,9 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .selectNav3: return "Select Nav Destination 3"
         case .selectNav4: return "Select Nav Destination 4"
         case .hyperspaceArm: return "Hyperspace Destination"
+        case .cycleHyperspaceLink: return "Cycle Hyperspace Destination"
+        case .routeMapZoomOut: return "Route Map: Zoom Out"
+        case .routeMapZoomIn: return "Route Map: Zoom In"
         case .dismissMessage: return "Dismiss Message"
         case .playerInfo: return "Player Info"
         case .missionInfo: return "Mission Info"

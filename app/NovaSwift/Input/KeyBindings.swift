@@ -47,7 +47,8 @@ struct KeyBindings: Codable, Equatable {
             .commandEscortAggressive: "f", .commandEscortDefensive: "d", .commandEscortHold: "v",
             .commandEscortFormation: "c", .commandEscortReturnHangar: "opt+c",
             .commandEscortEvasive: "", .shipInfo: "", .pauseGame: "",
-            .openMenu: "escape",
+            .openMenu: "escape", .cycleHyperspaceLink: "\\",
+            .routeMapZoomOut: "-", .routeMapZoomIn: "=",
         ]
         #if !os(macOS)
         m[.fireSecondary] = "return"
