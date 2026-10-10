@@ -370,6 +370,7 @@ final class GameHost {
             scene.onPlayerDestroyed = { [weak pilotStore] in
                 guard let pilotStore else { return }
                 if pilotStore.state.strictPlayDeathDeletesPilot { model.deleteStrictPlayPilot() }
+                else { model.killedPilotID = pilotStore.rosterID }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
                     model.returnToMainMenu()
                 }
@@ -578,16 +579,20 @@ final class GameHost {
             Log.hud.error("makeHUDStyle: no ïntf(\(intfID)) or ïntf(128) resource — falling back to GameHUDView")
             return nil
         }
-        guard let pictData = game.resources.resource(NovaType.pict, intf.backgroundPictID)?.data else {
-            Log.hud.error("makeHUDStyle: backdrop PICT #\(intf.backgroundPictID) missing — falling back to GameHUDView")
+        // 0x004cda50 clamps StatusBkgnd to >= 128; a missing backdrop draws
+        // PICT 128 instead of leaving the status bar out.
+        let backdropID = max(128, intf.backgroundPictID)
+        guard let pictData = (game.resources.resource(NovaType.pict, backdropID)
+                              ?? game.resources.resource(NovaType.pict, 128))?.data else {
+            Log.hud.error("makeHUDStyle: backdrop PICT #\(backdropID) and PICT #128 missing — falling back to GameHUDView")
             return nil
         }
-        guard let sheet = PICT.decodeLogged(pictData, id: intf.backgroundPictID) else {
-            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) failed to decode — falling back to GameHUDView")
+        guard let sheet = PICT.decodeLogged(pictData, id: backdropID) else {
+            Log.hud.error("makeHUDStyle: PICT #\(backdropID) failed to decode — falling back to GameHUDView")
             return nil
         }
         guard let cg = sheet.makeCGImage() else {
-            Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) decoded but makeCGImage() failed — falling back to GameHUDView")
+            Log.hud.error("makeHUDStyle: PICT #\(backdropID) decoded but makeCGImage() failed — falling back to GameHUDView")
             return nil
         }
         // A radar/status rect with zero or negative width/height (a bad ïntf
@@ -1054,15 +1059,10 @@ struct GameContainerView: View {
                 // in flight (a crön advances the clock). A single OK dismisses it.
                 if let story = flightMissionServices.storyText {
                     Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
-                    NovaDialog(title: story.title.isEmpty ? "Mission" : story.title,
-                               width: 480,
-                               buttons: [NovaDialogButton(title: "OK", isDefault: true) {
-                                   flightMissionServices.storyText = nil
-                               }]) {
-                        Text(story.text)
-                            .novaFont(.body)
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
+                    DescTextDialog(title: story.title, text: story.text,
+                                   graphicID: flightMissionServices.storyDescID
+                                       .flatMap { host.game?.desc($0)?.pictureID }) {
+                        flightMissionServices.storyText = nil
                     }
                     .transition(.opacity)
                 }

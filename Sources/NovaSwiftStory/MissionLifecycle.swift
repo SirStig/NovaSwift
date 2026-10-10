@@ -147,7 +147,7 @@ extension StoryEngine {
         // The acceptance dialogs: BriefText, then LoadCargoText for cargo
         // aboard from the start.
         let brief = acceptBriefing(for: m)
-        if !brief.isEmpty { services?.showStoryText(brief, title: resolvedName(for: m)) }
+        if !brief.isEmpty { services?.showStoryText(brief, title: resolvedName(for: m), descID: m.briefText) }
         if m.cargoPickup == .atStart, let i = slotIndex(serial: serial) {
             showMissionText(m.loadCargoText, for: m, active: player.activeMissions[i])
         }
@@ -171,7 +171,7 @@ extension StoryEngine {
         }
         Log.mission.debug("decline: mission \(missionID) (\"\(m.name, privacy: .public)\") declined")
         let refusal = resolveMissionText(game.descText(m.refuseText, context: textContext), for: m)
-        if !refusal.isEmpty { services?.showStoryText(refusal, title: resolvedName(for: m)) }
+        if !refusal.isEmpty { services?.showStoryText(refusal, title: resolvedName(for: m), descID: m.refuseText) }
         runScript(m.onRefuse, m, "OnRefuse")
         if isLaneLocation(m.availLocation) { recordLaneOffer(missionID, .closed) }
     }
@@ -473,7 +473,7 @@ extension StoryEngine {
         releaseCargo(am)
         let text = MissionText.resolve(game.descText(m.failureText, context: textContext),
                                        fields: nil, player: player, game: game)
-        if m.failureText >= 128, !text.isEmpty { services?.showStoryText(text, title: m.displayName) }
+        if m.failureText >= 128, !text.isEmpty { services?.showStoryText(text, title: m.displayName, descID: m.failureText) }
     }
 
     /// Success at the return stellar (0x00440410): CompText, OnSuccess,
@@ -484,7 +484,7 @@ extension StoryEngine {
         let am = player.activeMissions[i]
         let text = resolveMissionText(game.descText(m.completionText, context: textContext), for: m, active: am)
         let title = resolveMissionText(m.displayName, for: m, active: am)
-        if m.completionText >= 128, !text.isEmpty { services?.showStoryText(text, title: title) }
+        if m.completionText >= 128, !text.isEmpty { services?.showStoryText(text, title: title, descID: m.completionText) }
         player.activeMissions.remove(at: i)
         releaseCargo(am)
         player.completedMissions.insert(m.id)
@@ -715,7 +715,7 @@ extension StoryEngine {
     func showMissionText(_ descID: Int, for m: MissionRes, active: ActiveMission? = nil) {
         guard descID >= 128 else { return }
         let text = resolveMissionText(game.descText(descID, context: textContext), for: m, active: active)
-        if !text.isEmpty { services?.showStoryText(text, title: resolveMissionText(m.displayName, for: m, active: active)) }
+        if !text.isEmpty { services?.showStoryText(text, title: resolveMissionText(m.displayName, for: m, active: active), descID: descID) }
     }
 
     private func showMiscText(_ index: Int) {

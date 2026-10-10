@@ -1,5 +1,6 @@
 import SwiftUI
 import GameController
+import NovaSwiftKit
 #if os(macOS)
 import AppKit
 #endif
@@ -14,6 +15,10 @@ struct GridPagingModifier: ViewModifier {
     let currentPage: Int
     let pageCount: Int
     let onChange: (Int) -> Void
+    /// When set, the arrow keys move the grid's selection the way the
+    /// original's shipyard/outfitter do (`GridKeyboardNav`) instead of paging,
+    /// and Space presses the buy button.
+    var keyboard: GridKeyboardSelection? = nil
 
     @State private var controllerWasUp = false
     @State private var controllerWasDown = false
@@ -43,9 +48,32 @@ struct GridPagingModifier: ViewModifier {
             // the grid that lingers past the panel during the dismiss transition. Same
             // pattern as GameContainerView / TutorialContainerView. Paging still works.
             .focusEffectDisabled()
-            .onKeyPress(.upArrow) { step(-1); return .handled }
-            .onKeyPress(.downArrow) { step(1); return .handled }
+            .onKeyPress(.upArrow) { arrow(.up); return .handled }
+            .onKeyPress(.downArrow) { arrow(.down); return .handled }
+            .onKeyPress(.leftArrow) { arrow(.left); return keyboard == nil ? .ignored : .handled }
+            .onKeyPress(.rightArrow) { arrow(.right); return keyboard == nil ? .ignored : .handled }
+            .onKeyPress(.space) {
+                guard let keyboard else { return .ignored }
+                keyboard.onSpace()
+                return .handled
+            }
             .task(id: "grid-controller-poll") { await pollController() }
+    }
+
+    private func arrow(_ key: GridKeyboardNav.Key) {
+        guard let keyboard else {
+            if key == .up { step(-1) } else if key == .down { step(1) }
+            return
+        }
+        let offset = currentPage * GridKeyboardNav.columns
+        let slot = keyboard.selectedIndex.map { i -> Int in
+            let s = i - offset
+            return (0..<GridKeyboardNav.visibleSlots).contains(s) ? s : -1
+        } ?? -1
+        let r = GridKeyboardNav.step(slot: slot, offset: offset, count: keyboard.count, key: key)
+        let page = r.offset / GridKeyboardNav.columns
+        if page != currentPage { onChange(page) }
+        if r.offset + r.slot < keyboard.count { keyboard.onSelect(r.offset + r.slot) }
     }
 
     private func step(_ delta: Int) {
@@ -72,10 +100,21 @@ struct GridPagingModifier: ViewModifier {
     }
 }
 
+/// The selection the grid's arrow keys drive (see `GridPagingModifier.keyboard`).
+struct GridKeyboardSelection {
+    /// Index of the selected item in the grid's full list, if any.
+    var selectedIndex: Int?
+    var count: Int
+    var onSelect: (Int) -> Void
+    var onSpace: () -> Void
+}
+
 extension View {
     /// See `GridPagingModifier`.
-    func gridPaging(currentPage: Int, pageCount: Int, onChange: @escaping (Int) -> Void) -> some View {
-        modifier(GridPagingModifier(currentPage: currentPage, pageCount: pageCount, onChange: onChange))
+    func gridPaging(currentPage: Int, pageCount: Int, keyboard: GridKeyboardSelection? = nil,
+                    onChange: @escaping (Int) -> Void) -> some View {
+        modifier(GridPagingModifier(currentPage: currentPage, pageCount: pageCount,
+                                    onChange: onChange, keyboard: keyboard))
     }
 }
 

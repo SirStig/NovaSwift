@@ -7,7 +7,7 @@ import NovaSwiftKit
 ///
 /// It is a **true overlay**: a translucent scrim dims whatever UI is already on
 /// screen (the real main menu shows through), and the panel — the game's
-/// stretchable mission-panel frame (PICTs 8521/8522/8523: metal border, black
+/// stretchable dësc-dialog frame (PICTs 8524/8525/8526: metal border, black
 /// interior, grey control strip) with three-slice buttons (`NovaButton`) in the
 /// strip — floats centred over it. It does **not** paint its own copy of the
 /// title screen (which read as a second, emptier background menu).
@@ -103,6 +103,9 @@ struct NovaDialog<Content: View>: View {
                     // internally; the pill via CursorButton) — no outer
                     // registration, or Ⓐ would have two overlapping targets.
                     footerButton(b)
+                        // Return presses the default button and Esc the
+                        // cancel one, as in every original dialog (0x004cfdd0).
+                        .novaDialogKey(isDefault: b.isDefault, isCancel: b.isCancel)
                 }
             }
             .padding(.horizontal, 16)
@@ -248,9 +251,9 @@ struct DialogChrome<Content: View>: View {
 }
 
 /// The game's own stretchable dialog frame, shared by `NovaDialog` and
-/// `DialogChrome`: PICTs 8521 (top cap, 9px), 8522 (middle, stretches with
-/// content) and 8523 (bottom cap, 40px — the grey strip footer controls sit
-/// on). Native width is 441; small horizontal stretches of the brushed-metal
+/// `DialogChrome`: the generic dësc-dialog art, PICTs 8524 (top cap, 9px), 8525
+/// (middle, stretches with content) and 8526 (bottom cap, 40px — the grey strip footer controls sit
+/// on); 8521-8523 belong to the mission-offer window and are only a fallback. Native width is 441; small horizontal stretches of the brushed-metal
 /// border are imperceptible. Falls back to a plain dark card before data import.
 struct NovaPanelBackground: View {
     let graphics: SpaceportGraphics?
@@ -262,7 +265,8 @@ struct NovaPanelBackground: View {
         if modern {
             ModernDialogPanel()
         } else if let g = graphics,
-           let top = g.pict(8521), let middle = g.pict(8522), let bottom = g.pict(8523) {
+           let top = g.pict(8524) ?? g.pict(8521), let middle = g.pict(8525) ?? g.pict(8522),
+           let bottom = g.pict(8526) ?? g.pict(8523) {
             VStack(spacing: 0) {
                 Image(decorative: top, scale: 1).resizable().frame(height: 9)
                 Image(decorative: middle, scale: 1).resizable()
@@ -338,6 +342,22 @@ struct NovaDialogButton: Identifiable {
     var isDefault = false
     var enabled = true
     let action: () -> Void
+    /// The button Esc presses (the dialog's cancel item).
+    var isCancel: Bool { !isDefault && ["Cancel", "No"].contains(title) }
+}
+
+extension View {
+    /// Binds Return to a dialog's default button and Esc to its cancel button
+    /// (`UiWindow_RunInteractionLoop` 0x004cfdd0, items +0x24 / +0x28).
+    @ViewBuilder func novaDialogKey(isDefault: Bool, isCancel: Bool) -> some View {
+        #if os(macOS) || os(iOS)
+        if isDefault { keyboardShortcut(.defaultAction) }
+        else if isCancel { keyboardShortcut(.cancelAction) }
+        else { self }
+        #else
+        self
+        #endif
+    }
 }
 
 /// The EV Nova UI accent used for headings in the port's authentic screens.

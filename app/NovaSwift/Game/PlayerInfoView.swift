@@ -170,29 +170,12 @@ private struct InfoTabButton: View {
 
     var body: some View {
         Button(action: action) {
-            let slices = graphics.buttonSlices(selected ? .clicked : .normal)
-            HStack(spacing: 0) {
-                slice(slices.left, 13)
-                slice(slices.middle, 73)
-                slice(slices.right, 13)
-            }
-            .frame(width: 99, height: 25)
-            .overlay(
-                Text(title)
-                    .font(.custom(NovaFontRole.button.family, size: 12))
-                    .foregroundStyle(selected ? Color(white: 0.75) : .white)
-            )
+            ThreeStateButtonArt(slices: graphics.buttonSlices(selected ? .clicked : .normal),
+                                totalWidth: 99, label: title,
+                                state: selected ? .clicked : .normal,
+                                labelColor: selected ? Color(white: 0.75) : .white)
             .contentShape(Rectangle())
         }
         .buttonStyle(.novaPlain)
-    }
-
-    @ViewBuilder private func slice(_ image: CGImage?, _ w: CGFloat) -> some View {
-        if let image {
-            Image(decorative: image, scale: 1).interpolation(.high).resizable()
-                .frame(width: w, height: 25)
-        } else {
-            Color(white: 0.2).frame(width: w, height: 25)
-        }
     }
 }
