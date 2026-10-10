@@ -8,6 +8,18 @@
   tip.hidden = true;
   document.body.appendChild(tip);
 
+  // Site palette (overrides the colours in the JSON). Picked to stay apart
+  // under red-green colour blindness; "partly" squares are also drawn
+  // half-filled in styles.css so status never relies on colour alone.
+  var PALETTE = {
+    done: "#2fc39a", partly: "#f2b33d", partial: "#f2b33d",
+    deferred: "#d17fb5", mapped: "#4d78b8", library: "#3b3a40"
+  };
+  function paint(node, key, color) {
+    var c = PALETTE[key] || color;
+    if (c && c !== "none") node.style.setProperty("--c", c);
+  }
+
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -52,7 +64,7 @@
       b.type = "button";
       b.setAttribute("aria-pressed", "true");
       var sw = el("i", "sq st-" + s.key);
-      sw.style.background = s.color === "none" ? "transparent" : s.color;
+      paint(sw, s.key, s.color);
       b.appendChild(sw);
       b.appendChild(el("span", null, s.label + " "));
       b.appendChild(el("small", null, s.count.toLocaleString()));
@@ -78,7 +90,7 @@
       var frag = document.createDocumentFragment();
       g.squares.forEach(function (q) {
         var sq = el("i", "sq st-" + q.status);
-        if (colors[q.status] !== "none") sq.style.background = colors[q.status];
+        paint(sq, q.status, colors[q.status]);
         sq._tip = q.tip;
         frag.appendChild(sq);
       });
