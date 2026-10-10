@@ -3703,7 +3703,8 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
 ## Missions / economy sweep (fix/missions-economy)
 
 Done: the missions_session and economy_save reports' offers, cargo, special-ship, BBS, status-bar
-cargo panel, hire/shipyard list, pilot-open items, plus murk as a per-sprite distance fog
-(`MurkFog`, 0x00438db0) and the ambush hail quote's 'STR ' override. Left: death debris puffs
-(0x00428090 / 0x0043b170), background-sprite wrap (0x0042e590), offer-movie autoplay, and hail-quote
-wildcard expansion (rides on main's `expandStatusText`).
+cargo panel, hire/shipyard list, pilot-open items, murk as a per-sprite distance fog (`MurkFog`,
+0x00438db0), background-sprite murk level (0x0042e590; the tiled star layers keep their own
+wrap), debris puffs (`DebrisPuffs.swift`, 0x00428090 / 0x0043b170; drawn as grey dots, the puff
+art is not identified) and the ambush hail quote's 'STR ' override. Offer movies autoplay with Skip.
+Left: hail-quote wildcard expansion (rides on main's `expandStatusText`).

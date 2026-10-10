@@ -529,6 +529,7 @@ final class GameScene: SKScene {
     /// opacity tracks `World.effectiveMurk(for:)`.
     private var murkFog: SKSpriteNode?
     private var currentMurk = 0
+    private var debrisPuffNodes: [SKSpriteNode] = []
     private var murkOrigin = CGPoint.zero
     /// Space backdrop for systems with no `sÿst.BkgndColor` (near-black blue).
     private static let defaultBackdrop = SKColor(red: 0.02, green: 0.02, blue: 0.06, alpha: 1)
@@ -1743,6 +1744,7 @@ final class GameScene: SKScene {
         updateSpriteAnims(dt)
         lap("effects")
         syncProjectiles()
+        syncDebrisPuffs()
         lap("sync.projectiles")
         syncBeams()
         lap("sync.beams")
@@ -3183,6 +3185,26 @@ final class GameScene: SKScene {
     /// a torpedo points where it flies, a spinning mine animates — falling back to
     /// a soft additive dot for weapons that ship no graphic. Nodes are reused
     /// across frames and re-textured in place (cheap); same-weapon volleys batch.
+    /// The 32 debris-puff slots (0x0043b170): drawn where the pool says,
+    /// opaque until the last 32 ticks of life, then fading out.
+    private func syncDebrisPuffs() {
+        while debrisPuffNodes.count < world.debrisPuffs.count {
+            let dot = SKSpriteNode(texture: projectileTexture)
+            dot.size = CGSize(width: 3, height: 3)
+            dot.color = SKColor(white: 0.62, alpha: 1)
+            dot.colorBlendFactor = 1
+            dot.zPosition = 8
+            effectsLayer.addChild(dot)
+            debrisPuffNodes.append(dot)
+        }
+        for (node, puff) in zip(debrisPuffNodes, world.debrisPuffs) {
+            guard puff.life > 0 else { node.isHidden = true; continue }
+            node.isHidden = false
+            node.position = CGPoint(x: puff.position.x, y: puff.position.y)
+            node.alpha = CGFloat(puff.opacity)
+        }
+    }
+
     private func syncProjectiles() {
         let shots = world.projectiles
         while projectileNodes.count < shots.count {
@@ -4040,7 +4062,12 @@ final class GameScene: SKScene {
         let murk = world.effectiveMurk(for: world.player)
         currentMurk = murk
         murkOrigin = renderPoint(world.player)
-        for layer in starLayers { layer.container.isHidden = murk < 0 }
+        // The background sprites take their own fixed level (0x0042e590).
+        let starAlpha = 1 - CGFloat(MurkFog.backgroundLevel(murk: max(0, murk))) / 32
+        for layer in starLayers {
+            layer.container.isHidden = murk < 0
+            layer.container.alpha = starAlpha
+        }
         murkFog?.isHidden = true
         for node in planetNodes {
             if let sprite = node as? SKSpriteNode { applyMurk(to: sprite, at: node.position) }

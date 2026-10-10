@@ -696,6 +696,9 @@ public final class Ship {
     }
     /// See `disabled`: the derelict-government / rescue-ship arms (and a test seam).
     public var heldDisabled = false
+    /// Debris puffs this hull still has to shed (shïp PodCount); nil until the
+    /// first one is due (0x00433050, ship+0xc908).
+    var debrisPodsLeft: Int?
     /// The player's post-disable window (`DAT_0073549c`): set to 300 ticks when
     /// the player is disabled, it counts down one tick per tick and holds off
     /// the repair system until it runs out (OS-07).
@@ -1314,6 +1317,8 @@ public final class World {
     private var cadence = RawCallCadence()
     /// The original's raw-call counter (`DAT_00597992`), advanced each step.
     private(set) var rawCallCounter = 0
+    /// The 32 fading debris-puff slots (0x005914ac).
+    public internal(set) var debrisPuffs = [DebrisPuff](repeating: DebrisPuff(), count: 32)
     /// Live beam records (`Shot_UpdateBeamHitQueue`).
     private var beamRecords: [BeamRecord] = []
     /// Co-op `SessionRules.pvpDamageReal`: when false, a player-vs-player hit still
@@ -2410,6 +2415,7 @@ public final class World {
         rawCallsThisStep = cadence.advance(dt)
         let rawCalls = rawCallsThisStep
         rawCallCounter &+= rawCalls
+        tickDebrisPuffs(rawCalls: rawCalls)
 
         prof("sim.spawn") {
             if !spawningPaused { spawner?.update(dt, world: self) }   // paused on a co-op client (mirrors the authority)
