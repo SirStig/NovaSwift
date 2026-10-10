@@ -67,7 +67,8 @@ final class LoaderFidelityTests: XCTestCase {
         col.add(record(NovaType.ship, 1000, size: 1860))      // past shïp slot 0x2ff
         col.add(record(NovaType.weapon, 383, size: 134))      // last wëap slot
         col.add(record(NovaType.weapon, 384, size: 134))
-        col.add(record(NovaType.mission, 5000, size: 10))     // mïsn has no slot table
+        col.add(record(NovaType.mission, 5000, size: 10))     // mïsn: 1000 slots (0x0043bbb0)
+        col.add(record(NovaType.mission, 1127, size: 10))
         col.normalizeScenarioRecords()
 
         let ship = try XCTUnwrap(col.resource(NovaType.ship, 128))
@@ -77,7 +78,8 @@ final class LoaderFidelityTests: XCTestCase {
         XCTAssertNil(col.resource(NovaType.ship, 1000))
         XCTAssertNotNil(col.resource(NovaType.weapon, 383))
         XCTAssertNil(col.resource(NovaType.weapon, 384))
-        XCTAssertEqual(col.resource(NovaType.mission, 5000)?.data.count, 1970)
+        XCTAssertNil(col.resource(NovaType.mission, 5000))
+        XCTAssertEqual(col.resource(NovaType.mission, 1127)?.data.count, 1970)
     }
 
     // MARK: UI-16 order

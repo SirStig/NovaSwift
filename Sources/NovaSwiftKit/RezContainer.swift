@@ -23,7 +23,8 @@ public enum RezContainer {
         let numEntries = Int(try reader.readU32())
 
         guard sig == signature, numGroups == 1, type == groupType,
-              numEntries >= 1, Int(headerLength) <= data.count
+              numEntries >= 1, Int(headerLength) <= data.count,
+              numEntries <= data.count / 12
         else {
             throw ResourceFileError.corrupt(
                 "bad BRGR header: sig=\(String(format: "%08X", sig)) numGroups=\(numGroups) type=\(type) numEntries=\(numEntries)")
@@ -37,6 +38,10 @@ public enum RezContainer {
             offsets.append(Int(try reader.readU32()))
             sizes.append(Int(try reader.readU32()))
             try reader.advance(4) // skip name offset
+        }
+
+        for i in 0..<numEntries where offsets[i] > data.count || sizes[i] > data.count - offsets[i] {
+            throw ResourceFileError.corrupt("BRGR entry \(i) runs past the end of the file")
         }
 
         // Resource map (big-endian).

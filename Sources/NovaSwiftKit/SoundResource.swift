@@ -87,7 +87,7 @@ public enum SndDecoder {
             let cmd = try r.readU16()
             _ = try r.readU16()               // param1
             let param2 = try r.readU32()      // offset to the sound header
-            if sampleOffset == nil, cmd == 0x8000 | bufferCmd || cmd == 0x8000 | soundCmd {
+            if sampleOffset == nil, cmd & 0x7FFF == bufferCmd || cmd & 0x7FFF == soundCmd {   // data-offset bit optional
                 sampleOffset = Int(param2)
             }
         }

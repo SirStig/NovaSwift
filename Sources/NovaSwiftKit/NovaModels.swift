@@ -1624,6 +1624,14 @@ public struct NovaGame {
         return nil
     }
 
+    /// A `ppat` pixel pattern (UI background tile) as a one-frame image, or nil
+    /// when absent or not one the original accepts (`Resource_LoadPixPat`).
+    public func pixPatSheet(_ id: Int) -> SpriteSheet? {
+        guard let data = (resources.resource(NovaType.ppat, id) ?? resources.resource(NovaType.ppatAlt, id))?.data
+        else { return nil }
+        return try? PixPat.decode(data)
+    }
+
     /// The sheet for a sprite id the way the original loads every sprite: the
     /// `rlëD` with that id when it exists, otherwise a PICT sheet cut into
     /// `frameWidth`×`frameHeight` frames with mask PICT `maskID` as its alpha

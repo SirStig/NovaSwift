@@ -5183,8 +5183,10 @@ public final class World {
     @discardableResult
     func launchFighter(from carrier: Ship, bay: Ship.FighterBay, formationSlot: Int) -> Ship? {
         guard let galaxy else { return nil }
-        // The original's 64 ship slots: no room, no launch.
-        guard allShips.count < 64 else { return nil }
+        // Weapon_SpawnShipFromCarrierBayWeapon (0x0041e640) allocates with a reserve
+        // of 8 (Ship_AllocateShipSlotInSystem 0x004254b0): a slot below 64 - 8 must
+        // be free (slot 0 is the player), otherwise the launch fails silently.
+        guard allShips.count < 64 - 8 else { return nil }
         let bayMount = carrier.weapons.first(where: { $0.spec.id == bay.spec.bayWeaponID })
         var heading = carrier.angle
         if let spec = bayMount?.spec, spec.inaccuracyDegrees > 0 {

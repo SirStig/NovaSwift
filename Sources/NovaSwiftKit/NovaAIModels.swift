@@ -1019,7 +1019,8 @@ public struct WeapRes {
         speed = ai16(d, 10)
         ammoType = ai16(d, 12)
         let rawGraphic = ai16(d, 14)
-        graphicSpinID = rawGraphic <= 0 ? nil : rawGraphic + 3000
+        // Original (0x0041fd30) indexes the shot table with the raw value: 0 is spïn 3000; only <0 or >255 fails.
+        graphicSpinID = (rawGraphic < 0 || rawGraphic > 255) ? nil : rawGraphic + 3000
         let rawAccuracy = ai16(d, 16)
         accuracy = abs(rawAccuracy)
         firesAtFixedAngle = rawAccuracy < 0

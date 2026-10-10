@@ -592,10 +592,17 @@ final class GameDataController: ObservableObject {
     /// first, then every discovered plugin directory, each the same
     /// direct-hit-then-recursive-search way `raceVideoURL` always has.
     func videoURL(named name: String) -> URL? {
-        for dir in ([resolveBaseDir()] + resolvePluginDirs()).compactMap({ $0 }) {
-            let direct = dir.appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: direct.path) { return direct }
-            guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil) else { continue }
+        // Ui_PlayMovieFileModal (0x0049db00): "Nova Plug-ins" first, then "Nova Files".
+        let dirs = (resolvePluginDirs() + [resolveBaseDir()]).compactMap { $0 }
+        let fm = FileManager.default
+        for dir in dirs {   // flat, case-insensitive
+            if let names = try? fm.contentsOfDirectory(atPath: dir.path),
+               let hit = names.first(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+                return dir.appendingPathComponent(hit)
+            }
+        }
+        for dir in dirs {   // nested folders (enhancement over the flat original)
+            guard let e = fm.enumerator(at: dir, includingPropertiesForKeys: nil) else { continue }
             if let hit = e.compactMap({ $0 as? URL }).first(where: { $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame }) {
                 return hit
             }

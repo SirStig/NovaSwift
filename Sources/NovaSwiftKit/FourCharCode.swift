@@ -79,6 +79,8 @@ public enum NovaType {
     // Standard Mac resource types EV Nova also uses.
     public static let strList   = FourCharCode("STR#")!
     public static let pict        = FourCharCode("PICT")!
+    public static let ppat        = FourCharCode("ppat")!
+    public static let ppatAlt     = FourCharCode("PPat")!
     public static let snd         = FourCharCode("snd ")!
     public static let cicn        = FourCharCode("cicn")!
     public static let rle8        = FourCharCode("rlë8")!
@@ -109,6 +111,10 @@ extension NovaType {
         govt: 128...(128 + 0x100 - 1), pers: 128...(128 + 0x400 - 1),
         fleet: 128...(128 + 0x100 - 1), cron: 128...(128 + 0x200 - 1),
         junk: 128...(128 + 0x80 - 1),
+        // 0x0043bbb0 (1000 mission slots) and 0x004bd3c0.
+        mission: 128...(128 + 1000 - 1), oops: 128...(128 + 0x100 - 1),
+        nebula: 128...(128 + 0x20 - 1), boom: 128...(128 + 0x40 - 1),
+        rank: 128...(128 + 0x80 - 1), roid: 128...(128 + 0x10 - 1),
     ]
 }
 

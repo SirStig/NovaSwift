@@ -318,12 +318,14 @@ public enum GameLibrary {
         // Reading + parsing a container is independent per file and CPU/IO-bound,
         // so parse them concurrently and then overlay in load order (the overlay
         // itself must stay ordered — later layers override earlier ones).
-        for col in try parseConcurrently(baseLoadOrder(layers.base), context: "base file") {
+        for case let col? in try parseConcurrently(baseLoadOrder(layers.base), context: "base file", strict: true) {
             collection.overlay(col)
         }
         Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(layers.base.count, privacy: .public) file(s)")
-        let parsed = try parseConcurrently(layers.plugins.map(\.url), context: "plug-in file")
+        // Like nv_LoadFilesInFolder, a plug-in file that fails to open is logged and skipped.
+        let parsed = try parseConcurrently(layers.plugins.map(\.url), context: "plug-in file", strict: false)
         for (i, col) in parsed.enumerated() {
+            guard let col else { continue }
             collection.overlay(col, tag: layers.plugins[i].id)
         }
         Log.data.debug("merge: applied \(layers.plugins.count, privacy: .public) plug-in file(s) — collection now \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
@@ -332,9 +334,9 @@ public enum GameLibrary {
     }
 
     /// Parse `urls` in parallel, preserving input order in the result (so the
-    /// caller's override chain is unaffected). Throws the first parse error
-    /// encountered — matching the serial version's fail-fast behaviour.
-    private static func parseConcurrently(_ urls: [URL], context: String) throws -> [ResourceCollection] {
+    /// caller's override chain is unaffected). When `strict`, throws the first parse
+    /// error; otherwise a failed file yields nil and the rest still load.
+    private static func parseConcurrently(_ urls: [URL], context: String, strict: Bool) throws -> [ResourceCollection?] {
         guard !urls.isEmpty else { return [] }
         var results = [ResourceCollection?](repeating: nil, count: urls.count)
         var firstError: Error?
@@ -348,8 +350,8 @@ public enum GameLibrary {
                 lock.lock(); if firstError == nil { firstError = error }; lock.unlock()
             }
         }
-        if let firstError { throw firstError }
-        return results.compactMap { $0 }
+        if strict, let firstError { throw firstError }
+        return results
     }
 
     // MARK: Plug-in content hash (multiplayer compatibility)

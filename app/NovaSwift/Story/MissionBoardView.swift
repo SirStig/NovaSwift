@@ -430,6 +430,8 @@ struct MissionSingleDialog: View {
     /// the dialog — dismissed by Skip or when the clip ends/fails, same pattern
     /// as `GamblingView`'s racing holovid.
     @State private var moviePlayer: AVPlayer?
+    /// A `.gif` movie (EV Classic's "EV Haikus.gif") plays through `AnimatedGIFView` instead.
+    @State private var movieGIF: URL?
 
     private static let upperID = 8521, middleID = 8522, lowerID = 8523
     private static let frameWidth: CGFloat = 441
@@ -489,7 +491,16 @@ struct MissionSingleDialog: View {
     /// The briefing's holovid, full-screen over the whole dialog — mirrors
     /// `GamblingView.racingView`'s player + Skip + end/fail-dismiss pattern.
     @ViewBuilder private var moviePlayerOverlay: some View {
-        if let moviePlayer {
+        if let movieGIF {
+            ZStack {
+                Color.black.opacity(0.92).ignoresSafeArea()
+                VStack(spacing: 14) {
+                    AnimatedGIFView(url: movieGIF, onFinish: dismissMovie)
+                        .frame(maxWidth: 640, maxHeight: 400)
+                    NovaButton(graphics: graphics, title: "Skip", width: 42, action: dismissMovie)
+                }
+            }
+        } else if let moviePlayer {
             ZStack {
                 Color.black.opacity(0.92).ignoresSafeArea()
                 VStack(spacing: 14) {
@@ -511,14 +522,17 @@ struct MissionSingleDialog: View {
 
     private func playMovie() {
         guard let filename = movieFilename, let url = model.data.videoURL(named: filename) else { return }
+        if url.pathExtension.lowercased() == "gif" { movieGIF = url; return }
         let player = AVPlayer(url: url)
         moviePlayer = player
         player.play()
     }
 
     private func dismissMovie() {
+        guard moviePlayer != nil || movieGIF != nil else { return }
         moviePlayer?.pause()
         moviePlayer = nil
+        movieGIF = nil
         if let action = afterMovie {
             afterMovie = nil
             action()
