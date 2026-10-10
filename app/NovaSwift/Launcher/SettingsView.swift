@@ -182,7 +182,11 @@ struct SettingsView: View {
     @ViewBuilder
     private var presentationSection: some View {
         Section {
-            NovaSegmentedPicker(selection: presetBinding, options: GameSettings.UIMode.allCases) { $0.label }
+            // The Nova Swift preset is hidden; it only shows for someone already using it.
+            NovaSegmentedPicker(selection: presetBinding,
+                                options: GameSettings.UIMode.allCases.filter {
+                                    $0 != .novaSwift || model.settings.matchedPreset == .novaSwift
+                                }) { $0.label }
         } header: {
             sectionHeader("Presentation", icon: "sparkles.tv")
         } footer: {
