@@ -709,7 +709,13 @@ struct ShipyardView: View {
                 }
             }
         }
-        .gridPaging(currentPage: currentTopRow, pageCount: maxTopRow + 1) { topRow = $0 }
+        // Arrow keys move the selection (0x008722b0); Space is item 10, Info.
+        .gridPaging(currentPage: currentTopRow, pageCount: maxTopRow + 1,
+                    keyboard: GridKeyboardSelection(
+                        selectedIndex: stock.firstIndex { $0.id == (selectedID ?? stock.first?.id) },
+                        count: stock.count,
+                        onSelect: { selectedID = stock[$0].id },
+                        onSpace: { if selected != nil { showInfo = true } })) { topRow = $0 }
     }
 
     /// The shipyard's dedicated display picture for a hull, falling back to the
