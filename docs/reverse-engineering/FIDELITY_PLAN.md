@@ -3699,3 +3699,13 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
    NovaSwift save slots with it (FL-03).
 5. Hitch behaviour (Q-FL-13) and persisting offer rolls / aux ships in `.evpilot` (Q-MS-06).
 6. Whether any FIX-only item listed at the end of §3 should be kept as a toggle instead.
+
+## Star map / HUD / input sweep (fix/ui-starmap)
+
+Done: classic star map zoom steps and button gates, route drawing, Find (0x004aab30) selecting only, political
+overlay, route mini map in flight (H and hop arrival), shipyard/hire list order and per-flag hide rules (0x00469e90),
+bar Hire Escort gate, one-shot quantity prompt, trade-center status strip and keys, shop grid arrow keys, bribe prompt
+wording and amount format, news headline, comm middle button rules, self-destruct docked boarders, landing PICT fallback.
+Open: beam-lock jump gate (D-11), squad-jump push sync (D-9), hypergate stellar animation (D-6), pixel-mask adjacency
+quirk (F, needs oracle), deadly-stellar mask collision (D-13), "No hyperspace effects" (S-10), escort free space in the
+trade strip (fleet holds not modelled), disaster sentence in the trade strip.

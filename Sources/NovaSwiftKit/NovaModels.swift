@@ -865,6 +865,8 @@ public struct SpobRes {
     public let techLevel: Int
     public let government: Int
     public let landingPictID: Int
+    /// The raw Graphic field (@4, 0...63); landing art falls back to PICT `10000 + it` (0x0048e970).
+    public let graphicRaw: Int
     /// Custom ambient `snd ` id for this stellar's spaceport (e.g. a station's
     /// own hum), or nil to use no special ambience. Verified empirically: Holpa
     /// Station (#299, government #129 "Auroran Empire") carries id 10033,
@@ -1115,6 +1117,7 @@ public struct SpobRes {
         techLevel = i16(d, 12)
         government = i16(d, 20)
         landingPictID = u16(d, 24)
+        graphicRaw = i16(d, 4)
         minStatus = i16(d, 22)
         let flags2v = UInt32(u16(d, 32))
         flags2 = flags2v
