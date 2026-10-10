@@ -17,7 +17,6 @@ extension NetIntent {
         firePrimary = intent.firePrimary
         fireSecondary = intent.fireSecondary
         desiredHeading = intent.desiredHeading
-        turnScale = intent.turnScale
     }
 
     /// Engine form of a received wire intent.
@@ -31,7 +30,6 @@ extension NetIntent {
         out.firePrimary = firePrimary
         out.fireSecondary = fireSecondary
         out.desiredHeading = desiredHeading
-        out.turnScale = turnScale
         return out
     }
 }

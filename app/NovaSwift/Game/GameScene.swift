@@ -863,11 +863,10 @@ final class GameScene: SKScene {
         autoLandTargetID = nil
     }
 
-    /// Apply the player's turn preferences (invert / sensitivity) to a raw intent.
+    /// Apply the player's turn preference (invert) to a raw intent.
     private func playerIntent(_ raw: ControlIntent) -> ControlIntent {
         var i = raw
         if settings.invertTurn { swap(&i.turnLeft, &i.turnRight) }   // "Invert turn direction"
-        i.turnScale = settings.controlSensitivity                    // "Turn sensitivity"
         return i
     }
 

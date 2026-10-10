@@ -289,7 +289,6 @@ struct SettingsView: View {
             }
             NovaMenuPicker(title: "Touch flying", selection: binding(\.controlScheme),
                            options: GameSettings.ControlScheme.allCases) { $0.label }
-            sliderRow("Turn sensitivity", binding(\.controlSensitivity), 0.4...2.0)
             if model.settings.controlScheme == .tilt {
                 sliderRow("Tilt sensitivity", binding(\.tiltSensitivity), 0.4...2.0)
             }

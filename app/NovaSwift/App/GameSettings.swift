@@ -256,7 +256,6 @@ struct GameSettings: Codable, Equatable {
     // MARK: Controls
 
     var controlScheme: ControlScheme = .virtualCockpit
-    var controlSensitivity: Double = 1.0
     var invertTurn: Bool = false
     var tiltSensitivity: Double = 1.0
     /// Analog-stick / touch dead zone (0…0.5).
@@ -478,7 +477,6 @@ struct GameSettings: Codable, Equatable {
         pauseOnFocusLoss      = v(.pauseOnFocusLoss, d.pauseOnFocusLoss)
         enhancements          = v(.enhancements, d.enhancements)
         controlScheme         = v(.controlScheme, d.controlScheme)
-        controlSensitivity    = v(.controlSensitivity, d.controlSensitivity)
         invertTurn            = v(.invertTurn, d.invertTurn)
         tiltSensitivity       = v(.tiltSensitivity, d.tiltSensitivity)
         stickDeadzone         = v(.stickDeadzone, d.stickDeadzone)
