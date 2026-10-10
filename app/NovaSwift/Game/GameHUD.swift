@@ -80,6 +80,9 @@ final class GameHUDModel: ObservableObject {
     /// strip; posting a new one replaces whatever's showing instead of
     /// stacking underneath it.
     @Published var message: HUDMessage?
+    /// The original's text expansion (`{G …}` conditionals and `<PSN>`-style
+    /// wildcards), applied to every posted line; set by the container.
+    var expandText: ((String) -> String)?
 
     /// Sim time left on the current message, in seconds: a message lasts its
     /// own number of the original's raw sim calls and freezes while the game
@@ -92,7 +95,7 @@ final class GameHUDModel: ObservableObject {
     /// clears the line, as in the original.
     func post(_ text: String, rawCalls: Int = 0xf0) {
         guard !text.isEmpty else { dismissMessage(); return }
-        let msg = HUDMessage(text: text)
+        let msg = HUDMessage(text: expandText?(text) ?? text)
         withAnimation(.easeOut(duration: 0.2)) { message = msg }
         messageTimeLeft = Double(rawCalls) * OriginalClock.rawCallSeconds
     }

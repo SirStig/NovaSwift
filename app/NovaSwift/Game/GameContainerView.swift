@@ -836,7 +836,9 @@ struct GameContainerView: View {
                         .transition(.opacity)
                 }
 
-                MessageLogView(hud: host.hud)
+                GeometryReader { geo in
+                    MessageLogView(hud: host.hud, rightInset: touchRightInset(host, in: geo.size))
+                }
 
                 // Multiplayer session chat — only rendered while a session is
                 // live (started from the in-game menu). Passive cluster; empty
@@ -1755,6 +1757,13 @@ struct GameContainerView: View {
         host?.scene.onTravelStellarSelected = { nav.disarmJump() }
         host?.scene.onLandingCleared = { id in postLandingClearance(id) }
         host?.scene.persGrudgeProvider = { id in model.pilot.state.persHoldsGrudge(id) }
+        // Every status-bar line gets the original's wildcard pass, so a quote's
+        // <PSN>/<PN>/{G …} never reaches the screen raw.
+        if let game = host?.game {
+            host?.hud.expandText = { text in
+                OriginalText(game: game).expandStatusText(text, player: model.pilot.state)
+            }
+        }
         // Feed a mission special-ship's completed goal back into the story engine
         // (decrement the objective, complete the mission if it was the last one).
         host?.scene.onMissionShipGoalReached = { missionID, goal, _ in
@@ -4208,6 +4217,11 @@ struct GameLoadingView: View {
 /// the line, like the original.
 struct MessageLogView: View {
     @ObservedObject var hud: GameHUDModel
+    /// Width the status-bar sidebar takes on the right.
+    var rightInset: CGFloat = 0
+
+    /// The original's message rect is one 26 px line (0x0087550b).
+    static let lineHeight: CGFloat = 26
 
     /// Mirrors `ContextualActionsView.bottomPadding` — sits flush with the true
     /// bottom edge (just clearing the safe area on iOS, which already clears
@@ -4232,12 +4246,16 @@ struct MessageLogView: View {
                         .novaFont(.hud, weight: .semibold)
                         #endif
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
                         .transition(.opacity)
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(.leading, 16).padding(.bottom, bottomPadding)
+            // One line, clipped to the original's rect: left + 25 to
+            // right − sidebar − 50 (0x0087550b).
+            .padding(.leading, 16).padding(.trailing, rightInset + 50).padding(.bottom, bottomPadding)
         }
         .novaResponsive()
         .allowsHitTesting(false)

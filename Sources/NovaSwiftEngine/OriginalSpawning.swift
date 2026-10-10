@@ -217,7 +217,10 @@ extension Spawner {
         world.addNPC(ship, arrival: .populate)
         if let pers = galaxy.game.pers(revengeID), pers.hailQuote > 0,
            let quotes = galaxy.game.stringList(7101)?.strings, pers.hailQuote <= quotes.count {
-            world.postOverlayMessage(quotes[pers.hailQuote - 1], frames: 360)
+            // `<OSN>` names the speaking përs (0x004444f0); the host's status
+            // bar fills the player tags.
+            world.postOverlayMessage(quotes[pers.hailQuote - 1].replacingOccurrences(of: "<OSN>", with: pers.name),
+                                     frames: 360)
         }
     }
 

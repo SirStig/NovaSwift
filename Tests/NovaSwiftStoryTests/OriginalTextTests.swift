@@ -114,4 +114,22 @@ final class OriginalTextTests: XCTestCase {
                        "Cleared to land, Kay. Commence final approach. [Landing fee is 50 credits.]")
         XCTAssertEqual(text.landingDenied(body: .planet), "Landing request denied.")
     }
+
+    // MARK: Status-bar wildcards (0x00426d10 → 0x004444f0)
+
+    func testHailQuoteWildcardsNeverReachTheScreenRaw() {
+        let text = OriginalText(game: makeGame([misc([:])]))
+        var p = player(GameDate(day: 1, month: 1, year: 1177))
+        p.pilotName = "Kay"
+        p.shipName = "Wanderer"
+        p.isMale = false
+        XCTAssertEqual(text.expandStatusText("<OSN>: Ahoy there, <PSN>!", speaker: "Vell-os", player: p),
+                       "Vell-os: Ahoy there, Wanderer!")
+        XCTAssertEqual(text.expandStatusText("<OSN>: Prepare to die, <PN>!", speaker: "Bounty Hunter", player: p),
+                       "Bounty Hunter: Prepare to die, Kay!")
+        XCTAssertEqual(text.expandStatusText("Watch {G \"him\" \"her\"}, <PN>.", player: p), "Watch her, Kay.")
+        let noSpeaker = text.expandStatusText("<OSN>: Hey <PSN>.", player: p)
+        XCTAssertEqual(noSpeaker, "[Error]: Hey Wanderer.", "the original prints [Error] for an unnamed speaker")
+        XCTAssertEqual(text.expandStatusText("Plain line.", player: p), "Plain line.")
+    }
 }

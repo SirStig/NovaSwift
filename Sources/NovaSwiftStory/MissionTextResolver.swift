@@ -34,7 +34,10 @@ enum MissionText {
 
     static let errorText = "[Error]"
 
-    static func resolve(_ text: String, fields: Fields?, player: PlayerState, game: NovaGame) -> String {
+    /// `otherShipName` is `<OSN>`: the speaking ship's përs name on a hail
+    /// quote (0x004444f0 reads it from the announcing ship), `[Error]` otherwise.
+    static func resolve(_ text: String, fields: Fields?, player: PlayerState, game: NovaGame,
+                        otherShipName: String? = nil) -> String {
         guard text.contains("<") else { return text }
         var out = text
 
@@ -69,7 +72,7 @@ enum MissionText {
             ("<PNN>", player.pilotName),   // no nickname: the full name
             ("<PSN>", player.shipName.isEmpty ? errorText : player.shipName),
             ("<PST>", shipType.isEmpty ? errorText : shipType),
-            ("<OSN>", errorText),          // only a speaking ship's hail fills it
+            ("<OSN>", otherShipName ?? errorText),   // only a speaking ship's hail fills it
             ("<PRK>", topRank(player, game, short: false, govt: nil)),
             ("<SRK>", topRank(player, game, short: true, govt: nil)),
             ("<RRK>", player.recentRank.flatMap { game.rank($0)?.name } ?? captain(game)),
