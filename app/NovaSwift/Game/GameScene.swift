@@ -196,7 +196,9 @@ final class GameScene: SKScene {
             guard forced || (hud.isMessageIdle && rested && Double.random(in: 0..<1) < chance) else { continue }
             let quote = game.singleString(pers.hailQuote + 4999) ?? game.stringList(7101)?.string(at: pers.hailQuote)
             guard let quote, !quote.isEmpty else { continue }
-            hud.post(quote, rawCalls: 0x1a4)
+            // `<OSN>` is the speaking përs (0x00426d10 → 0x004444f0); the
+            // HUD's own pass fills the player tags.
+            hud.post(quote.replacingOccurrences(of: "<OSN>", with: pers.name), rawCalls: 0x1a4)
             audio?.play(.uiSelect)
             hailQuoted.insert(npc.entityID)
             lastHailQuote[npc.entityID] = hailQuoteClock
@@ -645,12 +647,18 @@ final class GameScene: SKScene {
     private var forgivingLanding: Bool { settings.enhancements.forgivingLanding }
     /// The speed below which a landing is allowed, px/s: the forgiving overall
     /// limit, or the original's per-axis 0.75 px/tick.
-    private var landingSpeedLimit: Double { forgivingLanding ? 130 : OriginalClock.perSecond(0.75) }
+    private var landingSpeedLimit: Double { forgivingLanding ? 130 : PlayerLanding.perAxisSpeedLimit }
 
     /// The original's landing envelope (0x00457580): `|dx|` and `|dy|` both
     /// inside `round(spriteWidth × 1.75)` (75 without a sprite).
     private func landingReach(_ body: StellarBody) -> Double {
-        forgivingLanding ? body.radius + 70 : (body.radius * 2 * 1.75).rounded()
+        forgivingLanding ? body.radius + 70 : PlayerLanding.reach(radius: body.radius)
+    }
+
+    /// The original's per-axis speed gate (0.75 px/tick), or the forgiving
+    /// overall limit.
+    private func isSlowEnoughToLand(_ p: Ship) -> Bool {
+        forgivingLanding ? p.velocity.length <= landingSpeedLimit : PlayerLanding.isSlowEnough(p.velocity)
     }
 
     /// Whether `p` may set down on `body` right now.
@@ -855,6 +863,9 @@ final class GameScene: SKScene {
         guard world?.systemContext.bodies.contains(where: { $0.id == spobID && isPlayerLandTarget($0) }) == true else { return false }
         autoLandTargetID = spobID
         selectedPlanetID = spobID
+        // The autopilot is the Land press: request clearance so the 250 px arm
+        // runs for this body, or `canLand` never passes and it hovers forever.
+        if !forgivingLanding, landingRequestID != spobID { requestLandingClearance(spobID) }
         return true
     }
 
@@ -1834,13 +1845,23 @@ final class GameScene: SKScene {
         // sequence left the Land prompt live, so dying next to a planet let the
         // player simply set down and walk away from their own destruction.
         canLandNow = p.isAlive && !world.playerInEscapePod && bestBody.map { canLand(on: $0, p) } ?? false
-        if let id = bestID, inReach, p.isAlive {
-            let name = world.systemContext.bodies.first { $0.id == id }
-                .flatMap { _ in planetVisuals.first { $0.id == id }?.name } ?? "the spaceport"
-            hud?.landPrompt = canLandNow ? "Press \(landControlLabel()) to land on \(name)"
-                                         : "Slow down to land on \(name)"
+        if let id = bestID, let body = bestBody, inReach, p.isAlive {
+            let name = planetVisuals.first { $0.id == id }?.name ?? "the spaceport"
+            let prompt = PlayerLanding.prompt(canLandNow: canLandNow,
+                                         slowEnough: isSlowEnoughToLand(p),
+                                         needsRequest: !forgivingLanding && !landingClearance.contains(body.id),
+                                         cloaked: p.isEffectivelyCloaked)
+            switch prompt {
+            case .land: hud?.landPrompt = "Press \(landControlLabel()) to land on \(name)"
+            case .request: hud?.landPrompt = "Press \(landControlLabel()) to request landing on \(name)"
+            case .slowDown: hud?.landPrompt = "Slow down to land on \(name)"
+            case .none: hud?.landPrompt = ""
+            }
             hud?.landName = name
-            hud?.landReady = canLandNow
+            // The Land control does something useful (requests clearance or
+            // lands): on touch it must stay pressable before clearance, or the
+            // two-press flow could never start.
+            hud?.landReady = prompt == .land || prompt == .request
         } else {
             hud?.landPrompt = ""
             hud?.landName = ""
@@ -5102,7 +5123,7 @@ final class GameScene: SKScene {
     private func updateSelectionBrackets() {
         if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
             let radius = npcNodes[tid]?.radius ?? CGFloat(ship.radius)
-            shipBracket.position = CGPoint(x: ship.position.x, y: ship.position.y)
+            shipBracket.position = renderPoint(ship)   // interpolated like the ship it brackets
             shipBracket.isHidden = false
             shipBracket.strokeColor = factionColor(for: ship)
             if lockedShipBracketID != tid {

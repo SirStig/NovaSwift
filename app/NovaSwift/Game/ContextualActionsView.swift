@@ -132,8 +132,8 @@ struct ContextualActionsView: View {
         VStack(spacing: 7) {
             // The approach hint keeps its own live (undebounced) lane above the
             // pills — it's passive text, and "slow down" should track reality.
-            if !hud.landName.isEmpty, !hud.landReady {
-                hint("Slow down to land on \(hud.landName)").allowsHitTesting(false)
+            if !hud.landName.isEmpty, !hud.landReady, !hud.landPrompt.isEmpty {
+                hint(hud.landPrompt).allowsHitTesting(false)
             }
             if escortOrdersOpen {
                 escortOrdersRow
@@ -144,7 +144,14 @@ struct ContextualActionsView: View {
             }
         }
         #else
-        if !hud.landPrompt.isEmpty { hint(hud.landPrompt).allowsHitTesting(false) }
+        // The original has one status line (0x0087550b) and no land hint; this
+        // hint sits a line above it while a message is up so the two never
+        // draw over each other.
+        if !hud.landPrompt.isEmpty {
+            hint(hud.landPrompt).allowsHitTesting(false)
+                .padding(.bottom, hud.message == nil ? 0 : MessageLogView.lineHeight)
+                .animation(.easeInOut(duration: 0.15), value: hud.message == nil)
+        }
         #endif
     }
 
