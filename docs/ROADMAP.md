@@ -31,22 +31,37 @@ a diagnostics bundle from Settings ▸ Support ▸ Report a Bug.
 ### Pilot converter
 
 Import pilots from the original game and turn them into NovaSwift saves, so
-nobody has to start over.
+nobody has to start over. Mostly done; the details are in
+[reverse-engineering/PILOT_IMPORT.md](reverse-engineering/PILOT_IMPORT.md).
 
-- Windows EV Nova CE `.plt` files. The format is known from the decompiled
-  loader and writer: the data is stored in blocks XORed with a fixed key.
-- Classic Mac EV Nova pilots, which keep the same data in the resource fork.
-  Accept them as plain files, MacBinary or AppleDouble.
-- Every saved field mapped across: date, credits, ship and name, outfits and
-  ammo, cargo, escorts, active missions, control bits, explored systems, the
-  per-system legal record, ranks, combat rating, crön, stellar and përs state,
-  nickname and Strict Play. Anything without a counterpart is reported.
-- Pilots that use plug-in content load with a warning if that plug-in isn't
-  installed.
-- An "Import EV Nova Pilot" button on the Pilots screen that shows what will be
-  imported before creating the pilot. The original file is never changed.
-- Tested by round-tripping synthetic pilots through the original's own save
-  code in the emulator.
+Done:
+
+- Windows EV Nova CE `.plt` files (XOR-obfuscated blocks, decoded from the
+  original's loader).
+- Classic Mac pilots from a plain resource-fork file, AppleDouble, MacBinary or
+  (on macOS) the file's own resource fork.
+- Date, credits, ship and name, outfits and ammo, cargo and junk, fuel, escorts
+  and their upgrade/sale marks, active missions (destinations, counters, cargo),
+  the 10,000 control bits, explored and landed systems, the per-system legal
+  record, ranks, combat rating, crön, disasters, destroyed and dominated
+  stellars, përs kills and grudges, nickname, Strict Play.
+- Content missing from the loaded data (usually a plug-in) gives a warning, not
+  a failure.
+- "Import EV Nova Pilot…" on the Pilots screen shows a summary with warnings and
+  the fields that aren't carried over, then creates the pilot. The original file
+  is only read.
+- Tests use synthetic pilots written by the tests' own encoder.
+
+Left:
+
+- Mac pilots: the six padding bytes in each mission record come from the format
+  notes and haven't been checked against a real Mac pilot. Windows is the
+  reliable path.
+- The tests don't run the original's saver in the emulator; only the cipher is
+  checked against the original executable.
+- No counterpart in NovaSwift yet: ship paint color, escort group-order
+  commands, per-planet domination-day counters, the launched-fighter list, and
+  mission accept dates (the original doesn't save them).
 
 ### Godot frontend for Linux and Windows
 
