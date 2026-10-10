@@ -1,5 +1,6 @@
 import SwiftUI
 import GameController
+import CoreText
 import NovaSwiftKit
 import NovaSwiftStory
 
@@ -103,7 +104,15 @@ struct GalaxyMapView: View {
     // drawn nor routable. That's EV Nova's mechanism for systems appearing and
     // disappearing mid-campaign.
 
-    private struct MapNebula { let x, y, w, h: Int; let image: CGImage }
+    /// `variants` are the nebula's seven zoom-level PICTs (smallest first);
+    /// `image` is the largest, for the modern presentations.
+    private struct MapNebula { let id, x, y, w, h: Int; let image: CGImage; let variants: [CGImage?] }
+    /// Nebulae whose ActiveOn test holds and that the player has explored —
+    /// the two flags (+8, +9) the original's map requires.
+    @State private var drawnNebulae: Set<Int> = []
+    /// The map's mission markers: cicn 15000 (mission target, upper-left of
+    /// the dot) and 15001 (the previewed destination, upper-right).
+    @State private var markerIcons: [Int: CGImage] = [:]
 
     /// Hypergate/wormhole connections between systems (`spöb` HyperLink1-8),
     /// built once. Drawn as distinct dashed links over the hyperspace web.
@@ -121,6 +130,8 @@ struct GalaxyMapView: View {
     static let classicMinZoom: CGFloat = 0.5
     static let classicMaxZoom: CGFloat = 2.0
     static let classicDefaultZoom: CGFloat = 1 / 0.5625
+    /// A click lands on a system whose point, inset by -10, holds it.
+    static let classicHitRadius: CGFloat = 10
 
     @Environment(\.novaTheme) private var theme
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
@@ -138,6 +149,8 @@ struct GalaxyMapView: View {
                 Canvas { ctx, size in drawMap(ctx: &ctx, size: size, blinkOn: true) }
             }
             .background(Color.black)
+            // The frame is drawn in the cölr FloatingMap colour (0x00735658).
+            .overlay(Rectangle().strokeBorder(theme.floatingMap, lineWidth: 1))
             .onAppear {
                 zoom = CGFloat(1 / miniMapUnitsPerPixel)
                 rebuildMissionDestinations()
@@ -220,7 +233,8 @@ struct GalaxyMapView: View {
                         pinchStartZoom = base
                         setZoom(base * value)
                     }
-                    .onEnded { _ in pinchStartZoom = nil }
+                    .onEnded { _ in pinchStartZoom = nil },
+                including: fullscreen ? .all : .none   // the original zooms with its − / + buttons only
             )
             .onTapGesture { location in
                 handleTap(at: location, viewSize: geo.size)
@@ -268,7 +282,9 @@ struct GalaxyMapView: View {
                 Log.spaceport.error("Galaxy map: no PICT for nebula \(neb.id, privacy: .public) (\(neb.name, privacy: .public)) — tried \(baseID, privacy: .public)/-1/-2")
                 return nil
             }
-            return MapNebula(x: neb.x, y: neb.y, w: neb.width, h: neb.height, image: image)
+            let base = 9500 + 7 * (neb.id - 128)
+            return MapNebula(id: neb.id, x: neb.x, y: neb.y, w: neb.width, h: neb.height, image: image,
+                             variants: (0..<7).map { graphics.pict(base + $0) })
         }
     }
 
@@ -321,6 +337,20 @@ struct GalaxyMapView: View {
         // through (and end in) the swapped-out twin of a system — see
         // `NavigationModel.hiddenSystems`.
         nav.hiddenSystems = engine.hiddenSystemIDs()
+        drawnNebulae = engine.exploredActiveNebulaIDs()
+        loadMarkerIcons(game)
+    }
+
+    /// cicn 15000 / 15001, the mission markers `Resource_LoadCicn` loads for
+    /// the map (0x004a8100); read from the player's data, never bundled.
+    private func loadMarkerIcons(_ game: NovaGame) {
+        guard markerIcons.isEmpty else { return }
+        for id in [15000, 15001] {
+            if let r = game.resources.resource(NovaType.cicn, id),
+               let sheet = try? CICN.decode(r.data), let cg = sheet.makeCGImage() {
+                markerIcons[id] = cg
+            }
+        }
     }
 
     /// A government's authentic **territory** colour — its real `gövt.mapColor`
@@ -403,6 +433,10 @@ struct GalaxyMapView: View {
         var byID: [Int: SystRes] = [:]
         for s in systems { byID[s.id] = s }
 
+        // The selected system. The in-flight mini map (0x004a9b30) selects
+        // the armed link's system instead of the map's own selection.
+        let selectedID: Int? = miniMap ? (nav.jumpArmed ? nav.route.first : nil) : nav.selectedSystemID
+
         // Fog of war: what the player currently knows about each system.
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
@@ -428,10 +462,10 @@ struct GalaxyMapView: View {
         // resource), and gated to known systems so adjacency alone never leaks
         // a system's allegiance (matching the dot colours below). The glow
         // radius tracks zoom so neighbours' halos overlap at any scale.
-        if showBorders && !fullscreen {
+        if showBorders && !fullscreen && !miniMap {
             drawClassicPoliticalOverlay(ctx: &ctx, size: size, systems: systems, visibility: visibility,
                                         plot: plot, game: game)
-        } else if showBorders {
+        } else if showBorders && fullscreen {
             var tctx = ctx
             tctx.blendMode = .plusLighter
             let glowR = min(max(30 * zoom, 16), 320)
@@ -465,14 +499,36 @@ struct GalaxyMapView: View {
         // links and labels sit on top. Each is placed by its map-space box
         // (top-left `x,y`, extent `w,h` — same units as systems), scaled by zoom.
         // Dimmed so it reads as atmosphere behind the map, not chrome over it.
-        if !nebulae.isEmpty {
-            var nctx = ctx
-            nctx.opacity = 0.5
-            for neb in nebulae {
-                let tl = plot(neb.x, neb.y)
-                let rect = CGRect(x: tl.x, y: tl.y, width: CGFloat(neb.w) * zoom, height: CGFloat(neb.h) * zoom)
-                guard rect.intersects(visibleRect) else { continue }
-                nctx.draw(nctx.resolve(Image(decorative: neb.image, scale: 1)), in: rect)
+        if !nebulae.isEmpty, !miniMap {
+            if fullscreen {
+                var nctx = ctx
+                nctx.opacity = 0.5
+                for neb in nebulae {
+                    let tl = plot(neb.x, neb.y)
+                    let rect = CGRect(x: tl.x, y: tl.y, width: CGFloat(neb.w) * zoom, height: CGFloat(neb.h) * zoom)
+                    guard rect.intersects(visibleRect) else { continue }
+                    nctx.draw(nctx.resolve(Image(decorative: neb.image, scale: 1)), in: rect)
+                }
+            } else {
+                // Classic (0x004a51f0): only active, explored nebulae; the
+                // smallest of the seven zoom-level PICTs that is at least as
+                // wide or tall as the destination (the last one otherwise),
+                // blended with transfer mode 0x25 (addMax: per-channel max).
+                var nctx = ctx
+                nctx.blendMode = .lighten
+                for neb in nebulae where drawnNebulae.contains(neb.id) {
+                    let tl = plot(neb.x, neb.y)
+                    let rect = CGRect(x: tl.x.rounded(), y: tl.y.rounded(),
+                                      width: (CGFloat(neb.w) * zoom).rounded(), height: (CGFloat(neb.h) * zoom).rounded())
+                    guard rect.intersects(CGRect(origin: .zero, size: size)) else { continue }
+                    var pick: CGImage?
+                    for v in neb.variants.compactMap({ $0 }) {
+                        pick = v
+                        if rect.width <= CGFloat(v.width) || rect.height <= CGFloat(v.height) { break }
+                    }
+                    guard let image = pick ?? Optional(neb.image) else { continue }
+                    nctx.draw(nctx.resolve(Image(decorative: image, scale: 1)), in: rect)
+                }
             }
         }
 
@@ -544,7 +600,7 @@ struct GalaxyMapView: View {
             for dest in gs.destinations {
                 guard let d = byID[dest.systemID] else { continue }
                 let pb = plot(d.x, d.y)
-                let selected = dest.systemID == nav.selectedSystemID
+                let selected = dest.systemID == selectedID
                 var line = Path(); line.move(to: pa); line.addLine(to: pb)
                 let angle = atan2(pb.y - pa.y, pb.x - pa.x)
                 for barb in [angle + .pi * 3 / 4, angle - .pi * 3 / 4] {
@@ -589,7 +645,10 @@ struct GalaxyMapView: View {
         }
 
         let neighborIDs = Set(game.systemNeighbors(cur.id))
-        let showLabels = zoom >= 1.1
+        // Names show while the map's units-per-pixel is at most 1.1
+        // (0x00575a10), plus the selected system (0x004a8100).
+        let showLabels = fullscreen ? zoom >= 1.1 : zoom >= 1 / 1.1
+        let missionIDs = Set(missionDestinations.map(\.systemID))
         // Fixed design-point size: the canvas is already scaled to the device by
         // its container (novaFrameScale), so labels must not re-apply a viewport
         // factor here — that double-scaling was the old 1024/768 formula's bug.
@@ -597,7 +656,9 @@ struct GalaxyMapView: View {
 
         for s in systems {
             let vis = visibility[s.id] ?? .unknown
-            guard vis != .unknown else { continue }   // fog of war: not drawn at all
+            // Fog of war: not drawn at all — except a mission target, which
+            // the Classic map marks regardless (0x004a8100).
+            guard vis != .unknown || (!fullscreen && missionIDs.contains(s.id)) else { continue }
             let p = plot(s.x, s.y)
             guard visibleRect.contains(p) else { continue }
             let isCurrent = s.id == nav.currentSystemID
@@ -618,23 +679,42 @@ struct GalaxyMapView: View {
             // filled solid in amber (not dark) so "you are here" reads at a
             // glance under the blinking crosshair.
             if !fullscreen {
-                // Classic markers (0x004a8100): the 0x00466260 ring, the
-                // current system a filled cyan dot, the selection eight-stroke
-                // corner brackets in 0x00733b32.
-                let r: CGFloat = 4
-                let ring = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
-                ctx.fill(ring, with: .color(Color(white: 0.03)))
-                ctx.stroke(ring, with: .color(originalMarkerColor(for: s, game: game, visited: isKnownDetail)), lineWidth: 1.4)
+                // Classic markers (0x004a8100): a black disc, then the
+                // 0x00466260 ring — 8 px across with a 1 px pen, or 12 px
+                // with a 2 px pen once the map is zoomed in past 0.5 units
+                // per pixel. The current system gets a cyan dot on top.
+                let zoomedIn = 1 / zoom <= 0.5
+                let half: CGFloat = zoomedIn ? 6 : 4
+                let pen: CGFloat = zoomedIn ? 2 : 1
+                let disc = CGRect(x: p.x - half, y: p.y - half, width: half * 2, height: half * 2)
+                ctx.fill(Path(ellipseIn: disc), with: .color(.black))
+                ctx.stroke(Path(ellipseIn: disc.insetBy(dx: pen / 2, dy: pen / 2)),
+                           with: .color(originalMarkerColor(for: s, game: game, visited: isKnownDetail)), lineWidth: pen)
                 if isCurrent {
-                    ctx.fill(Path(ellipseIn: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)), with: .color(.cyan))
+                    let d: CGFloat = zoomedIn ? 3 : 2
+                    ctx.fill(Path(ellipseIn: CGRect(x: p.x - d, y: p.y - d, width: d * 2, height: d * 2)), with: .color(.cyan))
                 }
-                if s.id == nav.selectedSystemID {
-                    ctx.stroke(crosshair(at: p, arm: 3, gap: 4), with: .color(Color(red: 0, green: 1, blue: 0)), lineWidth: 1)
+                if !miniMap, s.id == selectedID {
+                    // Eight 3-px strokes, 1 px in from each corner of the
+                    // point inset by -6 (or -8), in 0x00733b32 (0x004a51f0).
+                    let h: CGFloat = zoomedIn ? 8 : 6
+                    let l = p.x - h, r = p.x + h, t = p.y - h, b = p.y + h
+                    var br = Path()
+                    for (x0, x1, y) in [(l + 1, l + 4, t + 0.5), (l + 1, l + 4, b + 0.5), (r - 1, r - 4, t + 0.5), (r - 1, r - 4, b + 0.5)] {
+                        br.move(to: CGPoint(x: x0, y: y)); br.addLine(to: CGPoint(x: x1, y: y))
+                    }
+                    for (x, y0, y1) in [(l + 0.5, t + 1, t + 4), (l + 0.5, b - 1, b - 4), (r + 0.5, t + 1, t + 4), (r + 0.5, b - 1, b - 4)] {
+                        br.move(to: CGPoint(x: x, y: y0)); br.addLine(to: CGPoint(x: x, y: y1))
+                    }
+                    ctx.stroke(br, with: .color(Color(red: 0, green: 1, blue: 0)), lineWidth: 1)
                 }
-                if isKnownDetail, showLabels || isCurrent || s.id == nav.selectedSystemID {
-                    ctx.draw(Text(s.displayName).font(.custom(NovaFontRole.hud.family, size: labelSize))
-                                .foregroundStyle(Color.white.opacity(0.85)),
-                             at: CGPoint(x: p.x + r + 5, y: p.y), anchor: .leading)
+                // Geneva 9, white, pen at (x + 7, y + 4) on the baseline.
+                if isKnownDetail, showLabels || s.id == selectedID {
+                    let t = ctx.resolve(Text(s.displayName).font(.custom(NovaFontRole.hud.family, size: 9))
+                                            .foregroundStyle(Color.white))
+                    let sz = t.measure(in: CGSize(width: 400, height: 40))
+                    let base = t.firstBaseline(in: sz)
+                    ctx.draw(t, at: CGPoint(x: p.x + 7, y: p.y + 4 - base), anchor: .topLeading)
                 }
                 continue
             }
@@ -656,7 +736,7 @@ struct GalaxyMapView: View {
             }
 
             // The map selection (a click that armed nothing still moves it).
-            if s.id == nav.selectedSystemID, !isCurrent, !isDestination {
+            if s.id == selectedID, !isCurrent, !isDestination {
                 let ring = Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16))
                 ctx.stroke(ring, with: .color(.white.opacity(0.8)), lineWidth: 1)
             }
@@ -669,7 +749,7 @@ struct GalaxyMapView: View {
             // Names: visited (or charted) systems only, zoom-gated, plus the
             // current, destination and selected ones (UI-18). An unvisited
             // system gets no label at all — no name leak from adjacency.
-            if isKnownDetail, showLabels || isCurrent || isDestination || s.id == nav.selectedSystemID {
+            if isKnownDetail, showLabels || isCurrent || isDestination || s.id == selectedID {
                 let name = s.displayName
                 let color: Color = isCurrent ? amber
                     : onRoute ? (hopAffordable ? routeGreen : routeWarn)
@@ -692,13 +772,23 @@ struct GalaxyMapView: View {
         // marked regardless of fog of war — the game reveals where a mission
         // sends you so you can navigate there. The arrow bobs with the blink tick.
         let bob: CGFloat = blinkOn ? 0 : 3
+        let previewID = destinationPreview?.systemID
         for dest in missionDestinations {
             guard let s = byID[dest.systemID] else { continue }
             let p = plot(s.x, s.y)
             guard visibleRect.contains(p) else { continue }
-            drawMissionArrow(ctx: &ctx, at: p, bob: fullscreen ? bob : 0)
-            // The original marks a mission system with the ring and arrow only.
-            if fullscreen { drawMissionLabel(ctx: &ctx, at: p, names: dest.names) }
+            if fullscreen {
+                drawMissionArrow(ctx: &ctx, at: p, bob: bob)
+                drawMissionLabel(ctx: &ctx, at: p, names: dest.names)
+            } else if dest.systemID == previewID, let icon = markerIcons[15001] {
+                // The previewed destination: cicn 15001, 16 px up and right.
+                ctx.draw(Image(decorative: icon, scale: 1), in: CGRect(x: p.x, y: p.y - 16, width: 16, height: 16))
+            } else if let icon = markerIcons[15000] {
+                // A mission target: cicn 15000, 16 px up and left.
+                ctx.draw(Image(decorative: icon, scale: 1), in: CGRect(x: p.x - 16, y: p.y - 16, width: 16, height: 16))
+            } else {
+                drawMissionArrow(ctx: &ctx, at: p, bob: 0)
+            }
         }
 
         // Multiplayer presence markers — drawn last (over the dots/labels/arrows),
@@ -826,7 +916,13 @@ struct GalaxyMapView: View {
                 let p = CGPoint(x: center.x + CGFloat(s.x - cur.x) * zoom,
                                 y: center.y + CGFloat(s.y - cur.y) * zoom)
                 let d = hypot(p.x - location.x, p.y - location.y)
-                if d < (pick?.dist ?? 24) { pick = (dest.gateSpobID, dest.systemID, d) }
+                if fullscreen {
+                    if d < (pick?.dist ?? 24) { pick = (dest.gateSpobID, dest.systemID, d) }
+                } else if pick == nil, abs(p.x - location.x) <= Self.classicHitRadius,
+                          abs(p.y - location.y) <= Self.classicHitRadius {
+                    // The first system whose point inset by -10 holds the click.
+                    pick = (dest.gateSpobID, dest.systemID, d)
+                }
             }
             if let pick { gs.onSelect(pick.gate, pick.sys) }
             return
@@ -837,6 +933,11 @@ struct GalaxyMapView: View {
         let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
         let missionSystems = Set(missionDestinations.map(\.systemID))
         var best: (id: Int, dist: CGFloat)?
+        // Classic (0x004a3aa0): an unlatched system is still clickable when
+        // it is linked from the current system, or from the route's tail
+        // with Shift held (so a route can run one hop past the known map).
+        let reachBase = (Self.isShiftHeld && !nav.route.isEmpty) ? (nav.route.last ?? cur.id) : cur.id
+        let reachable = Set(nav.game?.systemNeighbors(reachBase) ?? [])
         for s in nav.systems() {
             // Story-hidden systems can't be targeted at all.
             guard !nav.hiddenSystems.contains(s.id) else { continue }
@@ -844,11 +945,19 @@ struct GalaxyMapView: View {
             // one, charted counting as visited), a mission target or the
             // current selection; anywhere else is empty space (UI-05).
             guard nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted) != .unknown
-                    || missionSystems.contains(s.id) || s.id == nav.selectedSystemID else { continue }
+                    || missionSystems.contains(s.id) || s.id == nav.selectedSystemID
+                    || (!fullscreen && reachable.contains(s.id)) else { continue }
             let p = CGPoint(x: center.x + CGFloat(s.x - cur.x) * zoom,
                             y: center.y + CGFloat(s.y - cur.y) * zoom)
             let d = hypot(p.x - location.x, p.y - location.y)
-            if d < (best?.dist ?? 18) { best = (s.id, d) }
+            if fullscreen {
+                if d < (best?.dist ?? 18) { best = (s.id, d) }
+            } else if best == nil, abs(p.x - location.x) <= Self.classicHitRadius,
+                      abs(p.y - location.y) <= Self.classicHitRadius {
+                // The first system (in id order) whose point inset by -10
+                // holds the click.
+                best = (s.id, d)
+            }
         }
         guard let hit = best else { return }
         if nav.autoRoutePlotting {
@@ -1004,9 +1113,11 @@ struct GalaxyMapView: View {
             routeBar = r(1, (left: 8,   top: 436, w: 586, h: 42))   // idx1 — course/fuel
             zoomOut  = r(3, (left: 408, top: 483, w: 25,  h: 25))   // idx3
             zoomIn   = r(4, (left: 438, top: 483, w: 25,  h: 25))   // idx4
-            nearest  = r(7, (left: 155, top: 483, w: 120, h: 25))   // idx7 — "Nearest System"
-            named    = r(8, (left: 11,  top: 483, w: 130, h: 25))   // idx8 — "Named System"
-            clear    = r(9, (left: 288, top: 483, w: 99,  h: 25))   // idx9 — "Clear Route"
+            // Item numbers (1-based) and labels from 0x0049f1f0 / 0x004a3aa0:
+            // 8 Clear Route, 9 Show/Hide Borders, 10 Find.
+            clear    = r(7, (left: 155, top: 483, w: 120, h: 25))   // idx7 — "Clear Route"
+            named    = r(8, (left: 11,  top: 483, w: 130, h: 25))   // idx8 — "Show/Hide Borders"
+            nearest  = r(9, (left: 288, top: 483, w: 99,  h: 25))   // idx9 — "Find"
             done     = r(0, (left: 483, top: 483, w: 99,  h: 25))   // idx0 — "Done"
         }
     }
@@ -1037,8 +1148,8 @@ struct GalaxyMapView: View {
                     .clipped()
                     .novaPlace(space, cx(items.canvas, nw), cy(items.canvas, nh))
 
-                sidePanel
-                    .frame(width: CGFloat(items.panel.w), height: CGFloat(items.panel.h), alignment: .top)
+                classicSidePanel
+                    .frame(width: CGFloat(items.panel.w), height: CGFloat(items.panel.h), alignment: .topLeading)
                     .clipped()
                     .novaPlace(space, cx(items.panel, nw), cy(items.panel, nh))
 
@@ -1046,10 +1157,13 @@ struct GalaxyMapView: View {
                 // in the hypergate picker its "select a destination" prompt.
                 // There is no jump button or colour key in the original map.
                 Group {
-                    if gateSelection != nil, let game = nav.game {
-                        NovaText(OriginalText(game: game).misc(308), size: 10, color: Color(white: 0.6))
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 14)
+                    // The hypergate prompt shows while the selection is the
+                    // current system or none (0x004a51f0); else the usual bar.
+                    if gateSelection != nil, nav.selectedSystemID == nil || nav.selectedSystemID == nav.currentSystemID,
+                       let game = nav.game {
+                        let prompt = OriginalText(game: game).misc(308)
+                        qdText(prompt, x: (CGFloat(items.routeBar.w) - Self.genevaWidth(prompt)) / 2, y: 24,
+                               color: Self.themeLight)
                     } else {
                         originalStatusBar
                     }
@@ -1173,11 +1287,16 @@ struct GalaxyMapView: View {
         return names.isEmpty ? [text.misc(335)] : names
     }
 
-    private func services(_ usable: [SpobRes], text: OriginalText) -> [String] {
+    private func serviceTags(_ usable: [SpobRes], text: OriginalText) -> [String] {
         var names: [String] = []
         if usable.contains(where: { $0.hasCommodityExchange }) { names.append(text.misc(329)) }
         if usable.contains(where: { $0.hasOutfitter }) { names.append(text.misc(330)) }
         if usable.contains(where: { $0.hasShipyard }) { names.append(text.misc(331)) }
+        return names
+    }
+
+    private func services(_ usable: [SpobRes], text: OriginalText) -> [String] {
+        let names = serviceTags(usable, text: text)
         return names.isEmpty ? [text.misc(332)] : names
     }
 
@@ -1190,10 +1309,34 @@ struct GalaxyMapView: View {
             .padding(.leading, 5)
     }
 
-    /// The original's status bar (0x004a51f0): "Ports:" with the selected
-    /// system's usable stellars, "Navigation Hazards:" composed from its
-    /// asteroids, interference, murk and gravity, and the date at the right.
-    /// "<Unknown>" until the system is visited or charted.
+    // MARK: Classic text — QuickDraw MoveTo + DrawString, Geneva 9
+
+    /// 0x00733b50 (light grey, 0xC000) — labels.
+    static let themeLight = Color(white: 0xC000 / 65535.0)
+    /// 0x00733b5c (0x4000) — the date.
+    static let themeDim = Color(white: 0x4000 / 65535.0)
+
+    /// The pen advance of `s` in Geneva 9.
+    static func genevaWidth(_ s: String) -> CGFloat {
+        let font = CTFontCreateWithName(NovaFontRole.hud.family as CFString, 9, nil)
+        let attr = NSAttributedString(string: s, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
+        return CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(attr), nil, nil, nil))
+    }
+
+    /// `s` with its baseline at (x, y) in the parent's top-left space, as the
+    /// original sets text with MoveTo and DrawString.
+    private func qdText(_ s: String, x: CGFloat, y: CGFloat, color: Color = .white) -> some View {
+        Text(s).font(.custom(NovaFontRole.hud.family, size: 9))
+            .foregroundStyle(color)
+            .lineLimit(1).fixedSize()
+            .alignmentGuide(.top) { $0[.firstTextBaseline] }
+            .offset(x: x, y: y)
+    }
+
+    /// The original's status bar (0x004a51f0), item 2: "Ports:" with the
+    /// selected system's usable stellars (wrapping to a second line near the
+    /// right edge), "Navigation Hazards:", and the date in dim grey at the
+    /// right. "<Unknown>" until the system is visited or charted.
     @ViewBuilder
     private var originalStatusBar: some View {
         if let game = nav.game {
@@ -1201,21 +1344,96 @@ struct GalaxyMapView: View {
             let infoID = nav.selectedSystemID ?? nav.destinationID ?? nav.currentSystemID
             let known = pilot.state.isSystemExplored(infoID)
             let sys = nav.system(infoID)
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        NovaText(text.misc(309), size: 10, color: Color(white: 0.6))
-                        NovaText(known ? ports(sys, game: game, text: text) : text.misc(310), size: 10)
+            let width = CGFloat(items.routeBar.w)
+            let date = text.date(for: pilot.state)
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                qdText(text.misc(309), x: 10, y: 12, color: Self.themeLight)
+                if known {
+                    ForEach(Array(portLines(sys, game: game, text: text, width: width).enumerated()), id: \.offset) { _, run in
+                        qdText(run.text, x: run.x, y: run.y)
                     }
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        NovaText(text.misc(311), size: 10, color: Color(white: 0.6))
-                        NovaText(known ? hazards(sys, game: game, text: text) : text.misc(310), size: 10)
+                } else {
+                    qdText(text.misc(310), x: 45, y: 12)
+                }
+                qdText(text.misc(311), x: 10, y: 36, color: Self.themeLight)
+                qdText(known ? hazards(sys, game: game, text: text) : text.misc(310), x: 110, y: 36)
+                qdText(date, x: width - Self.genevaWidth(date) - 5, y: 36, color: Self.themeDim)
+            }
+        }
+    }
+
+    /// The pen runs of the "Ports" value: names at (45, 12), a ", " after all
+    /// but the last, wrapping to (45, 24) when a name would pass the right
+    /// edge less 20 — the original's pen arithmetic, including its
+    /// not-counting the wrapped name.
+    private func portLines(_ sys: SystRes?, game: NovaGame, text: OriginalText, width: CGFloat) -> [(text: String, x: CGFloat, y: CGFloat)] {
+        let names = (sys?.spobs ?? []).compactMap { game.spob($0) }
+            .filter { !$0.isUninhabited && !pilot.state.isStellarDestroyed($0.id) }
+            .map(\.displayName)
+        guard !names.isEmpty else { return [(text.misc(335), 45, 12)] }
+        var runs: [(text: String, x: CGFloat, y: CGFloat)] = []
+        var pen: CGFloat = 45, y: CGFloat = 12, used: CGFloat = 0
+        let sep = Self.genevaWidth(", ")
+        for (i, name) in names.enumerated() {
+            let w = Self.genevaWidth(name)
+            if width - 20 < w + 45 + used { pen = 45; y = 24; used = 0 } else { used += w }
+            runs.append((name, pen, y)); pen += w
+            if i < names.count - 1 {
+                runs.append((", ", pen, y)); pen += sep; used += sep
+            }
+        }
+        return runs
+    }
+
+    /// The system-info side column (item 6, 0x004a51f0), every string at its
+    /// original pen position: header and name, then Government, Legal
+    /// Status, Goods Traded and Services.
+    @ViewBuilder
+    private var classicSidePanel: some View {
+        if let cur = nav.current, let game = nav.game,
+           let sys = nav.system(nav.selectedSystemID ?? nav.destinationID ?? nav.currentSystemID) {
+            let text = OriginalText(game: game)
+            let level = pilot.state.discoveryLevel(sys.id)
+            let gateDest = gateSelection?.destinations.contains { $0.systemID == sys.id } ?? false
+            let header = nav.jumpArmed ? text.misc(339)
+                : sys.id == cur.id ? text.misc(337)
+                : gateDest ? text.misc(340) : text.misc(338)
+            let usable = usableStellars(sys, game: game)
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                qdText(header, x: 10, y: 12, color: Self.themeLight)
+                qdText(level < 1 ? text.misc(310) : sys.displayName, x: 15, y: 26)
+                if level >= 1 {
+                    if usable.isEmpty {
+                        qdText(text.misc(334), x: 10, y: 75)
+                    } else {
+                        qdText(text.misc(325), x: 10, y: 75, color: Self.themeLight)
+                        qdText(game.govt(sys.government)?.displayName ?? text.misc(333), x: 15, y: 88)
+                        qdText(text.misc(326), x: 10, y: 119, color: Self.themeLight)
+                        qdText(LegalStatus.label(inSystem: sys.id, player: pilot.state, game: game), x: 15, y: 132)
+                        qdText(text.misc(327), x: 10, y: 155, color: Self.themeLight)
+                        if level < 2 {
+                            qdText(text.misc(310), x: 15, y: 168)
+                        } else {
+                            ForEach(Array(goodsTraded(usable, game: game, text: text).enumerated()), id: \.offset) { i, g in
+                                qdText(g, x: 15, y: 168 + 12 * CGFloat(i))
+                            }
+                        }
+                        qdText(text.misc(328), x: 10, y: 250, color: Self.themeLight)
+                        let tags = serviceTags(usable, text: text)
+                        if tags.isEmpty {
+                            qdText(level < 2 ? text.misc(310) : text.misc(332), x: 15, y: 262)
+                        } else if level < 2 {
+                            qdText(text.misc(310), x: 15, y: 263)
+                        } else {
+                            ForEach(Array(tags.enumerated()), id: \.offset) { i, t in
+                                qdText(t, x: 15, y: 263 + 12 * CGFloat(i))
+                            }
+                        }
                     }
                 }
-                Spacer()
-                NovaText(text.date(for: pilot.state), size: 10)
             }
-            .padding(.horizontal, 10).padding(.top, 6)
         }
     }
 
@@ -1230,7 +1448,7 @@ struct GalaxyMapView: View {
     /// < 34 light / < 67 moderate / heavy, murk < 31 reduced / < 61 severely
     /// reduced / greatly reduced, and "gravity shear" when a stellar pulls.
     private func hazards(_ sys: SystRes?, game: NovaGame, text: OriginalText) -> String {
-        guard let sys else { return text.misc(336) }
+        guard let sys else { return text.misc(335) }
         var parts: [String] = []
         // Gravity shear comes first (0x004a51f0).
         if sys.spobs.compactMap({ game.spob($0) }).contains(where: { $0.gravity != 0 }) {
@@ -1248,7 +1466,9 @@ struct GalaxyMapView: View {
             let level = sys.murk < 31 ? 321 : sys.murk < 61 ? 322 : 323
             parts.append("\(text.misc(level)) \(text.misc(324))")
         }
-        return parts.isEmpty ? text.misc(336) : parts.joined(separator: ", ")
+        // Empty reads "None" (#335) and the first letter is capitalised.
+        let joined = parts.isEmpty ? text.misc(335) : parts.joined(separator: ", ")
+        return joined.prefix(1).uppercased() + joined.dropFirst()
     }
 
     /// Service tags for a stellar object, from the already-decoded `spöb`

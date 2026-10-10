@@ -43,6 +43,13 @@ extension StoryEngine {
         }
     }
 
+    /// The nebulae the galaxy map draws (0x004a51f0): ActiveOn holds (+8) and
+    /// the player has explored them (+9, set by `exploreNebulae`).
+    public func exploredActiveNebulaIDs() -> Set<Int> {
+        let explored = player.exploredNebulae ?? []
+        return Set(game.nebulae().filter { explored.contains($0.id) && evaluate(test: $0.activeOn) }.map(\.id))
+    }
+
     /// An outfit was acquired outside the engine (a shop purchase): run its
     /// map's nebula events over `state`.
     public static func exploreNebulae(_ systems: [Int], state: inout PlayerState, game: NovaGame) {
