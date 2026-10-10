@@ -5,7 +5,7 @@ import NovaSwiftKit
 /// themselves from — **all from the player's own data**, never our own artwork:
 ///   • frame PICTs (Spaceport 8500, Shipyard 8501, Outfit 8502, Bar 8503/8504,
 ///     Trade 8510, Mission BBS 8505),
-///   • the three-slice button PICTs (7500–7508),
+///   • the three-slice button PICTs (7500–7508) and their masks (7600–7608),
 ///   • the button labels (`STR# 150`),
 ///   • per-planet landscape PICTs and per-item outfit/ship pictures.
 ///
@@ -53,57 +53,88 @@ final class SpaceportGraphics {
 
     private var buttonSliceCache: [Int: CGImage] = [:]
 
-    /// (left, middle, right) PICT ids for a button state, with their baked
-    /// neutral-grey backing keyed to transparent. The cap PICTs (7500-7508) carry
-    /// a flat grey (≈0x424242) frame around the red pill, meant to vanish into the
-    /// grey button recesses the game's dialogs are drawn with. Our frames don't
-    /// reproduce those exact recesses pixel-for-pixel, so that grey read as a hard
-    /// box around every button. Keying just the neutral-grey pixels (leaving the
-    /// red pill and its dark-red bevel untouched, since those aren't R≈G≈B) lets
-    /// the pill sit cleanly on any surface.
+    /// The (left, middle, right) slices for a button state, composited the way
+    /// `NovaUi_InitThreeStateButtonArt` 0x004a2f50 builds its canvases: the
+    /// caps (7500/7502 + 3·state) take their transparency from the matching
+    /// mask PICTs (7600/7602 + 3·state; black = drawn, white = not), and the
+    /// middle slice is drawn unmasked (`NovaUi_DrawThreeStateButton` copies it
+    /// with a plain CopyBits). A missing art PICT is a 12×24 opaque black slot;
+    /// a missing mask leaves its slot fully opaque — so a TC that ships no
+    /// masks gets square, opaque caps, exactly as in the original.
     func buttonSlices(_ state: ButtonState) -> (left: CGImage?, middle: CGImage?, right: CGImage?) {
-        let base: Int
+        let s: ThreeStateButton.State
         switch state {
-        case .normal:  base = 7500
-        case .clicked: base = 7503
-        case .grey:    base = 7506
+        case .normal:  s = .normal
+        case .clicked: s = .pressed
+        case .grey:    s = .grey
         }
-        return (keyedSlice(base), keyedSlice(base + 1), keyedSlice(base + 2))
+        return (maskedSlice(s, 0), slice(ThreeStateButton.artID(state: s, slice: 1)), maskedSlice(s, 2))
     }
 
-    private func keyedSlice(_ id: Int) -> CGImage? {
+    private func slice(_ id: Int) -> CGImage? {
         if let c = buttonSliceCache[id] { return c }
-        guard let raw = pict(id) else { return nil }
-        let keyed = Self.keyOutNeutralGrey(raw) ?? raw
-        buttonSliceCache[id] = keyed
-        return keyed
+        let img = pict(id) ?? Self.blackSlot()
+        buttonSliceCache[id] = img
+        return img
     }
 
-    /// Make flat neutral-grey pixels (R≈G≈B, mid-dark brightness) transparent,
-    /// leaving coloured (e.g. red) pixels intact. Used to lift the button caps'
-    /// grey backing so only the pill shows.
-    private static func keyOutNeutralGrey(_ image: CGImage) -> CGImage? {
-        let w = image.width, h = image.height
-        guard w > 0, h > 0 else { return nil }
+    private func maskedSlice(_ state: ThreeStateButton.State, _ index: Int) -> CGImage? {
+        let id = ThreeStateButton.artID(state: state, slice: index)
+        if let c = buttonSliceCache[id] { return c }
+        guard let art = pict(id) else {
+            let black = Self.blackSlot()
+            buttonSliceCache[id] = black
+            return black
+        }
+        let maskID = ThreeStateButton.maskID(state: state, slice: index)
+        let masked: CGImage
+        if game.resources.resource(NovaType.pict, maskID) != nil, let mask = pict(maskID) {
+            masked = Self.apply(mask: mask, to: art) ?? art
+        } else {
+            masked = art   // no mask PICT: the slot's mask stays solid black → opaque
+        }
+        buttonSliceCache[id] = masked
+        return masked
+    }
+
+    /// An opaque black 12×24 block: the slot the original leaves (painted
+    /// black) for a missing button PICT.
+    private static func blackSlot() -> CGImage? {
+        let w = ThreeStateButton.missingSlotWidth, h = ThreeStateButton.missingSlotHeight
         var px = [UInt8](repeating: 0, count: w * h * 4)
+        for i in stride(from: 3, to: px.count, by: 4) { px[i] = 255 }
+        guard let provider = CGDataProvider(data: Data(px) as CFData) else { return nil }
+        return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
+    /// Apply a mask PICT (drawn scaled into the art's slot, as `nv_DrawPict`
+    /// does) as alpha: dark mask pixels keep the art, light ones clear it.
+    private static func apply(mask: CGImage, to art: CGImage) -> CGImage? {
+        let w = art.width, h = art.height
+        guard w > 0, h > 0 else { return nil }
         let cs = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8,
-                                  bytesPerRow: w * 4, space: cs,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
-        for i in stride(from: 0, to: px.count, by: 4) {
-            let r = Int(px[i]), g = Int(px[i + 1]), b = Int(px[i + 2])
-            let mx = max(r, g, b), mn = min(r, g, b)
-            // Neutral (low chroma) AND not near-black / not bright: the grey frame.
-            if mx - mn <= 14, mx >= 32, mx <= 120 {
-                px[i] = 0; px[i + 1] = 0; px[i + 2] = 0; px[i + 3] = 0
-            }
+        func rgba(_ img: CGImage) -> [UInt8]? {
+            var px = [UInt8](repeating: 0, count: w * h * 4)
+            guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: w * 4, space: cs,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            ctx.interpolationQuality = .none
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return px
+        }
+        guard var px = rgba(art), let m = rgba(mask) else { return nil }
+        for i in stride(from: 0, to: px.count, by: 4)
+        where !ThreeStateButton.maskOpaque(r: m[i], g: m[i + 1], b: m[i + 2]) {
+            px[i] = 0; px[i + 1] = 0; px[i + 2] = 0; px[i + 3] = 0
         }
         guard let provider = CGDataProvider(data: Data(px) as CFData) else { return nil }
         return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,
                        bytesPerRow: w * 4, space: cs,
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+                       provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 
     /// A label from `STR# 150` ("button labels"): Leave, Buy, Sell, Buy Ship,
