@@ -13,6 +13,9 @@ enum SpriteTextures {
     static func rotationFrames(from sheet: SpriteSheet, rotationCount: Int = 36) -> [SKTexture] {
         let count = min(rotationCount, sheet.frameCount)
         guard count > 0 else { return [] }
+        // A graphics pack's HD art / 3D model for this sprite, when HD is on
+        // and it's ready: same frames, same logical size, denser pixels.
+        if let hd = HDGraphics.shared.frames(for: sheet) { return Array(hd.prefix(count)) }
         // Build the backing grid CGImage once and crop every heading out of it.
         // (Calling `frameCGImage(_:)` per frame rebuilt the full surface + copied
         // the whole RGBA buffer 36× for a single hull — see `frameCGImages`.)

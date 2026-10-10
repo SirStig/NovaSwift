@@ -274,6 +274,13 @@ struct GameSettings: Codable, Equatable {
     /// Smooth (linear) vs. crisp (nearest) sprite scaling. EV Nova art is pixel
     /// art, so crisp is the faithful default.
     var smoothSprites: Bool = false
+    /// Draw the HD art and 3D models that graphics packs (e.g. Nova Reimagined)
+    /// supply in place of the original sprites. Presentation only — hit-boxes,
+    /// frames and gameplay are the original's. Off by default: the original art.
+    var hdGraphics: Bool = false
+    /// HD texture detail, in pixels per original pixel (2 or 4). 4 is sharper
+    /// up close but uses four times the memory per sprite.
+    var hdDetail: Int = 2
     var frameRateCap: FrameRateCap = .platformDefault
     /// Engine exhaust / weapon glow effects.
     var engineGlow: Bool = true
@@ -518,6 +525,8 @@ struct GameSettings: Codable, Equatable {
         starfieldDensity      = v(.starfieldDensity, d.starfieldDensity)
         showFPS               = v(.showFPS, d.showFPS)
         smoothSprites         = v(.smoothSprites, d.smoothSprites)
+        hdGraphics            = v(.hdGraphics, d.hdGraphics)
+        hdDetail              = v(.hdDetail, d.hdDetail)
         frameRateCap          = v(.frameRateCap, d.frameRateCap)
         engineGlow            = v(.engineGlow, d.engineGlow)
         screenShake           = v(.screenShake, d.screenShake)

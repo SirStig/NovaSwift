@@ -13,6 +13,7 @@
 		AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000F7 /* NovaSwiftPluginStore */; };
 		AA000000000000000000F9 /* NovaSwiftNet in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000FA /* NovaSwiftNet */; };
 		AA000000000000000000FB /* NovaSwiftSync in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000FC /* NovaSwiftSync */; };
+		AA0000000000000000HD01 /* NovaSwiftHD in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000HD02 /* NovaSwiftHD */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +45,7 @@
 				AA000000000000000000F8 /* NovaSwiftPluginStore in Frameworks */,
 				AA000000000000000000F9 /* NovaSwiftNet in Frameworks */,
 				AA000000000000000000FB /* NovaSwiftSync in Frameworks */,
+				AA0000000000000000HD01 /* NovaSwiftHD in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -92,6 +94,7 @@
 				AA000000000000000000F7 /* NovaSwiftPluginStore */,
 				AA000000000000000000FA /* NovaSwiftNet */,
 				AA000000000000000000FC /* NovaSwiftSync */,
+				AA0000000000000000HD02 /* NovaSwiftHD */,
 			);
 			productName = NovaSwift;
 			productReference = AA000000000000000000E5 /* NovaSwift.app */;
@@ -264,7 +267,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 420;
+				CURRENT_PROJECT_VERSION = 424;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -326,7 +329,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 420;
+				CURRENT_PROJECT_VERSION = 424;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -430,6 +433,10 @@
 		AA000000000000000000FC /* NovaSwiftSync */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NovaSwiftSync;
+		};
+		AA0000000000000000HD02 /* NovaSwiftHD */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NovaSwiftHD;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

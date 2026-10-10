@@ -96,6 +96,12 @@ final class DebugController: ObservableObject {
     /// off by default. A pure visualization — it never changes the simulation.
     @Published var aiDebugEnabled = false
 
+    /// HD / 3D debug overlay (HD-or-classic label, frame ring and weapon exit
+    /// points on every ship). Mirrors `GameScene.hdDebugOverlay`.
+    @Published var hdOverlay = false
+    /// Presents the HD / 3D viewer sheet from the dev tools (`hd view`).
+    @Published var showHDViewer = false
+
     /// The scene currently being measured / driven. Weak: the container owns
     /// the scene's lifetime through `GameHost`, and swaps it on every rebuild.
     weak var scene: GameScene?

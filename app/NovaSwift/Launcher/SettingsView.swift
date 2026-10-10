@@ -332,6 +332,12 @@ struct SettingsView: View {
             NovaMenuPicker(title: "Frame rate limit", selection: binding(\.frameRateCap),
                            options: GameSettings.FrameRateCap.allCases) { $0.label }
             Toggle("Smooth sprite scaling", isOn: binding(\.smoothSprites))
+            Toggle("HD graphics from plug-ins", isOn: binding(\.hdGraphics))
+            if model.settings.hdGraphics {
+                Toggle("Extra-sharp HD (uses more memory)",
+                       isOn: Binding(get: { model.settings.hdDetail >= 4 },
+                                     set: { model.settings.hdDetail = $0 ? 4 : 2 }))
+            }
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Screen shake", isOn: binding(\.screenShake))
             Toggle("Windows hyperspace look", isOn: binding(\.ceHyperspaceLook))
@@ -340,7 +346,7 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Graphics", icon: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes. Jump timing is the same either way. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. HD graphics draws the high-resolution art and 3D models that graphics plug-ins such as Nova Reimagined provide, in place of the originals; ships still handle and collide exactly as in the original. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes. Jump timing is the same either way. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
         }
     }
 

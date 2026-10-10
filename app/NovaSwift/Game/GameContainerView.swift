@@ -4166,6 +4166,70 @@ struct GameContainerView: View {
             return "Destroyed \(n) ship\(n == 1 ? "" : "s")."
         })
 
+        console.register(.init(name: "hd", summary: "HD / 3D graphics: status, on/off, detail, overlay, reload packs, clear bake cache, viewer.",
+                               usage: "hd [status | on | off | detail <2|4> | overlay <on|off> | reload | clearcache | view]") { args in
+            let sub = args.first?.lowercased() ?? "status"
+            /// Re-prepare the packs (bakes are cached) and rebuild the live system's art.
+            @MainActor func prepareAndRefresh(reload: Bool = false) {
+                Task { @MainActor in
+                    if reload { await model.data.reloadGraphicsPacks() } else { await model.data.prewarmHDGraphics() }
+                    debug.scene?.debugRefreshGraphics()
+                }
+            }
+            @MainActor func setting(_ change: (inout GameSettings) -> Void) {
+                change(&model.settings)
+                model.settings.save()
+                HDGraphics.shared.update(settings: model.settings)
+            }
+            switch sub {
+            case "status":
+                let st = HDGraphics.shared.status()
+                let ready = st.entries.filter { $0.state == .ready }.count
+                var lines = [String(format: "HD %@ · %d× · %d/%d ready · %.1f MB", st.enabled ? "on" : "off",
+                                    Int(st.maxScale), ready, st.entries.count, Double(st.totalBytes) / 1_048_576)]
+                for e in st.entries {
+                    lines.append("  sprite \(e.spriteID) \(e.kind.rawValue) \(e.state.rawValue) (\(e.origin))"
+                                 + (e.layers.isEmpty ? "" : " layers: " + e.layers.joined(separator: ",")))
+                }
+                lines += st.problems.map { "  problem: \($0)" }
+                if let search = HDGraphics.shared.lastSearch {
+                    lines.append("  searched: " + search.dirs.map(\.path).joined(separator: " | "))
+                    lines.append("  packs found: " + (search.packs.isEmpty ? "none" : search.packs.map(\.lastPathComponent).joined(separator: ", ")))
+                } else {
+                    lines.append("  no data set loaded yet (catalog builds when game data loads)")
+                }
+                return lines.joined(separator: "\n")
+            case "on", "off":
+                setting { $0.hdGraphics = sub == "on" }
+                prepareAndRefresh()
+                return "HD graphics \(sub). Rebuilding the live system's art…"
+            case "detail":
+                guard let d = args.dropFirst().first.flatMap(Int.init), d == 2 || d == 4 else {
+                    throw ConsoleController.CommandError(message: "Usage: hd detail <2|4>")
+                }
+                setting { $0.hdDetail = d }
+                prepareAndRefresh()
+                return "HD detail \(d)×. Re-preparing…"
+            case "overlay":
+                let on = args.dropFirst().first.map { $0.lowercased() == "on" } ?? !debug.hdOverlay
+                debug.hdOverlay = on
+                debug.scene?.hdDebugOverlay = on
+                return "HD overlay \(on ? "on" : "off") (green = HD, grey = classic; dots = weapon exit points)."
+            case "reload":
+                prepareAndRefresh(reload: true)
+                return "Re-scanning graphics packs…"
+            case "clearcache":
+                HDGraphics.shared.reset(clearDiskCache: true)
+                prepareAndRefresh()
+                return "Bake cache cleared; re-rendering every model…"
+            case "view":
+                debug.showHDViewer = true
+                return "Opening the HD / 3D viewer."
+            default:
+                throw ConsoleController.CommandError(message: "Usage: hd [status | on | off | detail <2|4> | overlay <on|off> | reload | clearcache | view]")
+            }
+        })
+
         console.register(.init(name: "spawn", summary: "Spawn a ship by id, hostile/escort/neutral.", usage: "spawn <hostile|escort|neutral> <shipID> [count]") { args in
             guard args.count >= 2, let hull = Int(args[1]) else {
                 throw ConsoleController.CommandError(message: "Usage: spawn <hostile|escort|neutral> <shipID> [count]")

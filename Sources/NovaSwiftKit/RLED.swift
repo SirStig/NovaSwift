@@ -13,6 +13,10 @@ public struct SpriteSheet {
     public let surfaceHeight: Int
     /// surfaceWidth * surfaceHeight * 4 bytes, RGBA, row-major, top-left origin.
     public let rgba: [UInt8]
+    /// The sprite id this sheet was loaded as (`NovaGame.spriteSheet`), so a
+    /// presentation layer can find its HD/3D enhancement. nil for sheets not
+    /// loaded through the sprite loader (interface art, cicns, patterns).
+    public var sourceSpriteID: Int? = nil
 
     /// Frames are always packed 6-across in the source format (fewer if there are
     /// fewer than 6 frames), so a frame's grid cell is (index % 6, index / 6).

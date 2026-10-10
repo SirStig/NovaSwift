@@ -258,6 +258,18 @@ final class GameScene: SKScene {
     /// Texture filtering for all sprites — crisp `.nearest` for the faithful
     /// pixel-art look, `.linear` when the player turns on "Smooth sprite scaling".
     private var spriteFilter: SKTextureFilteringMode { settings.smoothSprites ? .linear : .nearest }
+    /// HD pack textures always filter smoothly; the crisp setting is for pixel art.
+    private func filterMode(for texture: SKTexture?) -> SKTextureFilteringMode {
+        HDGraphics.shared.isHD(texture) ? .linear : spriteFilter
+    }
+    /// A hull drawn by a graphics pack's 3D model skips each classic overlay
+    /// layer (engine glow, lights, weapon glow, alt sprites) the model doesn't
+    /// replace with its own effect layer: the classic ones are pixel-matched
+    /// to the classic art, not to the model.
+    private func hullHidesOverlay(_ shipTypeID: Int, _ overlay: (ShanRes) -> Int) -> Bool {
+        guard let shan = galaxy?.game.shan(shipTypeID) else { return false }
+        return HDGraphics.shared.hidesOverlay(baseSpriteID: shan.baseSpriteID, overlaySpriteID: overlay(shan))
+    }
     private var audio: GameAudio?
     private var wasFiring = false
     // Edge-triggered warning state: true once the klaxon/red-alert for that
@@ -1289,7 +1301,7 @@ final class GameScene: SKScene {
             let node: SKNode
             if let tex = p.texture {
                 let sprite = SKSpriteNode(texture: tex)
-                sprite.texture?.filteringMode = spriteFilter
+                sprite.texture?.filteringMode = filterMode(for: sprite.texture)
                 node = sprite
             } else {
                 // Fallback disc for stellars whose art we can't decode yet (e.g. PICT).
@@ -1389,7 +1401,7 @@ final class GameScene: SKScene {
                 let star: SKSpriteNode
                 if let frames = starFrames, !frames.isEmpty {
                     star = SKSpriteNode(texture: frames.randomElement())
-                    star.texture?.filteringMode = spriteFilter
+                    star.texture?.filteringMode = filterMode(for: star.texture)
                     star.alpha = spec.brightness
                     star.setScale(spec.size / 3.0)
                 } else {
@@ -1423,11 +1435,12 @@ final class GameScene: SKScene {
     private func buildShip() {
         let node = SKNode()
         node.zPosition = 9.5   // same band as NPC ships, drawn last
+        let hullType = world.player.shipTypeID
 
         // Real engine-glow art, added first so it renders behind the hull.
-        if let first = engineGlowTextures.first {
+        if !hullHidesOverlay(hullType, \.engineSpriteID), let first = engineGlowTextures.first {
             let glow = SKSpriteNode(texture: first)
-            glow.texture?.filteringMode = spriteFilter
+            glow.texture?.filteringMode = filterMode(for: glow.texture)
             glow.blendMode = .add
             glow.zPosition = 0.45   // glow sits above the hull and alt layers (0x004af020)
             glow.isHidden = true
@@ -1437,7 +1450,7 @@ final class GameScene: SKScene {
 
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
-            sprite.texture?.filteringMode = spriteFilter
+            sprite.texture?.filteringMode = filterMode(for: sprite.texture)
             // The original's tint resolver (0x0046e470): the player gets only the
             // oütf ModType 43 paint, never the gövt colour.
             applyShipTint(to: sprite, isPlayer: true, persColor: nil, government: world.player.government)
@@ -1465,18 +1478,18 @@ final class GameScene: SKScene {
 
         // Running-lights + weapon-glow overlays: real per-hull art on top of the
         // hull, additively blended. Lights blink; weapon glow flashes on firing.
-        if let first = lightTextures.first {
+        if !hullHidesOverlay(hullType, \.lightSpriteID), let first = lightTextures.first {
             let lights = SKSpriteNode(texture: first)
-            lights.texture?.filteringMode = spriteFilter
+            lights.texture?.filteringMode = filterMode(for: lights.texture)
             lights.blendMode = .add
             lights.zPosition = 0.5
             lights.isHidden = true
             node.addChild(lights)
             lightNode = lights
         }
-        if let first = weaponGlowTextures.first {
+        if !hullHidesOverlay(hullType, \.weaponGlowSpriteID), let first = weaponGlowTextures.first {
             let wg = SKSpriteNode(texture: first)
-            wg.texture?.filteringMode = spriteFilter
+            wg.texture?.filteringMode = filterMode(for: wg.texture)
             wg.blendMode = .add
             wg.zPosition = 0.5
             wg.isHidden = true
@@ -1486,9 +1499,9 @@ final class GameScene: SKScene {
         // Alternating-sprite overlay: normal (not additive) blending — the Bible
         // describes it as sprites "displayed on top of the basic sprite", i.e.
         // hull detail, not a glow. Drawn just above the hull, below the glows.
-        if let first = altTextures.first {
+        if !hullHidesOverlay(hullType, \.altSpriteID), let first = altTextures.first {
             let alt = SKSpriteNode(texture: first)
-            alt.texture?.filteringMode = spriteFilter
+            alt.texture?.filteringMode = filterMode(for: alt.texture)
             alt.zPosition = 0.4
             node.addChild(alt)
             altNode = alt
@@ -1508,7 +1521,7 @@ final class GameScene: SKScene {
         // Pre-sized art, so drawn at native size; hidden until a hit flares it.
         if let first = shieldTextures.first {
             let shield = SKSpriteNode(texture: first)
-            shield.texture?.filteringMode = spriteFilter
+            shield.texture?.filteringMode = filterMode(for: shield.texture)
             shield.zPosition = 1
             shield.blendMode = .add   // shield layer is additive in the original
             shield.isHidden = true
@@ -3880,7 +3893,7 @@ final class GameScene: SKScene {
         n.textures = textures
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
-            sprite.texture?.filteringMode = spriteFilter
+            sprite.texture?.filteringMode = filterMode(for: sprite.texture)
             n.container.addChild(sprite)
             n.sprite = sprite
         } else {
@@ -3900,7 +3913,7 @@ final class GameScene: SKScene {
         n.textures = textures
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
-            sprite.texture?.filteringMode = spriteFilter
+            sprite.texture?.filteringMode = filterMode(for: sprite.texture)
             n.container.addChild(sprite)
             n.sprite = sprite
         }
@@ -3928,6 +3941,7 @@ final class GameScene: SKScene {
     }
 
     private func syncNPCs() {
+        defer { if hdDebugOverlay { updateHDDebugOverlay() } }
         var seen = Set<Int>()
         // A cloak scanner's 0x0002 bit ("reveal cloaked ships on the screen")
         // keeps cloaked hulls fully visible to the player despite the fade
@@ -4016,7 +4030,7 @@ final class GameScene: SKScene {
         n.engineGlowTextures = glowTextures
         if let first = glowTextures.first {
             let glow = SKSpriteNode(texture: first)
-            glow.texture?.filteringMode = spriteFilter
+            glow.texture?.filteringMode = filterMode(for: glow.texture)
             glow.blendMode = .add
             glow.zPosition = 0.45
             glow.isHidden = true
@@ -4028,7 +4042,7 @@ final class GameScene: SKScene {
         n.textures = textures
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
-            sprite.texture?.filteringMode = spriteFilter
+            sprite.texture?.filteringMode = filterMode(for: sprite.texture)
             applyShipTint(to: sprite, isPlayer: false,
                           persColor: npc.personID.flatMap { galaxy?.game.pers($0) }?.color,
                           government: npc.government)
@@ -4071,7 +4085,7 @@ final class GameScene: SKScene {
         n.lightTextures = lightTex
         if let first = lightTex.first {
             let lights = SKSpriteNode(texture: first)
-            lights.texture?.filteringMode = spriteFilter
+            lights.texture?.filteringMode = filterMode(for: lights.texture)
             lights.blendMode = .add
             lights.zPosition = 0.5
             lights.isHidden = true
@@ -4082,7 +4096,7 @@ final class GameScene: SKScene {
         n.weaponGlowTextures = wgTex
         if let first = wgTex.first {
             let wg = SKSpriteNode(texture: first)
-            wg.texture?.filteringMode = spriteFilter
+            wg.texture?.filteringMode = filterMode(for: wg.texture)
             wg.blendMode = .add
             wg.zPosition = 0.5
             wg.isHidden = true
@@ -4095,7 +4109,7 @@ final class GameScene: SKScene {
         n.altTextures = altTex
         if let first = altTex.first {
             let alt = SKSpriteNode(texture: first)
-            alt.texture?.filteringMode = spriteFilter
+            alt.texture?.filteringMode = filterMode(for: alt.texture)
             alt.zPosition = 0.4
             n.container.addChild(alt)
             n.alt = alt
@@ -4109,7 +4123,7 @@ final class GameScene: SKScene {
         n.shieldTextures = shieldTex
         if let first = shieldTex.first {
             let shield = SKSpriteNode(texture: first)
-            shield.texture?.filteringMode = spriteFilter
+            shield.texture?.filteringMode = filterMode(for: shield.texture)
             shield.zPosition = 1
             shield.blendMode = .add
             shield.isHidden = true
@@ -4772,7 +4786,7 @@ final class GameScene: SKScene {
         -> (frames: [SKTexture], destroyedFrames: [SKTexture], animator: StellarAnimator?) {
         func textures(_ s: SpriteSheet?) -> [SKTexture] {
             guard let s, s.frameCount > 1 else { return [] }
-            return (0..<s.frameCount).compactMap { s.frameCGImage($0) }.map { SKTexture(cgImage: $0) }
+            return SpriteTextures.allFrames(from: s)
         }
         let frames = textures(sheet), wreck = textures(destroyed)
         let count = max(frames.count, wreck.count)
@@ -4784,7 +4798,7 @@ final class GameScene: SKScene {
 
     private func makePlanetVisuals(systemID: Int, game: NovaGame) -> [PlanetVisual] {
         game.stellarObjects(in: systemID).map { entry in
-            let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
+            let tex = entry.sprite.flatMap { SpriteTextures.rotationFrames(from: $0, rotationCount: 1).first }
             let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
             // `spöb.X/Y` is authored +y-down (same convention as `sÿst.X/Y`); flip
             // to this engine/SpriteKit's +y-up world (see `Galaxy.systemContext`).
@@ -5055,6 +5069,7 @@ final class GameScene: SKScene {
         let filterChanged = newSettings.smoothSprites != settings.smoothSprites
         let zoomChanged = newSettings.cameraZoom != settings.cameraZoom
         settings = newSettings
+        HDGraphics.shared.update(settings: newSettings)   // HD art applies to ships/planets built from now on
         if zoomChanged { cameraNode.setScale(cameraZoom) }
         controllerInput?.deadzone = Float(settings.stickDeadzone)   // live "Stick dead zone"
         Haptics.enabled = settings.hapticsEnabled
@@ -5126,7 +5141,7 @@ final class GameScene: SKScene {
 
     /// Recursively set every sprite's texture filtering to the current mode.
     private func applySpriteFiltering(to node: SKNode) {
-        (node as? SKSpriteNode)?.texture?.filteringMode = spriteFilter
+        if let sprite = node as? SKSpriteNode { sprite.texture?.filteringMode = filterMode(for: sprite.texture) }
         for child in node.children { applySpriteFiltering(to: child) }
     }
 
@@ -5213,7 +5228,7 @@ final class GameScene: SKScene {
     private func npcEngineGlowTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcEngineGlowCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, let sheet = galaxy?.game.engineGlowSprite(shipTypeID) {
+        if shipTypeID >= 128, !hullHidesOverlay(shipTypeID, \.engineSpriteID), let sheet = galaxy?.game.engineGlowSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcEngineGlowCache[shipTypeID] = textures
@@ -5224,7 +5239,7 @@ final class GameScene: SKScene {
     private func npcLightTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcLightCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, settings.runningLights, let sheet = galaxy?.game.lightSprite(shipTypeID) {
+        if shipTypeID >= 128, settings.runningLights, !hullHidesOverlay(shipTypeID, \.lightSpriteID), let sheet = galaxy?.game.lightSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcLightCache[shipTypeID] = textures
@@ -5236,7 +5251,7 @@ final class GameScene: SKScene {
     private func npcAltTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcAltCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, let sheet = galaxy?.game.altSprite(shipTypeID) {
+        if shipTypeID >= 128, !hullHidesOverlay(shipTypeID, \.altSpriteID), let sheet = galaxy?.game.altSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcAltCache[shipTypeID] = textures
@@ -5247,7 +5262,7 @@ final class GameScene: SKScene {
     private func npcWeaponGlowTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcWeaponGlowCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, settings.weaponEffects, let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
+        if shipTypeID >= 128, settings.weaponEffects, !hullHidesOverlay(shipTypeID, \.weaponGlowSpriteID), let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcWeaponGlowCache[shipTypeID] = textures
@@ -5362,7 +5377,7 @@ final class GameScene: SKScene {
     /// whatever hull texture it wears; `.add` blends that glow over the ship.
     private func makeIonizeTint(texture: SKTexture) -> SKSpriteNode {
         let t = SKSpriteNode(texture: texture)
-        t.texture?.filteringMode = spriteFilter
+        t.texture?.filteringMode = filterMode(for: t.texture)
         t.blendMode = .add
         t.colorBlendFactor = 1
         t.zPosition = 0.7   // above the hull + running lights, below the shield bubble
@@ -6366,6 +6381,104 @@ final class GameScene: SKScene {
         let armed = allIDs.filter { (galaxy.shipSpec($0)?.mounts.isEmpty == false) }
         let chosen = armed.isEmpty ? allIDs : armed
         return Array(chosen.prefix(cap))
+    }
+
+    // MARK: - HD / 3D debug tools
+
+    /// Draw, on every ship, whether it is using HD art, its frame bounds and
+    /// its real weapon exit points (where shots leave the hull) — for checking
+    /// a model's alignment against the classic hull it replaces.
+    var hdDebugOverlay = false {
+        didSet { if !hdDebugOverlay { removeHDDebugOverlay() } }
+    }
+
+    /// Rebuild every ship and planet in the live system with the current art
+    /// (after switching HD on/off, changing detail, or reloading packs).
+    func debugRefreshGraphics() {
+        evictTextureCaches()
+        npcLightCache.removeAll(); npcWeaponGlowCache.removeAll(); npcAltCache.removeAll()
+        npcEngineGlowCache.removeAll(); npcShieldCache.removeAll()
+        for (_, n) in npcNodes { n.container.removeFromParent() }
+        npcNodes.removeAll()                       // rebuilt by the next syncNPCs
+        if world != nil { adoptPlayerHull() }
+        if let game = galaxy?.game {
+            let fresh = makePlanetVisuals(systemID: systemID, game: game)
+            for v in fresh {
+                guard let sprite = planetNodeByID[v.id] as? SKSpriteNode, let t = v.texture else { continue }
+                sprite.texture = t
+                sprite.texture?.filteringMode = filterMode(for: t)
+            }
+            planetVisuals = fresh
+        }
+    }
+
+    private static let hdOverlayName = "hdDebugOverlay"
+
+    private func removeHDDebugOverlay() {
+        shipNode?.childNode(withName: Self.hdOverlayName)?.removeFromParent()
+        for (_, n) in npcNodes { n.container.childNode(withName: Self.hdOverlayName)?.removeFromParent() }
+        for node in planetNodes { node.childNode(withName: Self.hdOverlayName)?.removeFromParent() }
+    }
+
+    private func updateHDDebugOverlay() {
+        guard let game = galaxy?.game else { return }
+        func overlay(on container: SKNode, ship: Ship, radius: CGFloat) {
+            let hd = game.shan(ship.shipTypeID).map { HDGraphics.shared.isReady($0.baseSpriteID) } ?? false
+            let root: SKNode
+            if let existing = container.childNode(withName: Self.hdOverlayName) { root = existing } else {
+                root = SKNode(); root.name = Self.hdOverlayName; root.zPosition = 40
+                container.addChild(root)
+                let ring = SKShapeNode(circleOfRadius: radius)
+                ring.name = "ring"; ring.lineWidth = 1; ring.glowWidth = 0
+                root.addChild(ring)
+                let label = SKLabelNode(fontNamed: "Menlo-Bold")
+                label.name = "label"; label.fontSize = 9; label.verticalAlignmentMode = .bottom
+                label.position = CGPoint(x: 0, y: radius + 3)
+                root.addChild(label)
+                let points = SKShapeNode()
+                points.name = "points"; points.lineWidth = 1
+                points.strokeColor = .clear
+                root.addChild(points)
+            }
+            let color: SKColor = hd ? SKColor(red: 0.3, green: 1, blue: 0.55, alpha: 0.9) : SKColor(white: 0.8, alpha: 0.6)
+            (root.childNode(withName: "ring") as? SKShapeNode)?.strokeColor = color
+            if let label = root.childNode(withName: "label") as? SKLabelNode {
+                let base = game.shan(ship.shipTypeID)?.baseSpriteID ?? 0
+                label.text = "\(hd ? "HD" : "classic") · ship \(ship.shipTypeID) · sprite \(base)"
+                label.fontColor = color
+            }
+            // Exit points: gun = yellow, turret = cyan, guided = magenta, beam = red.
+            guard let pointsNode = root.childNode(withName: "points") as? SKShapeNode else { return }
+            pointsNode.removeAllChildren()
+            guard let exits = ship.exitPoints else { return }
+            let kinds: [(WeaponExitType, SKColor)] = [(.gun, .yellow), (.turret, .cyan), (.guided, .magenta), (.beam, .red)]
+            for (type, c) in kinds {
+                for i in 0..<4 {
+                    let o = exits.muzzleOffset(type: type, index: i, angle: ship.angle, nose: 0)
+                    guard o.x != 0 || o.y != 0 else { continue }
+                    let dot = SKShapeNode(circleOfRadius: 1.6)
+                    dot.fillColor = c; dot.strokeColor = .black; dot.lineWidth = 0.5
+                    dot.position = CGPoint(x: o.x, y: o.y)
+                    pointsNode.addChild(dot)
+                }
+            }
+        }
+        if let p = world?.player, let node = shipNode { overlay(on: node, ship: p, radius: shipRadius) }
+        for npc in world.npcs {
+            guard let n = npcNodes[npc.entityID] else { continue }
+            overlay(on: n.container, ship: npc, radius: n.radius)
+        }
+        for v in planetVisuals {
+            guard let node = planetNodeByID[v.id], node.childNode(withName: Self.hdOverlayName) == nil else { continue }
+            let label = SKLabelNode(fontNamed: "Menlo-Bold")
+            label.name = Self.hdOverlayName; label.fontSize = 9; label.zPosition = 40
+            let sprite = game.spob(v.id).flatMap { game.spin($0.graphicSpinID) }?.spriteID ?? 0
+            let hd = HDGraphics.shared.isReady(sprite)
+            label.text = "\(hd ? "HD" : "classic") · spöb \(v.id) · sprite \(sprite)"
+            label.fontColor = hd ? SKColor(red: 0.3, green: 1, blue: 0.55, alpha: 0.9) : SKColor(white: 0.8, alpha: 0.6)
+            label.position = CGPoint(x: 0, y: v.radius + 4)
+            node.addChild(label)
+        }
     }
 
     // MARK: - Debug suite: live game-state actions

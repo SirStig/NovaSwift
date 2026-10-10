@@ -1639,6 +1639,14 @@ public struct NovaGame {
     /// derives the count from the PICT's size. nil (logged) when neither works.
     public func spriteSheet(spriteID: Int, maskID: Int, frameWidth: Int, frameHeight: Int,
                             frameCount: Int) -> SpriteSheet? {
+        var sheet = loadSpriteSheet(spriteID: spriteID, maskID: maskID, frameWidth: frameWidth,
+                                    frameHeight: frameHeight, frameCount: frameCount)
+        sheet?.sourceSpriteID = spriteID
+        return sheet
+    }
+
+    private func loadSpriteSheet(spriteID: Int, maskID: Int, frameWidth: Int, frameHeight: Int,
+                                 frameCount: Int) -> SpriteSheet? {
         if resources.resource(NovaType.rleD, spriteID) != nil { return decodedRLE(spriteID) }
         let key = "\(spriteID)/\(maskID)/\(frameWidth)/\(frameHeight)/\(frameCount)"
         cache.lock.lock()

@@ -1,7 +1,8 @@
 # Plug-in toolkit
 
-**Status: planned.** Nothing here is built yet except the pieces called out as
-existing.
+**Status: mostly planned.** The HD extension format, loader and model
+rendering (Part 2, steps 6 to 8) are built; see [HD_PIPELINE.md](HD_PIPELINE.md).
+The rest is not built yet except the pieces called out as existing.
 
 The goal is to give plug-in makers tools the original game never had: a full
 editor for every resource, and a way to ship HD art, 3D models and better audio
@@ -114,9 +115,9 @@ to the classic resource when it's missing or turned off.
 | 3 | Ship/outfit/weapon editors, test in engine | 2 |
 | 4 | Galaxy editor, mission and control-bit editor, validation | 2 |
 | 5 | Store publishing, CLI, templates and docs | 2 |
-| 6 | HD extension format and loader, with fallback | 1 |
+| 6 | HD extension format and loader, with fallback (**built**: [HD_PIPELINE.md](HD_PIPELINE.md)) | 1 |
 | 7 | HD sprites, audio, landing art | 6 |
-| 8 | 3D model import, live 3D view, sprite baking | 6 |
+| 8 | 3D model import and sprite baking (**built**), live 3D view | 6 |
 
 The pilot converter on the [roadmap](ROADMAP.md) shares the write path and is
 planned separately.

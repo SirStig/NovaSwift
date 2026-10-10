@@ -234,7 +234,40 @@ final class GameDataController: ObservableObject {
             prewarmProgress = report
             prewarmFraction = max(prewarmFraction, report.fraction)
         }
+        await prewarmHDGraphics()
         await prewarmStorylineTags(game: game)
+    }
+
+    /// Decode the HD packs' sprites and bake their 3D models now, on the
+    /// loading screen (bakes are cached across launches, so after the first
+    /// time this is a quick read). Skipped when HD graphics are off.
+    /// Re-scan the plug-in folders for graphics packs and rebuild the HD
+    /// layer against the loaded data, then prepare it — the HD debug tools'
+    /// "reload packs" (edit a manifest or swap a model without relaunching).
+    func reloadGraphicsPacks() async {
+        guard let game else { return }
+        let dirs = resolvePluginDirs()
+        let packs = GameLibrary.discoverGraphicsPacks(in: dirs)
+        let graphics = GameLibrary.graphicsCatalog(resources: game.resources, plugins: plugins,
+                                                   graphicsPacks: packs, flatPluginOrder: !pluginsAreManual)
+        HDGraphics.shared.noteSearch(dirs: dirs, packs: packs)
+        HDGraphics.shared.install(catalog: graphics, game: game, settings: GameSettings.load())
+        await prewarmHDGraphics()
+    }
+
+    func prewarmHDGraphics() async {
+        HDGraphics.shared.update(settings: GameSettings.load())
+        guard HDGraphics.shared.isActive else { return }
+        let phase = "Preparing HD graphics"
+        let reports = AsyncStream<PrewarmProgress> { continuation in
+            Task.detached(priority: .userInitiated) {
+                HDGraphics.shared.prewarm { done, total in
+                    continuation.yield(PrewarmProgress(phase: phase, completed: done, total: total))
+                }
+                continuation.finish()
+            }
+        }
+        for await report in reports { prewarmProgress = report }
     }
 
     /// Loads the mission→storyline table from disk cache, or (on a miss)
@@ -374,6 +407,13 @@ final class GameDataController: ObservableObject {
         var newGame = NovaGame(merged, spriteCache: spriteCache)
         newGame.iniStringOverrides = Self.loadIniOverrides(near: baseDir)
         game = newGame
+        // HD / 3D graphics packs: in-file NSgx resources + `.nsx` sidecars.
+        let graphicsDirs = resolvePluginDirs()
+        let graphicsPacks = GameLibrary.discoverGraphicsPacks(in: graphicsDirs)
+        let graphics = GameLibrary.graphicsCatalog(resources: merged, plugins: plugins,
+                                                   graphicsPacks: graphicsPacks, flatPluginOrder: !pluginsAreManual)
+        HDGraphics.shared.noteSearch(dirs: graphicsDirs, packs: graphicsPacks)
+        HDGraphics.shared.install(catalog: graphics, game: newGame, settings: GameSettings.load())
         if let game { CreditsFormatting.refresh(from: game) }
         storylineTagCache = StorylineTagCache(fingerprint: fingerprint)
         storylineTags = [:]   // stale from any previous data set until `prewarm()` recomputes

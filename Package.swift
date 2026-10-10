@@ -22,8 +22,12 @@ let package = Package(
         .library(name: "NovaSwiftSync", targets: ["NovaSwiftSync"]),
         // Plug-in store: catalog metadata + download/install pipeline.
         .library(name: "NovaSwiftPluginStore", targets: ["NovaSwiftPluginStore"]),
+        // HD / 3D graphics extensions: HD atlases, model baking (Apple only).
+        .library(name: "NovaSwiftHD", targets: ["NovaSwiftHD"]),
         // Command-line extractor / inspector.
         .executable(name: "novaswift-extract", targets: ["novaswift-extract"]),
+        // HD pack tool: build, bake, compare and benchmark graphics packs.
+        .executable(name: "novaswift-hd", targets: ["novaswift-hd"]),
     ],
     dependencies: [
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.0"),
@@ -59,6 +63,16 @@ let package = Package(
             name: "novaswift-extract",
             dependencies: ["NovaSwiftKit", "NovaSwiftEngine", "NovaSwiftStory"],
             path: "Sources/novaswift-extract"
+        ),
+        .target(
+            name: "NovaSwiftHD",
+            dependencies: ["NovaSwiftKit", .product(name: "Crypto", package: "swift-crypto")],
+            path: "Sources/NovaSwiftHD"
+        ),
+        .executableTarget(
+            name: "novaswift-hd",
+            dependencies: ["NovaSwiftKit", "NovaSwiftHD"],
+            path: "Sources/novaswift-hd"
         ),
         .testTarget(
             name: "NovaSwiftKitTests",

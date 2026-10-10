@@ -24,6 +24,7 @@ struct DevToolsPane: View {
                 performanceSection
                 cheatsSection
                 worldSection
+                hdSection
                 stressSection
                 deepToolsSection
             }
@@ -45,6 +46,10 @@ struct DevToolsPane: View {
         }
         // Same reporter as Settings, but with the live scene attached so the
         // bundled self-test can also check the flight session.
+        .sheet(isPresented: $debug.showHDViewer) {
+            HDViewerView(debug: debug)
+                .environmentObject(model)
+        }
         .sheet(isPresented: $showBugReport) {
             BugReportView(debug: debug)
                 .environmentObject(model)
@@ -233,6 +238,30 @@ struct DevToolsPane: View {
     }
 
     // MARK: Deep editors
+
+    // MARK: HD / 3D
+    //
+    // The HD graphics layer (docs/HD_PIPELINE.md): A/B the packs' art against
+    // the originals live, check model alignment, and open the turntable viewer.
+
+    private var hdSection: some View {
+        section("HD / 3D", "cube.transparent") {
+            commandToggle("HD graphics", command: "hd", isOn: model.settings.hdGraphics)
+            commandToggle("HD overlay (exit points)", command: "hd overlay", isOn: debug.hdOverlay)
+            HStack(spacing: 6) {
+                commandChip("Detail 2×", "hd detail 2")
+                commandChip("Detail 4×", "hd detail 4")
+            }
+            HStack(spacing: 6) {
+                commandChip("Reload packs", "hd reload")
+                commandChip("Clear cache", "hd clearcache", destructive: true)
+            }
+            HStack(spacing: 6) {
+                commandChip("Status", "hd status")
+                commandChip("Open viewer", "hd view")
+            }
+        }
+    }
 
     private var deepToolsSection: some View {
         section("EDITORS", "wrench.and.screwdriver.fill") {
