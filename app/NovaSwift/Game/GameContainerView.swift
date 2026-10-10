@@ -337,6 +337,10 @@ final class GameHost {
                 guard let ship = scanGame.ship(id), !ship.appearOn.isEmpty else { return true }
                 return StoryEngine(game: scanGame, player: store.state).evaluate(test: ship.appearOn)
             }
+            scene.missionBoardStandsDown = { id in
+                guard let m = scanGame.mission(id) else { return false }
+                return m.flags1 & 0x0001 != 0 && m.shipCount == 1
+            }
             // Mining: the player's scoop collected a destroyed asteroid's yield —
             // add it to cargo (clamped to free hold) and report what was stowed.
             scene.onAsteroidMined = { [weak pilotStore] cargoType, quantity in

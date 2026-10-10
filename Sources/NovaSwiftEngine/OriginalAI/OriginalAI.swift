@@ -208,7 +208,9 @@ public final class OriginalAI {
 
     func runSupervisor(_ rec: OriginalAIShipState, ship: Ship, host: OriginalAIHost) {
         let hull = host.hull(of: ship)
-        if rec.defenseHome != nil {
+        if ship.missionID != nil, ship.brain?.behaviorOverride == .attackStellars {
+            stellarAttackDirective(rec, ship: ship, host: host)
+        } else if rec.defenseHome != nil {
             defenseFleet(rec, ship: ship, host: host)
         } else if hull.flags3 & 0x0003 != 0, leader(of: ship) == nil {
             asteroidMiner(rec, ship: ship, host: host)
@@ -227,6 +229,37 @@ public final class OriginalAI {
             default: break
             }
         }
+    }
+
+    /// `Mission_UpdateShipMissionStellarAttackDirective` 0x004053c0, for a
+    /// mission ship with ShipBehav 2: the first standing destroyable stellar
+    /// of a hostile or xenophobic government, and the first ready planet-type
+    /// weapon that isn't a beam, put the ship in state 0x12 against it.
+    /// Without both it drops a 0x12 attack and flies as a warship, whatever
+    /// its own AI type.
+    func stellarAttackDirective(_ rec: OriginalAIShipState, ship: Ship, host: OriginalAIHost) {
+        guard !ship.disabled, ship.isAlive, rec.state != OriginalAIState.yield else { return }
+        let target = host.stellars.first { s in
+            host.stellarAttackable(s.id) && host.areHostile(s.government, ship.government)
+        }
+        let weapon = ship.weapons.contains { mount in
+            let g = mount.spec.guidance.rawValue
+            return mount.spec.isPlanetTypeWeapon && !mount.spec.isBeam && mount.count > 0 && mount.ready
+                && g != WeaponGuidance.beam.rawValue && g != WeaponGuidance.beamTurret.rawValue && g < 8
+        }
+        if let target, weapon {
+            rec.primary = nil
+            rec.secondary = .stellar(target.id)
+            rec.state = OriginalAIState.stellarAttack
+            return
+        }
+        if rec.state == OriginalAIState.stellarAttack {
+            rec.primary = nil
+            rec.secondary = .none
+            rec.state = OriginalAIState.idle
+            rec.mode = OriginalAIMode.idle
+        }
+        warship(rec, ship: ship, host: host)
     }
 
     // MARK: Records

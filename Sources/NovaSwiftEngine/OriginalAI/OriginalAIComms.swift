@@ -684,6 +684,23 @@ extension OriginalAI {
         mirror(rec, ship)
     }
 
+    /// `Ship_ClearOtherShipsTargetingShip` 0x00415dc0: every other ship whose
+    /// primary or secondary target is `boarded` stands down — state and mode
+    /// 0, both targets cleared, hostility 0. The player's own target stays.
+    func clearShipsTargeting(_ boarded: Ship, in world: World) {
+        for npc in world.npcs where npc !== boarded && npc.isAlive {
+            guard let rec = records[npc.entityID],
+                  rec.primary == boarded.entityID || rec.secondary == .ship(boarded.entityID) else { continue }
+            standDown(npc)
+            rec.hostility = 0
+        }
+    }
+
+    /// The boarded mission ship coasts for `ticks` before it acts again.
+    func setManeuverTimer(_ ship: Ship, _ ticks: Double) {
+        records[ship.entityID]?.maneuverTimer = ticks
+    }
+
     /// A captured ship joins its captor's wing: behavior 6, state and mode 0,
     /// coasting `coastTicks` before it acts.
     func joinWing(_ ship: Ship, coastTicks: Double) {

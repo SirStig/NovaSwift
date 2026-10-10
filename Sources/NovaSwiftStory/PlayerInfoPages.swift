@@ -126,11 +126,33 @@ public struct PlayerInfoPages {
 
     // MARK: Pages 2–4
 
-    /// Cargo: commodities and junk with count words, or "You don't have any
-    /// cargo aboard your ship" (#269).
-    public func cargo() -> String {
+    /// Whether the cargo page has anything to list (0x0046a680): a commodity
+    /// or junk ton, or a loaded mission cargo of some type — even at 0 tons.
+    public var hasCargo: Bool {
+        if player.cargo.values.contains(where: { $0 > 0 }) { return true }
+        return player.activeMissions.contains { am in
+            am.isCarryingCargo && (am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1) >= 0
+        }
+    }
+
+    /// Whether Jettison Cargo is offered (0x0046f140): a commodity or junk
+    /// ton, or the loaded cargo of an abortable mission (0 tons included).
+    /// A non-abortable mission's cargo alone doesn't count.
+    public var canJettison: Bool {
+        let mission = PilotEconomy.missionCargo(player, game: game)
+        if player.cargo.contains(where: { $0.value - (mission[$0.key] ?? 0) > 0 }) { return true }
+        return player.activeMissions.contains { am in
+            guard am.isCarryingCargo, let m = game.mission(am.missionID), m.canAbort else { return false }
+            return (am.resolvedCargoType ?? m.cargoType) >= 0
+        }
+    }
+
+    /// Cargo: commodities and junk with count words. Empty: "You don't have
+    /// any cargo aboard your ship" (#269), or #268 when the fleet carries
+    /// more than the ship (freighter escorts, 0x0049a540).
+    public func cargo(shipCapacity: Int = 0, fleetCapacity: Int = 0) -> String {
         let held = player.cargo.filter { $0.value > 0 }.sorted { $0.key < $1.key }
-        guard !held.isEmpty else { return text.misc(269) }
+        guard hasCargo, !held.isEmpty else { return text.misc(shipCapacity < fleetCapacity ? 268 : 269) }
         return held.map { id, tons in
             let name = Commodity(rawValue: id).map { game.commodityName($0) } ?? game.junk(id)?.name ?? ""
             return "\(text.countWord(tons)) \(text.misc(tons == 1 ? 1 : 2)) \(text.misc(391)) \(name)"

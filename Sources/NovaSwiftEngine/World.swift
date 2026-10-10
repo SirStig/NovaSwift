@@ -4671,6 +4671,10 @@ public final class World {
     /// default would thin out düde spawns before the story layer wires a real
     /// evaluator (which replaces this with an `AppearOn`-against-pilot-bits check).
     public var shipSpawnEligible: (Int) -> Bool = { _ in true }
+    /// Whether boarding a board/rescue ship of mission `id` takes the
+    /// original's stand-down branch (0x0045a3d0: mïsn Flags 0x0001 and a
+    /// ShipCount of 1). The host answers from the mission data.
+    public var missionBoardStandsDown: (Int) -> Bool = { _ in false }
 
     /// The current system's sensor static (`sÿst.Interference`, 0-100). Set when
     /// the world is built for a system; degrades effective sensor range.
@@ -5175,6 +5179,12 @@ public final class World {
             s.missionBoardingGoalReported = true
             // A boarded rescue ship is no longer held; its armor decides.
             if goal == .rescue { s.heldDisabled = false }
+            // 0x0045a3d0's board/rescue branch: the ship coasts 100 calls and
+            // every ship attacking it stands down (0x00415dc0).
+            if missionBoardStandsDown(mid) {
+                originalAI.setManeuverTimer(s, 100)
+                originalAI.clearShipsTargeting(s, in: self)
+            }
             events.append(.missionShipGoalReached(missionID: mid, entityID: s.entityID,
                                                   goal: goal, byPlayer: true))
         }

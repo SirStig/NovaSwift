@@ -83,6 +83,7 @@ final class GameScene: SKScene {
             world?.playerPersGrudges = persGrudges
             if let e = persSpawnEligible { world?.persSpawnEligible = e }
             if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
+            if let e = missionBoardStandsDown { world?.missionBoardStandsDown = e }
             if let room = playerHoldHasRoom { world?.playerHoldHasRoom = room }
             if let left = stellarStrengthLeft { world?.stellarArmor = left() }
         }
@@ -240,6 +241,8 @@ final class GameScene: SKScene {
     var persSpawnEligible: ((Int) -> Bool)?
     /// Host gate: whether a hull with a non-blank `shïp.AppearOn` may spawn now.
     var shipSpawnEligible: ((Int) -> Bool)?
+    /// Host gate: whether boarding mission `id`'s ship stands its attackers down.
+    var missionBoardStandsDown: ((Int) -> Bool)?
     /// The player's mining scoop collected (cargoType, quantity) from a destroyed
     /// asteroid; the host adds it to pilot cargo (clamped to free hold) and returns
     /// the tonnage actually stowed plus the commodity's display name, or nil if the
@@ -2709,6 +2712,7 @@ final class GameScene: SKScene {
         world?.playerPersGrudges = persGrudges
         if let e = persSpawnEligible { world?.persSpawnEligible = e }
         if let e = shipSpawnEligible { world?.shipSpawnEligible = e }
+        if let e = missionBoardStandsDown { world?.missionBoardStandsDown = e }
     }
 
     /// Take the credits aboard a boarded hulk; returns the amount.

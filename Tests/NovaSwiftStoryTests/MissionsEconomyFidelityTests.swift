@@ -200,6 +200,36 @@ final class MissionsEconomyFidelityTests: XCTestCase {
         XCTAssertEqual(s.first { $0.id == 601 }?.payload, "")
     }
 
+    // MARK: NCB and crön (MS-28)
+
+    func testNCBTestWithLeadingWhitespaceIsFalse() {
+        var p = PlayerState()
+        p.setBit(1)
+        XCTAssertTrue(NCBTest("b1").evaluate(p))
+        XCTAssertFalse(NCBTest(" b1").evaluate(p))
+        XCTAssertTrue(NCBTest("").evaluate(p))
+    }
+
+    func testCronContributesOnlyAfterItsHoldoff() {
+        var rt = CronRuntime(cronID: 128)
+        rt.active = true
+        rt.holdoff = 3
+        XCTAssertFalse(rt.contributes)
+        rt.holdoff = 0
+        XCTAssertTrue(rt.contributes)
+    }
+
+    // MARK: Player Info (MS-29)
+
+    func testJettisonNeedsOrdinaryOrAbortableMissionCargo() {
+        let locked = MissionSpec(id: 600, cargoType: 0, cargoQty: 5, cargoPickup: 0, canAbort: false).resource()
+        let (eng, _) = engine([locked])
+        XCTAssertTrue(eng.accept(600))
+        let pages = PlayerInfoPages(game: eng.game, player: eng.player)
+        XCTAssertTrue(pages.hasCargo)
+        XCTAssertFalse(pages.canJettison, "a non-abortable mission's cargo alone can't be jettisoned")
+    }
+
     // MARK: dësc flags
 
     func testDescMovieFlagsDecodeAfterTheMovieName() {

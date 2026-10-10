@@ -124,6 +124,8 @@ protocol OriginalAIHost {
     func tryAssistanceEncounter(_ ship: Ship, odds: Double)
     func transferFuel(to ship: Ship, amount: Double)
     func repairAboveDisable(_ ship: Ship)
+    /// A destroyable stellar (Strength > 0) still standing (0x0046e3c0 false).
+    func stellarAttackable(_ id: Int) -> Bool
 }
 
 /// The original AI's view of a live `World`.
@@ -136,6 +138,10 @@ struct WorldAIHost: OriginalAIHost {
     func ship(_ id: Int) -> Ship? { world.ship(id: id) }
     func random(_ n: Int) -> Int { world.rng.range(n) }
     var stellars: [OriginalAIStellar] { ai.stellars(of: world) }
+    func stellarAttackable(_ id: Int) -> Bool {
+        guard let body = world.systemContext.bodies.first(where: { $0.id == id }), body.isDestroyable else { return false }
+        return !world.stellarsDestroyedThisSession.contains(id) && (world.stellarArmor[id] ?? body.strength) >= 0
+    }
     func hull(of ship: Ship) -> OriginalAIHull { ai.hull(of: ship, world: world) }
     func govt(_ id: Int) -> GovtRes? { id >= govtResourceBase ? world.diplomacy?.govt(id) : nil }
 

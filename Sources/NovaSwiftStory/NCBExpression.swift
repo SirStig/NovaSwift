@@ -38,14 +38,14 @@ public struct NCBTest: Sendable {
 
     public init(_ text: String) {
         source = text
-        // Retain the public API's whitespace normalization. Original resource
-        // strings normally have no leading whitespace.
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        isAlwaysTrue = trimmed.isEmpty
-        hasValidStart = trimmed.first.map { "bB(!pPgGoOeE".contains($0) } ?? true
+        // 0x00447f20: only an empty string is always true, and the raw first
+        // character must open a test — a string starting with a space or a
+        // line break is false.
+        isAlwaysTrue = text.isEmpty
+        hasValidStart = text.first.map { "bB(!pPgGoOeE".contains($0) } ?? true
         var prepared: [Character] = []
         var previous: Character?
-        for ch in trimmed {
+        for ch in text {
             // 0x447F20 inserts a space between adjacent opening parentheses.
             if ch == "(", previous == "(" { prepared.append(" ") }
             prepared.append(ch)
