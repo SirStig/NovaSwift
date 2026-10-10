@@ -256,7 +256,7 @@ extension OriginalAI {
         if npcFollowMode || npcJumpPrep || leaderJump > 0 {
             rec.secondary = leaderRec?.secondary ?? .none
             rec.primary = nil
-            if !leaderShip.isPlayer && ship.inertialess {
+            if !leaderShip.isPlayer && ship.isInertialessNow {
                 setLeader(ship, nil)
                 rec.behavior = hull.inherentAI
                 rec.state = S.departJump

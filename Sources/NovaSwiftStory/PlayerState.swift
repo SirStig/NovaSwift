@@ -125,9 +125,14 @@ public struct CronRuntime: Codable, Hashable, Sendable {
         self.pendingStart = pendingStart
     }
 
-    /// The event counts as running — for Contribute bits and news — from the
-    /// day it triggers until it deactivates, holdoffs included.
+    /// The event counts as running — for news — from the day it triggers until
+    /// it deactivates, holdoffs included; Contribute bits use `contributesBits`.
     public var isActive: Bool { active ?? (startedDate != nil) }
+
+    /// Whether the event's Contribute bits count (0x0046cca0): it is active
+    /// and its holdoff counter has reached zero, so neither the pre- nor the
+    /// post-holdoff wait contributes.
+    public var contributesBits: Bool { isActive && (holdoff ?? 0) < 1 }
 }
 
 /// Where a mission offered at the current landing would send the player, and

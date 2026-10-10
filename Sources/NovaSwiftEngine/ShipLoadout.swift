@@ -613,7 +613,7 @@ extension Galaxy {
             interferenceReduction: interferenceReduction, murkModifier: murkModifier,
             hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject, inertialess: inertialess,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus,
-            ionCapacityBonus: max(0, ionCapBonus), deionizeBonus: max(0, deionizeBonus),
+            ionCapacityBonus: ionCapBonus, deionizeBonus: deionizeBonus,
             jamming: jammingBonus.map { max(0, min(100, $0)) }, hasMiningScoop: hasMiningScoop,
             hyperspaceDistBonus: hyperspaceDistBonus,
             hasAutoRefuel: hasAutoRefuel, hasDensityScanner: hasDensityScanner,

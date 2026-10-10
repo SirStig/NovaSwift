@@ -2724,7 +2724,7 @@ struct GameContainerView: View {
                 cargoLines: m.cargo.map { PlunderLine(label: commodityLabel($0.commodity),
                                                       amount: "\($0.tons)") },
                 creditsAboard: m.credits,
-                ammoAboard: scene.ammoAboard(m.shipID),
+                ammoAboard: scene.ammoAboard(m.shipID, freeMass: plunderFreeMass),
                 energyAboard: Int(scene.fuelAboard(m.shipID).rounded()),
                 captureChance: m.captureChance,
                 onTakeCargo: { plunderPress(scene, m.shipID) { plunderTakeCargo(scene, shipID: m.shipID) } },
@@ -2897,8 +2897,14 @@ struct GameContainerView: View {
     /// "Ammo" plunder button — top up the player's matching weapons from the
     /// hulk's magazines. Ammunition lives on the in-flight weapon mounts (no
     /// separate save field), so this needs no pilot write.
+    /// The player's free mass, which bounds how many plundered rounds fit.
+    private var plunderFreeMass: Int {
+        guard let galaxy = host?.galaxy else { return .max }
+        return model.pilot.freeMass(galaxy: galaxy)
+    }
+
     private func plunderTakeAmmo(_ scene: GameScene, shipID: Int) {
-        let rounds = scene.plunderAmmo(shipID)
+        let rounds = scene.plunderAmmo(shipID, freeMass: plunderFreeMass)
         guard rounds > 0 else { return }
         plunderPanic?.looted(.ammo)
         host?.hud.post("Transferred \(rounds) round\(rounds == 1 ? "" : "s") of ammunition.")
@@ -3006,8 +3012,14 @@ struct GameContainerView: View {
             return
         }
         // One capture in ten ends with the crew scuttling the ship.
-        if Int.random(in: 0..<10) == 0 {
+        if scene.rollCaptureScuttle() {
             hulkSelfDestructs(scene, shipID)
+            return
+        }
+        // A full wing means no capture at all (#124); the hulk stays.
+        guard model.pilot.canAddEscort() else {
+            host?.hud.post(host?.game?.stringList(2002)?.string(at: 124) ?? "You can't command any more escorts.")
+            refreshBoard(scene, shipID: shipID)
             return
         }
         plunderPanic = nil
@@ -3016,7 +3028,12 @@ struct GameContainerView: View {
         if let pid = capturedPers {
             model.pilot.state.recordPersDefeated(pid)
         }
-        pendingCaptureChoice = cap
+        // A captain with no crew of his own isn't asked: the prize escorts.
+        if scene.playerHullCrew < 1 {
+            recruitCapturedShipAsEscort(cap)
+        } else {
+            pendingCaptureChoice = cap
+        }
     }
 
     /// "Use as escort" outcome: register the captured hull in the persistent

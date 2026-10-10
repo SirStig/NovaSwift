@@ -249,8 +249,8 @@ public struct ShanRes {
         turretPoints = points(xBase: 88, yBase: 96, zBase: 152)
         guidedPoints = points(xBase: 104, yBase: 112, zBase: 160)
         beamPoints = points(xBase: 120, yBase: 128, zBase: 168)
-        // 0 on disk means "unset" → 100% (no compression).
-        func comp(_ off: Int) -> Int { let v = i16(d, off); return v == 0 ? 100 : v }
+        // 0 on disk means "unset", and a negative value is read the same: → 100%.
+        func comp(_ off: Int) -> Int { let v = i16(d, off); return v <= 0 ? 100 : v }
         upCompress = (x: comp(136), y: comp(138))
         downCompress = (x: comp(140), y: comp(142))
     }

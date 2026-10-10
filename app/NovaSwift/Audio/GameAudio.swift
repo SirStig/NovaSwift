@@ -136,6 +136,15 @@ final class GameAudio: ObservableObject {
         engine.play(buffer, volume: volume)
     }
 
+    /// Play an escort chatter line unpositioned and report its length in
+    /// seconds (0 if it can't play), so the world can hold the next line until
+    /// this one ends (`DAT_00591a8c`).
+    func playChatter(_ id: Int) -> Double {
+        guard !settings.muteAll, let buffer = library.buffer(for: id) else { return 0 }
+        engine.play(buffer, volume: Float(settings.uiVolume))
+        return Double(buffer.frameLength) / max(1, buffer.format.sampleRate)
+    }
+
     /// Play a `snd ` id positioned in the world relative to the listener (the
     /// player ship / camera). Distance attenuates volume; horizontal offset pans.
     /// `range` is the world distance at which the sound fades to silence.

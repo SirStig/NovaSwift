@@ -347,7 +347,7 @@ public final class StoryEngine {
         for rankID in player.activeRanks {
             bits |= game.rank(rankID)?.contribute ?? 0
         }
-        for (cronID, rt) in player.cronRuntime where rt.isActive {
+        for (cronID, rt) in player.cronRuntime where rt.contributesBits {
             bits |= game.cron(cronID)?.contribute ?? 0
         }
         return bits

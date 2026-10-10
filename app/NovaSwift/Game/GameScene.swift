@@ -184,6 +184,8 @@ final class GameScene: SKScene {
             guard let pid = npc.personID, let pers = game.pers(pid), pers.hailQuote >= 1,
                   world.canTarget(npc, by: world.player), !world.player.isEffectivelyCloaked else { continue }
             if npc.disabled != pers.hailQuoteWhenDisabled { continue }
+            // Flags 0x0800 stays silent while the ship is in AI state 2 (0x00433050).
+            if npc.personFlags & 0x0800 != 0, world.originalAI.record(for: npc.entityID)?.state == OriginalAIState.departJump { continue }
             var forced = false
             if pers.hailQuoteWhenAttacking, !npc.disabled {
                 guard !hailQuoted.contains(npc.entityID), world.isThreatToPlayerSquad(npc) else { continue }
@@ -2246,7 +2248,7 @@ final class GameScene: SKScene {
         // with before its real radius (needed for `formationStation`) is known.
         let slot = world.playerEscorts.count
         let heading = AIBrain.wingHeading(for: player)
-        guard let ship = galaxy.makeLoadedShip(shipType, government: player.government,
+        guard let ship = galaxy.makeLoadedShip(shipType, government: independentGovt,
                                                at: player.position, angle: heading,
                                                skillScale: galaxy.skillVarianceScale(classOf: nil, rng: &world.rng)) else { return false }
         ship.position = AIBrain.formationStation(leaderPosition: player.position, leaderRadius: player.radius,
@@ -2380,6 +2382,14 @@ final class GameScene: SKScene {
         guard let world else { return }
         for event in world.drainEvents() {
             switch event {
+            case let .combatChatter(soundID):
+                let length = audio?.playChatter(soundID) ?? 0
+                if length > 0 {
+                    run(.sequence([.wait(forDuration: length),
+                                   .run { [weak self] in self?.world?.combatChatterPlaying = false }]))
+                } else {
+                    world.combatChatterPlaying = false
+                }
             case let .weaponFired(shooterID, at, _, soundID, weaponID):
                 // Positional for every shooter — the player's own shots report
                 // right at the listener (near-zero distance = full volume), NPC
@@ -2723,9 +2733,9 @@ final class GameScene: SKScene {
     /// Siphon a boarded hulk's jump fuel into the player; returns units taken.
     func plunderFuel(_ id: Int) -> Double { world?.takePlunderFuel(from: id) ?? 0 }
     /// Ammunition a boarded hulk holds for weapons the player also carries.
-    func ammoAboard(_ id: Int) -> Int { world?.ammoAboard(id) ?? 0 }
+    func ammoAboard(_ id: Int, freeMass: Int = .max) -> Int { world?.ammoAboard(id, freeMass: freeMass) ?? 0 }
     /// Transfer a boarded hulk's matching ammunition into the player's weapons.
-    func plunderAmmo(_ id: Int) -> Int { world?.takePlunderAmmo(from: id) ?? 0 }
+    func plunderAmmo(_ id: Int, freeMass: Int = .max) -> Int { world?.takePlunderAmmo(from: id, freeMass: freeMass) ?? 0 }
 
     /// Roll to capture a boarded hulk. On success returns the captured hull's
     /// live entityID / shïp type / name, but doesn't decide what happens to
@@ -2733,9 +2743,17 @@ final class GameScene: SKScene {
     /// and commits via `recruitCapturedEscort` or its own flagship swap.
     /// nil on failure.
     func attemptCapture(_ id: Int) -> (entityID: Int, shipType: Int, name: String)? {
-        guard let world, let cap = world.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)) else { return nil }
+        guard let world, let cap = world.attemptCapture(shipID: id, roll: world.rng.range(100)) else { return nil }
         return (id, cap.shipTypeID, cap.name)
     }
+
+    /// The crew-scuttle roll after a successful capture: one in ten, drawn
+    /// from the world's generator (0x00482940).
+    func rollCaptureScuttle() -> Bool { world.rng.range(10) == 0 }
+
+    /// The player's hull crew; a captain with none sends the prize straight
+    /// into the wing without the take-command question.
+    var playerHullCrew: Int { world.player.crew }
 
     /// Commit the "use as escort" outcome for a hulk `attemptCapture` already
     /// rolled a success for.

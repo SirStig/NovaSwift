@@ -34,7 +34,7 @@ extension NovaGame {
         for rankID in pilot.activeRanks {
             bits |= rank(rankID)?.contribute ?? 0
         }
-        for (cronID, rt) in pilot.cronRuntime where rt.isActive {
+        for (cronID, rt) in pilot.cronRuntime where rt.contributesBits {
             bits |= cron(cronID)?.contribute ?? 0
         }
         return bits

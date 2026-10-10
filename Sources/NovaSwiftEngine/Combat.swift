@@ -944,13 +944,16 @@ public struct ShipExitPoints {
         let i = ((index % pts.count) + pts.count) % pts.count
         let local = pts[i]
         let z = zValues(for: type).indices.contains(i) ? zValues(for: type)[i] : 0
-        // A hull that never authored this hardpoint leaves it at the origin;
-        // firing from dead centre looks wrong, so fall back to a nose muzzle.
-        if local.x == 0 && local.y == 0 && z == 0 { return forward * nose }
+        // A hardpoint the hull never authored sits at the origin: the shot
+        // leaves from the hull centre (less the drop), as in the original
+        // (0x0046c5c0).
+        if local.x == 0 && local.y == 0 { return Vec2(0, z) }
         let right = Vec2(forward.y, -forward.x)    // ship's right in world space
         var world = right * local.x + forward * local.y
-        // Screen-space perspective squish (identity at 100/100).
-        let up = forward.y >= 0                      // nose in the upper screen half
+        // Screen-space perspective squish (identity at 100/100): the "up"
+        // pair for a point above the hull centre on screen, else the "down"
+        // pair; a factor at or below zero reads as 1.0 (loader, C-2).
+        let up = world.y > 0
         let cx = (up ? upCompress.x : downCompress.x) / 100.0
         let cy = (up ? upCompress.y : downCompress.y) / 100.0
         world = Vec2(world.x * cx, world.y * cy)

@@ -331,10 +331,15 @@ public final class Ship {
     /// live position/heading — the real hardpoint the shot leaves from.
     public func muzzle(exitType: WeaponExitType, index: Int) -> Vec2 {
         let nose = radius + 4
-        guard let ep = exitPoints, exitType != .center else {
+        guard let ep = exitPoints else {
             return position + Vec2.heading(angle) * nose
         }
-        return position + ep.muzzleOffset(type: exitType, index: index, angle: angle, nose: nose)
+        // ExitType −1 leaves from the hull centre; the offsets rotate with the
+        // sprite frame's whole-degree heading, not the continuous one (B-12).
+        if exitType == .center { return position }
+        let frames = max(1, stats.rotationFrames)
+        let frameDeg = Double((spriteFrame % frames) * 360 / frames)
+        return position + ep.muzzleOffset(type: exitType, index: index, angle: frameDeg * .pi / 180, nose: nose)
     }
 
     /// Convenience: the muzzle for `mount`'s current exit cursor.
@@ -504,6 +509,8 @@ public final class Ship {
     /// made once when first boarded; nil = not rolled yet.
     public var plunderCargoRoll: (commodity: Int, tons: Int)??
     public var plunderFuelRoll: Int?
+    /// The hulk bank (wëap id) a boarding offers ammunition from, rolled once (B-11).
+    var plunderAmmoBankID: Int?
 
     /// `shïp.Crew` — the crew complement, used on both sides of the EV Nova
     /// capture-odds math (attacker's crew vs. defender's crew × 10). See
@@ -822,6 +829,13 @@ public final class Ship {
     /// outfit ModType 38): the ship has no momentum — its velocity tracks the nose
     /// with no lateral drift. Set at build time from the hull/outfits.
     public var inertialess = false
+    /// This NPC has a leader and its AI sits in velocity-match / station-hold
+    /// (control mode 0x0C): `Outfit_ShipIsInertialess` (0x0046df70) then says
+    /// no, so it flies Newtonian and feels gravity (D-2). Set each step by the
+    /// world after the AI decides.
+    var velocityMatchLed = false
+    /// The inertialess answer the flight, gravity and AI-state code see.
+    var isInertialessNow: Bool { inertialess && !velocityMatchLed }
     /// The throttle-driven target speed for an inertialess hull (its velocity chases
     /// `heading × throttleSpeed`). Unused by inertial ships.
     var throttleSpeed: Double = 0
@@ -1074,7 +1088,7 @@ public final class Ship {
     /// flight. A player ship (no brain) without the hull flag always flies
     /// Newtonian, so the player/AI asymmetry the original had is preserved.
     func fliesInertialess(_ tuning: FlightTuning) -> Bool {
-        if inertialess { return true }
+        if isInertialessNow { return true }
         guard let brain = brain else { return false }
         switch tuning.aiInertialess {
         case .off:        return false
@@ -1128,7 +1142,7 @@ public final class Ship {
         // other heading inputs keep driving the turn.
         var autoHeading = intent.desiredHeading
         var turnKeysLive = true
-        if manual, controllable, intent.reverse, !inertialess {
+        if manual, controllable, intent.reverse, !isInertialessNow {
             let gate = OriginalClock.perSecond(0.05)
             if abs(velocity.x) >= gate || abs(velocity.y) >= gate {
                 autoHeading = OriginalMath.bearingRadians(of: velocity) + .pi
@@ -1189,7 +1203,7 @@ public final class Ship {
         }
 
         let dirDeg = wholeDegreeHeading
-        if inertialess {
+        if isInertialessNow {
             // MARK: Inertialess hull (shïp Flags2 0x0040 / ModType 38)
             // Thrust and reverse move a scalar speed that has no idle decay;
             // the velocity then steers toward heading × speed by at most
@@ -1408,7 +1422,7 @@ public final class World {
     /// physics world still works; when nil, nobody is hostile.
     public var diplomacy: Diplomacy?
     /// The system's stellar geometry (planets, jump radius) for AI navigation.
-    public var systemContext = SystemContext()
+    public var systemContext = SystemContext() { didSet { pendingChatter = nil } }
     /// Catalog used to instantiate NPC ships & weapons. Optional for physics-only.
     public var galaxy: Galaxy?
     /// Populates and refreshes the NPC population.
@@ -2472,6 +2486,8 @@ public final class World {
                 let npcIntent: ControlIntent
                 if npc.brain != nil {
                     npcIntent = originalAI.think(ship: npc, world: self, dt: dt)
+                    npc.velocityMatchLed = npc.brain?.leaderID != nil
+                        && originalAI.record(for: npc.entityID)?.mode == OriginalAIMode.velocityMatch
                 } else if npc.remotePlayer != nil {
                     // Another player's ship: driven from the outside, just like the
                     // local player, from the intent the net layer published this
@@ -3203,15 +3219,19 @@ public final class World {
         return p
     }
 
-    /// Nearest hittable ship to `pos` (for submunitions that seek the nearest
-    /// valid target).
+    /// `Ship_FindNearestHittableWeaponTarget` (0x0046ba30): the first ship, in
+    /// slot order, that the shot may hit and that has the smallest distance
+    /// `trunc|dx|² + trunc|dy|²` held in an Int16 (so it wraps negative past
+    /// ~181 px per axis); a strictly smaller value is needed to replace it.
     private func nearestHostile(to pos: Vec2, shot: Projectile) -> Ship? {
         var best: Ship?
-        var bestD = Double.greatestFiniteMagnitude
+        var bestD: Int16 = 0
         for other in allShips where other.isAlive {
             guard canShotHit(shot, other) else { continue }
-            let d = (other.position - pos).length
-            if d < bestD { bestD = d; best = other }
+            let dx = Int16(truncatingIfNeeded: Int(abs(other.position.x.rounded(.towardZero) - pos.x.rounded(.towardZero))))
+            let dy = Int16(truncatingIfNeeded: Int(abs(other.position.y.rounded(.towardZero) - pos.y.rounded(.towardZero))))
+            let d = dx &* dx &+ dy &* dy
+            if best == nil || d < bestD { bestD = d; best = other }
         }
         return best
     }
@@ -4115,9 +4135,14 @@ public final class World {
         for i in 0..<sub.count {
             var aim = wholeDegrees(p.facing)
             var subTarget = p.targetID
-            if sub.fireAtNearest, let near = nearestHostile(to: pos, shot: p) {
-                aim = subSpec.guidance == .guided ? aim : OriginalMath.bearingRadians(from: pos, to: near.position)
-                subTarget = near.entityID
+            // A pointDefense (9) parent hands its own target down; otherwise
+            // Flags2 0x0010 aims at the nearest hittable ship — for every
+            // guidance — falling back to the parent's target (0x00420d30).
+            if p.guidance != .pointDefense, sub.fireAtNearest {
+                if let near = nearestHostile(to: pos, shot: p) ?? p.targetID.flatMap({ ship(id: $0) }) {
+                    aim = OriginalMath.bearingRadians(from: pos, to: near.position)
+                    subTarget = near.entityID
+                }
             }
             if theta > 0 {
                 aim += Double(rng.range(2 * theta) - theta) * .pi / 180
@@ -4161,6 +4186,9 @@ public final class World {
             return true
         }
         let owner = ship(id: shot.ownerID)
+        // A miner's shots (an NPC in state 0x10) never hit ships (0x00426ef0).
+        if let owner, !owner.isPlayerControlled,
+           originalAI.record(for: owner.entityID)?.state == OriginalAIState.asteroid { return false }
         // Player-vs-player: co-op partners are gated by the session rule.
         if victim.isPlayerControlled, owner?.isPlayerControlled == true, victim.entityID != shot.ownerID {
             return pvpAllowed
