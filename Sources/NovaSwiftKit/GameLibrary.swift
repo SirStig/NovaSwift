@@ -305,6 +305,24 @@ public enum GameLibrary {
         return (base, files)
     }
 
+    // MARK: Plug-in files that failed to load
+
+    /// A plug-in file the last `merge` could not open (the original logs and
+    /// skips it; the launcher lists it).
+    public struct FailedPluginFile: Equatable, Sendable {
+        public let url: URL
+        public let reason: String
+    }
+
+    private static let failedLock = NSLock()
+    nonisolated(unsafe) private static var failedFiles: [FailedPluginFile] = []
+
+    /// The plug-in files that failed to open in the most recent `merge`.
+    public static var lastFailedPluginFiles: [FailedPluginFile] {
+        failedLock.lock(); defer { failedLock.unlock() }
+        return failedFiles
+    }
+
     // MARK: Merge (the override chain)
 
     /// Resolve base + enabled plug-ins into one collection. Base files load in
@@ -323,6 +341,7 @@ public enum GameLibrary {
         }
         Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(layers.base.count, privacy: .public) file(s)")
         // Like nv_LoadFilesInFolder, a plug-in file that fails to open is logged and skipped.
+        failedLock.lock(); failedFiles = []; failedLock.unlock()
         let parsed = try parseConcurrently(layers.plugins.map(\.url), context: "plug-in file", strict: false)
         for (i, col) in parsed.enumerated() {
             guard let col else { continue }
@@ -347,6 +366,11 @@ public enum GameLibrary {
                 lock.lock(); results[i] = col; lock.unlock()
             } catch {
                 Log.data.error("merge: failed to load \(context, privacy: .public) \(urls[i].path, privacy: .public): \(String(describing: error), privacy: .public)")
+                if !strict {
+                    failedLock.lock()
+                    failedFiles.append(FailedPluginFile(url: urls[i], reason: String(describing: error)))
+                    failedLock.unlock()
+                }
                 lock.lock(); if firstError == nil { firstError = error }; lock.unlock()
             }
         }

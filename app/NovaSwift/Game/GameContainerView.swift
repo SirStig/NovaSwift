@@ -1870,6 +1870,9 @@ struct GameContainerView: View {
             host?.hud.expandText = { text in
                 OriginalText(game: game).expandStatusText(text, player: model.pilot.state)
             }
+            var patterns: [Int: CGImage] = [:]
+            for id in 128..<138 { if let cg = game.pixPatSheet(id)?.makeCGImage() { patterns[id] = cg } }
+            host?.hud.radarPatterns = patterns
         }
         // Feed a mission special-ship's completed goal back into the story engine
         // (decrement the objective, complete the mission if it was the last one).

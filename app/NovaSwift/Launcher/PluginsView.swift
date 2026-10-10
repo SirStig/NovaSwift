@@ -89,6 +89,17 @@ struct PluginsView: View {
 
     private var installedList: some View {
         List {
+            if !model.data.failedPluginFiles.isEmpty {
+                Section(header: Text("Failed to load"),
+                        footer: Text("These files could not be opened and were skipped.")) {
+                    ForEach(model.data.failedPluginFiles, id: \.url) { f in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(f.url.lastPathComponent).font(.headline)
+                            Text(f.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+            }
             if model.data.plugins.isEmpty {
                 ContentUnavailableViewCompat(
                     title: "No plug-ins installed",
