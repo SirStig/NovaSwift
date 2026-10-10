@@ -2870,6 +2870,13 @@ public final class World {
             let exitIndex: Int
             if spec.firesFromClosestExit, let target {
                 exitIndex = ship.closestExitIndex(exitType: spec.exitType, to: target.position)
+                // The per-type cursor still steps: a shot stores best + 1
+                // (0x0046c320), a beam advances its old cursor (0x00427a90).
+                if spec.isBeam {
+                    _ = nextExitQuadrant(ship, spec.exitType)
+                } else if ship.exitPoints != nil, spec.exitType != .center {
+                    ship.exitQuadrants[spec.exitType] = (exitIndex + 1) % 4
+                }
             } else {
                 exitIndex = nextExitQuadrant(ship, spec.exitType)
             }
@@ -3109,7 +3116,15 @@ public final class World {
         p.hitsAnyShip = spec.hitsAnyShip
         p.subsOnExpire = !spec.noSubmunitionsOnExpire
         p.expiryBlast = spec.detonateOnExpire && spec.blastRadius > 0 && !spec.isPlanetTypeWeapon
-        p.nonLethal = spec.disablesOnly
+        // A1: an NPC boarding, or locked on a target it hasn't disabled yet,
+        // fires non-lethal shots (0x0041fd30). Its shot target is its primary
+        // target; a submunition's is the child's own.
+        if let shooter, !spec.disablesOnly {
+            let shotTarget = (subDepth == 0 ? shooter.currentTargetID : targetID).flatMap { ship(id: $0) }
+            p.nonLethal = originalAI.shotIsNonLethal(shooter: shooter, target: shotTarget)
+        } else {
+            p.nonLethal = spec.disablesOnly
+        }
         p.ownerLeaderID = shooter?.brain?.leaderID
         p.jamLocks = spec.jamVulnerability.map { $0 > 0 ? rng.range($0 + 1) : 0 }
         if let shooter, subDepth == 0,
@@ -3255,6 +3270,8 @@ public final class World {
         /// Where the last call's sweep ended, and whether it touched anything.
         var lastEnd = Vec2()
         var lastHit = false
+        /// The record's non-lethal byte (+0x20), fixed when it is queued.
+        var nonLethal = false
         init(shooterID: Int, mountIndex: Int, spec: WeaponSpec, targetShipID: Int?,
              targetShot: Projectile?, exitIndex: Int) {
             self.shooterID = shooterID; self.mountIndex = mountIndex; self.spec = spec
@@ -3271,6 +3288,12 @@ public final class World {
         let record = BeamRecord(shooterID: ship.entityID, mountIndex: mountIndex, spec: spec,
                                 targetShipID: targetShipID, targetShot: targetShot,
                                 exitIndex: exitIndex ?? (mountIndex < ship.weapons.count ? ship.weapons[mountIndex].exitCursor : 0))
+        // A1: the record's non-lethal byte (0x00427a90) — the weapon's own
+        // Flags2 0x1000, or an NPC locked on its not-yet-disabled primary
+        // target; never for a beam aimed at a shot.
+        record.nonLethal = spec.disablesOnly
+            || (targetShot == nil && originalAI.beamIsNonLethal(
+                shooter: ship, target: ship.currentTargetID.flatMap { self.ship(id: $0) }))
         if !spec.loopSound || spec.isPointDefense {
             let visual = ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex, weaponID: spec.id,
                                     from: ship.position, to: ship.position, hit: false,
@@ -3368,7 +3391,7 @@ public final class World {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization, ionizeColor: spec.ionizeColor,
                      piercing: spec.penetratesShields, weaponID: spec.id,
-                     disablesOnly: spec.disablesOnly,
+                     disablesOnly: record.nonLethal,
                      impact: spec.impact, impactFrom: origin, hitPoint: cast.end)
         } else if let rock = cast.hitAsteroid {
             applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage,
@@ -4109,7 +4132,12 @@ public final class World {
         // "log on change/transition" here — every hit is its own event), and
         // splash damage can call this several times in the same instant for a
         // clustered group. Destroy/disable transitions get their own lines.
-        ship.applyDamage(shield: shield, armor: armor, piercing: piercing, nonLethal: disablesOnly)
+        // A1: an NPC hitting its own primary target while it (or its squad
+        // leader) is boarding never destroys it (0x004192d0).
+        let nonLethal = disablesOnly
+            || (ownerID > 0 && self.ship(id: ownerID).map {
+                originalAI.hitIsNonLethal(attacker: $0, victimID: ship.entityID) } == true)
+        ship.applyDamage(shield: shield, armor: armor, piercing: piercing, nonLethal: nonLethal)
         originalAI.noteHit(ship, attackerID: ownerID, shield: shield, armor: armor, world: self)
         // A death blast never disables: past the line, armor is set back to
         // just above it (`max × 0.3333 + 1`, or `0.1` with hull Flags 0x0010).

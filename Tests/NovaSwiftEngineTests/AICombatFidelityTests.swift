@@ -102,4 +102,72 @@ final class AICombatFidelityTests: XCTestCase {
         r.state = OriginalAIState.idle
         XCTAssertFalse(w.originalAI.isThreatenedByEnemy(supporter, of: context, host: host(w)))
     }
+
+    // MARK: Disable-only fire (A1)
+
+    /// 0x004192d0: a boarder's hit on its own target leaves armor at 1; the
+    /// same hit from an attacking ship destroys.
+    func testBoarderHitOnItsTargetIsNonLethal() {
+        for (state, survives) in [(OriginalAIState.board, true), (OriginalAIState.attack, false)] {
+            let w = world()
+            let pirate = npc("Pirate", govt: 129, at: Vec2(0, 0))
+            let trader = npc("Trader", govt: 128, at: Vec2(100, 0))
+            w.addNPC(pirate); w.addNPC(trader)
+            let r = rec(w, pirate)
+            r.state = state
+            r.primary = trader.entityID
+            trader.shield = 0
+            trader.armor = 2
+            w.applyHit(to: trader, shield: 0, armor: 50, ownerID: pirate.entityID)
+            XCTAssertEqual(trader.isAlive, survives, "state \(state)")
+            if survives { XCTAssertEqual(trader.armor, 1) }
+        }
+    }
+
+    /// The squad leader's boarding state covers its escorts' hits too.
+    func testEscortOfABoardingLeaderFiresNonLethal() {
+        let w = world()
+        let leader = npc("Leader", govt: 129, at: Vec2(0, 0))
+        let wing = npc("Wing", govt: 129, at: Vec2(30, 0))
+        let trader = npc("Trader", govt: 128, at: Vec2(100, 0))
+        for s in [leader, wing, trader] { w.addNPC(s) }
+        wing.brain?.leaderID = leader.entityID
+        rec(w, leader).state = OriginalAIState.board
+        let r = rec(w, wing)
+        r.state = OriginalAIState.attack
+        r.primary = trader.entityID
+        trader.shield = 0; trader.armor = 2
+        w.applyHit(to: trader, shield: 0, armor: 50, ownerID: wing.entityID)
+        XCTAssertEqual(trader.armor, 1)
+    }
+
+    /// 0x0041fd30: a shot from an NPC locked on (state 4, control 0x0F) a
+    /// target that isn't disabled carries the non-lethal byte; once the
+    /// target is disabled the lock no longer marks it.
+    func testLockedOnShotsCarryTheNonLethalByte() {
+        let w = world()
+        let pirate = npc("Pirate", govt: 129, at: Vec2(0, 0))
+        let trader = npc("Trader", govt: 128, at: Vec2(0, 200))
+        w.addNPC(pirate); w.addNPC(trader)
+        let r = rec(w, pirate)
+        r.state = OriginalAIState.attack
+        r.mode = OriginalAIMode.boardHold
+        r.primary = trader.entityID
+        pirate.currentTargetID = trader.entityID
+        let shot = w.spawnProjectile(spec: gun(), muzzle: pirate.position, aim: 0, ownerID: pirate.entityID,
+                                     ownerGovt: 129, ownerVelocity: Vec2(), targetID: nil, subDepth: 0,
+                                     shooter: pirate)
+        XCTAssertTrue(shot.nonLethal)
+        trader.armor = 10
+        let late = w.spawnProjectile(spec: gun(), muzzle: pirate.position, aim: 0, ownerID: pirate.entityID,
+                                     ownerGovt: 129, ownerVelocity: Vec2(), targetID: nil, subDepth: 0,
+                                     shooter: pirate)
+        XCTAssertFalse(late.nonLethal, "the target is already disabled")
+        r.mode = OriginalAIMode.pursuit
+        trader.armor = 100
+        let plain = w.spawnProjectile(spec: gun(), muzzle: pirate.position, aim: 0, ownerID: pirate.entityID,
+                                      ownerGovt: 129, ownerVelocity: Vec2(), targetID: nil, subDepth: 0,
+                                      shooter: pirate)
+        XCTAssertFalse(plain.nonLethal)
+    }
 }

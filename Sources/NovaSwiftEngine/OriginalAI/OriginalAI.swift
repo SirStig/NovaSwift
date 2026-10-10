@@ -425,6 +425,44 @@ public final class OriginalAI {
         }
     }
 
+    // MARK: Disable-only fire
+
+    /// `Ship_IsShipLockedOnTarget` (0x004124f0): boarding (state 0x0D), or
+    /// attacking with the board-hold control (state 4, mode 0x0F), with
+    /// `targetID` as the primary target.
+    func isLockedOnTarget(_ shooter: Ship, targetID: Int) -> Bool {
+        guard let rec = records[shooter.entityID], rec.primary == targetID else { return false }
+        return rec.state == OriginalAIState.board
+            || (rec.state == OriginalAIState.attack && rec.mode == OriginalAIMode.boardHold)
+    }
+
+    /// The non-lethal byte a new shot gets from its NPC shooter
+    /// (`Shot_SpawnShotFromWeapon` 0x0041fd30): locked on a target that isn't
+    /// disabled yet, or boarding at all (0x004115a0).
+    func shotIsNonLethal(shooter: Ship, target: Ship?) -> Bool {
+        guard !shooter.isPlayerControlled, let rec = records[shooter.entityID] else { return false }
+        if let target, !target.disabled, isLockedOnTarget(shooter, targetID: target.entityID) { return true }
+        return rec.state == OriginalAIState.board
+    }
+
+    /// The beam record's non-lethal byte (`Shot_QueueBeamHit` 0x00427a90):
+    /// the locked-on arm only, and never for a beam aimed at a shot.
+    func beamIsNonLethal(shooter: Ship, target: Ship?) -> Bool {
+        guard !shooter.isPlayerControlled, let target, !target.disabled else { return false }
+        return isLockedOnTarget(shooter, targetID: target.entityID)
+    }
+
+    /// The hit-time arm of `Ship_ApplyDamageToShip` (0x004192d0): a hit from
+    /// an NPC whose primary target is the victim is non-lethal while that NPC,
+    /// or its (NPC) squad leader, is boarding (0x00415e80).
+    func hitIsNonLethal(attacker: Ship, victimID: Int) -> Bool {
+        guard !attacker.isPlayerControlled, let rec = records[attacker.entityID],
+              rec.primary == victimID else { return false }
+        if rec.state == OriginalAIState.board { return true }
+        guard let l = leader(of: attacker), l != World.playerEntityID else { return false }
+        return records[l]?.state == OriginalAIState.board
+    }
+
     // MARK: Squad helpers
 
     func leader(of ship: Ship) -> Int? { ship.brain?.leaderID }
