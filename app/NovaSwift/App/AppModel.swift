@@ -30,6 +30,10 @@ final class AppModel: ObservableObject {
     /// A new pilot has finished their intro and is being offered flight training
     /// before the game begins.
     @Published var pendingTutorialOffer = false
+    /// The roster pilot whose ship was just destroyed (no escape pod) — the
+    /// authentic main menu shows "<name> has been killed" for it, as the
+    /// original does for a loaded pilot whose ship is gone. Session-only.
+    @Published var killedPilotID: UUID?
 
     @Published var settings: GameSettings = .load()
     @Published var bindings: KeyBindings = .load()
@@ -473,6 +477,7 @@ final class AppModel: ObservableObject {
     @discardableResult
     func enterShip() -> Bool {
         guard let save = roster.selected else { return false }
+        killedPilotID = nil
         play(save)
         return true
     }

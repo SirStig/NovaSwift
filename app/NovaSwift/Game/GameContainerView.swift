@@ -336,6 +336,7 @@ final class GameHost {
                     pilotStore.save()
                     model.returnToMainMenu()
                 } else {
+                    model.killedPilotID = pilotStore.rosterID
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
                         model.returnToMainMenu()
                     }
