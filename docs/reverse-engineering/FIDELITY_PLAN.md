@@ -3706,6 +3706,9 @@ Done: classic star map zoom steps and button gates, route drawing, Find (0x004aa
 overlay, route mini map in flight (H and hop arrival), shipyard/hire list order and per-flag hide rules (0x00469e90),
 bar Hire Escort gate, one-shot quantity prompt, trade-center status strip and keys, shop grid arrow keys, bribe prompt
 wording and amount format, news headline, comm middle button rules, self-destruct docked boarders, landing PICT fallback.
-Open: beam-lock jump gate (D-11), squad-jump push sync (D-9), hypergate stellar animation (D-6), pixel-mask adjacency
-quirk (F, needs oracle), deadly-stellar mask collision (D-13), "No hyperspace effects" (S-10), escort free space in the
-trade strip (fleet holds not modelled), disaster sentence in the trade strip.
+Also done: trade strip with escort free space and the disaster sentence (exe separators), route mini map with its
+original size, cycle key and zoom keys (60 Hz ticks confirmed), tractor-beam lock (jump gate, drag, speed/turn cut),
+squad-jump push sync, StellarAnimator port incl. hypergate open/close, deadly-stellar pixel masks, the run-walk
+abutment quirk (oracle-confirmed), "no hyperspace effects" preference.
+Open: D-7 MapReveal first-visible-twin (existing fixtures place all systems at one point), stellar mask uses frame 0,
+tractor pull of a light owner toward a heavy victim.

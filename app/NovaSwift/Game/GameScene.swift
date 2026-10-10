@@ -4214,6 +4214,11 @@ final class GameScene: SKScene {
     /// Advance the jump one frame and return the `ControlIntent` that flies it.
     /// Called from `update` in place of manual input while `jumpPhase != .none`.
     private func stepJump(_ dt: Double) -> ControlIntent {
+        defer {
+            // "No hyperspace effects" (g_nv_noHyperspaceEffects): the flash colour
+            // goes black and the brighten ramp is never set (0x00872384).
+            if settings.noHyperspaceEffects { jumpFlash?.isHidden = true; jumpFlash?.alpha = 0 }
+        }
         jumpClock += dt
         let p = world.player
         var intent = ControlIntent()
@@ -4345,6 +4350,7 @@ final class GameScene: SKScene {
     /// `stretch` elongates the lines along the travel direction.
     private func showJumpStreaks(intensity: CGFloat, stretch: CGFloat) {
         guard let streaks = jumpStreaks else { return }
+        if settings.noHyperspaceEffects { streaks.isHidden = true; return }
         streaks.isHidden = false
         streaks.alpha = intensity * 0.7
         streaks.yScale = stretch

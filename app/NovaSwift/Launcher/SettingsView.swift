@@ -316,6 +316,8 @@ struct SettingsView: View {
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Screen shake", isOn: binding(\.screenShake))
             Toggle("Windows hyperspace look", isOn: binding(\.ceHyperspaceLook))
+            Toggle("Hyperspace effects", isOn: Binding(get: { !model.settings.noHyperspaceEffects },
+                                                       set: { model.settings.noHyperspaceEffects = !$0 }))
         } header: {
             sectionHeader("Graphics", icon: "sparkles")
         } footer: {
