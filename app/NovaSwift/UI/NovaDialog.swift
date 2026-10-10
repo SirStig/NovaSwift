@@ -73,6 +73,14 @@ struct NovaDialog<Content: View>: View {
             .cursorScaleEffect(1.5)
             #endif
         }
+        // Return presses the default button, as the original's native dialogs
+        // do (0x004cfdd0 → item 1). They set no cancel item, so Esc does nothing.
+        .novaDialogKeys(onDefault: defaultAction)
+    }
+
+    private var defaultAction: (() -> Void)? {
+        guard let b = buttons.first(where: { $0.isDefault }), b.enabled else { return nil }
+        return { model.audio.play(.uiSelect); b.action() }
     }
 
     /// One card variant. `scrolls` wraps the body in a `ScrollView` so an
