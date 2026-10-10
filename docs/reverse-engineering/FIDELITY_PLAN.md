@@ -3699,3 +3699,12 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
    NovaSwift save slots with it (FL-03).
 5. Hitch behaviour (Q-FL-13) and persisting offer rolls / aux ships in `.evpilot` (Q-MS-06).
 6. Whether any FIX-only item listed at the end of §3 should be kept as a toggle instead.
+
+## Missions / economy sweep (fix/missions-economy)
+
+Done: the missions_session and economy_save reports' offers, cargo, special-ship, BBS, status-bar
+cargo panel, hire/shipyard list, pilot-open items, murk as a per-sprite distance fog (`MurkFog`,
+0x00438db0), background-sprite murk level (0x0042e590; the tiled star layers keep their own
+wrap), debris puffs (`DebrisPuffs.swift`, 0x00428090 / 0x0043b170; drawn as grey dots, the puff
+art is not identified) and the ambush hail quote's 'STR ' override. Offer movies autoplay with Skip.
+Left: hail-quote wildcard expansion (rides on main's `expandStatusText`).

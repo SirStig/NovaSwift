@@ -215,12 +215,16 @@ extension Spawner {
         ship.position = Vec2(Double(world.rng.range(span) - OriginalSpawnRules.initialScatter),
                              Double(world.rng.range(span) - OriginalSpawnRules.initialScatter))
         world.addNPC(ship, arrival: .populate)
-        if let pers = galaxy.game.pers(revengeID), pers.hailQuote > 0,
-           let quotes = galaxy.game.stringList(7101)?.strings, pers.hailQuote <= quotes.count {
-            // `<OSN>` names the speaking përs (0x004444f0); the host's status
-            // bar fills the player tags.
-            world.postOverlayMessage(quotes[pers.hailQuote - 1].replacingOccurrences(of: "<OSN>", with: pers.name),
-                                     frames: 360)
+        // 0x00426d10: a 'STR ' resource at HailQuote + 4999 overrides STR# 7101.
+        // `<OSN>` names the speaking përs (0x004444f0); the host's status bar
+        // fills the player tags.
+        if let pers = galaxy.game.pers(revengeID), pers.hailQuote > 0 {
+            let quotes = galaxy.game.stringList(7101)?.strings ?? []
+            let quote = galaxy.game.singleString(pers.hailQuote + 4999)
+                ?? (pers.hailQuote <= quotes.count ? quotes[pers.hailQuote - 1] : nil)
+            if let quote, !quote.isEmpty {
+                world.postOverlayMessage(quote.replacingOccurrences(of: "<OSN>", with: pers.name), frames: 0x1a4)
+            }
         }
     }
 

@@ -126,7 +126,7 @@ struct TradeCenterView: View {
     private var qtyUpperBound: Int {
         guard let c = current else { return max(1, pendingQty) }
         let buyLimit = c.price > 0 ? min(pilot.cargoFree(galaxy: galaxy), pilot.state.credits / c.price) : pilot.cargoFree(galaxy: galaxy)
-        let sellLimit = pilot.held(cargo: c.cargoID)
+        let sellLimit = pilot.held(cargo: c.cargoID, game: game)
         return max(1, buyLimit, sellLimit)
     }
 
@@ -135,15 +135,19 @@ struct TradeCenterView: View {
     // ~23px rows that overran the list panel).
     private var list: some View {
         VStack(spacing: 0) {
+            // Column headers from STR# 2002 (0x0048d6f0): #197, the price
+            // level #200, and the hold — #198 when the fleet carries more than
+            // the ship, else #199.
             HStack(spacing: 0) {
-                NovaText("Commodity", size: 10, color: .gray, width: 160)
-                NovaText("Price", size: 10, color: .gray, width: 62, align: .center)
-                NovaText("Cost/ton", size: 10, color: .gray, width: 70, align: .center)
-                NovaText("Hold", size: 10, color: .gray, width: 60, align: .trailing)
+                NovaText(misc(197, "Commodity"), size: 10, color: .gray, width: 160)
+                NovaText(misc(200, "Price"), size: 10, color: .gray, width: 62, align: .center)
+                NovaText("", size: 10, color: .gray, width: 70, align: .center)
+                NovaText(misc(shipCapacity < pilot.cargoCapacity(galaxy: galaxy) ? 198 : 199, "Hold"),
+                         size: 10, color: .gray, width: 60, align: .trailing)
             }
             .frame(height: 17, alignment: .top)
             ForEach(Array(market.enumerated()), id: \.offset) { i, row in
-                let held = pilot.held(cargo: row.cargoID)
+                let held = pilot.held(cargo: row.cargoID, game: game)
                 HStack(spacing: 0) {
                     NovaText(row.name, size: 10, color: theme.listText, width: 160)
                     NovaText(rowLabel(row), size: 10, color: rowLabelColor(row), width: 62, align: .center)
@@ -162,33 +166,32 @@ struct TradeCenterView: View {
         }
     }
 
-    /// DITL #1001 item 14 — the narrow strip between list and buttons. The
-    /// game shows status text here; this port uses it for the credits readout,
-    /// the tap-to-edit transaction quantity (real DITL #1003 "qty" prompt), and
-    /// — when an `öops` disaster is active at this stellar — its name, per the
-    /// Bible's "what's happening here" trade banner (`JUNK_OOPS_DESIGN.md` §B.5).
+    /// DITL #1001 item 14 — the narrow strip between list and buttons: the
+    /// original's status text (0x0048d6f0) — mission and junk cargo aboard,
+    /// the ship's free space and, with freighter escorts, theirs — and the
+    /// first active disaster's sentence.
     private var statusLine: some View {
-        HStack(spacing: 0) {
-            Button { showQtyPrompt = true } label: {
-                NovaText("×\(pendingQty) per tap", size: 10, color: .gray, width: 90)
-                    .contentShape(Rectangle())
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 2) {
+                NovaText(LandedServices.tradeStatus(state: pilot.state, game: game,
+                                                    shipCapacity: shipCapacity,
+                                                    fleetCapacity: pilot.cargoCapacity(galaxy: galaxy),
+                                                    junkRows: Set(market.map(\.cargoID).filter { $0 >= 128 }))
+                            .replacingOccurrences(of: "\r", with: "\n"),
+                         size: 10, color: .gray, width: 346, align: .leading)
+                if let line = LandedServices.tradeDisasterLine(at: spob.id, state: pilot.state, game: game) {
+                    NovaText(line, size: 10, color: Color(red: 1, green: 0.55, blue: 0.3), width: 346, align: .leading)
+                }
             }
-            .buttonStyle(.novaPlain)
-            if let banner = disasterBanner {
-                NovaText(banner, size: 10, color: Color(red: 1, green: 0.55, blue: 0.3), width: 126)
-            }
-            Spacer(minLength: 0)
-            NovaText(pilot.state.credits.creditsAbbreviated, size: 10,
-                     color: Color(red: 1, green: 0.85, blue: 0.4), width: 130, align: .trailing)
         }
         .frame(width: 346, height: 24)
     }
 
-    /// Active `öops` disaster names for this stellar, joined for display, or
-    /// `nil` when none are active here right now.
-    private var disasterBanner: String? {
-        let names = LandedServices.activeDisasterNames(at: spob.id, state: pilot.state, game: game)
-        return names.isEmpty ? nil : names.joined(separator: ", ")
+    private var shipCapacity: Int { PilotEconomy.shipCargoCapacity(pilot.state, galaxy: galaxy) }
+
+    private func misc(_ n: Int, _ fallback: String) -> String {
+        let s = game.stringList(2002)?.string(at: n) ?? ""
+        return s.isEmpty ? fallback : s
     }
 
     private var current: TradeRow? {
@@ -200,7 +203,7 @@ struct TradeCenterView: View {
     }
     private var canSell: Bool {
         guard let c = current else { return false }
-        return pilot.held(cargo: c.cargoID) > 0
+        return pilot.held(cargo: c.cargoID, game: game) > 0
     }
     private func buy() {
         guard let c = current else {
@@ -221,8 +224,8 @@ struct TradeCenterView: View {
             Log.spaceport.error("Trade sell tapped with no commodity row selected at spöb \(spob.id, privacy: .public) — no-op")
             return
         }
-        let held = pilot.held(cargo: c.cargoID)
-        let sold = pilot.sellCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price)
+        let held = pilot.held(cargo: c.cargoID, game: game)
+        let sold = pilot.sellCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price, game: game)
         if sold == 0 {
             Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
         } else {
@@ -578,9 +581,16 @@ struct ShipyardView: View {
     private var stock: [ShipRes] {
         let day = pilot.state.date.julianDay
         let state = pilot.state
-        return game.shipsSold(at: spob, day: day,
-                              redraws: { state.stockRerollCount(shipType: $0, hire: false, day: day) })
-            .filter { lockState(for: $0) != .hidden }
+        guard spob.hasShipyard else { return [] }
+        return game.shipyardList(
+            at: spob, hire: false,
+            stocked: { s in
+                NovaGame.stocked(buyRandom: s.buyRandom,
+                                 roll: NovaGame.dailyStockRoll(day: day, itemID: s.id, salt: 1,
+                                                               redraw: state.stockRerollCount(shipType: s.id, hire: false, day: day)))
+            },
+            availabilityPasses: { NCBTest($0.availBits).evaluate(state) },
+            requirePasses: { ($0.require & game.contributedBits(pilot: state)) == $0.require })
     }
     /// The net price of `s` here: its price after the tech markdown, rank
     /// scale and rounding, less the trade-in (EC-09).
@@ -901,6 +911,7 @@ struct BarView: View {
                             onDone: { showHolovid = false })
             }
         }
+        .overlay { StoryTextOverlay(services: services) }
         .onAppear { services.onCloseSpaceportScreen = onDone }   // a `Q` from an accept leaves the bar
         .task(id: nextOffer) { await offerPatron(after: nextOffer == 0 ? 15 : 30 + Int.random(in: 0..<30)) }
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
@@ -923,7 +934,12 @@ struct BarView: View {
             return
         }
         Log.spaceport.debug("Bar patron offers mission \(mission.id, privacy: .public) at spöb \(spob.id, privacy: .public)")
-        e.present(mission)
+        if !e.present(mission) {
+            // A can't-refuse offer with no text activated silently.
+            pilot.state = e.player
+            pilot.save()
+            nextOffer += 1
+        }
     }
 
     private func accept(_ offer: MissionOffer) {

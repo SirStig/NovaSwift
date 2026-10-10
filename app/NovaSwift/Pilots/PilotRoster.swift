@@ -123,8 +123,10 @@ final class PilotRoster: ObservableObject {
     /// Create a brand-new pilot from a starting scenario and save it to the store.
     /// Returns the new save (its `player` is what the live pilot should adopt).
     @discardableResult
-    func create(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes, game: NovaGame) -> PilotSave {
-        var player = PilotFactory.make(name: name, isMale: isMale, scenario: scenario, game: game)
+    func create(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes, game: NovaGame,
+                nickname: String = "", shipName: String? = nil) -> PilotSave {
+        var player = PilotFactory.make(name: name, isMale: isMale, scenario: scenario, game: game,
+                                       nickname: nickname, shipName: shipName)
         player.strictPlay = strictPlay
         var save = PilotSave(displayName: name.isEmpty ? "Captain" : name,
                              scenarioName: scenario.displayName,

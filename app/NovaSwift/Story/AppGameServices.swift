@@ -13,9 +13,19 @@ final class AppGameServices: GameServices, ObservableObject {
     /// The mission currently being offered, if any — a mission/spöb screen
     /// observes this to show the briefing sheet.
     @Published var pendingOffer: MissionOffer?
-    /// The most recent narrative text the engine wants shown (mission
-    /// completion, cron news), if any.
-    @Published var storyText: (title: String, text: String)?
+    /// Narrative texts the engine wants shown (briefings, completion and
+    /// failure texts, refusals), oldest first. The original shows each in a
+    /// modal dialog of its own (0x004982a0), so none overwrites another.
+    @Published private(set) var storyQueue: [(title: String, text: String)] = []
+    /// The text on screen: the head of `storyQueue`. Assigning a text queues
+    /// it behind any already waiting; assigning nil dismisses the one shown.
+    var storyText: (title: String, text: String)? {
+        get { storyQueue.first }
+        set {
+            if let newValue { storyQueue.append(newValue) }
+            else if !storyQueue.isEmpty { storyQueue.removeFirst() }
+        }
+    }
 
     var audio: GameAudio?
 

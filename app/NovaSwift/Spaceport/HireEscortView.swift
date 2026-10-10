@@ -41,34 +41,24 @@ struct HireEscortView: View {
     /// Today's galaxy day — the seed for the per-day availability roll.
     private var day: Int { pilot.state.date.julianDay }
 
-    /// Ships offered for hire here today. The pool is what this planet's
-    /// *shipyard* deals in — `game.shipsSold(at:day:)` is tech-level-eligible and
-    /// returns nothing when the spöb has no shipyard, so a bar without a shipyard
-    /// offers no escorts (you can only hire hulls the port actually stocks). From
-    /// that pool, only the hulls whose `HireRandom` roll passes today are on
-    /// offer, so it's a random planet-specific subset that changes day to day —
-    /// never every ship. A hull the player hasn't unlocked for purchase
-    /// (mission/story-gated `Availability`/`Require` — same `lockState` the
-    /// Shipyard's own stock uses, see `ItemLocking.swift`) is dropped entirely
-    /// when it opts into full hiding, same as the Shipyard; otherwise it's still
-    /// listed but locked (see `buttons(_:)`'s `canHire`). Grouped by escort
-    /// category, then fee, the way the escort menu clusters
-    /// fighters/medium/warships/freighters. Passing `day: nil` uses the
-    /// shipyard's tech eligibility without its separate `BuyRandom` stock roll —
-    /// hire availability is the `HireRandom` roll's job.
+    /// Ships offered for hire here today: the hulls whose `HireRandom` roll
+    /// passes today, a random subset that changes day to day.
+    ///
+    /// The hire list is the shipyard list in hire mode (0x00469e90): tech and
+    /// SpecialTech, the day's HireRandom roll, the Flags3 hides, then
+    /// DispWeight order — at any stellar with a bar, shipyard or not.
     private var stock: [ShipRes] {
-        game.shipsSold(at: spob, day: nil)
-            .filter { pilot.escortAvailableToday($0, day: day) }
-            .filter { lockState(for: $0) != .hidden }
-            .sorted { ($0.escortCategory, hirePrice($0)) < ($1.escortCategory, hirePrice($1)) }
+        let state = pilot.state
+        return game.shipyardList(
+            at: spob, hire: true,
+            stocked: { pilot.escortAvailableToday($0, day: day) },
+            availabilityPasses: { NCBTest($0.availBits).evaluate(state) },
+            requirePasses: { ($0.require & game.contributedBits(pilot: state)) == $0.require })
     }
     private func hirePrice(_ s: ShipRes) -> Int { pilot.escortHirePrice(s, at: spob, galaxy: galaxy) }
     /// The original's cap: six hired or captured escorts (EC-19).
     private var wingHasRoom: Bool { pilot.canAddEscort() }
     private var selected: ShipRes? { stock.first { $0.id == selectedID } ?? stock.first }
-    private func lockState(for s: ShipRes) -> LockState {
-        game.lockState(for: s, pilot: pilot.state)
-    }
 
     private static func categoryLabel(_ c: Int) -> String {
         switch c {
@@ -129,7 +119,7 @@ struct HireEscortView: View {
                     ItemTile(name: s.displayName, image: picture?.image,
                              pixelated: picture?.isDedicated == false,
                              selected: (selectedID ?? stock.first?.id) == s.id,
-                             locked: lockState(for: s) != .available)
+                             locked: !NCBTest(s.availBits).evaluate(pilot.state))
                         .onTapGesture { selectedID = s.id }
                         .cursorClickable { selectedID = s.id }
                 } else {
@@ -195,7 +185,9 @@ struct HireEscortView: View {
 
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
-        let canHire = (s.map { pilot.state.credits >= hirePrice($0) && lockState(for: $0) == .available } ?? false)
+        // Hiring checks the credits and the Availability test only; Require
+        // gates buying, not hiring (0x00498dc0).
+        let canHire = (s.map { pilot.state.credits >= hirePrice($0) && NCBTest($0.availBits).evaluate(pilot.state) } ?? false)
             && wingHasRoom
         NovaButton(graphics: graphics,
                    title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),

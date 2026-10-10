@@ -51,6 +51,19 @@ extension StoryEngine {
         state = engine.player
     }
 
+    /// Opening a pilot (0x00486ed0 action 1, 0x004ca120): the nebulae's
+    /// explored marks belong to the session, not the pilot file, so they
+    /// start clear and every visible system the pilot has explored runs its
+    /// region events again, in system order — each active nebula covering
+    /// one fires its OnExplore once more.
+    public func pilotOpened() {
+        player.exploredNebulae = nil
+        let explored = game.systems().map(\.id).sorted().filter { id in
+            isSystemVisible(id) && player.isSystemExplored(id)
+        }
+        exploreNebulae(explored)
+    }
+
     /// The galaxy-map detail level of a system: 0 unknown, 1 visited or
     /// revealed (services "<Unknown>"), 2 landed or charted by a map.
     public func discoveryLevel(_ systemID: Int) -> Int {

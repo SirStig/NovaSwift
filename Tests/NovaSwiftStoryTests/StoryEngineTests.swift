@@ -175,7 +175,7 @@ final class StoryEngineTests: XCTestCase {
         // too there is nowhere to land, so the mission only ends by a script
         // (here its OnShipDone) — it never pays.
         let m = MissionSpec(id: 400, returnStellar: -1, pay: 5000,
-                            shipCount: 2, shipGoal: 0 /* destroy */,
+                            shipCount: 2, shipGoal: 0 /* destroy */, shipDude: 128,
                             onSuccess: "b900", onShipDone: "b901").resource()
         let (eng, svc) = engine([m])
         XCTAssertTrue(eng.accept(400))

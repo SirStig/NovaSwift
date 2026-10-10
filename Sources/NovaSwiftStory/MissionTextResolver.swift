@@ -69,7 +69,7 @@ enum MissionText {
             ("<RST>", returnName), ("<RSY>", returnSystem),
             ("<CT>", cargoName), ("<CQ>", cargoQty), ("<SN>", shipName), ("<DL>", deadline),
             ("<PN>", player.pilotName),
-            ("<PNN>", player.pilotName),   // no nickname: the full name
+            ("<PNN>", (player.nickname ?? "").isEmpty ? player.pilotName : player.nickname!),
             ("<PSN>", player.shipName.isEmpty ? errorText : player.shipName),
             ("<PST>", shipType.isEmpty ? errorText : shipType),
             ("<OSN>", otherShipName ?? errorText),   // only a speaking ship's hail fills it

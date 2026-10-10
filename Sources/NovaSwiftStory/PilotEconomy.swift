@@ -139,6 +139,45 @@ public enum PilotEconomy {
         max(0, cargoCapacity(state, galaxy: galaxy) - cargoUsed(state))
     }
 
+    /// The player ship's own cargo capacity (`Ship_ComputeShipTotalCargoCapacity`
+    /// 0x0046a730): hull Holds plus every owned ModType-2 outfit's ModVal.
+    /// Mission acceptance and pickups measure against this, not the fleet.
+    public static func shipCargoCapacity(_ state: PlayerState, galaxy: Galaxy) -> Int {
+        loadout(state, galaxy: galaxy)?.cargoCapacity ?? galaxy.game.ship(state.shipType)?.cargoSpace ?? 0
+    }
+
+    /// `Player_ComputeRemainingCargoSpace` 0x0046a7c0: the room left in the
+    /// player ship itself. With freighter escorts the fleet's ordinary cargo
+    /// fills the escorts first; mission cargo always rides in the player ship.
+    public static func remainingCargoSpace(_ state: PlayerState, galaxy: Galaxy) -> Int {
+        let own = shipCargoCapacity(state, galaxy: galaxy)
+        let fleet = cargoCapacity(state, galaxy: galaxy)
+        let total = state.usedCargoSpace
+        let mission = missionCargo(state, game: galaxy.game).values.reduce(0, +)
+        if own < fleet {
+            let share = max(0, total - mission - (fleet - own))
+            return own - (share + mission)
+        }
+        return own - total
+    }
+
+    /// Tons of each cargo type the active missions have aboard. The original
+    /// keeps mission cargo in the mission slots, apart from the commodity bins
+    /// and junk counts; NovaSwift merges it into `state.cargo`, so trading and
+    /// fleet-wide hold operations subtract this first. Slots from older saves
+    /// fall back to the static mïsn fields.
+    public static func missionCargo(_ state: PlayerState, game: NovaGame) -> [Int: Int] {
+        var tons: [Int: Int] = [:]
+        for am in state.activeMissions where am.isCarryingCargo {
+            let m = game.mission(am.missionID)
+            let type = am.resolvedCargoType ?? m?.cargoType ?? -1
+            let qty = am.resolvedCargoQty ?? m.map { abs($0.cargoQty) } ?? 0
+            guard type >= 0, qty > 0 else { continue }
+            tons[type, default: 0] += qty
+        }
+        return tons
+    }
+
     /// Free outfit mass remaining (hull free mass minus installed outfit mass).
     public static func freeMass(_ state: PlayerState, galaxy: Galaxy) -> Int {
         loadout(state, galaxy: galaxy)?.freeMass
@@ -146,7 +185,12 @@ public enum PilotEconomy {
     }
 
     public static func owned(_ state: PlayerState, outfit id: Int) -> Int { state.outfits[id] ?? 0 }
-    public static func held(_ state: PlayerState, cargo id: Int) -> Int { state.cargo[id] ?? 0 }
+    /// Tons of cargo `id` in the trade bins (`player+0x7a`) or junk counts —
+    /// what the trade center shows and can sell (0x00465ea0). Mission cargo
+    /// lives in its mission slot and is never part of it.
+    public static func held(_ state: PlayerState, cargo id: Int, game: NovaGame) -> Int {
+        max(0, (state.cargo[id] ?? 0) - (missionCargo(state, game: game)[id] ?? 0))
+    }
 
     /// Route systems a single hyperspace jump crosses, from multi-jump outfits
     /// (ModType 32): `Σ ModVal`, at least 1 (FL-06).
@@ -201,13 +245,15 @@ public enum PilotEconomy {
         return n
     }
 
+    /// Sell up to `tons` of cargo `id` from the trade bins. Mission cargo of
+    /// the same commodity can't be sold (EC-27).
     @discardableResult
-    public static func sellCargo(_ state: inout PlayerState, id: Int, tons: Int, unitPrice: Int) -> Int {
-        let held = state.cargo[id] ?? 0
-        let n = max(0, min(tons, held))
+    public static func sellCargo(_ state: inout PlayerState, id: Int, tons: Int, unitPrice: Int,
+                                 game: NovaGame) -> Int {
+        let n = max(0, min(tons, held(state, cargo: id, game: game)))
         guard n > 0 else { return 0 }
         state.credits += n * unitPrice
-        let left = held - n
+        let left = (state.cargo[id] ?? 0) - n
         if left > 0 { state.cargo[id] = left } else { state.cargo[id] = nil }
         return n
     }
@@ -268,8 +314,9 @@ public enum PilotEconomy {
     }
 
     @discardableResult
-    public static func sellCommodity(_ state: inout PlayerState, _ c: Commodity, tons: Int, unitPrice: Int) -> Int {
-        sellCargo(&state, id: c.cargoID, tons: tons, unitPrice: unitPrice)
+    public static func sellCommodity(_ state: inout PlayerState, _ c: Commodity, tons: Int, unitPrice: Int,
+                                     game: NovaGame) -> Int {
+        sellCargo(&state, id: c.cargoID, tons: tons, unitPrice: unitPrice, game: game)
     }
 
     /// The price actually charged for `o` on the player's current hull

@@ -21,6 +21,9 @@ final class AppModel: ObservableObject {
     /// full-screen at the `RootView` level (not nested in any dialog sheet) so
     /// the intro slideshow always covers the whole window.
     @Published var pendingIntro: CharRes?
+    /// A warning to show once the game is up: the pilot referenced resources
+    /// missing from the loaded data (STR# 140 #52).
+    var pendingLoadNotice: String?
 
     /// Where a flight-training session should hand off when it ends.
     enum TutorialExit: Equatable { case play, menu }
@@ -442,10 +445,12 @@ final class AppModel: ObservableObject {
     /// live pilot. Does not change the screen — the new-pilot UI shows the intro
     /// and then calls `beginPlay()`.
     @discardableResult
-    func createPilot(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes) -> CharRes? {
+    func createPilot(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes,
+                     nickname: String = "", shipName: String? = nil) -> CharRes? {
         prepareAudioAndData()
         guard let game = data.game else { return nil }
-        let save = roster.create(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario, game: game)
+        let save = roster.create(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario, game: game,
+                                 nickname: nickname, shipName: shipName)
         roster.setSelected(save.id)                 // a new pilot becomes the loaded one
         pilot.begin(state: save.player, rosterID: save.id)
         pilot.migrateIfNeeded(game: game)
@@ -457,6 +462,7 @@ final class AppModel: ObservableObject {
     /// whatever happens to be newest).
     func play(_ save: PilotSave) {
         prepareAudioAndData()
+        killedPilotID = nil
         roster.setSelected(save.id)
         var state = save.player
         if let game = data.game {
@@ -465,7 +471,17 @@ final class AppModel: ObservableObject {
                                                   junkExists: { game.junk($0) != nil },
                                                   shipExists: { game.ship($0) != nil },
                                                   fallbackShipID: game.ships().first?.id)
-            if repaired { Log.pilot.notice("play: pilot \(save.id, privacy: .public) referenced missing plug-in data; repaired on load") }
+            if repaired {
+                Log.pilot.notice("play: pilot \(save.id, privacy: .public) referenced missing plug-in data; repaired on load")
+                // The original warns before "preparing universe" (STR# 140 #52).
+                let notice = game.stringList(140)?.string(at: 52) ?? ""
+                pendingLoadNotice = notice.isEmpty ? nil : notice
+            }
+            // Explored nebulae are per session: opening the pilot re-runs
+            // the region events of every explored system (D-1).
+            let engine = StoryEngine(game: game, player: state)
+            engine.pilotOpened()
+            state = engine.player
         }
         pilot.begin(state: state, rosterID: save.id)
         // Migrate at adoption as well as at `finishLoadingIntoGame`. It's
@@ -483,9 +499,19 @@ final class AppModel: ObservableObject {
     @discardableResult
     func enterShip() -> Bool {
         guard let save = roster.selected else { return false }
+        // The loaded pilot was killed: Enter Ship only beeps until the pilot
+        // is opened again (0x00486ed0 action 3).
+        if save.id == killedPilotID {
+            audio.play(.uiError)
+            return true
+        }
         play(save)
         return true
     }
+
+    /// The loaded pilot whose ship was destroyed this session; Enter Ship
+    /// refuses it until it is opened again from the pilot list.
+    var killedPilotID: UUID?
 
     /// Turn iCloud pilot syncing on or off: persist the preference and migrate
     /// existing pilots into the new store (local ⇄ iCloud). Falls back to local
