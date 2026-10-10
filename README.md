@@ -26,11 +26,12 @@ Original behaviour is the default. The decompiled code is not in this repo; only
 written specs with function addresses are, in
 [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-![How closely NovaSwift matches the original game](docs/branding/fidelity-summary.svg?v=20256bd4)
+![How closely NovaSwift matches the original game](docs/branding/fidelity-summary.svg?v=83a21e6d)
 
 Each row is one part of the game. A filled block is roughly 5% of that part's
-original code, checked against NovaSwift and behaving the same. Amber blocks are
-differences being fixed right now. For the function-by-function view, see
+original code, checked against NovaSwift and behaving the same. Teal blocks are
+parts NovaSwift does its own way on purpose, like its save format and controls,
+with the same result for the player. For the function-by-function view, see
 [docs/STATUS.md](docs/STATUS.md) or the [website](https://sirstig.github.io/NovaSwift/#progress).
 
 ### Beyond the original
