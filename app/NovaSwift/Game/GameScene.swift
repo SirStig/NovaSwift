@@ -2425,6 +2425,8 @@ final class GameScene: SKScene {
         guard let world else { return }
         for event in world.drainEvents() {
             switch event {
+            case let .debrisPuffSound(at):
+                audio?.play(372, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
             case let .areaBlast(at, blastRadius):
                 spawnAreaBlast(at: CGPoint(x: at.x, y: at.y), blastRadius: blastRadius)
             case let .playerCloakChanged(engaging):

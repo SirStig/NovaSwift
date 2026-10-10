@@ -271,6 +271,14 @@ final class DebrisPuffTests: XCTestCase {
         XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 50, podCount: 1), 20)
     }
 
+    func testExactHalfArmorBranch() {
+        XCTAssertTrue(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: 0x0002, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 151, hullArmor: 300, personFlags: 0x0002, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: nil, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: 0x0004, govtFlags: 0))
+        XCTAssertFalse(World.debrisExactHalfPuff(armor: 150, hullArmor: 300, personFlags: 0x0002, govtFlags: 0x0100))
+    }
+
     func testPuffFades() {
         var p = DebrisPuff(); p.life = 40
         XCTAssertEqual(p.opacity, 1)

@@ -1023,6 +1023,8 @@ public enum WorldEvent {
     /// 0x004311f0): play `soundID` unpositioned, and keep
     /// `World.combatChatterPlaying` set until it ends.
     case combatChatter(soundID: Int)
+    /// A debris puff left a hull: snd 372 (0x174), spatial at `at`.
+    case debrisPuffSound(at: Vec2)
     /// An `ExplodType` ≥ 1000 impact (`Shot_SpawnAreaImpactEffects` 0x004211d0):
     /// scatter small bööm sprites around `at` over the weapon's `blastRadius`.
     case areaBlast(at: Vec2, blastRadius: Int)

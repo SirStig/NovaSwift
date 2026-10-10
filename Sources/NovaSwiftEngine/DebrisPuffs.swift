@@ -35,9 +35,24 @@ extension World {
         max(10, Int((Double(hullArmor / podCount) * 0.4).rounded()))
     }
 
+    /// The exact-half branch (0x00433050): armor (Float32) equal to
+    /// `shïp.Armor × 0.5`, the ship a përs whose Flags has 0x0002, and its
+    /// gövt (if any) lacking Flags 0x0100. It fires on every raw call the
+    /// equality holds. `personFlags` is nil for a non-përs ship (+0xc8d0 == -1).
+    static func debrisExactHalfPuff(armor: Double, hullArmor: Int, personFlags: Int?, govtFlags: Int?) -> Bool {
+        guard let personFlags, personFlags & 0x0002 != 0 else { return false }
+        if let govtFlags, govtFlags & 0x0100 != 0 { return false }
+        return Double(Float(armor)) == Double(hullArmor) * 0.5
+    }
+
     func tickDebrisPuffs(rawCalls: Int) {
         guard rawCalls > 0, let game = galaxy?.game else { return }
         for npc in npcs + [player] where npc.isAlive {
+            if let hull = game.ship(npc.shipTypeID), Self.debrisExactHalfPuff(
+                armor: npc.armor, hullArmor: hull.armor, personFlags: npc.personID == nil ? nil : npc.personFlags,
+                govtFlags: govtRes(npc.government).map { Int($0.flags1) }) {
+                for _ in 0..<rawCalls { spawnDebrisPuff(from: npc); emit(.debrisPuffSound(at: npc.position)) }
+            }
             guard let hull = game.ship(npc.shipTypeID), hull.podCount > 0,
                   npc.armor <= npc.maxArmor * 0.5 else { continue }
             if npc.debrisPodsLeft == nil { npc.debrisPodsLeft = hull.podCount }
@@ -48,6 +63,7 @@ extension World {
                 if (rawCallCounter - rawCalls + 1 + k) % period == 0 || now == hull.podCount {
                     npc.debrisPodsLeft = now - 1
                     spawnDebrisPuff(from: npc)
+                    emit(.debrisPuffSound(at: npc.position))
                 }
             }
         }
