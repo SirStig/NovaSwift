@@ -426,6 +426,9 @@ public struct ShipRes {
     /// Bible). Offset verified against novaparse `ShipResource.ts` (`subtitle`)
     /// and real bytes: shïp #128 "Shuttle" carries the text "Version A" here.
     public let subtitle: String     // @1766, 64-byte NUL-terminated field
+    /// Display order weight (Bible `DispWeight`, @60): higher lists first in the
+    /// shipyard and bar (0x00469e90).
+    public let displayWeight: Int
     public let flags3: UInt16       // @1830  0x0100 hide-if-unavailable · 0x0200 hide-if-require-unmet
     /// "The percent chance that a ship of this type will be available for
     /// purchase on a given day... A BuyRandom of 0 means this ship will never
@@ -530,6 +533,7 @@ public struct ShipRes {
         onRetire = cstr(d, 1231, 255)
         require = u64(d, 896)
         subtitle = cstr(d, 1766, 64)
+        displayWeight = i16(d, 60)
         flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))
         buyRandom = max(0, min(100, i16(d, 904)))
         hireRandom = max(0, min(100, i16(d, 906)))
@@ -570,6 +574,13 @@ public struct ShipRes {
     /// shows greyed-out; these bits mean "omit it from the shipyard list
     /// entirely" instead.
     public var hidesWhenLocked: Bool { flags3 & 0x0100 != 0 || flags3 & 0x0200 != 0 }
+    /// `Flags3` 0x0100: hide the class while its Availability fails.
+    public var hidesWhenUnavailable: Bool { flags3 & 0x0100 != 0 }
+    /// `Flags3` 0x0200: hide the class while its Require bits fail.
+    public var hidesWhenRequireUnmet: Bool { flags3 & 0x0200 != 0 }
+    /// `Flags3` 0x4000: when listed, hides every later-index class with the
+    /// same DispWeight.
+    public var suppressesLaterSameWeight: Bool { flags3 & 0x4000 != 0 }
     /// Bible `Flags3` 0x0010: "Ship ignores gravity". The original engine never
     /// tests this bit, so the simulation doesn't either (FL-19).
     public var ignoresGravity: Bool { flags3 & 0x0010 != 0 }

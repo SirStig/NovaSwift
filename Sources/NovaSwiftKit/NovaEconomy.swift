@@ -306,22 +306,34 @@ extension NovaGame {
             }
     }
 
-    /// The hulls for sale at `spob`, cheapest first. Empty when there's no
-    /// shipyard. `day` applies `BuyRandom` through the day's roll; `redraws`
-    /// says how many times a class's roll was redrawn today (buying a ship
-    /// redraws its class, 0x00492f30).
-    public func shipsSold(at spob: SpobRes, day: Int? = nil,
-                          redraws: (Int) -> Int = { _ in 0 }) -> [ShipRes] {
-        guard spob.hasShipyard else { return [] }
-        return ships()
-            .filter { $0.cost > 0 && sells(techLevel: $0.techLevel, at: spob) }
+    /// The shipyard / bar-hire list at `spob` (`NovaUi_RebuildShipyardAvailabilityList`
+    /// 0x00469e90): classes with tech >= 0 that are at most the stellar's tech
+    /// level or in its SpecialTech slots, with no cost filter; in buy mode the
+    /// shipyard must exist and `day` applies `BuyRandom` (`redraws` says how
+    /// often a class's roll was redrawn today, 0x00492f30). `excluded` drops
+    /// classes (hire roll, hide flags) before the Flags3 0x4000 pass hides each
+    /// later same-DispWeight class; the result is DispWeight descending, then id.
+    public func shipsSold(at spob: SpobRes, day: Int? = nil, hire: Bool = false,
+                          redraws: (Int) -> Int = { _ in 0 },
+                          excluded: (ShipRes) -> Bool = { _ in false }) -> [ShipRes] {
+        guard hire || spob.hasShipyard else { return [] }
+        let special = spobSpecialTech(spob.id)
+        let listed = ships()
+            .filter { $0.techLevel >= 0 && ($0.techLevel <= spob.techLevel || special.contains($0.techLevel)) }
             .filter { ship in
-                guard let day else { return true }
+                guard let day, !hire else { return true }
                 return Self.stocked(buyRandom: ship.buyRandom,
                                     roll: Self.dailyStockRoll(day: day, itemID: ship.id, salt: 1,
                                                               redraw: redraws(ship.id)))
             }
-            .sorted { ($0.cost, $0.id) < ($1.cost, $1.id) }
+            .filter { !excluded($0) }
+            .sorted { $0.id < $1.id }
+        var hiddenIDs = Set<Int>()
+        for (i, ship) in listed.enumerated() where ship.suppressesLaterSameWeight && !hiddenIDs.contains(ship.id) {
+            for later in listed[(i + 1)...] where later.displayWeight == ship.displayWeight { hiddenIDs.insert(later.id) }
+        }
+        return listed.filter { !hiddenIDs.contains($0.id) }
+            .sorted { $0.displayWeight != $1.displayWeight ? $0.displayWeight > $1.displayWeight : $0.id < $1.id }
     }
 
     /// Whether a ship class is on the bar's hire list today: `HireRandom` 0

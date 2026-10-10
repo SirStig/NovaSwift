@@ -81,6 +81,9 @@ extension NovaGame {
         let availOK = NCBTest(item.availBits).evaluate(pilot)
         let requireOK = (item.require & contributedBits(pilot: pilot)) == item.require
         if availOK && requireOK { return .available }
-        return item.hidesWhenLocked ? .hidden : .locked
+        // The two hide bits are independent (0x00469e90): 0x0200 hides on a
+        // failed Require, 0x0100 on a failed Availability.
+        return (!requireOK && item.hidesWhenRequireUnmet) || (!availOK && item.hidesWhenUnavailable)
+            ? .hidden : .locked
     }
 }

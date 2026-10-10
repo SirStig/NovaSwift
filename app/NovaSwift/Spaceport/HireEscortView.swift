@@ -57,9 +57,8 @@ struct HireEscortView: View {
     /// shipyard's tech eligibility without its separate `BuyRandom` stock roll —
     /// hire availability is the `HireRandom` roll's job.
     private var stock: [ShipRes] {
-        game.shipsSold(at: spob, day: nil)
-            .filter { pilot.escortAvailableToday($0, day: day) }
-            .filter { lockState(for: $0) != .hidden }
+        game.shipsSold(at: spob, day: nil, hire: true,
+                       excluded: { !pilot.escortAvailableToday($0, day: day) || lockState(for: $0) == .hidden })
             .sorted { ($0.escortCategory, hirePrice($0)) < ($1.escortCategory, hirePrice($1)) }
     }
     private func hirePrice(_ s: ShipRes) -> Int { pilot.escortHirePrice(s, at: spob, galaxy: galaxy) }
@@ -195,7 +194,7 @@ struct HireEscortView: View {
 
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
-        let canHire = (s.map { pilot.state.credits >= hirePrice($0) && lockState(for: $0) == .available } ?? false)
+        let canHire = (s.map { pilot.state.credits >= hirePrice($0) && NCBTest($0.availBits).evaluate(pilot.state) } ?? false)
             && wingHasRoom
         NovaButton(graphics: graphics,
                    title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),

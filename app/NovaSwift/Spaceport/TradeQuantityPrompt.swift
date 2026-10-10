@@ -25,14 +25,19 @@ struct TradeQuantityPrompt: View {
         self.title = title
         self.range = range
         self.unitLabel = unitLabel
-        self._text = State(initialValue: "\(min(max(initial, range.lowerBound), range.upperBound))")
+        self._text = State(initialValue: "\(min(max(initial, 0), range.upperBound))")
         self.onConfirm = onConfirm
         self.onCancel = onCancel
     }
 
-    private var parsedQuantity: Int? {
-        guard let n = Int(text.trimmingCharacters(in: .whitespaces)), n > 0 else { return nil }
-        return min(max(n, range.lowerBound), range.upperBound)
+    /// The typed value: non-digits are stripped, an empty field is 0.
+    private var typed: Int { Int(text.filter(\.isNumber)) ?? 0 }
+
+    /// OK: a value above the maximum resets the field to the maximum (the
+    /// original beeps and stays open); otherwise it is the answer.
+    private func confirm() {
+        if typed > range.upperBound { text = "\(range.upperBound)"; return }
+        onConfirm(typed)
     }
 
     var body: some View {
@@ -42,6 +47,10 @@ struct TradeQuantityPrompt: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 NovaTextField(placeholder: "\(range.upperBound)", text: $text)
+                    .onChange(of: text) { _, new in
+                        let digits = new.filter(\.isNumber)
+                        if digits != new { text = digits }
+                    }
                     .frame(width: 96)
                     #if os(iOS)
                     .keyboardType(.numberPad)
@@ -59,9 +68,7 @@ struct TradeQuantityPrompt: View {
             HStack(spacing: 10) {
                 Spacer()
                 footerButton("Cancel", isDefault: false, action: onCancel)
-                footerButton("OK", isDefault: true, enabled: parsedQuantity != nil) {
-                    if let q = parsedQuantity { onConfirm(q) }
-                }
+                footerButton("OK", isDefault: true, action: confirm)
             }
         }
         .padding(20)
