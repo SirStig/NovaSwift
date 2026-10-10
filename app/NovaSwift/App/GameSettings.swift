@@ -1,4 +1,5 @@
 import Foundation
+import NovaSwiftEngine
 #if os(iOS)
 import UIKit
 #endif
@@ -52,46 +53,40 @@ struct GameSettings: Codable, Equatable {
     }
 
     /// How densely populated/landed-on systems feel — separate from combat
-    /// `Difficulty`. The engine's untuned defaults (`normal`) already read as
-    /// "alive"; `authentic` dials that back toward the original game's
-    /// quieter, more-passing-through traffic, and `bustling` pushes further
-    /// past `normal` for players who want even busier systems.
+    /// `Difficulty`. `original` (the default) runs the original engine's
+    /// spawning rules exactly (AI-09/AI-10); the others are Enhancement
+    /// presets over the port's earlier traffic model: `authentic` quieter and
+    /// more passing-through, `normal` the port's livelier mix, `bustling`
+    /// busier still.
     enum SystemAliveness: String, Codable, CaseIterable, Identifiable {
-        case authentic, normal, bustling
+        case original, authentic, normal, bustling
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .authentic: return "Authentic"
+            case .original: return "Original"
+            case .authentic: return "Quiet"
             case .normal: return "Normal"
             case .bustling: return "Bustling"
             }
         }
         var blurb: String {
             switch self {
-            case .authentic: return "Fewer ships, more passing through — closer to the original game's pace."
-            case .normal: return "The port's default: a lively mix of traffic and landings."
+            case .original: return "Exactly the original game's traffic: the system's average ship count, with arrivals trickling in."
+            case .authentic: return "Fewer ships, more passing through, on the port's traffic model."
+            case .normal: return "The port's livelier mix of traffic and landings."
             case .bustling: return "Even busier systems, with fleets and traffic on top of Normal."
             }
         }
         /// Multiplies `Spawner.targetPopulation`/`maxPopulation`/
         /// `maxConcurrentFleets`, and inversely scales `spawnInterval`/
         /// `fleetInterval` (so a lower population also arrives more slowly).
+        /// The `Spawner` rules this setting runs.
+        var spawnModel: Spawner.SpawnModel { self == .original ? .original : .port }
         var populationScale: Double {
             switch self {
+            case .original, .normal: return 1.0
             case .authentic: return 0.55
-            case .normal: return 1.0
             case .bustling: return 1.35
-            }
-        }
-        /// Odds (0...1) an ambient trader skips landing and just cruises
-        /// through the system instead — this is the main lever against
-        /// planets feeling crowded, since every landing trader used to dock
-        /// unconditionally.
-        var passThroughChance: Double {
-            switch self {
-            case .authentic: return 0.55
-            case .normal: return 0.0
-            case .bustling: return 0.0
             }
         }
     }
@@ -233,7 +228,9 @@ struct GameSettings: Codable, Equatable {
 
     var difficulty: Difficulty = .normal
     /// System traffic density/landing frequency (see `SystemAliveness`).
-    var systemAliveness: SystemAliveness = .normal
+    /// Defaults to the closest to the original until an exact `.original`
+    /// population model lands (FIDELITY_PLAN AI-09/AI-10).
+    var systemAliveness: SystemAliveness = .original
     /// Overall simulation speed (see `GameSpeed`). Default `x1` — real time,
     /// the faithful pace.
     var gameSpeed: GameSpeed = .x1
@@ -249,6 +246,12 @@ struct GameSettings: Codable, Equatable {
     var tutorialHints: Bool = true
     /// Pause the simulation when the window/app loses focus.
     var pauseOnFocusLoss: Bool = true
+
+    // MARK: Enhancements
+
+    /// Opt-in behaviours the original game doesn't have, all off by default
+    /// (see `GameplayEnhancements`). Carried into the engine's `World`.
+    var enhancements = GameplayEnhancements()
 
     // MARK: Controls
 
@@ -275,11 +278,17 @@ struct GameSettings: Codable, Equatable {
     var frameRateCap: FrameRateCap = .platformDefault
     /// Engine exhaust / weapon glow effects.
     var engineGlow: Bool = true
-    /// Camera shake on impacts / explosions.
-    var screenShake: Bool = true
-    /// Where hull/shield bars appear over ships. Default `above` (the current
-    /// look); `off` matches the original, which never floated bars over ships.
-    var shipBarPosition: ShipBarPosition = .above
+    /// Camera shake on impacts / explosions. Off by default (the original
+    /// never shook the view); a saved choice is kept.
+    var screenShake: Bool = false
+    /// Hyperspace presentation. Off (default): the Mac build's ~1.5 s white fade
+    /// in and out of a jump. On: the Windows CE build's look, whose fade is a
+    /// no-op (0x00467e60), leaving only the one-frame boom flash. The jump's
+    /// mechanics and timing are identical either way (FIDELITY_PLAN FL-04).
+    var ceHyperspaceLook: Bool = false
+    /// Where hull/shield bars appear over ships. Default `off`, as in the
+    /// original, which never floated bars over ships; a saved choice is kept.
+    var shipBarPosition: ShipBarPosition = .off
     /// Show the planet/station name under each stellar. The original never labelled
     /// planets in-flight, so this is off by default.
     var showPlanetLabels: Bool = false
@@ -467,6 +476,7 @@ struct GameSettings: Codable, Equatable {
         autoLanding           = v(.autoLanding, d.autoLanding)
         tutorialHints         = v(.tutorialHints, d.tutorialHints)
         pauseOnFocusLoss      = v(.pauseOnFocusLoss, d.pauseOnFocusLoss)
+        enhancements          = v(.enhancements, d.enhancements)
         controlScheme         = v(.controlScheme, d.controlScheme)
         controlSensitivity    = v(.controlSensitivity, d.controlSensitivity)
         invertTurn            = v(.invertTurn, d.invertTurn)
@@ -481,6 +491,7 @@ struct GameSettings: Codable, Equatable {
         frameRateCap          = v(.frameRateCap, d.frameRateCap)
         engineGlow            = v(.engineGlow, d.engineGlow)
         screenShake           = v(.screenShake, d.screenShake)
+        ceHyperspaceLook      = v(.ceHyperspaceLook, d.ceHyperspaceLook)
         shipBarPosition       = v(.shipBarPosition, d.shipBarPosition)
         showPlanetLabels      = v(.showPlanetLabels, d.showPlanetLabels)
         cameraZoom            = v(.cameraZoom, d.cameraZoom)

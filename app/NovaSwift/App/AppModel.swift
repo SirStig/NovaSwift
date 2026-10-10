@@ -82,10 +82,10 @@ final class AppModel: ObservableObject {
     let gameDataSync = GameDataCloudSync()
     #endif
 
-    /// Why a save is being written — drives whether a rotating backup is taken.
-    enum SaveReason { case manual, land, jump, timer, periodic
-        var wantsBackup: Bool { self == .land || self == .manual || self == .periodic }
-    }
+    /// Why a save is being written — decides whether it's written at all (the
+    /// original's cadence unless `frequentAutosave`) and whether a rotating
+    /// backup is taken. See `PilotSaveReason`.
+    typealias SaveReason = PilotSaveReason
 
     /// Authentic-UI graphics (real button / frame / backdrop PICTs) for menus and
     /// dialogs presented outside a play session. Built lazily from the loaded data
@@ -219,6 +219,7 @@ final class AppModel: ObservableObject {
     func commitSettings() {
         settings.save()
         audio.apply(settings: settings)
+        data.setManualPluginOrder(settings.enhancements.manualPluginOrder)
     }
     func commitBindings() { bindings.save() }
 
@@ -441,10 +442,10 @@ final class AppModel: ObservableObject {
     /// live pilot. Does not change the screen — the new-pilot UI shows the intro
     /// and then calls `beginPlay()`.
     @discardableResult
-    func createPilot(name: String, isMale: Bool, scenario: CharRes) -> CharRes? {
+    func createPilot(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes) -> CharRes? {
         prepareAudioAndData()
         guard let game = data.game else { return nil }
-        let save = roster.create(name: name, isMale: isMale, scenario: scenario, game: game)
+        let save = roster.create(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario, game: game)
         roster.setSelected(save.id)                 // a new pilot becomes the loaded one
         pilot.begin(state: save.player, rosterID: save.id)
         pilot.migrateIfNeeded(game: game)
@@ -457,7 +458,16 @@ final class AppModel: ObservableObject {
     func play(_ save: PilotSave) {
         prepareAudioAndData()
         roster.setSelected(save.id)
-        pilot.begin(state: save.player, rosterID: save.id)
+        var state = save.player
+        if let game = data.game {
+            // Loads at full shield/armor, with gone plug-in data pruned (UI-03).
+            let repaired = state.normalizeForLoad(outfitExists: { game.outfit($0) != nil },
+                                                  junkExists: { game.junk($0) != nil },
+                                                  shipExists: { game.ship($0) != nil },
+                                                  fallbackShipID: game.ships().first?.id)
+            if repaired { Log.pilot.notice("play: pilot \(save.id, privacy: .public) referenced missing plug-in data; repaired on load") }
+        }
+        pilot.begin(state: state, rosterID: save.id)
         // Migrate at adoption as well as at `finishLoadingIntoGame`. It's
         // idempotent, and the cost of a path that somehow skips it is no longer
         // cosmetic: the player's loadout is built purely from `outfits`, so an
@@ -536,9 +546,25 @@ final class AppModel: ObservableObject {
     /// (a dev autoplay run) has no roster id yet — adopt it into the roster
     /// now instead of leaving it un-persisted for the whole session.
     func autosave(reason: SaveReason) {
+        guard pilot.started else { return }     // e.g. a Strict Play pilot just deleted
+        guard reason.shouldSave(frequentAutosave: settings.enhancements.frequentAutosave,
+                                strictPlay: pilot.state.isStrictPlay) else {
+            Log.pilot.debug("autosave(\(String(describing: reason), privacy: .public)): skipped — not an original save point")
+            return
+        }
         let id = pilot.rosterID ?? roster.adopt(state: pilot.state, game: data.game).id
         if pilot.rosterID == nil { pilot.bind(rosterID: id) }
         roster.persist(id: id, state: pilot.state, game: data.game, backup: reason.wantsBackup)
+    }
+
+    /// Strict Play death without a pod (FL-03): delete the live pilot's save,
+    /// its backups and its iCloud/local copies, and forget the live mirror, so
+    /// there's nothing to resume.
+    func deleteStrictPlayPilot() {
+        guard let id = pilot.rosterID else { return }
+        Log.pilot.notice("deleting pilot \(id, privacy: .public) due to strict play death")
+        roster.deleteAfterStrictPlayDeath(id)
+        pilot.reset()
     }
 
     /// Back to the authentic EV Nova main menu (e.g. from the in-game pause menu).

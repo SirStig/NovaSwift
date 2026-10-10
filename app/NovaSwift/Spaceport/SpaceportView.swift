@@ -35,7 +35,6 @@ struct SpaceportView: View {
     // Bar and Mission BBS build their own engines for their own AvailLocations.)
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
-    @State private var offered: [MissionRes] = []
     @State private var rolledLanding = false
 
     private var game: NovaGame { graphics.game }
@@ -64,7 +63,8 @@ struct SpaceportView: View {
                                                   onDone: { screen = .hub })
                     case .shipyard: ShipyardView(graphics: graphics, spob: spob, pilot: pilot,
                                                  galaxy: galaxy, onLiveSync: onLiveSync, onDone: { screen = .hub })
-                    case .bar:      BarView(graphics: graphics, spob: spob, pilot: pilot, onDone: { screen = .hub })
+                    case .bar:      BarView(graphics: graphics, spob: spob, pilot: pilot, galaxy: galaxy,
+                                            onDone: { screen = .hub })
                     case .missions: MissionBBSView(graphics: graphics, spob: spob, pilot: pilot,
                                                    showHints: showHints, onDone: { screen = .hub })
                     }
@@ -96,6 +96,9 @@ struct SpaceportView: View {
         .animation(.easeInOut(duration: 0.25), value: landingHintDismissed)
         .onAppear {
             Log.spaceport.info("Landed at spöb \(spob.id, privacy: .public) (\(spob.name, privacy: .public)) — shipyard=\(spob.hasShipyard, privacy: .public) outfitter=\(spob.hasOutfitter, privacy: .public) trade=\(spob.hasCommodityExchange, privacy: .public) bar=\(spob.hasBar, privacy: .public) uninhabited=\(spob.isUninhabited, privacy: .public)")
+            // A `Q` fired by a mission accepted here closes whatever screen
+            // is open; its message waits for the launch.
+            services.onCloseSpaceportScreen = { screen = .hub }
             rollLandingOffer()
             autoRecharge()
         }
@@ -115,28 +118,27 @@ struct SpaceportView: View {
 
     // MARK: Location-triggered mission offers
 
-    /// The one-per-landing mainSpaceport roll — this is what lets simply
-    /// touching down hand the player a mission (a new pilot's first landing
-    /// surfaces the intro/opening mission here when the data defines one).
+    /// The main spaceport's offer, made once as the player lands — this is what
+    /// lets simply touching down hand the player a mission (a new pilot's first
+    /// landing surfaces the intro/opening mission here when the data defines one).
     private func rollLandingOffer() {
         guard !rolledLanding else { return }
         rolledLanding = true
-        let e = StoryEngine(game: game, player: pilot.state, services: services,
-                            seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
-        engine = e
-        rollOffer(at: .mainSpaceport, engine: e)
+        rollOffer(at: .mainSpaceport)
     }
 
-    /// Present the top eligible offer for `location` (if any) — availability is
-    /// fully gated by `missionsOffered` (AvailBits test + AvailRandom % + record/
-    /// rating/ship/stellar), so nothing surfaces that the pilot can't get yet.
-    private func rollOffer(at location: MissionOfferLocation, engine e: StoryEngine? = nil) {
+    /// Offer the next mission in this location's lane (0x00448670): the first
+    /// eligible one not yet accepted, refused or — since the last change of
+    /// screen — failed to activate. The original makes one offer when the
+    /// main spaceport opens and one each time a shop does.
+    private func rollOffer(at location: MissionOfferLocation) {
         guard services.pendingOffer == nil else { return }   // don't stack offers
-        let eng = e ?? engine ?? StoryEngine(game: game, player: pilot.state, services: services,
-                                             seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        let eng = StoryEngine(game: game, player: pilot.state, services: services,
+                              seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
         engine = eng
-        offered = eng.missionsOffered(at: location, spob: spob.id)
-        guard let mission = offered.first(where: { !eng.briefing(for: $0).isEmpty }) else { return }
+        let mission = eng.nextLaneOffer(at: location, spob: spob.id)
+        pilot.state = eng.player                             // the offer context latch
+        guard let mission else { return }
         Log.spaceport.debug("Location offer at spöb \(spob.id, privacy: .public) loc=\(String(describing: location), privacy: .public): mission \(mission.id, privacy: .public)")
         eng.present(mission)
     }
@@ -291,50 +293,24 @@ struct SpaceportView: View {
         guard let maxFuel else { return false }
         return currentFuel < maxFuel - 0.5
     }
-    /// Free refuel if the port's government runs "Roadside Assistance" (govt
-    /// `Flags2` 0x0010), or the player holds a rank from that govt with the
-    /// free-repair/refuel flag (0x0800). The auto-refueller (`oütf` ModType 19,
-    /// stock "Auto-recharger" #186) is deliberately NOT a route to free
-    /// service — its own dësc (#3058) says so outright: "the cost remains the
-    /// same regardless of whether you have the Auto-recharger or not." What it
-    /// buys is the *convenience*: see `autoRecharge()`.
-    private var rechargeIsFree: Bool {
-        let govtID = spob.government
-        if govtID >= 128, let g = game.govt(govtID), g.roadsideAssistance { return true }
-        return pilot.state.activeRanks.contains { game.rank($0)?.govt == govtID && (game.rank($0)?.flags ?? 0) & 0x0800 != 0 }
-    }
-
     /// Whether the player's fit includes an auto-refueller (`oütf` ModType 19).
     private var hasAutoRecharger: Bool {
         PilotEconomy.loadout(pilot.state, galaxy: galaxy)?.hasAutoRefuel ?? false
     }
 
-    /// The Auto-recharger's actual job, per its description: "automatically
-    /// contacts spaceport computers via your comm system whenever you land and
-    /// arranges for them to recharge your ship, saving you the worry." So on
-    /// landing it silently does what the Recharge button does — at the same
-    /// price — and only as far as the player can afford. Previously the outfit
-    /// only made fuel free, which is the one thing its description rules out,
-    /// and which is invisible at a port that already comps fuel — so owning it
-    /// looked like it did nothing at all.
+    /// The auto-refueller (`Player_RefuelShipWithCredits` 0x004250f0), run on
+    /// docking: the same 1 credit a unit as the Recharge button, buying as many
+    /// whole units as the credits cover, with no waiver at a dominated world.
     private func autoRecharge() {
-        guard hasAutoRecharger, !spob.isUninhabited, needsRecharge, let maxFuel else { return }
-        let cost = rechargeCost
-        guard pilot.state.credits >= cost else {
-            Log.spaceport.debug("Auto-recharger at spöb \(spob.id, privacy: .public): can't afford \(cost, privacy: .public)cr")
-            return
-        }
-        pilot.state.credits -= cost
-        pilot.state.fuel = maxFuel
-        pilot.save()
+        guard hasAutoRecharger, let maxFuel,
+              let fill = LandedServices.refuel(fuel: currentFuel, capacity: Int(maxFuel),
+                                               credits: pilot.state.credits,
+                                               dominated: false, uninhabited: false),
+              fill.fuel > currentFuel else { return }
+        pilot.state.credits -= fill.cost
+        pilot.state.fuel = fill.fuel
         onLiveSync()
-        Log.spaceport.debug("Auto-recharger topped fuel to \(maxFuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(cost, privacy: .public)cr")
-    }
-    /// Cost to top off: ~1cr per missing fuel unit (a ~jump's worth ≈ 100cr),
-    /// zero when a friendly government/rank comps it.
-    private var rechargeCost: Int {
-        guard let maxFuel, !rechargeIsFree else { return 0 }
-        return max(0, Int((maxFuel - currentFuel).rounded()))
+        Log.spaceport.debug("Auto-recharger filled fuel to \(fill.fuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(fill.cost, privacy: .public)cr")
     }
 
     @ViewBuilder private func buttonColumn(_ space: NovaSpace) -> some View {
@@ -352,24 +328,22 @@ struct SpaceportView: View {
             .novaPlace(space, Self.rightX, Self.rightSlotY["leave"] ?? 198)
     }
 
-    /// Pay to top off the tank. Free when the port's govt/your rank comps it;
-    /// otherwise it costs `rechargeCost` and no-ops if the player can't afford
-    /// it (the button only shows when the tank has room in the first place).
+    /// The Recharge button (EC-23, 0x00491f30 item 4): nothing at an
+    /// uninhabited stellar; otherwise whole fuel units at 1 credit each, as
+    /// many as the credits cover, or a free top-up at a dominated stellar.
     private func rechargeShip() {
         guard let maxFuel else {
             Log.spaceport.error("Recharge tapped at spöb \(spob.id, privacy: .public) but no loadout for ship \(pilot.state.shipType, privacy: .public) — no-op")
             return
         }
-        let cost = rechargeCost
-        guard pilot.state.credits >= cost else {
-            Log.spaceport.notice("Recharge no-op at spöb \(spob.id, privacy: .public): cost \(cost, privacy: .public)cr > credits \(pilot.state.credits, privacy: .public)")
-            return
-        }
-        pilot.state.credits -= cost
-        pilot.state.fuel = maxFuel
-        pilot.save()
+        guard let fill = LandedServices.refuel(fuel: currentFuel, capacity: Int(maxFuel),
+                                               credits: pilot.state.credits,
+                                               dominated: pilot.state.hasDominated(spob.id),
+                                               uninhabited: spob.isUninhabited) else { return }
+        pilot.state.credits -= fill.cost
+        pilot.state.fuel = fill.fuel
         onLiveSync()
-        Log.spaceport.debug("Recharged fuel to \(maxFuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(cost, privacy: .public)cr")
+        Log.spaceport.debug("Recharged fuel to \(fill.fuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(fill.cost, privacy: .public)cr")
     }
 
     // MARK: Fallback (data has no interface PICT)
@@ -492,6 +466,7 @@ struct MissionBBSView: View {
     }
 
     private func buildEngine() {
+        services.onCloseSpaceportScreen = onDone        // a `Q` from an accept leaves the BBS
         let e = StoryEngine(game: game, player: pilot.state, services: services,
                             seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
         engine = e

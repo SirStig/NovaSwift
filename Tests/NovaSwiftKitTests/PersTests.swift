@@ -10,7 +10,7 @@ final class PersTests: XCTestCase {
     private func pers(_ id: Int, ship: Int, govt: Int, grantClass: Int, grantProb: Int, grantCount: Int) -> Resource {
         var b = [UInt8](repeating: 0, count: 400)
         put16(&b, 2, govt); put16(&b, 4, 3); put16(&b, 10, ship)
-        put16(&b, 308, grantClass); put16(&b, 310, grantProb); put16(&b, 312, grantCount)
+        put16(&b, 308, grantClass); put16(&b, 310, grantCount); put16(&b, 312, grantProb)
         return Resource(type: NovaType.pers, id: id, name: "Person\(id)", data: Data(b))
     }
     private func outfit(_ id: Int, itemClass: Int) -> Resource {
@@ -91,5 +91,18 @@ final class PersTests: XCTestCase {
         col.add(outfit(200, itemClass: 3))   // wrong class
         let p = PersRes(pers(500, ship: 128, govt: 128, grantClass: 7, grantProb: 100, grantCount: 4))
         XCTAssertTrue(NovaGame(col).personBoardingGrant(p, seed: 1).isEmpty)
+    }
+
+    /// The original's loader reads count @310 and probability @312 (0x004bd3c0);
+    /// stock përs 162 grants with 50% odds, one item.
+    func testStockPersGrantFieldsDecodeAsTheOriginal() throws {
+        let repo = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let files = GameLibrary.discoverResourceFiles(in: repo.appendingPathComponent("data/base"))
+        guard !files.isEmpty else { throw XCTSkip("No stock data under data/base") }
+        let game = NovaGame(try GameLibrary.merge(baseFiles: files))
+        let p = try XCTUnwrap(game.resources.resource(NovaType.pers, 162).map(PersRes.init))
+        XCTAssertEqual(p.grantProb, 50)
+        XCTAssertEqual(p.grantCount, 1)
     }
 }

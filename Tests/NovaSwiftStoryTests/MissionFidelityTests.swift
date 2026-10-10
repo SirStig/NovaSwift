@@ -30,17 +30,26 @@ final class MissionFidelityTests: XCTestCase {
 
     /// A government with explicit class / ally class slots (@24 classes, @32
     /// allies), unused slots forced to -1 so they don't collapse to "class 0".
-    private func govt(id: Int, classes: [Int] = [], allies: [Int] = []) -> Resource {
+    private func govt(id: Int, classes: [Int] = [], allies: [Int] = [], enemies: [Int] = []) -> Resource {
         var b = [UInt8](repeating: 0, count: 176)
         for i in 0..<4 { Bytes.i16(&b, 24 + i * 2, i < classes.count ? classes[i] : -1) }
         for i in 0..<4 { Bytes.i16(&b, 32 + i * 2, i < allies.count ? allies[i] : -1) }
-        for i in 0..<4 { Bytes.i16(&b, 40 + i * 2, -1) }  // enemies: none
+        for i in 0..<4 { Bytes.i16(&b, 40 + i * 2, i < enemies.count ? enemies[i] : -1) }
         return Resource(type: NovaType.govt, id: id, name: "Govt \(id)", data: Data(b))
     }
 
+    /// Systems 128/129/130 owned by govts 128/200/201, and 131 independent —
+    /// the per-system legal record's map (EC-02).
+    private var ownedSystems: [Resource] {
+        [ownedSystemResource(id: 128, govt: 128), ownedSystemResource(id: 129, govt: 200),
+         ownedSystemResource(id: 130, govt: 201), ownedSystemResource(id: 131, govt: -1)]
+    }
+
     /// A spöb whose OnDestroy (@582) / OnRegen (@837) NCB set strings are set.
-    private func spobWithHooks(id: Int, onDestroy: String = "", onRegen: String = "") -> Resource {
+    private func spobWithHooks(id: Int, onDestroy: String = "", onRegen: String = "",
+                               deadTime: Int = -1) -> Resource {
         var b = [UInt8](repeating: 0, count: 1100)
+        Bytes.i16(&b, 578, deadTime)
         Bytes.cstr(&b, 582, onDestroy)
         Bytes.cstr(&b, 837, onRegen)
         return Resource(type: NovaType.spob, id: id, name: "Spob \(id)", data: Data(b))
@@ -87,20 +96,31 @@ final class MissionFidelityTests: XCTestCase {
         }
     }
 
-    func testPayValUncodedNegativeIsLiteralFee() {
-        // -500 is NOT one of the coded ranges → literal credit delta on completion.
-        let (eng, _) = engine([MissionSpec(id: 200, pay: -500).resource()])
-        eng.player.credits = 1000
-        acceptAndComplete(eng, 200)
-        XCTAssertEqual(eng.player.credits, 500)
+    func testPayValUncodedNegativeDoesNothing() {
+        // MS-09: -9999...0 and everything below -40099 do nothing on success.
+        for code in [-500, -9999, -40100, -45000] {
+            let (eng, _) = engine([MissionSpec(id: 200, pay: code).resource()])
+            eng.player.credits = 1000
+            acceptAndComplete(eng, 200)
+            XCTAssertEqual(eng.player.credits, 1000, "pay \(code)")
+        }
     }
 
     func testPayValCleanRecordWithGovt() {
-        let (eng, _) = engine([MissionSpec(id: 200, pay: -10128).resource()])
-        eng.player.legalRecord = [128: -50, 200: -30]
+        let (eng, _) = engine([MissionSpec(id: 200, pay: -10128).resource(),
+                               govt(id: 128), govt(id: 200)] + ownedSystems)
+        eng.player.systemReputation = [128: -50, 129: -30]
         acceptAndComplete(eng, 200)
-        XCTAssertNil(eng.player.legalRecord[128], "record with govt 128 cleaned")
-        XCTAssertEqual(eng.player.legalRecord[200], -30, "other govts untouched")
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), 0, "govt 128's system cleaned")
+        XCTAssertEqual(eng.player.reputation(atSystem: 129), -30, "other govts' systems untouched")
+    }
+
+    /// A clean record only lifts a criminal reputation (0x00440750): a good one stays.
+    func testPayValCleanRecordKeepsAGoodRecord() {
+        let (eng, _) = engine([MissionSpec(id: 200, pay: -10128).resource(), govt(id: 128)] + ownedSystems)
+        eng.player.systemReputation = [128: 40]
+        acceptAndComplete(eng, 200)
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), 40)
     }
 
     func testPayValCleanRecordWithGovtAndAllies() {
@@ -112,12 +132,12 @@ final class MissionFidelityTests: XCTestCase {
             govt(id: 200, classes: [5]),
             govt(id: 201, classes: [9]),
         ]
-        let (eng, _) = engine(resources)
-        eng.player.legalRecord = [128: -50, 200: -40, 201: -30]
+        let (eng, _) = engine(resources + ownedSystems)
+        eng.player.systemReputation = [128: -50, 129: -40, 130: -30]
         acceptAndComplete(eng, 300)
-        XCTAssertNil(eng.player.legalRecord[128], "named govt cleaned")
-        XCTAssertNil(eng.player.legalRecord[200], "ally (shared ally class) cleaned")
-        XCTAssertEqual(eng.player.legalRecord[201], -30, "non-ally untouched")
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), 0, "named govt's system cleaned")
+        XCTAssertEqual(eng.player.reputation(atSystem: 129), 0, "ally's system cleaned")
+        XCTAssertEqual(eng.player.reputation(atSystem: 130), -30, "non-ally untouched")
     }
 
     func testPayValCleanRecordWithGovtAndClassmates() {
@@ -128,12 +148,12 @@ final class MissionFidelityTests: XCTestCase {
             govt(id: 200, classes: [7]),
             govt(id: 201, classes: [3]),
         ]
-        let (eng, _) = engine(resources)
-        eng.player.legalRecord = [128: -50, 200: -40, 201: -30]
+        let (eng, _) = engine(resources + ownedSystems)
+        eng.player.systemReputation = [128: -50, 129: -40, 130: -30]
         acceptAndComplete(eng, 300)
-        XCTAssertNil(eng.player.legalRecord[128])
-        XCTAssertNil(eng.player.legalRecord[200], "classmate cleaned")
-        XCTAssertEqual(eng.player.legalRecord[201], -30, "non-classmate untouched")
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), 0)
+        XCTAssertEqual(eng.player.reputation(atSystem: 129), 0, "classmate's system cleaned")
+        XCTAssertEqual(eng.player.reputation(atSystem: 130), -30, "non-classmate untouched")
     }
 
     func testPayValPercentOfCash() {
@@ -164,33 +184,51 @@ final class MissionFidelityTests: XCTestCase {
 
     // MARK: - 2. CompReward reputation reversals
 
+    /// CompReward walks every system (0x00440410): full in CompGovt's, +half
+    /// in allies', −half in enemies', nothing in independent systems.
     func testCompRewardFullOnSuccess() {
-        let (eng, _) = engine([MissionSpec(id: 200, compRewardGovt: 128, compLegalReward: 10).resource()])
+        let resources = [MissionSpec(id: 200, compRewardGovt: 128, compLegalReward: 11).resource(),
+                         govt(id: 128, classes: [1], allies: [5], enemies: [9]),
+                         govt(id: 200, classes: [5]), govt(id: 201, classes: [9])] + ownedSystems
+        let (eng, _) = engine(resources)
         acceptAndComplete(eng, 200)
-        XCTAssertEqual(eng.player.legalRecord[128], 10)
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), 11)
+        XCTAssertEqual(eng.player.reputation(atSystem: 129), 5, "ally +trunc(11/2)")
+        XCTAssertEqual(eng.player.reputation(atSystem: 130), -5, "enemy −trunc(11/2)")
+        XCTAssertEqual(eng.player.reputation(atSystem: 131), 0, "independent unchanged")
     }
 
     func testCompRewardHalfPenaltyOnFailure() {
-        let (eng, _) = engine([MissionSpec(id: 200, compRewardGovt: 128, compLegalReward: 10).resource()])
+        // MS-07: the half penalty comes with the final resolution, on landing
+        // at the return stellar — not when the mission first fails — and only
+        // CompGovt's systems take it (EC-02).
+        let (eng, _) = engine([MissionSpec(id: 200, returnStellar: 300,
+                                           compRewardGovt: 128, compLegalReward: 10, canAbort: false).resource(),
+                               govt(id: 128)] + ownedSystems)
         XCTAssertTrue(eng.accept(200))
         eng.failMission(200)
-        XCTAssertEqual(eng.player.legalRecord[128], -5, "fail decreases record by 1/2 the reward")
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), 0)
+        XCTAssertTrue(eng.player.activeMission(200)?.isFailed ?? false)
+        eng.playerLanded(onSpob: 300)
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), -5, "fail decreases record by 1/2 the reward")
+        XCTAssertEqual(eng.player.reputation(atSystem: 129), 0, "only CompGovt's systems")
+        XCTAssertFalse(eng.player.isMissionActive(200))
     }
 
     func testCompRewardFiveXPenaltyOnAbortWhenFlagSet() {
         let m = MissionSpec(id: 200, compRewardGovt: 128, compLegalReward: 10, flags1: 0x0040).resource()
-        let (eng, _) = engine([m])
+        let (eng, _) = engine([m, govt(id: 128)] + ownedSystems)
         XCTAssertTrue(eng.accept(200))
         eng.abortMission(200)
-        XCTAssertEqual(eng.player.legalRecord[128], -50, "abort penalty flag → -5x the reward")
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), -50, "abort penalty flag → -5x the reward")
     }
 
     func testCompRewardNoAbortPenaltyWithoutFlag() {
         let m = MissionSpec(id: 200, compRewardGovt: 128, compLegalReward: 10).resource()
-        let (eng, _) = engine([m])
+        let (eng, _) = engine([m, govt(id: 128)] + ownedSystems)
         XCTAssertTrue(eng.accept(200))
         eng.abortMission(200)
-        XCTAssertNil(eng.player.legalRecord[128], "no abort-penalty flag → no reputation hit")
+        XCTAssertEqual(eng.player.reputation(atSystem: 128), 0, "no abort-penalty flag → no reputation hit")
     }
 
     // MARK: - 3. C / E / H ship-change outfit semantics
@@ -310,10 +348,21 @@ final class MissionFidelityTests: XCTestCase {
 
     func testCronLoopStartHitsCapWhenEnableStaysTrue() {
         // loopStartUntilFalse (0x0001) with an always-true EnableOn re-runs OnStart
-        // up to the hard cap (1000).
+        // up to the original's cap (0x2711 passes).
         let (eng, _) = engine([grantCron(id: 128, flags: 0x0001, enableOn: "")])
         eng.advanceOneDay()
-        XCTAssertEqual(eng.player.outfits[500], 1000, "iterative cron re-runs OnStart up to the cap")
+        XCTAssertEqual(eng.player.outfits[500], 0x2711, "iterative cron re-runs OnStart up to the cap")
+    }
+
+    func testIterativeCronChecksEnableOnBeforeTheFirstRun() {
+        // MS-14: the iterative loop tests Require + EnableOn before every run,
+        // the first included. OnEnd here runs while b998 is clear, which it
+        // never is once OnStart has set it.
+        let c = CronSpec(id: 128, random: 100, duration: 0, flags: 0x0002, enableOn: "!b998",
+                         onStart: "b998", onEnd: "G500").resource()
+        let (eng, _) = engine([c])
+        eng.advanceOneDay()
+        XCTAssertNil(eng.player.outfits[500], "OnEnd's loop never runs: EnableOn is false")
     }
 
     func testCronLoopStartTerminatesWhenOnStartFalsifiesEnable() {
@@ -339,21 +388,26 @@ final class MissionFidelityTests: XCTestCase {
 
     // MARK: - 7. Stellar OnDestroy / OnRegen hooks
 
-    func testDestroyStellarFiresSpobOnDestroyBits() {
-        let (eng, _) = engine([spobWithHooks(id: 400, onDestroy: "b555")])
+    func testYAndUDoNotRunTheStellarsOwnScripts() {
+        // MS-18: a mission Y/U sets the regeneration countdown; neither runs
+        // the stellar's OnDestroy or OnRegen.
+        let (eng, _) = engine([spobWithHooks(id: 400, onDestroy: "b555", onRegen: "b666")])
         eng.apply(set: "Y400")
         XCTAssertTrue(eng.player.isStellarDestroyed(400))
-        XCTAssertTrue(eng.player.isBitSet(555), "spöb OnDestroy control bits fire on a Y op")
-    }
-
-    func testRegenerateStellarFiresSpobOnRegenBits() {
-        let (eng, _) = engine([spobWithHooks(id: 400, onDestroy: "b555", onRegen: "b666 !b555")])
-        eng.apply(set: "Y400")
-        XCTAssertTrue(eng.player.isBitSet(555))
+        XCTAssertFalse(eng.player.isBitSet(555), "Y does not run OnDestroy")
         eng.apply(set: "U400")
         XCTAssertFalse(eng.player.isStellarDestroyed(400))
-        XCTAssertTrue(eng.player.isBitSet(666), "spöb OnRegen control bits fire on a U op")
-        XCTAssertFalse(eng.player.isBitSet(555), "OnRegen may clear what OnDestroy set")
+        XCTAssertFalse(eng.player.isBitSet(666), "U does not run OnRegen")
+    }
+
+    func testStellarDestroyedByYRegeneratesAfterDeadTimeAndRunsOnRegen() {
+        let (eng, _) = engine([spobWithHooks(id: 400, onRegen: "b666", deadTime: 3)])
+        eng.apply(set: "Y400")
+        eng.advanceDays(2)
+        XCTAssertTrue(eng.player.isStellarDestroyed(400))
+        eng.advanceDays(1)
+        XCTAssertFalse(eng.player.isStellarDestroyed(400), "back after DeadTime days")
+        XCTAssertTrue(eng.player.isBitSet(666), "its OnRegen runs on the way back")
     }
 
     // MARK: - 8. System visibility

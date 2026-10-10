@@ -58,6 +58,27 @@ public protocol GameServices: AnyObject {
     /// cron-start time since it doesn't know which station the player will
     /// later land at.
     func showNews(text: String, govt: Int?)
+
+    /// A transient line over the flight view — the original's overlay message
+    /// (a `Q` fired in flight, "mission failed" notices). The implementer plays
+    /// the overlay sound with it.
+    func showOverlayMessage(_ text: String)
+
+    /// A `Q` fired while landed: close whichever spaceport screen is open (the
+    /// bar, mission BBS, trade centre, shipyard or outfitter) and return to the
+    /// main spaceport. The message itself waits for the launch.
+    func closeSpaceportScreen()
+
+    /// The mission's ships are released (`Mission_ClearMisnSlotAssignments`
+    /// 0x00440aa0): untagged, and any flying in a group (a mission escort)
+    /// leaves it for its class's default AI. They stay in the system.
+    func releaseMissionShips(missionID: Int)
+}
+
+public extension GameServices {
+    func showOverlayMessage(_ text: String) {}
+    func closeSpaceportScreen() {}
+    func releaseMissionShips(missionID: Int) {}
 }
 
 /// A mission the engine wants to offer, with its presentation text resolved.
@@ -156,4 +177,7 @@ open class LoggingGameServices: GameServices {
     open func showNews(text: String, govt: Int?) {
         record("news[\(govt.map(String.init) ?? "independent")]: \(text.prefix(60))")
     }
+    open func showOverlayMessage(_ text: String) { record("overlay: \(text)") }
+    open func closeSpaceportScreen() { record("close spaceport screen") }
+    open func releaseMissionShips(missionID: Int) { record("release ships of mission #\(missionID)") }
 }

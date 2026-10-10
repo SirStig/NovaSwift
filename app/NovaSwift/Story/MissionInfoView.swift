@@ -143,7 +143,7 @@ struct MissionInfoView: View {
                     ForEach(summaries) { m in
                         HStack(spacing: 3) {
                             Button { selectedID = m.id } label: {
-                                NovaText(m.name, size: 11,
+                                NovaText((m.failed ? "• " : "") + m.name, size: 11,
                                          color: m.id == selectedID ? .white : Color(white: 0.78),
                                          width: CGFloat(Item.list.w) - 24, align: .leading)
                                     .padding(.vertical, 3).padding(.leading, 5)
@@ -168,7 +168,7 @@ struct MissionInfoView: View {
         if let m = selected {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 5) {
-                    NovaText(m.name, size: 11, color: amber,
+                    NovaText((m.failed ? "• " : "") + m.name, size: 11, color: amber,
                              width: CGFloat(Item.desc.w), align: .leading, weight: .bold)
 
                     // The current objective, with live progress folded in (ship

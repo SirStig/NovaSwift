@@ -46,6 +46,15 @@ final class GameDataController: ObservableObject {
     private(set) var game: NovaGame?
     private var loaded = false
 
+    /// The `manualPluginOrder` enhancement: honour the launcher's enable
+    /// switches and drag order. Off (the original), every installed plug-in
+    /// loads, alphabetically — see `GameLibrary.originalPluginOrder`. Set via
+    /// `setManualPluginOrder`, which reloads.
+    @Published private(set) var manualPluginOrder = GameSettings.load().enhancements.manualPluginOrder
+    /// Whether `plugins` currently holds the user's own enabled set (manual
+    /// mode) rather than the all-enabled original view.
+    private var pluginsAreManual = false
+
     /// Every tagged mission's storyline key/title (`StorylineAnalyzer.storylineTags()`),
     /// prewarmed once per data set — see `prewarm()`. Mission-offer screens read
     /// this instead of each re-scanning the whole mission/cron control-bit graph.
@@ -296,7 +305,7 @@ final class GameDataController: ObservableObject {
         // launch survives a reload that races the save.
         let persisted = Self.loadPluginState()
         let persistedOrder = Dictionary(uniqueKeysWithValues: persisted.enumerated().map { ($1.id, $0) })
-        let previouslyEnabled = Set(plugins.filter(\.isEnabled).map(\.id))
+        let previouslyEnabled = Set(pluginsAreManual ? plugins.filter(\.isEnabled).map(\.id) : [])
             .union(persisted.filter(\.isEnabled).map(\.id))
         for i in discovered.indices where previouslyEnabled.contains(discovered[i].id) {
             discovered[i].isEnabled = true
@@ -311,8 +320,9 @@ final class GameDataController: ObservableObject {
             case (_, nil): return true
             }
         }
-        plugins = discovered
-        Log.data.debug("reload: \(discovered.count, privacy: .public) plug-in(s) discovered, \(discovered.filter(\.isEnabled).count, privacy: .public) enabled")
+        plugins = manualPluginOrder ? discovered : GameLibrary.originalPluginOrder(discovered)
+        pluginsAreManual = manualPluginOrder
+        Log.data.debug("reload: \(discovered.count, privacy: .public) plug-in(s) discovered, \(self.plugins.filter(\.isEnabled).count, privacy: .public) enabled")
 
         guard let baseDir = resolveBaseDir() else {
             hasBaseData = false
@@ -383,8 +393,14 @@ final class GameDataController: ObservableObject {
         Log.data.error("reload: failed to merge game data from \(baseDir.path, privacy: .public): \(message, privacy: .public)")
     }
 
+    func setManualPluginOrder(_ on: Bool) {
+        guard on != manualPluginOrder else { return }
+        manualPluginOrder = on
+        if loaded { reload() }
+    }
+
     func setPlugin(_ id: String, enabled: Bool) {
-        guard let i = plugins.firstIndex(where: { $0.id == id }) else { return }
+        guard manualPluginOrder, let i = plugins.firstIndex(where: { $0.id == id }) else { return }
         plugins[i].isEnabled = enabled
         Self.savePluginState(plugins)
         reload()
@@ -396,7 +412,7 @@ final class GameDataController: ObservableObject {
     /// and lets a later one override an earlier one's same `(type,id)`
     /// resource). No-op if the move would run off either end.
     func movePlugin(id: String, by offset: Int) {
-        guard let i = plugins.firstIndex(where: { $0.id == id }) else { return }
+        guard manualPluginOrder, let i = plugins.firstIndex(where: { $0.id == id }) else { return }
         let j = i + offset
         guard plugins.indices.contains(j) else { return }
         plugins.swapAt(i, j)

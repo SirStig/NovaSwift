@@ -138,6 +138,7 @@ struct FlightKeyboardMonitor: NSViewRepresentable {
             case .afterburner: input.keyboard.afterburner = pressed
             case .firePrimary: input.keyboard.firePrimary = pressed
             case .fireSecondary: input.keyboard.fireSecondary = pressed
+            case .selfDestruct: input.keyboard.selfDestruct = pressed
             case .none:
                 // Discrete: fire once on the initial press (ignore auto-repeat),
                 // and only when the scene owns the keyboard. Deferred a tick for

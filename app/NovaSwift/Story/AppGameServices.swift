@@ -30,13 +30,23 @@ final class AppGameServices: GameServices, ObservableObject {
     var onChangePlayerShip: ((_ shipID: Int, _ mode: ChangeShipMode) -> Void)?
     var onMovePlayer: ((_ systemID: Int, _ keepPosition: Bool) -> Void)?
     var onLeaveStellar: ((_ message: String?) -> Void)?
+    /// An overlay line for the flight view (`showOverlayMessage`).
+    var onOverlayMessage: ((_ message: String) -> Void)?
+    /// A landed `Q`: the spaceport closes whichever screen is open. Each
+    /// spaceport screen's services instance sets it.
+    var onCloseSpaceportScreen: (() -> Void)?
     var onSetStellarDestroyed: ((_ spobID: Int, _ destroyed: Bool) -> Void)?
     var onSpawnMissionShips: ((_ missionID: Int, _ mission: MissionRes) -> Void)?
-    /// The daily hired-escort upkeep was just deducted (total credits charged).
-    var onEscortFeeCharged: ((_ total: Int) -> Void)?
     /// A hired escort left the wing because its daily fee went unpaid — the
     /// container despawns the live ship whose `escortRecordID` matches.
     var onEscortDeparted: ((_ escortID: Int, _ name: String) -> Void)?
+    /// A mission's ships are released (0x00440aa0); the container frees them
+    /// in the live world.
+    var onReleaseMissionShips: ((_ missionID: Int) -> Void)?
+
+    nonisolated func releaseMissionShips(missionID: Int) {
+        MainActor.assumeIsolated { onReleaseMissionShips?(missionID) }
+    }
 
     // `GameServices` itself isn't main-actor-isolated (the CLI's
     // `LoggingGameServices` runs off the main actor), but every conformer in
@@ -103,12 +113,23 @@ final class AppGameServices: GameServices, ObservableObject {
         }
     }
 
+    nonisolated func showOverlayMessage(_ text: String) {
+        MainActor.assumeIsolated {
+            if let onOverlayMessage { onOverlayMessage(text) } else { storyText = ("", text) }
+        }
+    }
+
+    nonisolated func closeSpaceportScreen() {
+        MainActor.assumeIsolated {
+            pendingOffer = nil
+            onCloseSpaceportScreen?()
+        }
+    }
+
     nonisolated func notify(_ event: StoryNotification) {
         Log.story.debug("notify: \(String(describing: event), privacy: .public)")
         MainActor.assumeIsolated {
             switch event {
-            case let .escortDailyFeeCharged(total):
-                onEscortFeeCharged?(total)
             case let .escortDeparted(escortID, name):
                 onEscortDeparted?(escortID, name)
             default:

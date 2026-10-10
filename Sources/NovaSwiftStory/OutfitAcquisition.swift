@@ -21,14 +21,28 @@ extension PlayerState {
     /// `fromSystem`. Safe to call for any outfit — a non-map, non-record outfit
     /// simply does nothing. Idempotent for maps (systems union in) and for
     /// record-clears (already-clean stays clean).
-    public mutating func applyOutfitAcquisition(_ o: OutfRes, game: NovaGame, fromSystem: Int) {
-        // ModType 16 (map): reveal a scoped set of systems, recorded permanently.
+    /// Returns the systems a map reached, in reach order, for their nebula
+    /// OnExplore events (`StoryEngine.exploreNebulae`).
+    @discardableResult
+    public mutating func applyOutfitAcquisition(_ o: OutfRes, game: NovaGame, fromSystem: Int) -> [Int] {
+        // ModType 16 (map): reveal a scoped set of systems at discovery level
+        // 2, recorded permanently. Hidden (NCB-invisible) systems stop the
+        // flood.
+        var reached: [Int] = []
+        let me = self
         for modVal in o.mapModVals {
-            chartSystems(game.mapRevealedSystems(modVal: modVal, from: fromSystem))
+            let order = game.mapRevealOrder(modVal: modVal, from: fromSystem) { id in
+                guard let test = game.system(id)?.visibility, !test.isEmpty else { return true }
+                return NCBTest(test).evaluate(me)
+            }
+            chartSystems(order)
+            reached += order
         }
-        // ModType 21 (clean legal record): wipe standing with the named govt, or all.
+        // ModType 21 (clean legal record): lift every criminal reputation in the
+        // named government's systems, or everywhere for −1.
         for govt in o.cleanRecordGovts {
-            clearLegalRecord(govt: govt)
+            cleanLegalRecord(govt == -1 ? .everywhere : .government(govt), game: game)
         }
+        return reached
     }
 }

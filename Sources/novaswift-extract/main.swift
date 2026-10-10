@@ -405,6 +405,19 @@ case "weapon":
                      w.duration, tags.joined(separator: " ") as NSString))
     }
 
+case "strings":
+    // novaswift-extract strings <baseDir> <STR# id>  — dump a string list, 1-based.
+    guard args.count == 3, let strID = Int(args[2]) else { usage() }
+    let strFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+    let strGame: NovaGame
+    do { strGame = NovaGame(try GameLibrary.merge(baseFiles: strFiles)) }
+    catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
+    guard let list = strGame.stringList(strID) else {
+        FileHandle.standardError.write(Data("error: no STR# \(strID)\n".utf8)); exit(1)
+    }
+    print("STR# \(strID) \"\(list.name)\": \(list.strings.count) entries")
+    for (i, str) in list.strings.enumerated() { print(String(format: "%4d  ", i + 1) + str) }
+
 case "govt":
     guard args.count == 2 || args.count == 3 else { usage() }
     let baseFiles = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
@@ -436,7 +449,7 @@ case "govt":
     govt #\(g.id): \(g.name)
       commName "\(g.commName)"  targetCode "\(g.targetCode)"  mediumName "\(g.mediumName)"
       classes \(g.classes)  allies \(g.allies)  enemies \(g.enemies)
-      crimeTolerance \(g.crimeTolerance)  initialRecord \(g.initialRecord)  maxOdds \(g.maxOdds)  shipSpeedFactor \(g.shipSpeedFactor)
+      crimeTolerance \(g.crimeTolerance)  initialRecord \(g.initialRecord)  maxOdds \(g.maxOdds)  skillMult \(g.skillMultRaw)
       penalties: scanFine \(g.scanFine)  smuggle \(g.smugglePenalty)  disable \(g.disablePenalty)  board \(g.boardPenalty)  kill \(g.killPenalty)  shoot(dead) \(g.shootPenalty)
       scanMask 0x\(String(g.scanMask, radix: 16))  require 0x\(String(g.require, radix: 16))  jamming \(g.jamming)
       interface \(g.interface)  newsPic \(g.newsPic)  voiceType \(g.voiceType)
@@ -851,13 +864,33 @@ case "ai":
     world.spawner?.populate(world)
     print("populated with \(world.npcs.count) NPC(s); jumpRadius \(Int(world.systemContext.jumpRadius))")
 
-    var arrivals = 0, departures = 0, kills = 0, shots = 0, beams = 0
+    var arrivals = 0, departures = 0, kills = 0, shots = 0, beams = 0, hullHits = 0
     var landings = 0, launches = 0, disables = 0, jumpIns = 0, scans = 0
     var scansOfPlayer = 0
     var stateHistogram: [String: Int] = [:]
+    var originalStates: [Int: Int] = [:]
+    var maxHostilePairs = 0
+    let aiTrace = ProcessInfo.processInfo.environment["NOVASWIFT_AI_TRACE"] == "1"
     let dt = 1.0 / 30.0
     let steps = Int(seconds / dt)
+    // NOVASWIFT_SIM_DIGEST=1: after every step phase print the RNG state and a
+    // digest of every ship's pose, so two runs can be diffed to the first
+    // phase that diverges (determinism checks).
+    var digestTick = 0
+    if ProcessInfo.processInfo.environment["NOVASWIFT_SIM_DIGEST"] == "1" {
+        world.profiler = { [unowned world] phase, _ in
+            guard phase != "sim.other" else { return }
+            var h: UInt64 = 1469598103934665603
+            for s in world.allShips {
+                for v in [Double(s.entityID), s.position.x, s.position.y, s.velocity.x, s.velocity.y, s.angle, s.armor, s.shield] {
+                    h = (h ^ v.bitPattern) &* 1099511628211
+                }
+            }
+            print("DIGEST \(digestTick) \(phase) rng \(world.rng.seed) n \(world.allShips.count) h \(String(h, radix: 16))")
+        }
+    }
     for i in 0..<steps {
+        digestTick = i
         world.step(dt)
         for e in world.events {
             switch e {
@@ -869,6 +902,7 @@ case "ai":
             case .shipDestroyed: kills += 1
             case .weaponFired: shots += 1
             case .beam(_, _, _, _, let hit, _, _): if hit { beams += 1 }
+            case .shieldHit, .armorHit: hullHits += 1
             case let .shipScanned(_, targetID, _): scans += 1; if targetID == 0 { scansOfPlayer += 1 }
             default: break
             }
@@ -876,16 +910,49 @@ case "ai":
         if i % (steps / 4 == 0 ? 1 : steps / 4) == 0 {
             for npc in world.npcs { stateHistogram[npc.brain?.state.rawValue ?? "?", default: 0] += 1 }
         }
+        // NOVASWIFT_AI_TRACE=1: dump every NPC's original-AI record every 5 s.
+        if aiTrace, i % 150 == 0 {
+            print(String(format: "  t=%5.1fs", Double(i) * dt))
+            for npc in world.npcs {
+                let rec = world.originalAI.record(for: npc.entityID)
+                let gov = aiGame.govt(npc.government)?.name ?? "indep"
+                print(String(format: "    #%-3d %-20@ [%@ %d] beh %d st 0x%02X md 0x%02X prim %@ cad %d wpn %d pos (%.0f,%.0f)",
+                             npc.entityID, npc.name as NSString, gov as NSString, npc.government,
+                             rec?.behavior ?? -1, rec?.state ?? -1, rec?.mode ?? -1,
+                             (rec?.primary.map(String.init) ?? "-") as NSString,
+                             rec?.cadence ?? -1, npc.weapons.count, npc.position.x, npc.position.y))
+            }
+        }
+        // Mutually hostile NPC pairs in the system (the potential fights).
+        if i % 30 == 0, let dip = world.diplomacy {
+            let live = world.npcs.filter { $0.isAlive && $0.government >= govtResourceBase }
+            var pairs = 0
+            for a in live.indices { for b in live.indices where b > a {
+                if GovtRelations.hostileOrXenophobic(live[a].government, live[b].government, govts: dip.govts) { pairs += 1 }
+            } }
+            maxHostilePairs = max(maxHostilePairs, pairs)
+        }
+        // The original AI's state codes, sampled every tick.
+        for npc in world.npcs {
+            guard let rec = world.originalAI.record(for: npc.entityID) else { continue }
+            originalStates[rec.state, default: 0] += 1
+        }
     }
 
     print(String(repeating: "-", count: 44))
     print("after \(Int(seconds))s:  live NPCs \(world.npcs.count)   projectiles \(world.projectiles.count)")
     print("  arrivals \(arrivals) (jump-in \(jumpIns), launch \(launches))   departures \(departures)   landings \(landings)")
-    print("  kills \(kills)   disabled \(disables)   shots fired \(shots)   beam hits \(beams)")
+    print("  kills \(kills)   disabled \(disables)   shots fired \(shots)   beam hits \(beams)   hull hits \(hullHits)")
     print("  scans \(scans) (of player \(scansOfPlayer))")
+    print("  max hostile NPC pairs in system \(maxHostilePairs)")
     let hist = stateHistogram.sorted { $0.value > $1.value }
         .map { "\($0.key)×\($0.value)" }.joined(separator: "  ")
     print("  behavior samples: \(hist)")
+    if !originalStates.isEmpty {
+        let codes = originalStates.sorted { $0.key < $1.key }
+            .map { String(format: "0x%02X×%d", $0.key, $0.value) }.joined(separator: "  ")
+        print("  original AI state-ticks: \(codes)")
+    }
     print("  sample ships:")
     for npc in world.npcs.prefix(8) {
         let gov = aiGame.govt(npc.government)?.name ?? "indep"

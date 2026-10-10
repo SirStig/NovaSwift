@@ -43,35 +43,38 @@ final class StoryEngineTests: XCTestCase {
         XCTAssertTrue(svc.log.contains { $0.contains("outfit") })
     }
 
-    // MARK: Daily escort fees
+    // MARK: Escort payroll (EC-20)
 
-    /// A hired escort's daily fee is deducted once per day; a captured escort is
-    /// free. Both stay in the wing while the fee is covered.
-    func testHiredEscortDailyFeeDeductedCapturedIsFree() {
+    /// Escort upkeep is not part of the daily tick: days pass without a charge,
+    /// and each payroll period bills only the hired escort (captured is free).
+    func testHiredEscortPayrollPerPeriodCapturedIsFree() {
         var player = PlayerState(shipType: 128, currentSystem: 128)
         player.credits = 1000
         player.registerEscort(shipType: 128, name: "Merc", origin: .hired, hireFee: 500, dailyFee: 50)
         player.registerEscort(shipType: 128, name: "Prize", origin: .captured)
         let (eng, svc) = engine([], player: player)
         eng.advanceDays(3)
-        XCTAssertEqual(eng.player.credits, 1000 - 50 * 3)   // only the hired one bills
-        XCTAssertEqual(eng.player.escortWing.count, 2)      // both still present
+        XCTAssertEqual(eng.player.credits, 1000, "days alone charge nothing")
+        eng.processEscortPayroll(periods: 2)                 // a two-day jump
+        XCTAssertEqual(eng.player.credits, 1000 - 50 * 2)
+        XCTAssertEqual(eng.player.escortWing.count, 2)
         XCTAssertTrue(svc.log.contains { $0.contains("escortDailyFeeCharged") })
     }
 
-    /// When the balance can't cover a hired escort's fee, that escort "departs
-    /// without ceremony" — cheaper escorts are paid first, the unaffordable one
-    /// leaves, and a `.escortDeparted` notification fires.
-    func testUnaffordableEscortDepartsWithoutCeremony() {
+    /// An escort the player can't pay defects; the others are paid in slot
+    /// order, and a disabled escort is skipped entirely.
+    func testUnpaidEscortDefectsAndDisabledIsSkipped() {
         var player = PlayerState(shipType: 128, currentSystem: 128)
         player.credits = 120
-        let cheap = player.registerEscort(shipType: 128, name: "Cheap", origin: .hired, hireFee: 300, dailyFee: 30)
         let pricey = player.registerEscort(shipType: 128, name: "Pricey", origin: .hired, hireFee: 5000, dailyFee: 500)
+        let cheap = player.registerEscort(shipType: 128, name: "Cheap", origin: .hired, hireFee: 300, dailyFee: 30)
+        let hurt = player.registerEscort(shipType: 128, name: "Hurt", origin: .hired, hireFee: 300, dailyFee: 1000)
         let (eng, svc) = engine([], player: player)
-        eng.advanceOneDay()
-        XCTAssertEqual(eng.player.credits, 90)              // 30 paid, 500 unaffordable
+        XCTAssertEqual(eng.processEscortPayroll(periods: 1, skipping: [hurt.id]), 1)
+        XCTAssertEqual(eng.player.credits, 90)
+        XCTAssertNil(eng.player.escort(id: pricey.id))
         XCTAssertNotNil(eng.player.escort(id: cheap.id))
-        XCTAssertNil(eng.player.escort(id: pricey.id))      // departed
+        XCTAssertNotNil(eng.player.escort(id: hurt.id))
         XCTAssertTrue(svc.log.contains { $0.contains("escortDeparted") })
     }
 
@@ -127,11 +130,15 @@ final class StoryEngineTests: XCTestCase {
         XCTAssertFalse(eng.isEligible(eng.game.mission(200)!, at: .missionComputer, spobID: nil))
     }
 
-    func testCompletedMissionNotOfferedAgain() {
+    func testCompletedMissionIsOfferedAgain() {
+        // MS-04: only AvailBits decide repeatability; the original has no
+        // "completed" gate.
         let m = MissionSpec(id: 201, availRandom: 100).resource()
         let (eng, _) = engine([m])
-        eng.player.completedMissions.insert(201)
-        XCTAssertEqual(eng.missionsOffered(at: .missionComputer, spob: nil).count, 0)
+        XCTAssertTrue(eng.accept(201))
+        XCTAssertEqual(eng.missionsOffered(at: .missionComputer, spob: nil).count, 0, "not while active")
+        eng.completeMission(201)
+        XCTAssertEqual(eng.missionsOffered(at: .missionComputer, spob: nil).map(\.id), [201])
     }
 
     // MARK: Cargo delivery lifecycle
@@ -163,20 +170,36 @@ final class StoryEngineTests: XCTestCase {
 
     // MARK: Combat-objective lifecycle
 
-    func testDestroyObjectiveCompletesWithoutReturn() {
-        // Destroy 2 ships, no return leg (returnStellar = -1).
+    func testDestroyObjectiveWithNoReturnNeverSucceeds() {
+        // MS-08: ReturnStel -1 means the travel stellar; with TravelStel -1
+        // too there is nowhere to land, so the mission only ends by a script
+        // (here its OnShipDone) — it never pays.
         let m = MissionSpec(id: 400, returnStellar: -1, pay: 5000,
                             shipCount: 2, shipGoal: 0 /* destroy */,
-                            onSuccess: "b900").resource()
+                            onSuccess: "b900", onShipDone: "b901").resource()
         let (eng, svc) = engine([m])
         XCTAssertTrue(eng.accept(400))
         XCTAssertTrue(svc.log.contains { $0.contains("spawn ships") })
 
         eng.missionShipDestroyed(missionID: 400)            // 1 of 2
-        XCTAssertTrue(eng.player.isMissionActive(400))
-        eng.missionShipDestroyed(missionID: 400)            // 2 of 2 → complete
-        XCTAssertFalse(eng.player.isMissionActive(400))
-        XCTAssertTrue(eng.player.completedMissions.contains(400))
+        XCTAssertFalse(eng.player.isBitSet(901))
+        eng.missionShipDestroyed(missionID: 400)            // 2 of 2 → objective done
+        XCTAssertTrue(eng.player.isBitSet(901), "OnShipDone fires when the objective completes")
+        XCTAssertTrue(eng.player.isMissionActive(400), "but there is no return leg to succeed at")
+        XCTAssertFalse(eng.player.isBitSet(900))
+        XCTAssertEqual(eng.player.credits, 0)
+    }
+
+    func testDestroyObjectiveCompletesAtTheReturnStellar() {
+        let m = MissionSpec(id: 401, returnStellar: 500, pay: 5000,
+                            shipCount: 1, shipGoal: 0, onSuccess: "b900").resource()
+        let (eng, _) = engine([m])
+        XCTAssertTrue(eng.accept(401))
+        eng.playerLanded(onSpob: 500)
+        XCTAssertTrue(eng.player.isMissionActive(401), "the ship isn't dealt with yet")
+        eng.missionShipDestroyed(missionID: 401)
+        eng.playerLanded(onSpob: 500)
+        XCTAssertFalse(eng.player.isMissionActive(401))
         XCTAssertTrue(eng.player.isBitSet(900))
         XCTAssertEqual(eng.player.credits, 5000)
     }
@@ -206,16 +229,38 @@ final class StoryEngineTests: XCTestCase {
     // MARK: Deadlines
 
     func testDeadlineFailure() {
+        // MS-13: the countdown hits 0 after TimeLimit daily ticks and the
+        // mission fails on the next flight pass — so it must be finished by
+        // accept + N - 1. It then waits, failed, for the return landing.
         let m = MissionSpec(id: 430, returnStellar: 500, timeLimit: 10,
                             canAbort: false, onFailure: "b66").resource()
         let (eng, _) = engine([m, spobResource(id: 500, govt: 128)])
         eng.accept(430)
         eng.advanceDays(9)
-        XCTAssertTrue(eng.player.isMissionActive(430))
-        eng.advanceDays(2)                                   // now past day 10
-        XCTAssertFalse(eng.player.isMissionActive(430))
+        eng.missionFlightPass()
+        XCTAssertFalse(eng.player.activeMission(430)!.isFailed)
+        eng.advanceDays(1)                                   // countdown reaches 0
+        XCTAssertFalse(eng.player.activeMission(430)!.isFailed, "nothing fails on the daily tick itself")
+        eng.missionFlightPass()
+        XCTAssertTrue(eng.player.activeMission(430)!.isFailed)
         XCTAssertTrue(eng.player.failedMissions.contains(430))
         XCTAssertTrue(eng.player.isBitSet(66))
+        eng.player.clearBit(66)
+        eng.playerLanded(onSpob: 500)
+        XCTAssertFalse(eng.player.isMissionActive(430))
+        XCTAssertTrue(eng.player.isBitSet(66), "OnFailure runs again at the final resolution")
+    }
+
+    func testDeadlineDoesNotFailWhileLanded() {
+        let m = MissionSpec(id: 431, returnStellar: 500, timeLimit: 2, canAbort: false).resource()
+        let (eng, _) = engine([m])
+        eng.playerLanded(onSpob: 600)
+        eng.accept(431)
+        eng.advanceDays(5)
+        eng.playerLanded(onSpob: 600)
+        XCTAssertFalse(eng.player.activeMission(431)!.isFailed, "the landing pass never fails on the clock")
+        _ = eng.playerLaunched()
+        XCTAssertTrue(eng.player.activeMission(431)!.isFailed)
     }
 
     // MARK: Cron events
@@ -262,38 +307,41 @@ final class StoryEngineTests: XCTestCase {
         XCTAssertEqual(eng.player.credits, 600)
     }
 
-    // MARK: Mission destination resolution (`concreteStellar`)
+    // MARK: Mission destination resolution (`selectStellar`)
 
-    func testConcreteStellarResolvesFixedIDPassthrough() {
-        let (eng, _) = engine([])
-        XCTAssertEqual(eng.concreteStellar(500, salt: 0), 500, "128...2175 is a literal spob id")
+    func testSelectStellarFixedIDPassesThrough() {
+        let (eng, _) = engine([landableSpob(id: 500, govt: 128), systemResource(id: 300, spobs: [500])])
+        XCTAssertEqual(eng.selectStellar(locator: 500, reference: nil, excluded: nil), 500,
+                       "128...2175 is a literal spob id")
     }
 
-    func testConcreteStellarResolvesGovtScopedSelectorNotAsLiteralID() {
-        // Regression: codes >= 128 that aren't literal ids (govt/class/random
-        // selectors) used to be treated as a literal spob id, so a mission's
-        // random destination resolved to a bogus lookup (silently rendering
-        // as the "your destination" placeholder) instead of a real spob.
+    func testSelectStellarGovtLocatorIsNotALiteralID() {
         // 10000+g selects "any stellar of government g" (g = code - 10000 + 128).
-        let spob = spobResource(id: 500, govt: 128)
-        let (eng, _) = engine([spob])
-        XCTAssertEqual(eng.concreteStellar(10000, salt: 0), 500,
-                       "a govt-scoped selector code must resolve via StellarMatch, not pass through as a literal id")
+        let (eng, _) = engine([landableSpob(id: 500, govt: 128), systemResource(id: 300, spobs: [500])])
+        XCTAssertEqual(eng.selectStellar(locator: 10000, reference: nil, excluded: nil), 500)
     }
 
-    func testConcreteStellarReturnsNilForNoDestination() {
-        let (eng, _) = engine([])
-        XCTAssertNil(eng.concreteStellar(-1, salt: 0))
+    func testSelectStellarFallsBackToTheAnchor() {
+        // OQ D3: with no candidate (and for -1/-4) the original returns the
+        // anchor, the offering stellar.
+        let (eng, _) = engine([landableSpob(id: 500, govt: 129), systemResource(id: 300, spobs: [500])])
+        XCTAssertEqual(eng.selectStellar(locator: -1, reference: 777, excluded: nil), 777)
+        XCTAssertEqual(eng.selectStellar(locator: 10000, reference: 777, excluded: nil), 777)
+        XCTAssertNil(eng.selectStellar(locator: 10000, reference: nil, excluded: nil))
     }
 
     // MARK: Mission-accept cargo-space gating (show-but-disable vs. hide)
 
     func testMissionComputerKeepsCargoShortMissionVisibleButNotAcceptable() {
-        // The Mission BBS (.missionComputer) should still show a mission the
-        // player can't currently fit — just not let them accept it.
+        // MS-12: the BBS hides a mission only with Flags2 0x0001; without it
+        // a mission the player can't fit is listed, and activation refuses it.
         let m = MissionSpec(id: 600, availLocation: 0 /* missionComputer */,
-                            cargoType: 1, cargoQty: 500, cargoPickup: 0, flags2: 0x0001).resource()
-        let (eng, _) = engine([m])
+                            cargoType: 1, cargoQty: 500, cargoPickup: 0).resource()
+        let hidden = MissionSpec(id: 604, availLocation: 0, cargoType: 1, cargoQty: 500,
+                                 cargoPickup: 0, flags2: 0x0001).resource()
+        let (eng, _) = engine([m, hidden])
+        XCTAssertFalse(eng.isEligible(eng.game.mission(604)!, at: .missionComputer, spobID: nil),
+                       "Flags2 0x0001 hides it while it doesn't fit")
         XCTAssertTrue(eng.isEligible(eng.game.mission(600)!, at: .missionComputer, spobID: nil),
                       "still offered/browsable even without enough cargo space")
         XCTAssertFalse(eng.canAccept(eng.game.mission(600)!), "but not acceptable")
@@ -312,11 +360,13 @@ final class StoryEngineTests: XCTestCase {
                        "a bar offer the player can't fit should never be offered")
     }
 
-    func testCanAcceptTrueWhenNoCargoSpaceFlagOrEnoughRoom() {
+    func testActivationAlwaysChecksCargoRoom() {
+        // MS-12: activation refuses a cargo load that exceeds the hold or its
+        // free space, whatever the flags.
         let noFlag = MissionSpec(id: 602, cargoType: 1, cargoQty: 500, cargoPickup: 0).resource()
         let fits = MissionSpec(id: 603, cargoType: 1, cargoQty: 1, cargoPickup: 0, flags2: 0x0001).resource()
         let (eng, _) = engine([noFlag, fits])
-        XCTAssertTrue(eng.canAccept(eng.game.mission(602)!), "flag not set — no cargo gate at all")
+        XCTAssertFalse(eng.canAccept(eng.game.mission(602)!), "500 t never fits a 100 t hold")
         XCTAssertTrue(eng.canAccept(eng.game.mission(603)!), "1 ton needed, plenty of room free")
     }
 

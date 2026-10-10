@@ -71,6 +71,7 @@ final class MissionAndFleetSpawnTests: XCTestCase {
         let table = SpawnTable(dudes: [], fleets: [], averageShips: 4,
                                systemGovt: 128, systemID: 500)
         let spawner = Spawner(galaxy: galaxy, table: table)
+        spawner.model = .port   // the port's traffic model (System Aliveness presets)
         let world = World(player: Ship(name: "P", stats: stats()))
         world.galaxy = galaxy
         // An inhabited system (a landable port) so the spawner keeps its fleet slots:
@@ -91,6 +92,7 @@ final class MissionAndFleetSpawnTests: XCTestCase {
         let galaxy = Galaxy(game: NovaGame(col))
         let table = SpawnTable(dudes: [], fleets: [], averageShips: 4, systemGovt: 129, systemID: 500)
         let spawner = Spawner(galaxy: galaxy, table: table)
+        spawner.model = .port   // the port's traffic model (System Aliveness presets)
         let world = World(player: Ship(name: "P", stats: stats()))
         world.galaxy = galaxy
         spawner.populate(world)
@@ -114,6 +116,7 @@ final class MissionAndFleetSpawnTests: XCTestCase {
         let table = SpawnTable(dudes: [(200, 100)], fleets: [], averageShips: 8,
                                systemGovt: 128, systemID: 500)
         let spawner = Spawner(galaxy: galaxy, table: table)
+        spawner.model = .port   // the port's traffic model (System Aliveness presets)
         let world = World(player: Ship(name: "P", stats: stats()))
         world.galaxy = galaxy
         world.diplomacy = galaxy.makeDiplomacy()
@@ -145,6 +148,36 @@ final class MissionAndFleetSpawnTests: XCTestCase {
         return Resource(type: NovaType.govt, id: id, name: "Govt\(id)", data: Data(b))
     }
 
+    // MARK: AI-13 · the retrigger delay outlives the visit
+
+    func testReinforcementCallReportsItsDayDelayAndAHeldSystemCannotCall() {
+        var col = ResourceCollection()
+        col.add(ship(128, name: "Hull"))
+        col.add(govtWithMaxOdds(128, maxOdds: 10))
+        col.add(fleet(200, lead: 128, govt: 128, linkSyst: -1))
+        let galaxy = Galaxy(game: NovaGame(col))
+        func make(regen: Int) -> (Spawner, World) {
+            let table = SpawnTable(dudes: [], fleets: [], averageShips: 0, systemGovt: 128, systemID: 500,
+                                   reinforcementFleet: 200, reinforcementDelay: 30, reinforcementRegen: regen)
+            let spawner = Spawner(galaxy: galaxy, table: table)
+            let world = World(player: Ship(name: "P", stats: stats()))
+            world.galaxy = galaxy
+            world.diplomacy = galaxy.makeDiplomacy()
+            world.spawner = spawner
+            return (spawner, world)
+        }
+        let (spawner, world) = make(regen: 0)
+        world.step(1.0 / 30.0)
+        XCTAssertTrue(spawner.requestAssistance(govt: 128, odds: 10, forced: false, world: world))
+        XCTAssertTrue(world.events.contains { if case .reinforcementsCalled(500, 1) = $0 { return true }; return false },
+                      "ReinfIntrval 0 still waits max(0, 1) = 1 day")
+        let (held, heldWorld) = make(regen: 3)
+        held.holdReinforcements(retriggerDaysLeft: 2)
+        heldWorld.step(1.0 / 30.0)
+        XCTAssertFalse(held.requestAssistance(govt: 128, odds: 10, forced: true, world: heldWorld),
+                       "a system still counting down its days can't call on this visit")
+    }
+
     // MARK: Reactive reinforcement provocation (independent of legal-record threshold)
 
     /// Attacking one ship of a government must make reinforcement calls
@@ -164,6 +197,7 @@ final class MissionAndFleetSpawnTests: XCTestCase {
                                systemGovt: 128, systemID: 500,
                                reinforcementFleet: 200, reinforcementDelay: 0, reinforcementRegen: 999)
         let spawner = Spawner(galaxy: galaxy, table: table)
+        spawner.model = .port   // the port's traffic model (System Aliveness presets)
 
         let player = Ship(name: "P", stats: stats())
         player.combatStrength = 1000                  // heavily outmatches the lone patrol
@@ -207,6 +241,7 @@ final class MissionAndFleetSpawnTests: XCTestCase {
 
         // Default host gate returns false → the gated fleet is suppressed.
         let spawner1 = Spawner(galaxy: galaxy, table: table)
+        spawner1.model = .port   // the port's traffic model (System Aliveness presets)
         let world1 = World(player: Ship(name: "P", stats: stats()))
         world1.galaxy = galaxy
         spawner1.populate(world1)
@@ -215,6 +250,7 @@ final class MissionAndFleetSpawnTests: XCTestCase {
 
         // Host says the story bit is set → the fleet becomes eligible.
         let spawner2 = Spawner(galaxy: galaxy, table: table)
+        spawner2.model = .port   // the port's traffic model (System Aliveness presets)
         let world2 = World(player: Ship(name: "P", stats: stats()))
         world2.galaxy = galaxy
         // Inhabited system so fleet slots aren't zeroed by `applyHabitation`.
@@ -303,6 +339,23 @@ final class MissionAndFleetSpawnTests: XCTestCase {
             }
             return false
         }, "destroying a destroy-goal mission ship reports the objective reached")
+    }
+
+    /// MS-11: the story counts every lost disable/escort/board mission ship, so
+    /// a destroyed one reports a loss whatever its goal.
+    func testDestroyedDisableGoalShipReportsALoss() {
+        let galaxy = missionGalaxy()
+        let world = World(player: Ship(name: "P", stats: stats()))
+        world.galaxy = galaxy
+        let ids = world.spawnMissionShips(missionID: 4, dudeID: 200, count: 1, goal: .disable)
+        _ = world.drainEvents()
+        let target = try! XCTUnwrap(world.ship(id: ids[0]))
+        target.armor = 0
+        world.step(1.0 / 30.0)
+        XCTAssertTrue(world.events.contains {
+            if case .missionShipLost(let mid, let goal) = $0 { return mid == 4 && goal == .disable }
+            return false
+        })
     }
 
     // MARK: Phase 3 — ShipBehav friend/foe overrides (no galaxy needed)

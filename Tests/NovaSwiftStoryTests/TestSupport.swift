@@ -87,9 +87,9 @@ struct MissionSpec {
         Bytes.i16(&b, 68, shipDoneText)
         Bytes.i16(&b, 64, timeLimit)
         Bytes.i16(&b, 66, canAbort ? 1 : 0)
-        Bytes.i16(&b, 78, flags1)
-        Bytes.i16(&b, 80, flags2)
-        Bytes.i16(&b, 88, availShipType)
+        Bytes.i16(&b, 80, flags1)
+        Bytes.i16(&b, 82, flags2)
+        Bytes.i16(&b, 90, availShipType)
         Bytes.cstr(&b, 92, availBits)
         Bytes.cstr(&b, 347, onAccept)
         Bytes.cstr(&b, 602, onRefuse)
@@ -115,9 +115,17 @@ struct CronSpec {
     var enableOn = ""
     var onStart = ""
     var onEnd = ""
+    var independentNews = -1
+    var newsGovts: [Int] = []
+    var govtNewsStrs: [Int] = []
 
     func resource() -> Resource {
         var b = [UInt8](repeating: 0, count: 822)
+        Bytes.i16(&b, 20, independentNews)
+        for i in 0..<4 {
+            Bytes.i16(&b, 806 + i * 2, i < newsGovts.count ? newsGovts[i] : -1)
+            Bytes.i16(&b, 814 + i * 2, i < govtNewsStrs.count ? govtNewsStrs[i] : -1)
+        }
         Bytes.i16(&b, 0, firstDay)
         Bytes.i16(&b, 2, firstMonth)
         Bytes.i16(&b, 4, firstYear)
@@ -143,12 +151,89 @@ func shipResource(id: Int, cargo: Int) -> Resource {
     return Resource(type: NovaType.ship, id: id, name: "Ship \(id)", data: Data(b))
 }
 
+/// A `sÿst` owned by `govt` (−1 independent) at map position (`x`, `y`) with
+/// declared `links` — enough for the per-system legal record (EC-02).
+func ownedSystemResource(id: Int, govt: Int, links: [Int] = [], x: Int? = nil, y: Int = 0) -> Resource {
+    var b = [UInt8](repeating: 0, count: 420)
+    Bytes.i16(&b, 0, x ?? id)
+    Bytes.i16(&b, 2, y)
+    for i in 0..<16 { Bytes.i16(&b, 4 + i * 2, i < links.count ? links[i] : -1) }
+    Bytes.i16(&b, 102, govt)
+    return Resource(type: NovaType.syst, id: id, name: "Sys \(id)", data: Data(b))
+}
+
 /// A spob with a government and landing pict, so stellar matching resolves.
 func spobResource(id: Int, govt: Int) -> Resource {
     var b = [UInt8](repeating: 0, count: 40)
     Bytes.i16(&b, 20, govt)
     Bytes.i16(&b, 24, 1000)   // landingPictID > 0 → "inhabited"
     return Resource(type: NovaType.spob, id: id, name: "Spob \(id)", data: Data(b))
+}
+
+/// A landable spöb (Flags 0x0001, plus `flags`) at a map position, so the
+/// original's random-destination rules accept it.
+func landableSpob(id: Int, govt: Int, x: Int = 0, y: Int = 0, flags: Int = 0) -> Resource {
+    var b = [UInt8](repeating: 0, count: 40)
+    Bytes.i16(&b, 0, x)
+    Bytes.i16(&b, 2, y)
+    Bytes.i32(&b, 6, 0x0001 | flags)
+    Bytes.i16(&b, 20, govt)
+    Bytes.i16(&b, 24, 1000)
+    return Resource(type: NovaType.spob, id: id, name: "Spob \(id)", data: Data(b))
+}
+
+/// A sÿst at a map position with links, stellars, a government and an
+/// optional NCB visibility test.
+func systemResource(id: Int, x: Int? = nil, y: Int = 0, links: [Int] = [], spobs: [Int] = [],
+                    govt: Int = -1, visibility: String = "") -> Resource {
+    var b = [UInt8](repeating: 0, count: 500)
+    Bytes.i16(&b, 0, x ?? id * 10)
+    Bytes.i16(&b, 2, y)
+    for i in 0..<16 { Bytes.i16(&b, 4 + i * 2, i < links.count ? links[i] : -1) }
+    for i in 0..<16 { Bytes.i16(&b, 36 + i * 2, i < spobs.count ? spobs[i] : -1) }
+    Bytes.i16(&b, 102, govt)
+    Bytes.cstr(&b, 150, visibility)
+    return Resource(type: NovaType.syst, id: id, name: "System \(id)", data: Data(b))
+}
+
+/// A government with class, ally and enemy slots (@24/@32/@40) and Flags1
+/// (@2); unused slots are -1.
+func govtResource(id: Int, classes: [Int], allies: [Int] = [], enemies: [Int] = [], flags: Int = 0) -> Resource {
+    var b = [UInt8](repeating: 0, count: 176)
+    Bytes.i16(&b, 2, flags)
+    for i in 0..<4 { Bytes.i16(&b, 24 + i * 2, i < classes.count ? classes[i] : -1) }
+    for i in 0..<4 { Bytes.i16(&b, 32 + i * 2, i < allies.count ? allies[i] : -1) }
+    for i in 0..<4 { Bytes.i16(&b, 40 + i * 2, i < enemies.count ? enemies[i] : -1) }
+    return Resource(type: NovaType.govt, id: id, name: "Govt \(id)", data: Data(b))
+}
+
+/// A STR# resource from a list of strings.
+func stringListResource(_ id: Int, _ items: [String]) -> Resource {
+    var b: [UInt8] = [UInt8(items.count >> 8), UInt8(items.count & 0xff)]
+    for s in items {
+        let bytes = Array(s.data(using: .macOSRoman) ?? Data())
+        b.append(UInt8(bytes.count)); b += bytes
+    }
+    return Resource(type: NovaType.strList, id: id, name: "STR#\(id)", data: Data(b))
+}
+
+/// A ränk: weight @0, govt @2, salary @6, flags @22.
+func rankResource(id: Int, govt: Int = 128, weight: Int = 0, salary: Int = 0, flags: Int = 0) -> Resource {
+    var b = [UInt8](repeating: 0, count: 152)
+    Bytes.i16(&b, 0, weight)
+    Bytes.i16(&b, 2, govt)
+    Bytes.i32(&b, 6, salary)
+    Bytes.i16(&b, 22, flags)
+    return Resource(type: NovaType.rank, id: id, name: "Rank \(id)", data: Data(b))
+}
+
+/// An IFF outfit (ModType 14).
+func iffOutfit(id: Int) -> Resource {
+    var b = [UInt8](repeating: 0, count: 1012)
+    for pos in [6, 18, 22, 26] { Bytes.i16(&b, pos, -1) }
+    Bytes.i16(&b, 6, 14)
+    Bytes.i16(&b, 8, 1)
+    return Resource(type: NovaType.outfit, id: id, name: "IFF", data: Data(b))
 }
 
 /// A government with a real `mapColor` (LCOL, `0x00RRGGBB` @164) so palette /

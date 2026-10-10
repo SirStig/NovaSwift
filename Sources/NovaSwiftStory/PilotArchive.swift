@@ -320,6 +320,27 @@ public final class PilotArchive {
         Log.pilot.notice("PilotArchive.delete: deleted pilot \(id, privacy: .public)")
     }
 
+    /// Strict Play death (FL-03): delete pilot `id` — its file and every backup —
+    /// from each of `archives`, the live store and any other store a copy may
+    /// have been migrated into (local ⇄ iCloud migration copies, it doesn't
+    /// move). Missing copies are skipped. Returns how many stores held a copy.
+    @discardableResult
+    public static func deleteEverywhere(id: UUID, archives: [PilotArchive]) -> Int {
+        var held = 0
+        var seen = Set<URL>()
+        for archive in archives where seen.insert(archive.root.standardizedFileURL).inserted {
+            let had = archive.exists(id: id) || !archive.backups(for: id).isEmpty
+            do {
+                try archive.delete(id: id)
+                if had { held += 1 }
+            } catch {
+                Log.pilot.error("PilotArchive.deleteEverywhere: failed in \(archive.root.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        Log.pilot.notice("PilotArchive.deleteEverywhere: deleted pilot \(id, privacy: .public) from \(held) store(s)")
+        return held
+    }
+
     /// Clone a pilot under a new id (and optional new name) — a "copy pilot"
     /// action that forks an independent pilot identity. Deliberately assigns a
     /// **fresh** `pilotGroupID` (not inherited from the source): this is a

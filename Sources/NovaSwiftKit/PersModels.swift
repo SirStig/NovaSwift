@@ -37,8 +37,9 @@ import Foundation
 /// Offsets confirmed empirically against the 516 shipped `përs` records:
 /// `ShipType@10` is a valid `shïp` id in all 516; `Govt@2`/`AIType@4` match the
 /// Bible's field order; `GrantClass@308` carries the one real `ItemClass` value
-/// in the data (25, "Dr Ralph"), with `GrantProb@310`/`GrantCount@312` following
-/// it in the Bible-stated order.
+/// in the data (25, "Dr Ralph"). The two words after it are count then
+/// probability — the reverse of the Bible's listing: the original's loader
+/// (0x004bd3c0) clamps @312 to 0–100 and @310 to ≥ 0.
 public struct PersRes {
     public let id: Int
     public let name: String
@@ -52,6 +53,9 @@ public struct PersRes {
     public let aiType: Int
     /// `Aggress`: how close ships get before the person attacks (1 close … 3 far). @6.
     public let aggression: Int
+    /// `Aggress` as the loader stores it: 1 and 2 kept, 3 or more read as 4,
+    /// anything below 1 as 1 (AI-21 consumes it).
+    public var aggressionLevel: Int { aggression >= 3 ? 4 : max(1, aggression) }
     /// `Coward`: percent of shields at which the person flees a fight. @8.
     public let coward: Int
     /// `ShipType`: the `shïp` class the person flies. @10.
@@ -77,16 +81,19 @@ public struct PersRes {
     public let linkMission: Int
     /// `Flags`: behaviour bits (grudge, quote conditions, mission handling). @50.
     public let flags: UInt16
+    /// `Flags2` (payload +0x17e, runtime +0x16): 0x0001 spawns the ship with
+    /// no fuel (`Pers_SpawnShipFromPersDef` 0x004235c0).
+    public let flags2: UInt16
     /// `ActiveOn`: NCB test expression gating whether this person can appear. @52.
     public let activeOn: String
     /// `GrantClass` (Bible): "The class of outfit item given out by this person's
     /// ship when boarded by the player" — an `oütf.ItemClass` value. 0/-1 =
     /// nothing. @308.
     public let grantClass: Int
-    /// `GrantProb`: percent chance (0-100) of granting any items when boarded. @310.
+    /// `GrantProb`: percent chance (0-100) of granting any items when boarded. @312.
     public let grantProb: Int
     /// `GrantCount`: max items given; the actual count is between
-    /// `GrantCount/2` and `GrantCount` (Bible). @312.
+    /// `GrantCount/2` and `GrantCount` (Bible). @310.
     public let grantCount: Int
 
     public init(_ r: Resource) {
@@ -110,9 +117,12 @@ public struct PersRes {
         linkMission = pi16(d, 48)
         flags = pu16(d, 50)
         activeOn = pcstr(d, 52, 255)
-        grantClass = pi16(d, 308)
-        grantProb = pi16(d, 310)
-        grantCount = pi16(d, 312)
+        // A class below 1 voids the whole grant, as the original's loader does.
+        let itemClass = pi16(d, 308)
+        grantClass = itemClass < 1 ? -1 : itemClass
+        grantCount = itemClass < 1 ? 0 : max(0, pi16(d, 310))
+        grantProb = itemClass < 1 ? 0 : min(100, max(0, pi16(d, 312)))
+        flags2 = pu16(d, 382)
     }
 
     /// True if boarding this person can yield outfit loot (`GrantClass` set and a
@@ -132,6 +142,9 @@ public struct PersRes {
     public var hailQuoteWhenAttacking: Bool { flags & 0x0010 != 0 }
     /// 0x0020 — only show HailQuote when the ship is disabled.
     public var hailQuoteWhenDisabled: Bool { flags & 0x0020 != 0 }
+    /// 0x0040 — accepting its LinkMission replaces this ship with the
+    /// mission's special ship (when the mission has one), at the same spot.
+    public var replacedByMissionShip: Bool { flags & 0x0040 != 0 }
     /// 0x0080 — only show the quote once.
     public var quoteOnce: Bool { flags & 0x0080 != 0 }
     /// 0x0100 — deactivate the person after accepting its LinkMission.

@@ -6,7 +6,7 @@ public struct Resource: Hashable, Sendable {
     public let id: Int
     public let name: String
     public let attributes: Int
-    public let data: Data
+    public internal(set) var data: Data
     /// Which layer contributed this resource in the merged collection: ""
     /// for the base game, else the owning `PluginBundle.id` — stamped by
     /// `ResourceCollection.overlay(_:tag:)` during `GameLibrary.merge`.
@@ -47,6 +47,10 @@ public struct ResourceCollection: Sendable {
                 add(r)
             }
         }
+    }
+
+    public mutating func remove(_ type: FourCharCode, _ id: Int) {
+        byType[type]?[id] = nil
     }
 
     public func resource(_ type: FourCharCode, _ id: Int) -> Resource? {

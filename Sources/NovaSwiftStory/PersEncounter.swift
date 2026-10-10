@@ -22,24 +22,23 @@ public struct PersHailResult: Equatable, Sendable {
 public enum PersEncounter {
 
     /// Whether the player currently "likes" this person: no grudge and a
-    /// non-negative legal standing with the person's government.
+    /// non-negative reputation in the current system (EC-02).
     public static func likesPlayer(_ pers: PersRes, player: PlayerState) -> Bool {
         guard !player.persHoldsGrudge(pers.id) else { return false }
         guard pers.govt >= 0 else { return true }
-        return player.effectiveLegalRecord(govt: pers.govt, atSystem: player.currentSystem) >= 0
+        return player.reputationHere >= 0
     }
 
-    /// The `mïsn` this person offers right now (LinkMission), if it's valid,
-    /// unfinished, and its own gate passes — nil otherwise. `boarding` selects
-    /// the board-vs-hail offer context (Flags 0x0200).
+    /// The `mïsn` this person offers right now (LinkMission), if it passes the
+    /// full offering chain as a ship offer (AvailLoc 2) — nil otherwise.
+    /// `boarding` selects the board-vs-hail offer context (Flags 0x0200).
     public static func offeredMission(_ pers: PersRes, player: PlayerState, game: NovaGame,
                                       engine: StoryEngine, boarding: Bool) -> Int? {
         guard pers.linkMission >= 128 else { return nil }
         // Flags 0x0200: offer on boarding, not hailing (and vice-versa).
         if pers.offerMissionOnBoard != boarding { return nil }
-        guard let m = game.mission(pers.linkMission) else { return nil }
-        if player.isMissionActive(m.id) || player.completedMissions.contains(m.id) { return nil }
-        guard engine.evaluate(test: m.availBits) else { return nil }
+        guard let m = game.mission(pers.linkMission),
+              engine.isEligible(m, at: .persShip, spobID: nil) else { return nil }
         return m.id
     }
 

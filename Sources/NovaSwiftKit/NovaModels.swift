@@ -358,10 +358,8 @@ public struct ShipRes {
     /// entirely for this ship type.
     public var hidesShieldArmorOnStatusDisplay: Bool { flags & 0x0200 != 0 }
     /// "The amount (in percent) to which this ship's pilots' skill varies" —
-    /// EV Nova Bible. Applied as a per-instance jitter to acceleration/turn
-    /// rate (one pilot-skill roll affects both) so ships of the same class
-    /// aren't all identical. 0 = no variance. Offset verified against
-    /// novaparse `ShipResource.ts` (`skillVariation`).
+    /// EV Nova Bible. Clamped 1...50 as the loader stores it (0x004bd3c0), so
+    /// even a 0 hull varies by 1 %.
     public let skillVar: Int        // @96
     /// Second flags field. Offset verified against novaparse `ShipResource.ts`
     /// (`flags2N`).
@@ -377,6 +375,9 @@ public struct ShipRes {
     /// value of 100 equals 1 point of ion energy per 1/30th of a second"
     /// (Bible). Offset verified against novaparse `ShipResource.ts` (`deionize`).
     public let deionize: Int        // @874
+    /// `Deionize` as the loader stores it: ion charge shed per 1/30 s tick,
+    /// `Deionize × 0.01`, with 0 or less read as a full 1.0 per tick.
+    public var deionizePerTick: Double { deionize > 0 ? Double(deionize) * 0.01 : 1.0 }
     /// "The amount of ion charge at which a ship of this type will be
     /// considered 'fully ionized'" (Bible's IonizeMax). Offset verified
     /// against novaparse `ShipResource.ts` (`ionization`).
@@ -428,12 +429,12 @@ public struct ShipRes {
     public let flags3: UInt16       // @1830  0x0100 hide-if-unavailable · 0x0200 hide-if-require-unmet
     /// "The percent chance that a ship of this type will be available for
     /// purchase on a given day... A BuyRandom of 0 means this ship will never
-    /// be made available for purchase" (Bible). @904. Unlike outfits, 0 means
-    /// never here, not always.
+    /// be made available for purchase" (Bible). @904, clamped 0...100.
     public let buyRandom: Int
     /// "The percent chance that a ship of this type will be available for
     /// hire in the bar on a given day. A HireRandom of 0 means this ship
-    /// will never be made available for hire" (Bible). @906, `DWRD`. Same
+    /// will never be made available for hire" (Bible). @906, `DWRD`, clamped
+    /// 0...100. Same
     /// zero-means-never semantics as `buyRandom`; offset confirmed against a
     /// 284-ship sweep in docs/reverse-engineering/ESCORTS.md §2.2. Restock
     /// gating (day-seeded roll) is implemented for `buyRandom` in
@@ -445,6 +446,14 @@ public struct ShipRes {
     /// unlabeled `DWRD` in the TMPL). @1842. -1 = Automatic, 0 = Fighter,
     /// 1 = Medium Ship, 2 = Warship, 3 = Freighter.
     public let escortCategory: Int
+    /// `escortCategory` as the loader stores it (0x004bd3c0): 0...3 are kept;
+    /// Automatic and any other value are inferred — freighter for InherentAI
+    /// below 3, otherwise fighter / medium / warship by mass < 50 / < 200.
+    public var escortClass: Int {
+        if (0...3).contains(escortCategory) { return escortCategory }
+        if inherentAI < 3 { return 3 }
+        return mass < 50 ? 0 : mass < 200 ? 1 : 2
+    }
     /// "ID of the ship class this ship can be upgraded to" (Bible's
     /// `UpgradeTo`). @1832, `RSID`. -1 = not upgradable.
     public let escortUpgradesTo: Int
@@ -472,9 +481,10 @@ public struct ShipRes {
 
     /// Flat up-front price to hire this hull as an escort — 10% of `cost`.
     public var escortHireFee: Int { max(1, cost / 10) }
-    /// Recurring daily upkeep for a **hired** escort of this hull — 10% of the
-    /// hire fee (= 1% of `cost`). Captured/mission escorts pay nothing.
-    public var escortDailyFee: Int { max(1, cost / 100) }
+    /// Recurring upkeep for a **hired** escort of this hull: `trunc(cost ×
+    /// 0.01)`, with no floor (0x004232d0, EC-20). Captured/mission escorts pay
+    /// nothing.
+    public var escortDailyFee: Int { Int(Double(cost) * 0.01) }
 
     public init(_ r: Resource) {
         id = r.id
@@ -508,7 +518,7 @@ public struct ShipRes {
         flags = UInt16(truncatingIfNeeded: u16(d, 74))
         podCount = i16(d, 76)
         fuelRegen = i16(d, 94)
-        skillVar = i16(d, 96)
+        skillVar = max(1, min(50, i16(d, 96)))
         flags2 = UInt16(truncatingIfNeeded: u16(d, 98))
         deionize = i16(d, 874)
         ionizeMax = i16(d, 876)
@@ -521,8 +531,8 @@ public struct ShipRes {
         require = u64(d, 896)
         subtitle = cstr(d, 1766, 64)
         flags3 = UInt16(truncatingIfNeeded: u16(d, 1830))
-        buyRandom = i16(d, 904)
-        hireRandom = i16(d, 906)
+        buyRandom = max(0, min(100, i16(d, 904)))
+        hireRandom = max(0, min(100, i16(d, 906)))
         escortUpgradesTo = i16(d, 1832)
         escortUpgradeCost = i32(d, 1834)
         escortSellValue = i32(d, 1838)
@@ -560,15 +570,46 @@ public struct ShipRes {
     /// shows greyed-out; these bits mean "omit it from the shipyard list
     /// entirely" instead.
     public var hidesWhenLocked: Bool { flags3 & 0x0100 != 0 || flags3 & 0x0200 != 0 }
-    /// Bible `Flags3` 0x0010: "Ship ignores gravity" — this hull is immune to
-    /// a stellar's `Gravity` pull/push outright, no outfit needed. Combines
-    /// with a fitted `oütf` ModType 41 (gravityResist) at the loadout layer.
+    /// Bible `Flags3` 0x0010: "Ship ignores gravity". The original engine never
+    /// tests this bit, so the simulation doesn't either (FL-19).
     public var ignoresGravity: Bool { flags3 & 0x0010 != 0 }
-    /// Bible `Flags3` 0x0020: "Ship ignores deadly stellars" — this hull
-    /// survives touching a `SpobRes.isDeadly` stellar outright, no outfit
-    /// needed. Combines with a fitted `oütf` ModType 42 (stellarResist) at
-    /// the loadout layer.
+    /// Bible `Flags3` 0x0020: "Ship ignores deadly stellars". The original
+    /// reads it for gravity shielding too (0x0046e120 / 0x0046e210).
     public var ignoresDeadlyStellars: Bool { flags3 & 0x0020 != 0 }
+
+    // Bits the original reads but no NovaSwift system consumes yet (LD-01);
+    // see FIDELITY_PLAN.md for the items that will.
+
+    /// `Flags` 0x0020: an AI ship may use its afterburner, rolled at spawn
+    /// against its combat rating (`Ship_CanShipUseAfterburner` 0x0046b260).
+    public var aiAfterburnerByRating: Bool { flags & 0x0020 != 0 }
+    /// `Flags` 0x0040: an AI ship always may use its afterburner.
+    public var aiAlwaysAfterburner: Bool { flags & 0x0040 != 0 }
+    /// `Flags` 0x1000/0x2000/0x4000: turrets can't bear on targets in front,
+    /// to the sides, or behind (`Weapon_IsTargetBearingInTurretBlindSpot` 0x0046b360).
+    public var turretBlindFront: Bool { flags & 0x1000 != 0 }
+    public var turretBlindSides: Bool { flags & 0x2000 != 0 }
+    public var turretBlindRear: Bool { flags & 0x4000 != 0 }
+    /// `Flags2` 0x0001: the AI swarms (follows a swarm mate at a lead).
+    public var swarms: Bool { flags2 & 0x0001 != 0 }
+    /// `Flags2` 0x0002: the AI holds off at most of its weapon range.
+    public var keepsStandoffDistance: Bool { flags2 & 0x0002 != 0 }
+    /// `Flags2` 0x0004: can't be targeted without a scanner that allows it.
+    public var untargetable: Bool { flags2 & 0x0004 != 0 }
+    /// `Flags2` 0x0100-0x2000: when an AI ship of this type cloaks
+    /// (`Ship_UpdateShipCloakStateFromTraits` 0x00411d00).
+    public var cloaksOnReload: Bool { flags2 & 0x0100 != 0 }
+    public var cloaksWhenFleeing: Bool { flags2 & 0x0200 != 0 }
+    public var cloaksWhenDeparting: Bool { flags2 & 0x0400 != 0 }
+    public var cloaksWhenIdle: Bool { flags2 & 0x0800 != 0 }
+    public var cloaksUntilClose: Bool { flags2 & 0x1000 != 0 }
+    public var cloaksWhenDocking: Bool { flags2 & 0x2000 != 0 }
+    /// `Flags2` 0x4000: re-cloaks when attacked.
+    public var recloaksWhenAttacked: Bool { flags2 & 0x4000 != 0 }
+    /// `Flags3` 0x0001 / 0x0002: an asteroid miner — destroys rocks, scoops
+    /// their debris (`Ship_UpdateShipAiAsteroidMinerBehavior` 0x00402980).
+    public var destroysAsteroids: Bool { flags3 & 0x0001 != 0 }
+    public var scoopsAsteroidDebris: Bool { flags3 & 0x0002 != 0 }
 }
 
 // MARK: sÿst — star system (map position, hyperspace links, stellar objects)
@@ -590,6 +631,12 @@ public struct NebuRes {
     public let y: Int
     public let width: Int
     public let height: Int
+    /// `ActiveOn` (@8): NCB test; the nebula's OnExplore can fire only while
+    /// it holds (empty = always).
+    public let activeOn: String
+    /// `OnExplore` (@263): NCB set run the first time the player reaches a
+    /// system inside the nebula (OS-14).
+    public let onExplore: String
 
     public init(_ r: Resource) {
         id = r.id
@@ -599,6 +646,8 @@ public struct NebuRes {
         y = i16(d, 2)
         width = i16(d, 4)
         height = i16(d, 6)
+        activeOn = cstr(d, 8, 255)
+        onExplore = cstr(d, 263, 256)
     }
 }
 
@@ -627,6 +676,10 @@ public struct SystRes {
     /// Filtered to valid ids (>=128). Verified: Sol pins #128/#227/#156/#299
     /// (Terrapin, Valkyrie, Drifting Derelict, Galadriel).
     public let pinnedPersons: [Int]
+    /// `Person1-8` paired with their `%Prob` (@126, 8×int16, clamped 0...100
+    /// by the loader): each slot appears with that percent chance (AI-11).
+    /// Slots with an id below 128 are dropped.
+    public let persons: [(id: Int, chance: Int)]
     /// `sÿst.Interference` (Bible): "How thick the static in the system should
     /// be. 0 is no static, 100 is complete sensor blackout." Degrades radar /
     /// sensor range (see `World` detection). @108, confirmed against real data
@@ -706,6 +759,8 @@ public struct SystRes {
         asteroidCount = max(0, min(16, i16(d, 106)))
         interference = i16(d, 108)
         pinnedPersons = (0..<8).map { i16(d, 110 + $0 * 2) }.filter { $0 >= 128 }
+        persons = (0..<8).map { (id: i16(d, 110 + $0 * 2), chance: max(0, min(100, i16(d, 126 + $0 * 2)))) }
+            .filter { $0.id >= 128 }
         // BkgndColor @142: 4 bytes 0x00RRGGBB (first byte padding), right
         // between the Person block and Murk@146.
         if d.count >= 146 {
@@ -1100,6 +1155,8 @@ private final class NovaGameCache {
     /// draw from one pool. A `nil` value is a negative cache (known missing or
     /// undecodable), so a bad id is only ever chased down once.
     var rleSheets: [Int: SpriteSheet?] = [:]
+    /// Collision masks keyed by `rlëD` id (WP-17); `nil` = known missing.
+    var rleMasks: [Int: SpriteMaskSet?] = [:]
     /// `spöb` id → the id of the system that lists it in its `spobs`. Built once
     /// (walking every system) so gate transport can resolve a linked gate's
     /// destination system without re-scanning the galaxy each time.
@@ -1108,6 +1165,9 @@ private final class NovaGameCache {
     /// both directions (see `NovaGame.systemNeighbors`). Built once by walking
     /// every system's `links`.
     var systemNeighborIndex: [Int: [Int]]?
+    /// Every system's government, declared links and twin group, as the
+    /// legal-record rules read them (see `NovaGame.reputationMap()`).
+    var reputationMap: ReputationMap?
     /// wëap id → the `oütf` that installs it (ModType 1) and the `oütf` that
     /// loads ammo for it (ModType 3). Built once by walking the outfit catalog;
     /// see `NovaGame.outfitInstalling(weapon:)`.
@@ -1115,6 +1175,8 @@ private final class NovaGameCache {
     /// Cross-launch cache of decoded sheets on disk; nil when no writable cache
     /// location exists. Set once at `NovaGame` init.
     var diskCache: SpriteDiskCache?
+    /// Derived tables other modules build once per data set (see `NovaGame.memo`).
+    var memo: [String: Any] = [:]
 }
 
 /// Typed, indexed view of a merged `ResourceCollection`. Decodes resource bodies
@@ -1152,6 +1214,41 @@ public struct NovaGame {
         cache.rleSheets[rleID] = .some(sheet)
         cache.lock.unlock()
         return sheet
+    }
+
+    /// The 1-bit opaque masks of every frame of `rlëD` `rleID`, built once and
+    /// kept (WP-17). Masks are a few KB per sheet, so `flushSpriteSheets`
+    /// leaves them alone.
+    public func collisionMask(rleID: Int) -> SpriteMaskSet? {
+        cache.lock.lock()
+        if let hit = cache.rleMasks[rleID] { cache.lock.unlock(); return hit }
+        cache.lock.unlock()
+        let mask = resources.resource(NovaType.rleD, rleID).flatMap { try? RLED.decodeMasks($0.data) }
+        cache.lock.lock(); cache.rleMasks[rleID] = .some(mask); cache.lock.unlock()
+        return mask
+    }
+
+    /// A hull's base-sprite collision mask, resolved like `shipSprite`.
+    public func shipCollisionMask(_ shipID: Int) -> SpriteMaskSet? {
+        guard let shan = shan(shipID) else { return nil }
+        if resources.resource(NovaType.rleD, shan.baseSpriteID) != nil {
+            return collisionMask(rleID: shan.baseSpriteID)
+        }
+        if let spin = spin(shan.baseSpriteID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return collisionMask(rleID: spin.spriteID)
+        }
+        return nil
+    }
+
+    /// A shot graphic's collision mask, resolved like `weaponSprite(spinID:)`.
+    public func weaponCollisionMask(spinID: Int) -> SpriteMaskSet? {
+        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return collisionMask(rleID: spin.spriteID)
+        }
+        if resources.resource(NovaType.rleD, spinID) != nil {
+            return collisionMask(rleID: spinID)
+        }
+        return nil
     }
 
     /// Release every decoded sprite sheet held in RAM (hulls, engine glows,
@@ -1202,6 +1299,19 @@ public struct NovaGame {
         return cache.spobSystemIndex?[spobID]
     }
 
+    /// A value derived from this data set, built once by `build` and kept for the
+    /// life of the game data under `key`. Lets other modules cache their own
+    /// lookup tables (e.g. the story engine's mission geography) without each
+    /// short-lived caller re-decoding every resource.
+    public func memo<T>(_ key: String, _ build: () -> T) -> T {
+        cache.lock.lock()
+        if let hit = cache.memo[key] as? T { cache.lock.unlock(); return hit }
+        cache.lock.unlock()
+        let value = build()
+        cache.lock.lock(); cache.memo[key] = value; cache.lock.unlock()
+        return value
+    }
+
     /// Every system one hyperspace jump from `systemID`, **both ways along every
     /// link**. Use this — not `SystRes.links` — anywhere a jump, a course plot or
     /// a map line is decided.
@@ -1234,6 +1344,20 @@ public struct NovaGame {
             cache.systemNeighborIndex = idx.mapValues { $0.sorted() }
         }
         return cache.systemNeighborIndex?[systemID] ?? []
+    }
+
+    /// The galaxy as the per-system legal record reads it (EC-02): each
+    /// system's owner, its *declared* links in slot order (the reputation
+    /// flood follows them one way, unlike `systemNeighbors`), and its
+    /// same-position twin group. Built once.
+    public func reputationMap() -> ReputationMap {
+        cache.lock.lock(); defer { cache.lock.unlock() }
+        if let map = cache.reputationMap { return map }
+        let map = ReputationMap(systems: resources.resources(of: NovaType.syst).map(SystRes.init).map {
+            ReputationMap.System(id: $0.id, govt: $0.government, x: $0.x, y: $0.y, links: $0.links)
+        })
+        cache.reputationMap = map
+        return map
     }
 
     /// The `oütf` that *is* weapon `weaponID` — the outfit whose ModType 1
@@ -1288,22 +1412,24 @@ public struct NovaGame {
         return out
     }
 
-    /// Where a wormhole can spit the player out. If it has `HyperLink`s, those are
-    /// its exits (same as a hypergate). If it has none, the Bible says it connects
-    /// to another *link-less* wormhole picked at random — so the candidates are
-    /// every other link-less wormhole in the galaxy (falling back to any other
-    /// wormhole if none are link-less). Each candidate carries its own system.
-    public func wormholeExitCandidates(from wormhole: SpobRes) -> [(gateSpobID: Int, systemID: Int)] {
-        if !wormhole.hyperLinks.isEmpty { return gateDestinations(from: wormhole) }
-        func collect(_ predicate: (SpobRes) -> Bool) -> [(Int, Int)] {
-            var out: [(Int, Int)] = []
-            for s in spobs() where s.id != wormhole.id && s.isWormhole && predicate(s) {
-                if let sys = systemContaining(spob: s.id) { out.append((s.id, sys)) }
-            }
-            return out
+    /// Where a wormhole can spit the player out (`Stellar_EnterWormhole`
+    /// 0x00456ca0; OS-06). With `HyperLink`s, a uniform pick among the links
+    /// whose system is visible — if it has links but none is visible, the
+    /// wormhole can't be used ("Unable to use this wormhole"). Without links,
+    /// a pick among the *other link-less* wormholes outside the current system
+    /// whose system is visible; there is no fallback to linked wormholes.
+    /// Each candidate carries its own system.
+    public func wormholeExitCandidates(from wormhole: SpobRes, currentSystem: Int? = nil,
+                                       isVisible: (Int) -> Bool = { _ in true }) -> [(gateSpobID: Int, systemID: Int)] {
+        if !wormhole.hyperLinks.isEmpty {
+            return gateDestinations(from: wormhole).filter { isVisible($0.systemID) }
         }
-        let linkless = collect { $0.hyperLinks.isEmpty }
-        return linkless.isEmpty ? collect { _ in true } : linkless
+        var out: [(Int, Int)] = []
+        for s in spobs() where s.id != wormhole.id && s.isWormhole && s.hyperLinks.isEmpty {
+            guard let sys = systemContaining(spob: s.id), sys != currentSystem, isVisible(sys) else { continue }
+            out.append((s.id, sys))
+        }
+        return out
     }
 
     // AI-driving resources.
@@ -1363,6 +1489,17 @@ public struct NovaGame {
     public func roids() -> [RoidRes] { resources.resources(of: NovaType.roid).map(RoidRes.init) }
     public func desc(_ id: Int) -> DescRes? { resources.resource(NovaType.desc, id).map(DescRes.init) }
     public func stringList(_ id: Int) -> StringListRes? { resources.resource(NovaType.strList, id).map(StringListRes.init) }
+    /// The buoy text for a `sÿst.Message` value (`System_ShowSystemEventMessage`
+    /// 0x00467cf0): `STR ` message+999 if present, else `STR# 1000` entry
+    /// `message`, which is 1-based. Nil for Message ≤ 0 or an empty string.
+    public func systemMessageText(_ message: Int) -> String? {
+        guard message > 0 else { return nil }
+        let text = singleString(message + 999) ?? stringList(1000).flatMap { list in
+            message <= list.strings.count ? list.strings[message - 1] : nil
+        }
+        guard let text, !text.isEmpty else { return nil }
+        return text
+    }
     /// The narrative text of a `dësc` resource, or "" if absent.
     ///
     /// `dësc` bodies are mutable: they can embed `{bXXX …}` / `{G …}` / `{P …}`

@@ -4,7 +4,12 @@ Plan for going *beyond* the original engine's constraints — smarter AI, higher
 art, richer effects, better audio and UI — as **opt-in enhancements layered on top
 of a faithful base**.
 
-> **Plan, not built.** Nothing here exists yet; this scopes what to build.
+> **Mostly a plan.** What exists today: the gameplay Enhancements in
+> Settings ▸ Enhancements (eight toggles, all off by default, driven by
+> `GameplayEnhancements.catalog`), the modern HUD and other presentation presets,
+> smoothed sprites and the parallax starfield. The enhanced AI, effects, audio and
+> HD packs below are not built. The toggle names and `EnhancementsView` sketched in
+> §7 were not used; the shipped Enhancements are listed in [STATUS.md](STATUS.md).
 
 See also [MOBILE_AND_PLUGINS.md](MOBILE_AND_PLUGINS.md) (override chain and
 toggles), [AI.md](AI.md), and

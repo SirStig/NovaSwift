@@ -12,6 +12,9 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     /// This is the one explicit fighter command left: call every deployed
     /// fighter home regardless of what it's doing.
     case recallFighters
+    /// Abandon ship (the original's Alt+X): with an escape pod or an
+    /// ejectable fighter bay, while disabled or going down (OS-02).
+    case eject
     /// Standing orders for the whole escort wing (hired/captured escorts and
     /// bay-launched fighters alike) — EV Nova's Fleet Control keys, which work
     /// instantly without opening the Escorts window first.
@@ -30,13 +33,37 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     /// hull when nothing is targeted) — a NovaSwift convenience with no original
     /// key, the flight-side entry to the standalone ship-detail screen.
     case shipInfo
+    // The original's commands NovaSwift lacked (UI-06, UI-07, UI-11, UI-13,
+    // UI-15). New cases go at the end so stored bindings keep decoding.
+    /// Shift-`: step the ship target backward.
+    case targetPrevious
+    /// Alt-`: cycle only the player's own escorts.
+    case targetEscortNext
+    /// Alt-N: clear the ship target (plain N clears the travel selection).
+    case clearShipTarget
+    /// 1–4: the current system's first four nav stellars.
+    case selectNav1, selectNav2, selectNav3, selectNav4
+    /// H: re-arm the plotted route's next hop as the jump target.
+    case hyperspaceArm
+    /// Return: dismiss the status-bar message.
+    case dismissMessage
+    /// P: the Player Info window.
+    case playerInfo
+    /// I: the mission info window.
+    case missionInfo
+    /// S: clear the secondary weapon selection.
+    case clearSecondary
+    /// Alt-Y: hail the selected stellar even with a ship targeted.
+    case hailStellar
+    /// Alt-−: self-destruct — held for five seconds, released to abort (UI-15).
+    case selfDestruct
 
     var id: String { rawValue }
 
     var continuous: Bool {
         switch self {
         case .accelerate, .decelerate, .turnLeft, .turnRight, .afterburner,
-             .firePrimary, .fireSecondary:
+             .firePrimary, .fireSecondary, .selfDestruct:
             return true
         default:
             return false
@@ -53,11 +80,15 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .accelerate, .decelerate, .turnLeft, .turnRight, .afterburner: return .flight
         case .firePrimary, .fireSecondary, .selectSecondaryPrev, .selectSecondaryNext, .toggleCloak,
-             .recallFighters, .commandEscortAggressive, .commandEscortDefensive, .commandEscortEvasive,
+             .recallFighters, .eject, .selfDestruct, .commandEscortAggressive, .commandEscortDefensive, .commandEscortEvasive,
              .commandEscortHold: return .combat
-        case .targetNearest, .targetNext, .nearestHostile, .clearTarget: return .targeting
-        case .land, .hyperjump, .galaxyMap, .autopilot, .hailTarget, .board, .openEscorts: return .navigation
-        case .pauseGame, .openMenu, .shipInfo: return .interface
+        case .targetNearest, .targetNext, .nearestHostile, .clearTarget,
+             .targetPrevious, .targetEscortNext, .clearShipTarget,
+             .selectNav1, .selectNav2, .selectNav3, .selectNav4: return .targeting
+        case .land, .hyperjump, .galaxyMap, .autopilot, .hailTarget, .board, .openEscorts,
+             .hyperspaceArm, .hailStellar: return .navigation
+        case .clearSecondary: return .combat
+        case .pauseGame, .openMenu, .shipInfo, .dismissMessage, .playerInfo, .missionInfo: return .interface
         }
     }
 
@@ -74,6 +105,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .selectSecondaryNext: return "Next Secondary"
         case .toggleCloak: return "Toggle Cloak"
         case .recallFighters: return "Recall Fighters"
+        case .eject: return "Eject"
         case .commandEscortAggressive: return "Escorts: Aggressive"
         case .commandEscortDefensive: return "Escorts: Defensive"
         case .commandEscortEvasive: return "Escorts: Evasive"
@@ -92,11 +124,25 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .pauseGame: return "Pause"
         case .openMenu: return "Menu"
         case .shipInfo: return "Ship Info"
+        case .targetPrevious: return "Cycle Target Backward"
+        case .targetEscortNext: return "Cycle Escorts"
+        case .clearShipTarget: return "Clear Ship Target"
+        case .selectNav1: return "Select Nav Destination 1"
+        case .selectNav2: return "Select Nav Destination 2"
+        case .selectNav3: return "Select Nav Destination 3"
+        case .selectNav4: return "Select Nav Destination 4"
+        case .hyperspaceArm: return "Hyperspace Destination"
+        case .dismissMessage: return "Dismiss Message"
+        case .playerInfo: return "Player Info"
+        case .missionInfo: return "Mission Info"
+        case .clearSecondary: return "Clear Secondary Weapon"
+        case .hailStellar: return "Hail Planet"
+        case .selfDestruct: return "Self-Destruct"
         }
     }
 
     /// How this continuous action drives the flight `ControlIntent`.
-    enum FlightEffect { case turnLeft, turnRight, thrust, reverse, afterburner, firePrimary, fireSecondary, none }
+    enum FlightEffect { case turnLeft, turnRight, thrust, reverse, afterburner, firePrimary, fireSecondary, selfDestruct, none }
     var flightEffect: FlightEffect {
         switch self {
         case .turnLeft: return .turnLeft
@@ -106,6 +152,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .afterburner: return .afterburner
         case .firePrimary: return .firePrimary
         case .fireSecondary: return .fireSecondary
+        case .selfDestruct: return .selfDestruct
         default: return .none
         }
     }

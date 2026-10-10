@@ -16,64 +16,44 @@ public let govtResourceBase = 128
 /// Resolves who fights whom, exactly the way EV Nova's `gövt` relations work:
 /// governments carry *class* memberships plus lists of ally/enemy classes, and
 /// two governments are enemies when one's enemy-classes intersect the other's
-/// classes. Xenophobes attack anyone who isn't an ally. The player is tracked
-/// separately through a per-government legal record.
+/// classes. Xenophobes attack anyone who isn't an ally.
+///
+/// The player is judged on the original's legal record: one reputation per
+/// *system* (EC-02, `SystemReputation`), seeded from the pilot when a system
+/// session starts, changed live by crimes (which flood across the galaxy), and
+/// drained back to the pilot with `consumeReputationDelta()`.
 public final class Diplomacy {
     /// government id → decoded record.
     public private(set) var govts: [Int: GovtRes]
-    /// Player's standing with each government *at `currentSystemID`*
-    /// (negative = criminal there) — the EVN wiki's "displayed legal
-    /// status," combining the universal (mission-driven) and local
-    /// (combat-driven) components already on record for this system, seeded
-    /// once via `seed(legalRecord:)`. Live combat mutates this directly (full
-    /// weight, same as before spatial decay existed — see `recordCrime`) and
-    /// additionally spreads a tapered share to nearby systems in `localSpread`.
-    public private(set) var playerRecord: [Int: Int] = [:]
-    /// `playerRecord` as of the last `seed(legalRecord:)` call — the baseline
-    /// `consumeLocalRecordDelta()` diffs against to find what changed at
-    /// `currentSystemID` this session.
-    private var seededPlayerRecord: [Int: Int] = [:]
-    /// Legal-record deltas earned this session in systems *other* than
-    /// `currentSystemID`, from the Legal Status radius rule (hostile actions
-    /// felt in nearby systems at reduced weight). govt id -> system id ->
-    /// delta. Drained by `consumeLocalSpread()`.
-    public private(set) var localSpread: [Int: [Int: Int]] = [:]
-    /// The system this `Diplomacy` instance is scoped to — a fresh instance
-    /// is built per system-session (see `seed(legalRecord:)`'s doc comment),
-    /// so this is also the origin for `recordKill`/`recordDisable`/
-    /// `recordBoard`'s spatial spread. Set by the caller (`GameContainerView`)
-    /// right after construction, alongside `game`.
+    /// The player's reputation in every system (sparse; a missing system is
+    /// 0) — the pilot's `systemReputation` plus every crime committed since
+    /// `seed(reputation:)`.
+    public private(set) var reputation: [Int: Int] = [:]
+    /// `reputation` as of the last seed or drain — the baseline
+    /// `consumeReputationDelta()` diffs against.
+    private var seededReputation: [Int: Int] = [:]
+    /// The system the player is in. Its reputation is what the AI's
+    /// player-hostility ladder reads, and it is where a crime starts its flood.
     public var currentSystemID = -1
-    /// Game data backing `NovaGame.systemsWithinHops` for the spatial spread.
-    /// nil (e.g. in unit tests that hand-build bare `GovtRes` values with no
-    /// backing `NovaGame`) simply skips neighboring-system propagation —
-    /// `playerRecord`, the current system's own standing, is unaffected.
+    /// Game data backing `reputationMap`. Nil in unit tests that hand-build
+    /// bare `GovtRes` values; those assign `reputationMap` directly.
     public var game: NovaGame?
-    /// Fallback record-at-or-below-which-hostile, used only when a government
-    /// is unknown/missing from the table (so `crimeTolerance` can't be read) —
-    /// see `isCriminal`. Per-government hostility now uses `gövt.CrimeTol`
-    /// (`GovtRes.crimeTolerance`, Bible: "the maximum amount of evilness the
-    /// player can accumulate before warships of this govt start to beat on
-    /// him" — Appendix II) instead of this single constant for every govt.
-    public var hostileThreshold = -1
+    /// Every system's owner, links and twin group. Built from `game` on first
+    /// use; tests may assign one.
+    public var reputationMap: ReputationMap {
+        get {
+            if let map = cachedMap { return map }
+            let map = game?.reputationMap() ?? ReputationMap(systems: [])
+            cachedMap = map
+            return map
+        }
+        set { cachedMap = newValue }
+    }
+    private var cachedMap: ReputationMap?
 
-    /// Player's combat rating: the sum of `shïp.strength` (per-kill) of every
-    /// ship the player has destroyed (Appendix I: "the sum of the strengths
-    /// of all the ships you have destroyed, times some internal multiplier
-    /// for adjustment"). The multiplier is never given a value by the Bible,
-    /// and disassembly of the real tier-selection routine (`fcn.00469030`)
-    /// shows no scaling applied at the comparison stage either — see
-    /// docs/reverse-engineering/GOVERNMENT.md §3. Until that's pinned down
-    /// further we use multiplier = 1 (no scaling), the documented-safe
-    /// default. This is the engine-layer tally, updated live as kills happen
-    /// (mirroring `playerRecord` above); `NovaSwiftStory.PlayerState` has its
-    /// own persisted `combatRating` (seeded once from `chär.Kills` at pilot
-    /// creation) that this module has no dependency on and therefore cannot
-    /// write to directly — syncing the two is a pre-existing gap (see
-    /// GOVERNMENT.md §5's "two separate modules that never talk to each
-    /// other"), not something this file can close; whatever bridges
-    /// `World`'s kill event to `Diplomacy.recordKill` should also copy this
-    /// value into `PlayerState.combatRating`.
+    /// Combat rating earned by kills since the last `consumeCombatRatingDelta`
+    /// — each kill's `CombatRatingRule.points` — which the host folds into
+    /// `PlayerState.combatRating` with `CombatRatingRule.fold`.
     public private(set) var combatRating = 0
 
     /// Government ids we've already warned about missing from the table, so a
@@ -142,190 +122,293 @@ public final class Diplomacy {
 
     // MARK: Government ↔ player
 
-    /// Is the player criminal (attackable-on-sight-once-provoked) with this
-    /// government? Per Appendix II, this is a **per-government ratio**, not a
-    /// single hardcoded point value: warships turn hostile once the player's
-    /// accumulated evilness with that govt reaches its own `CrimeTol`
-    /// (`GovtRes.crimeTolerance`) — a govt with `CrimeTol = 500` tolerates far
-    /// more than one with `CrimeTol = 5`. Falls back to the old single
-    /// `hostileThreshold` constant only if the government is missing from the
-    /// table entirely (so no `crimeTolerance` can be read).
-    public func isCriminal(with govt: Int) -> Bool {
-        guard let gov = self.govt(govt) else {
-            return (playerRecord[govt] ?? 0) <= hostileThreshold
-        }
-        let evilness = -(playerRecord[govt] ?? 0)
-        guard evilness > 0 else { return false }
-        // CrimeTol <= 0 is data-invalid/unset; treat any evilness as enough
-        // to provoke rather than making the govt impossible to anger.
-        guard gov.crimeTolerance > 0 else { return true }
-        return evilness >= gov.crimeTolerance
-    }
+    /// The player's reputation in the current system.
+    public var reputationHere: Int { reputation[currentSystemID] ?? 0 }
+
+    /// The current system's owning government, −1 independent.
+    public var currentSystemGovernment: Int { reputationMap.govt(of: currentSystemID) }
 
     /// Governments whose ships won't automatically attack the player because the
     /// player holds an active `ränk` from them with the "won't attack" flag
-    /// (`ränk.Flags` 0x0100). Seeded from the pilot's active ranks alongside
-    /// `legalRecord`; empty otherwise.
+    /// (`ränk.Flags` 0x0100; the original's rank privilege 0). Seeded from the
+    /// pilot's active ranks; empty otherwise.
     public var rankProtectedGovts: Set<Int> = []
+    /// Every active rank's (government, `ränk.Flags`), seeded by the host
+    /// like `rankProtectedGovts`. The ship comm window (0x0047e470) reads
+    /// 0x0400 (an allied ship helps for free against a threat) and 0x0800
+    /// (assistance is free) from ranks whose government is allied with the
+    /// hailed ship.
+    public var activeRankFlags: [(govt: Int, flags: Int)] = []
 
-    /// Does government `g` want to attack the player right now?
+    /// The session's IFF-scrambler and reinforcement-inhibitor latches (OS-10).
+    public var latches: GovernmentLatches = .shared
+
+    /// Rank privilege and the IFF-scrambler latch both clear the player as a
+    /// candidate (`Ship_AcquirePrimaryTargetForShip` 0x0040e020, after the
+    /// ladder).
+    public func playerShielded(from g: Int) -> Bool {
+        rankProtectedGovts.contains(g) || latches.isScrambled(g)
+    }
+
+    /// The reputation arm of `Ship_AcquirePrimaryTargetForShip` 0x0040e020
+    /// (AI-05): would a ship of government `g` flag the player as a target
+    /// here, judged on the player's reputation `rep` in the **current**
+    /// system and on `g`'s `CrimeTol`?
+    ///
+    /// - `g` owns the system: `rep < −CrimeTol`.
+    /// - Independent system: nosy (`Flags` 0x0002) only, `rep < −2·CrimeTol`.
+    /// - `g` hostile to the owner (or either is xenophobic): `rep > CrimeTol` —
+    ///   known bug #132, a *good* record makes the owner's enemies attack.
+    /// - Allied with the owner: `rep < −1.5·CrimeTol`.
+    /// - Neutral to the owner: nosy only, `rep < −2·CrimeTol`.
+    ///
+    /// `Flags` 0x0040 blocks all of it, and a xenophobe takes its own branch
+    /// (`xenophobeTargetsPlayer`). Rank privilege and the scrambler latch
+    /// clear the result. The caller adds the per-ship parts: the
+    /// `cadence × 600` px box, the 1-in-50 inherent-government roll
+    /// (`inherentGovtGrudge`) and the MaxOdds filter.
+    public func reputationFlagsPlayer(_ g: Int) -> Bool {
+        guard let gov = govts[g] else { return false }
+        // `Flags` 0x0004 turns a ship hostile to the player outright as it
+        // arrives in the system, whatever the record.
+        if gov.alwaysAttacksPlayer { return true }
+        if gov.xenophobic { return xenophobeTargetsPlayer(g) }
+        guard !gov.neverAttacksPlayer, !playerShielded(from: g) else { return false }
+        return reputationLadderFlagsPlayer(g)
+    }
+
+    /// The bare relation ladder of `reputationFlagsPlayer` for a
+    /// non-xenophobic government: no `Flags` 0x0004 / 0x0040 arm, no rank or
+    /// scrambler shield. The original AI applies those itself, in the order
+    /// 0x0040e020 does (`OriginalAI.acquirePrimaryTarget`).
+    public func reputationLadderFlagsPlayer(_ g: Int) -> Bool {
+        guard let gov = govts[g] else { return false }
+        let rep = reputationHere
+        let tol = gov.crimeTolerance
+        let owner = currentSystemGovernment
+        if g == owner { return rep < -tol }
+        if owner == independentGovt { return gov.nosy && rep < tol * -2 }
+        if GovtRelations.hostileOrXenophobic(g, owner, govts: govts) { return tol < rep }
+        if GovtRelations.allied(g, owner, govts: govts) { return Double(rep) < Double(-tol) * 1.5 }
+        return gov.nosy && rep < tol * -2
+    }
+
+    /// A xenophobic government's ships flag the player anywhere except their
+    /// own system, where a reputation of 1 or more keeps the peace
+    /// (0x0040e020's xenophobe scan). `Flags` 0x0040, rank privilege and the
+    /// scrambler latch still apply. There is no acquisition box: a xenophobe
+    /// sees the player system-wide.
+    public func xenophobeTargetsPlayer(_ g: Int) -> Bool {
+        guard let gov = govts[g], !gov.neverAttacksPlayer, !playerShielded(from: g) else { return false }
+        return g == currentSystemGovernment ? reputationHere < 1 : true
+    }
+
+    /// The 1-in-50 arm: a ship of `g` may flag the player when the player's
+    /// hull has an inherent government hostile to `g`. The caller rolls.
+    public func inherentGovtGrudge(_ g: Int, playerHullGovt: Int) -> Bool {
+        guard g != independentGovt, playerHullGovt != independentGovt,
+              !playerShielded(from: g) else { return false }
+        return GovtRelations.hostileOrXenophobic(g, playerHullGovt, govts: govts)
+    }
+
+    /// Does government `g` want the player dead here, as a government? The
+    /// reputation ladder with no per-ship box or roll — what the radar colour,
+    /// the reinforcement gate and other government-level readers use.
     public func isHostileToPlayer(_ g: Int) -> Bool {
-        guard let gov = govts[g] else {
+        guard govts[g] != nil else {
             warnMissingGovt(g)
             return false
         }
-        // An active rank that grants "govt won't attack" overrides the govt's
-        // own default aggression (short of it being a criminal-provoked case
-        // the player themselves triggered — `neverAttacksPlayer` is stronger).
-        if rankProtectedGovts.contains(g) { return false }
-        if gov.neverAttacksPlayer { return false }
-        if gov.alwaysAttacksPlayer { return true }
-        if gov.xenophobic { return true }
-        if gov.nosy && isCriminal(with: g) { return true }
-        return isCriminal(with: g)
+        return reputationFlagsPlayer(g)
     }
 
-    /// Force the player's standing with a government at the current system to
-    /// an exact value. Unlike `recordCrime`/`recordKill`, this doesn't
-    /// propagate to allies or apply any penalty scaling — it's a direct
-    /// override, used by the in-game debug suite to make a government
-    /// instantly friendly or hostile so combat/hailing behaviour can be
-    /// exercised on demand. Also clears any pending spread to other systems
-    /// for this govt from earlier this session, so the override actually
-    /// sticks rather than being partly undone by a later sync.
-    public func setPlayerRecord(_ govt: Int, to value: Int) {
-        playerRecord[govt] = value
-        seededPlayerRecord[govt] = value
-        localSpread[govt] = nil
+    /// `Government_IsCandidateHostileToTargeter` 0x004629e0, player arm: a
+    /// stellar's batteries (government `g`, or the system's owner for an
+    /// independent stellar) fire on the player when `rep < −CrimeTol`; failing
+    /// that, a non-xenophobic stellar fires when the player's hull has an
+    /// inherent government hostile to the stellar's own, and a xenophobic one
+    /// when `rep < 0`. Rank privilege and the scrambler latch clear it.
+    public func stellarBatteriesTargetPlayer(stellarGovt: Int, playerHullGovt: Int) -> Bool {
+        let g = stellarGovt == independentGovt ? currentSystemGovernment : stellarGovt
+        guard let gov = govts[g] else { return false }
+        let rep = reputationHere
+        var hostile = rep < -gov.crimeTolerance
+        if !hostile {
+            if gov.xenophobic {
+                hostile = rep < 0
+            } else if GovtRelations.hostileOrXenophobic(playerHullGovt, stellarGovt, govts: govts) {
+                hostile = true
+            }
+        }
+        return hostile && !playerShielded(from: g)
     }
 
-    /// Bulk-seed `playerRecord` from a persisted, already-combined snapshot
-    /// (e.g. `PlayerState.effectiveLegalRecords(atSystem:)`, universal +
-    /// local-at-this-system). A fresh `Diplomacy` is built from scratch on
-    /// every jump/session rebuild (`GameHost.init` → `Galaxy(game:)` →
-    /// `makeDiplomacy()`), so without this the player's standing would silently
-    /// reset to neutral every time they jumped. Call once, right after
-    /// construction (and after setting `currentSystemID`/`game`), before any
-    /// combat can mutate it — this also snapshots the baseline
-    /// `consumeLocalRecordDelta()` diffs against.
-    public func seed(legalRecord: [Int: Int]) {
-        for (govt, value) in legalRecord { playerRecord[govt] = value }
-        seededPlayerRecord = playerRecord
+    /// Set the player's reputation in the current system to an exact value —
+    /// the debug suite's "make this system friendly/hostile" override. No
+    /// flood, and the value counts as already synced.
+    public func setReputationHere(_ value: Int) {
+        let v = SystemReputation.clamp(value)
+        reputation[currentSystemID] = v == 0 ? nil : v
+        seededReputation[currentSystemID] = reputation[currentSystemID]
     }
 
-    /// How much `playerRecord` (standing at `currentSystemID`) has changed
-    /// since the last `seed`/`consumeLocalRecordDelta` call, and resets the
-    /// baseline — mirrors `consumeCombatRatingDelta`'s drain-on-read pattern
-    /// so calling this from multiple sync points in a session never double-
-    /// counts. Fold the result into `PlayerState.localLegalRecord[govt]
-    /// [currentSystemID]` (NOT `PlayerState.legalRecord`, the universal/
-    /// mission-only component this must never touch).
-    public func consumeLocalRecordDelta() -> [Int: Int] {
-        defer { seededPlayerRecord = playerRecord }
+    /// Drop the player's reputation in the current system to `minStatus − 1`
+    /// when it still meets `minStatus` (a tribute demand or a release,
+    /// 0x00480030): a direct write to this system's entry, no flood, kept for
+    /// the next `consumeReputationDelta()`. `MinStatus` −32767 / 32767 never
+    /// lowers anything.
+    public func lowerReputationHere(belowMinStatus minStatus: Int) {
+        guard minStatus > -32767, minStatus != 32767, reputationHere >= minStatus else { return }
+        let v = minStatus - 1
+        reputation[currentSystemID] = v == 0 ? nil : v
+    }
+
+    /// Seed from the pilot's persisted per-system reputation. A fresh
+    /// `Diplomacy` is built for every system session, so call this once,
+    /// right after construction and before any combat.
+    public func seed(reputation persisted: [Int: Int]) {
+        reputation = persisted
+        seededReputation = persisted
+    }
+
+    /// Per-system change since the last seed or drain, resetting the
+    /// baseline, so draining from several sync points never double-counts.
+    /// The host folds it into `PlayerState` (`applyReputationDelta`).
+    public func consumeReputationDelta() -> [Int: Int] {
+        defer { seededReputation = reputation }
         var result: [Int: Int] = [:]
-        for (govt, value) in playerRecord {
-            let delta = value - (seededPlayerRecord[govt] ?? 0)
-            if delta != 0 { result[govt] = delta }
+        for id in Set(reputation.keys).union(seededReputation.keys) {
+            let delta = (reputation[id] ?? 0) - (seededReputation[id] ?? 0)
+            if delta != 0 { result[id] = delta }
         }
         return result
     }
 
-    /// Drain `localSpread` (legal-record deltas earned this session in
-    /// systems other than `currentSystemID`) — same drain-on-read safety as
-    /// `consumeLocalRecordDelta()`.
-    public func consumeLocalSpread() -> [Int: [Int: Int]] {
-        defer { localSpread = [:] }
-        return localSpread
-    }
-
     /// Returns the combat rating earned since the last call and resets the live
-    /// tally to 0. `combatRating` here only ever tracks kills made during the
-    /// current `Diplomacy` instance's lifetime (one jump/session, per the
-    /// `seed(legalRecord:)` doc comment) — folding this delta into
-    /// `PlayerState.combatRating` at natural save points (landing, jump-out)
-    /// is what makes it persist, without needing to seed it back in (a fresh
-    /// instance starting at 0 and being drained on every sync is already
-    /// double-count-safe regardless of how often this is called).
+    /// tally to 0. The host folds it into `PlayerState.combatRating` at natural
+    /// save points (landing, jump-out); a fresh instance starting at 0 and
+    /// drained on every sync is double-count-safe.
     public func consumeCombatRatingDelta() -> Int {
         defer { combatRating = 0 }
         return combatRating
     }
 
-    /// Apply a legal-record change to a government (e.g. the player disabled/
-    /// killed one of its ships). Per the Bible (§1.2): "Doing evil deeds to one
-    /// government will improve your rating with its enemies, and vice versa.
-    /// Allied governments also communicate your actions, so attacking one
-    /// government will make its allies hate you too." Neither propagation's
-    /// magnitude is quantified by the Bible; both use the same invented-but-
-    /// consistent half-penalty, mirrored in sign (allies suffer, enemies
-    /// benefit). `playerRecord` (standing at `currentSystemID`) always gets
-    /// the full penalty; when `game` is available, a tapered share also
-    /// spreads to nearby systems via `localSpread` (see `applyLocal`'s doc
-    /// comment for the wiki-sourced radius rule) — without it (e.g. a unit
-    /// test with no backing `NovaGame`), only the current system is affected.
-    public func recordCrime(against govt: Int, penalty: Int) {
-        if let game {
-            LegalRecordPropagation.applyLocal(penalty: penalty, to: govt, atSystem: currentSystemID,
-                                              current: &playerRecord, spread: &localSpread,
-                                              govts: govts, game: game)
-        } else {
-            LegalRecordPropagation.apply(penalty: penalty, to: govt, in: &playerRecord, govts: govts)
-        }
+    /// A crime of `kind` against a ship (or stellar) of `govt` in the current
+    /// system: the original's flood (`SystemReputation.applyCrime`). A crime
+    /// against a mission ship changes nothing.
+    public func recordCrime(_ kind: CrimeKind, against govt: Int, missionShip: Bool = false) {
+        SystemReputation.applyCrime(kind, victim: govt, inSystem: currentSystemID, to: &reputation,
+                                    govts: govts, map: reputationMap, missionShip: missionShip)
+        if !missionShip { crimeEvents.append((kind, govt)) }
     }
 
-    // MARK: Combat/piracy events → legal standing + combat rating
-    //
-    // The Bible's four *live* evilness sources (Appendix II §2.1) are
-    // KillPenalty/DisabPenalty/BoardPenalty/SmugPenalty — `ShootPenalty` is
-    // explicitly called out as "currently ignored" in the real game, so
-    // per-hit gunfire should never call `recordCrime` directly. These methods
-    // are the correct call sites for the events that actually happen; wire
-    // combat/story code to these instead of reading `.shootPenalty`.
+    /// Crimes since the last drain, for the rank revocation the same event
+    /// runs in the original (EC-10, `PlayerState.revokeRanks`); the ranks live
+    /// in the pilot, so the host applies them.
+    private var crimeEvents: [(kind: CrimeKind, victim: Int)] = []
 
-    /// The player destroyed a ship belonging to `govt`. Applies `KillPenalty`
-    /// evilness and credits `combatRating` with the destroyed ship's
-    /// `shïp.strength` (see `combatRating`'s doc comment above for the
-    /// "internal multiplier" caveat). `World.despawnDepartedAndDead` already
-    /// emits a `.shipDestroyed` event for this — that call site just needs to
-    /// invoke this method instead of (or in addition to) its current
-    /// `gov.shootPenalty`-on-every-hit logic.
-    public func recordKill(of govt: Int, shipStrength: Int) {
-        combatRating += shipStrength
-        if let gov = self.govt(govt) {
-            recordCrime(against: govt, penalty: gov.killPenalty)
-        }
+    public func consumeCrimeEvents() -> [(kind: CrimeKind, victim: Int)] {
+        defer { crimeEvents = [] }
+        return crimeEvents
+    }
+
+    // MARK: Crime events → legal record + combat rating
+    //
+    // The four live crime events are the kill, disable, board and smuggling
+    // penalties; `ShootPenalty` is never raised by the original, so gunfire
+    // itself never touches the record.
+
+    /// The player (or one of the player's direct escorts) destroyed a ship
+    /// belonging to `govt`: the kill flood, and the kill's combat-rating
+    /// points (`CombatRatingRule.points`, from the hull's `shïp.Strength`).
+    public func recordKill(of govt: Int, shipStrength: Int, missionShip: Bool = false) {
+        combatRating += CombatRatingRule.points(forStrength: shipStrength)
+        recordCrime(.kill, against: govt, missionShip: missionShip)
     }
 
     /// The player disabled (but did not destroy) a ship belonging to `govt`.
-    /// Applies `DisabPenalty` evilness. `World.applyHit` already emits a
-    /// `.shipDisabled` event for this transition — that call site just needs
-    /// to invoke this method.
-    public func recordDisable(of govt: Int) {
-        if let gov = self.govt(govt) {
-            recordCrime(against: govt, penalty: gov.disablePenalty)
-        }
+    public func recordDisable(of govt: Int, missionShip: Bool = false) {
+        recordCrime(.disable, against: govt, missionShip: missionShip)
     }
 
-    /// The player boarded/plundered a ship belonging to `govt`. Applies
-    /// `BoardPenalty` evilness. Called from `World.board(shipID:)` the moment
-    /// the player docks with a hulk — that's the single "forced entry" event,
-    /// independent of what's taken or whether a follow-up capture succeeds.
-    public func recordBoard(of govt: Int) {
-        if let gov = self.govt(govt) {
-            recordCrime(against: govt, penalty: gov.boardPenalty)
-        }
+    /// The player boarded a ship belonging to `govt` — the single "forced
+    /// entry" event, whatever is taken afterwards.
+    public func recordBoard(of govt: Int, missionShip: Bool = false) {
+        recordCrime(.board, against: govt, missionShip: missionShip)
     }
 
-    /// The player was *detected* smuggling `govt`-illegal mission cargo
-    /// (matched via `mïsn.ScanMask` ∩ `gövt.ScanMask`). Applies
-    /// `SmugPenalty` evilness — the point cost of getting caught, not of
-    /// merely carrying the cargo. No ScanMask/illegal-cargo detection system
-    /// exists anywhere in this codebase yet (no event to hook this into) —
-    /// see docs/reverse-engineering/GOVERNMENT.md §5. Provided so the method
-    /// exists and is correct the moment scan-and-fine is implemented.
+    /// The player was caught smuggling by a ship of `govt`.
     public func recordSmuggling(against govt: Int) {
-        if let gov = self.govt(govt) {
-            recordCrime(against: govt, penalty: gov.smugglePenalty)
+        recordCrime(.smuggling, against: govt)
+    }
+}
+
+/// The original's per-government byte latches that an owned outfit sets and
+/// nothing clears until the game quits (`Outfit_RecomputeOutfitDerivedState`
+/// 0x0046d4b0, OS-10): owning an IFF scrambler (ModType 48) marks every
+/// government holding its ModVal class "scrambled"; owning a reinforcement
+/// inhibitor (ModType 44) marks them "inhibited", and ModVal −1 on an
+/// inhibitor inhibits every government. A scrambler with ModVal −1 matches
+/// nothing. Selling the outfit leaves the latch set.
+///
+/// Process-wide on purpose: the original keeps these in the loaded government
+/// table, which outlives every system session and pilot load.
+public final class GovernmentLatches: @unchecked Sendable {
+    public static let shared = GovernmentLatches()
+
+    private let lock = NSLock()
+    private var scrambled: Set<Int> = []
+    private var inhibited: Set<Int> = []
+    private var inhibitAll = false
+
+    public init() {}
+
+    /// Latch the governments an outfit set of `scramblerClasses` /
+    /// `inhibitorClasses` (ModVals) matches. Idempotent; never clears.
+    public func latch(scramblerClasses: Set<Int>, inhibitorClasses: Set<Int>, govts: [GovtRes]) {
+        guard !scramblerClasses.isEmpty || !inhibitorClasses.isEmpty else { return }
+        lock.lock(); defer { lock.unlock() }
+        if inhibitorClasses.contains(-1) { inhibitAll = true }
+        for g in govts {
+            let classes = Set(g.classes)
+            if !classes.isDisjoint(with: scramblerClasses) { scrambled.insert(g.id) }
+            if !classes.isDisjoint(with: inhibitorClasses) { inhibited.insert(g.id) }
         }
+    }
+
+    public func isScrambled(_ govt: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return scrambled.contains(govt)
+    }
+
+    public func isInhibited(_ govt: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return inhibitAll || inhibited.contains(govt)
+    }
+
+    /// Forget every latch (the game quitting; tests).
+    public func reset() {
+        lock.lock(); defer { lock.unlock() }
+        scrambled = []; inhibited = []; inhibitAll = false
+    }
+}
+
+/// `Frame_AddCombatRatingPoints` (0x0046f1e0): a kill of a hull with
+/// `shïp.Strength` below 5 earns 1 point; anything stronger earns
+/// `trunc(strength × 0.2)`. A rating already at 10,000,000 is pinned there.
+/// The rank thresholds (100 / 200 / … / 25600) read the result directly.
+public enum CombatRatingRule {
+    public static let cap = 10_000_000
+
+    /// Points one kill of a hull of `strength` earns.
+    public static func points(forStrength strength: Int) -> Int {
+        strength < 5 ? 1 : Int((Double(strength) * 0.2).rounded(.down))
+    }
+
+    /// `rating` after earning `points` more: the original adds while below
+    /// the cap and pins at the cap once there.
+    public static func fold(_ rating: Int, adding points: Int) -> Int {
+        guard points != 0 else { return rating }
+        return rating >= cap ? cap : rating + points
     }
 }

@@ -1,86 +1,64 @@
 # Roadmap
 
-What's next, in priority order. For what already works, see
-[STATUS.md](STATUS.md); for why any of it matters, see [CHARTER.md](CHARTER.md).
-
-**Sequencing principle:** a feature that isn't wired doesn't exist for the
-player. Wiring something that's already built beats starting something new.
+What's next, roughly in order. For what already works, see
+[STATUS.md](STATUS.md). For why, see [CHARTER.md](CHARTER.md).
 
 ## Now
 
-### 1. AI, spawning and flight fidelity
+### Close out the fidelity plan
 
-The most visible remaining difference between this port and the original — and
-the hardest, because EV Nova's AI was never open-sourced and there was nothing to
-copy. This is quality-of-reconstruction work, not a missing feature.
+All 177 items in [FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) are
+done. What's left:
 
-- **Spawn cadence and density** (`Spawner.swift`). The ambient trickle toward
-  `sÿst.AvgShips` is a heuristic. Tune it toward the original's real arrival
-  rhythm and ship mix so traffic stops feeling too even.
-- **Flight smoothness** (`AIBrain.swift`). Remove the wobble and overshoot in the
-  hand-tuned turn/thrust steering so NPC flight reads as naturally as the
-  original's.
-- **Behaviour edge cases.** Implement the mission `ShipBehav` case that currently
-  falls through to normal AI, and tighten the engagement/disengagement
-  transitions.
+- The deferred pieces listed in STATUS.md (hint chain, Player Info Tab cycling,
+  map key cycling, gate hold for mission ships, jump-engage countdown).
+- The plan's open questions: run the remaining routines in the emulator
+  (perishable cargo decay, the legal-record flood split, outfitter cancel and
+  the day flag, bar re-offer timing) and the static reads (engine glow states,
+  NPC gravity, asteroid frame seed).
+- The maintainer decisions at the end of the plan: presentation defaults,
+  macOS key bindings, autosave details, Strict Play scope.
+- More oracle-backed tests. Many AI behaviours are covered by unit traces, not
+  emulator output yet.
 
-Details in [AI.md](AI.md).
+### Hardening
 
-### 2. Junk and `öops` trading
-
-The last corner of the economy. Both decoders work and nothing calls them.
-Implement `öops` price disasters first, then junk trading — the design is already
-written up in
-[JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md), building on
-[ECONOMY.md](reverse-engineering/ECONOMY.md).
-
-Finishing this also unblocks `përs.showsDisasterInfo` and `öops.isNewsOnly`,
-which have nothing to report until disasters exist.
-
-### 3. Save format decision
-
-Keep the native JSON `PlayerState`, or move to the built-but-unused
-`PilotSave`/`CombatRating` classic-archive encoder. Pick one and delete the other
-path.
+Bug fixes and performance as more people play on more devices. Testers can send
+a diagnostics bundle from Settings ▸ Support ▸ Report a Bug.
 
 ## Next
 
-### Combat and interaction depth
+### Godot frontend for Linux and Windows
 
-Deeper hailing and bribing, distress calls and reinforcements, guided-weapon
-lock-tone and lock-loss nuance, and per-weapon `snd ` coverage. Named `përs`
-captains, their hail quotes, link-missions and grudges are done; what's left is
-the negotiation nuance around them.
+Sound, the galaxy map, outfitter, shipyard, bar and mission board, saving, the
+story runtime, then packaged builds. Developed in parallel; it doesn't block the
+Apple builds. See [GODOT_LAYER.md](GODOT_LAYER.md).
 
-### Audio and text coverage
+### Multiplayer
 
-Full `snd ` sound-effect and music coverage, and `STR#`/`dësc` text everywhere a
-string is currently hardcoded.
-
-### Options and accessibility
-
-Every EV Nova setting plus difficulty, with modern graphics, audio and
-accessibility options layered on top — opt-in, per the charter.
+Wider device testing, finer PvP options, and handing authority over when the
+host drops. See [MULTIPLAYER.md](MULTIPLAYER.md).
 
 ### Plug-in tooling
 
-Load-order and override UI polish, then an in-app resource editor
-(Mission Computer / ResForge class) and pilot editing. Both depend on a **write
-path** in `NovaSwiftKit`, which today only parses. Scoped in
+An in-app resource editor and pilot editor. Both need a write path in
+`NovaSwiftKit`, which only reads today. Scoped in
 [EDITOR_AND_PLUGINS_SCOPE.md](EDITOR_AND_PLUGINS_SCOPE.md).
 
-### Godot frontend
+### Optional extras
 
-The Linux/Windows port in `godot/` runs on the same portable Swift engine.
-Flight, HUD and landing/launch are wired; the galaxy map, spaceport screens and
-story runtime are next. Developed in parallel — it doesn't gate anything above.
-See [GODOT_LAYER.md](GODOT_LAYER.md).
+All off by default and never replacing the original:
 
-## Ongoing
+- HD art and audio packs layered over the originals.
+- An optional smarter AI behind the same seam as the original AI.
+- More accessibility options.
 
-- **Fidelity checks** against original behaviour, backed by golden-data tests.
-- **No hardcoded data in the play loop.** A charter anti-goal. Audit for
-  placeholder data leaking into shipping screens.
-- **Performance.** Atlasing and culling; drop to Metal where SpriteKit limits us.
-- **Legal posture.** Base game data stays user-supplied. Only our own code and
-  art ship in this repo.
+See [MODERNIZATION.md](MODERNIZATION.md).
+
+## Always
+
+- New behaviour that differs from the original goes behind an Enhancement,
+  off by default.
+- No hardcoded game data in the play loop.
+- No game data in the repo. Base data stays user-supplied.
+- No decompiled code in the repo. Specs only.

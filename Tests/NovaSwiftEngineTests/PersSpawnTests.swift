@@ -55,7 +55,8 @@ final class PersSpawnTests: XCTestCase {
         col.add(Resource(type: NovaType.pers, id: 500, name: "Captain", data: Data(person)))
 
         var system = [UInt8](repeating: 0, count: 2000)
-        put16(&system, 110, 500)    // guaranteed Person1
+        put16(&system, 110, 500)    // Person1
+        put16(&system, 126, 100)    // … at 100 %
         col.add(Resource(type: NovaType.syst, id: 128, name: "System", data: Data(system)))
 
         let galaxy = Galaxy(game: NovaGame(col))
@@ -109,15 +110,23 @@ final class PersSpawnTests: XCTestCase {
         XCTAssertTrue(ship.isAlive)
     }
 
-    func testPersonNegativeStrengthPreservesNativeInvincibility() throws {
+    /// AI-41: a negative ShieldMod scales nothing; the përs's shield and
+    /// armor are refilled to full every call (0x00433050).
+    func testPersonNegativeStrengthRefillsEveryTick() throws {
         for modifier in [-1, -32768] {
             let ship = try spawnPerson(shieldMod: modifier)
-            XCTAssertEqual(ship.maxShield, 1_000_000)
-            XCTAssertEqual(ship.shield, 1_000_000)
+            XCTAssertEqual(ship.maxShield, 100)
             XCTAssertEqual(ship.maxArmor, 80)
-            XCTAssertEqual(ship.armor, 80)
-            XCTAssertTrue(ship.isAlive)
+            XCTAssertTrue(ship.refillsDefensesEveryTick)
         }
+        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
+        let ship = Ship(name: "S", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3), position: Vec2(500, 0))
+        ship.maxShield = 100; ship.shield = 10; ship.maxArmor = 80; ship.armor = 30
+        ship.refillsDefensesEveryTick = true
+        world.addNPC(ship)
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(ship.shield, 100)
+        XCTAssertEqual(ship.armor, 80)
     }
 
     func testAddsExtraWeaponMount() {

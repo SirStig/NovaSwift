@@ -16,12 +16,12 @@ land, jump, map…). We map that to a touch scheme, with a controller option.
   - Secondary weapon, target-nearest, and afterburner as smaller buttons.
   - Optional **tilt-to-turn** and **tap-to-turn-toward** (point ship at tap) as
     accessibility/simplified modes.
-- **Gestures:** pinch = zoom; two-finger tap = secondary fire; swipe up near a
-  planet = land; dedicated buttons for **hyperspace jump** and **map**.
-- **HUD is touch-native:** radar, target, shields/armor bars are tappable
-  (tap a radar blip to target it).
-- **Controller:** full MFi / PS / Xbox controller support on iOS & macOS
-  (twin-stick: left = turn/thrust, right = aim/secondary).
+- **Gestures (planned, not built):** pinch to zoom in flight, two-finger tap for
+  secondary fire, swipe up near a planet to land. Pinch zoom works on the galaxy
+  map only.
+- **HUD (planned):** tap a radar blip to target it.
+- **Controller:** MFi / PlayStation / Xbox controllers on every platform, with
+  remapping and an on-screen cursor for menus (see [CONTROLS.md](CONTROLS.md)).
 - Control scheme + button layout + sensitivity live in Settings (below).
 - Implementation: an input-abstraction layer (`ControlIntent` — turnLeft,
   turnRight, thrust, firePrimary, …) that touch, keyboard, and controller all

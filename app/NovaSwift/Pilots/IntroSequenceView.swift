@@ -11,13 +11,13 @@ struct IntroSequenceView: View {
     var onFinish: () -> Void
 
     /// Slideshow pages: the intro PICTs, then an optional text page (id = -1).
-    private struct Page: Identifiable { let id: Int; let pictID: Int?; let delay: Int }
+    private struct Page: Identifiable { let id: Int; let pictID: Int?; let delay: Double }
 
     @State private var index = 0
 
     private var pages: [Page] {
         var p = scenario.introSlides.enumerated().map { i, s in
-            Page(id: i, pictID: s.pictID, delay: max(2, min(s.delaySeconds, 7)))
+            Page(id: i, pictID: s.pictID, delay: s.duration)
         }
         if scenario.introTextID != nil, !introText.isEmpty {
             p.append(Page(id: 9_000, pictID: nil, delay: 0))   // text page (manual advance)
@@ -47,7 +47,7 @@ struct IntroSequenceView: View {
         .task(id: index) {
             guard let page = pages.indices.contains(index) ? pages[index] : nil,
                   page.pictID != nil, page.delay > 0 else { return }
-            try? await Task.sleep(nanoseconds: UInt64(page.delay) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(page.delay * 1_000_000_000))
             if !Task.isCancelled { advance() }
         }
     }

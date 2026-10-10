@@ -8,35 +8,23 @@ player's own game data** (`gövt`, `düde`, `flët`, `shïp`, `wëap`, `sÿst`).
 The whole thing lives in `NovaSwiftEngine` and is exercised headlessly by
 `novaswift-extract ai <baseDir> [systemID] [seconds]`.
 
-## Fidelity: this is the port's weakest area
+## Where the AI comes from
 
-EV Nova's AI and spawning were never open-sourced, so there is no original
-source to port. Everything here is reconstructed from the data tables
-(`gövt`/`düde`/`flët`/`sÿst`) and observed behaviour, cross-checked against the
-Nova Bible (see
-[reverse-engineering/AI_GROUND_TRUTH.md](reverse-engineering/AI_GROUND_TRUTH.md)).
-It covers the documented behaviour well, but it is honestly where the port feels
-least like the original. The weak points, and what's already been done about
-them:
+The NPC AI is a port of the original's, taken from the decompiled EV Nova CE
+executable. `Sources/NovaSwiftEngine/OriginalAI/` holds it: behaviour
+supervisors (wimpy trader, brave trader, warship, interceptor, escort, defense
+fleet, miner, plunderer) pick a state; the state machine
+(`Ship_UpdateShipAiState` 0x00405590) turns it into one of 24 control modes;
+the controls (0x00408150) turn the mode into heading, thrust and speed. It is
+the only NPC brain. Spawning follows the original's rules in
+`OriginalSpawning.swift`. Items AI-01 to AI-44 and FL-01 to FL-23 in
+[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md) give the details and
+addresses.
 
-- **Spawn cadence and density.** Ambient population is a trickle heuristic — one
-  spawn every `spawnInterval` toward the system's `sÿst.AvgShips` — built in the
-  same spirit as the original, not as its algorithm. Traffic can read as too
-  sparse or too evenly paced.
-- **Flight handling.** The steering is hand-tuned heuristics: thrust when roughly
-  pointed the right way, turn-limit lifts through hard turns, escort
-  heading-hold. For the case that matters most — fleets and escorts holding a
-  slot — ships in formation now fly the driftless model
-  (`FlightTuning.aiInertialess`, below), the way EV Nova's AI flew tighter than
-  the player on the same hull. That removed the formation wobble. Lone traffic
-  and lone combatants still wrestle Newtonian momentum, and the reverse-and-fire
-  "Monty Python" maneuver is a deliberate signature of the original, not a bug.
-- **Behaviour edge cases.** One mission `ShipBehav` case falls through to normal
-  AI, brainless ships drift, and some engagement transitions approximate timing
-  the Bible never documents.
-
-Tightening this is the top fidelity item on the [roadmap](ROADMAP.md). Read what
-follows alongside these caveats.
+Some sections below were written before that port and describe `AIBrain`, which
+now mostly carries shared per-ship state (squad leader, target, cadence) for the
+rest of the engine and the app. Where this doc and the plan disagree, the plan
+and the code are right.
 
 ## The core idea: NPCs are ships with a brain
 
@@ -45,7 +33,9 @@ Every ship — player or NPC — is a `Ship`. The simulation only ever reads a
 produce one; an NPC's `AIBrain` produces the *same struct*. That symmetry means
 one flight model, one combat model, one collision model drives everything.
 
-**One deliberate asymmetry — inertialess AI flight, scoped to formations.**
+**Formations.** In the original, escorts and fleet members fly on their own hull's momentum. The inertialess formation model described here is now the optional "Tight formations" Enhancement, off by default.
+
+**Inertialess AI flight (Tight formations only).**
 EV Nova's escorts "ignore their own speed and maneuverability to hold
 formation" (Nova Bible) — a fleet member glues to its slot far more tightly
 than finite turn/thrust could otherwise manage. We reproduce that by flying

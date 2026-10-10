@@ -22,7 +22,9 @@ top.
 The measure of every feature is: does it match the original?
 
 Same flight model, same combat, same economy, same mission logic, same AI
-behaviour, same UI layout — reconstructed from the real data, not approximated.
+behaviour, same UI layout. The reference is the original executable, decompiled
+and compared function by function (see
+[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md)).
 Modern additions (higher resolution, touch controls, controllers,
 quality-of-life) are opt-in and additive, and a pure Classic run must behave like
 the original. When in doubt, do what the original does. "Close enough" is a bug.
@@ -81,8 +83,9 @@ wiring what's built over building more.
 - Describing a library feature as done when the app never calls it.
 - Bundling any original game asset, even "just for testing."
 - Modern redesigns that replace rather than sit beside the authentic experience.
-- Gameplay shortcuts that diverge from the original to make it simpler — free or
-  instant jumps, an immortal player, free repairs. These are bugs.
+- Gameplay shortcuts that diverge from the original by default, such as free or
+  instant jumps, an immortal player or free repairs. These are bugs. A
+  convenience worth keeping can be an Enhancement in Settings, off by default.
 
 ## Legal posture
 

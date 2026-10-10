@@ -40,7 +40,7 @@ NOVA Swift is split into two halves:
 | Half | Platforms | Status |
 |---|---|---|
 | **Core** — `NovaSwiftKit`, `NovaSwiftEngine`, `NovaSwiftStory`, `NovaSwiftNet` | portable Swift | builds on any Swift toolchain |
-| **Frontend** — `app/NovaSwift/` (SwiftUI + SpriteKit) | Apple only | macOS / iPadOS / iOS |
+| **Frontend** — `app/NovaSwift/` (SwiftUI + SpriteKit) | Apple only | macOS / iPadOS / iOS / tvOS |
 
 The simulation, data layer, and story runtime are plain Swift with almost no
 Apple-framework coupling (an audit found exactly **one** unconditional

@@ -34,14 +34,17 @@ struct SystemFinderView: View {
 
     private var filtered: [SystRes] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return q.isEmpty ? known : known.filter { $0.displayName.localizedCaseInsensitiveContains(q) }
+        return q.isEmpty ? known : known.filter { $0.displayName.lowercased().hasPrefix(q.lowercased()) }   // the original Find matches a prefix
     }
 
     var body: some View {
         NavigationStack {
             List(filtered, id: \.id) { system in
                 Button {
-                    nav.plotCourse(to: system.id)
+                    // The original's Find only selects the system (UI-18); the
+                    // `autoRoutePlotting` enhancement plots a course there too.
+                    if nav.autoRoutePlotting { nav.plotCourse(to: system.id) }
+                    else { nav.click(system: system.id) }
                     onSelect(system)
                     dismiss()
                 } label: {

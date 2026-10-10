@@ -147,8 +147,14 @@ public enum CombatRating {
     private static let thresholds = [0, 1, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600]
 
     public static func title(forRating rating: Int) -> String {
-        var title = titles[0]
-        for (i, t) in thresholds.enumerated() where rating >= t { title = titles[i] }
-        return title
+        titles[tierIndex(forRating: rating)]
+    }
+
+    /// The 0-based tier for `rating`; STR# 138 entry `tier + 1` holds its
+    /// title (`OriginalText.combatRating`).
+    public static func tierIndex(forRating rating: Int) -> Int {
+        var index = 0
+        for (i, t) in thresholds.enumerated() where rating >= t { index = i }
+        return index
     }
 }

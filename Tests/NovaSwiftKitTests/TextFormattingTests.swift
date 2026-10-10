@@ -100,22 +100,32 @@ final class TextFormattingTests: XCTestCase {
         XCTAssertEqual(NovaDescFormatter.render(src, context: .init(isRegistered: false)), "you haven't paid.")
     }
 
-    /// `Pxxx` = registered at least xxx days ago.
+    /// `Pxxx`: a registered copy always takes the first arm, whatever the day
+    /// count (0x0044a4d0).
     func testRegistrationWithDayCount() {
         let src = #"{P30 "veteran" "newcomer"}"#
         XCTAssertEqual(NovaDescFormatter.render(src, context: .init(isRegistered: true, daysRegistered: 45)), "veteran")
-        XCTAssertEqual(NovaDescFormatter.render(src, context: .init(isRegistered: true, daysRegistered: 10)), "newcomer")
+        XCTAssertEqual(NovaDescFormatter.render(src, context: .init(isRegistered: true, daysRegistered: 10)), "veteran")
     }
 
-    // MARK: Robustness
+    // MARK: Original quirks (MS-21)
 
-    /// A stray brace must survive, not eat the rest of the description.
-    func testMalformedSequencesPassThroughVerbatim() {
-        XCTAssertEqual(NovaDescFormatter.render("a { b c"), "a { b c")
-        XCTAssertEqual(NovaDescFormatter.render(#"{b12 "unterminated"#), #"{b12 "unterminated"#)
-        XCTAssertEqual(NovaDescFormatter.render("{zzz \"x\"}"), "{zzz \"x\"}")
-        XCTAssertEqual(NovaDescFormatter.render("{b \"no digits\"}"), "{b \"no digits\"}")
+    /// The original's machine swallows malformed sequences: a header that
+    /// isn't b/g/p eats text, and a missing quote eats the rest.
+    func testMalformedSequencesAreSwallowedLikeTheOriginal() {
+        XCTAssertEqual(NovaDescFormatter.render("a { b c"), "a ")
+        XCTAssertEqual(NovaDescFormatter.render(#"{b12 "unterminated"#), "")
+        XCTAssertEqual(NovaDescFormatter.render("{zzz \"x\"} tail"), "")
+        XCTAssertEqual(NovaDescFormatter.render("{b \"no digits\"}!"), "!")
         XCTAssertEqual(NovaDescFormatter.render("plain text"), "plain text")
+    }
+
+    /// The `!` latch is never reset: every conditional after the first
+    /// `{!…}` is inverted too.
+    func testNegateLatchCarriesToLaterConditionals() {
+        let src = #"{!b1 "A" "a"} {b2 "B" "b"} {G "M" "F"}"#
+        let out = NovaDescFormatter.render(src, context: .init(isBitSet: { $0 == 2 }, isMale: true))
+        XCTAssertEqual(out, "A b F")
     }
 
     func testMultipleConditionalsInOneBody() {

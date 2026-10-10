@@ -20,7 +20,7 @@ final class BoardingCargoMissionTests: XCTestCase {
     private func sampleMission(goal: Int = 2) -> MissionSpec {
         MissionSpec(id: 900, returnStellar: 286,
                     cargoType: 31, cargoQty: 1, cargoPickup: 2, cargoDropoff: 1,
-                    pay: 40000, shipCount: 1, shipGoal: goal,
+                    pay: 40000, shipCount: 1, shipGoal: goal, canAbort: false,
                     loadCargoText: 5100, dropCargoText: 5200,
                     onSuccess: "b700", onShipDone: "b701")
     }
@@ -55,16 +55,20 @@ final class BoardingCargoMissionTests: XCTestCase {
         XCTAssertEqual(engine.player.credits, 40000, "delivery pays only once")
     }
 
-    func testDisablingOrDestroyingDoesNotCompleteBoardingObjective() {
+    func testDestroyingTheBoardTargetFailsTheMission() {
+        // MS-11: destroying a board/rescue target before boarding it fails the
+        // mission at once; the failure resolves on landing at the return
+        // stellar, with no pay.
         let (engine, _) = engine(sampleMission())
         XCTAssertTrue(engine.accept(900))
         engine.missionShipDisabled(missionID: 900)
+        XCTAssertFalse(engine.player.activeMission(900)!.isFailed, "disabling alone is fine")
         engine.missionShipDestroyed(missionID: 900)
-        XCTAssertEqual(engine.player.activeMission(900)!.shipObjectivesRemaining, 1)
+        XCTAssertTrue(engine.player.activeMission(900)!.isFailed)
         XCTAssertFalse(engine.player.activeMission(900)!.cargoPickedUp)
         XCTAssertNil(engine.player.cargo[31])
         engine.playerLanded(onSpob: 286)
-        XCTAssertTrue(engine.player.isMissionActive(900))
+        XCTAssertFalse(engine.player.isMissionActive(900))
         XCTAssertEqual(engine.player.credits, 0)
     }
 
@@ -152,7 +156,11 @@ final class BoardingCargoMissionTests: XCTestCase {
         XCTAssertEqual(engine.player.credits, 100)
     }
 
-    func testVisitBeforeBoardingDoesNotCountAsTravelDelivery() {
+    func testVisitBeforeBoardingStillCountsAsTheTravelLeg() {
+        // The original latches the travel leg on any landing at the travel
+        // stellar when its pickup isn't there (0x004438d0), and success needs
+        // only that latch and the objective — so the boarded cargo, never
+        // dropped at the travel stellar, simply leaves with the mission.
         var spec = sampleMission()
         spec.travelStellar = 300
         spec.cargoDropoff = 0
@@ -160,10 +168,7 @@ final class BoardingCargoMissionTests: XCTestCase {
         XCTAssertTrue(engine.accept(900))
         engine.playerLanded(onSpob: 300)
         engine.missionShipBoarded(missionID: 900)
-        engine.playerLanded(onSpob: 286)
-        XCTAssertTrue(engine.player.isMissionActive(900), "cargo needs a travel landing after pickup")
-        XCTAssertEqual(engine.player.credits, 0)
-        engine.playerLanded(onSpob: 300)
+        XCTAssertEqual(engine.player.cargo[31], 1)
         engine.playerLanded(onSpob: 286)
         XCTAssertFalse(engine.player.isMissionActive(900))
         XCTAssertNil(engine.player.cargo[31])
@@ -222,8 +227,11 @@ final class BoardingCargoMissionTests: XCTestCase {
     func testLegacyBoardedShipWithoutPickupStillCompletesOnReturn() {
         let (engine, _) = engine(sampleMission())
         XCTAssertTrue(engine.accept(900))
-        // Older builds counted the board goal on disable without loading cargo.
+        // Older builds counted the board goal on disable without loading cargo,
+        // and saved no runtime latches.
         engine.player.activeMissions[0].shipObjectivesRemaining = 0
+        engine.player.activeMissions[0].serial = nil
+        engine.player.activeMissions[0].objectiveComplete = nil
         XCTAssertFalse(engine.player.activeMission(900)!.cargoPickedUp)
         engine.playerLanded(onSpob: 286)
         XCTAssertFalse(engine.player.isMissionActive(900))

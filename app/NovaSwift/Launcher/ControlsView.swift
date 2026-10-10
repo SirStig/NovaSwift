@@ -46,7 +46,7 @@ struct ControlsView: View {
             Section {
                 Button(role: .destructive) {
                     if device == .keyboard {
-                        model.bindings.resetToDefaults()
+                        model.bindings.resetToDefaults(modern: model.settings.enhancements.modernKeyBindings)
                         model.commitBindings()
                     } else {
                         model.padBindings.resetToDefaults()

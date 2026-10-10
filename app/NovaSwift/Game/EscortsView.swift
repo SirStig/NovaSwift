@@ -41,18 +41,32 @@ struct EscortsView: View {
     var game: NovaGame? = nil
     var currentOrder: EscortOrder? = nil
     var onCommand: (EscortOrder) -> Void = { _ in }
+    /// AI-35: under the original AI, orders go to one EscortType group (nil =
+    /// all ships; 0 fighters, 1 medium, 2 warships, 3 freighters) as the
+    /// original's escort overlay does, and Return to Hangar exists. Nil keeps
+    /// the port's whole-wing orders.
+    var onGroupCommand: ((_ category: Int?, _ command: Int) -> Void)? = nil
+    /// STR# 2002, for the group and order labels (#140–#149).
+    var strings: StringListRes? = nil
+    @State private var group: Int? = nil
     @Environment(\.novaTheme) private var theme
     /// Release / dismiss the escort with this `EscortRecord.id` — EV Nova's
     /// "Release from Servitude" hail action.
     var onRelease: (Int) -> Void = { _ in }
-    /// Queue an upgrade for the captured escort with this record id to its
-    /// hull's `UpgradeTo` — no charge yet; applied on the next shipyard
-    /// landing (see `PilotStore.applyPendingEscortUpgrades`).
+    /// The pilot, for the Upgrade gate (the target hull's availability
+    /// expression, `PilotEconomy.escortUpgradeTarget`). Nil in the demo path.
+    var pilot: PlayerState? = nil
+    /// Mark the escort with this record id for an upgrade to its hull's
+    /// `UpgradeTo` — no charge yet; the fleet pass applies it on leaving a
+    /// shipyard stellar (EC-22, `PilotEconomy.processEscortFleetAtStellar`).
     var onUpgrade: (Int) -> Void = { _ in }
-    /// Cancel a queued upgrade for the escort with this record id — free.
+    /// Clear the upgrade mark for the escort with this record id.
     var onCancelUpgrade: (Int) -> Void = { _ in }
-    /// Sell the captured escort with this record id for its `EscSellValue`.
+    /// Mark the captured escort with this record id to be sold at the next
+    /// shipyard, for its `EscSellValue`.
     var onSell: (Int) -> Void = { _ in }
+    /// Clear the sale mark for the escort with this record id.
+    var onCancelSale: (Int) -> Void = { _ in }
     var onClose: () -> Void = {}
 
     /// The selected row's live `EscortInfo.id` (entity id) — entity-keyed, not
@@ -231,8 +245,54 @@ struct EscortsView: View {
     /// A 146×26 authentic command button. Enabled only when there's a wing to
     /// command; the wing's current standing order is shown in the order panel.
     private func commandButton(_ order: EscortOrder) -> some View {
-        authButton(order.title, width: 120, enabled: hasEscorts) {
-            if hasEscorts { onCommand(order) }
+        authButton(onGroupCommand == nil ? order.title : originalTitle(order), width: 120, enabled: hasEscorts) {
+            guard hasEscorts else { return }
+            if let onGroupCommand {
+                onGroupCommand(group, originalCommand(order))
+            } else {
+                onCommand(order)
+            }
+        }
+    }
+
+    /// The original's order for a command button: Attack, Defend, Formation,
+    /// Hold Position (STR# 2002 #146 / #145 / #149 / #147).
+    private func originalCommand(_ order: EscortOrder) -> Int {
+        switch order {
+        case .aggressive: return OriginalEscortCommand.attack
+        case .defensive: return OriginalEscortCommand.defend
+        case .evasive: return OriginalEscortCommand.formation
+        case .hold: return OriginalEscortCommand.hold
+        }
+    }
+
+    private func originalTitle(_ order: EscortOrder) -> String {
+        let index: Int
+        switch order {
+        case .aggressive: index = 146
+        case .defensive: index = 145
+        case .evasive: index = 149
+        case .hold: index = 147
+        }
+        return strings?.string(at: index) ?? order.title
+    }
+
+    /// The group the original-AI orders go to, cycled All → Fighters → Medium
+    /// → Warships → Freighters (STR# 2002 #144 / #140–#143).
+    private var groupLabel: String {
+        guard let group else { return strings?.string(at: 144) ?? "All Ships" }
+        return strings?.string(at: 140 + group) ?? "Group \(group + 1)"
+    }
+
+    @ViewBuilder
+    private var groupControls: some View {
+        if let onGroupCommand {
+            authButton(groupLabel, width: 92, enabled: hasEscorts) {
+                group = group == nil ? 0 : (group! >= 3 ? nil : group! + 1)
+            }
+            authButton(strings?.string(at: 148) ?? "Return to Hangar", width: 112, enabled: hasEscorts) {
+                if hasEscorts { onGroupCommand(group, OriginalEscortCommand.returnToHangar) }
+            }
         }
     }
 
@@ -248,6 +308,9 @@ struct EscortsView: View {
                 hailStatus(rec)
                 Spacer(minLength: 6)
                 hailActions(rec)
+            } else if onGroupCommand != nil {
+                groupControls
+                Spacer(minLength: 6)
             } else {
                 NovaText(hasEscorts ? "Select an escort to hail it." : "Hail an escort to command it.",
                          size: 10, color: Color(white: 0.45))
@@ -284,15 +347,15 @@ struct EscortsView: View {
     /// repeating.
     private func hailStatus(_ sel: EscortRecord) -> some View {
         let detail: String = {
-            if let pendingID = sel.pendingUpgradeTo, let target = game?.ship(pendingID) {
-                return "Upgrade → \(target.displayName) queued · applies at next shipyard landing"
-            }
+            // The original's status lines (STR# 2002 #292 / #295).
+            if sel.pendingUpgradeTo != nil, let s = game?.stringList(2002)?.string(at: 292) { return s }
+            if sel.pendingSale == true, let s = game?.stringList(2002)?.string(at: 295) { return s }
             guard let ship = game?.ship(sel.shipType) else {
                 return sel.origin == .hired ? "Hired · \(sel.dailyFee)cr/day" : "Under command"
             }
             var parts = [sel.origin == .captured ? "Captured" : "Hired · \(sel.dailyFee)cr/day"]
-            if ship.escortUpgradesTo > 0 { parts.append("upgrade \(ship.escortUpgradeCost)cr") }
-            if sel.origin == .captured { parts.append("sell \(escortSellValue(ship))cr") }
+            if ship.escortUpgradesTo >= 128 { parts.append("upgrade \(ship.escortUpgradeCost)cr") }
+            if sel.origin == .captured { parts.append("sell \(PilotEconomy.escortSellValue(for: ship))cr") }
             return parts.joined(separator: " · ")
         }()
         return VStack(alignment: .leading, spacing: 1) {
@@ -302,33 +365,27 @@ struct EscortsView: View {
         .frame(minWidth: 90, alignment: .leading)
     }
 
-    /// The hail-menu actions for the selected escort. `UpgradeTo`/`EscUpgrdCost`
-    /// are hull-level Bible fields with no origin restriction in their text —
-    /// "if an escort ship of this type can be upgraded" — so any escort of an
-    /// upgradeable hull can queue one (queued until the next shipyard landing —
-    /// see `onUpgrade`/`onCancelUpgrade`), hired or captured alike. Only sale
-    /// (`EscSellValue`, "for selling off a captured escort") is captured-only;
-    /// every escort can be released/dismissed regardless of origin.
+    /// The escort window's actions (`NovaUi_RunEscortShipManagementWindow`
+    /// 0x004853a0): Upgrade and Sell are exclusive toggle marks the fleet pass
+    /// processes on leaving a shipyard stellar (EC-22). Upgrade is offered when
+    /// the hull has an `UpgradeTo` whose availability expression passes; Sell
+    /// never for a hired (or mission) escort. Release works for any escort.
     @ViewBuilder
     private func hailActions(_ sel: EscortRecord) -> some View {
-        let ship = game?.ship(sel.shipType)
-        let canUpgrade = (ship?.escortUpgradesTo ?? 0) > 0
+        let canUpgrade = game.flatMap { g in pilot.flatMap { PilotEconomy.escortUpgradeTarget($0, recordID: sel.id, game: g) } } != nil
         if sel.pendingUpgradeTo != nil {
             authButton("Cancel Upgrade", width: 90) { onCancelUpgrade(sel.id) }
         } else if canUpgrade {
             authButton("Upgrade", width: 46) { onUpgrade(sel.id) }
         }
-        if sel.origin == .captured {
-            authButton("Sell", width: 32) { onSell(sel.id); selectedEntityID = nil }
+        if sel.pendingSale == true {
+            authButton("Cancel Sale", width: 70) { onCancelSale(sel.id) }
+        } else if pilot.map({ PilotEconomy.canSellEscort($0, recordID: sel.id) }) ?? (sel.origin == .captured) {
+            authButton("Sell", width: 32) { onSell(sel.id) }
         }
         authButton(sel.origin == .hired ? "Release" : "Dismiss", width: 46) {
             onRelease(sel.id); selectedEntityID = nil
         }
-    }
-
-    /// EV Nova's resale value: `EscSellValue`, or 10% of Cost when unset (≤0).
-    private func escortSellValue(_ ship: ShipRes) -> Int {
-        ship.escortSellValue > 0 ? ship.escortSellValue : Int(Double(ship.cost) * 0.1)
     }
 
     // MARK: - Authentic button (three-slice art, plain fallback in the demo path)

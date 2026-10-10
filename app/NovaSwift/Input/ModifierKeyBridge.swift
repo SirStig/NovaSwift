@@ -90,6 +90,7 @@ struct ModifierKeyControls: ViewModifier {
             case .afterburner: input.keyboard.afterburner = isDown
             case .firePrimary: input.keyboard.firePrimary = isDown
             case .fireSecondary: input.keyboard.fireSecondary = isDown
+            case .selfDestruct: input.keyboard.selfDestruct = isDown
             case .none:
                 // A discrete action bound to a bare modifier only makes sense
                 // on press, not release (there's no "up" to react to).

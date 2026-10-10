@@ -191,13 +191,15 @@ enum BugReport {
         }
         out.append("")
 
-        out.append("  legal record (universal)")
-        let records = state.legalRecord.filter { $0.value != 0 }
-        if records.isEmpty {
+        out.append("  legal record (per system)")
+        let records = (state.systemReputation ?? [:]).filter { $0.value != 0 }
+        if state.systemReputation == nil {
+            out.append("    (not migrated yet)")
+        } else if records.isEmpty {
             out.append("    (clean everywhere)")
         } else {
-            for (govt, value) in records.sorted(by: { $0.key < $1.key }) {
-                out.append("    \(value >= 0 ? "+" : "")\(value)  \(game?.govt(govt)?.displayName ?? "govt #\(govt)")")
+            for (system, value) in records.sorted(by: { $0.key < $1.key }) {
+                out.append("    \(value >= 0 ? "+" : "")\(value)  \(game?.system(system)?.name ?? "system #\(system)")")
             }
         }
         out.append("")

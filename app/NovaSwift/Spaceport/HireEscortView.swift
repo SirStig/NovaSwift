@@ -1,5 +1,7 @@
 import SwiftUI
 import NovaSwiftKit
+import NovaSwiftEngine
+import NovaSwiftStory
 
 // The hire-escort browser reuses the Shipyard's grid metrics verbatim so it
 // looks and lays out identically (these mirror the private constants in
@@ -18,10 +20,10 @@ private func hireCreditString(_ n: Int) -> String {
 /// The spaceport bar's **Hire Escort** browser — the original's hire-escort
 /// dialog, which is the Shipyard UI (same frame PICT 8501, DITL #1004 layout)
 /// applied to renting escorts instead of buying hulls. Which hulls are on offer
-/// today is gated per-ship by `shïp.HireRandom` (a percent-chance-per-day roll,
-/// same `escortAvailableToday` mechanism the shipyard uses for `BuyRandom`), so
-/// only a random subset shows up on any given day. Hiring charges an up-front
-/// fee (`escortHireFee`) and then a recurring **daily fee** (`escortDailyFee`)
+/// today is gated per-ship by `shïp.HireRandom` (one galaxy-wide roll per class
+/// per day, redrawn when that class is hired), so only a random subset shows up
+/// on any given day. Hiring charges a tenth of the port's scaled shipyard price
+/// (EC-09) and then a recurring **daily fee** (`escortDailyFee`)
 /// billed by the day clock; the escort joins you on takeoff. The detail pane
 /// shows the ship's pilot description (`dësc` 14000-range, "shown in the
 /// hire-escort dialog" per the Bible), which is what distinguishes this from the
@@ -30,6 +32,7 @@ struct HireEscortView: View {
     let graphics: SpaceportGraphics
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
+    let galaxy: Galaxy
     var onDone: () -> Void
 
     @State private var selectedID: Int?
@@ -55,10 +58,13 @@ struct HireEscortView: View {
     /// hire availability is the `HireRandom` roll's job.
     private var stock: [ShipRes] {
         game.shipsSold(at: spob, day: nil)
-            .filter { $0.hireRandom > 0 && pilot.escortAvailableToday($0, at: spob, day: day) }
+            .filter { pilot.escortAvailableToday($0, day: day) }
             .filter { lockState(for: $0) != .hidden }
-            .sorted { ($0.escortCategory, $0.escortHireFee) < ($1.escortCategory, $1.escortHireFee) }
+            .sorted { ($0.escortCategory, hirePrice($0)) < ($1.escortCategory, hirePrice($1)) }
     }
+    private func hirePrice(_ s: ShipRes) -> Int { pilot.escortHirePrice(s, at: spob, galaxy: galaxy) }
+    /// The original's cap: six hired or captured escorts (EC-19).
+    private var wingHasRoom: Bool { pilot.canAddEscort() }
     private var selected: ShipRes? { stock.first { $0.id == selectedID } ?? stock.first }
     private func lockState(for s: ShipRes) -> LockState {
         game.lockState(for: s, pilot: pilot.state)
@@ -118,15 +124,12 @@ struct HireEscortView: View {
             ForEach(Array(visibleItems.enumerated()), id: \.offset) { _, s in
                 if let s {
                     let picture = shipPicture(s)
-                    // A hull hired out for the day, or one the player hasn't
-                    // unlocked for purchase yet, dims as "locked" rather than
-                    // vanishing or showing an exact remaining count — EV Nova
-                    // never surfaces a hire quantity to the player.
-                    let remaining = pilot.escortHireRemaining(s, at: spob, day: day)
+                    // A hull the player hasn't unlocked for purchase yet dims
+                    // as "locked" rather than vanishing.
                     ItemTile(name: s.displayName, image: picture?.image,
                              pixelated: picture?.isDedicated == false,
                              selected: (selectedID ?? stock.first?.id) == s.id,
-                             locked: remaining == 0 || lockState(for: s) != .available)
+                             locked: lockState(for: s) != .available)
                         .onTapGesture { selectedID = s.id }
                         .cursorClickable { selectedID = s.id }
                 } else {
@@ -176,7 +179,7 @@ struct HireEscortView: View {
     private func info(_ space: NovaSpace) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 8) {
-            infoRow("Hire:", s.map { hireCreditString($0.escortHireFee) } ?? "—")
+            infoRow("Hire:", s.map { hireCreditString(hirePrice($0)) } ?? "—")
             infoRow("Per day:", s.map { hireCreditString($0.escortDailyFee) } ?? "—")
             infoRow("You Have:", hireCreditString(pilot.state.credits))
         }
@@ -192,15 +195,15 @@ struct HireEscortView: View {
 
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
-        let remaining = s.map { pilot.escortHireRemaining($0, at: spob, day: day) } ?? 0
-        let canHire = (s.map { pilot.state.credits >= $0.escortHireFee && lockState(for: $0) == .available } ?? false)
-            && remaining > 0 && pilot.state.escortWing.count < PilotStore.maxEscorts
+        let canHire = (s.map { pilot.state.credits >= hirePrice($0) && lockState(for: $0) == .available } ?? false)
+            && wingHasRoom
         NovaButton(graphics: graphics,
                    title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
                    width: 83, enabled: canHire) {
             guard let s else { return }
-            if pilot.hireEscort(s, at: spob, day: day) {
-                Log.spaceport.debug("Hired escort \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(s.escortHireFee, privacy: .public)cr")
+            let price = hirePrice(s)
+            if pilot.hireEscort(s, at: spob, day: day, galaxy: galaxy) {
+                Log.spaceport.debug("Hired escort \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(price, privacy: .public)cr")
             }
         }
         .novaPlace(space, -18, 128)
@@ -220,11 +223,11 @@ struct HireEscortView: View {
                     HStack {
                         NovaText(s.name, size: 12)
                         Spacer()
-                        NovaText("\(s.escortHireFee)cr", size: 11)
+                        NovaText("\(hirePrice(s))cr", size: 11)
                         NovaButton(graphics: graphics,
                                    title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire"),
-                                   width: 84, enabled: pilot.state.credits >= s.escortHireFee) {
-                            _ = pilot.hireEscort(s, at: spob, day: day)
+                                   width: 84, enabled: pilot.state.credits >= hirePrice(s) && wingHasRoom) {
+                            _ = pilot.hireEscort(s, at: spob, day: day, galaxy: galaxy)
                         }
                     }
                 }

@@ -75,6 +75,9 @@ struct GalaxyMapView: View {
     /// the PICT/button-slice/label decode+cache this chrome needs.
     @State private var graphics: SpaceportGraphics?
     @State private var showingFinder = false
+    /// The political overlay, toggled by Show/Hide Borders (STR# 150 #56/#57)
+    /// and remembered like the original's preference (UI-18).
+    @AppStorage("com.novaswift.map.showBorders") private var showBorders = true
     /// Decoded `nëbu` regions with their resolved artwork, built once per data
     /// load. Drawn behind the systems in map-space (`x,y,w,h` share the `syst`
     /// coordinate system), scaled by the current zoom.
@@ -314,14 +317,46 @@ struct GalaxyMapView: View {
         let gov = s.government
         guard gov >= 0, let g = game.govt(gov) else { return relUninhabited }
         if g.alwaysAttacksPlayer || g.xenophobic { return relPirate }
-        // The dot's own system, not wherever the player currently is — each
-        // system shows its own true local standing (per the wiki's Legal
-        // Status radius rule, trouble caused nearby doesn't follow you
-        // everywhere that government has territory).
-        let standing = pilot.state.effectiveLegalRecord(govt: gov, atSystem: s.id, fallback: g.initialRecord)
+        // The dot's own system, not wherever the player currently is — the
+        // legal record is one reputation per system (EC-02).
+        let standing = pilot.state.reputation(atSystem: s.id)
         if standing < 0 { return relEnemy }
         if standing > 0 || g.neverAttacksPlayer { return relFriendly }
         return relNeutral
+    }
+
+    /// The original's marker ring colour (`Stellar_ComputeStellarDisplayColor`
+    /// 0x00466260), used in the Classic map: unvisited dark grey; no usable
+    /// port light grey; otherwise graded from the usable stellars (not gates,
+    /// not uninhabited, not destroyed) — any dominated one green, else any the
+    /// player may land on (MinStatus met, or an always-land rank) blue, else
+    /// orange while the system reputation is ≥ 0 and red below. There is no
+    /// "neutral" yellow.
+    private func originalMarkerColor(for s: SystRes, game: NovaGame, visited: Bool) -> Color {
+        guard visited else { return Color(white: 0.25) }
+        let usable = s.spobs.compactMap(game.spob).filter {
+            !$0.isGate && !$0.isUninhabited && !pilot.state.isStellarDestroyed($0.id)
+        }
+        guard !usable.isEmpty else { return Color(white: 0.75) }
+        let rep = pilot.state.legalStatusReputation(inSystem: s.id, game: game)
+        var dominated = 0, landable = 0, friendly = 0, hostile = 0
+        for spob in usable {
+            if pilot.state.hasDominated(spob.id) { dominated += 1; continue }
+            let alwaysLand = spob.government >= 0 && pilot.state.activeRanks.contains {
+                game.rank($0).map { $0.govt == spob.government && $0.canAlwaysLand } ?? false
+            }
+            let forbidden = spob.minStatus == 32767 || (rep < spob.minStatus && spob.minStatus > -32767)
+            if !alwaysLand && forbidden {
+                if rep < 0 { hostile += 1 } else { friendly += 1 }
+            } else {
+                landable += 1
+            }
+        }
+        if dominated > 0 { return Color(red: 0.2, green: 0.85, blue: 0.3) }
+        if landable > 0 { return Color(red: 0, green: 0, blue: 1) }
+        if friendly > 0 { return Color(red: 1, green: 0.4, blue: 0) }
+        if hostile > 0 { return Color(red: 1, green: 0, blue: 0) }
+        return Color(white: 0.75)
     }
 
     // MARK: Drawing
@@ -359,7 +394,7 @@ struct GalaxyMapView: View {
         // resource), and gated to known systems so adjacency alone never leaks
         // a system's allegiance (matching the dot colours below). The glow
         // radius tracks zoom so neighbours' halos overlap at any scale.
-        do {
+        if showBorders {
             var tctx = ctx
             tctx.blendMode = .plusLighter
             let glowR = min(max(30 * zoom, 16), 320)
@@ -404,9 +439,14 @@ struct GalaxyMapView: View {
             }
         }
 
-        // Hyperspace links: thin dim lines, culled to known systems only (an
-        // unknown system's links stay hidden — that's how fog of war works).
+        // Hyperspace links: thin dim lines that radiate only from a visited
+        // (or charted) system, as the original draws them (UI-18) — two
+        // unvisited neighbours of a visited system show no link between them.
         // Links touching the current system are tinted by fuel affordability.
+        func visited(_ id: Int) -> Bool {
+            let v = visibility[id] ?? .unknown
+            return v == .explored || v == .chartered
+        }
         var links = Path()
         var currentLinks = Path()
         for s in systems {
@@ -415,7 +455,8 @@ struct GalaxyMapView: View {
             // `systemNeighbors` (not `s.links`) so a link the data only declares
             // from the far end still draws — see NovaGame.systemNeighbors.
             for link in game.systemNeighbors(s.id) {
-                guard let n = byID[link], link > s.id, visibility[link] != .unknown else { continue }
+                guard let n = byID[link], link > s.id, visibility[link] != .unknown,
+                      visited(s.id) || visited(link) else { continue }
                 let b = plot(n.x, n.y)
                 guard visibleRect.contains(a) || visibleRect.contains(b) else { continue }
                 if s.id == nav.currentSystemID || link == nav.currentSystemID {
@@ -504,6 +545,7 @@ struct GalaxyMapView: View {
             // glance under the blinking crosshair.
             let markColor: Color = isCurrent ? amber
                 : onRoute ? (hopAffordable ? routeGreen : routeWarn)
+                : !fullscreen ? originalMarkerColor(for: s, game: game, visited: isKnownDetail)
                 : isKnownDetail ? relationColor(for: s, game: game)
                 : adjacentGrey
             let r: CGFloat = isCurrent || isDestination ? 5 : 4
@@ -519,16 +561,22 @@ struct GalaxyMapView: View {
                 ctx.stroke(ring, with: .color(ringColor), lineWidth: 1.2)
             }
 
+            // The map selection (a click that armed nothing still moves it).
+            if s.id == nav.selectedSystemID, !isCurrent, !isDestination {
+                let ring = Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16))
+                ctx.stroke(ring, with: .color(.white.opacity(0.8)), lineWidth: 1)
+            }
+
             // Blinking crosshair brackets over the current system, EV-style.
             if isCurrent && blinkOn {
                 ctx.stroke(crosshair(at: p, arm: 9, gap: 5), with: .color(amber), lineWidth: 1.3)
             }
 
-            // Names: everything when zoomed in; only the load-bearing ones when
-            // out. Unvisited/uncharted systems show as "Unexplored" — no name
-            // leak from adjacency alone.
-            if showLabels || isCurrent || isDestination {
-                let name = isKnownDetail ? s.displayName : "Unexplored"
+            // Names: visited (or charted) systems only, zoom-gated, plus the
+            // current, destination and selected ones (UI-18). An unvisited
+            // system gets no label at all — no name leak from adjacency.
+            if isKnownDetail, showLabels || isCurrent || isDestination || s.id == nav.selectedSystemID {
+                let name = s.displayName
                 let color: Color = isCurrent ? amber
                     : onRoute ? (hopAffordable ? routeGreen : routeWarn)
                     : isKnownDetail ? (neighborIDs.contains(s.id) ? .white.opacity(0.9) : .white.opacity(0.7))
@@ -692,23 +740,54 @@ struct GalaxyMapView: View {
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
+        let missionSystems = Set(missionDestinations.map(\.systemID))
         var best: (id: Int, dist: CGFloat)?
         for s in nav.systems() {
             // Story-hidden systems can't be targeted at all.
             guard !nav.hiddenSystems.contains(s.id) else { continue }
-            // Fog of war: only known systems are selectable.
-            guard nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted) != .unknown else { continue }
+            // A click only lands on a latched system (visited or one hop from
+            // one, charted counting as visited), a mission target or the
+            // current selection; anywhere else is empty space (UI-05).
+            guard nav.visibility(of: s.id, explored: explored, adjacent: adjacent, charted: charted) != .unknown
+                    || missionSystems.contains(s.id) || s.id == nav.selectedSystemID else { continue }
             let p = CGPoint(x: center.x + CGFloat(s.x - cur.x) * zoom,
                             y: center.y + CGFloat(s.y - cur.y) * zoom)
             let d = hypot(p.x - location.x, p.y - location.y)
             if d < (best?.dist ?? 18) { best = (s.id, d) }
         }
         guard let hit = best else { return }
-        if hit.id == nav.currentSystemID {
-            nav.clearCourse()
+        if nav.autoRoutePlotting {
+            // The `autoRoutePlotting` enhancement: any tap plots the shortest course.
+            if hit.id == nav.currentSystemID { nav.clearCourse() } else { nav.plotCourse(to: hit.id) }
+        } else if Self.isShiftHeld || (Self.touchExtendsRoute && hit.id == nav.selectedSystemID) {
+            // Shift+click builds the route hop by hop. Without a keyboard, a
+            // second tap on the selected system stands in for it.
+            nav.shiftClick(system: hit.id)
         } else {
-            nav.plotCourse(to: hit.id)
+            nav.click(system: hit.id)
         }
+    }
+
+    /// Whether Shift is held for the click (a Mac keyboard, or a hardware
+    /// keyboard on iPad).
+    private static var isShiftHeld: Bool {
+        #if os(macOS)
+        return NSEvent.modifierFlags.contains(.shift)
+        #else
+        guard let keys = GCKeyboard.coalesced?.keyboardInput else { return false }
+        return keys.button(forKeyCode: .leftShift)?.isPressed == true
+            || keys.button(forKeyCode: .rightShift)?.isPressed == true
+        #endif
+    }
+
+    /// Touch devices have no Shift: tapping the already-selected system again
+    /// acts as Shift+click there.
+    private static var touchExtendsRoute: Bool {
+        #if os(macOS)
+        return false
+        #else
+        return true
+        #endif
     }
 
     private func setZoom(_ value: CGFloat) {
@@ -735,7 +814,7 @@ struct GalaxyMapView: View {
     /// explored, chartered, or merely glimpsed-as-adjacent — and both plots a
     /// course to it and pans the view there, same as tapping it directly.
     private func findNearestSystem() {
-        guard let cur = nav.current else { return }
+        guard nav.autoRoutePlotting, let cur = nav.current else { return }
         let explored = pilot.state.exploredSystems
         let charted = pilot.chartedSystems
         let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
@@ -808,26 +887,22 @@ struct GalaxyMapView: View {
                     .clipped()
                     .novaPlace(space, cx(Item.panel, nw), cy(Item.panel, nh))
 
-                // A live tick so the fuel-dependent course readout / JUMP
-                // button reflect fuel regenerating while the map is open.
-                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-                    routeBar
-                        .frame(width: CGFloat(Item.routeBar.w), height: CGFloat(Item.routeBar.h))
-                        .novaPlace(space, cx(Item.routeBar, nw), cy(Item.routeBar, nh))
+                // The original status bar (Ports / Navigation Hazards / date);
+                // in the hypergate picker its "select a destination" prompt.
+                // There is no jump button or colour key in the original map.
+                Group {
+                    if gateSelection != nil, let game = nav.game {
+                        NovaText(OriginalText(game: game).misc(308), size: 10, color: Color(white: 0.6))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 14)
+                    } else {
+                        originalStatusBar
+                    }
                 }
+                .frame(width: CGFloat(Item.routeBar.w), height: CGFloat(Item.routeBar.h), alignment: .topLeading)
+                .novaPlace(space, cx(Item.routeBar, nw), cy(Item.routeBar, nh))
 
                 bottomButtons(space: space, nw: nw, nh: nh)
-
-                // Relation key, tucked into the star-map's lower-left corner so
-                // the dot colours are readable. Bottom-anchored inside a fixed
-                // box whose floor sits 4px above the canvas's bottom edge — the
-                // legend's height varies (gate rows appear only in systems with
-                // gates), and the old top-anchored placement let the tall
-                // variant spill out of the canvas onto the route bar.
-                relationLegend
-                    .frame(height: 116, alignment: .bottomLeading)
-                    .novaPlace(space, CGFloat(Item.canvas.left) + 4 - nw / 2,
-                               CGFloat(Item.canvas.top + Item.canvas.h) - 120 - nh / 2)
             }
             .frame(width: nw, height: nh, alignment: .topLeading)
             .cursorScaleEffect(scale)
@@ -868,46 +943,147 @@ struct GalaxyMapView: View {
         }
     }
 
-    /// The system-info panel (idx5): name, controlling government, and any
-    /// stellar objects' services — for the plotted destination if there is
-    /// one, else the current system. Respects the same fog-of-war the starmap
-    /// itself draws under: an unknown/merely-adjacent system shows no detail.
+    /// The system-info panel (idx5), laid out as the original's side column
+    /// (`NovaUi_RedrawStarmapWindow` 0x004a51f0, UI-18): a "Current / Selected /
+    /// Destination System:" header and name ("<Unknown>" until visited), then
+    /// Government, Legal Status (UI-14), Goods Traded and Services, every label
+    /// from STR# 2002. Goods and services read "<Unknown>" until the system is
+    /// visited or charted.
     @ViewBuilder
     private var sidePanel: some View {
         if let cur = nav.current, let game = nav.game {
-            let infoID = nav.destinationID ?? nav.currentSystemID
+            let infoID = nav.selectedSystemID ?? nav.destinationID ?? nav.currentSystemID
             if let sys = nav.system(infoID) {
+                let text = OriginalText(game: game)
                 let explored = pilot.state.exploredSystems
                 let charted = pilot.chartedSystems
                 let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
                 let vis = nav.visibility(of: infoID, explored: explored, adjacent: adjacent, charted: charted)
                 let known = vis == .explored || vis == .chartered
+                let header = infoID == cur.id ? text.misc(337)
+                    : (nav.jumpArmed && infoID == nav.destinationID) ? text.misc(339)
+                    : text.misc(338)
+                let usable = usableStellars(sys, game: game)
+                // Goods and services need discovery level 2 — landed here, or
+                // charted by a map; a system only flown through shows
+                // "<Unknown>" (UI-04). Saves from before the levels count every
+                // explored system as landed.
+                let detailed = (pilot.state.landedSystems ?? explored).contains(infoID) || charted.contains(infoID)
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        NovaText(known ? sys.displayName : "Unexplored", size: 13,
-                                 color: sys.id == cur.id ? amber : .white, width: 104, weight: .bold)
-                        if known {
-                            NovaText(game.govt(sys.government)?.displayName ?? "Independent", size: 11,
-                                     color: govtMapColor(sys.government, game: game), width: 104)
-                            Divider().overlay(.white.opacity(0.25))
-                            ForEach(sys.spobs, id: \.self) { spobID in
-                                if let spob = game.spob(spobID) {
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        NovaText(spob.displayName, size: 11, color: .white.opacity(0.9),
-                                                 width: 104, weight: .semibold)
-                                        NovaText(spobServices(spob), size: 11, color: Color(white: 0.6),
-                                                 width: 104)
-                                    }
-                                }
-                            }
+                    VStack(alignment: .leading, spacing: 3) {
+                        panelLabel(header)
+                        panelValue(known ? sys.displayName : text.misc(310),
+                                   color: sys.id == cur.id ? amber : .white, bold: true)
+                        if usable.isEmpty {
+                            panelLabel(text.misc(334)).padding(.top, 8)
                         } else {
-                            NovaText("No data on file.", size: 11, color: Color(white: 0.6), width: 104)
+                            panelLabel(text.misc(325)).padding(.top, 8)
+                            panelValue(game.govt(sys.government)?.displayName ?? text.misc(333),
+                                       color: govtMapColor(sys.government, game: game))
+                            panelLabel(text.misc(326)).padding(.top, 6)
+                            panelValue(LegalStatus.label(inSystem: sys.id, player: pilot.state, game: game))
+                            panelLabel(text.misc(327)).padding(.top, 6)
+                            ForEach(detailed ? goodsTraded(usable, game: game, text: text) : [text.misc(310)],
+                                    id: \.self) { panelValue($0) }
+                            panelLabel(text.misc(328)).padding(.top, 6)
+                            ForEach(detailed ? services(usable, text: text) : [text.misc(310)],
+                                    id: \.self) { panelValue($0) }
                         }
                     }
                     .padding(8)
                 }
             }
         }
+    }
+
+    /// A system's usable stellars: not gates, not uninhabited, not destroyed.
+    private func usableStellars(_ sys: SystRes, game: NovaGame) -> [SpobRes] {
+        sys.spobs.compactMap { game.spob($0) }.filter {
+            !$0.isGate && !$0.isUninhabited && !pilot.state.isStellarDestroyed($0.id)
+        }
+    }
+
+    private func goodsTraded(_ usable: [SpobRes], game: NovaGame, text: OriginalText) -> [String] {
+        let goods = Set(usable.flatMap { game.commodityMarket(at: $0).map(\.commodity) })
+        let names = Commodity.allCases.filter { goods.contains($0) }.map { game.commodityName($0) }
+        return names.isEmpty ? [text.misc(335)] : names
+    }
+
+    private func services(_ usable: [SpobRes], text: OriginalText) -> [String] {
+        var names: [String] = []
+        if usable.contains(where: { $0.hasCommodityExchange }) { names.append(text.misc(329)) }
+        if usable.contains(where: { $0.hasOutfitter }) { names.append(text.misc(330)) }
+        if usable.contains(where: { $0.hasShipyard }) { names.append(text.misc(331)) }
+        return names.isEmpty ? [text.misc(332)] : names
+    }
+
+    private func panelLabel(_ s: String) -> some View {
+        NovaText(s, size: 10, color: Color(white: 0.6), width: 104)
+    }
+
+    private func panelValue(_ s: String, color: Color = .white, bold: Bool = false) -> some View {
+        NovaText(s, size: 11, color: color, width: 98, weight: bold ? .bold : .regular)
+            .padding(.leading, 5)
+    }
+
+    /// The original's status bar (0x004a51f0): "Ports:" with the selected
+    /// system's usable stellars, "Navigation Hazards:" composed from its
+    /// asteroids, interference, murk and gravity, and the date at the right.
+    /// "<Unknown>" until the system is visited or charted.
+    @ViewBuilder
+    private var originalStatusBar: some View {
+        if let game = nav.game {
+            let text = OriginalText(game: game)
+            let infoID = nav.selectedSystemID ?? nav.destinationID ?? nav.currentSystemID
+            let known = pilot.state.exploredSystems.contains(infoID) || pilot.chartedSystems.contains(infoID)
+            let sys = nav.system(infoID)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        NovaText(text.misc(309), size: 10, color: Color(white: 0.6))
+                        NovaText(known ? ports(sys, game: game, text: text) : text.misc(310), size: 10)
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        NovaText(text.misc(311), size: 10, color: Color(white: 0.6))
+                        NovaText(known ? hazards(sys, game: game, text: text) : text.misc(310), size: 10)
+                    }
+                }
+                Spacer()
+                NovaText(text.date(for: pilot.state), size: 10)
+            }
+            .padding(.horizontal, 10).padding(.top, 6)
+        }
+    }
+
+    private func ports(_ sys: SystRes?, game: NovaGame, text: OriginalText) -> String {
+        let names = (sys?.spobs ?? []).compactMap { game.spob($0) }
+            .filter { !$0.isUninhabited && !pilot.state.isStellarDestroyed($0.id) }
+            .map(\.displayName)
+        return names.isEmpty ? text.misc(335) : names.joined(separator: ", ")
+    }
+
+    /// Hazard wording: asteroids < 4 sparse / < 7 moderate / dense, interference
+    /// < 34 light / < 67 moderate / heavy, murk < 31 reduced / < 61 severely
+    /// reduced / greatly reduced, and "gravity shear" when a stellar pulls.
+    private func hazards(_ sys: SystRes?, game: NovaGame, text: OriginalText) -> String {
+        guard let sys else { return text.misc(336) }
+        var parts: [String] = []
+        if sys.asteroidCount > 0 {
+            let level = sys.asteroidCount < 4 ? 313 : sys.asteroidCount < 7 ? 314 : 315
+            parts.append("\(text.misc(level)) \(text.misc(316))")
+        }
+        if sys.interference > 0 {
+            let level = sys.interference < 34 ? 317 : sys.interference < 67 ? 318 : 319
+            parts.append("\(text.misc(level)) \(text.misc(320))")
+        }
+        if sys.murk > 0 {
+            let level = sys.murk < 31 ? 321 : sys.murk < 61 ? 322 : 323
+            parts.append("\(text.misc(level)) \(text.misc(324))")
+        }
+        if sys.spobs.compactMap({ game.spob($0) }).contains(where: { $0.gravity != 0 }) {
+            parts.append(text.misc(312))
+        }
+        return parts.isEmpty ? text.misc(336) : parts.joined(separator: ", ")
     }
 
     /// Service tags for a stellar object, from the already-decoded `spöb`
@@ -983,11 +1159,22 @@ struct GalaxyMapView: View {
             NovaButton(graphics: graphics, title: buttonLabel(49, fallback: "Clear Route"),
                        width: CGFloat(Item.clear.w - 26)) { nav.clearCourse() }
                 .novaPlace(space, cx(Item.clear, nw), cy(Item.clear, nh))
-            NovaButton(graphics: graphics, title: "Nearest System",
-                       width: CGFloat(Item.nearest.w - 26), action: findNearestSystem)
-                .novaPlace(space, cx(Item.nearest, nw), cy(Item.nearest, nh))
-            NovaButton(graphics: graphics, title: "Named System",
-                       width: CGFloat(Item.named.w - 26)) { showingFinder = true }
+            // The original row is Show/Hide Borders, Find, Clear Route, −, +,
+            // Done (UI-18). "Nearest System" exists only with the
+            // `autoRoutePlotting` enhancement, which takes Find's place.
+            if nav.autoRoutePlotting {
+                NovaButton(graphics: graphics, title: "Nearest System",
+                           width: CGFloat(Item.nearest.w - 26), action: findNearestSystem)
+                    .novaPlace(space, cx(Item.nearest, nw), cy(Item.nearest, nh))
+            } else {
+                NovaButton(graphics: graphics, title: buttonLabel(60, fallback: "Find"),
+                           width: CGFloat(Item.nearest.w - 26)) { showingFinder = true }
+                    .novaPlace(space, cx(Item.nearest, nw), cy(Item.nearest, nh))
+            }
+            NovaButton(graphics: graphics,
+                       title: showBorders ? buttonLabel(57, fallback: "Hide Borders")
+                                          : buttonLabel(56, fallback: "Show Borders"),
+                       width: CGFloat(Item.named.w - 26)) { showBorders.toggle() }
                 .novaPlace(space, cx(Item.named, nw), cy(Item.named, nh))
             // idx3/idx4 (25×25) — the authentic button art at its minimum
             // 26×25 geometry with −/+ glyphs, not a translucent system chip.
@@ -1065,7 +1252,10 @@ struct GalaxyMapView: View {
                     TimelineView(.periodic(from: .now, by: 0.5)) { _ in routeBar }
                     HStack(spacing: 12) {
                         overlayButton("Named System") { showingFinder = true }
-                        overlayButton("Nearest System", action: findNearestSystem)
+                        if nav.autoRoutePlotting {
+                            overlayButton("Nearest System", action: findNearestSystem)
+                        }
+                        overlayButton(showBorders ? "Hide Borders" : "Show Borders") { showBorders.toggle() }
                         overlayButton("Clear Route") { nav.clearCourse() }
                         Spacer()
                     }

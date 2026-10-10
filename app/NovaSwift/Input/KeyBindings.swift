@@ -2,33 +2,67 @@ import SwiftUI
 
 /// A rebindable key map (action → key token). Tokens are stable strings like
 /// "left", "space", "j" so they persist and display cleanly. Defaults follow
-/// EV Nova's scheme; everything is user-rebindable in Settings → Controls.
+/// the original's table (`NovaPrefs_ResetKeyBindings` 0x004b4400, UI-15);
+/// everything is user-rebindable in Settings → Controls.
 struct KeyBindings: Codable, Equatable {
     private(set) var map: [GameAction: String]
 
     init(map: [GameAction: String] = KeyBindings.defaults) { self.map = map }
 
-    // Real EV Nova default: Spacebar fires primary; secondaries are picked
-    // with W (Alt-W to go backwards, `KeyToken`'s "opt+w") and fired with the
-    // Control key. Bare Control can still be rebound to in Settings ->
-    // Controls (via `ModifierKeyControls`/`ModifierFlagsBridge`), but it's
-    // deliberately NOT the shipped default: every arrow direction chorded
-    // with Control is a reserved macOS "symbolic hotkey" by default (Mission
-    // Control / move-a-space / app windows), which the WindowServer resolves
-    // before the event ever reaches this app — no in-app key handling can
-    // intercept it. Shipping Control as the default made flying-while-firing
-    // (turn + fire secondary, i.e. Control + an arrow) intermittently punt
-    // the player out to Mission Control or another Space. Return has no such
-    // conflict and is fully reachable through ordinary `onKeyPress`, so both
-    // platforms default to it.
-    private static let fireSecondaryDefault = "return"
+    /// The original's defaults: arrows fly, Space fires the primary, Control
+    /// the secondary (W / Alt-W select it, S clears it), Z the afterburner;
+    /// ` cycles targets (Shift back, Alt for escorts), R takes the nearest
+    /// hostile (Alt the nearest ship), N clears the travel selection (Alt the
+    /// ship target), 1–4 pick nav destinations; Y hails (Alt-Y the planet),
+    /// L lands, M is the map, H arms the route, J jumps, B boards; Return
+    /// dismisses a message, P opens Player Info, I mission info, E escorts and
+    /// F / D / V order them.
+    ///
+    /// Known clash: every Control-arrow chord is a reserved macOS shortcut
+    /// (Mission Control / move a Space), which the WindowServer takes before
+    /// the app sees it, so turning while firing a secondary can switch Spaces.
+    /// The `modernKeyBindings` enhancement's table moves the secondary to
+    /// Return. iOS and tvOS cannot see a bare Control press at all, so there
+    /// the secondary defaults to Return too (and dismissing a message is
+    /// unbound). The Alt squad-cycle modifier and the meaning of several slots
+    /// are open question Q-UI-04.
+    static let defaults: [GameAction: String] = {
+        var m: [GameAction: String] = [
+            .accelerate: "up", .decelerate: "down", .turnLeft: "left", .turnRight: "right",
+            .afterburner: "z",
+            .firePrimary: "space", .fireSecondary: "control",
+            .selectSecondaryNext: "w", .selectSecondaryPrev: "opt+w", .clearSecondary: "s",
+            .toggleCloak: "c", .recallFighters: "g",
+            .eject: "opt+x", .selfDestruct: "opt+-",
+            .targetNext: "`", .targetPrevious: "~", .targetEscortNext: "opt+`",
+            .nearestHostile: "r", .targetNearest: "opt+r",
+            .clearTarget: "n", .clearShipTarget: "opt+n",
+            .selectNav1: "1", .selectNav2: "2", .selectNav3: "3", .selectNav4: "4",
+            .hailTarget: "y", .hailStellar: "opt+y", .land: "l", .galaxyMap: "m",
+            .hyperspaceArm: "h", .hyperjump: "j", .board: "b", .autopilot: "a",
+            .dismissMessage: "return", .playerInfo: "p", .missionInfo: "i",
+            .openEscorts: "e",
+            .commandEscortAggressive: "f", .commandEscortDefensive: "d", .commandEscortHold: "v",
+            .commandEscortEvasive: "", .shipInfo: "", .pauseGame: "",
+            .openMenu: "escape",
+        ]
+        #if !os(macOS)
+        m[.fireSecondary] = "return"
+        m[.dismissMessage] = ""
+        #endif
+        return m
+    }()
 
-    static let defaults: [GameAction: String] = [
+    /// The port's earlier layout, the `modernKeyBindings` enhancement: Return
+    /// fires secondaries (no Control-arrow clash on macOS), Shift is the
+    /// afterburner, P pauses, I opens ship info, X orders escorts evasive, Tab
+    /// cycles targets, R/T take the nearest ship/hostile and U clears.
+    static let modernDefaults: [GameAction: String] = [
         .accelerate: "up", .decelerate: "down", .turnLeft: "left", .turnRight: "right",
         .afterburner: "shift",
-        .firePrimary: "space", .fireSecondary: fireSecondaryDefault,
+        .firePrimary: "space", .fireSecondary: "return",
         .selectSecondaryPrev: "opt+w", .selectSecondaryNext: "w", .toggleCloak: "c",
-        .recallFighters: "g",
+        .recallFighters: "g", .eject: "opt+x",
         // Matches the real game's default control scheme: Tab cycles targets
         // ("Target Select"), R snaps to the closest ("Closest Targ"), Y hails.
         .targetNearest: "r", .targetNext: "tab", .nearestHostile: "t", .clearTarget: "u",
@@ -45,6 +79,12 @@ struct KeyBindings: Codable, Equatable {
         // is menu-driven and holds no binding, so there's no conflict.
         .shipInfo: "i",
         .pauseGame: "p", .openMenu: "escape",
+        // Commands the modern layout gained with the original's table, on keys
+        // it leaves free.
+        .targetPrevious: "", .targetEscortNext: "", .clearShipTarget: "",
+        .selectNav1: "1", .selectNav2: "2", .selectNav3: "3", .selectNav4: "4",
+        .hyperspaceArm: "h", .dismissMessage: "", .playerInfo: "", .missionInfo: "",
+        .clearSecondary: "s", .hailStellar: "opt+y", .selfDestruct: "opt+-",
     ]
 
     func token(for action: GameAction) -> String { map[action] ?? "" }
@@ -63,19 +103,47 @@ struct KeyBindings: Codable, Equatable {
         map[action] = token
     }
 
-    mutating func resetToDefaults() { map = KeyBindings.defaults }
+    /// Reset to the original table, or with the `modernKeyBindings`
+    /// enhancement to the port's layout.
+    mutating func resetToDefaults(modern: Bool = false) {
+        map = modern ? KeyBindings.modernDefaults : KeyBindings.defaults
+    }
 
     // MARK: Persistence
 
     static let storageKey = "com.novaswift.keybindings.v1"
 
+    /// The stored bindings. A fresh install gets the original table. An
+    /// install from before the original table shipped keeps the layout it was
+    /// playing with: one that never saved bindings (but has saved settings)
+    /// is pinned to the port's old defaults. Actions added since a map was
+    /// saved take their default key only when nothing else already holds it.
     static func load() -> KeyBindings {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
-            return KeyBindings()
+        let defaults = UserDefaults.standard
+        let stored = defaults.data(forKey: storageKey)
+            .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+        guard let stored else {
+            guard defaults.data(forKey: GameSettings.storageKey) != nil else {
+                // A fresh install: save the original table now, so a later
+                // launch doesn't mistake it for a pre-existing one.
+                let fresh = KeyBindings()
+                fresh.save()
+                return fresh
+            }
+            let pinned = KeyBindings(map: modernDefaults)
+            pinned.save()
+            return pinned
         }
-        var m = KeyBindings.defaults
-        for (k, v) in decoded { if let a = GameAction(rawValue: k) { m[a] = v } }
+        var m: [GameAction: String] = [:]
+        for (k, v) in stored { if let a = GameAction(rawValue: k) { m[a] = v } }
+        // Older maps predate the original table, so fill gaps from the layout
+        // they were saved under.
+        let base = stored["playerInfo"] == nil ? modernDefaults : KeyBindings.defaults
+        let used = Set(m.values.filter { !$0.isEmpty })
+        for action in GameAction.allCases where m[action] == nil {
+            let token = base[action] ?? ""
+            m[action] = used.contains(token) ? "" : token
+        }
         return KeyBindings(map: m)
     }
 

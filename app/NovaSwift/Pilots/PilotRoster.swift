@@ -123,8 +123,9 @@ final class PilotRoster: ObservableObject {
     /// Create a brand-new pilot from a starting scenario and save it to the store.
     /// Returns the new save (its `player` is what the live pilot should adopt).
     @discardableResult
-    func create(name: String, isMale: Bool, scenario: CharRes, game: NovaGame) -> PilotSave {
-        let player = PilotFactory.make(name: name, isMale: isMale, scenario: scenario, game: game)
+    func create(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes, game: NovaGame) -> PilotSave {
+        var player = PilotFactory.make(name: name, isMale: isMale, scenario: scenario, game: game)
+        player.strictPlay = strictPlay
         var save = PilotSave(displayName: name.isEmpty ? "Captain" : name,
                              scenarioName: scenario.displayName,
                              player: player, game: game,
@@ -204,6 +205,32 @@ final class PilotRoster: ObservableObject {
         }
         refresh()
     }
+    /// Strict Play death without a pod (FL-03): the pilot is gone for good — its
+    /// `.evpilot`, every backup, and the copy in the other store (iCloud or
+    /// local), since switching stores copies pilots rather than moving them.
+    /// Only this save slot is deleted; other slots of the same pilot are
+    /// separate saves. Resolving the iCloud container can block, so that half
+    /// runs off the main thread.
+    func deleteAfterStrictPlayDeath(_ id: UUID) {
+        // The original keeps one file per pilot, so every save slot of this
+        // pilot goes, not just the one being played.
+        let group = pilots.first { $0.id == id }?.pilotGroupID
+        let ids = group.map { g in pilots.filter { $0.pilotGroupID == g }.map(\.id) } ?? [id]
+        for slot in ids { PilotArchive.deleteEverywhere(id: slot, archives: [archive]) }
+        refresh()
+        let currentIsCloud = archive.location.isCloud
+        Task.detached(priority: .utility) {
+            var others: [PilotArchive] = []
+            if currentIsCloud {
+                others.append(PilotArchive(location: .local(PilotArchive.defaultLocalRoot())))
+            } else if let cloud = PilotArchive.iCloudRoot() {
+                others.append(PilotArchive(location: .iCloud(cloud)))
+            }
+            for slot in ids { PilotArchive.deleteEverywhere(id: slot, archives: others) }
+            await MainActor.run { self.refresh() }
+        }
+    }
+
     func duplicate(_ id: UUID) {
         do {
             let dup = try archive.duplicate(id: id)

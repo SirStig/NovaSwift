@@ -24,30 +24,46 @@ final class CombatTests: XCTestCase {
     }
 
     func testShieldsAbsorbFullyThenHullTakesDamage() {
+        // WP-12 (`Ship_ApplyDamageToShip` 0x004192d0): energy comes off the
+        // shields; once they're at or below zero — this hit included — mass
+        // comes off the armor, and the shields bottom out at −10 % of max.
         let s = makeShip("x", govt: 1, at: Vec2())
-        // First hit: shields absorb it (still up afterward), so armor is spared.
         XCTAssertFalse(s.applyDamage(shield: 60, armor: 40))
         XCTAssertEqual(s.shield, 40, accuracy: 1e-9)
         XCTAssertEqual(s.armor, 100, accuracy: 1e-9)
-        // Second hit empties the shields — and because they're down *after* the
-        // shot, that same shot's armor damage lands (no infinite grace shot; this
-        // is what keeps a ship from being immortal once its shields are pinned).
+        // The hit that breaks the shields lands its mass damage too.
         XCTAssertFalse(s.applyDamage(shield: 60, armor: 30))
-        XCTAssertEqual(s.shield, 0, accuracy: 1e-9)
+        XCTAssertEqual(s.shield, -10, accuracy: 1e-9, "a broken shield floors at −10 % of max")
         XCTAssertEqual(s.armor, 70, accuracy: 1e-9)
-        // With shields already at zero, further hits keep chewing the hull.
         XCTAssertFalse(s.applyDamage(shield: 60, armor: 30))
-        XCTAssertEqual(s.shield, 0, accuracy: 1e-9)
+        XCTAssertEqual(s.shield, -10, accuracy: 1e-9)
         XCTAssertEqual(s.armor, 40, accuracy: 1e-9)
+        // A mass-only hit reaches the armor until the shields regenerate past 0.
+        s.shield = -5
+        s.applyDamage(shield: 0, armor: 10)
+        XCTAssertEqual(s.armor, 30, accuracy: 1e-9)
+        s.shield = 1
+        s.applyDamage(shield: 0, armor: 10)
+        XCTAssertEqual(s.armor, 30, accuracy: 1e-9, "positive shields absorb a mass-only hit")
     }
 
-    /// `wëap` Flags 0x0020 — a shield-penetrating weapon damages the hull even
-    /// while shields are still up (its energy still chips the shields too).
+    /// `wëap` Flags 0x0020 — a shield-penetrating weapon applies only its mass
+    /// damage, straight to the armor; the shields are untouched (WP-12).
     func testShieldPenetratingWeaponReachesHullThroughShields() {
         let s = makeShip("x", govt: 1, at: Vec2())
         XCTAssertFalse(s.applyDamage(shield: 20, armor: 30, piercing: true))
-        XCTAssertEqual(s.shield, 80, accuracy: 1e-9)   // energy still hits shields
-        XCTAssertEqual(s.armor, 70, accuracy: 1e-9)    // mass reaches the hull anyway
+        XCTAssertEqual(s.shield, 100, accuracy: 1e-9)  // no shield damage at all
+        XCTAssertEqual(s.armor, 70, accuracy: 1e-9)
+    }
+
+    /// A non-lethal hit (`wëap` Flags2 0x1000) that would take armor to zero
+    /// leaves exactly 1 (OQ B6).
+    func testNonLethalHitLeavesOneArmor() {
+        let s = makeShip("x", govt: 1, at: Vec2())
+        s.shield = 0
+        s.applyDamage(shield: 0, armor: 500, nonLethal: true)
+        XCTAssertEqual(s.armor, 1, accuracy: 1e-9)
+        XCTAssertTrue(s.isAlive)
     }
 
     func testProjectileTravelsHitsAndKills() {
@@ -77,48 +93,24 @@ final class CombatTests: XCTestCase {
 
     // MARK: player death (SESSION_AUDIT_FOLLOWUPS.md §C — escape-pod survival)
 
-    func testPlayerDeathReportsHadEscapePodFlag() {
-        let player = makeShip("Player", govt: 0, at: Vec2())
-        player.hasEscapePod = true
-        player.armor = 0; player.shield = 0
-        let world = World(player: player)
-
-        world.step(1.0 / 30.0)
-        let reported = world.events.contains {
-            if case let .playerDestroyed(hadEscapePod) = $0 { return hadEscapePod }
-            return false
-        }
-        XCTAssertTrue(reported, "a dead player with an escape pod should report hadEscapePod=true")
-    }
-
-    func testPlayerDeathWithoutEscapePodReportsFalse() {
+    func testPlayerDeathRunsItsSequenceThenReportsTheLossOnce() {
+        // OS-02: `.playerDying` at once; `.playerDestroyed` once the
+        // death sequence runs out with no eject — exactly once.
         let player = makeShip("Player", govt: 0, at: Vec2())
         player.armor = 0; player.shield = 0
         let world = World(player: player)
 
         world.step(1.0 / 30.0)
-        let reported = world.events.contains {
-            if case let .playerDestroyed(hadEscapePod) = $0 { return !hadEscapePod }
-            return false
+        let first = world.drainEvents()
+        XCTAssertTrue(first.contains { if case .playerDying = $0 { return true } else { return false } })
+        var losses = 0
+        for _ in 0..<120 {
+            world.step(1.0 / 30.0)
+            losses += world.drainEvents().filter {
+                if case .playerDestroyed = $0 { return true } else { return false }
+            }.count
         }
-        XCTAssertTrue(reported, "a dead player with no escape pod should report hadEscapePod=false")
-    }
-
-    func testPlayerDeathReportsOnlyOnce() {
-        let player = makeShip("Player", govt: 0, at: Vec2())
-        player.armor = 0; player.shield = 0
-        let world = World(player: player)
-
-        world.step(1.0 / 30.0)
-        let firstStepEvents = world.drainEvents()
-        world.step(1.0 / 30.0)   // armor is still 0 — must not re-report
-        let secondStepEvents = world.drainEvents()
-
-        func deathCount(_ events: [WorldEvent]) -> Int {
-            events.filter { if case .playerDestroyed = $0 { return true } else { return false } }.count
-        }
-        XCTAssertEqual(deathCount(firstStepEvents), 1)
-        XCTAssertEqual(deathCount(secondStepEvents), 0, "must not re-report on a later step while armor stays at 0")
+        XCTAssertEqual(losses, 1)
     }
 
     func testLivingPlayerNeverReportsDestroyed() {
@@ -157,32 +149,63 @@ final class CombatTests: XCTestCase {
         XCTAssertLessThanOrEqual(player.armor, 0, "the player is dead with no armor left")
     }
 
-    func testHitCrossingArmorThresholdDisablesNotDestroys() {
-        // EV Nova disables a ship the instant its armor crosses a fixed
-        // percentage of max armor (33% by default) — deterministically, not by
-        // a random roll — and only *then* can a further hit actually kill it.
-        let attacker = makeShip("A", govt: 1, at: Vec2())
-        let world = World(player: attacker)
+    func testDisableIsDerivedFromArmorNotLatched() {
+        // WP-02 (`Ship_IsShipDisabled` 0x004687b0): `armor × 100 < max × 33.333`
+        // (10.0 with hull Flags 0x0010), evaluated every time it's asked.
+        let world = World(player: makeShip("A", govt: 1, at: Vec2()))
         let target = makeShip("B", govt: 2, at: Vec2(0, 300))
         _ = world.addNPC(target)
-        target.armor = 40; target.maxArmor = 100; target.shield = 0   // 40% — above the 33% floor
-        XCTAssertEqual(target.disableArmorFraction, 0.33, accuracy: 1e-9)
+        XCTAssertEqual(target.disableArmorFraction, 0.33333, accuracy: 1e-9)
+        target.shield = 0
+        target.armor = 33.334
+        XCTAssertFalse(target.disabled)
+        target.armor = 33.332
+        XCTAssertTrue(target.disabled)
+        target.armor = 34
+        XCTAssertFalse(target.disabled, "repairing above the line brings it back")
 
-        attacker.angle = 0                                             // facing north, toward target
-        attacker.weapons = [WeaponMount(spec: gun(armor: 15, beam: true))]  // 40% -> 25%: crosses 33%
-        attacker.currentTargetID = target.entityID
-        world.intent.firePrimary = true
-        world.step(1.0 / 30.0)
-
-        XCTAssertTrue(target.disabled, "crossing the armor threshold disables the ship")
+        // A hit taking it from 40 % to 25 % disables it; the hulk keeps its
+        // real armor, and 25 more points of damage destroy it.
+        target.armor = 40
+        world.applyHit(to: target, shield: 0, armor: 15, ownerID: 0)
+        XCTAssertTrue(target.disabled)
         XCTAssertTrue(target.isAlive, "a disabled ship is a hulk, not a kill")
-        XCTAssertTrue(world.npcs.contains { $0 === target }, "the hulk stays in the world")
+        XCTAssertEqual(target.armor, 25, accuracy: 1e-9, "no 2 % sliver")
+        world.applyHit(to: target, shield: 0, armor: 24, ownerID: 0)
+        XCTAssertTrue(target.isAlive)
+        world.applyHit(to: target, shield: 0, armor: 2, ownerID: 0)
+        XCTAssertFalse(target.isAlive)
 
-        // A further hit on the already-disabled hulk is a real kill.
-        target.armor = 5
-        attacker.weapons[0].cooldown = 0
-        world.step(1.0 / 30.0)
-        XCTAssertFalse(target.isAlive, "damage after disable actually destroys the hulk")
+        // One hit can go straight from healthy to destroyed.
+        let other = makeShip("C", govt: 2, at: Vec2(0, 500))
+        _ = world.addNPC(other)
+        other.shield = 0; other.armor = 50
+        world.applyHit(to: other, shield: 0, armor: 60, ownerID: 0)
+        XCTAssertFalse(other.isAlive, "50 % → −10 % is a kill, not a disable")
+    }
+
+    func testPlayerCanBeDisabled() {
+        // WP-03: no player exemption in 0x004687b0. A disabled player gets a
+        // 300-tick post-disable window, whole-number armor, and loses its
+        // thrust and fire (only face-target turning remains).
+        let player = makeShip("A", govt: 1, at: Vec2())
+        let world = World(player: player)
+        player.shield = 0; player.armor = 40.7
+        world.applyHit(to: player, shield: 0, armor: 10, ownerID: -1)
+        XCTAssertTrue(player.disabled)
+        XCTAssertEqual(player.armor, 30, accuracy: 1e-9, "armor truncated on the transition")
+        XCTAssertEqual(player.recentlyHitTicks, 300)
+        XCTAssertTrue(world.events.contains { if case .shipDisabled(0, _) = $0 { return true } else { return false } })
+
+        player.weapons = [WeaponMount(spec: gun())]
+        world.intent.thrust = true
+        world.intent.firePrimary = true
+        world.intent.turnLeft = true
+        for _ in 0..<15 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(player.velocity.length, 0, accuracy: 1e-9, "no thrust while disabled")
+        XCTAssertEqual(player.angle, 0, accuracy: 1e-9, "no turn keys while disabled")
+        XCTAssertTrue(world.projectiles.isEmpty, "no fire while disabled")
+        XCTAssertEqual(player.armor, 30, accuracy: 1e-9, "no regeneration while disabled")
     }
 
     func testPointDefenseShootsDownIncomingGuidedProjectile() {
@@ -194,12 +217,13 @@ final class CombatTests: XCTestCase {
                                  blastRadius: 0, ammoPerShot: 0)
         let pd = WeaponSpec(id: 141, name: "Point Defense", shieldDamage: 5, armorDamage: 5,
                             reloadSeconds: 0.1, projectileSpeed: 0, range: 800,
-                            accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
-                            blastRadius: 0, ammoPerShot: 0, isPointDefense: true)
+                            accuracyRadians: 0, isBeam: true, isGuided: false, turnRate: 0,
+                            blastRadius: 0, ammoPerShot: 0, isPointDefense: true,
+                            guidance: .pointDefenseBeam)
 
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
-        let defender = makeShip("B", govt: 2, at: Vec2(0, 400))    // within the PD mount's 800px range
+        let defender = makeShip("B", govt: 2, at: Vec2(0, 400))    // within the PD beam's 800px
         let did = world.addNPC(defender)
         defender.weapons = [WeaponMount(spec: pd)]
         attacker.weapons = [WeaponMount(spec: missile)]
@@ -237,16 +261,25 @@ final class CombatTests: XCTestCase {
     }
 
     func testNoFriendlyFire() {
-        let attacker = makeShip("A", govt: 5, at: Vec2())
-        attacker.government = 5
-        let world = World(player: attacker)
-        let ally = makeShip("B", govt: 5, at: Vec2(0, 200))         // same government
-        ally.government = 5   // makeShip ignores its govt arg; set it so this is genuinely same-govt
+        // An NPC's shots pass through its own government's ships.
+        let world = World(player: makeShip("P", govt: 1, at: Vec2(5000, 5000)))
+        let attacker = makeShip("A", govt: 133, at: Vec2())
+        attacker.government = 133
+        attacker.brain = AIBrain(aiType: .warship, govt: 133)
+        world.addNPC(attacker)
+        let ally = makeShip("B", govt: 133, at: Vec2(0, 200))         // same government
+        ally.government = 133   // makeShip ignores its govt arg; set it so this is genuinely same-govt
         let tid = world.addNPC(ally)
         attacker.weapons = [WeaponMount(spec: gun())]
-        attacker.currentTargetID = tid
-        world.intent.firePrimary = true
-        for _ in 0..<60 { world.step(1.0 / 30.0) }
+        var fired = 0
+        for _ in 0..<60 {
+            attacker.currentTargetID = tid
+            attacker.weapons[0].cooldown = 0
+            world.testFire(attacker, primary: true)
+            fired += world.projectiles.count
+            world.step(1.0 / 30.0)
+        }
+        XCTAssertGreaterThan(fired, 0)
         XCTAssertEqual(ally.shield, 100, accuracy: 1e-6, "same-government ships don't damage each other")
         XCTAssertEqual(ally.armor, 100, accuracy: 1e-6)
     }
@@ -428,31 +461,47 @@ final class CombatTests: XCTestCase {
         let target = makeShip("B", govt: 2, at: Vec2(0, 250))
         _ = world.addNPC(target)
         target.ionizeMax = 100
-
-        let ionBeam = WeaponSpec(id: 150, name: "Ion Cannon", shieldDamage: 0, armorDamage: 0,
-                                reloadSeconds: 1, projectileSpeed: 0, range: 600,
-                                accuracyRadians: 0, isBeam: true, isGuided: false, turnRate: 0,
-                                blastRadius: 0, ammoPerShot: 0, ionization: 40)
-        attacker.weapons = [WeaponMount(spec: ionBeam)]
-        attacker.currentTargetID = target.entityID
-        attacker.angle = 0
-        world.intent.firePrimary = true
-        world.step(1.0 / 30.0)
-
+        world.applyHit(to: target, shield: 0, armor: 0, ownerID: 0, ionization: 40)
         XCTAssertEqual(target.ionCharge, 40, accuracy: 1e-9)
         XCTAssertFalse(target.isIonized, "below IonizeMax — not yet fully ionized")
+        for _ in 0..<3 { world.applyHit(to: target, shield: 0, armor: 0, ownerID: 0, ionization: 40) }
+        XCTAssertEqual(target.ionCharge, 160, accuracy: 1e-9, "charge accumulates uncapped (WP-11)")
     }
 
-    func testIonizedShipCannotThrustOrTurn() {
+    func testIonizationWeakensThrustAndCoastingTurn() {
+        // WP-11: I = min(0.7, charge / capacity). Thrust × (1 − I); the turn
+        // × (1 − I) only while not thrusting.
         let s = makeShip("x", govt: 1, at: Vec2())
         s.ionizeMax = 100
-        s.ionCharge = 100   // fully ionized
+        s.ionCharge = 50
         var intent = ControlIntent()
         intent.thrust = true
         intent.turnLeft = true
-        s.step(1.0, intent: intent, tuning: .default)
-        XCTAssertEqual(s.velocity.length, 0, "a fully-ionized ship can't thrust")
-        XCTAssertEqual(s.angle, 0, "a fully-ionized ship can't turn")
+        s.step(1.0 / 30.0, intent: intent, tuning: .default)
+        XCTAssertEqual(s.velocity.length, 200 * 0.5 / 30, accuracy: 1e-9, "50 % charge halves thrust")
+        XCTAssertEqual(s.angle, -.pi / 30, accuracy: 1e-9, "turning under thrust is unaffected")
+
+        let c = makeShip("y", govt: 1, at: Vec2())
+        c.ionizeMax = 100
+        c.ionCharge = 250   // past capacity: intensity stays capped at 0.7
+        XCTAssertEqual(c.ionIntensity, 0.7, accuracy: 1e-12)
+        var coast = ControlIntent()
+        coast.turnLeft = true
+        c.step(1.0 / 30.0, intent: coast, tuning: .default)
+        // The player's turn then truncates: 6°/tick × 0.3 = 1.8 → 1°.
+        XCTAssertEqual(c.angle, -.pi / 180, accuracy: 1e-9, "a coasting turn × 0.3 at ≥ 70 %")
+    }
+
+    func testIonizationDragsSpeedTowardTheReducedCap() {
+        // The charge drags each axis toward (1 − I) × top speed by 0.025
+        // px/tick every tick.
+        let s = makeShip("x", govt: 1, at: Vec2())
+        s.ionizeMax = 100
+        s.ionCharge = 50
+        s.deionizePerSec = 0
+        s.velocity = Vec2(300, 0)              // top speed 300 → cap 150
+        s.deionize(1.0 / 30.0)
+        XCTAssertEqual(s.velocity.x, 300 - 0.75, accuracy: 1e-9)
     }
 
     func testIonizationDissipatesOverTime() {
@@ -484,30 +533,27 @@ final class CombatTests: XCTestCase {
         XCTAssertNil(hulk.ionizeColor, "the glow clears once the charge is gone")
     }
 
-    /// A hull whose data `Deionize` is 0 — the majority of stock hulls — must still
-    /// shed ion charge, or the ionization glow sticks on at full strength forever
-    /// (the reported "the colour never fades" bug). `flooredDeionize` guarantees a
-    /// baseline so a full charge fades over ~`ionizationBaselineFadeSeconds`.
-    func testIonizationFadesEvenWhenHullDeionizeIsZero() {
-        let rate = Ship.flooredDeionize(rate: 0, ionizeMax: 100)
-        XCTAssertGreaterThan(rate, 0, "a 0-Deionize but ionizable hull still gets a baseline rate")
-        XCTAssertEqual(rate, 100 / Ship.ionizationBaselineFadeSeconds, accuracy: 1e-9)
+    /// The loader reads a hull's `Deionize` as charge per 1/30 s tick × 0.01,
+    /// and a 0 (most stock hulls) as a full 1.0 per tick — so a 0-Deionize hull
+    /// sheds 30 points a second rather than never fading.
+    func testDeionizeUsesTheLoaderRate() {
+        func hull(deionize: Int) -> ShipRes {
+            var b = [UInt8](repeating: 0, count: 1860)
+            b[874] = UInt8((deionize >> 8) & 0xFF); b[875] = UInt8(deionize & 0xFF)
+            return ShipRes(Resource(type: NovaType.ship, id: 128, data: Data(b)))
+        }
+        XCTAssertEqual(hull(deionize: 0).deionizePerTick, 1.0)
+        XCTAssertEqual(hull(deionize: -5).deionizePerTick, 1.0)
+        XCTAssertEqual(hull(deionize: 50).deionizePerTick, 0.5, accuracy: 1e-12)
 
         let s = makeShip("x", govt: 1, at: Vec2())
         s.ionizeMax = 100
         s.ionCharge = 100
-        s.deionizePerSec = rate
+        s.deionizePerSec = hull(deionize: 0).deionizePerTick * 30
         s.ionizeColor = (1, 0, 0)
-        s.deionize(Ship.ionizationBaselineFadeSeconds)
-        XCTAssertEqual(s.ionCharge, 0, accuracy: 1e-9, "a full charge fully fades within the baseline window")
+        s.deionize(100.0 / 30.0)
+        XCTAssertEqual(s.ionCharge, 0, accuracy: 1e-9, "a full 100-point charge fades in 100 ticks")
         XCTAssertNil(s.ionizeColor, "and the glow clears with it")
-    }
-
-    /// The floor only ever raises a too-slow (or zero) rate — a hull whose own
-    /// Deionize is already faster keeps it, and a non-ionizable hull gets no floor.
-    func testFlooredDeionizeKeepsAFasterHullRateAndSkipsNonIonizableHulls() {
-        XCTAssertEqual(Ship.flooredDeionize(rate: 50, ionizeMax: 100), 50, accuracy: 1e-9)
-        XCTAssertEqual(Ship.flooredDeionize(rate: 0, ionizeMax: 0), 0, accuracy: 1e-9)
     }
 
     /// A hulk has no attitude control: it coasts on the momentum it had, on the
@@ -568,39 +614,42 @@ final class CombatTests: XCTestCase {
                           blastRadius: 0, ammoPerShot: 0, turnsAwayIfJammed: true, flags: flags)
     }
 
-    func testTurnsAwayIfJammedEventuallyLosesLockAgainstAHighJamGovt() {
-        // The seeker must actually be vulnerable to jam type 1 — that's the half
-        // of the rule `wëap.JamVuln1-4` supplies. A jammer the weapon has no
-        // vulnerability to is inert (see the type-mismatch test below).
+    func testJammedSeekerKeepsItsTargetButStopsTurning() {
+        // WP-09: a channel jams when `jamScore > 100 − lock`, lock rolled
+        // `rand(JamVuln + 1)` at launch. The jam score is the hull's inherent
+        // government InhJam plus its jammers. A jammed seeker flies straight
+        // (Seeker 0x0010 turns away) but keeps its target.
         let missile = seeker(vulnerableTo: 0)
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
-        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [100, 0, 0, 0])])
-        let target = makeShip("B", govt: 2, at: Vec2(0, 2000))
-        target.government = 2
+        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 140, jamming: [100, 0, 0, 0])])
+        let target = makeShip("B", govt: 2, at: Vec2(1500, 1500))
+        target.inherentJamGovt = 140
+        XCTAssertEqual(world.jamScores(of: target), [100, 0, 0, 0])
         let tid = world.addNPC(target)
 
         attacker.weapons = [WeaponMount(spec: missile)]
         attacker.currentTargetID = tid
         world.intent.firePrimary = true
-        world.step(1.0 / 30.0)   // fires the missile
-        XCTAssertEqual(world.projectiles.count, 1)
-
-        var lostLock = false
-        for _ in 0..<300 {   // up to 10s — a 100%-jammed target should lose lock well before then
-            world.step(1.0 / 30.0)
-            if world.projectiles.first?.targetID == nil { lostLock = true; break }
-        }
-        XCTAssertTrue(lostLock, "a fully-jammed government's ship should eventually shake the lock")
+        world.step(1.0 / 30.0)
+        world.intent.firePrimary = false
+        let shot = try! XCTUnwrap(world.projectiles.first)
+        XCTAssertGreaterThan(shot.jamLocks[0], 0, "a nonzero lock roll (1 in 101 rolls 0)")
+        let start = shot.facing
+        for _ in 0..<60 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(shot.targetID, tid, "the jammed seeker keeps its target")
+        // Turning away: the heading moves *away* from the target's bearing.
+        XCTAssertLessThan(angleDelta(from: start, to: shot.facing), 0,
+                          "Seeker 0x0010 turns away from a target off to its right")
     }
 
     func testTurnsAwayIfJammedNeverTriggersAgainstAnUnjammedGovt() {
         let missile = seeker(vulnerableTo: 0)
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
-        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [0, 0, 0, 0])])
+        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 140, jamming: [0, 0, 0, 0])])
         let target = makeShip("B", govt: 2, at: Vec2(0, 2000))
-        target.government = 2
+        target.inherentJamGovt = 140
         let tid = world.addNPC(target)
 
         attacker.weapons = [WeaponMount(spec: missile)]
@@ -622,9 +671,9 @@ final class CombatTests: XCTestCase {
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
         // Type 2 jammer, maxed — and three more types the seeker ignores.
-        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 2, jamming: [0, 100, 100, 100])])
+        world.diplomacy = Diplomacy(govts: [govtWithJamming(id: 140, jamming: [0, 100, 100, 100])])
         let target = makeShip("B", govt: 2, at: Vec2(0, 2000))
-        target.government = 2
+        target.inherentJamGovt = 140
         let tid = world.addNPC(target)
 
         attacker.weapons = [WeaponMount(spec: missile)]
@@ -744,7 +793,9 @@ final class CombatTests: XCTestCase {
     func testDisablingAShipDentsLegalRecordViaDisabPenaltyOnly() {
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
-        world.diplomacy = Diplomacy(govts: [govtWithPenalties(id: 2, disablePenalty: 3, killPenalty: 99, shootPenalty: 999)])
+        world.diplomacy = Diplomacy(govts: [govtWithPenalties(id: 2, disablePenalty: 3, killPenalty: 99, shootPenalty: 999)],
+                                    currentSystemID: 500)
+        world.diplomacy?.reputationMap = ReputationMap(systems: [.init(id: 500, govt: 2, x: 0, y: 0, links: [])])
         let target = makeShip("B", govt: 2, at: Vec2(0, 300))
         target.government = 2
         _ = world.addNPC(target)
@@ -757,19 +808,20 @@ final class CombatTests: XCTestCase {
         world.step(1.0 / 30.0)
 
         XCTAssertTrue(target.disabled)
-        XCTAssertEqual(world.diplomacy?.playerRecord[2], -3, "only DisabPenalty applied, not ShootPenalty")
+        XCTAssertEqual(world.diplomacy?.reputationHere, -3, "only DisabPenalty applied, not ShootPenalty")
     }
 
     func testDestroyingAShipDentsLegalRecordAndCreditsCombatRating() {
         let attacker = makeShip("A", govt: 1, at: Vec2())
         let world = World(player: attacker)
-        world.diplomacy = Diplomacy(govts: [govtWithPenalties(id: 2, disablePenalty: 1, killPenalty: 8, shootPenalty: 999)])
+        world.diplomacy = Diplomacy(govts: [govtWithPenalties(id: 2, disablePenalty: 1, killPenalty: 8, shootPenalty: 999)],
+                                    currentSystemID: 500)
+        world.diplomacy?.reputationMap = ReputationMap(systems: [.init(id: 500, govt: 2, x: 0, y: 0, links: [])])
         let target = makeShip("B", govt: 2, at: Vec2(0, 300))
         target.government = 2
         target.combatStrength = 55
         _ = world.addNPC(target)
-        target.disabled = true                       // already a hulk
-        target.armor = 5; target.shield = 0           // one more hit finishes it
+        target.armor = 5; target.shield = 0           // a hulk; one more hit finishes it
 
         attacker.weapons = [WeaponMount(spec: gun())]
         attacker.currentTargetID = target.entityID
@@ -783,8 +835,8 @@ final class CombatTests: XCTestCase {
             }
         }
         XCTAssertTrue(destroyed)
-        XCTAssertEqual(world.diplomacy?.playerRecord[2], -8, "KillPenalty applied on the actual kill")
-        XCTAssertEqual(world.diplomacy?.combatRating, 55, "combat rating credited with the destroyed ship's strength")
+        XCTAssertEqual(world.diplomacy?.reputationHere, -8, "KillPenalty applied on the actual kill")
+        XCTAssertEqual(world.diplomacy?.combatRating, 11, "trunc(55 × 0.2) rating points (WP-04)")
     }
 
     // MARK: whole-government provocation (independent of legal-record threshold)
@@ -831,8 +883,8 @@ final class CombatTests: XCTestCase {
         XCTAssertEqual(hit.brain?.provokedByPlayer, true, "the directly-hit ship is provoked")
         XCTAssertEqual(bystander.brain?.provokedByPlayer, true,
                        "every OTHER same-government ship in the system becomes hostile immediately too")
-        XCTAssertNil(world.diplomacy?.playerRecord[128],
-                     "mere provocation must not dent the legal record — only disable/kill/board do")
+        XCTAssertEqual(world.diplomacy?.reputation ?? [:], [:],
+                       "mere provocation must not dent the legal record — only disable/kill/board do")
     }
 
     /// `independentGovt` (-1) and any below-128 placeholder government id
@@ -878,7 +930,7 @@ final class CombatTests: XCTestCase {
 
         XCTAssertEqual(player.velocity.length, 0, accuracy: 1e-6,
                        "a dead player's wreck freezes in place, ignoring live input")
-        XCTAssertTrue(world.events.contains { if case .playerDestroyed = $0 { return true }; return false },
+        XCTAssertTrue(world.events.contains { if case .playerDying = $0 { return true }; return false },
                       "player death is reported")
         XCTAssertTrue(world.events.contains {
             if case let .beamLoopStop(shooterID, _) = $0 { return shooterID == World.playerEntityID }

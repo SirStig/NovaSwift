@@ -540,6 +540,11 @@ codebase's own pre-existing comment) agree on 1622.
 
 ### 5.4 Open questions the Bible text doesn't resolve
 
+> These were later settled from the decompiled executable: the combat-rating
+> scale in WP-04, the legal-record flood and per-system record in EC-02,
+> hostility in AI-05, and SkillMult in FL-15 of
+> [FIDELITY_PLAN.md](FIDELITY_PLAN.md). The list below is kept for history.
+
 1. The combat-rating "internal multiplier for adjustment" (Appendix I) —
    **partially resolved by disassembly, see §3.** The tier-threshold
    comparison itself applies no multiplier (confirmed from `fcn.00469030`

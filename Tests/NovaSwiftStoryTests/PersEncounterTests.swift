@@ -23,8 +23,9 @@ final class PersEncounterTests: XCTestCase {
         put16(&b, 44, commQuote); put16(&b, 46, hailQuote); put16(&b, 48, linkMission); put16(&b, 50, flags)
         return Resource(type: NovaType.pers, id: id, name: "Jack Folstam", data: Data(b))
     }
+    /// A ship-offered (AvailLoc 2) mission that passes every offering gate.
     private func mission(_ id: Int) -> Resource {
-        Resource(type: NovaType.mission, id: id, name: "Mission\(id)", data: Data(count: 2000))
+        MissionSpec(id: id, availLocation: 2, availRandom: 100).resource()
     }
 
     private func game(persFlags: Int, linkMission: Int = 140) -> NovaGame {

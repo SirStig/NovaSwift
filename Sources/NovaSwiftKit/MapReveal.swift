@@ -28,52 +28,75 @@ extension NovaGame {
     /// Returns an empty set for `modVal == 0` (nothing to reveal) and for
     /// `-1000 < modVal < 0` other than `-1` (the Bible defines no meaning for
     /// that band, so nothing is revealed rather than guessing).
-    public func mapRevealedSystems(modVal: Int, from originSystem: Int) -> Set<Int> {
+    public func mapRevealedSystems(modVal: Int, from originSystem: Int,
+                                   isVisible: (Int) -> Bool = { _ in true }) -> Set<Int> {
+        Set(mapRevealOrder(modVal: modVal, from: originSystem, isVisible: isVisible))
+    }
+
+    /// The systems a map reveals, in the order the original reaches them —
+    /// the order their nebula OnExplore scripts fire in. `isVisible` is the
+    /// systems' NCB visibility; a hidden system blocks a positive map's flood.
+    public func mapRevealOrder(modVal: Int, from originSystem: Int,
+                               isVisible: (Int) -> Bool = { _ in true }) -> [Int] {
         if modVal >= 1 {
-            return systemsWithin(jumps: modVal, of: originSystem)
+            return systemsWithin(jumps: modVal, of: originSystem, isVisible: isVisible)
         }
         if modVal == -1 {
             return inhabitedIndependentSystems()
         }
         if modVal <= -1000 {
-            return systems(inGovtClass: -1000 - modVal)
+            return systems(inGovtClass: -1000 - modVal).sorted()
         }
         return []   // modVal == 0, or the undefined (-1, -1000) band
     }
 
-    /// Breadth-first flood over `sÿst` hyperspace links: every system reachable
-    /// in `jumps` hops or fewer from `origin`, including `origin` itself. Matches
-    /// the Bible's "How many jumps away from present system to explore" — a map
-    /// value of 2 reveals the origin, its neighbours, and their neighbours.
-    private func systemsWithin(jumps: Int, of origin: Int) -> Set<Int> {
+    /// The original's flood (0x00467ab0): a depth-first walk over each
+    /// system's own declared links, depth ≤ `jumps`, with one visited mask
+    /// marked on entry. Because a system first reached down a long path is
+    /// not revisited from a shorter one, it can reveal less than the true
+    /// `jumps` radius — a quirk kept on purpose (UI-04). A link to a hidden
+    /// system follows to a visible twin at the same spot, or stops there.
+    private func systemsWithin(jumps: Int, of origin: Int, isVisible: (Int) -> Bool) -> [Int] {
         guard system(origin) != nil else { return [] }
-        var seen: Set<Int> = [origin]
-        var frontier: [Int] = [origin]
-        var depth = 0
-        while depth < jumps, !frontier.isEmpty {
-            var next: [Int] = []
-            for id in frontier {
-                for link in systemNeighbors(id) where !seen.contains(link) {
-                    seen.insert(link)
-                    next.append(link)
-                }
-            }
-            frontier = next
-            depth += 1
+        let all = systems()
+        var byID: [Int: SystRes] = [:]
+        var twins: [String: [Int]] = [:]
+        for s in all {
+            byID[s.id] = s
+            twins["\(s.x),\(s.y)", default: []].append(s.id)
         }
-        return seen
+        func visibleTwin(_ id: Int) -> Int? {
+            if isVisible(id) { return id }
+            guard let s = byID[id] else { return nil }
+            return twins["\(s.x),\(s.y)"]?.sorted().first(where: isVisible)
+        }
+        var visited: Set<Int> = []
+        var order: [Int] = []
+        func flood(_ id: Int, _ depth: Int) {
+            guard depth <= jumps, byID[id] != nil, visited.insert(id).inserted else { return }
+            order.append(id)
+            for link in byID[id]?.links ?? [] where link >= 128 {
+                if let target = visibleTwin(link) { flood(target, depth + 1) }
+            }
+        }
+        flood(origin, 0)
+        return order
     }
 
-    /// Every independent (`government == -1`) system that has at least one
-    /// landable stellar — the Bible's "all inhabited independent systems".
-    private func inhabitedIndependentSystems() -> Set<Int> {
-        var result: Set<Int> = []
-        for sys in systems() where sys.government == -1 {
-            if sys.spobs.contains(where: { spob($0)?.canLand ?? false }) {
-                result.insert(sys.id)
+    /// The independent (`government == -1`) systems with a stellar that is
+    /// neither uninhabited (`spöb.Flags` 0x20) nor a hypergate/wormhole
+    /// (0x00468af0) — the Bible's "all inhabited independent systems".
+    private func inhabitedIndependentSystems() -> [Int] {
+        var result: [Int] = []
+        for sys in systems() where sys.government < 128 {
+            if sys.spobs.contains(where: { id in
+                guard let s = spob(id) else { return false }
+                return s.flags & 0x20 == 0 && s.flags2 & 0x3000 == 0
+            }) {
+                result.append(sys.id)
             }
         }
-        return result
+        return result.sorted()
     }
 
     /// Every system whose controlling government is a member of `govtClass`

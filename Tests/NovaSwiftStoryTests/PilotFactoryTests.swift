@@ -94,15 +94,59 @@ final class PilotFactoryTests: XCTestCase {
         XCTAssertTrue(pilot.setBits.contains(250))
     }
 
+    /// `chär` statuses overwrite the reputation of every system whose owner is
+    /// allied with the named government, and set `−status` where the owner is
+    /// hostile to it (0x004cd4b0); other systems start at their owner's
+    /// InitialRec, never below 0 (0x004b4220).
     func testGovtStandingApplied() {
+        func govt(_ id: Int, classes: [Int], allies: [Int] = [], enemies: [Int] = [], initialRec: Int = 0) -> Resource {
+            var b = [UInt8](repeating: 0, count: 176)
+            Bytes.i16(&b, 20, initialRec)
+            for i in 0..<4 { Bytes.i16(&b, 24 + i * 2, i < classes.count ? classes[i] : -1) }
+            for i in 0..<4 { Bytes.i16(&b, 32 + i * 2, i < allies.count ? allies[i] : -1) }
+            for i in 0..<4 { Bytes.i16(&b, 40 + i * 2, i < enemies.count ? enemies[i] : -1) }
+            return Resource(type: NovaType.govt, id: id, name: "G\(id)", data: Data(b))
+        }
         let game = makeGame([
             shipResource(id: 128, cargo: 10),
+            govt(200, classes: [1], allies: [2], enemies: [3]),
+            govt(201, classes: [2]),                     // ally of 200
+            govt(202, classes: [3], initialRec: 40),     // enemy of 200
+            govt(203, classes: [4], initialRec: 25),     // unrelated
+            govt(204, classes: [5], initialRec: -25),    // unrelated, negative InitialRec
+            ownedSystemResource(id: 128, govt: 200), ownedSystemResource(id: 129, govt: 201),
+            ownedSystemResource(id: 130, govt: 202), ownedSystemResource(id: 131, govt: 203),
+            ownedSystemResource(id: 132, govt: 204), ownedSystemResource(id: 133, govt: -1),
             charResource(id: 128, name: "S", cash: 0, ship: 128, systems: [128],
                          govtStatuses: [(200, 30)]),
         ])
         let ch = game.character(128)!
         let pilot = PilotFactory.make(name: "P", isMale: true, scenario: ch, game: game)
-        XCTAssertEqual(pilot.legalRecord[200], 30)
+        XCTAssertEqual(pilot.systemReputation, [128: 30, 129: 30, 130: -30, 131: 25])
+    }
+
+    func testNewPilotCreditsClampAndNoFreeIFF() {
+        let game = makeGame([
+            shipResource(id: 128, cargo: 10),
+            charResource(id: 128, name: "S", cash: -500, ship: 128, systems: [128]),
+            iffOutfit(id: 300),
+        ])
+        let ch = game.character(128)!
+        let pilot = PilotFactory.make(name: "P", isMale: true, scenario: ch, game: game)
+        XCTAssertEqual(pilot.credits, 0, "credits clamp at 0")
+        XCTAssertNil(pilot.outfits[300], "the original grants no IFF")
+    }
+
+    func testNewPilotHasTheStartSystemsNeighboursExplored() {
+        // UI-04: the start system and every visible system one jump away.
+        let game = makeGame([
+            shipResource(id: 128, cargo: 10),
+            charResource(id: 128, name: "S", cash: 0, ship: 128, systems: [300]),
+            systemResource(id: 300, links: [301, 302]), systemResource(id: 301),
+            systemResource(id: 302, visibility: "b9"), systemResource(id: 303, links: [300]),
+        ])
+        let pilot = PilotFactory.make(name: "P", isMale: true, scenario: game.character(128)!, game: game)
+        XCTAssertEqual(pilot.exploredSystems, [300, 301], "hidden 302 and the one-way 303 stay unknown")
     }
 
     func testMakeDefaultUsesLowestScenario() {

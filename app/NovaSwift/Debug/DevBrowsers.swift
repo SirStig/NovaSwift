@@ -148,7 +148,12 @@ struct DevGovtBrowser: View {
         DevBrowserFrame(query: $query, placeholder: "search governments…",
                         count: filtered.count, noun: "govt") {
             ForEach(filtered, id: \.id) { govt in
-                let record = model.pilot.state.legalRecord[govt.id] ?? 0
+                // The worst reputation the player holds in any of this
+                // government's systems (EC-02).
+                let record = (model.data.game?.reputationMap().ids ?? [])
+                    .filter { model.data.game?.reputationMap().govt(of: $0) == govt.id }
+                    .map { model.pilot.state.reputation(atSystem: $0) }
+                    .min() ?? 0
                 DevBrowserRow(
                     swatch: Color(red: Double(govt.mapColor.r) / 255,
                                   green: Double(govt.mapColor.g) / 255,
@@ -160,10 +165,10 @@ struct DevGovtBrowser: View {
                     expanded: selectedID == govt.id,
                     onTap: { selectedID = selectedID == govt.id ? nil : govt.id }
                 ) {
-                    DevActionChip("Hostile", "relation \(govt.id) -30000", console: console,
+                    DevActionChip("Hostile here", "relation -30000", console: console,
                                   destructive: true)
-                    DevActionChip("Neutral", "relation \(govt.id) 0", console: console)
-                    DevActionChip("Friendly", "relation \(govt.id) 30000", console: console)
+                    DevActionChip("Neutral here", "relation 0", console: console)
+                    DevActionChip("Friendly here", "relation 30000", console: console)
                 }
             }
         }

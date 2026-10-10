@@ -56,10 +56,16 @@ extension World {
         let provoked = contested || provokedGovernments.contains(body.government)
         let playerHostile = !dominatedStellars.contains(body.id)
             && (provoked || (!body.firesOnlyWhenProvoked
-                             && (diplomacy?.isHostileToPlayer(body.government) ?? false)))
+                             && (diplomacy?.stellarBatteriesTargetPlayer(
+                                    stellarGovt: body.government,
+                                    playerHullGovt: player.inherentCombatGovt) ?? false)))
         var best: Ship?
         var bestD = range
-        for ship in allShips where ship.isAlive && !ship.disabled && !ship.cloakEngaged {
+        // A disabled hull is passed over only by a disable-only or massless
+        // weapon (`Stellar_TickStellarDefenseBatteries` 0x0042d890).
+        let skipsDisabled = body.defenseWeapon.map { $0.disablesOnly || $0.armorDamage <= 0 } ?? true
+        for ship in allShips where ship.isAlive && !(skipsDisabled && ship.disabled)
+            && !ship.isEffectivelyCloaked {
             let hostile: Bool
             if isPlayerFleetMember(ship.entityID) {
                 hostile = playerHostile
@@ -75,64 +81,57 @@ extension World {
         return best
     }
 
-    /// Loose one shot at `target`: turret-style lead from the stellar's
-    /// position (a planet has no hull heading, so every stellar weapon aims
-    /// like a turret regardless of its `Guidance`), spawning a real projectile
-    /// or casting a real beam through the normal damage pipeline.
+    /// Loose one shot at `target` (`Stellar_TickStellarDefenseBatteries`
+    /// 0x0042d890): an ownerless shot from the stellar's centre with no launch
+    /// velocity of its own, aimed with a one-step lead (`distance / speed`,
+    /// `Shot_AimStellarBatteryShot` 0x0043ba30), that can hit only `target`.
     private func fireStellarWeapon(from body: StellarBody, spec: WeaponSpec,
                                    mount: WeaponMount, at target: Ship) {
         let shooterID = World.stellarShooterID(forSpob: body.id)
         var aim = leadAngle(from: body.position, shooterVel: Vec2(), target: target,
                             shotSpeed: spec.projectileSpeed, instantHit: spec.isBeam)
-        if spec.accuracyRadians > 0 && !spec.firesAtFixedAngle {
-            aim += rng.double(in: -spec.accuracyRadians...spec.accuracyRadians)
+        if spec.inaccuracyDegrees > 0 {
+            aim += Double(rng.range(2 * spec.inaccuracyDegrees) - spec.inaccuracyDegrees) * .pi / 180
         }
         let dir = Vec2.heading(aim)
-        // Shots leave from just inside the stellar's rim toward the target, so
-        // they visibly emerge from the planet's surface installations rather
-        // than materializing at its centre under the sprite.
-        let muzzle = body.position + dir * max(0, body.radius * 0.7)
+        let muzzle = body.position
 
         if spec.isBeam {
-            let cast = beamCast(from: muzzle, dir: dir, range: spec.range,
+            let cast = beamCast(from: muzzle, dir: dir, range: spec.beamLength,
                                 ownerID: shooterID, ownerGovt: body.government)
-            if let h = cast.hitShip {
+            let struck = cast.hitShip.flatMap { $0.entityID == target.entityID ? $0 : nil }
+            if let h = struck {
                 applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage,
                          ownerID: shooterID, ionization: spec.ionization,
                          ionizeColor: spec.ionizeColor, piercing: spec.penetratesShields,
-                         weaponID: spec.id, disablesOnly: spec.disablesOnly)
-                if spec.impact > 0 {
-                    h.velocity += dir * (spec.impact * 6.0 / max(4, h.radius))
-                }
-            } else if let rock = cast.hitAsteroid {
-                applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage,
-                                 shooterID: shooterID)
+                         weaponID: spec.id, disablesOnly: spec.disablesOnly,
+                         impact: spec.impact, impactFrom: muzzle)
             }
-            let hit = cast.hitShip != nil || cast.hitAsteroid != nil
+            let hit = struck != nil
+            let end = hit ? cast.end : muzzle + dir * spec.beamLength
             // Stellar beams are always pulse flashes (`refreshActiveBeams`
-            // counts them down by `life` without needing a shooter ship);
-            // continuous-loop welding only exists for ships, and a fresh pulse
-            // per reload tick reads correctly for a ground battery anyway.
+            // counts them down by `life` without needing a shooter ship).
             if let existing = activeBeams.first(where: {
                 $0.shooterID == shooterID && $0.mountIndex == 0 && !$0.continuous }) {
-                existing.from = muzzle; existing.to = cast.end; existing.hit = hit
+                existing.from = muzzle; existing.to = end; existing.hit = hit
                 existing.life = existing.maxLife
             } else {
                 activeBeams.append(ActiveBeam(shooterID: shooterID, mountIndex: 0,
-                                              weaponID: spec.id, from: muzzle, to: cast.end,
+                                              weaponID: spec.id, from: muzzle, to: end,
                                               hit: hit, continuous: false,
                                               life: spec.pulseBeamLifeSeconds,
                                               width: spec.beamWidth, color: spec.beamColor,
                                               coronaColor: spec.coronaColor,
                                               coronaFalloff: spec.coronaFalloff))
             }
-            emit(.beam(shooterID: shooterID, mountIndex: 0, from: muzzle, to: cast.end,
+            emit(.beam(shooterID: shooterID, mountIndex: 0, from: muzzle, to: end,
                        hit: hit, soundID: spec.fireSoundID, weaponID: spec.id))
         } else {
-            spawnProjectile(spec: spec, muzzle: muzzle, aim: aim,
-                            ownerID: shooterID, ownerGovt: body.government,
-                            ownerVelocity: Vec2(),
-                            targetID: spec.homes ? target.entityID : nil, subDepth: 0)
+            let shot = spawnProjectile(spec: spec, muzzle: muzzle, aim: aim,
+                                       ownerID: shooterID, ownerGovt: body.government,
+                                       ownerVelocity: Vec2(),
+                                       targetID: spec.homes ? target.entityID : nil, subDepth: 0)
+            shot.batteryTargetID = target.entityID
             emit(.weaponFired(shooterID: shooterID, at: muzzle, heading: aim,
                               soundID: spec.fireSoundID, weaponID: spec.id))
         }
@@ -171,20 +170,25 @@ extension World {
     /// Land one weapon hit on a stellar. Damage is the Bible's "combined mass and
     /// energy damage" — a stellar has no shields to knock down first, so both
     /// halves of the shot count toward the same pool. Returns true when this hit
-    /// destroyed it.
+    /// destroyed it. When the player's own shot (`ownerID` 0) destroys it, the
+    /// stellar's government takes ten kill events (OS-13; 0x00437e20).
     @discardableResult
-    func applyStellarHit(_ body: StellarBody, shield: Double, armor: Double) -> Bool {
+    func applyStellarHit(_ body: StellarBody, shield: Double, armor: Double, ownerID: Int = -1) -> Bool {
         guard body.isDestroyable, !stellarsDestroyedThisSession.contains(body.id) else { return false }
-        let remaining = max(0, stellarArmorRemaining(body) - (shield + armor))
+        // Destroyed once its strength goes below zero (0x00437e20).
+        let remaining = stellarArmorRemaining(body) - (shield + armor)
         stellarArmor[body.id] = remaining
-        emit(.stellarDamaged(spobID: body.id, armor: remaining, maxArmor: body.strength))
-        guard remaining <= 0 else { return false }
+        emit(.stellarDamaged(spobID: body.id, armor: max(0, remaining), maxArmor: body.strength))
+        guard remaining < 0 else { return false }
         stellarsDestroyedThisSession.insert(body.id)
         emit(.stellarDestroyed(spobID: body.id, at: body.position,
                                boomID: body.explosionBoomID, sparks: body.explosionHasSparks))
         // A destroyed stellar stops shooting and drops any tribute contest.
         stellarWeaponMounts[body.id] = nil
         stellarDefenses[body.id] = nil
+        if ownerID == 0 {
+            for _ in 0..<10 { diplomacy?.recordCrime(.kill, against: body.government) }
+        }
         Log.combat.notice("Stellar \(body.id, privacy: .public) destroyed by weapon fire")
         return true
     }

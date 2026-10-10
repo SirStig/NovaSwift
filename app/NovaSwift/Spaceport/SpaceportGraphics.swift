@@ -191,6 +191,8 @@ enum SpaceportLabel {
     static let tradeCenter = 7, outfitter = 8, shipyard = 9, bar = 10
     static let gamble = 11, holovid = 12, hireEscort = 13, bet1000 = 14, bet5000 = 15
     static let missionBBS = 16
+    /// "Bet" — the typed-amount wager (EC-26).
+    static let bet = 59
     // Player-info dialog (DITL #1017): its four tab buttons, plus the controls
     // that share this list (verified in the same raw dump: 29 Cancel, 35 Abort,
     // 36–39 General/Cargo/Extras/Honors, 48 Info, 61 Jettison Cargo).
@@ -206,5 +208,7 @@ enum SpaceportLabel {
     // "Request Landing" entry exists, so that button uses a literal fallback.
     static let closeChannel = 21, greetings = 22, requestAssistance = 23
     static let offerBribe = 24, demandTribute = 45
+    /// The payment window's buttons and the stellar comm's Release (STR# 150).
+    static let acceptPrice = 30, lowerPrice = 31, release = 32
     static let requestLanding = -1   // no STR# entry — literal fallback only
 }

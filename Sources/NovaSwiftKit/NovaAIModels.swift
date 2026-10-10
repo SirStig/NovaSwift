@@ -159,12 +159,10 @@ public struct OutfRes {
     /// only, 1128-1383 + independent, 2128-2383 all-but, 3128-3383 all-but +
     /// independent). @1010.
     public let requireGovt: Int
-    /// "The percent chance that an item of this type will be available for
-    /// purchase on a given day, from 1-100. Values less than 1 or greater
-    /// than 100 are interpreted as 100" (Bible). @1008. This is the same
-    /// on-disk field the Bible calls `BuyRandom` on both `oütf` and `shïp`;
-    /// `requireBitsApplyTo` below is likewise the Bible's `RequireGovt`
-    /// already decoded here as `requireGovt` — see OUTFITTERS.md §8.
+    /// `BuyRandom` (@1008): the percent chance this item is in stock on a given
+    /// day, clamped 0...100 as the loader stores it. Unlike the Bible's "less
+    /// than 1 is 100", the original never stocks an item whose value is below 1
+    /// (`Outfit_RebuildAvailableOutfitListForTravelStellar` 0x0046a220).
     public let buyRandom: Int
     /// "The item's classification, used in the pêrs resource for items that
     /// are given out by non-player characters' ships" (Bible `ItemClass`).
@@ -218,7 +216,7 @@ public struct OutfRes {
         require = au64(d, 38)
         availBits = acstr(d, 46, 255)
         requireGovt = ai16(d, 1010)
-        buyRandom = ai16(d, 1008)
+        buyRandom = max(0, min(100, ai16(d, 1008)))
         itemClass = ai16(d, 1004)
         scanMask = au16(d, 1006)
         onPurchase = acstr(d, 301, 255)
@@ -365,14 +363,29 @@ public struct GovtRes {
     public let killPenalty: Int
     public let shootPenalty: Int
     public let initialRecord: Int
+    /// Raw `MaxOdds` (@22). Read `maxOddsRatio` for the loader-normalised value.
     public let maxOdds: Int
-    /// The classes this government belongs to (−1 slots stripped).
+    /// `MaxOdds` as the original loader stores it (0x004bd3c0): × 0.01, never
+    /// below 0.01 — so 0 or a negative value means "almost never engage", not
+    /// "no limit".
+    public var maxOddsRatio: Double { max(0.01, Double(maxOdds) * 0.01) }
+    /// The classes this government belongs to, empty slots stripped. The
+    /// original skips any negative slot (`-1 < slot`), not only −1. Use this for
+    /// "is class c among them" tests; positional tests read `classSlots`.
     public let classes: [Int]
+    /// The four raw `Class1-4` slots, −1 for an empty one. The original's
+    /// "share a class" test compares slot i against slot i only
+    /// (`GovtRelations.shareClass`).
+    public let classSlots: [Int]
     /// Classes this government is allied with.
     public let allies: [Int]
     /// Classes this government is hostile to.
     public let enemies: [Int]
-    public let shipSpeedFactor: Int
+    /// Raw `SkillMult` (@48). Read `skillMult` for the loader-normalised value.
+    public let skillMultRaw: Int
+    /// `SkillMult` as the loader stores it: × 0.01, with values below 1 read
+    /// as 1.0. Scales NPC speed and thrust (0x004640a0 / 0x004642e0).
+    public var skillMult: Double { skillMultRaw < 1 ? 1.0 : Double(skillMultRaw) * 0.01 }
     /// `gövt.ScanMask` (Bible): 16-bit contraband jurisdiction mask. "If any of
     /// the 1 bits in a government's ScanMask field match any of the 1 bits in a
     /// mission's [or jünk type's, or outfit's] ScanMask field, that government
@@ -468,10 +481,11 @@ public struct GovtRes {
         shootPenalty = ai16(d, 18)
         initialRecord = ai16(d, 20)
         maxOdds = ai16(d, 22)
-        classes = (0..<4).map { ai16(d, 24 + $0 * 2) }.filter { $0 != -1 }
-        allies  = (0..<4).map { ai16(d, 32 + $0 * 2) }.filter { $0 != -1 }
-        enemies = (0..<4).map { ai16(d, 40 + $0 * 2) }.filter { $0 != -1 }
-        shipSpeedFactor = ai16(d, 48)
+        classSlots = (0..<4).map { ai16(d, 24 + $0 * 2) }
+        classes = classSlots.filter { $0 >= 0 }
+        allies  = (0..<4).map { ai16(d, 32 + $0 * 2) }.filter { $0 >= 0 }
+        enemies = (0..<4).map { ai16(d, 40 + $0 * 2) }.filter { $0 >= 0 }
+        skillMultRaw = ai16(d, 48)
         scanMask = au16(d, 50)
         let rawName = acstr(d, 52, 16)
         commName = rawName.isEmpty ? name : rawName
@@ -484,94 +498,6 @@ public struct GovtRes {
         shipColor = acolor(d, 168)
         interface = ai16(d, 172)
         newsPic = ai16(d, 174)
-    }
-}
-
-/// Applies a legal-record penalty to `govt` plus the Bible's §1.2 ally/enemy
-/// propagation: "Doing evil deeds to one government will improve your rating
-/// with its enemies, and vice versa. Allied governments also communicate your
-/// actions, so attacking one government will make its allies hate you too."
-/// Neither propagation's magnitude is quantified by the Bible; both use the
-/// same invented-but-consistent half-penalty, mirrored in sign (allies
-/// suffer, enemies benefit). Used for the *universal* (mission-driven) legal
-/// record — see `applyLocal` for the spatial version hostile ship-to-ship
-/// actions use instead. Shared by `NovaSwiftEngine.Diplomacy` and
-/// `NovaSwiftStory.ContrabandScan` so both apply the same rule instead of
-/// drifting apart — `NovaSwiftStory` can't depend on `NovaSwiftEngine`, so
-/// this lives in the shared base module.
-public enum LegalRecordPropagation {
-    public static func apply(penalty: Int, to govt: Int, in record: inout [Int: Int], govts: [Int: GovtRes]) {
-        record[govt, default: 0] -= penalty
-        guard let victim = govts[govt] else { return }
-        for (id, other) in govts where id != govt {
-            if !Set(other.classes).isDisjoint(with: victim.allies) {
-                record[id, default: 0] -= penalty / 2
-            }
-            if !Set(other.classes).isDisjoint(with: victim.enemies) {
-                record[id, default: 0] += penalty / 2
-            }
-        }
-    }
-
-    /// The same ally/enemy propagation as `apply`, but for a hostile action
-    /// against a ship (combat, boarding, a detected-smuggling scan) rather
-    /// than a mission reward — per the EVN wiki's Legal Status page: "Hostile
-    /// actions against ships will be reflected locally, while status changes
-    /// due to missions will be reflected universally... Hostile actions
-    /// against ships that a government regards favorably will be reflected
-    /// in a 3 system radius. Hostile actions against ships that a government
-    /// regards negatively will be reflected in a 5 system radius." `current`
-    /// (the system the action happened in) gets the full, unscaled penalty —
-    /// same magnitude as `apply` would give it. `spread` receives a tapered
-    /// share (linear falloff to 0 at the radius edge — the wiki doesn't
-    /// quantify the falloff shape, only that farther systems count for less)
-    /// in every *other* system within radius, keyed govt id -> system id.
-    public static func applyLocal(penalty: Int, to govt: Int, atSystem origin: Int,
-                                  current: inout [Int: Int], spread: inout [Int: [Int: Int]],
-                                  govts: [Int: GovtRes], game: NovaGame) {
-        func apply(delta: Int, to targetGovt: Int) {
-            guard delta != 0 else { return }
-            current[targetGovt, default: 0] += delta
-            let radius = delta < 0 ? 5 : 3   // unfavorable felt farther than favorable
-            for (systemID, hop) in game.systemsWithinHops(of: origin, maxHops: radius) where hop > 0 {
-                let scaled = delta * (radius - hop) / radius
-                guard scaled != 0 else { continue }
-                spread[targetGovt, default: [:]][systemID, default: 0] += scaled
-            }
-        }
-        apply(delta: -penalty, to: govt)
-        guard let victim = govts[govt] else { return }
-        for (id, other) in govts where id != govt {
-            if !Set(other.classes).isDisjoint(with: victim.allies) { apply(delta: -penalty / 2, to: id) }
-            if !Set(other.classes).isDisjoint(with: victim.enemies) { apply(delta: penalty / 2, to: id) }
-        }
-    }
-}
-
-extension NovaGame {
-    /// System ids within `maxHops` hyperspace jumps of `origin` (via
-    /// `sÿst.links`), BFS-limited, mapped to their hop distance (`origin`
-    /// itself is hop 0). Backs `LegalRecordPropagation.applyLocal`'s spatial
-    /// decay — the wiki's "actions in adjacent systems are also taken into
-    /// consideration, although given less weight than actions committed in
-    /// the immediate vicinity."
-    public func systemsWithinHops(of origin: Int, maxHops: Int) -> [Int: Int] {
-        var dist: [Int: Int] = [origin: 0]
-        var frontier = [origin]
-        var hop = 0
-        while hop < maxHops, !frontier.isEmpty {
-            hop += 1
-            var next: [Int] = []
-            for sid in frontier {
-                guard system(sid) != nil else { continue }
-                for link in systemNeighbors(sid) where dist[link] == nil {
-                    dist[link] = hop
-                    next.append(link)
-                }
-            }
-            frontier = next
-        }
-        return dist
     }
 }
 
@@ -599,6 +525,10 @@ public struct DudeRes {
     public let aiTypeRaw: Int
     public let govt: Int
     public let flags: UInt16
+    /// `InfoTypes` (+0x06): what a hailed ship of this dude says to Greetings
+    /// (0x1000 trade tip, 0x2000 disaster report, 0x4000 STR# (bits & 0xfff)
+    /// + 7500, 0x8000 its government's quotes).
+    public let infoTypes: UInt16
     /// (ship class id, spawn probability 0…100). Probabilities across the table
     /// sum to ~100 in real data.
     public let ships: [(shipID: Int, prob: Int)]
@@ -633,6 +563,7 @@ public struct DudeRes {
         aiTypeRaw = ai16(d, 0)
         govt = ai16(d, 2)
         flags = au16(d, 4)
+        infoTypes = au16(d, 6)
         var table: [(Int, Int)] = []
         for i in 0..<16 {
             let shipID = ai16(d, 8 + i * 2)

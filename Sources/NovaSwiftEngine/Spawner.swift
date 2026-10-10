@@ -51,8 +51,21 @@ public struct SpawnTable {
 /// what makes a system feel inhabited — traders coming and going, patrols on
 /// station, the occasional pirate pack.
 public final class Spawner {
+    /// Which population rules run. `.original` (the default) is the original
+    /// engine's maintenance loop (AI-09..AI-12, `OriginalSpawning.swift`);
+    /// `.port` is NovaSwift's earlier tuned traffic, kept for the System
+    /// Aliveness presets.
+    public enum SpawnModel: Sendable { case original, port }
+
     public let galaxy: Galaxy
     public var table: SpawnTable
+    public var model: SpawnModel = .original
+    /// Lazily built lists the original rules draw from (`OriginalSpawning.swift`).
+    var originalPersCache: [PersRes]?
+    var originalDudeWeightsCache: [(dudeID: Int, weight: Int)]?
+    /// Maintenance calls left before the escalation-fleet check (AI-16);
+    /// nil until the first call rolls it, −1 once spent.
+    var escalationCountdown: Int?
     /// How many NPCs to keep around; derived from the system's average count.
     /// This is specifically the *single-ship* backbone target — the ambient
     /// lone-trader/lone-patrol traffic that should make up most of a system's
@@ -67,11 +80,6 @@ public final class Spawner {
     public var populationScale: Double = 1.0 {
         didSet { rescaleForPopulationChange() }
     }
-    /// Odds (0...1) that an ambient trader skips landing and just cruises
-    /// through the system — threaded onto each spawned trader's `AIBrain` as
-    /// `passThroughChance`. 0 (the default) reproduces "every trader lands"
-    /// exactly as before.
-    public var passThroughChance: Double = 0.0
     /// How many spawned fleets may share a system at once. Fleets are an accent
     /// on top of the single-ship backbone, not the backbone itself, so this
     /// stays low; a busy system (high `AvgShips`) tolerates a second. Keeping it
@@ -116,6 +124,10 @@ public final class Spawner {
     /// `sÿst.ReinfIntrval`'s regen gate, so a system with allies stuck in a
     /// losing fight doesn't re-summon every tick once it first triggers.
     private var reinforcementCooldownUntil: Double = 0
+    /// When the reinforcement in flight was summoned, and whether its
+    /// approach warning has shown (AI-13).
+    private var reinforcementTriggeredAt: Double = 0
+    private var reinforcementWarned = false
     /// EV Nova's `ReinfIntrval` is in calendar days, but nothing at this
     /// layer (`Spawner`/`World`) tracks a galaxy day clock — that lives in
     /// `NovaSwiftStory.GameDate`, a layer up, and isn't threaded through combat
@@ -170,13 +182,17 @@ public final class Spawner {
 
     /// Where a spawn comes from: mid-system (initial fill), the hyperspace edge
     /// (a jump-in), or lifting off from a stellar object (planet launch).
-    private enum SpawnOrigin { case interior, edge, planet, hypergate(spobID: Int) }
+    enum SpawnOrigin { case interior, edge, planet, hypergate(spobID: Int) }
 
     /// Fill the system to its target population immediately (used on entry so the
     /// system isn't empty for the first few seconds). If the system has any
     /// eligible fleet, one is placed up front so the player often finds a
     /// formation already on station instead of only ever catching lone ships.
     public func populate(_ world: World) {
+        // DAT_007d17ca: one Rand(0x800) per arrival or launch (0x0044f829,
+        // 0x004b3a05), read by the ship comm's STR# 7500+ greetings.
+        world.commQuoteRoll = world.rng.range(0x800)
+        if model == .original { populateOriginal(world); return }
         applyHabitation(world)
         // One fleet up front, as an accent — so the player often arrives to find
         // a formation already on station — but just the one. Skipped entirely in
@@ -230,9 +246,14 @@ public final class Spawner {
 
     /// Called every step by the world.
     public func update(_ dt: Double, world: World) {
-        applyHabitation(world)
         simClock += dt
         updateReinforcements(world)
+        if model == .original {
+            // System_TickNpcSpawnMaintenance runs once per raw ~21 ms call.
+            for _ in 0..<world.rawCallsThisStep { maintainOriginal(world) }
+            return
+        }
+        applyHabitation(world)
 
         // Deliberate fleet cadence, independent of the ambient trickle so fleets
         // reliably appear — but gated so they stay an *accent*, not the bulk of
@@ -322,7 +343,7 @@ public final class Spawner {
 
     // MARK: Spawning
 
-    private func spawnOne(into world: World, origin: SpawnOrigin) {
+    func spawnOne(into world: World, origin: SpawnOrigin) {
         // The ambient trickle is dudes only — the per-system `DudeTypes`/`%Prob`
         // background traffic (traders and lone patrols coming and going). Fleets
         // are a separate mechanism (FLEETS.md §0): they arrive as a group on the
@@ -396,7 +417,7 @@ public final class Spawner {
 
     /// True if fleet `fleetID`'s `AppearOn` control-bit test currently permits it.
     /// Blank ⇒ always; non-blank ⇒ host-gated via `World.fleetSpawnEligible`.
-    private func fleetAppearOnAllowed(_ fleetID: Int, world: World) -> Bool {
+    func fleetAppearOnAllowed(_ fleetID: Int, world: World) -> Bool {
         guard let fleet = galaxy.game.fleet(fleetID) else { return false }
         if fleet.appearOn.isEmpty { return true }
         return world.fleetSpawnEligible(fleetID)
@@ -475,14 +496,31 @@ public final class Spawner {
         guard table.reinforcementFleet >= 128 else { return }
 
         if let dueAt = reinforcementDueAt {
+            // AI-13: once less than a quarter of the countdown is left the
+            // original warns "Sensors detect <MediumName> reinforcement fleet
+            // approaching" (STR# 2002 #306/#307) for 240 frames.
+            if model == .original, !reinforcementWarned,
+               (dueAt - simClock) < (dueAt - reinforcementTriggeredAt) * 0.25 {
+                reinforcementWarned = true
+                postReinforcementWarning(world)
+            }
             guard simClock >= dueAt else { return }
             reinforcementDueAt = nil
             if isFleetEligible(table.reinforcementFleet, world: world),
                fleetAppearOnAllowed(table.reinforcementFleet, world: world) {
-                spawnFleet(table.reinforcementFleet, into: world, origin: .edge)
+                if model == .original {
+                    // The lead arrives as an interceptor, with the fleet's Quote.
+                    originalSpawnFleet(table.reinforcementFleet, world: world, leadAI: .interceptor, showQuote: true)
+                } else {
+                    spawnFleet(table.reinforcementFleet, into: world, origin: .edge)
+                }
             }
-            reinforcementCooldownUntil = simClock
-                + Double(max(0, table.reinforcementRegen)) * secondsPerReinforcementDay
+            // The original's retrigger delay is `max(ReinfIntrval, 1)` game
+            // days, and no day passes in flight, so a system calls its
+            // reinforcements once per visit. The port model keeps its
+            // 60-seconds-a-day reading.
+            reinforcementCooldownUntil = model == .original ? .infinity
+                : simClock + Double(max(0, table.reinforcementRegen)) * secondsPerReinforcementDay
             return
         }
 
@@ -495,9 +533,69 @@ public final class Spawner {
         guard !isReinforcementInhibited(reinforcementGovt, world: world) else { return }
         guard governmentUnderAttackAndOutmatched(reinforcementGovt, world: world) else { return }
 
+        beginReinforcementCountdown(for: reinforcementGovt)
+    }
+
+    /// Start the `ReinfTime` countdown (30 Hz ticks) for the system's fleet.
+    private func beginReinforcementCountdown(for govt: Int) {
         let delaySeconds = Double(max(0, table.reinforcementDelay)) / max(1, galaxy.combatTuning.framesPerSecond)
         reinforcementDueAt = simClock + delaySeconds
-        Log.world.debug("Spawner: reinforcement fleet \(self.table.reinforcementFleet) triggered for govt \(reinforcementGovt), arriving in \(delaySeconds, format: .fixed(precision: 1))s")
+        reinforcementTriggeredAt = simClock
+        reinforcementWarned = false
+        Log.world.debug("Spawner: reinforcement fleet \(self.table.reinforcementFleet) triggered for govt \(govt), arriving in \(delaySeconds, format: .fixed(precision: 1))s")
+    }
+
+    // MARK: AI-13 · the original AI's per-ship call
+
+    /// The system's reinforcement countdown is running for a fleet allied
+    /// with `govt` — the original warship / interceptor odds retreat doubles
+    /// its MaxOdds threshold while it does (0x00402e50 / 0x00403de0).
+    func reinforcementInbound(alliedWith govt: Int, world: World) -> Bool {
+        guard govt >= govtResourceBase, reinforcementDueAt != nil, table.reinforcementFleet >= 128,
+              let fleet = galaxy.game.fleet(table.reinforcementFleet),
+              let dip = world.diplomacy else { return false }
+        return GovtRelations.allied(govt, fleet.govt, govts: dip.govts)
+    }
+
+    /// AI-13: the system's reinforcement retrigger delay (game days) carried
+    /// over from earlier visits; while it's running the system can't call.
+    public func holdReinforcements(retriggerDaysLeft days: Int) {
+        if days > 0 { reinforcementCooldownUntil = .infinity }
+    }
+
+    /// `Government_TryTriggerGovtAssistanceEncounter` 0x00413610, called by
+    /// the original AI for a ship of `govt` whose combat odds are `odds`
+    /// (AI-13). It needs a system ReinfFleet, no countdown running, the
+    /// retrigger delay spent, `odds > 0`, the fleet's government allied with
+    /// `govt`, and `fleet MaxOdds × 0.5 < odds` unless `forced` (the comm
+    /// dialog's call). A ModType-44 inhibitor latched for either government
+    /// costs the system its call for a day — the rest of this visit, as no
+    /// day passes in flight. Returns whether the countdown started.
+    @discardableResult
+    func requestAssistance(govt: Int, odds: Double, forced: Bool, world: World) -> Bool {
+        guard govt >= govtResourceBase, table.reinforcementFleet >= 128,
+              let fleet = galaxy.game.fleet(table.reinforcementFleet), let dip = world.diplomacy,
+              reinforcementDueAt == nil, simClock >= reinforcementCooldownUntil, odds > 0,
+              GovtRelations.allied(govt, fleet.govt, govts: dip.govts),
+              let fleetGovt = dip.govts[fleet.govt] else { return false }
+        guard forced || fleetGovt.maxOddsRatio * 0.5 < odds else { return false }
+        if dip.latches.isInhibited(govt) || dip.latches.isInhibited(fleet.govt) {
+            reinforcementCooldownUntil = .infinity
+            world.emit(.reinforcementsCalled(systemID: table.systemID, retriggerDays: 1))
+            return false
+        }
+        beginReinforcementCountdown(for: fleet.govt)
+        world.emit(.reinforcementsCalled(systemID: table.systemID,
+                                                  retriggerDays: max(table.reinforcementRegen, 1)))
+        return true
+    }
+
+    private func postReinforcementWarning(_ world: World) {
+        guard let fleet = galaxy.game.fleet(table.reinforcementFleet),
+              let strings = galaxy.game.stringList(2002)?.strings, strings.count >= 307 else { return }
+        let govt = fleet.govt >= 128 ? fleet.govt : table.systemGovt
+        let name = galaxy.game.govt(govt)?.mediumName ?? ""
+        world.postOverlayMessage(strings[305] + name + strings[306], frames: 240)
     }
 
     /// `oütf` ModType 44 (reinforcement inhibitor), player-only per the Bible:
@@ -505,12 +603,10 @@ public final class Spawner {
     /// from calling in reinforcements while the player is in the system and
     /// has this outfit... note that this outfit will only work when carried
     /// by the player." `-1` inhibits every government regardless of class.
+    /// The original latches it per government the moment the outfit is owned
+    /// and never clears it, so it outlasts a sale (OS-10, `GovernmentLatches`).
     private func isReinforcementInhibited(_ govt: Int, world: World) -> Bool {
-        let inhibited = world.player.reinforcementInhibitorClasses
-        guard !inhibited.isEmpty else { return false }
-        if inhibited.contains(-1) { return true }
-        guard let classes = world.diplomacy?.govt(govt)?.classes else { return false }
-        return !inhibited.isDisjoint(with: classes)
+        world.diplomacy?.latches.isInhibited(govt) ?? false
     }
 
     /// System-wide odds check for the reinforcement trigger: are `govt`'s
@@ -544,18 +640,22 @@ public final class Spawner {
         let foes = living.filter(isFoe)
         guard !foes.isEmpty else { return false }
 
-        // A non-hostile player being ganged up on in this government's own
+        // The port traffic model (System Aliveness): a non-hostile player being ganged up on in this government's own
         // system always calls in backup, odds check (and even the presence of
         // a friendly NPC patrol) skipped entirely — a government doesn't need
         // a patrol already on the scene, or a fair fight, to bother defending
         // a legitimate visitor from pirates in its own territory. NPC-vs-NPC
         // skirmishes still use the strength ratio below, so routine patrol
         // clashes don't summon a fleet every time.
-        if !dip.isHostileToPlayer(govt),
+        if model == .port,
+           !dip.isHostileToPlayer(govt),
            let player = living.first(where: { $0.isPlayer }),
            foes.contains(where: { $0.currentTargetID == player.entityID }) {
             return true
         }
+        // AI-13: with the original AI flying the ships, the call is theirs
+        // (`requestAssistance`); the system-wide comparison is the port's.
+        if model == .original { return false }
         guard !friends.isEmpty else { return false }
 
         // "Under attack": at least one friendly ship is a foe's current
@@ -584,7 +684,7 @@ public final class Spawner {
 
     /// Spawn a single dude's ship with an AI brain matching its disposition.
     @discardableResult
-    private func spawnDude(_ dudeID: Int, into world: World, origin: SpawnOrigin,
+    func spawnDude(_ dudeID: Int, into world: World, origin: SpawnOrigin,
                            leaderID: Int?) -> Ship? {
         guard let dude = galaxy.game.dude(dudeID) else { return nil }
         let roll = world.rng.int(in: 0...9999)
@@ -607,32 +707,21 @@ public final class Spawner {
            let gate = emergenceGate(for: govt, world: world) {
             effectiveOrigin = .hypergate(spobID: gate.id)
         }
-        let (pos, ang, arrival, originSpobID) = spawnPose(world, origin: effectiveOrigin)
+        let (pos, ang, arrival, _) = spawnPose(world, origin: effectiveOrigin)
         // Equip NPCs from their real hull loadout (preinstalled outfits: afterburner,
         // extra shields/weapons, fuel) — the same aggregation the player uses — so a
         // spawned ship matches its authentic EV Nova fit, not a bare hull.
         // Bible: "AI-controlled ships will ignore [DefaultItems]" — an ambient
         // NPC flies its hull's authored stock weapons, not the player's fit.
         guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang,
-                                               skillRoll: world.rng.double(in: -1...1),
-                                               includeDefaultItems: false) else { return nil }
+                                               skillScale: galaxy.skillVarianceScale(classOf: shipID, rng: &world.rng),
+                                               includeDefaultItems: false, defaultItemCapabilities: true) else { return nil }
+        ship.dudeID = dudeID
         let brain = AIBrain(aiType: dude.aiType, govt: govt)
         brain.leaderID = leaderID
-        brain.spawnOriginSpobID = originSpobID
-        // A trader that lifts off a spaceport is usually done here — most head
-        // straight back out to hyperspace (a visible departure), the rest hop to
-        // another port. Only solo dudes (not fleet escorts, who stay with their
-        // leader) and only trader dispositions.
-        if case .planet = effectiveOrigin, leaderID == nil, dude.aiType.isTrader,
-           world.rng.double(in: 0...1) < 0.65 {
-            brain.spawnOutbound = true
-        } else if leaderID == nil, dude.aiType.isTrader, passThroughChance > 0 {
-            // Not already outbound from a planet — give it the "System
-            // Aliveness" odds of skipping landing and just crossing the system.
-            brain.passThroughChance = passThroughChance
-        }
         ship.brain = brain
         rollDudeCargo(dude, into: ship, world: world)
+        world.assignBootyCredits(ship, dude: dude)
         // Bible: "When ships are created, there is a 5% chance that a specific
         // AI-person will also be created." Promote a matching hull to a named
         // përs (drives target name + ItemClass boarding loot).
@@ -688,8 +777,8 @@ public final class Spawner {
             let govt = pers.govt >= 128 ? pers.govt : table.systemGovt
             let (pos, ang, arrival, _) = spawnPose(world, origin: .interior)
             guard let ship = galaxy.makeLoadedShip(pers.shipType, government: govt, at: pos, angle: ang,
-                                                   skillRoll: world.rng.double(in: -1...1),
-                                                   includeDefaultItems: false) else { continue }
+                                                   skillScale: galaxy.skillVarianceScale(classOf: nil, rng: &world.rng),
+                                                   includeDefaultItems: false, defaultItemCapabilities: true) else { continue }
             ship.brain = AIBrain(aiType: AIType(raw: pers.aiType), govt: govt)
             ship.personID = pers.id
             applyPersonCustomization(pers, to: ship, world: world)
@@ -714,12 +803,17 @@ public final class Spawner {
     }
 
     /// Apply a `pêrs`'s ship customization: a shield-and-armor multiplier
-    /// (`ShieldMod`, <0 = invincible), the credits it carries for plunder, and
+    /// (`ShieldMod`, <0 = refilled every tick), the credits it carries for plunder, and
     /// its `WeapType`/`WeapCount`/`AmmoLoad` weapon layering on top of the
     /// hull's stock fit.
-    private func applyPersonCustomization(_ pers: PersRes, to ship: Ship, world: World) {
+    func applyPersonCustomization(_ pers: PersRes, to ship: Ship, world: World) {
+        // përs Flags2 0x0001: the ship starts with no fuel (0x004235c0), so it
+        // can't jump out and parks when its idle loop would leave (AI-11).
+        if pers.flags2 & 0x0001 != 0 { ship.fuel = 0 }
         if pers.shieldMod < 0 {
-            ship.maxShield = 1_000_000; ship.shield = ship.maxShield   // "invincible"
+            // AI-41: a negative ShieldMod scales nothing; `Ship_HandleShip`
+            // (0x00433050) refills the përs's shield and armor every call.
+            ship.refillsDefensesEveryTick = true
         } else if pers.shieldMod > 0, pers.shieldMod != 100 {
             // The original loader stores ShieldMod / 100 as Float32; both
             // defense-capacity helpers then multiply by that stored value.
@@ -728,26 +822,38 @@ public final class Spawner {
             ship.maxArmor *= scale; ship.armor = ship.maxArmor
         }
         if pers.credits > 0 {
-            // Credits carried, ±25% (deterministic jitter from the RNG).
-            let jitter = 0.75 + world.rng.double(in: 0...0.5)
-            ship.plunderCredits = max(0, Int(Double(pers.credits) * jitter))
+            // AI-11 (OQ C6): the spawner writes no credits; boarding reads the
+            // përs Credits field as is, with no jitter.
+            ship.plunderCredits = pers.credits
         }
         ship.brain?.personAggression = pers.aggression
         ship.brain?.personCoward = pers.coward
+        ship.personFlags = Int(pers.flags)
+        ship.brain?.cadence = AIBrain.cadence(forAggress: pers.aggression)
         applyPersonWeapons(pers, to: ship)
     }
 
     /// Layer a `pêrs`'s `WeapType`/`WeapCount`/`AmmoLoad[4]` onto the spawned
     /// hull's stock weapons. Per the Bible, a negative `WeapCount` *removes*
-    /// that many stock copies of `WeapType` instead of adding them.
+    /// that many stock copies of `WeapType` instead of adding them. The
+    /// original loader keeps one delta per weapon id, so a later triple naming
+    /// the same weapon replaces an earlier one rather than adding to it (AI-11).
     func applyPersonWeapons(_ pers: PersRes, to ship: Ship) {
+        var deltas: [(weapon: Int, count: Int, ammo: Int)] = []
         for i in 0..<4 {
             let wtype = pers.weapType[i]
             let wcount = pers.weapCount[i]
             guard wtype > 0, wcount != 0 else { continue }
+            let entry = (weapon: wtype, count: wcount, ammo: pers.ammoLoad[i])
+            if let at = deltas.firstIndex(where: { $0.weapon == wtype }) {
+                deltas[at] = entry
+            } else {
+                deltas.append(entry)
+            }
+        }
+        for (wtype, wcount, ammoLoad) in deltas {
             if wcount > 0 {
                 guard let spec = galaxy.weaponSpec(wtype) else { continue }
-                let ammoLoad = pers.ammoLoad[i]
                 if let existing = ship.weapons.first(where: { $0.spec.id == wtype }) {
                     existing.count += wcount
                     if ammoLoad > 0, existing.ammo >= 0 { existing.ammo += ammoLoad }
@@ -779,17 +885,16 @@ public final class Spawner {
         let govt = fleet.govt >= 128 ? fleet.govt
                  : (galaxy.shipSpec(fleet.leadShip)?.government ?? table.systemGovt)
 
-        let (pos, ang, arrival, originSpobID) = spawnPose(world, origin: origin)
+        let (pos, ang, arrival, _) = spawnPose(world, origin: origin)
         guard let lead = galaxy.makeLoadedShip(fleet.leadShip, government: govt, at: pos, angle: ang,
-                                               skillRoll: world.rng.double(in: -1...1),
-                                               includeDefaultItems: false) else { return }
+                                               skillScale: galaxy.skillVarianceScale(classOf: nil, rng: &world.rng),
+                                               includeDefaultItems: false, defaultItemCapabilities: true) else { return }
         // The flagship acts on its own hull's disposition (a freighter convoy leader
         // trades; a warfleet's leader fights) rather than always being a warship.
         let leadAI = galaxy.game.ship(fleet.leadShip).map { AIType(raw: $0.inherentAI) } ?? .warship
         let leadBrain = AIBrain(aiType: leadAI == .unknown ? .warship : leadAI, govt: govt)
         leadBrain.isFleetMember = true
         leadBrain.fleetID = fleetID
-        leadBrain.spawnOriginSpobID = originSpobID
         lead.brain = leadBrain
         // flët `Flags` 0x0001: freighters (InherentAI <= 2) in this fleet carry
         // random cargo, so boarding a convoy hauler actually yields loot.
@@ -807,8 +912,8 @@ public final class Spawner {
                 let offset = Vec2(world.rng.double(in: -120...120), world.rng.double(in: -120...120))
                 guard let e = galaxy.makeLoadedShip(escort.shipID, government: govt,
                                                     at: pos + offset, angle: ang,
-                                                    skillRoll: world.rng.double(in: -1...1),
-                                                    includeDefaultItems: false) else { continue }
+                                                    skillScale: galaxy.skillVarianceScale(classOf: nil, rng: &world.rng),
+                                                    includeDefaultItems: false, defaultItemCapabilities: true) else { continue }
                 // Escorts fly their own hull's disposition so that, if the flagship
                 // dies, they fall back to hull-appropriate behavior rather than
                 // always reverting to a generic interceptor.
@@ -838,7 +943,7 @@ public final class Spawner {
     /// player still sees the odd ship materialise from a gate. Govts flagged
     /// "don't use hypergates" never do. Prefers a gate the govt owns, else any
     /// gate present (stock gates all belong to the neutral "Hypergate" govt).
-    private func emergenceGate(for govt: Int, world: World) -> StellarBody? {
+    func emergenceGate(for govt: Int, world: World) -> StellarBody? {
         let gates = world.systemContext.bodies.filter { $0.isHypergate }
         guard !gates.isEmpty else { return nil }
         guard let g = galaxy.game.govt(govt), !g.avoidsHypergates else { return nil }
@@ -850,10 +955,8 @@ public final class Spawner {
     }
 
     /// Returns the spawn pose plus, for `.planet`, the id of the pad launched
-    /// from (nil otherwise) — callers feed that into `AIBrain.spawnOriginSpobID`
-    /// so the ship doesn't immediately pick the very body it just left as its
-    /// first travel destination (see `AIBrain.pickPlanetBody`).
-    private func spawnPose(_ world: World, origin: SpawnOrigin) -> (Vec2, Double, World.ArrivalMode, Int?) {
+    /// from (nil otherwise).
+    func spawnPose(_ world: World, origin: SpawnOrigin) -> (Vec2, Double, World.ArrivalMode, Int?) {
         let ctx = world.systemContext
         switch origin {
         case let .hypergate(spobID):

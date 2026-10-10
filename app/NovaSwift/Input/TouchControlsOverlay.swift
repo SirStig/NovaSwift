@@ -272,6 +272,7 @@ struct TouchControlsOverlay: View {
             // the bay like any other secondary, then fire) — recall is the one
             // dedicated fighter-bay touch command left.
             ("airplane.arrival", "Recall", { onDiscrete(.recallFighters) }, hud.hasFighterBays),
+            ("lifepreserver", "Eject", { onDiscrete(.eject) }, hud.canEject),
             ("map.fill", "Map", { onDiscrete(.galaxyMap) }, true),
             ("bolt.horizontal.circle.fill", "Jump", { onDiscrete(.hyperjump) }, true),
             ("arrow.down.to.line", "Land", { onDiscrete(.land) }, hud.landReady),

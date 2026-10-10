@@ -204,6 +204,9 @@ public struct MissionRes: Sendable {
     // Named flag bits (subset that matters to the runtime).
     public var autoAbortWhenStarted: Bool { flags1 & 0x0001 != 0 }
     public var cannotBeRefused: Bool      { flags1 & 0x0004 != 0 }
+    /// Flags 0x0010: auxiliary ships come back every visit, without limit
+    /// (the original never spends the aux budget, 0x0041d6e0).
+    public var infiniteAuxShips: Bool     { flags1 & 0x0010 != 0 }
     public var failIfScanned: Bool        { flags1 & 0x0020 != 0 }
     public var invisible: Bool            { flags1 & 0x0400 != 0 }
     public var requiresCargoSpace: Bool   { flags2 & 0x0001 != 0 }
@@ -272,12 +275,15 @@ public struct MissionRes: Sendable {
         auxShipCount   = mi16(d, 72)
         auxShipDude    = mi16(d, 74)
         auxShipSystem  = mi16(d, 76)
-        flags1         = mu16(d, 78)
-        flags2         = mu16(d, 80)
-        // 82,84: unused
-        refuseText     = mi16(d, 86)
-        availShipType  = mi16(d, 88)
-        // 90: (availShip legacy / unused word) — availShipType is the meaningful field
+        // 78: unused. Flags/Flags2/RefuseText/AvailShipType offsets match the
+        // original's mïsn reader (Flags @0x50, Flags2 @0x52, RefuseText @0x58,
+        // AvailShipType @0x5A); reading them two bytes early left Flags as zero
+        // in all 791 stock missions and put Flags into flags2.
+        flags1         = mu16(d, 80)
+        flags2         = mu16(d, 82)
+        // 84,86: unused
+        refuseText     = mi16(d, 88)
+        availShipType  = mi16(d, 90)
 
         // Seven 255-byte NCB strings; Require(8) + datePostIncrement(2) sit
         // between OnAbort and OnShipDone.

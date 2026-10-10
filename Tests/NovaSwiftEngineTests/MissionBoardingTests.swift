@@ -65,7 +65,8 @@ final class MissionBoardingTests: XCTestCase {
         let target = try XCTUnwrap(world.ship(id: try XCTUnwrap(ids.first)))
         XCTAssertTrue(target.disabled)
         XCTAssertTrue(target.isAlive)
-        XCTAssertEqual(target.armor, 13.5, accuracy: 0.001)
+        XCTAssertEqual(target.armor, target.maxArmor, accuracy: 0.001,
+                       "a derelict government holds it disabled at its real armor")
         XCTAssertNotNil(world.board(shipID: target.entityID))
         let goals = reachedGoals(world.drainEvents())
         XCTAssertEqual(goals.count, 1)

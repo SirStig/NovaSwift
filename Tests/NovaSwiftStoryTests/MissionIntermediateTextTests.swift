@@ -159,7 +159,10 @@ final class MissionIntermediateTextTests: XCTestCase {
                        "DropCargoText must NOT show on an abort release")
     }
 
-    func testDropCargoTextNotShownOnFailure() {
+    func testFailedMissionKeepsItsCargoUntilTheReturnLanding() {
+        // MS-07: a failed mission stays in its slot, cargo and all. The landing
+        // at its return stellar still unloads the cargo (DropCargoText shows,
+        // as in the original's landing pass) and then resolves the failure.
         let spec = MissionSpec(id: 200, returnStellar: 400,
                                cargoType: 0, cargoQty: 5,
                                cargoPickup: 0, cargoDropoff: 1,
@@ -167,8 +170,11 @@ final class MissionIntermediateTextTests: XCTestCase {
         let (eng, svc) = engine([spec, descResource(id: 5200, text: "Delivery complete")])
         XCTAssertTrue(eng.accept(200))
         eng.failMission(200)
-        XCTAssertNil(eng.player.cargo[0], "cargo lost on failure")
-        XCTAssertEqual(storyTextCount(svc, containing: "Delivery complete"), 0,
-                       "DropCargoText must NOT show on a fail release")
+        XCTAssertEqual(eng.player.cargo[0], 5, "still aboard while the failure is pending")
+        XCTAssertEqual(storyTextCount(svc, containing: "Delivery complete"), 0)
+        eng.playerLanded(onSpob: 400)
+        XCTAssertNil(eng.player.cargo[0])
+        XCTAssertFalse(eng.player.isMissionActive(200))
+        XCTAssertEqual(eng.player.credits, 0, "a failed mission never pays")
     }
 }

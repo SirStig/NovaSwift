@@ -15,16 +15,21 @@ import NovaSwiftStory
 ///   item 6     (60,195) 150×25                — Jettison Cargo
 ///   item 0     (293,195) 99×25                — Done
 /// Tab labels are the game's own `STR# 150` entries 36–39; the pane text is
-/// composed from the live pilot the way the original describes itself.
+/// `PlayerInfoPages`, the original's stat grid and lists (UI-13).
 struct PlayerInfoView: View {
     let graphics: SpaceportGraphics
     @ObservedObject var pilot: PilotStore
+    /// The live ship's figures for the stat grid (turn, thrust, speed, shield,
+    /// armor, energy); nil leaves those rows out.
+    var shipFigures: PlayerInfoPages.ShipFigures? = nil
     /// Jettison the pilot's cargo (also clears the live ship's hold when the
     /// caller can reach it). Nil hides nothing — the button just greys out.
     var onJettison: (() -> Void)?
     var onDone: () -> Void
 
     @State private var tab: Tab = .general
+    /// The original confirms a jettison first (STR# 2002 #291).
+    @State private var confirmingJettison = false
     enum Tab: CaseIterable { case general, cargo, extras, honors }
 
     private var game: NovaGame { graphics.game }
@@ -49,8 +54,7 @@ struct PlayerInfoView: View {
             tabButton(.honors,  SpaceportLabel.infoHonors,  "Honors",  cx: 100.5)
 
             ScrollView(showsIndicators: false) {
-                NovaText(paneText, size: 10, width: 393, align: .leading)
-                    .padding(.top, 4).padding(.leading, 6)
+                pane
             }
             .cursorScrollable()
             .frame(width: 405, height: 141)
@@ -60,7 +64,11 @@ struct PlayerInfoView: View {
             NovaButton(graphics: graphics,
                        title: graphics.buttonLabel(SpaceportLabel.jettisonCargo, fallback: "Jettison Cargo"),
                        width: 124, enabled: onJettison != nil && pilot.state.usedCargoSpace > 0) {
-                onJettison?()
+                confirmingJettison = true
+            }
+            .alert(game.stringList(2002)?.string(at: 291) ?? "", isPresented: $confirmingJettison) {
+                Button(graphics.buttonLabel(50, fallback: "Yes"), role: .destructive) { onJettison?() }
+                Button(graphics.buttonLabel(51, fallback: "No"), role: .cancel) {}
             }
             .novaPlace(space, -146.5, 81.5)
 
@@ -100,97 +108,44 @@ struct PlayerInfoView: View {
 
     // MARK: - Pane text
 
-    private var paneText: String {
+    private var pages: PlayerInfoPages { PlayerInfoPages(game: game, player: pilot.state) }
+
+    /// The pane: the original's two-column stat grid on page 1 (0x0049a540;
+    /// UI-13), text on the others.
+    @ViewBuilder private var pane: some View {
         switch tab {
-        case .general: return generalText
-        case .cargo:   return cargoText
-        case .extras:  return extrasText
-        case .honors:  return honorsText
-        }
-    }
-
-    private var generalText: String {
-        let p = pilot.state
-        var lines: [String] = []
-        let shipClass = game.ship(p.shipType)?.displayName ?? "ship"
-        let shipName = p.shipName.isEmpty ? shipClass : p.shipName
-        lines.append("You are Captain \(p.pilotName), of the \(shipClass) \(shipName).")
-        lines.append("")
-        lines.append("You have \(p.credits.creditsAbbreviated).")
-        lines.append("Your combat rating is \(CombatRating.title(forRating: p.combatRating)).")
-        if let govt = game.system(p.currentSystem)?.government,
-           let name = game.govt(govt)?.displayName {
-            let record = p.effectiveLegalRecord(govt: govt, atSystem: p.currentSystem)
-            let status: String
-            switch record {
-            case ..<(-200): return lines.joined(separator: "\n") + "\nYou are an enemy of the \(name)."
-            case ..<0:      status = "You are wanted by the \(name)."
-            case 0:         status = "You have no legal record with the \(name)."
-            default:        status = "You are in good standing with the \(name)."
+        case .general:
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    gridColumn(pages.leftColumn(shipFigures), labelWidth: 75, valueWidth: 120)
+                    gridColumn(pages.rightColumn(shipFigures), labelWidth: 70, valueWidth: 120)
+                }
+                NovaText(pages.dailyEconomy(), size: 10, width: 393, align: .leading)
             }
-            lines.append(status)
+            .padding(.top, 4).padding(.leading, 6)
+        case .cargo:
+            paneText(pages.cargo())
+        case .extras:
+            paneText(pages.extras(tradeInValue: PilotEconomy.tradeInValue(pilot.state, game: game)))
+        case .honors:
+            paneText(pages.honors())
         }
-        lines.append("The date is \(PlayerInfoView.longDate(p.date)).")
-        return lines.joined(separator: "\n")
     }
 
-    private var cargoText: String {
-        let cargo = pilot.state.cargo.filter { $0.value > 0 }
-        guard !cargo.isEmpty else { return "You are not carrying any cargo." }
-        var lines = ["Current cargo aboard your ship:", ""]
-        for (type, tons) in cargo.sorted(by: { $0.key < $1.key }) {
-            let name = Commodity(rawValue: type).map { game.commodityName($0) } ?? "Cargo #\(type)"
-            lines.append("\(tons) tons of \(name)")
-        }
-        return lines.joined(separator: "\n")
+    private func paneText(_ s: String) -> some View {
+        NovaText(s, size: 10, width: 393, align: .leading)
+            .padding(.top, 4).padding(.leading, 6)
     }
 
-    private var extrasText: String {
-        // Outfits flagged `0x2000` appear "in the Ranks section of the player
-        // info dialog instead of in the Extras section" (Bible) — see
-        // `honorsText` below.
-        let owned = pilot.state.outfits.filter { $0.value > 0 }
-            .filter { game.outfit($0.key)?.showsInRanksSection != true }
-        guard !owned.isEmpty else { return "Your ship carries no extra equipment." }
-        // The original reads as prose: "Current outfit for your ship: a light
-        // blaster, 2 fuel scoops, …" — one comma-joined sentence, using the
-        // oütf record's lowercase names when it provides them.
-        let items = owned.sorted { $0.key < $1.key }.map { id, qty -> String in
-            guard let o = game.outfit(id) else { return "outfit #\(id)" }
-            return qty > 1 ? "\(qty) \(o.lowercasePluralDisplayName)" : o.lowercaseDisplayName
+    private func gridColumn(_ rows: [PlayerInfoPages.Row], labelWidth: CGFloat, valueWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(rows, id: \.self) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    NovaText(row.label, size: 9, color: Color(white: 0.6), width: labelWidth, align: .leading)
+                    NovaText(row.value, size: 9, width: valueWidth, align: .leading)
+                }
+            }
         }
-        return "Current outfit for your ship:\n\n" + items.joined(separator: ", ") + "."
-    }
-
-    private var honorsText: String {
-        var honors = pilot.state.activeRanks
-            .compactMap { game.rank($0)?.conversationName }
-            .filter { !$0.isEmpty }
-            .sorted()
-        // Ranks-section outfits (`oütf.Flags 0x2000`) — permits, licenses and
-        // the like — list among the honors rather than the ship's equipment.
-        honors += pilot.state.outfits
-            .filter { $0.value > 0 }
-            .compactMap { id, _ in game.outfit(id) }
-            .filter(\.showsInRanksSection)
-            .map(\.displayName)
-            .sorted()
-        guard !honors.isEmpty else { return "You have not been granted any special honors." }
-        return "You hold the following titles and honors:\n\n" + honors.joined(separator: "\n")
-    }
-
-    /// "June 23rd, 1177" — the long calendar form the game uses in prose.
-    private static func longDate(_ d: GameDate) -> String {
-        let months = ["January","February","March","April","May","June","July",
-                      "August","September","October","November","December"]
-        let month = (1...12).contains(d.month) ? months[d.month - 1] : "\(d.month)"
-        let suffix: String
-        switch d.day % 100 {
-        case 11, 12, 13: suffix = "th"
-        default:
-            switch d.day % 10 { case 1: suffix = "st"; case 2: suffix = "nd"; case 3: suffix = "rd"; default: suffix = "th" }
-        }
-        return "\(month) \(d.day)\(suffix), \(d.year) NC"
     }
 }
 

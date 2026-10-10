@@ -216,9 +216,11 @@ final class StoryGuideModel: ObservableObject {
                                                       player: PlayerState) -> PilotSummary {
         let ranks = player.activeRanks.compactMap { game.rank($0)?.conversationName }
             .filter { !$0.isEmpty }.sorted()
-        let relations = player.legalRecord
+        // The legal record is one reputation per system (EC-02): list the
+        // systems where it isn't neutral, strongest first.
+        let relations = (player.systemReputation ?? [:])
             .filter { $0.value != 0 }
-            .map { PilotSummary.Relation(govt: game.govt($0.key)?.displayName ?? "Govt #\($0.key)", standing: $0.value) }
+            .map { PilotSummary.Relation(govt: game.system($0.key)?.name ?? "System #\($0.key)", standing: $0.value) }
             .sorted { abs($0.standing) > abs($1.standing) }
         let active = player.activeMissions.compactMap { am -> PilotSummary.MissionBrief? in
             guard let s = analyzer.brief(forMission: am.missionID, player: player) else { return nil }

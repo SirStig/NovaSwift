@@ -125,7 +125,7 @@ final class TargetingTests: XCTestCase {
         far.disabled = true
 
         XCTAssertNil(world.selectNearestTarget(hostileOnly: false))
-        world.player.cloakScannerFlags = 0x0008
+        world.player.cloakScannerFlags = 0x0002   // engages cloaked ships within 200 px (OS-04)
         XCTAssertEqual(world.selectNearestTarget(hostileOnly: false)?.entityID, hidden.entityID,
                        "a cloak scanner can expose a boardable hulk")
         hidden.armor = 0

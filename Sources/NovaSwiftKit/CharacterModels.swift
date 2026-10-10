@@ -59,10 +59,15 @@ public struct CharRes: Sendable {
         public let govt: Int
         public let status: Int
     }
-    /// One intro-slideshow slide: a PICT id and how long to show it (seconds).
+    /// One intro-slideshow slide: a PICT id and how long to show it.
     public struct IntroSlide: Hashable, Sendable {
         public let pictID: Int
+        /// The raw `IntroPictDelay` field. Despite the name it counts 60 ms
+        /// ticks in the original (stock 45 = 2.7 s); see `duration`.
         public let delaySeconds: Int
+        /// How long the original shows the slide: `delay` × 60 ms, the delay
+        /// clamped to 0…300 (0x004cd3b0, MS-22).
+        public var duration: Double { Double(max(0, min(delaySeconds, 300))) * 0.06 }
     }
 
     public let id: Int

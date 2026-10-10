@@ -71,12 +71,11 @@ final class ShipSystemTests: XCTestCase {
         XCTAssertEqual(lo.jumpRange, 4)
         XCTAssertNotNil(lo.afterburner, "outfit grants an afterburner")
         XCTAssertEqual(lo.usedMass, 5)
-        // Bible `shïp.FreeMass`: "space available to add additional items...
-        // in addition to the space taken up by the ship's stock weapons" — the
-        // decoded field is the fixed ceiling as-is, not inflated by whatever's
-        // currently installed.
-        XCTAssertEqual(lo.massCapacity, 40, "the hull's raw FreeMass field, unchanged by what's installed")
-        XCTAssertEqual(lo.freeMass, 35, "40 capacity − 5 used by the preinstalled outfit")
+        // EC-08: the loader adds the stock loadout's purchase mass (the 5 t
+        // DefaultItem) to the class FreeMass, so the stock hull shows its
+        // resource FreeMass exactly.
+        XCTAssertEqual(lo.massCapacity, 45, "FreeMass 40 + the 5 t DefaultItem")
+        XCTAssertEqual(lo.freeMass, 40, "45 capacity − 5 used by the preinstalled outfit")
         // Stock weapon 128 + outfit-granted weapon 129.
         XCTAssertEqual(Set(lo.weapons.map(\.id)), [128, 129])
     }
@@ -92,9 +91,9 @@ final class ShipSystemTests: XCTestCase {
         let one = try XCTUnwrap(galaxy.loadout(shipID: 128, extraOutfits: [200: 1]))
         let three = try XCTUnwrap(galaxy.loadout(shipID: 128, extraOutfits: [200: 3]))
 
-        XCTAssertEqual(zero.freeMass, 35, "just the preinstalled outfit (mass 5) against 40 capacity")
-        XCTAssertEqual(one.freeMass, 30, "one more 5-ton outfit bought on top")
-        XCTAssertEqual(three.freeMass, 20, "three more 5-ton outfits bought on top")
+        XCTAssertEqual(zero.freeMass, 40, "the stock hull shows its FreeMass (EC-08)")
+        XCTAssertEqual(one.freeMass, 35, "one more 5-ton outfit bought on top")
+        XCTAssertEqual(three.freeMass, 25, "three more 5-ton outfits bought on top")
         XCTAssertEqual(one.massCapacity, zero.massCapacity, "the ceiling itself never moves, only usedMass")
     }
 
@@ -138,7 +137,8 @@ final class ShipSystemTests: XCTestCase {
         col.add(Resource(type: NovaType.outfit, id: 201, name: "Jump Organ", data: Data(out)))
 
         let lo = try XCTUnwrap(Galaxy(game: NovaGame(col)).loadout(shipID: 128))
-        XCTAssertEqual(lo.maxJumpHops, 3, "base 1 + multiJump 2")
+        XCTAssertEqual(lo.multiJumpDepth, 3, "base 1 + multiJump 2")
+        XCTAssertEqual(lo.maxJumpHops, 2, "the jump crosses depth − 1 = 2 route systems (FL-06)")
         XCTAssertTrue(lo.instantJump, "a fastJump outfit makes jumps instant")
 
         // A plain hull with no jump outfits keeps the single-hop, slow-jump default.
@@ -358,10 +358,9 @@ final class ShipSystemTests: XCTestCase {
         XCTAssertNil(ship2.weapons.first { $0.spec.id == 400 }, "the pod variant itself was never owned")
     }
 
-    func testSkillVarJittersAccelAndTurnByRoll() throws {
-        // shïp.SkillVar (Bible): "up to X% slower or faster than stock" —
-        // applied to acceleration and turn rate together via one per-instance
-        // roll, and only when a roll is actually supplied.
+    func testSkillVarianceScalesSpeedAndThrustButNotTurn() throws {
+        // FL-15: scale = (range(2p + 1) + 100 − p) × 0.01 on top speed and
+        // thrust, times the government's SkillMult; turn is untouched.
         var col = ResourceCollection()
         var ship = [UInt8](repeating: 0, count: 2000)
         put16(&ship, 4, 200)   // accel
@@ -369,24 +368,29 @@ final class ShipSystemTests: XCTestCase {
         put16(&ship, 8, 30)    // turn
         put16(&ship, 96, 20)   // SkillVar: 20%
         col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
+        var govt = [UInt8](repeating: 0, count: 200)
+        put16(&govt, 48, 150)  // SkillMult 1.5
+        col.add(Resource(type: NovaType.govt, id: 128, name: "Elite", data: Data(govt)))
         let galaxy = Galaxy(game: NovaGame(col))
 
-        // Raw stat -> px/sec² goes through `FlightTuning.default.accelScale`
-        // (currently 0.55, calibrated against the original's flight feel —
-        // see `FlightTuning`'s doc comment) before SkillVar's jitter is
-        // applied on top, so expectations are derived from that scale rather
-        // than assuming raw stats pass straight through unscaled.
-        let scaledAccel = 200 * FlightTuning.default.accelScale
         let stock = try XCTUnwrap(galaxy.makeShip(128))
-        XCTAssertEqual(stock.stats.acceleration, scaledAccel, accuracy: 1e-9, "no roll supplied -> no jitter")
+        XCTAssertEqual(stock.stats.acceleration, 200 * 0.18, accuracy: 1e-9, "no roll supplied -> no variance")
+        XCTAssertEqual(stock.stats.maxSpeed, 300 * 0.30, accuracy: 1e-9)
 
-        let ace = try XCTUnwrap(galaxy.makeShip(128, skillRoll: 1.0))
-        XCTAssertEqual(ace.stats.acceleration, scaledAccel * 1.2, accuracy: 1e-9, "+20% at roll = 1.0")
-        XCTAssertEqual(ace.stats.turnRate, stock.stats.turnRate * 1.2, accuracy: 1e-9)
+        var rng = NovaRandom(seed: 1 as UInt32)
+        var scales: [Double] = []
+        for _ in 0..<500 { scales.append(galaxy.skillVarianceScale(classOf: 128, rng: &rng)) }
+        XCTAssertEqual(scales.min()!, 0.80, accuracy: 1e-9)
+        XCTAssertEqual(scales.max()!, 1.20, accuracy: 1e-9)
 
-        let rookie = try XCTUnwrap(galaxy.makeShip(128, skillRoll: -1.0))
-        XCTAssertEqual(rookie.stats.acceleration, scaledAccel * 0.8, accuracy: 1e-9, "-20% at roll = -1.0")
-        XCTAssertEqual(rookie.stats.maxSpeed, stock.stats.maxSpeed, "SkillVar doesn't touch top speed")
+        let ace = try XCTUnwrap(galaxy.makeShip(128, government: independentGovt, skillScale: 1.2))
+        XCTAssertEqual(ace.stats.acceleration, 200 * 0.18 * 1.2, accuracy: 1e-9)
+        XCTAssertEqual(ace.stats.maxSpeed, 300 * 0.30 * 1.2, accuracy: 1e-9)
+        XCTAssertEqual(ace.stats.turnRate, stock.stats.turnRate, accuracy: 1e-12, "variance never touches turn")
+
+        let elite = try XCTUnwrap(galaxy.makeShip(128, government: 128, skillScale: 1.0))
+        XCTAssertEqual(elite.stats.maxSpeed, 300 * 0.30 * 1.5, accuracy: 1e-9, "gövt SkillMult scales top speed")
+        XCTAssertEqual(elite.stats.acceleration, 200 * 0.18 * 1.5, accuracy: 1e-9, "…and thrust")
     }
 
     // MARK: fuel / jumps
@@ -412,7 +416,7 @@ final class ShipSystemTests: XCTestCase {
         let before = ship.fuel
         ship.step(1.0, intent: intent, tuning: .default)
         XCTAssertTrue(ship.afterburnerActive)
-        XCTAssertEqual(ship.fuel, before - 37, accuracy: 0.001, "afterburner drains fuel")
+        XCTAssertEqual(ship.fuel, before - 37 * 0.999, accuracy: 0.001, "ModVal × 0.0333 per tick")
         // While the burner is still lit (fuel remaining), top speed exceeds the
         // un-boosted maximum. (Run only long enough to accelerate, not drain dry.)
         for _ in 0..<20 { ship.step(0.1, intent: intent, tuning: .default) }

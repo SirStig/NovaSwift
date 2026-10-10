@@ -1,21 +1,24 @@
 import Foundation
 import NovaSwiftKit
 
-/// A rock in a system — EV Nova's `röid`. Real per-type stats (`Strength`,
-/// `Mass`, fragmentation) come straight from the decoded `RoidRes`. The Bible
-/// documents no position/velocity field for asteroids, only a rotation-frame-
-/// advance rate (`SpinRate`), so asteroids are scattered once when a system is
-/// entered and spin in place rather than drifting — that's what the source
-/// data actually specifies, not an invented simplification.
+/// A rock in a system's asteroid field — EV Nova's `röid`. Real per-type stats
+/// (`Strength`, `Mass`, fragmentation, yield) come straight from the decoded
+/// `RoidRes`. The field itself is the original's 16-slot pool that drifts and
+/// travels with the player (see `World.populateAsteroids`).
 public final class Asteroid {
     public let id: Int
     public let roidTypeID: Int
-    public let position: Vec2
+    public var position: Vec2
+    /// Drift, px/s (the original rolls ±2 px/tick per axis).
+    public var velocity = Vec2()
     public var angle: Double
     /// Degrees/sec, derived from `RoidRes.spinRate` (Bible: "100 = 30 frames
     /// per second" advancing through the 36-frame rotation sheet, i.e. 10° —
-    /// 360°/36 frames — per frame at that rate).
-    public let angularVelocityDegPerSec: Double
+    /// 360°/36 frames — per frame at that rate), then scaled by the spawn's
+    /// 0.80–1.20 roll and given a random direction.
+    public var angularVelocityDegPerSec: Double
+    /// Render-interpolation snapshot (see `Ship.renderPrevPosition`).
+    public var renderPrevPosition: Vec2
     public var hp: Double
     /// Collision radius (px), taken from the matching `spïn`'s real sprite
     /// tile width, not an invented constant.
@@ -45,6 +48,7 @@ public final class Asteroid {
         self.id = id
         self.roidTypeID = roidTypeID
         self.position = position
+        self.renderPrevPosition = position
         self.angle = angle
         self.angularVelocityDegPerSec = Double(roid.spinRate) / 100.0 * 30.0 * 10.0
         self.hp = max(1, Double(roid.strength) * hpScale)
@@ -70,4 +74,41 @@ public final class Asteroid {
         if a < 0 { a += twoPi }
         return Int((a / twoPi * Double(n)).rounded()) % n
     }
+}
+
+/// A freeflight object: the original's 64-slot pool of drifting boxes
+/// (`Ship_SpawnFreeflightObjectAtPosition` 0x0041fb50, ticked by 0x0042c1b0).
+/// A destroyed asteroid leaves its yield as these resource boxes; a ship with a
+/// working scoop collects one ton per box by flying through it (OS-11).
+public final class FreeflightObject {
+    public let id: Int
+    public var position: Vec2
+    public var renderPrevPosition: Vec2
+    /// px/s.
+    public var velocity: Vec2
+    /// Seconds left before the box expires (300–499 ticks at spawn).
+    public var lifeRemaining: Double
+    /// Rotation frame, 0..<36, advanced `spin` frames per tick.
+    public var frame: Double
+    public let spin: Int
+    /// The commodity (0–5) or junk (1000–1127) a scoop collects.
+    public let cargoType: Int
+    /// Which `spïn` 500+n box set draws it (0 = jettisoned cargo; asteroid
+    /// yields use 1–4 by rock size).
+    public let spriteSet: Int
+
+    init(id: Int, position: Vec2, velocity: Vec2, lifeRemaining: Double, frame: Double,
+         spin: Int, cargoType: Int, spriteSet: Int) {
+        self.id = id
+        self.position = position
+        self.renderPrevPosition = position
+        self.velocity = velocity
+        self.lifeRemaining = lifeRemaining
+        self.frame = frame
+        self.spin = spin
+        self.cargoType = cargoType
+        self.spriteSet = spriteSet
+    }
+
+    public var spriteFrame: Int { Int(frame.rounded(.down)) % 36 }
 }

@@ -1,72 +1,61 @@
 # Reverse-engineering
 
-The `.rez` files hold only static data — numbers, text, sprites. They never hold
-the *rules* that act on it. These docs recover those rules, per resource, so the
-port can reimplement them instead of guessing.
+The game's data files hold numbers, text and sprites, not the rules that act on
+them. The docs here describe those rules so NovaSwift can implement them.
 
-## The standard
+## Sources, strongest first
 
-Every claim in this folder follows the same contract, so individual docs don't
-repeat it:
+1. **The original executable.** The Windows build of EV Nova CE has been
+   decompiled in full (3,199 functions). Behaviour read from it is cited by
+   function address and name. Where reading wasn't enough, the routine was run
+   by itself in an emulator on test inputs and its output recorded. This is the
+   final word.
+2. **The Nova Bible**, ATMOS's resource documentation (`Nova Bible.txt`). Good
+   for intent and field meanings; it gives no formulas.
+3. **The resource templates** in
+   `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc`, for field
+   offsets. Dump one with `novaswift-extract tmpl <Templates.rsrc> <id>` (spöb 520,
+   shïp 518, shän 517, wëap 522) and check it against real bytes with
+   `novaswift-extract raw data/base <type> <id>`. The dumper walks `KEYB`/`KEYE`
+   union sections in sequence instead of overlaying them, so for `wëap` and
+   `shän` the printed branch offsets are not the flat record layout.
 
-- **Ground truth is ATMOS's own developer documentation.** Claims are verbatim
-  quotes or close paraphrases of `Nova Bible.txt`, the official Ambrosia / Matt
-  Burch "Resource Bible" — not inference from watching the game.
-- **Field offsets come from the real templates.** ResForge's `TMPL` resources in
-  `third_party/ResForge/Plugins/Sources/NovaTools/Templates.rsrc` are
-  authoritative. Dump one with
-  `novaswift-extract tmpl <Templates.rsrc> <id>` (spöb 520, shïp 518, shän 517,
-  wëap 522; `list` the file for the rest), then confirm against real bytes with
-  `novaswift-extract raw data/base <type> <id>`.
+Most of the per-resource docs below were first written from the Bible and real
+data. Where one of them disagrees with
+[FIDELITY_PLAN.md](FIDELITY_PLAN.md), the plan is right, because it was checked
+against the executable.
 
-  Watch for `KEYB`/`KEYE` union sections — the dumper walks them sequentially
-  rather than overlaying them, so for `wëap` and `shän` the printed branch
-  offsets are *not* the flat record layout.
-- **Guesses are labelled.** Where the Bible gives endpoints but no curve, the
-  interpolation is called out as our reading, not a documented rule. Where it
-  gives nothing at all, that's stated as an open question rather than invented.
+No decompiled code is kept here or anywhere in the repository. Specs restate
+behaviour in prose, short formulas and constants, with the original address so
+anyone with the executable can check them.
 
-**These docs describe the original game, not our progress against it.** For
-whether something is implemented, see [STATUS.md](../STATUS.md) — one place, so
-nine documents can't disagree.
-
-[NCB_BINARY.md](NCB_BINARY.md) records an additional kind of evidence: isolated
-execution of a pinned routine from the EV Nova CE Windows executable. It
-distinguishes observed binary quirks from documented syntax and states the
-inputs and context behavior that were not verified.
+These docs describe the original game, not NovaSwift's progress. For that, see
+[STATUS.md](../STATUS.md).
 
 ## The documents
 
-| Doc | Resources | Covers |
-|---|---|---|
-| [AI_GROUND_TRUTH.md](AI_GROUND_TRUTH.md) | `düde`, `gövt`, `shïp` | AI dispositions and combat behaviour, extracted from the Bible in full |
-| [GOVERNMENT.md](GOVERNMENT.md) | `gövt`, `ränk` | Government relations, legal status and crime tolerance, combat rating, rank and salary |
-| [FLEETS.md](FLEETS.md) | `flët`, `sÿst` | Fleet composition, `LinkSyst` targeting, background traffic vs. reinforcements |
-| [ECONOMY.md](ECONOMY.md) | `spöb`, `jünk`, `öops` | Commodity pricing, junk cargo, price-disaster events |
-| [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md) | `jünk`, `öops` | Implementation plan for junk trading and price disasters (builds on ECONOMY.md) |
-| [DOMINATION.md](DOMINATION.md) | `spöb`, `düde` | Demand Tribute: defence waves, the combat-rating gate, daily tribute |
-| [OUTFITTERS.md](OUTFITTERS.md) | `oütf` | Slots and mass, availability gating, pricing, ammo linkage, `BuyRandom` stocking |
-| [EVENTS.md](EVENTS.md) | `crön` | Timed and triggered background events, the activate/hold/start/end lifecycle, galaxy news |
-| [ESCORTS.md](ESCORTS.md) | `përs`, `shïp` | Named NPCs, and the real hire/requisition/capture escort system (it lives in `shïp`, not `përs`) |
-| [NCB_BINARY.md](NCB_BINARY.md) | NCB TEST expressions | Original cursor, counted-set, operator, and negation behavior; x86 comparison against the EV Nova CE Windows executable |
-| [PERSON_DEFENSE_BINARY.md](PERSON_DEFENSE_BINARY.md) | `përs` | `ShieldMod` scales armor as well as shields, checked against the original executable's armor-capacity helper |
+| Doc | Covers |
+|---|---|
+| [FIDELITY_PLAN.md](FIDELITY_PLAN.md) | Every difference found between NovaSwift and the original executable, as 177 items with addresses, fixes and tests. Also lists the optional Enhancements and remaining open questions. |
+| [NCB_BINARY.md](NCB_BINARY.md) | NCB test expressions, run against the original executable: cursor, counted sets, operators, negation. |
+| [PERSON_DEFENSE_BINARY.md](PERSON_DEFENSE_BINARY.md) | `përs` ShieldMod scales armor as well as shields, checked against the executable. |
+| [AI_GROUND_TRUTH.md](AI_GROUND_TRUTH.md) | AI dispositions and combat behaviour from the Bible (`düde`, `gövt`, `shïp`). |
+| [GOVERNMENT.md](GOVERNMENT.md) | Government relations, legal status, combat rating, ranks (`gövt`, `ränk`). |
+| [FLEETS.md](FLEETS.md) | Fleet composition, `LinkSyst`, background traffic and reinforcements (`flët`, `sÿst`). |
+| [ECONOMY.md](ECONOMY.md) | Commodity prices, junk cargo, price disasters (`spöb`, `jünk`, `öops`). |
+| [JUNK_OOPS_DESIGN.md](JUNK_OOPS_DESIGN.md) | The original design notes for junk trading and price disasters. |
+| [DOMINATION.md](DOMINATION.md) | Demand Tribute, defence waves, daily tribute. |
+| [OUTFITTERS.md](OUTFITTERS.md) | Outfit slots, mass, availability, pricing, ammo (`oütf`). |
+| [EVENTS.md](EVENTS.md) | `crön` events and galaxy news. |
+| [ESCORTS.md](ESCORTS.md) | Named NPCs, and hired, requisitioned and captured escorts (`përs`, `shïp`). |
 
-Covered elsewhere: mission and NCB scripting in [MISSIONS.md](../MISSIONS.md);
-hull and outfit stat aggregation in [SHIP_SYSTEM.md](../SHIP_SYSTEM.md);
-container and sprite formats in [DATA_FORMAT.md](../DATA_FORMAT.md).
+Also: missions and NCB scripting in [MISSIONS.md](../MISSIONS.md), hull and
+outfit stats in [SHIP_SYSTEM.md](../SHIP_SYSTEM.md), file formats in
+[DATA_FORMAT.md](../DATA_FORMAT.md).
 
 ## Open questions
 
-The Bible is a prose spec, not a formula sheet. Each doc lists its own
-unresolved points; these are the ones that would need `EV Nova.exe` disassembly
-to settle:
-
-- The combat-rating formula's internal multiplier (GOVERNMENT.md §3).
-- Whether government hostility is symmetric or one-directional per declarer
-  (GOVERNMENT.md §1.2).
-- The exact Low/Medium/High commodity price arithmetic — the Bible gives tiers,
-  not a formula from a base price (ECONOMY.md §1).
-- Whether `crön`'s iterative flags loop within one day-tick or across days
-  (EVENTS.md).
-- The escort hire-price field and roster capacity, which the Bible never names
-  (ESCORTS.md §4).
+Most questions these docs used to list were settled from the executable,
+including the combat-rating multiplier (WP-04), commodity price arithmetic
+(EC-03), `crön` iteration (MS) and hire prices (EC-09). What is still open is in §6 of
+[FIDELITY_PLAN.md](FIDELITY_PLAN.md).

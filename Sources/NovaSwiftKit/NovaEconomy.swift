@@ -10,13 +10,10 @@ import Foundation
 // docs/DATA_FORMAT.md): the `spöb` `flags` word (@6) packs both the six standard
 // commodity price levels (one nibble each in the upper 24 bits, Food first) and
 // the service bits (low byte); `chär` holds the starting pilot. The standard
-// commodity prices themselves are scenario data: per the Bible's Appendix III
-// ("Patching STR# Resources", lines 3580-3609), a plugin overrides them with
-// single `STR ` resources 9300-9305 (one base-price string per commodity),
-// the same override mechanism `STR ` 9400-9405 uses for status-bar
-// abbreviations — see `NovaGame.commodityPrices(_:)` below. The hardcoded
-// table on `Commodity.prices` is only the fallback for data that doesn't
-// define the override (see docs/reverse-engineering/ECONOMY.md §1/§5).
+// commodity base prices are scenario data: the original reads each one from a
+// single `STR ` override (9300-9305) when present, else from `STR# 4004`
+// entries 1-6 (`Ship_InitGameplayDataTables` 0x004b0c20) — see
+// `NovaGame.commodityBasePrice(_:)`.
 
 // MARK: Local big-endian helpers (the ones in NovaModels are file-private)
 
@@ -37,12 +34,9 @@ import Foundation
 // MARK: - Standard commodities & price levels
 
 /// EV Nova's six standard trade goods. Display names come from `STR# 4000` at
-/// runtime (see `NovaGame.commodityName`); the built-in names here are the
-/// fallback, and the Low/Medium/High table is the credits-per-ton price. Per
-/// the Bible's Appendix III, those absolute prices are themselves patchable
-/// scenario data (`STR ` 9300-9305) — see `NovaGame.commodityPrices(_:)`,
-/// which prefers that data and falls back to the table below only when the
-/// data doesn't define it.
+/// runtime (see `NovaGame.commodityName`) and base prices from `STR# 4004` (see
+/// `NovaGame.commodityBasePrice`); the built-in values here are only the
+/// fallback for data that defines neither.
 public enum Commodity: Int, CaseIterable, Sendable {
     case food = 0, industrial, medical, luxury, metal, equipment
 
@@ -61,18 +55,27 @@ public enum Commodity: Int, CaseIterable, Sendable {
         }
     }
 
-    /// (low, medium, high) credits per ton — the built-in fallback table, used
-    /// when the scenario data has no `STR ` 9300-9305 override. Prefer
-    /// `NovaGame.commodityPrices(_:)` for the actual in-game price.
-    public var prices: (low: Int, medium: Int, high: Int) {
+    /// The stock `STR# 4004` base price, used only when the data has no base
+    /// price for this commodity.
+    public var fallbackBasePrice: Int {
         switch self {
-        case .food:       return (12, 15, 18)
-        case .industrial: return (30, 35, 40)
-        case .medical:    return (80, 90, 100)
-        case .luxury:     return (150, 175, 200)
-        case .metal:      return (200, 250, 300)
-        case .equipment:  return (400, 450, 500)
+        case .food:       return 75
+        case .industrial: return 350
+        case .medical:    return 750
+        case .luxury:     return 900
+        case .metal:      return 200
+        case .equipment:  return 550
         }
+    }
+
+    /// The trade center's Low/Medium/High prices for a base price
+    /// (`NovaUi_RunTradeCenterWindow` 0x0048c730): Low = trunc(base / scale),
+    /// Medium = base, High = trunc(base × scale), each floored at 5. The scale
+    /// is 1.25 unless the stellar's system reputation or domination changes it.
+    public static func prices(base: Int, scale: Float = 1.25) -> (low: Int, medium: Int, high: Int) {
+        let low = Int((Float(base) / scale).rounded(.towardZero))
+        let high = Int((Float(base) * scale).rounded(.towardZero))
+        return (max(5, low), max(5, base), max(5, high))
     }
 
     /// The commodity for a cargo-hold key, if it is one of the six standard goods.
@@ -101,16 +104,6 @@ public enum PriceLevel: Int, Sendable, Equatable {
         case .low:       return "Low"
         case .medium:    return "Med"
         case .high:      return "High"
-        }
-    }
-
-    /// The market price for `commodity` at this level, or nil if not traded here.
-    public func price(for commodity: Commodity) -> Int? {
-        switch self {
-        case .notTraded: return nil
-        case .low:       return commodity.prices.low
-        case .medium:    return commodity.prices.medium
-        case .high:      return commodity.prices.high
         }
     }
 }
@@ -162,12 +155,11 @@ extension NovaGame {
         return commodity.fallbackName
     }
 
-    /// A single override `STR ` resource (**not** the indexed `STR#` list) —
-    /// the mechanism the Bible's Appendix III uses for its numbered
-    /// "replace this id to override that built-in value" ranges, e.g.
-    /// 9300-9305 for commodity base prices. Classic Mac resource format: one
-    /// length byte, then that many Mac Roman bytes (a single Pascal string).
-    private func overrideString(_ id: Int) -> String? {
+    /// A single `STR ` resource (**not** the indexed `STR#` list): one length
+    /// byte, then that many Mac Roman bytes. The original checks these as
+    /// per-id overrides of `STR#` entries — commodity prices (9300+), buoy
+    /// messages (999+), and so on.
+    public func singleString(_ id: Int) -> String? {
         guard let d = resources.resource(FourCharCode("STR ")!, id)?.data, !d.isEmpty else { return nil }
         let length = Int(d[d.startIndex])
         guard length > 0, d.count >= 1 + length else { return nil }
@@ -175,33 +167,39 @@ extension NovaGame {
         return String(data: raw, encoding: .macOSRoman)
     }
 
-    /// The base credit price for `commodity`, per Appendix III's `STR `
-    /// 9300-9305 override range (one base-price string per commodity, food
-    /// first — matching `STR# 4000`'s ordering). "Works much like the base
-    /// prices for 'regular' commodities" is how the Bible itself describes
-    /// `jünk.BasePrice` by analogy to this field. Returns nil when the data
-    /// doesn't define an override for this commodity.
-    public func commodityBasePrice(_ commodity: Commodity) -> Int? {
-        guard let raw = overrideString(9300 + commodity.rawValue) else { return nil }
-        return Int(raw.trimmingCharacters(in: .whitespaces))
+    /// The base credit price for `commodity`: `STR ` 9300+index when the data
+    /// defines it, else `STR# 4004` entry index+1, parsed as a 16-bit number.
+    /// Falls back to the stock value only when neither exists.
+    public func commodityBasePrice(_ commodity: Commodity) -> Int {
+        let raw = singleString(9300 + commodity.rawValue)
+            ?? stringList(4004).flatMap { list in
+                commodity.rawValue < list.strings.count ? list.strings[commodity.rawValue] : nil
+            }
+        guard let raw, let value = Self.stringToNum(raw) else { return commodity.fallbackBasePrice }
+        return value
     }
 
-    /// The Low/Medium/High credit price for `commodity`, preferring the
-    /// scenario's own `STR ` 9300-9305 override (see `commodityBasePrice`)
-    /// over the hardcoded `Commodity.prices` table — the same
-    /// data-first/hardcoded-fallback pattern `commodityName` uses for
-    /// `STR# 4000`. The Bible documents only *one* base-price string per
-    /// commodity (Medium is that value); it doesn't state a Low/High
-    /// formula, so this keeps this build's existing per-commodity-tuned
-    /// Low/High *offsets* from Medium and re-anchors them to the override
-    /// when present. Falls back to the untouched hardcoded triple when no
-    /// override exists, so scenarios without it behave exactly as before.
+    /// The leading signed decimal number in `s`, truncated to 16 bits as the
+    /// original stores it; nil when there is no digit.
+    static func stringToNum(_ s: String) -> Int? {
+        var chars = Substring(s.trimmingCharacters(in: .whitespaces))
+        var negative = false
+        if let sign = chars.first, sign == "-" || sign == "+" {
+            negative = sign == "-"
+            chars = chars.dropFirst()
+        }
+        let digits = chars.prefix { $0.isASCII && $0.isNumber }
+        guard !digits.isEmpty else { return nil }
+        var value = 0
+        for d in digits { value = (value &* 10 &+ Int(String(d))!) & 0xFFFF }
+        let int16 = Int(Int16(truncatingIfNeeded: value))
+        return negative ? -int16 : int16
+    }
+
+    /// The Low/Medium/High credit price for `commodity` at the default 1.25
+    /// trade-center scale (see `Commodity.prices(base:scale:)`).
     public func commodityPrices(_ commodity: Commodity) -> (low: Int, medium: Int, high: Int) {
-        let hardcoded = commodity.prices
-        guard let medium = commodityBasePrice(commodity) else { return hardcoded }
-        let lowDelta = hardcoded.medium - hardcoded.low
-        let highDelta = hardcoded.high - hardcoded.medium
-        return (medium - lowDelta, medium, medium + highDelta)
+        Commodity.prices(base: commodityBasePrice(commodity))
     }
 
     /// A `spöb`'s extra "special tech" levels. These unlock outfits/ships whose
@@ -240,8 +238,7 @@ extension NovaGame {
 
     /// The commodity market at `spob`: each traded good with its level and price.
     /// Empty when the planet has no commodity exchange. Prices come from
-    /// `commodityPrices(_:)`, i.e. the scenario's `STR ` 9300-9305 override
-    /// when present, else the hardcoded table.
+    /// `commodityPrices(_:)`.
     public func commodityMarket(at spob: SpobRes) -> [(commodity: Commodity, level: PriceLevel, price: Int)] {
         guard spob.hasCommodityExchange else { return [] }
         return Commodity.allCases.compactMap { c in
@@ -262,10 +259,11 @@ extension NovaGame {
     /// The outfits for sale at `spob`, ordered as EV Nova's outfitter lists them
     /// (higher display weight first, then id). Empty when there's no outfitter.
     /// `day` (an absolute day count, e.g. `GameDate.julianDay`) applies
-    /// `BuyRandom` — the Bible's "not everything shows every time" per-day
-    /// stocking roll; pass `nil` to skip it (e.g. tooling that wants the full
-    /// catalog).
-    public func outfitsSold(at spob: SpobRes, day: Int? = nil) -> [OutfRes] {
+    /// `BuyRandom` through the day's galaxy-wide roll (`dailyStockRoll`); pass
+    /// `nil` to skip it (e.g. tooling that wants the full catalog). An item in
+    /// `owned` skips the roll: the original zeroes the roll of anything the
+    /// player owns, so it stays listed (0x0046a220).
+    public func outfitsSold(at spob: SpobRes, day: Int? = nil, owned: Set<Int> = []) -> [OutfRes] {
         guard spob.hasOutfitter else { return [] }
         let available = outfits()
             // Bible `Flags 0x0800`: "This item can be sold anywhere, regardless
@@ -275,9 +273,9 @@ extension NovaGame {
             // buy-listing tech-level gate — see OUTFITTERS.md §3.5.
             .filter { sells(techLevel: $0.techLevel, at: spob) }
             .filter { outfit in
-                guard let day else { return true }
-                return onOfferToday(buyRandom: outfit.buyRandom, neverIfZero: false,
-                                     spobID: spob.id, itemID: outfit.id, day: day)
+                guard let day, !owned.contains(outfit.id) else { return true }
+                return Self.stocked(buyRandom: outfit.buyRandom,
+                                    roll: Self.dailyStockRoll(day: day, itemID: outfit.id, salt: 0))
             }
         // Bible `Flags 0x1000`: "When this item is available for sale, it
         // prevents all higher-numbered items with equal DispWeight from being
@@ -300,39 +298,49 @@ extension NovaGame {
     }
 
     /// The hulls for sale at `spob`, cheapest first. Empty when there's no
-    /// shipyard. `day` applies `BuyRandom` the same way as `outfitsSold` —
-    /// except for ships a `BuyRandom` of exactly 0 means *never* stocked, not
-    /// always (the Bible documents the two fields with opposite zero-behavior).
-    public func shipsSold(at spob: SpobRes, day: Int? = nil) -> [ShipRes] {
+    /// shipyard. `day` applies `BuyRandom` through the day's roll; `redraws`
+    /// says how many times a class's roll was redrawn today (buying a ship
+    /// redraws its class, 0x00492f30).
+    public func shipsSold(at spob: SpobRes, day: Int? = nil,
+                          redraws: (Int) -> Int = { _ in 0 }) -> [ShipRes] {
         guard spob.hasShipyard else { return [] }
         return ships()
             .filter { $0.cost > 0 && sells(techLevel: $0.techLevel, at: spob) }
             .filter { ship in
                 guard let day else { return true }
-                return onOfferToday(buyRandom: ship.buyRandom, neverIfZero: true,
-                                     spobID: spob.id, itemID: ship.id, day: day)
+                return Self.stocked(buyRandom: ship.buyRandom,
+                                    roll: Self.dailyStockRoll(day: day, itemID: ship.id, salt: 1,
+                                                              redraw: redraws(ship.id)))
             }
             .sorted { ($0.cost, $0.id) < ($1.cost, $1.id) }
     }
 
-    /// Whether a `BuyRandom`-gated item is stocked today: a deterministic roll
-    /// seeded by (day, spöb, item) — stable within one in-game day (reopening
-    /// the outfitter, or relaunching the app, on the same day shows the same
-    /// stock), and re-rolls only when the day changes. Not persisted state;
-    /// just a stable hash compared against the percent chance, so it needs no
-    /// save-file support. `neverIfZero` selects the Bible's per-type zero
-    /// behavior (outfits: 0/negative → always; ships: 0 → never).
-    private func onOfferToday(buyRandom: Int, neverIfZero: Bool, spobID: Int, itemID: Int, day: Int) -> Bool {
-        if buyRandom <= 0 { return !neverIfZero }
-        let percent = min(buyRandom, 100)
+    /// Whether a ship class is on the bar's hire list today: `HireRandom` 0
+    /// never, otherwise the class's daily hire roll must not exceed it.
+    public static func hireable(_ ship: ShipRes, day: Int, redraw: Int = 0) -> Bool {
+        stocked(buyRandom: ship.hireRandom,
+                roll: dailyStockRoll(day: day, itemID: ship.id, salt: 2, redraw: redraw))
+    }
+
+    /// An item with `BuyRandom` (or `HireRandom`) `chance` shows when the
+    /// chance is at least 1 and the day's roll does not exceed it.
+    static func stocked(buyRandom chance: Int, roll: Int) -> Bool {
+        chance >= 1 && roll <= chance
+    }
+
+    /// The day's stock roll, 1...100, for one outfit (salt 0), shipyard class
+    /// (1) or bar hire class (2). The original keeps one roll per item, shared
+    /// by every port and redrawn at each daily tick (0x00466cb0); deriving it
+    /// from the day gives the same behaviour without saving the table.
+    /// `redraw` counts same-day redraws (a purchase or hire).
+    public static func dailyStockRoll(day: Int, itemID: Int, salt: Int, redraw: Int = 0) -> Int {
         var hash: UInt64 = 14_695_981_039_346_656_037            // FNV-1a offset basis
-        for value in [day, spobID, itemID] {
+        for value in [day, itemID, salt, redraw] {
             for byte in withUnsafeBytes(of: Int64(value).bigEndian, Array.init) {
                 hash ^= UInt64(byte)
                 hash = hash &* 1_099_511_628_211                 // FNV-1a prime
             }
         }
-        let roll = Int(hash % 100) + 1                           // 1...100
-        return roll <= percent
+        return Int(hash % 100) + 1
     }
 }

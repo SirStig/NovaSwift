@@ -1,122 +1,164 @@
 # Status
 
-What a player can actually do today. This is the only doc that answers that
-question — if another doc claims a feature is finished, this one wins.
+What works today and how closely it matches the original. This is the one place
+for detailed status. If another doc disagrees, this one is right, and the other
+doc should be fixed.
 
-Three words, from the [charter](CHARTER.md):
+## Summary
 
-- **Wired** — the running app drives it. The player feels it.
-- **Built, not wired** — the code exists and is tested, but nothing in the play
-  loop calls it. For the player, it isn't in the game.
-- **Missing** — not built, or a UI shell.
+The whole game is playable on macOS, iPadOS, iOS and tvOS: start a pilot from any
+`chär` scenario, fly, fight, trade, outfit, buy ships, take missions, play the
+storylines through, board and capture ships, dominate planets, hire escorts, and
+die with the original's consequences. Plug-ins and total conversions load in the
+original's order.
 
-## The short version
+Gameplay has been checked against the original executable, system by system.
+Original behaviour is the default. The Linux/Windows frontend is partway done.
 
-NOVA Swift is a near-complete, faithful port. The whole game is playable start
-to finish on macOS, iPadOS, iOS and tvOS: create a pilot from a real starting
-scenario, fly, fight, trade, take missions, play the storylines through, and die
-with consequences.
+## How fidelity was checked
 
-What's left is fidelity fine-tuning and polish, not missing systems. The one real
-soft spot is how ships fly and spawn.
+The Windows executable of EV Nova CE (3,199 functions) was decompiled to
+pseudo-C. Each function was assigned to a subsystem (flight, weapons, AI and so
+on) from its name, the strings and resource types it touches, and its callers
+and callees. 718 of them are gameplay code.
 
-## What works
+We then compared NovaSwift with that code area by area and wrote down every
+difference as an item in
+[FIDELITY_PLAN.md](reverse-engineering/FIDELITY_PLAN.md). Each item gives the
+original behaviour with function addresses, the NovaSwift code it affects, and a
+test. Where reading the code was not enough to pin a formula (the random number
+generator, thrust and top speed, the control-bit test and set interpreters), the
+original routine was run on its own in an emulator and NovaSwift was tested
+against its output.
 
-**Flying and fighting.** Newtonian flight on your real hull-and-outfit stats.
-NPCs spawn from the actual `düde` and `flët` tables, fight using their
-government's dispositions, and take real damage. Target lock, radar and the
-status bar are driven from live state through the authentic `ïntf` layout.
-Weapons behave as their `wëap` records describe — guidance modes, turret arcs and
-blind spots, submunitions, point defense, fighter bays, beams, ionization,
-cloaking, and per-type jamming weighed against each seeker's own vulnerability.
+The plan has 177 items in eight areas. All 177 are marked done:
 
-**Stakes.** You can die. With an escape pod you're rescued at the nearest port
-minus your ship and outfits; without one it's back to the main menu. Repairs and
-fuel cost credits. Shooting the wrong government dents your record, and that
-record decays with distance from where it happened.
+| Area | Items |
+|---|---:|
+| Flight, hyperjump, travel days (FL) | 23 |
+| Weapons and damage (WP) | 27 |
+| NPC AI, spawning, escorts (AI) | 43 |
+| Economy, legal record, landed services (EC) | 26 |
+| Missions and story (MS) | 24 |
+| Outfit special systems (OS) | 14 |
+| Player-facing rules: map, targeting, HUD, keys, saving (UI) | 18 |
+| Data loading (LD) | 2 |
 
-**The galaxy.** Real `sÿst` coordinates and links, fuel-gated hyperjumps,
-hypergates and wormholes, message buoys, minable asteroids, nebulae on the map,
-and stellar objects you can dominate for tribute — or, where the data allows,
-shoot to pieces and watch regenerate on their own timer.
+A few done items leave a small piece for later:
 
-**Missions and story.** The story runtime is live end to end. Pick up a job at
-the bar, fly it, finish it — cargo, courier, passenger, bounty, escort. Mission
-ships spawn into the world around you and report back when you destroy, disable
-or board them. The galaxy clock advances on every landing and jump, so `crön`
-events and news fire on schedule. Storylines rewrite the map: systems appear and
-vanish, planets get destroyed.
+- UI-11: the original's new-pilot hint chain (overlaps NovaSwift's tutorial hints).
+- UI-13: Tab cycling in Player Info, and count words for junk cargo.
+- UI-15: map Tab/backslash cycling, Caps Lock.
+- AI-12: holding a mission ship at a gate.
+- FL-23: the jump-engage countdown and the cannot-jump message auto-clear.
 
-**The spaceport.** Trade, outfitter and shipyard run against a persistent pilot
-with real prices, mass-proportional outfit costs, gun and turret slot limits,
-tech-level and mission-bit gating, and rank discounts. Junk cargo trades
-alongside the six standard commodities. The bar's extras — hiring escorts,
-gambling on the races, the mission board — all work.
+The plan also keeps a short list of open questions (mostly small constants that
+still need an emulator run) and decisions for the maintainer, such as default
+key bindings on macOS. See §6 and the end of the plan.
 
-**Boarding and plunder.** Disable a ship, board it, and take its cargo, credits,
-fuel or ammo — or capture the hull outright and add it to your escort wing.
+No decompiled code is in this repository. The specs describe behaviour in prose,
+short formulas and constants, with the original function's address.
 
-**Presentation.** Real `bööm` explosion sprites over a particle system, weapon
-smoke and spark trails, hit spray, asteroid debris, lightning beams, animated
-stellars, and the `shän` overlay layers (engine glow, running lights, weapon
-glow, shields, alternating detail). The main menu is the original's, down to the
-button plates sliding into place.
+## The function grid
 
-**Pilots and platforms.** Multiple pilots with save history and backups.
-Controller support everywhere, and required on tvOS. iCloud sync for imported
-game data. Host-authoritative co-op. Plug-ins download, install and override
-correctly.
+![One square per function in the original executable](branding/progress-blocks.svg)
 
-## The one thing that still feels off
+One square per function in the EV Nova CE executable, grouped by subsystem.
 
-EV Nova's AI and spawning logic were never open-sourced. Unlike the rest of the
-port there was no original code to work from: `AIBrain.swift`, `Spawner.swift`
-and the flight code are rebuilt from the data tables and hours of watching how
-the original behaves. It covers what the Bible documents (see [AI.md](AI.md) and
-[AI_GROUND_TRUTH.md](reverse-engineering/AI_GROUND_TRUTH.md)) and it's close, but
-three things still don't quite *feel* right:
+| Colour | Meaning |
+|---|---|
+| Green | Cited by a completed fidelity item: NovaSwift was checked against this function. |
+| Amber | Cited by an item that is only partly done. |
+| Purple | Cited only by a deferred item. |
+| Blue | Gameplay code, decompiled and assigned a role, but not cited by any plan item. |
+| Outline | Gameplay code whose role is still unknown (34 functions, mostly in the game loop, input and star map code). |
+| Dark grey | Not gameplay: C runtime, QuickTime, image and audio libraries, networking, blitters, Windows glue, the shareware nag. Decompiled, but there is nothing to port. A few are green where a loader or dialog detail was checked. |
 
-- **Spawn rhythm.** Ambient traffic is a heuristic that trickles toward
-  `sÿst.AvgShips`, not the original's algorithm. Single ships are the backbone
-  and fleets a capped accent, which fixed the old "all fleets, no stragglers"
-  problem — but the arrival cadence and ship mix are still hand-tuned.
-- **Flight handling.** Ships holding formation fly a driftless model, which
-  reproduces the original's tight formation-keeping. Lone traffic, lone
-  combatants and the player fly Newtonian — including the reverse-and-fire
-  maneuver that's a signature of the original — so ambient flight rests on
-  hand-tuned steering rather than anything documented.
-- **Combat transitions.** One mission `ShipBehav` case falls through to normal
-  AI, brainless ships drift, and some engagement timings are approximations.
+Current counts: 277 green, 406 blue, 34 outline, 2,482 dark grey (3,199 total).
+Of the 697 gameplay functions, 257 are cited by a completed item.
 
-Most of the game plays close to the original. This is where you can still tell
-it's a reconstruction, because for this one piece there was nothing to copy.
+Green means "cited", not "every line verified". A function counts as cited when
+an address quoted in a plan item falls inside it. Blue does not mean wrong: the
+plan lists differences, and code that already matched was not always given an
+item.
 
-## Built, not wired
+The grid is regenerated by a script that reads the function map and the
+addresses cited in FIDELITY_PLAN.md. It writes
+[progress-blocks.svg](branding/progress-blocks.svg) for this page and
+`site/assets/progress.json` for the website's interactive version. The site
+shows each function's name, address, size, subsystem and citing items.
 
-- **Junk and `öops` price disasters.** The decoders are correct and the wiring is
-  designed ([JUNK_OOPS_DESIGN.md](reverse-engineering/JUNK_OOPS_DESIGN.md)), but
-  there's no daily price-disaster roll yet. `përs.showsDisasterInfo` and
-  `öops.isNewsOnly` are waiting on the same work.
-- **Classic pilot save encoding.** `PilotSave` can write the original archive
-  format; the app persists native JSON instead. The decode path is used, the
-  encode path isn't.
+## Enhancements
 
-## Missing
+Where NovaSwift used to behave differently from the original and the old
+behaviour was worth keeping, it became an option in Settings ▸ Enhancements. All
+are off by default:
 
-- **AI, spawning and flight fidelity** — the quality gap described above.
-- **Two cosmetic `cölr` anchors.** `menuFont`/`menuFontSize` has no target here
-  (our main-menu labels are PICT art, not rendered text), and `progressBar` is a
-  fixed Mac-pixel rect where our loading bar reflows. Both decode; neither is
-  carried.
+| Enhancement | What it changes |
+|---|---|
+| Manual plug-in order | Choose which plug-ins load and in what order. The original loads every installed plug-in alphabetically. |
+| Frequent autosave | Save on every jump, every few minutes and when the app is backgrounded. The original saves only when you leave a spaceport. |
+| Quick hyperjump | Jump after a short turn and burst. The original brakes to a stop and spins up for the length of its warp sound. |
+| Forgiving landing | Land from a wider circle at higher speed, with no clearance step. |
+| Automatic route plotting | Tap any system to plot the shortest route. The original plots one jump per click. |
+| Nearest-first targeting | Target cycling starts with the closest ship. The original goes in arrival order. |
+| Modern key layout | Return fires secondaries, Shift is the afterburner, P pauses. |
+| Tight formations | Escorts and fleets hold formation exactly. In the original they fly on their own hull's momentum. |
 
-## What's next
+Differences with no value of their own were simply fixed, with no option: for
+example the old commodity table, full refunds on sold outfits, and gate travel
+costing a day.
 
-The rule, from the charter: *if the player can't feel it, it isn't done.*
+## Beyond the original
 
-1. **Make ships fly and spawn like the original.** The biggest remaining gap
-   between this and "it feels like EV Nova." Polish on something that already
-   works, not a new feature. See [AI.md](AI.md).
-2. **Junk and `öops` trading.** The last economy corner, already designed —
-   price disasters first, then junk trading.
+![NovaSwift's own features](branding/feature-blocks.svg)
 
-[ROADMAP.md](ROADMAP.md) has the full sequence.
+NovaSwift's own features, one square per task: green done, amber partly done,
+outline planned. Currently 98 done, 9 partly done, 26 planned. The list is kept
+by hand in `site/assets/features.json`, with a pointer to the code for each
+task, and the same script renders [feature-blocks.svg](branding/feature-blocks.svg)
+from it. Update the JSON when a feature changes.
+
+Partly done, in short: the public online lobby list and iCloud game-data upload
+need the CloudKit schema promoted to Production; multiplayer host migration
+rebuilds the world rather than handing over; the `carryEncounter` session rule
+is not used yet; no plug-ins ship inside the app; the Godot trade center has a
+placeholder screen, and its Linux and Windows builds are not verified yet. Multiplayer has not yet
+been played end to end on two real devices.
+
+None of these change the game's rules:
+
+- Presentation presets: Classic, Enhanced, Nova Swift, with per-item overrides.
+- Story Guide and storyline map, storyline tags on missions, tutorial hints,
+  a flight-training range.
+- Touch controls; controller support with remapping and an on-screen cursor.
+- Apple TV build with a 10-foot UI ([TVOS.md](TVOS.md)).
+- iCloud sync of imported game data ([ICLOUD_SYNC.md](ICLOUD_SYNC.md)).
+- Plug-in store and manager.
+- Co-op multiplayer over local Wi-Fi or Game Center, with host-set rules
+  ([MULTIPLAYER.md](MULTIPLAYER.md)).
+- Debug suite: filtered logs, frame-time breakdown, inspector, console.
+- Bug reports: Settings ▸ Support ▸ Report a Bug collects the pilot, a log and
+  a self-test.
+
+## Linux and Windows
+
+The Godot frontend ([GODOT_LAYER.md](GODOT_LAYER.md)) runs the same engine.
+Working: flight on the real flight model, rendering of ships, planets, shots,
+beams, asteroids and explosions from your data, HUD, radar, target lock, landing
+and launch, and the trade center. Not yet: sound, the galaxy map, outfitter,
+shipyard, bar and mission board, saving, the story runtime, and packaged builds.
+It has been built and run on macOS; the Linux and Windows builds are not verified yet.
+
+## Known gaps
+
+- The deferred pieces listed above.
+- Open questions in the fidelity plan: a handful of constants and edge cases
+  that need an emulator run to settle.
+- Presentation defaults that differ from the original (ship bar position,
+  screen shake, storyline tags, tutorial hints) are kept on purpose and await a
+  decision.
+- Two cosmetic `cölr` fields have no target: `menuFont`/`menuFontSize` (our main
+  menu labels are PICT art) and `progressBar` (our loading bar reflows).
+
+Bugs go in the [issue tracker](https://github.com/SirStig/NovaSwift/issues).

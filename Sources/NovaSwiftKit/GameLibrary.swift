@@ -140,16 +140,42 @@ public enum GameLibrary {
         return .unknown
     }
 
+    // MARK: Load order
+
+    /// The original's base-file precedence: `nv_WinMain` 0x004d2a80 opens
+    /// `Nova.rez` before scanning Nova Files, and a later archive wins, so
+    /// `Nova.rez` is the weakest layer. The rest follow in the folder scan's
+    /// case-insensitive order.
+    public static func baseLoadOrder(_ files: [URL]) -> [URL] {
+        files.sorted { a, b in
+            let aRez = a.lastPathComponent.uppercased() == "NOVA.REZ"
+            let bRez = b.lastPathComponent.uppercased() == "NOVA.REZ"
+            if aRez != bRez { return aRez }
+            return (a.path.uppercased(), a.path) < (b.path.uppercased(), b.path)
+        }
+    }
+
+    /// The original plug-in rule (`nv_LoadFilesInFolder` 0x0046f500): every
+    /// installed plug-in loads, in the folder's case-insensitive alphabetical
+    /// order, and a later one wins a conflict. The launcher's enable switches
+    /// and drag order are the `manualPluginOrder` enhancement.
+    public static func originalPluginOrder(_ plugins: [PluginBundle]) -> [PluginBundle] {
+        plugins.map { p in var p = p; p.isEnabled = true; return p }
+            .sorted { ($0.id.uppercased(), $0.id) < ($1.id.uppercased(), $1.id) }
+    }
+
     // MARK: Merge (the override chain)
 
-    /// Resolve base + enabled plug-ins into one collection. Plug-ins are applied
-    /// in the given order; `isEnabled == false` bundles are skipped.
+    /// Resolve base + enabled plug-ins into one collection. Base files load in
+    /// `baseLoadOrder`; plug-ins are applied in the given order and
+    /// `isEnabled == false` bundles are skipped. The result is normalised the
+    /// way the original loader sees it (`normalizeScenarioRecords`).
     public static func merge(baseFiles: [URL], plugins: [PluginBundle] = []) throws -> ResourceCollection {
         var collection = ResourceCollection()
         // Reading + parsing a container is independent per file and CPU/IO-bound,
         // so parse them concurrently and then overlay in load order (the overlay
         // itself must stay ordered — later layers override earlier ones).
-        for col in try parseConcurrently(baseFiles.sorted(by: { $0.path < $1.path }), context: "base file") {
+        for col in try parseConcurrently(baseLoadOrder(baseFiles), context: "base file") {
             collection.overlay(col)
         }
         Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(baseFiles.count, privacy: .public) file(s)")
@@ -159,6 +185,7 @@ public enum GameLibrary {
             }
             Log.data.debug("merge: applied plug-in \(plugin.name, privacy: .public) (\(plugin.id, privacy: .public)) — collection now \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
         }
+        collection.normalizeScenarioRecords()
         return collection
     }
 

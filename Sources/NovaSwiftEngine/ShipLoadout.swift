@@ -15,22 +15,16 @@ public enum ShipFuel {
     public static let perJump: Double = 100
 }
 
-/// An installed afterburner's behaviour: it drains fuel while held and, in return,
-/// raises the ship's acceleration and speed cap. EV Nova's afterburner outfit only
-/// stores a fuel-cost figure; the boost factors are engine tuning.
+/// An installed afterburner (ModType 15). The outfit stores only its fuel cost;
+/// the original's boost is a separate thruster in the player's flight tick
+/// (`Ship.step`).
 public struct Afterburner: Equatable {
-    /// Fuel units consumed per second while burning.
+    /// Fuel units consumed per second while burning: ModVal × 0.0333 per tick
+    /// (`Ship_GetShipFuelBurnRate` 0x0046e060).
     public var fuelPerSecond: Double
-    /// Multiplier applied to the ship's top speed while burning.
-    public var speedMultiplier: Double
-    /// Multiplier applied to the ship's acceleration while burning.
-    public var accelMultiplier: Double
 
-    public init(fuelPerSecond: Double, speedMultiplier: Double = 1.5,
-                accelMultiplier: Double = 1.4) {
+    public init(fuelPerSecond: Double) {
         self.fuelPerSecond = fuelPerSecond
-        self.speedMultiplier = speedMultiplier
-        self.accelMultiplier = accelMultiplier
     }
 }
 
@@ -46,6 +40,9 @@ public struct Loadout {
     public var speed: Int
     public var acceleration: Int
     public var turnRate: Int
+    /// Summed ModType-9 `count × ModVal`, in hundredths of a degree per tick
+    /// (`Maneuver × 10` scale), added on top of `turnRate`.
+    public var turnBonus: Int = 0
 
     // Defenses (max HP + per-second regen, already in sim units).
     public var maxShield: Double
@@ -55,7 +52,13 @@ public struct Loadout {
 
     // Fuel & afterburner.
     public var maxFuel: Double
+    /// Fuel regeneration as an NPC flies the hull (`Ship_ComputeShipFuelRechargeRate`
+    /// 0x00463b30): `1/FuelRegen` per tick from the hull plus `count/ModVal` per
+    /// tick for each ModType-18 outfit. Negative ModVal drains ("fuel sucking").
     public var fuelRegenPerSec: Double
+    /// The same rate as the player flies it: the hull's `1/FuelRegen` term needs
+    /// shïp Flags 0x0008; the outfit terms don't (FL-07).
+    public var playerFuelRegenPerSec: Double = 0
     public var afterburner: Afterburner?
 
     // Storage & mass.
@@ -96,16 +99,18 @@ public struct Loadout {
 
     /// Jumps of hyperspace fuel this loadout can hold.
     public var jumpRange: Int { Int((maxFuel / ShipFuel.perJump).rounded(.down)) }
-    /// Hyperlane hops a single hyperspace jump command can cross (1 = standard
-    /// single-jump; higher only with a multi-jump outfit installed).
+    /// Route systems one jump crosses: `Σ ModVal` of the owned ModType-32
+    /// outfits (once per def), at least 1. Fuel and travel days are charged
+    /// once per jump however many systems it crosses (FL-06).
     public var maxJumpHops: Int
-    /// `oütf` ModType 37 (`fastJump`): a "jump control"/inertialess-jump outfit
-    /// that removes the slow spin-up — the ship jumps almost instantly without
-    /// the deliberate turn-and-align maneuver. False = the standard slow jump.
+    /// The original's multi-jump depth, `max(1, 1 + Σ ModVal)` (`FUN_0046cdd0`).
+    public var multiJumpDepth: Int = 1
+    /// Fast jump: class Flags2 0x0020 or a ModType-37 outfit. It skips the
+    /// jump's brake and the spin-up damping; the cue-timed spin-up still runs.
     public var instantJump: Bool = false
-    /// `oütf` ModType 22 (`hyperspaceSpeed`): summed bonus that shortens the
-    /// jump's entry/exit sequence. Interpreted by the app as a percentage speed-up
-    /// of the jump animation (0 = stock timing). See `PilotStore.jumpSpeedFactor`.
+    /// `oütf` ModType 22: summed `count × ModVal`. In the original these are
+    /// extra travel *days* per jump (`Galaxy.hyperspaceTravelDays`); the
+    /// `quickHyperjump` enhancement reads them as a jump speed-up instead.
     public var hyperspaceSpeedBonus: Int = 0
 
     /// Fighter bays fitted (`wëap` Guidance 99). Each launches carried fighters
@@ -127,8 +132,8 @@ public struct Loadout {
     public var interferenceReduction: Int = 0
     /// Net `oütf` ModType 28 murk change applied to the current system's murk.
     public var murkModifier: Int = 0
-    /// Whether the ship carries an escape pod (`shïp.EscapePod` count or an
-    /// `oütf` ModType 11 escape-pod item) — the pilot survives destruction.
+    /// Whether the ship carries an `oütf` ModType 11 escape pod — the pilot can
+    /// eject (OS-02). The hull's own PodCount doesn't count.
     public var hasEscapePod: Bool = false
     /// `oütf` ModType 20 (auto-eject): automatically ejects the pilot on death
     /// (requires an escape pod to work, per the Bible).
@@ -252,9 +257,11 @@ extension OutfRes {
     /// tons (`ShipRes.mass`, the hull's own mass field, @62) — applies the
     /// `0x0400` proportional-mass rule (`shipMass × mass / 100`, positive-mass
     /// items only) when the flag is set, otherwise the flat `mass`.
+    /// Never below the outfit's own mass (`Outfit_ComputeOutfitPurchaseMass`
+    /// 0x0046e950, EC-14), so a hull under 100 t pays the base mass.
     public func effectiveMass(shipMass: Int) -> Int {
         guard massIsShipMassProportional, mass > 0 else { return mass }
-        return shipMass * mass / 100
+        return max(mass, shipMass * mass / 100)
     }
 
     /// This outfit's effective purchase price aboard a hull of `shipMass` tons
@@ -263,9 +270,12 @@ extension OutfRes {
     /// code (e.g. `PilotStore.buyOutfit`/`sellOutfit`) to charge/refund
     /// correctly; not consumed anywhere in this file today since this file
     /// aggregates *stats*, not credits.
+    /// A non-positive cost is free; a scaled price never falls below the base
+    /// cost (`Outfit_ComputeOutfitPurchasePrice` 0x0046e910, EC-14).
     public func effectiveCost(shipMass: Int) -> Int {
+        guard cost > 0 else { return 0 }
         guard priceIsShipMassProportional else { return cost }
-        return shipMass * cost
+        return max(cost, shipMass * cost)
     }
 }
 
@@ -313,9 +323,15 @@ extension Galaxy {
     ///   Adding them here as well would arm the player twice over. Only weapons
     ///   an outfit actually installs are skipped: a plug-in hull carrying a weapon
     ///   no `oütf` sells keeps it inherent rather than losing it.
+    /// - Parameter defaultItemCapabilities: with `includeDefaultItems` off, still
+    ///   read the hull's DefaultItems for *capabilities* (cloak, scanners, fuel
+    ///   and mining scoops, jump outfits, repair, jamming) but not stats. That is
+    ///   the original's NPC split (OS-01); every AI spawn passes `true`. The
+    ///   player passes `false`, since `PlayerState.outfits` already owns them.
     public func loadout(shipID: Int, extraOutfits: [Int: Int] = [:],
                         includeDefaultItems: Bool = true,
-                        includeHullWeapons: Bool = true) -> Loadout? {
+                        includeHullWeapons: Bool = true,
+                        defaultItemCapabilities: Bool = false) -> Loadout? {
         guard let s = game.ship(shipID) else {
             Log.world.error("Galaxy.loadout: ship id \(shipID) not found in game data — returning nil loadout")
             return nil
@@ -331,15 +347,20 @@ extension Galaxy {
         // Aggregate in stat-space (the same units the hull stores).
         var shieldStat = s.shield, armorStat = s.armor
         var shieldRechStat = s.shieldRecharge, armorRechStat = s.armorRecharge
-        var speedStat = s.speed, accelStat = s.acceleration, turnStat = s.turnRate
-        var fuelCap = s.fuelCapacity, fuelRegenStat = s.fuelRegen
+        var speedStat = s.speed, accelStat = s.acceleration, turnStat = s.turnRate, turnBonus = 0
+        var fuelCap = s.fuelCapacity
+        // Per-tick fuel from ModType-18 outfits: each adds `count × (1/ModVal)`
+        // (0x00463b30). A zero ModVal would divide by zero in the original;
+        // it's skipped here.
+        var fuelScoopPerTick = 0.0
         var cargo = s.cargoSpace
         var maxGuns = s.maxGuns, maxTurrets = s.maxTurrets
         var usedMass = 0
         var usedGunSlots = 0, usedTurretSlots = 0
-        var afterburnerFuel = 0
+        var afterburnerFuel = 0, afterburnerOutfitID = Int.min
         var multiJumpBonus = 0
-        var fastJump = false
+        // Fast jump: class Flags2 0x0020 or a ModType-37 outfit (0x0046d080).
+        var fastJump = s.flags2 & 0x0020 != 0
         var hyperspaceSpeed = 0
         var marineCrew = 0
         var captureOddsBonus = 0
@@ -349,8 +370,11 @@ extension Galaxy {
         // Four independent jammer types (ModTypes 33-36), kept separate so each
         // only counters the seekers whose `JamVuln` names it.
         var jammingBonus = [0, 0, 0, 0]
-        var hasMiningScoop = s.flags3 & 0x0002 != 0   // hull "scoops asteroid debris"
-        var hasEscapePod = s.podCount > 0, hasAutoEject = false
+        // Only ModType 31 scoops for the player; hull Flags3 0x0002 drives the
+        // AI miner, not the player's scoop (OS-11).
+        var hasMiningScoop = false
+        // Only a ModType-11 outfit ejects; the hull's PodCount is cosmetic (OS-02).
+        var hasEscapePod = false, hasAutoEject = false
         var inertialess = s.inertialess        // hull flag; an inertial-dampener outfit ORs in below
         var grantedWeapons: [Int: Int] = [:]   // weapon id → count
         var ammoAdds: [Int: Int] = [:]         // weapon id → extra ammo units
@@ -361,7 +385,9 @@ extension Galaxy {
         var paintColor: (r: Double, g: Double, b: Double)?
         var hasGravityResist = false, hasStellarResist = false
 
-        for (oid, count) in outfitCounts {
+        // Sorted: dictionary order is per-process random, and the last paint
+        // outfit wins / Double sums depend on order (determinism).
+        for (oid, count) in outfitCounts.sorted(by: { $0.key < $1.key }) {
             guard let o = game.outfit(oid) else {
                 // The ship (or the player's purchase record) references an
                 // outfit id the data doesn't have — it's silently skipped, so
@@ -388,15 +414,17 @@ extension Galaxy {
                 case .armorRecharge:   armorRechStat += v
                 case .speed:           speedStat += v
                 case .acceleration:    accelStat += v
-                case .turnRate:        turnStat += v
+                case .turnRate:        turnBonus += v               // ModVal × 0.01 deg/tick
                 case .fuelCapacity:    fuelCap += v
-                case .fuelRegen:       fuelRegenStat += v
+                case .fuelRegen:       if value != 0 { fuelScoopPerTick += Double(count) / Double(value) }
                 case .freeCargo:       cargo += v
-                case .maxGuns:         maxGuns += v
-                case .maxTurrets:      maxTurrets += v
-                case .afterburner:     afterburnerFuel += value   // fuel cost per unit
-                case .multiJump:       multiJumpBonus += v        // extra hops per hyperjump
-                case .fastJump:        fastJump = true            // inertialess/instant jump (no spin-up)
+                case .maxGuns:         maxGuns += value               // once per def (0x004656a0)
+                case .maxTurrets:      maxTurrets += value
+                case .afterburner:
+                    // The last owned afterburner's burn wins; counts don't stack.
+                    if oid > afterburnerOutfitID { afterburnerFuel = value; afterburnerOutfitID = oid }
+                case .multiJump:       multiJumpBonus += value    // once per def (0x0046cdd0)
+                case .fastJump:        fastJump = true            // skips the jump's brake (FL-06)
                 case .hyperspaceSpeed: hyperspaceSpeed += v        // faster jump entry/exit sequence
                 case .weapon:          grantedWeapons[value, default: 0] += count
                 case .ammunition:      ammoAdds[value, default: 0] += count
@@ -414,10 +442,10 @@ extension Galaxy {
                 case .inertialDamper:  inertialess = true            // ModType 38 → no-inertia flight
                 case .ionCapacity:     ionCapBonus += v              // ModType 40 → +max ion charge
                 case .deionize:        deionizeBonus += v            // ModType 39 → +ion dissipation
-                case .jam1: jammingBonus[0] += v                     // ModType 33 → jam type 1
-                case .jam2: jammingBonus[1] += v                     // ModType 34 → jam type 2
-                case .jam3: jammingBonus[2] += v                     // ModType 35 → jam type 3
-                case .jam4: jammingBonus[3] += v                     // ModType 36 → jam type 4
+                case .jam1: jammingBonus[0] += value                 // ModType 33, once per def (0x00464810)
+                case .jam2: jammingBonus[1] += value                 // ModType 34
+                case .jam3: jammingBonus[2] += value                 // ModType 35
+                case .jam4: jammingBonus[3] += value                 // ModType 36
                 case .miningScoop:     hasMiningScoop = true         // ModType 31 → collect asteroid yield
                 case .hyperspaceDist:  hyperspaceDistBonus += v      // ModType 23 → no-jump zone radius delta
                 case .autoRefuel:      hasAutoRefuel = true          // ModType 19 → free refuel at spaceport
@@ -447,6 +475,31 @@ extension Galaxy {
                 // on trigger, which this aggregation (a pure, non-mutating function)
                 // has no business doing.
                 default: break
+                }
+            }
+        }
+
+        // An AI ship's stats ignore its hull's DefaultItems, but every capability
+        // probe in the original has an NPC arm that walks them (OS-01): cloak,
+        // scanners, fuel scoop, mining scoop, jump outfits, repair and jamming.
+        if !includeDefaultItems && defaultItemCapabilities {
+            for (oid, count) in s.outfits {
+                guard let o = game.outfit(oid) else { continue }
+                for (type, value) in o.modifiers {
+                    switch type {
+                    case .cloak:          cloakFlags |= value
+                    case .cloakScanner:   cloakScannerFlags |= value
+                    case .fuelRegen:      if value != 0 { fuelScoopPerTick += Double(count) / Double(value) }
+                    case .miningScoop:    hasMiningScoop = true
+                    case .fastJump:       fastJump = true
+                    case .multiJump:      multiJumpBonus += value
+                    case .repairSystem:   hasRepairSystem = true
+                    case .jam1:           jammingBonus[0] += value
+                    case .jam2:           jammingBonus[1] += value
+                    case .jam3:           jammingBonus[2] += value
+                    case .jam4:           jammingBonus[3] += value
+                    default: break
+                    }
                 }
             }
         }
@@ -498,7 +551,7 @@ extension Galaxy {
         // secondary weapon like any other — real EV Nova bays act exactly like a
         // missile launcher: select it, pull the trigger, one fighter launches.
         var fighterBays: [FighterBaySpec] = []
-        for (wid, entry) in byID where game.weapon(wid)?.isFighterBay == true {
+        for (wid, entry) in byID.sorted(by: { $0.key < $1.key }) where game.weapon(wid)?.isFighterBay == true {
             guard let w = game.weapon(wid) else { continue }
             let capacity = w.fighterCapacity * max(1, entry.count)
             fighterBays.append(FighterBaySpec(bayWeaponID: wid, fighterShipID: w.fighterShipID,
@@ -509,35 +562,42 @@ extension Galaxy {
         let weapons = byID.map { (id: $0.key, count: $0.value.count, ammo: $0.value.ammo) }
             .sorted { $0.id < $1.id }
 
-        let afterburner = afterburnerFuel > 0
-            ? Afterburner(fuelPerSecond: Double(afterburnerFuel)) : nil
+        // FuelRegen is frames per unit of fuel; NPCs always qualify, the player
+        // only with hull Flags 0x0008.
+        let hullFuelPerTick = s.fuelRegen > 0 ? 1.0 / Double(s.fuelRegen) : 0
+        let ticks = OriginalClock.ticksPerSecond
+
+        let afterburner = afterburnerOutfitID != Int.min
+            ? Afterburner(fuelPerSecond: Double(afterburnerFuel) * 0.0333 * OriginalClock.ticksPerSecond) : nil
 
         return Loadout(
             shipID: s.id, name: s.displayName,
             speed: max(0, speedStat), acceleration: max(0, accelStat), turnRate: max(0, turnStat),
+            turnBonus: turnBonus,
             maxShield: Double(max(0, shieldStat)) * combatTuning.hpScale,
             maxArmor: Double(max(1, armorStat)) * combatTuning.hpScale,
             shieldRechargePerSec: max(0, Double(shieldRechStat) * 0.03),
             armorRechargePerSec: max(0, Double(armorRechStat) * 0.03),
-            maxFuel: Double(max(0, fuelCap)),
-            fuelRegenPerSec: Double(max(0, fuelRegenStat)) * 0.03,
+            // ModType 12 capacity is clamped to 0...32000 (0x00463a20).
+            maxFuel: Double(min(32000, max(0, fuelCap))),
+            fuelRegenPerSec: (hullFuelPerTick + fuelScoopPerTick) * ticks,
+            playerFuelRegenPerSec: ((s.flags & 0x0008 != 0 ? hullFuelPerTick : 0) + fuelScoopPerTick) * ticks,
             afterburner: afterburner,
             cargoCapacity: max(0, cargo),
-            // `s.freeMass` is the Bible-documented ceiling as-is — "in addition
-            // to the space taken up by the ship's stock weapons" means the
-            // decoded field is already net of stock weapon mass, so it's the
-            // budget directly; `usedMass` (installed *outfits*, stock + bought)
-            // is what actually eats into it. Previously this was
-            // `s.freeMass + usedMass`, which made `freeMass` (== massCapacity −
-            // usedMass) collapse back to the constant `s.freeMass` no matter
-            // what was installed — the "Free Mass" readout never moved and no
-            // mass-consuming outfit purchase was ever actually gated by it.
-            massCapacity: s.freeMass, usedMass: usedMass,
+            // The loader raises the class FreeMass by the purchase mass of the
+            // hull's stock weapons, their ammunition and its DefaultItems
+            // (0x004bd3c0, EC-08), and `usedMass` counts every owned outfit —
+            // stock fittings included — so a stock hull shows exactly its
+            // resource FreeMass.
+            massCapacity: s.freeMass + game.stockFittingMass(s), usedMass: usedMass,
             blocksMassExpansion: s.blocksMassExpansion,
             maxGuns: maxGuns, maxTurrets: maxTurrets,
             usedGunSlots: usedGunSlots, usedTurretSlots: usedTurretSlots,
             outfits: outfitCounts, weapons: weapons,
-            maxJumpHops: max(1, 1 + multiJumpBonus),
+            // Multi-jump depth is 1 + Σ ModVal; the fire block then advances
+            // depth − 1 route systems, at least one (OQ A3).
+            maxJumpHops: max(1, multiJumpBonus),
+            multiJumpDepth: max(1, 1 + multiJumpBonus),
             instantJump: fastJump,
             hyperspaceSpeedBonus: hyperspaceSpeed,
             fighterBays: fighterBays,
@@ -562,22 +622,23 @@ extension Galaxy {
     /// you want equipped from real outfit data). Falls back to `makeShip` if the
     /// hull can't be found.
     /// - Parameter includeDefaultItems: see `loadout(shipID:extraOutfits:includeDefaultItems:)`.
-    ///   Pass `false` for AI-controlled spawns; the Bible says they ignore
-    ///   `shïp.DefaultItems`.
+    ///   Pass `false` for AI-controlled spawns, with `defaultItemCapabilities: true`.
     public func makeLoadedShip(_ shipID: Int, government govt: Int? = nil,
                                extraOutfits: [Int: Int] = [:],
                                at position: Vec2 = Vec2(), angle: Double = 0,
-                               skillRoll: Double? = nil,
+                               skillScale: Double? = nil,
                                includeDefaultItems: Bool = true,
-                               includeHullWeapons: Bool = true) -> Ship? {
+                               includeHullWeapons: Bool = true,
+                               defaultItemCapabilities: Bool = false) -> Ship? {
         guard let lo = loadout(shipID: shipID, extraOutfits: extraOutfits,
                                includeDefaultItems: includeDefaultItems,
-                               includeHullWeapons: includeHullWeapons) else {
+                               includeHullWeapons: includeHullWeapons,
+                               defaultItemCapabilities: defaultItemCapabilities) else {
             // Falls back to an un-equipped hull (`makeShip`) — if this fires
             // for the player's own ship, they'll fly with none of their
             // fitted outfits and no other clue why.
             Log.world.error("Galaxy.makeLoadedShip: loadout(\(shipID)) failed — falling back to an unequipped makeShip(\(shipID))")
-            return makeShip(shipID, government: govt, at: position, angle: angle, skillRoll: skillRoll)
+            return makeShip(shipID, government: govt, at: position, angle: angle, skillScale: skillScale)
         }
         // EV Nova hulls rotate through 36 headings. (shän's other counts are
         // *animation sets* — banking / lit variants — not headings, so we must NOT
@@ -587,8 +648,10 @@ extension Galaxy {
         let radius: Double = shan.map { max(10, Double(max($0.baseWidth, $0.baseHeight)) / 2) } ?? 18
         let shipRes = game.ship(shipID)
         let baseStats = ShipStats(speed: lo.speed, acceleration: lo.acceleration,
-                                  turnRate: lo.turnRate, rotationFrames: frames, tuning: flightTuning)
-        let stats = jitteredStats(baseStats, skillVar: shipRes?.skillVar ?? 0, roll: skillRoll)
+                                  turnRate: lo.turnRate, turnBonus: lo.turnBonus,
+                                  rotationFrames: frames, tuning: flightTuning)
+        let stats = skilledStats(baseStats, skillScale: skillScale,
+                                 government: govt ?? shipRes?.inherentCombatGovt ?? independentGovt, game: game)
         let ship = Ship(name: lo.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
         ship.explosionSoundID = shipRes.flatMap { game.deathExplosionSoundID($0) }
@@ -600,12 +663,10 @@ extension Galaxy {
         ship.radius = radius
         ship.exitPoints = exitPoints(forShip: shipID)
         ship.combatStrength = Double(max(1, shipRes?.strength ?? 1))
-        ship.disableArmorFraction = (shipRes.map { $0.flags & 0x0010 != 0 } ?? false) ? 0.10 : 0.33
+        ship.disableArmorFraction = (shipRes.map { $0.flags & 0x0010 != 0 } ?? false) ? Ship.lowDisableFraction : Ship.standardDisableFraction
         ship.fleeWhenOutOfAmmo = shipRes?.fleeWhenOutOfAmmo ?? false
         ship.ionizeMax = Double(max(0, shipRes?.ionizeMax ?? 0) + lo.ionCapacityBonus)
-        ship.deionizePerSec = Ship.flooredDeionize(
-            rate: Double(max(0, shipRes?.deionize ?? 0) + lo.deionizeBonus) * 0.3,
-            ionizeMax: ship.ionizeMax)
+        ship.deionizePerSec = (shipRes?.deionizePerTick ?? 1.0) * 30 + Double(lo.deionizeBonus) * 0.3
         ship.jamming = lo.jamming
         ship.rawTurnRate = shipRes?.turnRate ?? 0
         ship.keyCarriedShipID = shipRes?.keyCarriedShipID ?? -1
@@ -630,12 +691,15 @@ extension Galaxy {
         ship.hasEscapePod = lo.hasEscapePod
         ship.hasAutoEject = lo.hasAutoEject
         ship.hasRepairSystem = lo.hasRepairSystem
+        ship.instantJump = lo.instantJump
         ship.hasDensityScanner = lo.hasDensityScanner
         ship.reinforcementInhibitorClasses = lo.reinforcementInhibitorClasses
         ship.iffScramblerClasses = lo.iffScramblerClasses
         ship.paintColor = lo.paintColor
-        ship.ignoresGravity = (shipRes?.ignoresGravity ?? false) || lo.hasGravityResist
-        ship.ignoresDeadlyStellars = (shipRes?.ignoresDeadlyStellars ?? false) || lo.hasStellarResist
+        ship.hullShieldsStellars = shipRes?.ignoresDeadlyStellars ?? false
+        ship.hasGravityResistOutfit = lo.hasGravityResist
+        ship.hasStellarResistOutfit = lo.hasStellarResist
+        if let shipRes { ship.applyHullTraits(shipRes) }
 
         var mounts: [WeaponMount] = []
         for w in lo.weapons {
@@ -655,5 +719,25 @@ extension Galaxy {
         }
         ship.weapons = mounts
         return ship
+    }
+}
+
+extension NovaGame {
+    /// The purchase mass of everything a hull comes with — its stock weapons
+    /// (through the outfit that installs each), their `AmmoLoad` and its
+    /// `DefaultItems` — which the original's loader adds to the class FreeMass
+    /// (0x004bd3c0). Items at TechLevel 32767 or above are left out, as there.
+    public func stockFittingMass(_ s: ShipRes) -> Int {
+        var total = 0
+        func add(_ oid: Int?, _ count: Int) {
+            guard let oid, count > 0, let o = outfit(oid), o.techLevel < 0x7FFF else { return }
+            total += o.effectiveMass(shipMass: s.mass) * count
+        }
+        for w in s.weapons {
+            add(outfitInstalling(weapon: w.id), w.count)
+            add(outfitLoadingAmmo(for: w.id), w.ammo)
+        }
+        for (oid, count) in s.outfits { add(oid, count) }
+        return total
     }
 }

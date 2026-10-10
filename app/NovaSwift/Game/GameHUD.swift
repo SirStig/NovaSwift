@@ -1,4 +1,5 @@
 import SwiftUI
+import NovaSwiftEngine
 
 /// Live HUD state, updated by `GameScene` (throttled) and read by `GameHUDView`.
 @MainActor
@@ -42,6 +43,8 @@ final class GameHUDModel: ObservableObject {
     /// Whether the ship has at least one fighter bay fitted — gates the touch
     /// launch/recall controls (both are no-ops on a hull with none).
     @Published var hasFighterBays = false
+    /// The player could abandon ship right now (OS-02).
+    @Published var canEject = false
     /// Whether the player currently has any live escorts/fighters in the wing —
     /// gates the contextual escort-command pill (`ContextualActionsView`).
     @Published var hasEscorts = false
@@ -78,18 +81,49 @@ final class GameHUDModel: ObservableObject {
     /// stacking underneath it.
     @Published var message: HUDMessage?
 
+    /// Sim time left on the current message, in seconds: a message lasts its
+    /// own number of the original's raw sim calls and freezes while the game
+    /// is paused (`NovaHud_ShowOverlayMessage` 0x0047e2d0; UI-11).
+    private var messageTimeLeft: Double = 0
+
     /// Post a transient message to the bottom-left status line, replacing
-    /// whatever's currently shown. It appears immediately and fades away after
-    /// a few seconds unless superseded first.
-    func post(_ text: String) {
-        guard !text.isEmpty else { return }
+    /// whatever's currently shown. `rawCalls` is its duration in the
+    /// original's raw sim calls (0xf0 ≈ 5 s by default). Posting empty text
+    /// clears the line, as in the original.
+    func post(_ text: String, rawCalls: Int = 0xf0) {
+        guard !text.isEmpty else { dismissMessage(); return }
         let msg = HUDMessage(text: text)
         withAnimation(.easeOut(duration: 0.2)) { message = msg }
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            guard self?.message?.id == msg.id else { return }
-            withAnimation(.easeIn(duration: 0.6)) { self?.message = nil }
-        }
+        messageTimeLeft = Double(rawCalls) * OriginalClock.rawCallSeconds
+    }
+
+    /// Post only while the line is free — the original's taunts and quotes
+    /// never interrupt another message.
+    func postIfIdle(_ text: String, rawCalls: Int) {
+        guard message == nil else { return }
+        post(text, rawCalls: rawCalls)
+    }
+
+    var isMessageIdle: Bool { message == nil }
+
+    /// Return, or an empty post: clear the line now.
+    func dismissMessage() {
+        guard message != nil else { return }
+        withAnimation(.easeIn(duration: 0.2)) { message = nil }
+    }
+
+    /// Clear the line when it shows one of `texts` (FL-23: the cannot-jump
+    /// overlays go once a jump engages).
+    func dismissMessage(ifAnyOf texts: [String]) {
+        guard let current = message?.text, texts.contains(current) else { return }
+        dismissMessage()
+    }
+
+    /// Advance the message timer by `dt` seconds of unpaused sim time.
+    func tickMessage(dt: Double) {
+        guard message != nil else { return }
+        messageTimeLeft -= dt
+        if messageTimeLeft <= 0 { withAnimation(.easeIn(duration: 0.6)) { message = nil } }
     }
     /// The player's locked target, if any (empty name = no target locked).
     @Published var targetName = ""
@@ -126,6 +160,28 @@ final class GameHUDModel: ObservableObject {
     /// planet/station selection for landing, not a hyperspace destination).
     @Published var navCourseSystemName = ""
     @Published var navCourseJumps = 0
+
+    // The original's target and nav panel text (0x0045f530 / 0x0045e400;
+    // UI-10), composed by the scene and container from STR# 2002.
+    /// The status row: a dim label ("Shield:", "Armor:", or empty) and a
+    /// bright value ("57%", "Shields Down", "No Shields", "Disabled",
+    /// "Waiting").
+    @Published var targetStatusLabel = ""
+    @Published var targetStatusValue = ""
+    /// Bottom right: the government's TargetCode, else "Escort"/"Fighter"
+    /// for the player's own ships.
+    @Published var targetCode = ""
+    /// The "No Target" text (#349).
+    @Published var noTargetText = "No Target"
+    /// The nav panel: "Nav System Off" / "Stellar Navigation" / "Hyperspace"
+    /// title and the name under it, dimmed until a jump can be made.
+    @Published var navTitle = ""
+    @Published var navName = ""
+    @Published var navNameDim = false
+    /// The armed jump's next hop (not the final destination), or the
+    /// "Unexplored System" text below discovery level 1.
+    @Published var navNextHopName = ""
+    @Published var navJumpArmed = false
     /// True when the player is clear of the system's no-jump zone and could
     /// actually engage hyperspace right now — updated every frame from
     /// `GameScene.isClearOfNoJumpZone`. Grays the destination name in the nav
@@ -137,6 +193,8 @@ final class GameHUDModel: ObservableObject {
     /// colors" — the authentic HUD's radar draws in the interface's two-tone
     /// bright/dim scheme without one, and in allegiance colours with it.
     @Published var hasIFF = false
+    /// This radar refresh is all static (sÿst.Interference; OS-05): no contacts.
+    @Published var radarStatic = false
     /// Ship contacts in normalized [-1, 1] radar space (out-of-range ships are omitted).
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
@@ -188,6 +246,9 @@ struct RadarContact {
     /// blip so bigger planets read as bigger dots. 0 for ships, which draw at a
     /// fixed small size.
     var worldRadius: CGFloat = 0
+    /// A ship of 100 t or more seen through a density scanner (oütf ModType
+    /// 13): the original draws it as a 3×3 box (0x0045d600; OS-05).
+    var large: Bool = false
 }
 
 /// Maps a stellar object's world-space visual radius to its radar blip diameter

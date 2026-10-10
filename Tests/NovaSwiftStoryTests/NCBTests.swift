@@ -188,8 +188,53 @@ final class NCBTests: XCTestCase {
     func testSetParsesLeaveAndRandom() {
         XCTAssertEqual(NCBSet.parse("Q"), [.leaveStellar(messageStr: nil)])
         XCTAssertEqual(NCBSet.parse("Q25059"), [.leaveStellar(messageStr: 25059)])
-        // R( ... ) keeps its inner space-separated ops together.
-        XCTAssertEqual(NCBSet.parse("R(b1 b2)"), [.random([.setBit(1), .setBit(2)])])
+        // Each op of R(a b) only runs on one coin flip.
+        XCTAssertEqual(NCBSet.parse("R(b1 b2)"), [.random([.setBit(1)]), .random([.setBit(2)])])
+    }
+
+    // MARK: - SET interpreter quirks (Mission_ExecuteMisnScriptEngine, 0x00449370)
+
+    private func run(_ text: String, flips: [Int] = []) -> [NCBSetOp] {
+        var queue = flips
+        return NCBSet.resolve(text, pick: { queue.isEmpty ? 0 : queue.removeFirst() })
+    }
+
+    func testSetOpcodesAreCaseInsensitive() {
+        XCTAssertEqual(run("k148 g252 l143"), [.activateRank(148), .grantOutfit(252), .deactivateRank(143)])
+    }
+
+    func testSetSecondOpcodeBeforeDelimiterReplacesTheFirst() {
+        XCTAssertEqual(run("S862S863"), [.startMission(863)])
+    }
+
+    func testSetBitPrefixesAndBareForms() {
+        XCTAssertEqual(run("!b45 !45 ^b46 ^46"),
+                       [.clearBit(45), .clearBit(45), .toggleBit(46), .toggleBit(46)])
+        XCTAssertEqual(run("b10001 b9999"), [.setBit(9999)])
+    }
+
+    func testSetIgnoresOperandsOutsideEachCommandsRange() {
+        XCTAssertEqual(run("G640 G639 K256 K255 S1128 S1127"),
+                       [.grantOutfit(639), .activateRank(255), .startMission(1127)])
+    }
+
+    func testSetRandomRunsExactlyOneOfTwo() {
+        XCTAssertEqual(run("d358 R(g374 g261)", flips: [0]), [.removeOutfit(358), .grantOutfit(261)])
+        XCTAssertEqual(run("d358 R(g374 g261)", flips: [1]), [.removeOutfit(358), .grantOutfit(374)])
+    }
+
+    func testSetRandomSpacingQuirks() {
+        // A space after "(" means flip 0 skips the space, not the opcode: both run.
+        XCTAssertEqual(run("R( g374 g261)", flips: [0]), [.grantOutfit(374), .grantOutfit(261)])
+        // A lone R(b5) that fires leaves the coin armed: the next delimiter is
+        // swallowed. After ") " that's the space, harmless; with no space it
+        // eats the following op. (Outputs taken from running 0x00449370.)
+        XCTAssertEqual(run("R(b5) b6 b7", flips: [1]), [.setBit(5), .setBit(6), .setBit(7)])
+        XCTAssertEqual(run("R(b5)b6 b7", flips: [1]), [.setBit(5), .setBit(7)])
+        XCTAssertEqual(run("R(b5)b6 b7", flips: [0]), [.setBit(6), .setBit(7)])
+        XCTAssertEqual(run("R( b1 b2)", flips: [1]), [.setBit(1)])
+        // A second "b" re-zeroes the operand without executing.
+        XCTAssertEqual(run("b1b2 b3"), [.setBit(2), .setBit(3)])
     }
 
     func testSetSkipsGarbageTokens() {

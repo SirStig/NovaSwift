@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import NovaSwiftKit
+import NovaSwiftStory
 
 /// The Bar's Gambling screen — the real "Galaxy Racing Network" holovid betting
 /// game, not an invented mini-game. Confirmed authentic from the base data
@@ -11,10 +12,11 @@ import NovaSwiftKit
 /// banners; and the base install ships four holovid clips, `Race 1.mov`
 /// through `Race 4.mov`, each one visually confirmed (via its opening frame)
 /// to show that same color's ship leading — i.e. race outcome `n` plays
-/// `Race n.mov`. The one thing genuinely undocumented anywhere (Bible or the
-/// vendored NovaJS port, which implements neither) is the exact payout — no
-/// odds/multiplier are recorded — so a 3× return on a correct pick (net +2×
-/// the stake) is this port's own reasonable choice, not a ported value.
+/// `Race n.mov`. The rules are the original's (`FUN_0047dc50`, EC-26; see
+/// `LandedServices.RaceBet`): the standard wager is `min(credits, 1000)`, the
+/// typed amount is capped at `min(credits, 10000)`, a win pays four times the
+/// wager, and a race whose first roll repeats the previous winner is a
+/// guaranteed loss.
 ///
 /// Layout re-derived from the real dialog resources (`novaswift-extract dlog`/
 /// `ditl`, re-verified against the base install, not transcribed):
@@ -71,13 +73,21 @@ struct GamblingView: View {
     /// Bumped per race so the racing-phase watchdog (`.task(id:)`) restarts for
     /// each new bet rather than reusing the previous run.
     @State private var raceID = 0
+    @State private var showAmountPrompt = false
+    /// The previous race's winner, kept for the app's lifetime like the
+    /// original's global (it is not saved).
+    @MainActor private static var raceBet = LandedServices.RaceBet()
+    @State private var payout = 0
 
     var body: some View {
-        switch phase {
-        case .choosing: choosingView
-        case .racing:   racingView
-        case .result:   resultView
+        Group {
+            switch phase {
+            case .choosing: choosingView
+            case .racing:   racingView
+            case .result:   resultView
+            }
         }
+        .sheet(isPresented: $showAmountPrompt) { amountPrompt }
     }
 
     // MARK: Choosing — DITL #1023 "Race" against the real 470×230 PICT 8529 frame
@@ -91,10 +101,16 @@ struct GamblingView: View {
                     ForEach(RaceColor.allCases, id: \.rawValue) { colorButton($0, space) }
                     // Items 1/0: (129,196)-(228,221), (243,196)-(342,221), 99×25 —
                     // cx = itemLeft − 235, cy = 196 − 115 = 81.
-                    stakeButton(1000, label: graphics.buttonLabel(SpaceportLabel.bet1000, fallback: "Bet 1000"))
-                        .novaPlace(space, -106, 81)
-                    stakeButton(5000, label: graphics.buttonLabel(SpaceportLabel.bet5000, fallback: "Bet 5000"))
-                        .novaPlace(space, 8, 81)
+                    stakeButton(graphics.buttonLabel(SpaceportLabel.bet1000, fallback: "Bet 1000")) {
+                        placeBet(LandedServices.RaceBet.standardWager(credits: pilot.state.credits))
+                    }
+                    .novaPlace(space, -106, 81)
+                    // The original's modifier-key bet: type any amount up to
+                    // min(credits, 10000).
+                    stakeButton(graphics.buttonLabel(SpaceportLabel.bet, fallback: "Bet")) {
+                        showAmountPrompt = true
+                    }
+                    .novaPlace(space, 8, 81)
                     // DITL #1023 defines no credits/Leave items; they share the
                     // real button row (y=196) flanking the two stake buttons —
                     // INSIDE the 230px-tall frame (the old cy=106/128 spots put
@@ -137,11 +153,18 @@ struct GamblingView: View {
         .novaPlace(space, Self.colorBoxCX[color] ?? 0, -27)
     }
 
-    private func stakeButton(_ amount: Int, label: String) -> some View {
+    private func stakeButton(_ label: String, action: @escaping () -> Void) -> some View {
         NovaButton(graphics: graphics, title: label, width: 73,
-                   enabled: selectedColor != nil && pilot.state.credits >= amount) {
-            placeBet(amount)
-        }
+                   enabled: selectedColor != nil && pilot.state.credits > 0, action: action)
+    }
+
+    /// STR# 2002 #372 "Amount to bet:", capped at min(credits, 10000).
+    private var amountPrompt: some View {
+        let cap = max(1, LandedServices.RaceBet.maxPromptedWager(credits: pilot.state.credits))
+        return TradeQuantityPrompt(title: graphics.game.stringList(2002)?.string(at: 372) ?? "Amount to bet:",
+                                   range: 1...cap, initial: min(1000, cap), unitLabel: "credits",
+                                   onConfirm: { amount in showAmountPrompt = false; placeBet(amount) },
+                                   onCancel: { showAmountPrompt = false })
     }
 
     private var fallbackChoosing: some View {
@@ -156,12 +179,14 @@ struct GamblingView: View {
                 }
             }
             HStack(spacing: 10) {
-                Button(graphics.buttonLabel(SpaceportLabel.bet1000, fallback: "Bet 1000")) { placeBet(1000) }
+                Button(graphics.buttonLabel(SpaceportLabel.bet1000, fallback: "Bet 1000")) {
+                    placeBet(LandedServices.RaceBet.standardWager(credits: pilot.state.credits))
+                }
+                .novaProminentButton()
+                .disabled(selectedColor == nil || pilot.state.credits < 1)
+                Button(graphics.buttonLabel(SpaceportLabel.bet, fallback: "Bet")) { showAmountPrompt = true }
                     .novaProminentButton()
-                    .disabled(selectedColor == nil || pilot.state.credits < 1000)
-                Button(graphics.buttonLabel(SpaceportLabel.bet5000, fallback: "Bet 5000")) { placeBet(5000) }
-                    .novaProminentButton()
-                    .disabled(selectedColor == nil || pilot.state.credits < 5000)
+                    .disabled(selectedColor == nil || pilot.state.credits < 1)
             }
             Text("You Have: \(pilot.state.credits.creditsAbbreviated)").foregroundStyle(Color(red: 1, green: 0.85, blue: 0.4))
             Button(graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), action: onDone).novaBorderedButton()
@@ -176,11 +201,12 @@ struct GamblingView: View {
     }
 
     private func placeBet(_ amount: Int) {
-        guard selectedColor != nil, pilot.state.credits >= amount else { return }
+        guard let pick = selectedColor, amount > 0, pilot.state.credits >= amount else { return }
         stake = amount
         pilot.state.credits -= amount
-        pilot.save()
-        let winIndex = Int.random(in: 1...4)
+        let race = Self.raceBet.race(pick: pick.rawValue - 1, wager: amount) { Int.random(in: 0..<$0) }
+        payout = race.payout
+        let winIndex = race.winner + 1
         winner = RaceColor(rawValue: winIndex)
         if let url = model.data.raceVideoURL(index: winIndex) {
             player = AVPlayer(url: url)
@@ -254,8 +280,7 @@ struct GamblingView: View {
     private func finishRace() {
         guard phase == .racing else { return }
         player?.pause()
-        if winner == selectedColor { pilot.state.credits += stake * 3 }   // win: 3× stake back (net +2×)
-        pilot.save()
+        pilot.state.credits += payout   // a win pays four times the wager (STR# 2002 #370)
         phase = .result
     }
 
@@ -266,7 +291,7 @@ struct GamblingView: View {
             resultBoxes(space)
             if let winner {
                 NovaText(winner == selectedColor
-                         ? "You win \((stake * 3).creditsAbbreviated)!"
+                         ? "\(graphics.game.stringList(2002)?.string(at: 370) ?? "Your winnings"): \(payout.creditsAbbreviated)"
                          : "\(winner.name) wins — you lose \(stake.creditsAbbreviated).",
                          size: 12,
                          color: winner == selectedColor ? Color(red: 0.5, green: 0.9, blue: 0.5) : Color(red: 1, green: 0.5, blue: 0.5),
@@ -310,7 +335,7 @@ struct GamblingView: View {
     }
 
     private func resetForNextRace() {
-        selectedColor = nil; stake = 0; winner = nil; player = nil; phase = .choosing
+        selectedColor = nil; stake = 0; payout = 0; winner = nil; player = nil; phase = .choosing
     }
 
 }

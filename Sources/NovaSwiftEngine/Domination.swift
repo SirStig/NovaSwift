@@ -19,31 +19,34 @@ struct StellarDefense {
     var poolRemaining: Int
 }
 
-// EV Nova's planetary domination ("Demand Tribute"). The player targets a
-// stellar and demands tribute; a governed planet with a defense fleet answers
-// with force, launching `DefenseDude` ships in waves until its `DefCount` pool
-// is spent. Destroy them all and demand again, and the planet surrenders — it's
-// dominated and pays `Tribute` credits per day thereafter (the day clock, in
-// NovaSwiftStory, does the paying). A combat-rating gate (an engine addition on
-// top of the stock defeat-the-fleet gate) lets a weak player be laughed off
-// before a fight even starts. See docs/reverse-engineering/DOMINATION.md.
+// EV Nova's planetary domination ("Demand Tribute"), from the stellar comm
+// window (0x00480030, EC-16). Every demand is a crime against the stellar's
+// government; below a combat rating of 12,800 the demand is laughed off. A
+// stellar with nothing left to fight — no garrison and no defender up —
+// submits to the first demand made in a comm window; otherwise it launches its
+// `DefenseDude` defenders until its `DefCount` pool is spent. Once dominated it
+// pays `Tribute` credits per day (the day clock, in NovaSwiftStory, does the
+// paying). See docs/reverse-engineering/DOMINATION.md.
 extension World {
 
-    /// The combat rating a tribute demand on `spob` requires before the planet
-    /// takes it seriously — scaled by how many defenders it fields. 0 when the
-    /// rating gate is disabled (`tributeRatingPerDefender == 0`).
-    public func tributeRatingRequired(for spob: SpobRes) -> Int {
-        spob.defenseTotal * max(0, tributeRatingPerDefender)
-    }
+    /// The combat rating below which a stellar laughs off a tribute demand
+    /// (`0x3200`, a flat gate in the original).
+    public static let tributeCombatRating = 12_800
 
-    /// Demand tribute from stellar `spobID`. Drives the whole domination flow:
-    /// refuses (with a reason) if the planet can't or won't submit, launches a
-    /// defense wave if it fights back, reports the fight is ongoing if it's
-    /// already defending, or dominates the planet once its defenders are broken.
+    /// The combat rating a tribute demand on `spob` requires.
+    public func tributeRatingRequired(for spob: SpobRes) -> Int { Self.tributeCombatRating }
+
+    /// Demand tribute from stellar `spobID`. `firstPressInWindow` is whether
+    /// this is the first Demand Tribute press since the comm window opened —
+    /// only that press can win a stellar with nothing left to fight.
+    ///
+    /// Every demand fires the stellar government's kill penalty once, after
+    /// first dropping a record that still meets `MinStatus` to `MinStatus − 1`;
+    /// a demand that dominates or opens the defence fires it five more times.
     /// The player must be in the same system as the stellar (the world is
     /// single-system); pass the id of a stellar present in `systemContext`.
     @discardableResult
-    public func demandTribute(spobID: Int) -> TributeOutcome {
+    public func demandTribute(spobID: Int, firstPressInWindow: Bool = true) -> TributeOutcome {
         // Already ours.
         if dominatedStellars.contains(spobID) {
             emit(.tributeRefused(spobID: spobID, reason: .alreadyDominated))
@@ -61,48 +64,43 @@ extension World {
             emit(.stellarDominated(spobID: spobID))
             return .dominated
         }
-        // No defense fleet → nothing to break, so it can't be forced to submit.
-        guard spob.hasDefenseFleet else {
-            emit(.tributeRefused(spobID: spobID, reason: .noDefenseFleet))
-            return .refused(.noDefenseFleet)
+
+        applyTributeCrime(spob, floods: 1, lowerToMinStatus: true)
+        if playerCombatRating < Self.tributeCombatRating {
+            emit(.tributeRefused(spobID: spobID, reason: .combatRatingTooLow(required: Self.tributeCombatRating)))
+            Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) tribute refused — combat rating \(self.playerCombatRating) below \(Self.tributeCombatRating)")
+            return .refused(.combatRatingTooLow(required: Self.tributeCombatRating))
+        }
+
+        let garrison = stellarDefenses[spobID]?.poolRemaining
+            ?? stellarGarrisons[spobID] ?? (spob.hasDefenseFleet ? spob.defenseTotal : 0)
+        let mounted = liveDefenders(of: spobID) > 0
+        if firstPressInWindow, garrison < 1, !mounted {
+            applyTributeCrime(spob, floods: 5, lowerToMinStatus: false)
+            stellarDefenses[spobID] = nil
+            stellarGarrisons[spobID] = 0
+            touchedGarrisons.insert(spobID)
+            dominatedStellars.insert(spobID)
+            emit(.stellarDominated(spobID: spobID))
+            Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) dominated — nothing left to defend it")
+            return .dominated
         }
 
         // An active contest: the per-frame trickle keeps the field topped up as
         // defenders fall.
         if var defense = stellarDefenses[spobID] {
-            let aliveDefenders = liveDefenders(of: spobID)
-            if defense.poolRemaining == 0 && aliveDefenders == 0 {
-                // Defenses broken — the planet yields. A disabled defender no
-                // longer counts as "up" (see `liveDefenders`), so a field of
-                // disabled hulks with the pool spent surrenders too, rather than
-                // making the player hunt the hulks down.
-                stellarDefenses[spobID] = nil
-                dominatedStellars.insert(spobID)
-                emit(.stellarDominated(spobID: spobID))
-                Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) dominated — defenses broken")
-                return .dominated
-            }
-            // Still contesting. Top up now so a re-demand at a thin moment doesn't
-            // wait a frame for the trickle tick, then report the fight is ongoing.
             _ = topUpDefenders(&defense, spob: spob)
             stellarDefenses[spobID] = defense
             return .stillDefending
         }
-
-        // First demand on this planet. Combat-rating gate first: a weak player is
-        // laughed off before any shots are fired.
-        let required = tributeRatingRequired(for: spob)
-        if required > 0, playerCombatRating < required {
-            emit(.tributeRefused(spobID: spobID, reason: .combatRatingTooLow(required: required)))
-            Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) tribute refused — combat rating \(self.playerCombatRating) below required \(required)")
-            return .refused(.combatRatingTooLow(required: required))
-        }
+        guard spob.hasDefenseFleet else { return .stillDefending }
 
         // Open the contest and scramble the first wave.
+        applyTributeCrime(spob, floods: 5, lowerToMinStatus: false)
         let govt = spob.government >= 128 ? spob.government
                  : (galaxy.game.dude(spob.defenseDude)?.govt ?? independentGovt)
         var defense = StellarDefense(spobID: spobID, dudeID: spob.defenseDude, govt: govt,
-                                     waveSize: spob.defenseWaveSize, poolRemaining: spob.defenseTotal)
+                                     waveSize: spob.defenseWaveSize, poolRemaining: garrison)
         let n = topUpDefenders(&defense, spob: spob)
         // Only the opening scramble announces on the HUD; the silent trickle that
         // replaces losses does not, so a long fight doesn't spam a line per ship.
@@ -112,6 +110,36 @@ extension World {
         stellarDefenses[spobID] = defense
         Log.world.notice("\(LogTag.spob(id: spobID, name: spob.name)) tribute demand opened — \(n) defenders launched, pool \(defense.poolRemaining)")
         return .defending(launched: n)
+    }
+
+    /// Releasing a dominated stellar (EC-16): it stops paying tribute and its
+    /// garrison is reseeded; a record that still meets `MinStatus` drops to
+    /// `MinStatus − 1`. The host runs `OnRelease`.
+    public func releaseStellar(spobID: Int) {
+        dominatedStellars.remove(spobID)
+        stellarDefenses[spobID] = nil
+        stellarGarrisons[spobID] = nil   // reseeded: a full DefCount again
+        touchedGarrisons.insert(spobID)
+        if let spob = galaxy?.game.spob(spobID) {
+            applyTributeCrime(spob, floods: 0, lowerToMinStatus: true)
+        }
+    }
+
+    /// The demand's cost in standing (0x00480030): the player's reputation in
+    /// this system drops to `MinStatus − 1` if it still meets `MinStatus`,
+    /// then faction event 3 (a kill, `KillPenalty`) against the stellar's
+    /// government floods from this system (EC-02) `floods` times.
+    func applyTributeCrime(_ spob: SpobRes, floods: Int, lowerToMinStatus: Bool) {
+        guard let diplomacy else { return }
+        // An ungoverned stellar floods as an independent victim, as the
+        // original passes its −1 straight through.
+        let victim = spob.government >= govtResourceBase ? spob.government : independentGovt
+        if lowerToMinStatus {
+            diplomacy.lowerReputationHere(belowMinStatus: spob.minStatus)
+        }
+        for _ in 0..<floods {
+            diplomacy.recordCrime(.kill, against: victim)
+        }
     }
 
     /// Dev-tools shortcut: grants domination of `spobID` instantly, skipping the
@@ -130,25 +158,48 @@ extension World {
         emit(.stellarDominated(spobID: spobID))
     }
 
-    /// Number of a stellar's defense ships still up and fighting in the system —
-    /// alive and not disabled. Public so the app can show "defenders remaining"
-    /// while a tribute fight is on. A *disabled* defender counts as down (like a
-    /// destroyed one): it frees a slot for a replacement and no longer blocks the
-    /// planet's surrender, so the player never has to chase disabled hulks around.
+    /// AI-15: every garrison this visit changed, for the host to merge into
+    /// the save — the ships still in each pool plus the defenders still alive
+    /// in the field (survivors return to the garrison; the dead are lost).
+    /// nil = reseeded to a full `DefCount` (a release).
+    public func garrisonSnapshot() -> [Int: Int?] {
+        var out: [Int: Int?] = [:]
+        for spobID in touchedGarrisons { out[spobID] = stellarGarrisons[spobID] }
+        for (spobID, defense) in stellarDefenses {
+            let alive = npcs.reduce(0) { $0 + (($1.spobDefenderOf == spobID && $1.isAlive) ? 1 : 0) }
+            out[spobID] = defense.poolRemaining + alive
+        }
+        return out
+    }
+
+    /// Number of a stellar's defense ships still in the system. Public so the
+    /// app can show "defenders remaining" while a tribute fight is on. AI-15:
+    /// the original counts every active ship slot tagged to the stellar
+    /// (`System_TickNpcSpawnMaintenance` 0x0041d6e0), so a *disabled* defender
+    /// still holds its place in the wave quota and still blocks the surrender —
+    /// only destroying (or boarding away) a hulk frees its slot.
     public func liveDefenders(of spobID: Int) -> Int {
-        npcs.reduce(0) { $0 + (($1.spobDefenderOf == spobID && $1.isAlive && !$1.disabled) ? 1 : 0) }
+        npcs.reduce(0) { $0 + (($1.spobDefenderOf == spobID && $1.isAlive) ? 1 : 0) }
     }
 
     /// Per-frame upkeep for active tribute contests: keep each planet's field
     /// topped up to its concurrent `waveSize`, launching one replacement for every
-    /// defender that has fallen (destroyed or disabled) since last frame, until the
+    /// defender that has been destroyed since last frame, until the
     /// pool is spent — a continuous trickle, not a wave that only refills once the
     /// field is empty. Called from `step`.
     func updateStellarDefenses() {
         guard !stellarDefenses.isEmpty else { return }
-        for (spobID, var defense) in stellarDefenses {
-            guard defense.poolRemaining > 0, let spob = galaxy?.game.spob(spobID) else { continue }
-            if topUpDefenders(&defense, spob: spob) > 0 {
+        // AI-15: the maintenance tick (0x0041d6e0) launches at most one
+        // defender per raw call, from the first stellar short of its wave.
+        var budget = rawCallsThisStep
+        for spobID in stellarDefenses.keys.sorted() where budget > 0 {
+            guard var defense = stellarDefenses[spobID], defense.poolRemaining > 0,
+                  let spob = galaxy?.game.spob(spobID) else { continue }
+            let deficit = defense.waveSize - liveDefenders(of: defense.spobID)
+            guard deficit > 0 else { continue }
+            let launched = launchDefenders(&defense, spob: spob, count: min(deficit, budget))
+            if launched > 0 {
+                budget -= launched
                 stellarDefenses[spobID] = defense
             }
         }
@@ -156,7 +207,7 @@ extension World {
 
     /// Bring the live (up-and-fighting) defender count back up to the concurrent
     /// target (`waveSize`) by scrambling replacements from the remaining pool — one
-    /// per open slot, so each destroyed or disabled defender draws exactly one
+    /// per open slot, so each destroyed defender draws exactly one
     /// fresh ship. Returns how many launched this call.
     @discardableResult
     private func topUpDefenders(_ defense: inout StellarDefense, spob: SpobRes) -> Int {
@@ -175,21 +226,26 @@ extension World {
         let want = min(count, defense.poolRemaining)
         // Launch from the planet's own position if we have its geometry, else the
         // system centre.
+        // AI-15 (`Stellar_SpawnDefenseFleetShip` 0x00421fd0): exactly on the
+        // stellar, flying a warship's AI whatever the dude says, leaving at full
+        // speed on a random heading, hostile to the player.
         let origin = systemContext.bodies.first { $0.id == defense.spobID }?.position ?? systemContext.center
         var launched: [Int] = []
         for _ in 0..<want {
             let roll = rng.int(in: 0...9999)
             guard let shipID = dude.pickShip(roll: roll) else { continue }
-            let jitter = Vec2(rng.double(in: -60...60), rng.double(in: -60...60))
-            let ang = rng.double(in: 0...(2 * .pi))
+            let ang = Double(rng.range(360)) * .pi / 180
             guard let ship = galaxy.makeLoadedShip(shipID, government: defense.govt,
-                                                   at: origin + jitter, angle: ang,
-                                                   skillRoll: rng.double(in: -1...1),
-                                                   includeDefaultItems: false) else { continue }
-            let brain = AIBrain(aiType: dude.aiType == .unknown ? .warship : dude.aiType, govt: defense.govt)
+                                                   at: origin, angle: ang,
+                                                   skillScale: galaxy.skillVarianceScale(classOf: nil, rng: &rng),
+                                                   includeDefaultItems: false, defaultItemCapabilities: true) else { continue }
+            ship.velocity = Vec2(sin(ang), cos(ang)) * ship.stats.maxSpeed
+            ship.throttleSpeed = ship.stats.maxSpeed
+            let brain = AIBrain(aiType: .warship, govt: defense.govt)
             brain.behaviorOverride = .attackPlayer   // defenders exist to repel the player
             ship.brain = brain
             ship.spobDefenderOf = defense.spobID
+            ship.dudeID = defense.dudeID
             launched.append(addNPC(ship, arrival: .launch))
         }
         defense.poolRemaining -= launched.count

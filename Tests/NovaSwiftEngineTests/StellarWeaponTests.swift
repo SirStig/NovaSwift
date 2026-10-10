@@ -324,19 +324,32 @@ final class StellarWeaponTests: XCTestCase {
     // MARK: Gravity (`spöb.Gravity`)
 
     func testStellarGravityPullsShipsAndTheImmuneIgnoreIt() {
-        let world = destroyableWorld(strength: 0, gravity: 400)
-        let drifter = makeShip("Drifter", govt: independentGovt, at: Vec2(0, 200))
+        // FL-19: Gravity / max(d², 30) px/tick per tick, d in hundreds of px.
+        let world = destroyableWorld(strength: 0, gravity: 30)
+        let drifter = makeShip("Drifter", govt: independentGovt, at: Vec2(0, 1000))
         drifter.brain = nil
         _ = world.addNPC(drifter)
-        let immune = makeShip("Immune", govt: independentGovt, at: Vec2(0, 200))
+        let immune = makeShip("Immune", govt: independentGovt, at: Vec2(0, 1000))
         immune.brain = nil
-        immune.ignoresGravity = true
+        immune.hullShieldsStellars = true
         _ = world.addNPC(immune)
+        let pod = makeShip("Resistant", govt: independentGovt, at: Vec2(0, 1000))
+        pod.brain = nil
+        pod.hasGravityResistOutfit = true                 // ModType 41 only shields the player
+        _ = world.addNPC(pod)
 
-        for _ in 0..<30 { world.step(1.0 / 30.0) }
-        XCTAssertLessThan(drifter.velocity.y, -1, "positive gravity pulls a ship toward the body")
-        XCTAssertEqual(immune.velocity.y, 0, accuracy: 1e-9,
-                       "shïp Flags3 0x0010 / oütf ModType 41 make a hull immune")
+        world.step(1.0 / 30.0)
+        // 30 / (10² ) = 0.3 px/tick per tick = 9 px/s after one tick.
+        XCTAssertEqual(drifter.velocity.y, -9, accuracy: 1e-9, "positive gravity pulls a ship toward the body")
+        XCTAssertEqual(immune.velocity.y, 0, accuracy: 1e-9, "shïp Flags3 0x0020 makes a hull immune")
+        XCTAssertEqual(pod.velocity.y, -9, accuracy: 1e-9, "an NPC's ModType-41 outfit does nothing")
+
+        // Inside d² = 30 (≈ 548 px) the pull stops growing.
+        let close = makeShip("Close", govt: independentGovt, at: Vec2(0, 300))
+        close.brain = nil
+        _ = world.addNPC(close)
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(close.velocity.y, -30, accuracy: 1e-9, "30 / 30 = 1 px/tick per tick")
     }
 
     func testZeroGravityIsInert() {

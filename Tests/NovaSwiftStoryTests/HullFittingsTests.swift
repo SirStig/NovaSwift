@@ -94,8 +94,11 @@ final class HullFittingsTests: XCTestCase {
         // blasters and burned none of its mass budget doing it.
         XCTAssertEqual(lo?.weapons.first(where: { $0.id == 300 })?.count, 1)
         XCTAssertEqual(lo?.weapons.count, 1)
-        XCTAssertEqual(PilotEconomy.freeMass(pilot, galaxy: galaxy), 20 - 3,
-                       "the blaster now costs its 3t against free mass, as it should")
+        // EC-08: the loader adds the stock blaster's 3t to the class FreeMass,
+        // so the owned blaster leaves the stock hull at exactly its FreeMass.
+        XCTAssertEqual(PilotEconomy.freeMass(pilot, galaxy: galaxy), 20,
+                       "a stock hull shows exactly its resource FreeMass")
+        XCTAssertEqual(lo?.massCapacity, 23)
         XCTAssertEqual(lo?.freeGunSlots, 1,
                        "…and consumes one of the hull's two gun mounts")
     }
@@ -161,10 +164,10 @@ final class HullFittingsTests: XCTestCase {
 
     // MARK: Mission hull swaps
 
-    /// Bible `C` ("keep the outfits"): the player's own items carry over, the new
-    /// hull's `DefaultItems` don't — but the hull still has to turn up armed, or
-    /// a storyline that hands you a ship strands you in a defenceless one.
-    func testMissionKeepOutfitsSwapStillArmsTheNewHull() {
+    /// `C` (0x00449370) changes only the class: the player's own weapons and
+    /// items carry over, and the new hull's stock armament and `DefaultItems`
+    /// do not — only the E/H arm adds the class's stock banks (MS-18).
+    func testMissionKeepOutfitsSwapChangesOnlyTheClass() {
         let game = makeGameData()
         var pilot = PlayerState(shipType: 128)
         pilot.outfits = [200: 1]
@@ -172,8 +175,30 @@ final class HullFittingsTests: XCTestCase {
         engine.apply(set: "C129")
 
         XCTAssertEqual(engine.player.shipType, 129)
-        XCTAssertEqual(engine.player.outfits[200], 1, "C keeps what the player brought")
-        XCTAssertEqual(engine.player.outfits[201], 1, "…and the new hull arrives armed")
-        XCTAssertNil(engine.player.outfits[210], "…but with none of its DefaultItems")
+        XCTAssertEqual(engine.player.outfits, [200: 1], "C keeps what the player brought and adds nothing")
+    }
+
+    /// E/H clamp every owned count to its limit after adding the fittings:
+    /// here the new hull's launcher is the only one, so missiles beyond its
+    /// MaxAmmo go.
+    func testDefaultOutfitSwapClampsOwnedCounts() {
+        var resources = [
+            shipResource(id: 128, cargo: 10, freeMass: 20, maxGuns: 2),
+            shipResource(id: 129, cargo: 20, freeMass: 40,
+                         stockWeapons: [(id: 301, count: 1, ammo: 12)], maxGuns: 2),
+            outfitResource(id: 201, name: "Missile Launcher", mass: 5, cost: 20000,
+                           installsWeapon: 301, isFixedGun: true),
+            outfitResource(id: 202, name: "Missile", mass: 0, cost: 750, ammoFor: 301),
+        ]
+        var launcher = [UInt8](weaponResource(id: 301, name: "Missile Launcher").data)
+        Bytes.i16(&launcher, 108, 20)                      // MaxAmmo 20
+        resources.append(Resource(type: NovaType.weapon, id: 301, name: "Missile Launcher", data: Data(launcher)))
+        let game = makeGame(resources)
+        var pilot = PlayerState(shipType: 128)
+        pilot.outfits = [202: 30]
+        let engine = StoryEngine(game: game, player: pilot)
+        engine.apply(set: "E129")
+        XCTAssertEqual(engine.player.outfits[201], 1)
+        XCTAssertEqual(engine.player.outfits[202], 20, "30 + 12 missiles clamped to one launcher's 20")
     }
 }

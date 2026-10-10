@@ -116,32 +116,28 @@ final class FighterBayTests: XCTestCase {
         world.galaxy = galaxy
         world.diplomacy = galaxy.makeDiplomacy()
         _ = world.addNPC(carrier)
-        // The carrier flies for the player, on Attack. It needs a gun of its own
-        // to engage: `AIBrain.armed` counts only firing weapons, not bays.
-        carrier.weapons.append(WeaponMount(spec: WeaponSpec(
-            id: 300, name: "Gun", shieldDamage: 10, armorDamage: 10, reloadSeconds: 0.1,
-            projectileSpeed: 2000, range: 4000, accuracyRadians: 0, isBeam: false,
-            isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0)))
+        // The carrier flies for the player, on Attack.
         carrier.brain = AIBrain(aiType: .warship, govt: 128)
         carrier.brain?.leaderID = World.playerEntityID
         world.setPlayerEscortOrder(.aggressive)
         XCTAssertEqual(carrier.brain?.escortOrder, .aggressive)
 
-        // Something that has already traded fire with the player's fleet: the
-        // carrier engages it on its own, which is what puts its bays into combat.
+        // Something the carrier is fighting puts its bays into combat. The
+        // carrier flies brainless for the launch so no AI re-aims it.
         let enemy = Ship(name: "E", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
                          position: Vec2(0, 600))
-        enemy.brain = AIBrain(aiType: .warship, govt: 200)
-        enemy.brain?.provokedByPlayer = true
         _ = world.addNPC(enemy)
-        world.player.currentTargetID = enemy.entityID
+        let carrierBrain = carrier.brain
+        carrier.brain = nil
+        carrier.currentTargetID = enemy.entityID
         for _ in 0..<3 { world.step(1.0 / 30.0) }
-        XCTAssertEqual(carrier.currentTargetID, enemy.entityID, "the carrier engaged on its wing order")
+        carrier.brain = carrierBrain
 
         let fighter = try XCTUnwrap(world.npcs.first { $0.carrierID == carrier.entityID })
         XCTAssertTrue(world.isPlayerFleetMember(fighter.entityID),
                       "the fleet test follows the chain of command through the carrier")
         XCTAssertTrue(world.isPlayerEscort(fighter), "so the radar/targeting read it as yours")
+        world.setPlayerEscortOrder(.aggressive)
         XCTAssertEqual(fighter.brain?.escortOrder, .aggressive,
                        "it flies under the same standing order as the wing it belongs to")
         // Even if something has marked the fighter as provoked, it is on the
@@ -154,15 +150,9 @@ final class FighterBayTests: XCTestCase {
                        "nor on the player whose fleet it belongs to")
     }
 
-    func testFightersStayOutWhenCarrierLeavesCombatButDockWhenBadlyHurt() throws {
-        // Regression-guarding the *current*, deliberate behavior (see
-        // `updateFighterBays`'s doc comment): a fighter does NOT get yanked home
-        // just because its carrier lost its target/left combat — only when the
-        // fighter itself is dry on ammo or badly hurt (or the player explicitly
-        // recalls it). The old version of this test asserted the opposite
-        // (carrier-leaves-combat ⇒ auto-recall), which is exactly the "yank every
-        // fighter home the instant you deselected a target" behavior the current
-        // code deliberately moved away from.
+    func testFightersReturnAndDockWhenTheCarrierStandsDown() throws {
+        // OS-03: a carrier that stands down (no target) calls its fighters
+        // home; they dock within 75 px on both axes and the bay gains them back.
         let galaxy = Galaxy(game: game())
         let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))
         carrier.brain = nil
@@ -175,110 +165,45 @@ final class FighterBayTests: XCTestCase {
         world.step(1.0 / 30.0)
         let fighter = try XCTUnwrap(world.npcs.first { $0.carrierID == carrier.entityID })
         XCTAssertEqual(carrier.fighterBays.first?.docked, 2)
+        XCTAssertEqual(fighter.currentTargetID, enemyID, "a launched fighter takes the carrier's target")
 
-        // Carrier leaves combat: place the fighter right on the carrier (so
-        // proximity is never the blocker) and step — it should NOT dock.
-        carrier.currentTargetID = nil
-        fighter.position = carrier.position
-        for _ in 0..<3 { world.step(1.0 / 30.0) }
-        XCTAssertTrue(world.npcs.contains { $0.entityID == fighter.entityID },
-                      "leaving combat alone shouldn't recall a healthy, armed fighter")
-        XCTAssertEqual(carrier.fighterBays.first?.docked, 2, "bay unchanged — fighter still deployed")
-
-        // Now badly hurt it (below the 30% health-fraction recall threshold):
-        // still on top of the carrier, it should dock on the next step.
-        fighter.armor = fighter.maxArmor * 0.1
-        fighter.shield = 0
+        // In combat, a fighter next to its carrier stays out.
+        fighter.position = carrier.position + Vec2(10, 10)
         world.step(1.0 / 30.0)
-        XCTAssertFalse(world.npcs.contains { $0.entityID == fighter.entityID }, "badly hurt fighter docks away")
+        XCTAssertTrue(world.npcs.contains { $0.entityID == fighter.entityID })
+
+        // Standing down recalls it; at 74 px it docks, at 76 px it doesn't.
+        carrier.currentTargetID = nil
+        fighter.position = carrier.position + Vec2(76, 0)
+        fighter.velocity = Vec2()
+        world.step(1.0 / 30.0)
+        XCTAssertTrue(fighter.recallToCarrier)
+        fighter.position = carrier.position + Vec2(74, -74)
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(world.npcs.contains { $0.entityID == fighter.entityID }, "docked")
         XCTAssertEqual(carrier.fighterBays.first?.docked, 3, "bay restored on dock")
     }
 
-    func testBadlyHurtFighterFliesHomeToDockFromRange() throws {
-        // Previously the recall flag steered nothing — a hurt fighter far from its
-        // carrier kept dogfighting and only ever docked if it happened to drift back
-        // over the bay, which read as fighters wandering off and never coming home.
-        // Now the brain flies a recalled fighter straight home.
+    func testLaunchedFighterIsBehaviorFiveWithTheBaysLaunchVelocity() throws {
+        // AI-41: × 1.333 max shield/armor and shield regen; OS-03: launched
+        // from the carrier's centre at the bay's Speed / 100 px/tick.
         let galaxy = Galaxy(game: game())
         let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 128, extraOutfits: [200: 1]))
-        carrier.brain = nil   // brainless → sits still, so the carrier doesn't move under the test
+        carrier.brain = nil
+        carrier.angle = .pi / 2
         let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
         world.galaxy = galaxy
         world.diplomacy = galaxy.makeDiplomacy()
         _ = world.addNPC(carrier)
-        let enemyID = world.addNPC(Ship(name: "E", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
-        carrier.currentTargetID = enemyID
+        carrier.currentTargetID = world.addNPC(Ship(name: "E", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
         world.step(1.0 / 30.0)
         let fighter = try XCTUnwrap(world.npcs.first { $0.carrierID == carrier.entityID })
-
-        // Teleport the fighter far away and badly hurt it (below the 30% recall
-        // threshold), so it will be flagged to return.
-        fighter.position = carrier.position + Vec2(4000, 0)
-        fighter.armor = fighter.maxArmor * 0.1
-        fighter.shield = 0
-        let startDist = (fighter.position - carrier.position).length
-
-        for _ in 0..<120 { world.step(1.0 / 30.0) }   // ~4s to fly home
-        if let f = world.npcs.first(where: { $0.entityID == fighter.entityID }) {
-            XCTAssertTrue(f.recallToCarrier, "a badly hurt fighter is flagged to return")
-            XCTAssertLessThan((f.position - carrier.position).length, startDist,
-                              "a recalled fighter closes on its carrier instead of loitering at range")
-        }
-        // (If it already docked and despawned, that's the fully-correct outcome too.)
-    }
-
-    // MARK: a live, brain-driven (not manually-targeted) NPC carrier
-
-    private func govtData(classes: [Int], enemies: [Int] = []) -> Data {
-        var d = [UInt8](repeating: 0, count: 60)
-        func putW(_ off: Int, _ v: Int) {
-            let u = UInt16(bitPattern: Int16(truncatingIfNeeded: v))
-            d[off] = UInt8(u >> 8); d[off + 1] = UInt8(u & 0xff)
-        }
-        for i in 0..<4 { putW(24 + i * 2, i < classes.count ? classes[i] : -1) }
-        for i in 0..<4 { putW(32 + i * 2, -1) }
-        for i in 0..<4 { putW(40 + i * 2, i < enemies.count ? enemies[i] : -1) }
-        return Data(d)
-    }
-    private func govt(_ id: Int, classes: [Int], enemies: [Int] = []) -> GovtRes {
-        GovtRes(Resource(type: NovaType.govt, id: id, name: "G\(id)", data: govtData(classes: classes, enemies: enemies)))
-    }
-
-    /// Regression-guarding the gap the other tests in this file leave open:
-    /// they all strip `carrier.brain` and hand-set `currentTargetID`, so the
-    /// carrier's *own* AI decision to fight (and thereby trigger
-    /// `carrierInCombat`) was never actually exercised end-to-end. Here the
-    /// carrier keeps its real brain and only diplomacy/proximity drive it
-    /// into combat, same as it would in a live system.
-    func testLiveBrainDrivenCarrierLaunchesFightersWithoutManualTargeting() throws {
-        let galaxy = Galaxy(game: game())
-        let carrier = try XCTUnwrap(galaxy.makeLoadedShip(128, government: 300, extraOutfits: [200: 1]))
-        carrier.weapons = [WeaponMount(spec: WeaponSpec(id: 999, name: "Gun", shieldDamage: 10, armorDamage: 10,
-                                                        reloadSeconds: 1, projectileSpeed: 1000, range: 3000,
-                                                        accuracyRadians: 0, isBeam: false, isGuided: false,
-                                                        turnRate: 0, blastRadius: 0, ammoPerShot: 0))]
-        carrier.brain = AIBrain(aiType: .warship, govt: 300)
-
-        let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3),
-                                       position: Vec2(9_000, 9_000)))
-        world.galaxy = galaxy
-        world.diplomacy = Diplomacy(govts: [
-            govt(300, classes: [30], enemies: [31]),
-            govt(301, classes: [31], enemies: [30]),
-        ])
-        _ = world.addNPC(carrier)
-        let hostile = Ship(name: "Hostile", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3), position: Vec2(0, 400))
-        hostile.government = 301
-        hostile.weapons = [WeaponMount(spec: WeaponSpec(id: 998, name: "Gun", shieldDamage: 10, armorDamage: 10,
-                                                        reloadSeconds: 1, projectileSpeed: 1000, range: 3000,
-                                                        accuracyRadians: 0, isBeam: false, isGuided: false,
-                                                        turnRate: 0, blastRadius: 0, ammoPerShot: 0))]
-        _ = world.addNPC(hostile)
-
-        for _ in 0..<90 { world.step(1.0 / 30.0) }   // up to 3s for the carrier to close/engage/launch
-
-        XCTAssertEqual(carrier.brain?.state, .attacking, "the carrier's own brain should pick the hostile as a target")
-        let fighters = world.npcs.filter { $0.carrierID == carrier.entityID }
-        XCTAssertFalse(fighters.isEmpty, "a live, brain-driven carrier in real combat should launch fighters on its own")
+        let stock = try XCTUnwrap(galaxy.makeLoadedShip(144))
+        XCTAssertEqual(fighter.maxShield, Double(Float(stock.maxShield * 1.333)), accuracy: 1e-6)
+        XCTAssertEqual(fighter.maxArmor, Double(Float(stock.maxArmor * 1.333)), accuracy: 1e-6)
+        XCTAssertEqual(fighter.shieldRechargePerSec, stock.shieldRechargePerSec * 1.333, accuracy: 1e-9)
+        XCTAssertEqual(fighter.armorRechargePerSec, stock.armorRechargePerSec, accuracy: 1e-9)
+        XCTAssertEqual(carrier.fighterBays.first?.launchCooldown ?? 0, 1, accuracy: 1e-9,
+                       "the next launch waits Reload / mounted (30 ticks / 1)")
     }
 }

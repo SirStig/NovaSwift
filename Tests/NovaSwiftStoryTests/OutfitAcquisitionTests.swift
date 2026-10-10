@@ -44,35 +44,41 @@ final class OutfitAcquisitionTests: XCTestCase {
         XCTAssertFalse(player.isSystemCharted(130), "2 jumps out — beyond a 1-jump map")
     }
 
-    /// A charted system is NOT an explored one: buying a map must not satisfy the
-    /// NCB `Exxx` "have you been there" test.
-    func testMapAcquisitionDoesNotMarkExplored() {
+    /// UI-04: a map writes discovery level 2, so a charted system satisfies
+    /// the NCB `Exxx` test — while staying distinct from a visited one.
+    func testMapAcquisitionCountsAsExploredForE() {
         var player = PlayerState(currentSystem: 128)
         let game = mapGame()
         player.applyOutfitAcquisition(game.outfit(500)!, game: game, fromSystem: 128)
-        XCTAssertFalse(player.isSystemExplored(129))
-        XCTAssertEqual(player.exploredSystems, [128], "only the start system is explored")
+        XCTAssertTrue(player.isSystemExplored(129))
+        XCTAssertTrue(NCBTest("e129").evaluate(player))
+        XCTAssertEqual(player.exploredSystems, [128], "only the start system is visited")
     }
 
+    /// ModType 21 lifts criminal reputations in the named government's systems
+    /// (0x00427770); systems 128/129 belong to govts 128/129.
     func testCleanRecordClearsNamedGovtOnly() {
         var col = ResourceCollection()
         col.add(outfit(600, modType: 21, modVal: 128))   // clean record with govt 128
+        col.add(ownedSystemResource(id: 128, govt: 128))
+        col.add(ownedSystemResource(id: 129, govt: 129))
         let game = NovaGame(col)
         var player = PlayerState(currentSystem: 128)
-        player.legalRecord = [128: -50, 129: -10]
+        player.systemReputation = [128: -50, 129: -10]
         player.applyOutfitAcquisition(game.outfit(600)!, game: game, fromSystem: 128)
-        XCTAssertNil(player.legalRecord[128], "record with 128 wiped")
-        XCTAssertEqual(player.legalRecord[129], -10, "record with 129 untouched")
+        XCTAssertEqual(player.reputation(atSystem: 128), 0, "govt 128's system wiped")
+        XCTAssertEqual(player.reputation(atSystem: 129), -10, "govt 129's system untouched")
     }
 
     func testCleanRecordMinusOneClearsAll() {
         var col = ResourceCollection()
         col.add(outfit(601, modType: 21, modVal: -1))    // clean record with all
+        for id in 128...130 { col.add(ownedSystemResource(id: id, govt: id)) }
         let game = NovaGame(col)
         var player = PlayerState(currentSystem: 128)
-        player.legalRecord = [128: -50, 129: -10, 130: 5]
+        player.systemReputation = [128: -50, 129: -10, 130: 5]
         player.applyOutfitAcquisition(game.outfit(601)!, game: game, fromSystem: 128)
-        XCTAssertTrue(player.legalRecord.isEmpty, "-1 clears every government")
+        XCTAssertEqual(player.systemReputation, [130: 5], "-1 lifts every criminal record; a good one stays")
     }
 
     // MARK: charts are consumed, so they can be bought again in the next region

@@ -1,6 +1,7 @@
 import Foundation
 import SpriteKit
 import NovaSwiftKit
+import NovaSwiftEngine
 
 /// Immutable per-hull animation configuration decoded from a `shän`, plus the
 /// pure frame-selection / blink math the renderer uses each frame. Mutable
@@ -58,11 +59,10 @@ struct HullAnim {
     /// Heading frame (0..<framesPerSet) for a world angle (radians, CCW, +y up).
     /// Computed from the true angle so hulls with more than 36 frames/rotation
     /// (e.g. the Leviathan's 64) index their full sheet, not just the first 36.
+    /// The engine's own selection (`trunc(heading° × frames / 360)`), so the
+    /// frame on screen is the frame shots collide with (WP-17).
     func heading(forAngle angle: Double) -> Int {
-        let twoPi = 2 * Double.pi
-        var a = angle.truncatingRemainder(dividingBy: twoPi)
-        if a < 0 { a += twoPi }
-        return Int((a / twoPi * Double(framesPerSet)).rounded()) % framesPerSet
+        SpriteFrames.headingFrame(angle: angle, frames: framesPerSet)
     }
 
     /// Which base sprite set to show. `turnSign`: +1 turning left (CCW), -1 right,

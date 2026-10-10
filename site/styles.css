@@ -279,25 +279,6 @@ h1, h2, h3 { font-family: var(--display); color: var(--bone); line-height: 1.12;
 .card h3 { font-size: 1.08rem; margin-bottom: 9px; }
 .card p { margin: 0; font-size: 0.95rem; color: var(--muted); }
 
-.card.list ul { margin: 0; padding: 0; list-style: none; }
-.card.list li {
-  position: relative; padding-left: 24px; margin-bottom: 11px;
-  font-size: 0.95rem; color: var(--muted);
-}
-.card.list li:last-child { margin-bottom: 0; }
-.card.list li b { color: var(--bone); font-weight: 600; }
-.card.list li em {
-  font-style: normal; font-family: var(--hud); font-size: 0.72rem;
-  text-transform: uppercase; letter-spacing: 0.1em;
-  color: var(--bronze); border: 1px solid rgba(217,165,111,0.3);
-  border-radius: 999px; padding: 1px 8px; margin-left: 4px; white-space: nowrap;
-}
-.card.list li::before {
-  position: absolute; left: 0; top: -1px; font-size: 1rem;
-}
-.card.done li::before { content: "✦"; color: var(--crimson); }
-.card.wip li::before { content: "▸"; color: var(--bronze); }
-
 .note {
   margin: 26px 0 0; font-size: 0.94rem; color: var(--muted);
 }
@@ -383,4 +364,60 @@ h1, h2, h3 { font-family: var(--display); color: var(--bone); line-height: 1.12;
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .btn:hover { transform: none; }
+}
+
+/* ---------- Progress grids ---------- */
+.prose { max-width: 68ch; }
+.prose p { margin: 0 0 14px; color: var(--text); }
+.grid-card {
+  background: rgba(6, 4, 8, 0.72);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r);
+  padding: 22px;
+  margin-top: 26px;
+}
+.grid-card > h3 { font-size: 1.08rem; margin-bottom: 4px; }
+.grid-card > p { margin: 0 0 16px; font-size: 0.92rem; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.legend .key {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 500 0.82rem var(--body); color: var(--text);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line-soft); border-radius: 999px;
+  padding: 5px 12px; cursor: pointer;
+}
+.legend .key small { color: var(--muted); font-size: 0.78rem; }
+.legend .key[aria-pressed="false"] { opacity: 0.4; }
+.legend .key:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+.grp { margin-bottom: 14px; }
+.grp-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 5px; }
+.grp-head h3 { font-size: 0.86rem; font-weight: 600; }
+.grp-head span { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.cells { display: flex; flex-wrap: wrap; gap: 2px; }
+.sq { display: inline-block; width: 8px; height: 8px; border-radius: 1px; flex: 0 0 auto; }
+.sq.st-unexplored, .sq.st-planned { box-shadow: inset 0 0 0 1px #8d807c; background: transparent; }
+.cells .sq:hover { outline: 1px solid var(--bone); }
+.big .sq { width: 14px; height: 14px; border-radius: 2px; }
+.big .cells { gap: 3px; }
+.big .grp { display: grid; grid-template-columns: 220px 1fr; gap: 12px; align-items: center; margin-bottom: 8px; }
+.big .grp-head { display: block; margin: 0; }
+.big .grp-head span { display: block; }
+.hide-done .cells .st-done, .hide-partly .cells .st-partly, .hide-partial .cells .st-partial,
+.hide-deferred .cells .st-deferred, .hide-mapped .cells .st-mapped,
+.hide-unexplored .cells .st-unexplored, .hide-library .cells .st-library,
+.hide-planned .cells .st-planned { opacity: 0.08; }
+.tip {
+  position: fixed; z-index: 60; pointer-events: none;
+  max-width: 300px; padding: 9px 12px;
+  background: rgba(16, 10, 14, 0.96);
+  border: 1px solid var(--line); border-radius: 9px;
+  font-size: 0.8rem; line-height: 1.45; color: var(--text);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+}
+.tip b { display: block; color: var(--bone); font-family: var(--mono); font-size: 0.8rem; word-break: break-all; }
+.tip span { display: block; }
+.grid-note { margin: 10px 0 0; font-size: 0.82rem; color: var(--muted); }
+@media (max-width: 680px) {
+  .grid-card { padding: 16px; }
+  .big .grp { grid-template-columns: 1fr; gap: 4px; }
 }

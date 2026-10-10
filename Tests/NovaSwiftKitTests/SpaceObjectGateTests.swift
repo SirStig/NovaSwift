@@ -150,4 +150,25 @@ final class SpaceObjectGateTests: XCTestCase {
         XCTAssertEqual(exits.map(\.gateSpobID), [461])
         XCTAssertEqual(exits.first?.systemID, 301)
     }
+    func testWormholeExitsFollowTheOriginalFilters() {
+        // OS-06 (`Stellar_EnterWormhole` 0x00456ca0).
+        var col = ResourceCollection()
+        col.add(gateSpob(id: 460, govt: 183, flags2: 0x2000, links: []))   // ours, link-less
+        col.add(gateSpob(id: 461, govt: 183, flags2: 0x2000, links: []))   // link-less, same system
+        col.add(gateSpob(id: 462, govt: 183, flags2: 0x2000, links: []))   // link-less, hidden system
+        col.add(gateSpob(id: 463, govt: 183, flags2: 0x2000, links: [464]))
+        col.add(gateSpob(id: 464, govt: 183, flags2: 0x2000, links: [463]))
+        col.add(system(id: 300, spobIDs: [460, 461]))
+        col.add(system(id: 301, spobIDs: [462]))
+        col.add(system(id: 302, spobIDs: [463]))
+        col.add(system(id: 303, spobIDs: [464]))
+        let game = NovaGame(col)
+        let hidden: Set<Int> = [301, 303]
+        let visible = { (id: Int) in !hidden.contains(id) }
+        XCTAssertTrue(game.wormholeExitCandidates(from: game.spob(460)!, currentSystem: 300, isVisible: visible).isEmpty,
+                      "no fallback to linked wormholes; the current and hidden systems are excluded")
+        XCTAssertTrue(game.wormholeExitCandidates(from: game.spob(463)!, currentSystem: 302, isVisible: visible).isEmpty,
+                      "a wormhole whose only link is hidden can't be used")
+        XCTAssertEqual(game.wormholeExitCandidates(from: game.spob(463)!, currentSystem: 302).map(\.gateSpobID), [464])
+    }
 }

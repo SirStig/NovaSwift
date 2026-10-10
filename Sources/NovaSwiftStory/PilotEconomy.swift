@@ -120,10 +120,19 @@ public enum PilotEconomy {
         return true
     }
 
-    /// Effective cargo capacity of the current hull + installed outfits, in tons.
+    /// The fleet's cargo capacity in tons (`Player_ComputeFleetCargoCapacity`
+    /// 0x00469760, EC-21): the player's hull and outfits plus the holds of every
+    /// non-mission escort whose hull's InherentAI is below 3 (a freighter),
+    /// capped at 32000. The trade center and the junk cargo effects use it.
     public static func cargoCapacity(_ state: PlayerState, galaxy: Galaxy) -> Int {
-        loadout(state, galaxy: galaxy)?.cargoCapacity
+        let own = loadout(state, galaxy: galaxy)?.cargoCapacity
             ?? galaxy.game.ship(state.shipType)?.cargoSpace ?? 0
+        var fleet = own
+        for e in state.escortWing where e.missionID == nil {
+            guard let hull = galaxy.game.ship(e.shipType), hull.inherentAI < 3 else { continue }
+            fleet += max(0, hull.cargoSpace)
+        }
+        return min(32000, fleet)
     }
     public static func cargoUsed(_ state: PlayerState) -> Int { state.usedCargoSpace }
     public static func cargoFree(_ state: PlayerState, galaxy: Galaxy) -> Int {
@@ -139,34 +148,40 @@ public enum PilotEconomy {
     public static func owned(_ state: PlayerState, outfit id: Int) -> Int { state.outfits[id] ?? 0 }
     public static func held(_ state: PlayerState, cargo id: Int) -> Int { state.cargo[id] ?? 0 }
 
-    /// Hyperlane hops a single hyperspace jump can cross, from installed outfits
-    /// (multi-jump drives). 1 = standard single-jump.
+    /// Route systems a single hyperspace jump crosses, from multi-jump outfits
+    /// (ModType 32): `Σ ModVal`, at least 1 (FL-06).
     public static func maxJumpHops(_ state: PlayerState, galaxy: Galaxy) -> Int {
         loadout(state, galaxy: galaxy)?.maxJumpHops ?? 1
     }
 
-    /// True if the ship has an instant-jump / jump-control outfit (`oütf` ModType
-    /// 37): jumps skip the slow turn-and-align spin-up and fire almost instantly.
+    /// Fast jump (class Flags2 0x0020 or `oütf` ModType 37): the jump skips its
+    /// brake; the cue-timed spin-up still runs (FL-06).
     public static func hasInstantJump(_ state: PlayerState, galaxy: Galaxy) -> Bool {
         loadout(state, galaxy: galaxy)?.instantJump ?? false
     }
 
-    /// How much faster than stock the jump sequence runs, from hyperspace-speed
-    /// outfits (`oütf` ModType 22). 1.0 = stock; each point of bonus is +1%,
-    /// clamped so it stays a speed-up and never gets absurd. The scene divides
-    /// its jump-phase durations by this.
+    /// The `quickHyperjump` enhancement's reading of ModType 22: a jump-animation
+    /// speed-up, 1.0 = stock, +1% a point, clamped. The original counts these
+    /// outfits as travel days instead (`travelDays`).
     public static func jumpSpeedFactor(_ state: PlayerState, galaxy: Galaxy) -> Double {
         let bonus = loadout(state, galaxy: galaxy)?.hyperspaceSpeedBonus ?? 0
         return min(4.0, max(1.0, 1.0 + Double(bonus) / 100.0))
     }
 
-    /// The no-jump zone's radius around a system's centre (`oütf` ModType 23,
-    /// summed across fitted outfits; Bible: "standard radius is 1000"), clamped
-    /// so it can never invert to a negative/zero radius from a large enough
-    /// reduction.
+    /// Days one hyperspace jump costs this pilot's own ship (FL-05): by hull
+    /// mass, plus owned ModType-22 `count × ModVal`, at least 1. The jump runs
+    /// the max of this and each attached escort's hull-only figure.
+    public static func travelDays(_ state: PlayerState, galaxy: Galaxy) -> Int {
+        galaxy.hyperspaceTravelDays(hull: state.shipType, ownedOutfits: state.outfits)
+    }
+
+    /// The no-jump zone's radius around a system's origin: 1000 plus the
+    /// summed `oütf` ModType 23 (`count × ModVal`). The original squares it
+    /// (0x00465610), so a reduction past zero grows the zone again — callers
+    /// compare squares.
     public static func hyperspaceNoJumpRadius(_ state: PlayerState, galaxy: Galaxy) -> Double {
         let bonus = loadout(state, galaxy: galaxy)?.hyperspaceDistBonus ?? 0
-        return max(0, 1000 + Double(bonus))
+        return 1000 + Double(bonus)
     }
 
     // MARK: Transactions (return the number actually transacted)
@@ -197,34 +212,43 @@ public enum PilotEconomy {
         return n
     }
 
-    /// Apply the two `jünk.Flags` cargo-bay side effects for one game-day of
-    /// elapsed time (called once per calendar day, i.e. per jump/landing):
-    /// Tribbles (0x0001) self-multiply to fill the remaining hold, and Perishable
-    /// (0x0002) cargo decays away. The Bible documents the behaviors but not
-    /// their rates, so this uses a modest, self-documenting model: tribbles grow
-    /// ~50%/day (at least +1) capped at free cargo space; perishables lose
-    /// ~25%/day (at least -1) until gone. Standard commodities (cargoID 0-5) are
-    /// untouched. Returns whether anything changed (so a caller can decide to save).
+    /// The frame counter period of the junk cargo effects: the player tick
+    /// runs them when the 0…1024 wrapping frame counter is a multiple of 250
+    /// (EC-24) — five events every 1025 frames, the last gap 25 frames.
+    public static let junkCargoFramePeriod = 1025
+
+    /// Whether the junk cargo effects run on in-flight frame `frame` (the
+    /// original's 0…1024 counter).
+    public static func junkCargoEventDue(frame: Int) -> Bool {
+        let f = ((frame % junkCargoFramePeriod) + junkCargoFramePeriod) % junkCargoFramePeriod
+        return f % 250 == 0
+    }
+
+    /// One junk cargo event, in flight only (0x0044aa70, EC-24). Free space is
+    /// measured once: while it is above zero, every tribble type (`jünk` Flags
+    /// 0x1, including junk with both bits) grows one ton — so several types can
+    /// overfill by a ton each — and every perishable type (Flags 0x2 alone)
+    /// loses one ton.
+    ///
+    /// With no tribbles aboard the original tests a stack slot it never wrote
+    /// (an original bug); the user ruled that perishables then never rot, so
+    /// they rot only while a tribble type rides along with free space.
+    /// Returns whether anything changed.
     @discardableResult
-    public static func tickJunkCargo(_ state: inout PlayerState, galaxy: Galaxy) -> Bool {
+    public static func runJunkCargoEvent(_ state: inout PlayerState, galaxy: Galaxy) -> Bool {
         guard !state.cargo.isEmpty else { return false }
-        var changed = false
-        for (id, qty) in state.cargo where qty > 0 {
-            guard let j = galaxy.game.junk(id) else { continue }   // nil ⇒ standard commodity
-            if j.multipliesInCargoHold {
-                let room = cargoFree(state, galaxy: galaxy)
-                guard room > 0 else { continue }
-                let grown = min(room, max(1, qty / 2))
-                state.cargo[id] = qty + grown
-                changed = true
-            } else if j.decaysInCargoHold {
-                let lost = max(1, qty / 4)
-                let left = qty - lost
-                state.cargo[id] = left > 0 ? left : nil
-                changed = true
-            }
+        let junk = state.cargo.keys.sorted().compactMap { id -> JunkRes? in
+            guard (state.cargo[id] ?? 0) > 0 else { return nil }
+            return galaxy.game.junk(id)
         }
-        return changed
+        let tribbles = junk.filter(\.multipliesInCargoHold)
+        guard !tribbles.isEmpty, cargoFree(state, galaxy: galaxy) > 0 else { return false }
+        for j in tribbles { state.cargo[j.id, default: 0] += 1 }
+        for j in junk where j.decaysInCargoHold && !j.multipliesInCargoHold {
+            let left = (state.cargo[j.id] ?? 0) - 1
+            state.cargo[j.id] = left > 0 ? left : nil
+        }
+        return true
     }
 
     /// Add up to `tons` of cargo `id` for free (no credit cost), clamped to the
@@ -248,28 +272,13 @@ public enum PilotEconomy {
         sellCargo(&state, id: c.cargoID, tons: tons, unitPrice: unitPrice)
     }
 
-    /// The price actually charged/refunded for `o` on the player's current hull.
-    /// Applies Bible `Flags 0x0200` (mass-proportional price = shipMass × Cost)
-    /// via `Galaxy.effectiveCost`; a flat-priced outfit returns its plain `cost`.
-    /// `priceMultiplier` folds in the port's rank `PriceMod` discount (1.0 = none).
-    public static func effectiveCost(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
-        let base = galaxy.effectiveCost(of: o, forShip: state.shipType)
-        return priceMultiplier == 1 ? base : max(1, Int((Double(base) * priceMultiplier).rounded()))
-    }
-
-    /// Best (lowest) rank `PriceMod` multiplier for `govt` from the player's
-    /// active ranks — 90 → 0.9 (a 10% discount); 1.0 when no active rank modifies
-    /// this govt. Per the Bible, `ränk.PriceMod` is a "percentage modifier to the
-    /// prices of goods, outfits and ships at spaceports owned by this govt", so a
-    /// single helper feeds the commodity market, outfitter, and shipyard alike.
-    public static func rankPriceMultiplier(_ state: PlayerState, govt: Int, game: NovaGame) -> Double {
-        guard govt >= 128 else { return 1 }
-        var best = 1.0
-        for rankID in state.activeRanks {
-            guard let r = game.rank(rankID), r.govt == govt, r.priceModifier > 0 else { continue }
-            best = min(best, Double(r.priceModifier) / 100.0)
-        }
-        return best
+    /// The price actually charged for `o` on the player's current hull
+    /// (`Outfit_ComputeOutfitPurchasePrice` 0x0046e910): Bible `Flags 0x0200`
+    /// scales it by hull mass, never below the base cost. Rank `PriceMod`
+    /// never reaches outfits — the original computes the scaled price and
+    /// throws it away (EC-10).
+    public static func effectiveCost(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy) -> Int {
+        galaxy.effectiveCost(of: o, forShip: state.shipType)
     }
 
     /// The effective per-player cap on `o`, folding in any owned `ModType 27`
@@ -281,8 +290,8 @@ public enum PilotEconomy {
     /// Can the player buy `outfit` here — affordable at its effective price, fits
     /// in free mass, under its (expander-adjusted) max, and with a free gun/turret
     /// mount if it's a fixed-gun/turret item (Bible `Flags 0x0001/0x0002`)?
-    public static func canBuyOutfit(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
-        guard state.credits >= effectiveCost(state, o, galaxy: galaxy, priceMultiplier: priceMultiplier) else { return false }
+    public static func canBuyOutfit(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy) -> Bool {
+        guard state.credits >= effectiveCost(state, o, galaxy: galaxy) else { return false }
         // Free-mass check uses the outfit's *effective* mass (Flags 0x0400
         // scales mass with the hull), matching how `freeMass` accounts for
         // already-installed outfits.
@@ -301,6 +310,7 @@ public enum PilotEconomy {
         }
         let cap = maxInstallable(state, o, galaxy: galaxy)
         if cap > 0, owned(state, outfit: o.id) >= cap { return false }
+        if let ammoCap = ammoLimit(state, o, galaxy: galaxy), owned(state, outfit: o.id) >= ammoCap { return false }
         // Bible `Flags 0x0001/0x0002`: a fixed gun / turret consumes one of the
         // hull's `MaxGuns`/`MaxTurrets` mounts. Block the purchase when none are free.
         if o.isFixedGunOutfit || o.isTurretOutfit,
@@ -311,18 +321,47 @@ public enum PilotEconomy {
         return true
     }
 
+    /// The ammunition cap on `o` (`Outfit_ClampOutfitOwnedCountToCurrentLimits`
+    /// 0x004656a0, EC-13): when its first modifier is ModType 3 and the weapon
+    /// has a positive MaxAmmo, at most `MaxAmmo × mounted launchers` — so with
+    /// no launcher none can be bought. nil when no ammo cap applies.
+    public static func ammoLimit(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy) -> Int? {
+        guard let first = o.modifiers.first, first.type == .ammunition,
+              let w = galaxy.game.weapon(first.value), w.maxAmmo > 0 else { return nil }
+        let launchers = loadout(state, galaxy: galaxy)?.weapons
+            .filter { $0.id == w.id }.reduce(0) { $0 + $1.count } ?? 0
+        return w.maxAmmo * launchers
+    }
+
+    /// Clamp every owned outfit to its current ownership limit — what the
+    /// E/H hull swaps do after adding the new class's fittings (0x00449370 →
+    /// `Outfit_ClampOutfitOwnedCountToCurrentLimits` 0x004656a0, MS-18): the
+    /// ammunition cap of the launchers now mounted and the (expander-scaled)
+    /// Max. A limit of 0 never clamps. Not reproduced: the original reuses the
+    /// limit out-parameter across outfits without resetting it, so an outfit
+    /// that hits no limit can be clamped by the previous one's.
+    public static func clampOwnedOutfitsToLimits(_ state: inout PlayerState, galaxy: Galaxy) {
+        for id in state.outfits.keys.sorted() {
+            guard let owned = state.outfits[id], owned > 0, let o = galaxy.game.outfit(id) else { continue }
+            var limit = maxInstallable(state, o, galaxy: galaxy)
+            if let ammo = ammoLimit(state, o, galaxy: galaxy), ammo > 0 { limit = limit > 0 ? min(limit, ammo) : ammo }
+            if limit > 0, limit < owned { state.outfits[id] = limit }
+        }
+    }
+
     /// One unit of `buyOutfit`'s effect. `buyOutfit` and its bulk sibling below
     /// both build on this so a "buy 1000" from the quantity prompt is one
     /// caller-side save, not a thousand.
-    private static func buyOutfitUnit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double) -> Bool {
-        guard canBuyOutfit(state, o, galaxy: galaxy, priceMultiplier: priceMultiplier) else { return false }
-        state.credits -= effectiveCost(state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
+    private static func buyOutfitUnit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy) -> Bool {
+        guard canBuyOutfit(state, o, galaxy: galaxy) else { return false }
+        state.credits -= effectiveCost(state, o, galaxy: galaxy)
         state.grantOutfit(o.id)
         // Acquisition-time modifier effects that mutate campaign state: a map
         // (ModType 16) charts its scoped systems from *here*; an amnesty
         // (ModType 21) clears the legal record. Shared with the mission-grant
         // path (`StoryEngine.grantOutfit`).
-        state.applyOutfitAcquisition(o, game: galaxy.game, fromSystem: state.currentSystem)
+        let charted = state.applyOutfitAcquisition(o, game: galaxy.game, fromSystem: state.currentSystem)
+        StoryEngine.exploreNebulae(charted, state: &state, game: galaxy.game)
         // Bible `OnPurchase`: an NCB *set* expression run as a side effect of
         // buying (e.g. a permit that flips a story bit). Distinct from a mission
         // grant, which does not "buy" and so does not fire this.
@@ -343,8 +382,8 @@ public enum PilotEconomy {
     }
 
     @discardableResult
-    public static func buyOutfit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
-        buyOutfitUnit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
+    public static func buyOutfit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy) -> Bool {
+        buyOutfitUnit(&state, o, galaxy: galaxy)
     }
 
     /// Buy up to `count` of `o` in one transaction — the real game's Alt-click
@@ -353,42 +392,69 @@ public enum PilotEconomy {
     /// the same constraints a single purchase enforces, just repeated). Returns
     /// how many were actually bought.
     @discardableResult
-    public static func buyOutfit(_ state: inout PlayerState, _ o: OutfRes, count: Int, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
+    public static func buyOutfit(_ state: inout PlayerState, _ o: OutfRes, count: Int, galaxy: Galaxy) -> Int {
         // A consumed item leaves inventory the instant it's bought, so its `Max`
         // never stops the loop — "buy 1000" of a chart would charge for a
         // thousand copies of the same one-shot reveal. One per transaction.
         let limit = (o.flags & 0x0010 != 0 || o.isConsumableChart) ? min(count, 1) : count
         var bought = 0
-        while bought < limit, buyOutfitUnit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier) {
+        while bought < limit, buyOutfitUnit(&state, o, galaxy: galaxy) {
             bought += 1
         }
         return bought
     }
 
-    /// One unit of `sellOutfit`'s effect — see `buyOutfitUnit`.
-    private static func sellOutfitUnit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double) -> Bool {
-        guard owned(state, outfit: o.id) > 0 else { return false }
-        // Bible `Flags 0x0008`: "This item can't be sold."
-        guard o.flags & 0x0008 == 0 else { return false }
-        state.credits += effectiveCost(state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
+    /// Whether `o` can be sold back at all: the player owns one and it is not
+    /// `oütf` Flags 0x0008 ("can't be sold") — the outfitter's sell rule
+    /// (0x0048ea70).
+    public static func canSellOutfit(_ state: PlayerState, _ o: OutfRes) -> Bool {
+        owned(state, outfit: o.id) > 0 && o.flags & 0x0008 == 0
+    }
+
+    /// What one unit of `o` sells for (0x0048ea70): its purchase price on this
+    /// hull, halved (truncated) unless the player holds more than they did when
+    /// the outfitter opened — units bought this visit refund in full, newest
+    /// first. `ownedAtOpen` nil means "all owned units predate this visit".
+    public static func outfitSalePrice(_ state: PlayerState, _ o: OutfRes, galaxy: Galaxy, ownedAtOpen: Int?) -> Int {
+        let price = effectiveCost(state, o, galaxy: galaxy)
+        let held = owned(state, outfit: o.id)
+        guard held <= (ownedAtOpen ?? held) else { return price }
+        return Int(Double(price) * 0.5)
+    }
+
+    /// One unit of `sellOutfit`'s effect — see `buyOutfitUnit`. A sale that
+    /// would take free mass from zero or more to below zero is refused.
+    private static func sellOutfitUnit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy, ownedAtOpen: Int?) -> Bool {
+        guard canSellOutfit(state, o) else { return false }
+        let price = outfitSalePrice(state, o, galaxy: galaxy, ownedAtOpen: ownedAtOpen)
+        let before = rawFreeMass(state, galaxy: galaxy)
+        var after = state
+        after.removeOutfit(o.id)
+        if let before, let left = rawFreeMass(after, galaxy: galaxy), left < 0, before >= 0 { return false }
+        state.credits += price
         state.removeOutfit(o.id)
         // Bible `OnSell`: the sibling NCB set expression, run when the item is sold.
         runOutfitScript(&state, o.onSell, outfit: o, field: "OnSell", game: galaxy.game)
         return true
     }
 
-    /// EV Nova refunds outfits at full purchase price (the same effective,
-    /// mass-proportional price they were bought at on this hull).
+    /// Free mass without the display clamp at zero.
+    private static func rawFreeMass(_ state: PlayerState, galaxy: Galaxy) -> Int? {
+        loadout(state, galaxy: galaxy).map { $0.massCapacity - $0.usedMass }
+    }
+
+    /// Sell one `o`. Units owned before this outfitter visit (`ownedAtOpen`)
+    /// fetch half their price (EC-07).
     @discardableResult
-    public static func sellOutfit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
-        sellOutfitUnit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
+    public static func sellOutfit(_ state: inout PlayerState, _ o: OutfRes, galaxy: Galaxy, ownedAtOpen: Int? = nil) -> Bool {
+        sellOutfitUnit(&state, o, galaxy: galaxy, ownedAtOpen: ownedAtOpen)
     }
 
     /// The sell-side counterpart of the bulk `buyOutfit(_:count:...)` above.
     @discardableResult
-    public static func sellOutfit(_ state: inout PlayerState, _ o: OutfRes, count: Int, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
+    public static func sellOutfit(_ state: inout PlayerState, _ o: OutfRes, count: Int, galaxy: Galaxy, ownedAtOpen: Int? = nil) -> Int {
         var sold = 0
-        while sold < count, sellOutfitUnit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier) {
+        while sold < count, sellOutfitUnit(&state, o, galaxy: galaxy, ownedAtOpen: ownedAtOpen) {
             sold += 1
         }
         return sold
@@ -417,49 +483,36 @@ public enum PilotEconomy {
         state = engine.player
     }
 
-    /// Trade-in value of the current hull *and* its installed outfits, toward
-    /// a new ship. Per the Bible: "The cost of buying a ship is always the
-    /// cost of the new ship minus 25% of the original cost of your current
-    /// ship and upgrades" — the credit covers everything currently installed,
-    /// not just the bare hull.
-    public static func tradeInValue(_ state: PlayerState, game: NovaGame) -> Int {
-        let shipMass = game.ship(state.shipType)?.mass ?? 0
-        let hullCost = game.ship(state.shipType)?.cost ?? 0
-        // Value each installed outfit at what it actually cost on this hull —
-        // mass-proportional-price outfits (Flags 0x0200) were charged
-        // shipMass × Cost, so they trade in on the same basis, not flat `Cost`.
-        let outfitsCost = state.outfits.reduce(0) { sum, owned in
-            guard let o = game.outfit(owned.key) else { return sum }
-            return sum + o.effectiveCost(shipMass: shipMass) * owned.value
-        }
-        return Int(Double(hullCost + outfitsCost) * 0.25)
+    /// The shipyard's credit for the current ship (EC-09): see
+    /// `LandedServices.tradeInValue`. `scale` is the port's rank price scale
+    /// and `stellarTech` its tech level.
+    public static func tradeInValue(_ state: PlayerState, game: NovaGame, scale: Float = 1, stellarTech: Int = 0) -> Int {
+        LandedServices.tradeInValue(state, game: game, scale: scale, stellarTech: stellarTech)
     }
 
-    /// Net price to switch to `ship` (its cost minus the current hull+outfits
-    /// trade-in). `priceMultiplier` discounts the *new ship's* cost via the port's
-    /// rank `PriceMod`; the trade-in credit reflects original value and is unscaled.
-    public static func netPrice(_ state: PlayerState, of ship: ShipRes, game: NovaGame, priceMultiplier: Double = 1) -> Int {
-        let hullCost = priceMultiplier == 1 ? ship.cost : Int((Double(ship.cost) * priceMultiplier).rounded())
-        return max(0, hullCost - tradeInValue(state, game: game))
+    /// Net price to switch to `ship`: its scaled price less the scaled trade-in.
+    public static func netPrice(_ state: PlayerState, of ship: ShipRes, game: NovaGame, scale: Float = 1, stellarTech: Int = 0) -> Int {
+        max(0, LandedServices.shipPrice(ship, scale: scale, stellarTech: stellarTech)
+               - tradeInValue(state, game: game, scale: scale, stellarTech: stellarTech))
     }
 
+    /// Buy `ship` (0x00492f30): credit the trade-in, run the old hull's
+    /// OnRetire, charge the full scaled price, keep only the outfits that stay
+    /// with the player (`oütf` Flags 0x0004), hand over the new hull's fittings,
+    /// run its OnPurchase and redraw the class's shipyard roll for the day.
     @discardableResult
-    public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, game: NovaGame, priceMultiplier: Double = 1) -> Bool {
-        let price = netPrice(state, of: ship, game: game, priceMultiplier: priceMultiplier)
-        guard state.credits >= price, ship.id != state.shipType else { return false }
-        // Bible `shïp.OnRetire`: the old hull is sold/replaced — run its retire NCB
-        // set expression before it's gone. `OnPurchase`: run the new hull's on-buy
-        // set expression after the swap. Both are usually empty (base-game hulls
-        // rarely script story bits on trade-in), so this no-ops for most ships.
+    public static func buyShip(_ state: inout PlayerState, _ ship: ShipRes, game: NovaGame, scale: Float = 1, stellarTech: Int = 0) -> Bool {
+        let price = LandedServices.shipPrice(ship, scale: scale, stellarTech: stellarTech)
+        let tradeIn = tradeInValue(state, game: game, scale: scale, stellarTech: stellarTech)
+        guard state.credits + tradeIn >= price, ship.id != state.shipType else { return false }
+        state.credits += tradeIn
         if let oldShip = game.ship(state.shipType) {
             runControlBitSet(&state, oldShip.onRetire, game: game,
                              source: "shïp \(oldShip.id) \"\(oldShip.name)\" OnRetire")
         }
-        state.credits -= price
+        state.credits = max(0, state.credits - price)
         state.shipType = ship.id
         state.shipName = ship.displayName
-        runControlBitSet(&state, ship.onPurchase, game: game,
-                         source: "shïp \(ship.id) \"\(ship.name)\" OnPurchase")
         // The old hull and everything installed on it are traded in together
         // (credited via `tradeInValue` above) — real EV Nova does NOT carry
         // outfits over to a new ship by default. The one exception is
@@ -477,6 +530,8 @@ public enum PilotEconomy {
         // with both `include…` flags off, precisely so what's granted here isn't
         // folded in a second time on top of itself.
         grantHullFittings(&state, ship: ship, game: game)
+        runControlBitSet(&state, ship.onPurchase, game: game,
+                         source: "shïp \(ship.id) \"\(ship.name)\" OnPurchase")
         // `armor`/`shield`/`fuel` are stored as raw absolute values with `nil`
         // meaning "uninitialized (full)". Left alone, the *old* ship's raw
         // numbers (e.g. 100/100) would carry over as a ceiling on the *new*
@@ -487,7 +542,34 @@ public enum PilotEconomy {
         state.armor = nil
         state.shield = nil
         state.fuel = nil
+        state.rerollStock(shipType: ship.id, hire: false, day: state.date.julianDay)
         return true
+    }
+
+    /// "Use As My Ship" (`Player_ReplaceShipWithCapturedHull` 0x00423fa0,
+    /// EC-17): every outfit that does not stay with the player (`oütf` Flags
+    /// 0x0004) goes with the old hull; the prize's stock armament and
+    /// DefaultItems arrive; the old hull's OnRetire runs, then the prize's
+    /// OnCapture; the old hull joins the wing as a captured escort when there
+    /// is room. Returns whether the old hull was kept.
+    @discardableResult
+    public static func takeCommandOfCapturedHull(_ state: inout PlayerState, hull: Int, game: NovaGame) -> Bool {
+        let oldType = state.shipType
+        let kept = canAddEscort(state)
+        state.outfits = state.outfits.filter { id, _ in (game.outfit(id)?.flags ?? 0) & 0x0004 != 0 }
+        if let old = game.ship(oldType) {
+            runControlBitSet(&state, old.onRetire, game: game, source: "shïp \(old.id) \"\(old.name)\" OnRetire")
+        }
+        state.shipType = hull
+        if let prize = game.ship(hull) {
+            state.shipName = prize.displayName
+            grantHullFittings(&state, ship: prize, game: game)
+            runControlBitSet(&state, prize.onCapture, game: game, source: "shïp \(prize.id) \"\(prize.name)\" OnCapture")
+        }
+        if kept {
+            state.registerEscort(shipType: oldType, name: game.ship(oldType)?.name ?? "Escort", origin: .captured)
+        }
+        return kept
     }
 
     // MARK: Escort economics (ESCORTS.md §2.2, §5 — model-layer only)
@@ -498,133 +580,196 @@ public enum PilotEconomy {
     // hire/upgrade charge, sell refund) as pure credit transactions against
     // `state.credits`; they don't own or validate an escort's fleet membership.
 
-    /// Whether `ship` is offered for hire in the bar today. Bible `HireRandom`:
-    /// "The percent chance that a ship of this type will be available for hire
-    /// in the bar on a given day. A HireRandom of 0 means this ship will never
-    /// be made available for hire" — note the zero-behavior matches
-    /// `shïp.BuyRandom`'s "never" default, not `oütf.BuyRandom`'s "always"
-    /// default. Mirrors the deterministic FNV-1a-hash-of-(day, spöb, item) roll
-    /// `NovaEconomy`'s private `onOfferToday` uses for the sibling `BuyRandom`
-    /// stocking mechanic — same stable-within-a-day, no-save-state contract.
-    public static func escortAvailableToday(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
-        guard ship.hireRandom > 0 else { return false }   // HireRandom 0 = never hireable
-        let percent = min(ship.hireRandom, 100)
-        var hash: UInt64 = 14_695_981_039_346_656_037            // FNV-1a offset basis
-        for value in [day, spob.id, ship.id] {
-            for byte in withUnsafeBytes(of: Int64(value).bigEndian, Array.init) {
-                hash ^= UInt64(byte)
-                hash = hash &* 1_099_511_628_211                 // FNV-1a prime
-            }
-        }
-        let roll = Int(hash % 100) + 1                           // 1...100
-        return roll <= percent
+    /// Whether `ship` is on the bar's hire list today (EC-19): one roll per
+    /// class per day, shared by every bar, `HireRandom` 0 meaning never, and
+    /// redrawn whenever that class is hired.
+    public static func escortAvailableToday(_ state: PlayerState, _ ship: ShipRes, day: Int) -> Bool {
+        NovaGame.hireable(ship, day: day, redraw: state.stockRerollCount(shipType: ship.id, hire: true, day: day))
     }
 
-    /// How many of `ship` the station has to hire out today — a deterministic
-    /// 1...5 per (day, spöb, hull), stable within the day. EV Nova's escort
-    /// stock varied by type (you might find one warship but five fighters), and
-    /// no `shïp` field encodes a count, so this stands in for it, seeded like the
-    /// availability roll but with an extra salt so the *count* doesn't track the
-    /// *availability* roll. Only meaningful once `escortAvailableToday` passes.
-    public static func escortHireStock(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Int {
-        var hash: UInt64 = 14_695_981_039_346_656_037            // FNV-1a offset basis
-        for value in [day, spob.id, ship.id, 0x1E5C07] {         // extra salt decorrelates count from availability
-            for byte in withUnsafeBytes(of: Int64(value).bigEndian, Array.init) {
-                hash ^= UInt64(byte)
-                hash = hash &* 1_099_511_628_211                 // FNV-1a prime
-            }
-        }
-        return 1 + Int(hash % 5)                                 // 1...5
+    /// The escort cap (`Ship_CanPlayerHaveMoreEscorts` 0x00468920): six
+    /// non-mission escorts.
+    public static let maxEscorts = 6
+
+    /// Escorts counted against `maxEscorts`: mission escorts are extra.
+    public static func escortsCounted(_ state: PlayerState) -> Int {
+        state.escortWing.filter { $0.missionID == nil }.count
     }
 
-    /// How many of `ship` are still available to hire at `spob` today, after any
-    /// the player has already hired here today.
-    public static func escortHireRemaining(_ state: PlayerState, _ ship: ShipRes, at spob: SpobRes, day: Int) -> Int {
-        max(0, escortHireStock(ship, at: spob, day: day)
-            - state.escortsHired(shipType: ship.id, spob: spob.id, day: day))
+    /// Whether the player may take on another escort.
+    public static func canAddEscort(_ state: PlayerState) -> Bool {
+        escortsCounted(state) < maxEscorts
     }
 
-    /// The cap on simultaneous hired/captured/mission escorts — `EscortRecord`s
-    /// in the roster, not bay-launched fighters. Not a Bible-documented field —
-    /// no `shïp`/`flët` field or the EVN wiki describes a wing-size limit — this
-    /// is a deliberate house rule.
-    public static let maxEscorts = 9
+    /// The hire price at a port: a tenth of the scaled shipyard price (EC-09).
+    public static func escortHirePrice(_ ship: ShipRes, scale: Float = 1, stellarTech: Int = 0) -> Int {
+        LandedServices.hirePrice(ship, scale: scale, stellarTech: stellarTech)
+    }
 
-    /// Hire `ship` as an escort at `spob` today: charge the up-front hire fee
-    /// (`ShipRes.escortHireFee` = 10% of Cost) and register it in the persistent
-    /// escort roster as a `.hired` ship, snapshotting its recurring daily fee.
-    /// The live ship spawns from the roster the next time a system world is
-    /// built (i.e. on takeoff), which is when a hired escort joins you in EV
-    /// Nova. Returns false if not on offer today or the hire fee is unaffordable.
+    /// Hire `ship` as an escort: charge the hire price and register it in the
+    /// persistent escort roster as a `.hired` ship, snapshotting its recurring
+    /// daily fee. The live ship spawns from the roster the next time a system
+    /// world is built (i.e. on takeoff). Redraws the class's hire roll for the
+    /// day. Returns false if not on offer, at the escort cap, or unaffordable.
     @discardableResult
-    public static func hireEscort(_ state: inout PlayerState, _ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
-        guard escortAvailableToday(ship, at: spob, day: day) else { return false }
-        // The station's daily stock of this hull is finite; don't over-hire.
-        guard escortHireRemaining(state, ship, at: spob, day: day) > 0 else { return false }
-        guard state.escortWing.count < maxEscorts else { return false }
-        let fee = ship.escortHireFee
+    public static func hireEscort(_ state: inout PlayerState, _ ship: ShipRes, day: Int,
+                                  scale: Float = 1, stellarTech: Int = 0) -> Bool {
+        guard escortAvailableToday(state, ship, day: day) else { return false }
+        guard canAddEscort(state) else { return false }
+        let fee = escortHirePrice(ship, scale: scale, stellarTech: stellarTech)
         guard state.credits >= fee else { return false }
         state.credits -= fee
         state.registerEscort(shipType: ship.id, name: ship.name, origin: .hired,
                              hireFee: fee, dailyFee: ship.escortDailyFee)
-        state.recordEscortHire(shipType: ship.id, spob: spob.id, day: day)
+        state.rerollStock(shipType: ship.id, hire: true, day: day)
         return true
     }
 
-    /// Queue escort record `recordID` for an upgrade to its hull's `UpgradeTo`.
-    /// Bible `UpgradeTo`/`EscUpgrdCost`. No charge yet — the upgrade is only
-    /// actually applied (hull swapped, `EscUpgrdCost` charged) the next time the
-    /// player lands somewhere with a shipyard (see `applyPendingEscortUpgrades`),
-    /// and can be canceled free any time before then (`cancelEscortUpgrade`).
-    /// Returns the target hull's id, or nil if the escort can't upgrade.
+    /// The hull escort `recordID` would be upgraded to, when the escort window
+    /// offers Upgrade (`NovaUi_RunEscortShipManagementWindow` 0x004853a0): the
+    /// class has an `UpgradeTo` and that hull's availability expression passes.
+    public static func escortUpgradeTarget(_ state: PlayerState, recordID: Int, game: NovaGame) -> ShipRes? {
+        guard let rec = state.escort(id: recordID), let ship = game.ship(rec.shipType),
+              ship.escortUpgradesTo >= 128, let target = game.ship(ship.escortUpgradesTo),
+              NCBTest(target.availBits).evaluate(state) else { return nil }
+        return target
+    }
+
+    /// Mark escort `recordID` for an upgrade at the next shipyard (EC-22). The
+    /// original's Upgrade button is a toggle mark, processed by the fleet pass
+    /// when the player leaves a shipyard stellar (`processEscortFleetAtStellar`);
+    /// setting it clears a sale mark. Nothing is charged now. Returns the target
+    /// hull's id, or nil when the escort can't upgrade.
     @discardableResult
     public static func requestEscortUpgrade(_ state: inout PlayerState, recordID: Int, game: NovaGame) -> Int? {
-        guard let rec = state.escort(id: recordID), let ship = game.ship(rec.shipType),
-              ship.escortUpgradesTo > 0, let target = game.ship(ship.escortUpgradesTo) else { return nil }
+        guard let target = escortUpgradeTarget(state, recordID: recordID, game: game) else { return nil }
         state.setPendingEscortUpgrade(id: recordID, to: target.id)
         return target.id
     }
 
-    /// Cancel a queued upgrade for escort `recordID` — free, since nothing was
-    /// charged when it was requested.
+    /// Clear escort `recordID`'s upgrade mark.
     public static func cancelEscortUpgrade(_ state: inout PlayerState, recordID: Int) {
         state.clearPendingEscortUpgrade(id: recordID)
     }
 
-    /// One escort's queued-upgrade outcome on landing, for the caller to post
-    /// to the HUD.
-    public struct EscortUpgradeResult {
-        public let recordID: Int
-        public let escortName: String
-        public let newShipName: String
-        /// False when the upgrade is still queued (unaffordable this landing).
-        public let applied: Bool
+    /// Whether the escort window offers Sell for escort `recordID`: never for a
+    /// hired escort (the hired-origin mark, +0xbb) and never for a mission's.
+    public static func canSellEscort(_ state: PlayerState, recordID: Int) -> Bool {
+        guard let rec = state.escort(id: recordID) else { return false }
+        return rec.origin != .hired && rec.missionID == nil
     }
 
-    /// Apply every queued escort upgrade that's now affordable — called on
-    /// landing at a spöb with a shipyard (upgrades, like the real ones, are
-    /// fitted at a shipyard, not just anywhere). Charges `EscUpgrdCost` and
-    /// swaps the hull (`PlayerState.upgradeEscort`) for each affordable
-    /// pending record; a record the player still can't afford stays queued for
-    /// a later landing. No-op (returns empty) when `spob` has no shipyard.
+    /// Mark escort `recordID` to be sold at the next shipyard (EC-22); setting
+    /// it clears an upgrade mark. Returns false when the escort can't be sold.
     @discardableResult
-    public static func applyPendingEscortUpgrades(_ state: inout PlayerState, at spob: SpobRes, game: NovaGame) -> [EscortUpgradeResult] {
-        guard spob.hasShipyard else { return [] }
-        var results: [EscortUpgradeResult] = []
-        for rec in state.escortWing {
-            guard let pendingID = rec.pendingUpgradeTo, let ship = game.ship(rec.shipType),
-                  let target = game.ship(pendingID) else { continue }
-            guard state.credits >= ship.escortUpgradeCost else {
-                results.append(EscortUpgradeResult(recordID: rec.id, escortName: rec.name,
-                                                    newShipName: target.name, applied: false))
-                continue
-            }
-            state.credits -= ship.escortUpgradeCost
-            state.upgradeEscort(id: rec.id, to: target.id, dailyFee: target.escortDailyFee)
-            results.append(EscortUpgradeResult(recordID: rec.id, escortName: rec.name,
-                                                newShipName: target.name, applied: true))
+    public static func requestEscortSale(_ state: inout PlayerState, recordID: Int) -> Bool {
+        guard canSellEscort(state, recordID: recordID) else { return false }
+        state.setPendingEscortSale(id: recordID)
+        return true
+    }
+
+    /// Clear escort `recordID`'s sale mark.
+    public static func cancelEscortSale(_ state: inout PlayerState, recordID: Int) {
+        state.clearPendingEscortSale(id: recordID)
+    }
+
+    /// What one escort fleet pass did, for the caller's dialog and day cost.
+    public struct EscortFleetPass: Sendable, Equatable {
+        public var soldIDs: [Int] = []
+        public var saleCredits = 0
+        public var upgradedIDs: [Int] = []
+        public var upgradeCost = 0
+
+        public init() {}
+
+        /// Escorts sold plus escorts upgraded; the visit costs half that many
+        /// days (`SpaceportVisitDays.escortsSoldOrUpgraded`).
+        public var transactions: Int { soldIDs.count + upgradedIDs.count }
+    }
+
+    /// The escort fleet pass run when the player leaves a spaceport
+    /// (`Player_ProcessEscortFleetAtStellar` 0x004229d0, EC-22). Only at a
+    /// stellar with a shipyard (flag 0x8):
+    /// - every escort marked for sale that isn't disabled (`disabled`) or a
+    ///   mission's is sold for its `escortSellValue` and leaves the wing;
+    /// - then every escort marked for upgrade, not a mission's, whose class has
+    ///   an `UpgradeTo` and whose `EscUpgrdCost` the player can now afford is
+    ///   charged and changes hull (its loadout and ammo are the new class's).
+    ///   An unaffordable one keeps its mark for a later shipyard.
+    /// The payroll (`StoryEngine.processEscortPayroll`, one period) follows at
+    /// every stellar; the caller runs it.
+    @discardableResult
+    public static func processEscortFleetAtStellar(_ state: inout PlayerState, spob: SpobRes, game: NovaGame,
+                                                   disabled: Set<Int> = []) -> EscortFleetPass {
+        var pass = EscortFleetPass()
+        guard spob.hasShipyard else { return pass }
+        for rec in state.escortWing where rec.pendingSale == true && rec.missionID == nil && !disabled.contains(rec.id) {
+            guard let ship = game.ship(rec.shipType) else { continue }
+            let value = escortSellValue(for: ship)
+            state.credits += value
+            pass.saleCredits += value
+            pass.soldIDs.append(rec.id)
+            state.removeEscort(id: rec.id)
         }
-        return results
+        for rec in state.escortWing where rec.pendingUpgradeTo != nil && rec.missionID == nil {
+            guard let ship = game.ship(rec.shipType), ship.escortUpgradesTo >= 128,
+                  let target = game.ship(ship.escortUpgradesTo),
+                  ship.escortUpgradeCost <= state.credits else { continue }
+            let cost = max(0, ship.escortUpgradeCost)
+            state.credits -= cost
+            pass.upgradeCost += cost
+            pass.upgradedIDs.append(rec.id)
+            state.upgradeEscort(id: rec.id, to: target.id, dailyFee: target.escortDailyFee)
+        }
+        return pass
+    }
+
+    /// The fleet pass's dialog text: "<Count> escort was / escorts were sold
+    /// for a profit of <N> credits." then the same for upgrades (STR# 2002
+    /// #298–#301, #32/#33; STR# 137 count words). Empty when nothing happened.
+    public static func escortFleetPassText(_ pass: EscortFleetPass, game: NovaGame) -> String {
+        let text = OriginalText(game: game)
+        func line(_ count: Int, _ verb: Int, _ credits: Int) -> String {
+            "\(text.capitalizedCountWord(count)) \(text.misc(count == 1 ? 298 : 299)) \(text.misc(verb)) "
+                + "\(OriginalText.grouped(credits)) \(text.misc(credits < 2 ? 32 : 33))."
+        }
+        var parts: [String] = []
+        if !pass.soldIDs.isEmpty { parts.append(line(pass.soldIDs.count, 300, pass.saleCredits)) }
+        if !pass.upgradedIDs.isEmpty { parts.append(line(pass.upgradedIDs.count, 301, pass.upgradeCost)) }
+        return parts.joined(separator: "\n\n")         // the original's two carriage returns
+    }
+
+    /// An escort leaving the wing takes its share of the fleet's cargo
+    /// (`Player_TransferCargoAndJunkToEscortByRatio` 0x00469810, EC-21): with
+    /// `ratio = min(1, recipientHolds / fleet)`, where the fleet is the
+    /// player's holds plus every non-mission freighter escort's (InherentAI < 3),
+    /// each commodity and junk stack loses `trunc(tons × ratio)`. Mission cargo
+    /// (`missionCargo`, which NovaSwift keeps in the same dictionary) is never
+    /// touched. Called when a freighter escort is destroyed, disabled or
+    /// defects, and for any released escort. Returns the commodity tons moved
+    /// (junk is lost, not handed over): what a disabled escort carries, and
+    /// gives back if the player boards it to repair it (0x0045a3d0).
+    @discardableResult
+    public static func transferCargoToEscort(_ state: inout PlayerState, recipientHolds: Int,
+                                             missionCargo: [Int: Int], galaxy: Galaxy) -> [Int: Int] {
+        var movedCommodities: [Int: Int] = [:]
+        var fleet = loadout(state, galaxy: galaxy)?.cargoCapacity ?? galaxy.game.ship(state.shipType)?.cargoSpace ?? 0
+        for e in state.escortWing where e.missionID == nil {
+            guard let hull = galaxy.game.ship(e.shipType), hull.inherentAI < 3 else { continue }
+            fleet += max(0, hull.cargoSpace)
+        }
+        guard fleet > 0 else { return [:] }
+        let ratio = min(1, Float(recipientHolds) / Float(fleet))
+        for (type, held) in state.cargo {
+            let mission = min(held, missionCargo[type] ?? 0)
+            let own = held - mission
+            guard own > 0 else { continue }
+            let moved = Int(Float(own) * ratio)
+            let left = max(0, own - moved) + mission
+            state.cargo[type] = left > 0 ? left : nil
+            if type >= 0, type < 128, moved > 0 { movedCommodities[type] = min(moved, own) }
+        }
+        return movedCommodities
     }
 
     /// Credits refunded for selling off a captured/hired escort of hull
@@ -636,16 +781,25 @@ public enum PilotEconomy {
     public static func escortSellValue(for ship: ShipRes) -> Int {
         ship.escortSellValue > 0 ? ship.escortSellValue : Int(Double(ship.cost) * 0.1)
     }
+}
 
-    /// Sell captured escort `recordID` for its `escortSellValue`, removing it from
-    /// the roster. Returns the credits received, or nil if the record is unknown.
-    /// (Hired escorts are released, not sold — this is for captured ships.)
-    @discardableResult
-    public static func sellEscort(_ state: inout PlayerState, recordID: Int, game: NovaGame) -> Int? {
-        guard let rec = state.escort(id: recordID), let ship = game.ship(rec.shipType) else { return nil }
-        let value = escortSellValue(for: ship)
-        state.credits += value
-        state.removeEscort(id: recordID)
-        return value
+/// The days a spaceport visit costs, run when the player leaves (FL-05). In the
+/// original, landing itself costs nothing; the dock-and-launch sequence
+/// (0x00455e10) runs one daily tick, the spaceport exit (0x00491f30) runs one
+/// more if the outfitter bought or sold anything and four more if a ship was
+/// bought — both flags clear on entering the spaceport, so one visit can cost
+/// five extra days — and selling or upgrading escorts costs
+/// `trunc((sold + upgraded) / 2)` (0x004229d0). Trade, the bar, the mission
+/// computer and refuelling cost nothing.
+public struct SpaceportVisitDays: Sendable, Equatable {
+    public var outfitTransaction = false
+    public var shipPurchase = false
+    public var escortsSoldOrUpgraded = 0
+
+    public init() {}
+
+    /// Daily ticks to run on departure.
+    public var departureDays: Int {
+        1 + (outfitTransaction ? 1 : 0) + (shipPurchase ? 4 : 0) + escortsSoldOrUpgraded / 2
     }
 }

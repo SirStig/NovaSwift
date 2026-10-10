@@ -6,8 +6,10 @@ reverse-guessing from observed behaviour. See the [folder README](README.md) for
 the standard every claim here follows, and [STATUS.md](../STATUS.md) for what's
 implemented.
 
-Where the Bible doesn't give exact runtime math, `EV Nova.exe` (x86 PE, not fully
-stripped) is a candidate for disassembly.
+The executable has since been decompiled, and the AI was ported from it
+(`Sources/NovaSwiftEngine/OriginalAI/`, items AI-01 to AI-44 in
+[FIDELITY_PLAN.md](FIDELITY_PLAN.md)). Where this doc and the plan disagree, the
+plan is right.
 
 **The core correction to how we'd been thinking about this:** EV Nova's AI is
 not "4 dispositions, each a fixed rule." It's 4 base dispositions layered with

@@ -1,6 +1,7 @@
 # Multiplayer
 
-Everything described here is built and covered by tests. What hasn't happened is
+Almost everything described here is built and covered by tests (the
+`carryEncounter` rule is declared but not used yet). What hasn't happened is
 verification on real hardware over a real network: the netcode and sync logic are
 proven headlessly (two live `World`s talking over a loopback transport) and the
 app-side wiring compiles, but nobody has played a session end to end on two

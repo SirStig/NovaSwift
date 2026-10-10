@@ -221,7 +221,11 @@ enum DebugLiveTests {
         return s
     }
 
-    private static func makeWorld() -> World { World(player: makeShip()) }
+    private static func makeWorld() -> World {
+        let world = World(player: makeShip())
+        world.strictPlay = true   // no non-strict ×1.5, so the cap is the stat
+        return world
+    }
 
     private static func gun(shield: Double = 50, armor: Double = 50) -> WeaponSpec {
         WeaponSpec(id: 128, name: "Gun", shieldDamage: shield, armorDamage: armor,

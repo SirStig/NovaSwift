@@ -13,6 +13,9 @@ public struct ControlIntent: Equatable {
     public var afterburner = false  // burn fuel for a speed / accel boost
     public var firePrimary = false
     public var fireSecondary = false
+    /// The self-destruct command is held (Alt-−, UI-15): the player tick arms
+    /// and runs the countdown while it stays down. Ignored for NPCs.
+    public var selfDestruct = false
     /// Absolute heading (radians, compass) to rotate toward — used by mouse,
     /// analog-stick aiming, and the AI. When set, it drives turning unless a
     /// discrete turnLeft/turnRight is also active (discrete input wins).
@@ -21,6 +24,11 @@ public struct ControlIntent: Equatable {
     /// setting. 1 = the hull's native turn rate. Left at 1 for NPCs (the AI never
     /// sets it), so it only ever affects the player's ship.
     public var turnScale: Double = 1
+    /// The exact mounts an NPC's trigger serves this frame, when its AI chose
+    /// them (the original AI's control modes asking the AI-02 selectors for a
+    /// particular kind of bank). nil leaves the choice to
+    /// `World.npcSelectedMounts`. Ignored for the player.
+    public var npcMounts: Set<Int>?
     public init() {}
 
     /// OR-merge several input sources into one intent (keyboard + touch +
@@ -36,6 +44,7 @@ public struct ControlIntent: Equatable {
             r.afterburner = r.afterburner || s.afterburner
             r.firePrimary = r.firePrimary || s.firePrimary
             r.fireSecondary = r.fireSecondary || s.fireSecondary
+            r.selfDestruct = r.selfDestruct || s.selfDestruct
             if r.desiredHeading == nil { r.desiredHeading = s.desiredHeading }
         }
         // Two input sources disagreeing on turn direction cancel out in
@@ -60,63 +69,55 @@ public struct ControlIntent: Equatable {
 /// How widely the AI-inertialess flight model is applied on top of each hull's
 /// own `shïp` Flags2 0x0040 / inertial-dampener flag.
 ///
-/// EV Nova's NPC AI doesn't wrestle the same Newtonian momentum the player does —
-/// its ships turn and their velocity tracks the nose far more tightly than a
-/// human flying the identical hull, which is why AI traffic reads as *precise*
-/// rather than drifty. Reproducing that here means letting AI-controlled ships
-/// fly the engine's driftless (inertialess) model regardless of whether their
-/// hull carries the real flag. The player keeps authentic Newtonian flight
-/// (unless *their* hull/outfits set the flag), so the asymmetry the original had
-/// is preserved.
+/// The original flies an NPC inertialess only when its hull has Flags2 0x0040
+/// (`Ship_HandleShip` 0x00433050), which is `.off`. The wider scopes are the
+/// port's own formation model, kept behind the `formationFlying` enhancement.
 public enum AIInertialessScope: Sendable {
-    /// Off — only hulls/outfits with the real `shïp` Flags2 0x0040 flag (or an
-    /// inertial-dampener outfit) fly driftless. Pure "everyone obeys identical
-    /// physics" mode.
+    /// Only hulls/outfits with the real `shïp` Flags2 0x0040 flag (or an
+    /// inertial-dampener outfit) fly driftless. The original.
     case off
-    /// Only ships flying in formation — fleet members and escorts (anything with
-    /// a leader, plus the fleet flagship) — fly driftless. Kills the constant
-    /// micro-correction wobble of a wing holding station without changing how
-    /// lone traders/patrols fly.
+    /// Ships flying in formation — fleet members and escorts (anything with a
+    /// leader, plus the fleet flagship) — also fly driftless. Kills the
+    /// micro-correction wobble of a wing holding station.
     case formations
-    /// Every AI-brained ship flies driftless — the classic EV Nova AI-flight
-    /// feel, and the default. Turning points the ship *and* its motion together,
-    /// so NPCs go where they aim without the momentum overshoot/wrong-direction
-    /// drift a from-source flight AI wouldn't have.
+    /// Every AI-brained ship flies driftless.
     case all
 }
 
-/// Tuning that maps EV Nova's integer stat units into simulation units. Kept in
-/// one place so flight feel can be adjusted without touching data decoding.
+/// Tuning that maps EV Nova's integer stat units into simulation units, plus
+/// the switches that select the port's own flight behaviours. Kept in one place
+/// so flight feel can be adjusted without touching data decoding.
 public struct FlightTuning {
     public var speedScale: Double      // stat → max px/sec
     public var accelScale: Double      // stat → px/sec²
     public var turnScale: Double       // stat → deg/sec
     public var dragPerSecond: Double   // gentle space drag so ships settle (0 = pure Newtonian)
-    /// How broadly AI ships fly the engine's driftless (inertialess) model
-    /// beyond their own hull flag — see `AIInertialessScope`. Defaults to
-    /// `.formations`: lone traffic and lone combatants wrestle Newtonian momentum
-    /// (the reverse-and-fire "Monty Python" maneuver is a signature of the
-    /// original), while ships *holding formation* — escorts and fleet members —
-    /// fly driftless so they glue to their slots. The EV Nova Bible describes
-    /// escorts as "ignoring their own speed and maneuverability to hold formation,"
-    /// which is exactly a driftless hold; making them Newtonian instead produces
-    /// a scattered, twitchy, lagging wing (finite turn/thrust can't chase a moving
-    /// slot cleanly). This keeps the momentum feel where the player perceives it
-    /// (ambient flight, combat) and precise formations where they expect them.
-    public var aiInertialess: AIInertialessScope = .formations
+    /// How broadly AI ships fly the driftless model beyond their own hull flag.
+    /// `.off` in the original; `.formations` under the `formationFlying`
+    /// enhancement.
+    public var aiInertialess: AIInertialessScope = .off
 
-    // The Bible states an explicit real-time ratio for Maneuver ("10 ≈ 30°/sec",
-    // giving turnScale=3.0 exactly) but gives Speed/Accel no units at all — no
-    // "per frame," no ratio, unlike every other timing field in the same
-    // resources (Reload, weapon Speed/Duration, ShieldRecharge all explicitly
-    // convert from a frame count). Taking raw Speed/Accel as already-real
-    // px/sec (scale=1.0, the previous value) was the simplest reading of that
-    // silence, but direct side-by-side play against the original showed it
-    // reads roughly 2x too fast — 0.55 is calibrated to that comparison, not
-    // derived from the text (which doesn't settle it either way). Revisit if a
-    // harder source ever turns up.
-    public static let `default` = FlightTuning(speedScale: 0.55, accelScale: 0.55,
-                                               turnScale: 3.0, dragPerSecond: 0.0)
+    /// The original's loader and runtime scales (0x004bd3c0, 0x004640a0,
+    /// 0x004642e0): top speed `Speed/100` px/tick, thrust `Accel/10000 × 2.0`
+    /// px/tick², turn `Maneuver × 0.1` deg/tick. At 30 ticks/s that is 0.30 ×
+    /// Speed px/s, 0.18 × Accel px/s² and 3 × Maneuver deg/s.
+    public static let original = FlightTuning(speedScale: 0.30, accelScale: 0.18,
+                                              turnScale: 3.0, dragPerSecond: 0.0)
+
+    public static let `default` = original
+
+    public init(speedScale: Double, accelScale: Double, turnScale: Double, dragPerSecond: Double) {
+        self.speedScale = speedScale
+        self.accelScale = accelScale
+        self.turnScale = turnScale
+        self.dragPerSecond = dragPerSecond
+    }
+
+    /// The flight model a set of enhancement toggles selects.
+    public init(enhancements e: GameplayEnhancements) {
+        self = .original
+        aiInertialess = e.formationFlying ? .formations : .off
+    }
 }
 
 /// Derived, simulation-ready flight parameters for a ship.
@@ -125,21 +126,52 @@ public struct ShipStats {
     public let acceleration: Double    // px/sec²
     public let turnRate: Double        // rad/sec
     public let rotationFrames: Int     // sprite frames for a full 360°
+    /// The player's turn step in whole degrees per tick: `trunc` of
+    /// `Maneuver × 0.1 + Σ ModType-9 count × ModVal × 0.01`, floored to 1 for a
+    /// hull with any Maneuver (0x00463e70, then the truncating conversion at
+    /// 0x0044c8d7). NPCs turn at the unrounded `turnRate`.
+    public let playerTurnDegPerTick: Int
 
     public init(maxSpeed: Double, acceleration: Double, turnRate: Double, rotationFrames: Int = 36) {
         self.maxSpeed = maxSpeed
         self.acceleration = acceleration
         self.turnRate = turnRate
         self.rotationFrames = rotationFrames
+        let degPerTick = turnRate * 180 / .pi / OriginalClock.ticksPerSecond
+        self.playerTurnDegPerTick = degPerTick > 0 ? max(1, Int((degPerTick + 1e-9).rounded(.down))) : 0
     }
 
-    /// Build from decoded ship stat integers (speed / accel / turnRate).
-    public init(speed: Int, acceleration: Int, turnRate: Int,
+    /// Build from decoded ship stat integers (speed / accel / Maneuver).
+    /// `turnBonus` is the summed ModType-9 `count × ModVal`, in hundredths of a
+    /// degree per tick (ten to one Maneuver point).
+    public init(speed: Int, acceleration: Int, turnRate: Int, turnBonus: Int = 0,
                 rotationFrames: Int = 36, tuning: FlightTuning = .default) {
         self.maxSpeed = Double(speed) * tuning.speedScale
         self.acceleration = Double(acceleration) * tuning.accelScale
-        self.turnRate = Double(turnRate) * tuning.turnScale * .pi / 180.0
+        // Turn in hundredths of a degree per tick keeps the truncation exact.
+        // A rate below 1°/tick is floored to 1 when the hull's own rate is at
+        // least 1 (Maneuver ≥ 10); the player's truncated step floors for any
+        // positive Maneuver.
+        let hundredths = turnRate * 10 + turnBonus
+        let unrounded = turnRate >= 10 && hundredths < 100 ? 100 : max(0, hundredths)
+        self.turnRate = Double(unrounded) / 10 * tuning.turnScale * .pi / 180.0
         self.rotationFrames = rotationFrames
+        self.playerTurnDegPerTick = turnRate > 0 ? max(1, hundredths / 100) : max(0, hundredths / 100)
+    }
+
+    /// The same stats with top speed and thrust scaled (skill variance).
+    func scaled(speedAndThrust k: Double) -> ShipStats {
+        ShipStats(maxSpeed: maxSpeed * k, acceleration: acceleration * k, turnRate: turnRate,
+                  rotationFrames: rotationFrames, playerTurnDegPerTick: playerTurnDegPerTick)
+    }
+
+    private init(maxSpeed: Double, acceleration: Double, turnRate: Double,
+                 rotationFrames: Int, playerTurnDegPerTick: Int) {
+        self.maxSpeed = maxSpeed
+        self.acceleration = acceleration
+        self.turnRate = turnRate
+        self.rotationFrames = rotationFrames
+        self.playerTurnDegPerTick = playerTurnDegPerTick
     }
 }
 
@@ -228,7 +260,10 @@ public final class Ship {
     /// so they aren't selectable.
     public var secondaryWeaponIDs: [Int] {
         weapons.filter {
-            guard $0.spec.isSecondary, !$0.spec.isPointDefense else { return false }
+            // WP-27: a bank with wëap Flags 0x0002 and guidance below 9 or 99
+            // (a bay), in bank (weapon id) order — never point defense.
+            let g = $0.spec.guidance
+            guard $0.spec.isSecondary, g.rawValue < 9 || g == .bay else { return false }
             // `wëap.Flags2` 0x0800: "Don't allow this weapon to be selected or
             // displayed if it is out of ammo" — a dry launcher drops out of the
             // cycle entirely rather than sitting there refusing to fire.
@@ -248,6 +283,9 @@ public final class Ship {
         guard let id = effectiveSecondaryID else { return nil }
         return weapons.first { $0.spec.id == id && $0.spec.isSecondary }
     }
+
+    /// Clear the secondary selection (the original's "S"; the key is UI-15).
+    public func clearSecondary() { selectedSecondaryID = nil }
 
     /// Step the selected secondary to the next/previous fitted secondary,
     /// wrapping. No-op when the ship carries fewer than two secondaries.
@@ -294,11 +332,14 @@ public final class Ship {
     /// EV Nova's `shïp.Strength` — relative combat power, used for the
     /// combat-odds check (`gövt.MaxOdds`) before an AI picks a fight.
     public var combatStrength: Double = 1
-    /// Fraction of max armor at which a lethal hit disables this ship instead of
-    /// destroying it outright. EV Nova: 33% by default, 10% if `shïp.Flags`
-    /// bit 0x0010 is set. A one-time state transition, not a random roll —
-    /// only ships not already disabled can cross it.
-    public var disableArmorFraction: Double = 0.33
+    /// Fraction of max armor below which this ship is disabled: 33.333 %, or
+    /// 10 % with `shïp.Flags` 0x0010 (`Ship_IsShipDisabled` 0x004687b0 tests
+    /// `armor × 100 < maxArmor × 33.333`). See `disabled`.
+    public var disableArmorFraction: Double = Ship.standardDisableFraction
+    /// `armor × 100 < maxArmor × 33.333` (0x00575808), and 10.0 (0x005757f8)
+    /// with hull Flags 0x0010.
+    public static let standardDisableFraction = 0.33333
+    public static let lowDisableFraction = 0.10
     /// `shïp.Flags2` 0x0080: "AI ships of this type will run away/dock if out
     /// of ammo for all ammo-using weapons."
     public var fleeWhenOutOfAmmo: Bool = false
@@ -310,24 +351,19 @@ public final class Ship {
     /// `shïp.IonizeMax` — 0 means this hull doesn't define the field (never
     /// considered ionized, rather than trivially "always ionized").
     public var ionizeMax: Double = 0
+    /// Ion charge shed per second: `shïp.Deionize` per 1/30 s tick (a hull
+    /// whose Deionize is 0 sheds a full 1.0 per tick — see `ShipRes.deionizePerTick`).
     public var deionizePerSec: Double = 0
-    /// Ionization always visibly fades over roughly this many seconds, even for a
-    /// hull whose `shïp.Deionize` is 0 (the majority of stock hulls). Without a
-    /// floor, `deionizePerSec` came out 0 for those hulls, so a fully-ionized ship
-    /// bled off *nothing* and the ionization glow stuck on forever — the reported
-    /// "the colour never goes away" bug. The rate a hull's own `Deionize` gives is
-    /// still honoured whenever it's faster than this baseline (see `Galaxy`/
-    /// `ShipLoadout`, which floor `deionizePerSec` to `ionizeMax / this`).
-    public static let ionizationBaselineFadeSeconds: Double = 12
-    /// The effective ion-dissipation rate for a hull: the rate its own data gives,
-    /// but never slower than draining a full charge over
-    /// `ionizationBaselineFadeSeconds`. Only applies to hulls that can actually be
-    /// ionized (`ionizeMax > 0`); a non-ionizable hull keeps whatever it had (0).
-    public static func flooredDeionize(rate: Double, ionizeMax: Double) -> Double {
-        guard ionizeMax > 0 else { return rate }
-        return max(rate, ionizeMax / ionizationBaselineFadeSeconds)
-    }
+    /// Fully ionized: the charge has reached the capacity. Only Seeker 0x0020
+    /// weapons care (they won't fire).
     public var isIonized: Bool { ionizeMax > 0 && ionCharge >= ionizeMax }
+    /// `Ship_GetIonizationIntensity` (0x0046c160) capped at 0.7: how much of
+    /// its thrust (and its turn while coasting) and top speed the charge
+    /// takes away.
+    public var ionIntensity: Double {
+        guard ionizeMax > 0, ionCharge > 0 else { return 0 }
+        return min(0.7, ionCharge / ionizeMax)
+    }
     /// The tint the hull glows while ionized, set from the `IonizeColor` of
     /// whatever last landed ion charge on it (Bible: "the color that a ship hit
     /// by this weapon will appear after being sufficiently ionized"). Nil → the
@@ -381,6 +417,10 @@ public final class Ship {
     /// when it's disabled" — not player-restricted, so an NPC hull stocked
     /// with one benefits too. See `World`'s disabled-hulk tick.
     public var hasRepairSystem: Bool = false
+    /// `Ship_CheckSpecialLoadoutCapability` (0x0046d080) for a jump: shïp
+    /// Flags2 0x0020 or a ModType-37 fast-jump outfit (the hull's DefaultItems
+    /// count for an NPC, OS-01). The jump skips its brake.
+    public var instantJump: Bool = false
     /// `oütf` ModType 13 (density scanner): reveals a targeted ship's cargo
     /// hold contents in the targeting readout. Bible ModVal is "ignored" —
     /// ownership alone is what matters.
@@ -400,14 +440,13 @@ public final class Ship {
     /// tint (0...1 RGB) from a fitted paint outfit. Nil = fly the hull's
     /// stock/government tint instead.
     public var paintColor: (r: Double, g: Double, b: Double)?
-    /// `shïp.Flags3` 0x0010 ("ignores gravity") OR a fitted `oütf` ModType 41
-    /// (gravityResist) — either makes this ship immune to a stellar's
-    /// `Gravity` pull/push.
-    public var ignoresGravity: Bool = false
-    /// `shïp.Flags3` 0x0020 ("ignores deadly stellars") OR a fitted `oütf`
-    /// ModType 42 (stellarResist) — either lets this ship touch a
-    /// `SpobRes.isDeadly` stellar and survive.
-    public var ignoresDeadlyStellars: Bool = false
+    /// `shïp.Flags3` 0x0020: the hull ignores stellar gravity *and* survives
+    /// deadly stellars (0x0046e120 / 0x0046e210 both read this one bit).
+    public var hullShieldsStellars: Bool = false
+    /// A fitted `oütf` ModType 41 (gravityResist). Only the player's counts.
+    public var hasGravityResistOutfit: Bool = false
+    /// A fitted `oütf` ModType 42 (stellarResist). Only the player's counts.
+    public var hasStellarResistOutfit: Bool = false
 
     // Fuel — EV Nova's blue gauge. Spent by hyperspace jumps (100 per jump) and
     // by the afterburner; regenerates only if the hull/outfits grant it.
@@ -428,6 +467,13 @@ public final class Ship {
     /// Credits aboard for plunder once disabled. -1 = not yet rolled; set to 0
     /// once the player has taken them, so re-boarding can't duplicate the haul.
     public var plunderCredits: Int = -1
+    /// The `Booty` flags of the düde this ship spawned from (0 for any other
+    /// ship): the boarding cargo roll reads them (EC-18).
+    public var dudeBooty: Int = 0
+    /// The boarding cargo and fuel rolls (`Boarding_BuildOptions` 0x00484230),
+    /// made once when first boarded; nil = not rolled yet.
+    public var plunderCargoRoll: (commodity: Int, tons: Int)??
+    public var plunderFuelRoll: Int?
 
     /// `shïp.Crew` — the crew complement, used on both sides of the EV Nova
     /// capture-odds math (attacker's crew vs. defender's crew × 10). See
@@ -460,12 +506,19 @@ public final class Ship {
     public var hasCloak: Bool { cloakFlags != 0 }
     /// Player/AI intent to be cloaked. Toggled by input (player) or the brain.
     public var cloakEngaged = false
-    /// 0 = fully visible, 1 = fully cloaked; fades between when (dis)engaging.
+    /// 0 = fully visible, 1 = fully cloaked: the original's fade progress
+    /// 0…32 over 32 (OS-04).
     public var cloakLevel: Double = 0
-    /// Substantially hidden — excluded from targeting/AI acquisition (unless the
-    /// observer has a cloak scanner). Uses a high threshold so a ship mid-fade
-    /// is still detectable.
-    public var isCloaked: Bool { cloakLevel >= 0.99 }
+    /// "Cloaked" — can't fire, can't be targeted, off radar
+    /// (`Ship_IsShipCloakVisibilityThresholdActive` 0x0046c7a0): past 24/32
+    /// while fading in, until under 8/32 while fading out, past 16/32 at rest.
+    public var isCloaked: Bool { Ship.cloakHides(level: cloakLevel, engaged: cloakEngaged) }
+    static func cloakHides(level: Double, engaged: Bool) -> Bool {
+        let progress = level * 32
+        if engaged && level < 1 { return progress > 24 }
+        if !engaged && level > 0 { return progress >= 8 }
+        return progress > 16
+    }
     /// Fuel drained per second while cloaked (Bible bits 0x0010/20/40/80 = 1/2/4/8).
     public var cloakFuelPerSec: Double {
         Double((cloakFlags & 0x0010 != 0 ? 1 : 0) + (cloakFlags & 0x0020 != 0 ? 2 : 0)
@@ -491,27 +544,20 @@ public final class Ship {
     /// The stronger of this ship's own cloak and any area-cloak shared onto it
     /// by a formation-mate — what detection/rendering should actually use.
     public var effectiveCloakLevel: Double { max(cloakLevel, areaCloakLevel) }
-    /// Substantially hidden by either its own cloak or a formation-mate's area
-    /// cloak — the target-selection/radar/rendering-facing check.
-    public var isEffectivelyCloaked: Bool { effectiveCloakLevel >= 0.99 }
+    /// Hidden by either its own cloak or a formation-mate's area cloak — the
+    /// target-selection/radar/rendering-facing check.
+    public var isEffectivelyCloaked: Bool { isCloaked || areaCloakLevel * 32 > 16 }
     /// Anti-interference (oütf ModType 24): subtracted from the system's sensor
     /// static when computing this ship's effective sensor range.
     public var interferenceReduction: Int = 0
     /// Murk modifier (oütf ModType 28): added to/subtracted from the system's
     /// `sÿst.Murk` visual fog when computing this ship's effective murk.
     public var murkModifier: Int = 0
-    /// ModType 11 (`escapePod`): if the player is flying this hull when
-    /// destroyed, they eject and survive instead of a real game-over.
+    /// An owned ModType-11 escape pod: the player may eject (Alt+X) while
+    /// disabled or during the death sequence (OS-02).
     public var hasEscapePod: Bool = false
-    /// ModType 20 (`autoEject`), a real purchasable stock outfit (#187): Bible
-    /// says it's "ignored (requires escape pod to work)" — implying a plain
-    /// pod alone might otherwise need a manual eject action before this
-    /// outfit exists to automate it. This engine has no manual-eject control
-    /// at all (a pod-equipped ship already always survives destruction), so
-    /// gating that on also owning this $20,000 outfit would only ever be a
-    /// strict downgrade for existing pod owners — not implemented on purpose;
-    /// tracked here for completeness/future use if a manual-eject control is
-    /// ever added.
+    /// An owned ModType-20 auto-eject: a destroyed player with a pod ejects
+    /// on their own once half the death sequence has run.
     public var hasAutoEject: Bool = false
     /// Set on a launched fighter: the entity id of the carrier it flew from, so
     /// it can dock back and be freed if the carrier dies. nil = not a fighter.
@@ -519,6 +565,13 @@ public final class Ship {
     /// `përs` id when this ship is a named character (5% spawn chance). Drives the
     /// target-display name and the ItemClass boarding-loot grant. nil = ordinary.
     public var personID: Int?
+    /// The `përs` Flags of `personID` (0 for an ordinary ship). 0x0001: a hit
+    /// from the player makes it hold a grudge (AI-07).
+    public var personFlags = 0
+    /// The `düde` this ship was spawned from (ship +0x78), nil for fleet,
+    /// përs and fighter ships. The comm window's greeting reads its
+    /// InfoTypes (AI-43).
+    public var dudeID: Int?
 
     /// Set when this ship was spawned *by a mission* (`mïsn` special/aux ship),
     /// tagged with the mission's resource id. Lets the world report goal progress
@@ -603,6 +656,9 @@ public final class Ship {
     /// continuous loop per mount instead of retriggering a one-shot every
     /// reload tick (up to 10×/sec) while the trigger is held.
     var activeBeamLoopMounts: Set<Int> = []
+    /// The original AI's in-place departure (a jump spin-up or a gate entry)
+    /// finished: the world removes the ship wherever it is.
+    public var departsInPlace = false
     /// The brain requests hyperspace departure; the world despawns it past the
     /// system edge.
     public var wantsToDepart = false
@@ -621,16 +677,57 @@ public final class Ship {
     public var entryOverspeed: Double = 0
     public var entryOverspeedDecayPerSec: Double = 0
 
-    /// A drifting hulk: armor was knocked out but the ship wasn't destroyed. It
-    /// carries no thrust or weapons and other ships leave it be; further damage
-    /// finishes it off. Set by the world's damage handler.
-    public var disabled = false
+    /// A drifting hulk: no thrust, no weapons, no regeneration. Derived every
+    /// time it is read, as `Ship_IsShipDisabled` (0x004687b0) is: armor below
+    /// `disableArmorFraction` of max, so repairing above the line (or
+    /// regenerating, for a hull that does) brings a ship back. A dead ship
+    /// (armor ≤ 0) also reads disabled. Two arms hold a ship disabled whatever
+    /// its armor: a government with Flags 0x0800 (derelicts) and an un-boarded
+    /// rescue-mission ship; `heldDisabled` carries both, and setting
+    /// `disabled` writes it. A stellar's defense ship is never disabled by
+    /// armor — it fights until destroyed.
+    public var disabled: Bool {
+        get {
+            if heldDisabled { return true }
+            if !isPlayer, spobDefenderOf != nil { return false }
+            return armor < maxArmor * disableArmorFraction
+        }
+        set { heldDisabled = newValue }
+    }
+    /// See `disabled`: the derelict-government / rescue-ship arms (and a test seam).
+    public var heldDisabled = false
+    /// The player's post-disable window (`DAT_0073549c`): set to 300 ticks when
+    /// the player is disabled, it counts down one tick per tick and holds off
+    /// the repair system until it runs out (OS-07).
+    public var recentlyHitTicks: Double = -1
 
     /// True if the player dealt the hit that dropped this ship to 0 armor —
     /// read once by `despawnDepartedAndDead` to attribute `Diplomacy.recordKill`
     /// to the player specifically (an NPC-vs-NPC kill shouldn't touch the
     /// player's legal record).
     public var killedByPlayer = false
+    /// True if the killing hit counts as the player's for the legal record and
+    /// combat rating (`World.isCreditedToPlayer`): the player or a direct
+    /// escort, against anything but a defense ship or a derelict.
+    public var killCredited = false
+    /// `shïp.Mass` in tons: knockback divides by it, and hulls of 100 t or
+    /// more blast on death (WP-13). 0 = a synthetic ship with no backing hull.
+    public var massTons: Double = 0
+    /// `shïp.Flags` 0x0400, a planet-type ship: only planet-type weapons
+    /// (`wëap` Flags2 0x0400) hit it, and weapon impact never pushes it.
+    public var isPlanetTypeShip = false
+    /// The turret tracking rating of the hull's class (WP-26): 80 fighter,
+    /// 90 medium ship, 100 warship or freighter (`shïp.EscortType`, else
+    /// inferred). 100 for a synthetic ship.
+    public var turretRating = 100
+    /// The government whose `InhJam1-4` the hull carries (`shïp.InherentGovt`).
+    public var inherentJamGovt = -1
+    /// The hull's inherent *combat* government (`shïp.InherentGovt`), −1 for
+    /// none. On the player's hull it drives the 1-in-50 "you fly their enemy's
+    /// ship" hostility roll and the stellar batteries' grudge (AI-05).
+    public var inherentCombatGovt = -1
+    /// shïp 895 (class index 0x2ff): the escape pod, which no shot can hit.
+    public static let escapePodShipID = 895
 
     /// Non-nil once this NPC's armor has hit 0: counts up the seconds spent
     /// playing out its wreck-explosion sequence before `despawnDepartedAndDead`
@@ -639,9 +736,15 @@ public final class Ship {
     /// hidden, instead of vanishing the instant its armor reaches 0.
     public var deathTimer: Double? = nil
 
-    /// How long a dead NPC's wreck lingers (matches the player's own 9-burst,
-    /// 0.2s-apart death sequence in `GameScene.beginPlayerDeathSequence`).
-    static let deathSequenceDuration: Double = 1.8
+    /// How long this hull's death sequence runs (`Ship_UpdateVisualState`
+    /// 0x00428340): the timer starts at `DeathDelay` (× 3 for the player) and
+    /// counts down one per raw call to the finale at 2. A hull with no data
+    /// (a synthetic ship) uses the port's earlier 1.8 s.
+    var deathSequenceDuration: Double {
+        guard deathDelayTicks > 0 else { return 1.8 }
+        let start = deathDelayTicks * (isPlayer ? 3 : 1)
+        return max(0, start - 2) * OriginalClock.rawCallSeconds
+    }
 
     /// Debug/cheat only: when set, `applyDamage` is a no-op — shields and armor
     /// never drop and the ship can't be destroyed or disabled by weapon fire.
@@ -649,36 +752,39 @@ public final class Ship {
     /// normal gameplay ever sets it, so it's inert unless a developer flips it.
     public var invulnerable = false
 
-    /// Formation-flight limit lift (0…1), requested by an escort's AI *this frame*.
-    /// EV Nova escorts "ignore their own speed and maneuverability restraints to
-    /// stay in formation" — so while holding station this scales up the ship's turn
-    /// rate, acceleration, and top speed (see `Ship.step`) enough to pin the wing to
-    /// any leader, however sluggish the hull. It still turns and thrusts frame to
-    /// frame, so it reads as flying, not teleporting. `Ship.step` reads and clears
-    /// it each frame; 0 for everything not currently holding formation.
-    var formationBoost: Double = 0
+    /// Top-speed multiplier the world applies this step: 1.5 for the player and
+    /// the player's direct escorts when the pilot is not on Strict Play
+    /// (`Ship_ComputeShipEffectiveMaxSpeed` 0x004642e0), otherwise 1.
+    public internal(set) var topSpeedFactor: Double = 1
+    /// The ship this NPC is velocity-matched to, if any. A matched NPC flies at
+    /// a third of its top speed and turn rate, and its thrust takes ×0.333
+    /// instead of the usual ×2.0 (0x004640a0 / 0x004642e0 / 0x00463e70). Set
+    /// by the AI that matches velocities.
+    public var velocityMatchTargetID: Int?
+    /// True while the system holds any stellar with gravity; it stops the
+    /// player's afterburner widening the speed caps (0x0043adb0).
+    var inGravityPull = false
+    /// The player's per-axis speed caps (px/s), maintained by the afterburner.
+    var speedCapX: Double = 0
+    var speedCapY: Double = 0
 
-    /// A formation-holding escort's direct drive on its own motion, requested by
-    /// its AI *this frame* (see `AIBrain.escort`). This is EV Nova's escort cheat
-    /// made explicit: rather than steering a hull — where the nose and the motion
-    /// are the same control, so an escort can either point where its leader points
-    /// or fly toward its slot but never both — a glued escort drives its velocity
-    /// and its heading *independently*, past its own hull's limits and its
-    /// leader's. `Ship.step` reads and clears it each frame; nil for everything
-    /// not currently holding station.
-    struct FormationGlue {
-        /// Velocity to fly at — the formation controller's `desiredVel`, already
-        /// speed-capped. Chased exponentially rather than snapped, so the ship
-        /// still reads as flying (a very hard burn) rather than teleporting.
-        var targetVelocity: Vec2
-        /// Heading to hold, independent of which way the ship is actually moving.
-        var targetHeading: Double
-        /// Cheated turn rate (rad/sec) toward `targetHeading`.
-        var turnRate: Double
-        /// Exponential rate (1/sec) at which `velocity` closes on `targetVelocity`.
-        var response: Double
+    private var velocityMatched: Bool {
+        guard let id = velocityMatchTargetID else { return false }
+        return id != entityID && !isPlayerControlled
     }
-    var formationGlue: FormationGlue?
+    /// Top speed with the strict-play and velocity-match multipliers, px/s.
+    public var effectiveMaxSpeed: Double {
+        stats.maxSpeed * (velocityMatched ? 0.333 : 1) * topSpeedFactor
+    }
+    /// Thrust with the velocity-match multiplier, px/s². `stats.acceleration`
+    /// already carries the usual ×2.0, which a matched ship swaps for ×0.333.
+    public var effectiveAcceleration: Double {
+        velocityMatched ? stats.acceleration * (0.333 / 2.0) : stats.acceleration
+    }
+    /// NPC turn rate with the velocity-match multiplier, rad/s.
+    var effectiveTurnRate: Double { stats.turnRate * (velocityMatched ? 0.333 : 1) }
+    /// The player's whole-degree turn step per tick.
+    var playerTurnStep: Int { stats.playerTurnDegPerTick }
 
     /// EV Nova's inertialess flight (`shïp` Flags2 0x0040, or the inertial-dampener
     /// outfit ModType 38): the ship has no momentum — its velocity tracks the nose
@@ -704,10 +810,12 @@ public final class Ship {
     /// 0…1 overall health, shields included, for morale/retreat decisions.
     public var healthFraction: Double {
         let maxTotal = maxShield + maxArmor
-        return maxTotal > 0 ? (shield + armor) / maxTotal : 0
+        return maxTotal > 0 ? (max(0, shield) + max(0, armor)) / maxTotal : 0
     }
-    public var armorFraction: Double { maxArmor > 0 ? armor / maxArmor : 0 }
-    public var shieldFraction: Double { maxShield > 0 ? shield / maxShield : 0 }
+    /// Armor and shields can go below zero (a killing blow, a broken shield's
+    /// −10 % floor); the fractions read 0 there.
+    public var armorFraction: Double { maxArmor > 0 ? max(0, armor) / maxArmor : 0 }
+    public var shieldFraction: Double { maxShield > 0 ? max(0, shield) / maxShield : 0 }
 
     public init(name: String, stats: ShipStats, position: Vec2 = Vec2(), angle: Double = 0) {
         self.name = name
@@ -720,42 +828,115 @@ public final class Ship {
         self.renderPrevAngle = angle
     }
 
-    /// The sprite frame index (0..<rotationFrames) for the current heading.
+    /// Behavior 5, a carried fighter (AI-41, OQ B3/B7): × 1.333 maximum
+    /// shield and armor, float-rounded as the original stores them, and × 1.333
+    /// shield regeneration (not armor). This pool is the whole of the
+    /// community's "fighters take 75 % damage".
+    func applyCarriedFighterScale(keepingLevels: Bool = false) {
+        guard preFighterScale == nil else { return }
+        preFighterScale = (maxShield, maxArmor, shieldRechargePerSec)
+        maxShield = Double(Float(maxShield * 1.333))
+        maxArmor = Double(Float(maxArmor * 1.333))
+        shieldRechargePerSec *= 1.333
+        if !keepingLevels { shield = maxShield; armor = maxArmor }
+    }
+
+    /// Leaving behavior 5 (a disabled fighter dropping out of the wing) takes
+    /// the × 1.333 back off: the original computes the pools from the live
+    /// behavior every time (0x00463550 / 0x004637a0). Current levels stay,
+    /// clamped to the smaller pools.
+    func removeCarriedFighterScale() {
+        guard let pre = preFighterScale else { return }
+        preFighterScale = nil
+        maxShield = pre.maxShield; maxArmor = pre.maxArmor; shieldRechargePerSec = pre.shieldRegen
+        shield = min(shield, maxShield); armor = min(armor, maxArmor)
+    }
+
+    /// The pools before the carried-fighter × 1.333, while it applies.
+    var preFighterScale: (maxShield: Double, maxArmor: Double, shieldRegen: Double)?
+
+    /// A ship that was in the player's wing and dropped out when it was
+    /// disabled (`+0xc8de`, AI-38): it still remembers whether it flew as a
+    /// bay fighter or an escort, so a repair system or the player boarding it
+    /// brings it back. nil for every other ship.
+    public enum FormerWingRole: Sendable { case fighter, escort }
+    public var formerWingRole: FormerWingRole?
+
+    /// A përs with a negative `ShieldMod`: its shield and armor are refilled
+    /// to full every call (`Ship_HandleShip` 0x00433050), so only a single
+    /// hit bigger than both can stop it.
+    public var refillsDefensesEveryTick = false
+
+    /// Per-exit-type firing quadrant cursors (WP-25), started at random.
+    var exitQuadrants: [WeaponExitType: Int] = [:]
+
+    /// Set when a deadly stellar destroyed this ship: it's gone at once, with
+    /// no death sequence (WP-25).
+    var diesInstantly = false
+    /// The hull the player ejected from (OS-02). If it was already dying, the
+    /// host's player death sequence plays its explosions.
+    public var wreckOfPlayer = false
+
+    /// The hull fields the combat model reads straight off `shïp`.
+    func applyHullTraits(_ res: ShipRes) {
+        massTons = Double(max(0, res.mass))
+        isPlanetTypeShip = res.flags & 0x0400 != 0
+        turretRating = [80, 90, 100, 100][max(0, min(3, res.escortClass))]
+        inherentJamGovt = res.inherentAttributesGovt
+        inherentCombatGovt = res.inherentCombatGovt
+        hullFlags = Int(res.flags)
+        hullFlags2 = Int(res.flags2)
+        deathDelayTicks = Double(max(0, res.deathDelay))
+    }
+
+    /// Raw `shïp.Flags` / `Flags2`, for the rules that read single bits
+    /// (turret blind arcs, untargetable hulls, cloak fade rate …).
+    public var hullFlags = 0
+    public var hullFlags2 = 0
+    /// `shïp.DeathDelay` in ticks: how long the death sequence runs (× 3 for
+    /// the player) before the hull is gone (WP-13).
+    public var deathDelayTicks: Double = 0
+
+    /// The sprite frame index (0..<rotationFrames) for the current heading:
+    /// `trunc(heading° × frames / 360)`, as the original picks it.
     public var spriteFrame: Int {
-        let n = stats.rotationFrames
-        guard n > 0 else { return 0 }
-        let twoPi = 2 * Double.pi
-        var a = angle.truncatingRemainder(dividingBy: twoPi)
-        if a < 0 { a += twoPi }
-        return Int((a / twoPi * Double(n)).rounded()) % n
+        SpriteFrames.headingFrame(angle: angle, frames: stats.rotationFrames)
     }
 
     // MARK: Combat helpers
 
-    /// Apply damage the authentic EV Nova way: energy damage hits shields only,
-    /// mass damage hits armor only, and **the hull can't be touched until the
-    /// shields are knocked down** (Nova Bible, `wëap` MassDmg/EnergyDmg). The one
-    /// exception is a shield-penetrating weapon (`wëap` Flags 0x0020, `piercing`),
-    /// whose mass damage reaches armor even through live shields. Returns true if
-    /// the hit destroyed the ship.
+    /// One hit's damage, as `Ship_ApplyDamageToShip` (0x004192d0) applies it:
+    /// energy comes off the shields; once the shields are at or below zero
+    /// (this hit's energy included) the mass damage comes off the armor, and
+    /// the shields bottom out at −10 % of their maximum, so a broken shield
+    /// has to regenerate past zero before it absorbs again. A shield-piercing
+    /// weapon (`wëap` Flags 0x0020) applies its mass damage alone, never
+    /// touching the shields. A non-lethal hit (`wëap` Flags2 0x1000, or an AI
+    /// in its disable-only state) that would take positive armor to zero or
+    /// below leaves exactly 1. Armor simply subtracts, so one hit can take a
+    /// healthy ship straight past the disable line to destroyed. Returns true
+    /// if the hit destroyed the ship.
     @discardableResult
     public func applyDamage(shield dmgShield: Double, armor dmgArmor: Double,
-                            piercing: Bool = false) -> Bool {
-        // God mode (debug suite): swallow every hit whole — no shield/armor loss,
-        // never reports a kill. Kept as the very first check so no damage math or
-        // side effect runs for an invulnerable ship.
+                            piercing: Bool = false, nonLethal: Bool = false) -> Bool {
+        // God mode (debug suite): swallow every hit whole.
         if invulnerable { return false }
-        // Apply the shield damage first, then expose the hull based on whether the
-        // shields are down *after* this shot. The shot that empties the shields
-        // therefore also lands its armor damage — there is no infinite "grace shot."
-        // This matters under sustained fire: shield regen tops the shields up by a
-        // sliver every frame (regen runs before damage), so a gate keyed on
-        // "shields were up *before* this shot" would read as up every frame and a
-        // continuous beam could pin the shields at zero yet never touch the hull —
-        // an immortal target. A shield-penetrating weapon bypasses the gate outright.
-        if dmgShield > 0 { shield = max(0, shield - dmgShield) }
-        if dmgArmor > 0, piercing || shield <= 0 {
-            armor = max(0, armor - dmgArmor)
+        func hitArmor() {
+            guard dmgArmor > 0 else { return }
+            if nonLethal, armor > 0, armor - dmgArmor <= 0 {
+                armor = 1
+            } else {
+                armor -= dmgArmor
+            }
+        }
+        if piercing {
+            hitArmor()
+        } else {
+            if dmgShield > 0 { shield -= dmgShield }
+            if shield <= 0 {
+                hitArmor()
+                shield = max(shield, -maxShield * 0.1)
+            }
         }
         return armor <= 0
     }
@@ -769,20 +950,40 @@ public final class Ship {
         if armor < maxArmor && armorRechargePerSec > 0 {
             armor = min(maxArmor, armor + armorRechargePerSec * dt)
         }
-        if fuel < maxFuel && fuelRegenPerSec > 0 {
-            fuel = min(maxFuel, fuel + fuelRegenPerSec * dt)
-        }
+        if !isPlayer { regenFuel(dt) }
         logFuelTransitions()
+    }
+
+    /// Fuel regeneration (FL-07). A negative rate ("fuel sucking") drains.
+    /// The player's runs even while disabled — the original has no gate there.
+    func regenFuel(_ dt: Double) {
+        guard fuelRegenPerSec != 0, armor > 0 else { return }
+        if fuelRegenPerSec > 0, fuel < maxFuel {
+            fuel = min(maxFuel, fuel + fuelRegenPerSec * dt)
+        } else if fuelRegenPerSec < 0, fuel > 0 {
+            fuel = max(0, fuel + fuelRegenPerSec * dt)
+        }
     }
 
     /// Bleed off ionization. Unlike `regen`, this is not a system the ship has to
     /// power — it's an externally applied charge dissipating on its own — so it
     /// runs even for a disabled hulk, whose glow would otherwise stay frozen
     /// (and pulsing) at full strength forever.
+    /// The charge also drags the ship toward `(1 − I) ×` its top speed,
+    /// 0.025 px/tick per tick on each axis (`Ship_HandleShip` 0x00433050 /
+    /// the player's 0x0045073f).
     func deionize(_ dt: Double) {
         guard ionCharge > 0 else { return }
         ionCharge = max(0, ionCharge - deionizePerSec * dt)
-        if ionCharge == 0 { ionizeColor = nil }   // glow fades with the charge
+        if ionCharge == 0 { ionizeColor = nil; return }   // glow fades with the charge
+        let cap = (1 - ionIntensity) * effectiveMaxSpeed
+        let step = OriginalClock.perSecond(0.025) * dt * OriginalClock.ticksPerSecond
+        var v = velocity
+        if v.x > cap { v.x -= step }
+        if v.x < -cap { v.x += step }
+        if v.y > cap { v.y -= step }
+        if v.y < -cap { v.y += step }
+        velocity = v
     }
 
     /// Log-on-change fuel/jump-capability transitions — called after anything
@@ -857,126 +1058,205 @@ public final class Ship {
         }
     }
 
-    func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning) {
-        // Fully ionized: "nearly immobilized" (Bible) — no active turning or
-        // thrust until the charge dissipates below `ionizeMax`. Existing
-        // momentum still coasts (drag/speed-clamp/position below still run).
-        let controllable = !isIonized
+    /// Flight for one fixed step. The player (and a co-op player) flies the
+    /// original's player tick (`Ship_HandlePlayerShipCore` 0x0044aa70): a
+    /// truncated whole-degree turn, the reverse key's turn-to-retrograde, the
+    /// afterburner and its decaying per-axis speed caps. Every other ship flies
+    /// `Ship_HandleShip` (0x00433050): an unrounded turn that snaps onto its
+    /// desired heading, and thrust clamped per axis to its top speed.
+    ///
+    /// `rawCalls` is how many of the original's 21 ms loop calls this step
+    /// spans (`RawCallCadence`); the afterburner push and the cap decay run
+    /// once per call, unscaled, as they do in the original.
+    func step(_ dt: Double, intent: ControlIntent, tuning: FlightTuning, rawCalls: Int = 1) {
+        // Ionization never takes the controls away; it weakens them (WP-11):
+        // thrust × (1 − I), and turning × (1 − I) while not thrusting, where
+        // I = min(0.7, charge / capacity). The speed damping is `deionize`'s.
+        let controllable = true
+        let ion = ionIntensity
+        let ionTurn = ion > 0 && !intent.thrust ? 1 - ion : 1
 
-        // Formation-flight limit lift: while an escort is holding station its AI
-        // asks to ignore its own turn/accel/speed caps (EV Nova's escort behavior),
-        // by a generous but finite factor so the wing pins to any leader yet still
-        // visibly rotates and thrusts. Consumed each frame.
-        let boost = formationBoost
-        formationBoost = 0
+        let manual = isPlayerControlled
+        let ticks = dt * OriginalClock.ticksPerSecond
+        let accel = effectiveAcceleration * (1 - ion)
+        let topSpeed = effectiveMaxSpeed
 
-        // Formation glue: an escort holding station drives its heading and its
-        // velocity independently, both past its own hull's limits (see
-        // `FormationGlue` / `AIBrain.escort`). Taken before any of the ordinary
-        // steering below because it replaces it wholesale — there's no thrust
-        // decision to make and no nose-to-motion coupling to honour. An ionized
-        // ship is "nearly immobilized" and gets no cheat: it drops through to
-        // coast on whatever momentum it had, same as any other hull.
-        let glue = formationGlue
-        formationGlue = nil
-        if controllable, let glue {
-            let maxGlueTurn = glue.turnRate * dt
-            let delta = angleDelta(from: angle, to: glue.targetHeading)
-            angle += max(-maxGlueTurn, min(maxGlueTurn, delta))
-            velocity += (glue.targetVelocity - velocity) * (1 - exp(-glue.response * dt))
-            // Keep the driftless model's throttle in step with our real speed, so
-            // an escort that peels off to fight (`.attacking` drops the glue)
-            // picks up flying at the speed it was actually doing rather than
-            // snapping to a stale one.
-            throttleSpeed = velocity.length
-            position += velocity * dt
-            guardFiniteMotion()
-            return
+        // MARK: Turn
+        let continuousTurn = effectiveTurnRate * dt * ionTurn
+            * (manual ? max(0.05, intent.turnScale) : 1)
+        // The player turns a whole number of degrees per tick (`trunc` of the
+        // turn rate, 0x0044c8d7), so Maneuver 25 turns like 20.
+        let quantized = manual
+        let playerStep = ionTurn < 1
+            ? Double(Int((stats.turnRate * 180 / .pi / OriginalClock.ticksPerSecond * ionTurn + 1e-9).rounded(.down)))
+            : Double(playerTurnStep)
+        let turnStep = quantized ? playerStep * ticks * .pi / 180 : continuousTurn
+        // Reverse (0x0044fff0): a non-inertialess ship turns to face the
+        // reverse of its velocity, once either axis moves at ≥ 0.05 px/tick.
+        // It overrides the turn keys and face-target; below the threshold the
+        // other heading inputs keep driving the turn.
+        var autoHeading = intent.desiredHeading
+        var turnKeysLive = true
+        if manual, controllable, intent.reverse, !inertialess {
+            let gate = OriginalClock.perSecond(0.05)
+            if abs(velocity.x) >= gate || abs(velocity.y) >= gate {
+                autoHeading = velocity.angle + .pi
+                turnKeysLive = false
+            }
+        }
+        if controllable, turnKeysLive, intent.turnLeft || intent.turnRight {
+            if intent.turnLeft { angle -= turnStep }
+            if intent.turnRight { angle += turnStep }
+        } else if controllable, let target = autoHeading {
+            let delta = angleDelta(from: angle, to: target)
+            if quantized {
+                // The player's auto-turn steps a whole turn step and stops,
+                // without snapping, once within one step of the heading.
+                if abs(delta) > turnStep { angle += delta > 0 ? turnStep : -turnStep }
+            } else {
+                angle += max(-turnStep, min(turnStep, delta))
+            }
         }
 
-        let effectiveTurnRate = stats.turnRate * (1 + 6 * boost)
-
-        let maxTurn = effectiveTurnRate * dt * max(0.05, intent.turnScale)
-        if controllable, intent.turnLeft || intent.turnRight {
-            if intent.turnLeft { angle -= maxTurn }
-            if intent.turnRight { angle += maxTurn }
-        } else if controllable, let target = intent.desiredHeading {
-            // Rotate toward the target heading, clamped to this frame's turn budget.
-            let twoPi = 2 * Double.pi
-            var delta = (target - angle).truncatingRemainder(dividingBy: twoPi)
-            if delta > .pi { delta -= twoPi }
-            if delta < -.pi { delta += twoPi }
-            angle += max(-maxTurn, min(maxTurn, delta))
-        }
-
-        // Base accel / top speed, lifted by formation flight, then the afterburner
-        // on top. EV Nova's afterburner is a held control that drains fuel.
-        var accel = stats.acceleration * (1 + 5 * boost)
-        var topSpeed = stats.maxSpeed * (1 + 1.0 * boost)
+        // MARK: Afterburner
+        // The player's afterburner (ModType 15) engages while held with fuel
+        // for at least one tick's burn. NPCs never burn: the burn rate is 0
+        // for every ship but the player (`Ship_GetShipFuelBurnRate` 0x0046e060).
         afterburnerActive = false
-        if controllable, intent.afterburner, let ab = afterburner, fuel > 0 {
+        if controllable, manual, intent.afterburner, let ab = afterburner, fuel > 0,
+           ab.fuelPerSecond / OriginalClock.ticksPerSecond <= fuel {
             afterburnerActive = true
-            accel *= ab.accelMultiplier
-            topSpeed *= ab.speedMultiplier
             fuel = max(0, fuel - ab.fuelPerSecond * dt)
             logFuelTransitions()
         }
+        let playerBurn = afterburnerActive && manual
+        let widen = playerBurn && !inGravityPull
+
         // Hyperspace-entry over-speed: allow briefly exceeding cruise, decaying to
         // zero, so a jump-in eases down to cruise rather than snapping.
-        if entryOverspeed > 0 {
-            topSpeed += entryOverspeed
+        let overspeeding = entryOverspeed > 0
+        if overspeeding {
             entryOverspeed = max(0, entryOverspeed - entryOverspeedDecayPerSec * dt)
         }
+        let cruise = topSpeed + entryOverspeed
 
-        let heading = Vec2.heading(angle)
-        if fliesInertialess(tuning) {
-            // No inertia (shïp Flags2 0x40 / inertial-dampener outfit, or an AI ship
-            // flying the `FlightTuning.aiInertialess` model): the ship has no lateral
-            // momentum — its motion tracks the nose. A throttle scalar ramps up under
-            // thrust, brakes under reverse, and bleeds off when idle.
+        // MARK: Speed caps (player)
+        // While burning outside a gravity pull both per-axis caps sit at 1.8 ×
+        // top speed (0x00575610); after release each decays by thrust × 0.4 per
+        // raw call (0x00575680) back down to top speed.
+        if manual {
+            if widen {
+                speedCapX = cruise * 1.8
+                speedCapY = cruise * 1.8
+            } else {
+                let decay = OriginalClock.perSecond(OriginalClock.perTickSquared(accel) * 0.4) * Double(rawCalls)
+                if speedCapX > cruise { speedCapX -= decay }
+                if speedCapY > cruise { speedCapY -= decay }
+            }
+            speedCapX = max(speedCapX, cruise)
+            speedCapY = max(speedCapY, cruise)
+        }
+
+        let dirDeg = wholeDegreeHeading
+        if inertialess {
+            // MARK: Inertialess hull (shïp Flags2 0x0040 / ModType 38)
+            // Thrust and reverse move a scalar speed that has no idle decay;
+            // the velocity then steers toward heading × speed by at most
+            // 4 × thrust per tick on each axis (0x0043b020).
+            if controllable {
+                if intent.thrust { throttleSpeed = min(throttleSpeed + accel * dt, cruise) }
+                if intent.reverse { throttleSpeed = max(0, throttleSpeed - accel * dt) }
+            }
+            if playerBurn {
+                let push = OriginalClock.perSecond(OriginalClock.perTickSquared(accel) * 2.75)
+                throttleSpeed = min(throttleSpeed + push * Double(rawCalls), topSpeed * 1.8)
+            }
+            throttleSpeed = min(throttleSpeed, manual ? speedCapX : cruise)
+            let target = Vec2.heading(dirDeg) * throttleSpeed
+            let maxDv = 4 * accel * dt
+            velocity = Vec2(velocity.x + max(-maxDv, min(maxDv, target.x - velocity.x)),
+                            velocity.y + max(-maxDv, min(maxDv, target.y - velocity.y)))
+        } else if fliesInertialess(tuning) {
+            // MARK: Formation driftless (formationFlying enhancement)
+            // The port's own model: a throttle that bleeds off when idle, and a
+            // velocity whose direction follows the nose at this frame's turn budget.
             if controllable {
                 if intent.thrust { throttleSpeed += accel * dt }
-                else if intent.reverse { throttleSpeed -= accel * dt }
-                else { throttleSpeed -= accel * dt }          // coast to a stop when idle
+                else { throttleSpeed -= accel * dt }
             }
-            throttleSpeed = min(max(throttleSpeed, 0), topSpeed)
-            // Rebuild velocity each frame from two independent parts, so the ship
-            // never visibly slews (pointing one way while drifting another): its
-            // *direction* rotates to follow the heading at this frame's own turn
-            // budget — the same rate the nose just turned — so facing and motion stay
-            // locked even through a hard turn; its *magnitude* ramps toward the
-            // throttle target at up to 2×accel. Any momentum that isn't along the nose
-            // (a hyperspace tear-in seeds velocity along the nose already, but a
-            // knockback or fighter-launch inheriting a carrier's drift won't) is
-            // steered onto the heading over a few frames rather than snapped. This is
-            // the tight, driftless "goes exactly where it points" flying EV Nova's
-            // inertialess hulls have. Drag/overspeed don't apply.
+            throttleSpeed = min(max(throttleSpeed, 0), cruise)
+            let heading = Vec2.heading(angle)
             let speed = velocity.length
             let velDir = speed > 1e-6 ? velocity * (1 / speed) : heading
-            let twoPi = 2 * Double.pi
-            var toNose = (angle - velDir.angle).truncatingRemainder(dividingBy: twoPi)
-            if toNose > .pi { toNose -= twoPi }
-            if toNose < -.pi { toNose += twoPi }
-            let steered = Vec2.heading(velDir.angle + max(-maxTurn, min(maxTurn, toNose)))
+            let toNose = angleDelta(from: velDir.angle, to: angle)
+            let steered = Vec2.heading(velDir.angle + max(-continuousTurn, min(continuousTurn, toNose)))
             let dSpeed = throttleSpeed - speed
             let maxDv = accel * dt * 2
             let newSpeed = abs(dSpeed) <= maxDv ? throttleSpeed : speed + (dSpeed > 0 ? maxDv : -maxDv)
             velocity = steered * max(0, newSpeed)
         } else {
-            if controllable, intent.thrust { velocity += heading * (accel * dt) }
-            if controllable, intent.reverse { velocity += heading * (-stats.acceleration * 0.5 * dt) }
-            if tuning.dragPerSecond > 0 {
-                let k = max(0, 1 - tuning.dragPerSecond * dt)
-                velocity = velocity * k
+            // MARK: Newtonian
+            // Thrust adds along the heading, each axis capped at its share of
+            // top speed (`Math_AddPolarVelocityWithClamp` 0x0043b4e0), so a turn
+            // under thrust can leave the net speed a little above top speed.
+            if controllable, intent.thrust {
+                addPolarVelocityWithClamp(heading: dirDeg, step: accel * dt,
+                                          max: widen ? cruise * 1.8 : cruise)
             }
-            // Clamp to max speed (raised while the afterburner is lit / entering).
-            let speed = velocity.length
-            if speed > topSpeed, speed > 0 {
-                velocity = velocity.normalized * topSpeed
+            if tuning.dragPerSecond > 0 {
+                velocity = velocity * max(0, 1 - tuning.dragPerSecond * dt)
+            }
+            if manual {
+                // The player's per-axis box cap (0x0044d05b), then the
+                // afterburner's own push: per raw call, thrust × 2.75 on each
+                // axis still inside its 1.8 × top-speed share, else × 0.99.
+                velocity = Vec2(max(-speedCapX, min(speedCapX, velocity.x)),
+                                max(-speedCapY, min(speedCapY, velocity.y)))
+                if playerBurn {
+                    let dir = Vec2.heading(dirDeg)
+                    let push = dir * OriginalClock.perSecond(OriginalClock.perTickSquared(accel) * 2.75)
+                    let bound = dir * (topSpeed * 1.8)
+                    func tail(_ thrust: Double, _ bound: Double, _ v: Double) -> Double {
+                        (thrust > 0 && v < bound) || (thrust <= 0 && bound < v) ? v + thrust : v * 0.99
+                    }
+                    for _ in 0..<rawCalls {
+                        velocity = Vec2(tail(push.x, bound.x, velocity.x), tail(push.y, bound.y, velocity.y))
+                    }
+                }
+            }
+            if overspeeding {
+                // An arrival's decaying over-speed is a magnitude limit of the
+                // port's own.
+                let speed = velocity.length
+                if speed > cruise, speed > 0 { velocity = velocity.normalized * cruise }
             }
         }
         position += velocity * dt
         guardFiniteMotion()
+    }
+
+    /// One axis-clamped thrust step (`Math_AddPolarVelocityWithClamp`
+    /// 0x0043b4e0): each axis gains its share of `step` only while below its
+    /// share of `max`; it never pulls an existing component back.
+    func addPolarVelocityWithClamp(heading: Double, step: Double, max: Double) {
+        let dir = Vec2.heading(heading)
+        func axis(_ cap: Double, _ delta: Double, _ cur: Double) -> Double {
+            if delta <= 0 || cap <= 0 {
+                if delta < 0 && cap < 0 { return cap < cur ? cur + delta : cur }
+                return cur + delta
+            }
+            return cur < cap ? cur + delta : cur
+        }
+        velocity = Vec2(axis(dir.x * max, dir.x * step, velocity.x),
+                        axis(dir.y * max, dir.y * step, velocity.y))
+    }
+
+    /// The heading the original's polar tables see: whole degrees, truncated.
+    var wholeDegreeHeading: Double {
+        var deg = angle * 180 / .pi
+        deg = deg.truncatingRemainder(dividingBy: 360)
+        if deg < 0 { deg += 360 }
+        return (deg + 1e-9).rounded(.down) * .pi / 180   // 30° stored as 29.999… is still 30
     }
 }
 
@@ -1019,6 +1299,24 @@ public final class World {
     /// also catches other players (on top of `pvpAllowed`, which gates direct hits).
     /// Off ⇒ your blast weapons never singe an ally even in a PvP session.
     public var friendlyFireAllowed = false
+    /// The player's opt-in non-original behaviours (Settings ▸ Enhancements).
+    /// All off by default; systems that gate an invented behaviour read it here.
+    public var enhancements = GameplayEnhancements()
+    /// The pilot's Strict Play option. Off (the original's default), the player
+    /// and the player's direct escorts fly at 1.5 × top speed (FL-03).
+    public var strictPlay = false
+    /// The player's engaged hyperspace jump (FL-04), nil in normal flight. While
+    /// it runs the jump flies the player and the weapons stay cold; once it
+    /// reaches `.fired` the host swaps systems, and on `.collapsed` it clears it.
+    public var playerJump: PlayerHyperjump?
+    /// The original's raw 21 ms calls inside this step (see `RawCallCadence`):
+    /// how many times a per-call rule runs.
+    public private(set) var rawCallsThisStep = 0
+    private var cadence = RawCallCadence()
+    /// The original's raw-call counter (`DAT_00597992`), advanced each step.
+    private(set) var rawCallCounter = 0
+    /// Live beam records (`Shot_UpdateBeamHitQueue`).
+    private var beamRecords: [BeamRecord] = []
     /// Co-op `SessionRules.pvpDamageReal`: when false, a player-vs-player hit still
     /// *registers* (flash/cloak-drop) but deals **zero** damage — a friendly spar.
     public var pvpDamageReal = true
@@ -1033,6 +1331,21 @@ public final class World {
     /// so a `World` that keeps stepping with 0 armor (the app hasn't reacted
     /// yet) doesn't re-report it every frame.
     private var playerDeathReported = false
+    /// Seconds since the player died, and whether its death sequence has run
+    /// out (blast fired, pilot lost) or been cut short by an eject (OS-02).
+    private(set) var playerDeathElapsed: Double = 0
+    private(set) var playerDeathSequenceOver = false
+    var playerDeathEjected = false
+    var playerDeathReportedForEject: Bool { playerDeathReported }
+    /// OS-02: the eject command for this step, the pod's remaining flight
+    /// (nil when not in the pod), and whether it has landed (the host's cue
+    /// to respawn the pilot).
+    var ejectRequested = false
+    /// UI-15: the self-destruct countdown in 30 Hz ticks, −1 when disarmed
+    /// (`DAT_00735498`).
+    public internal(set) var selfDestructCountdown: Double = -1
+    public internal(set) var escapePodTicksLeft: Double?
+    public internal(set) var escapePodLanded = false
 
     /// Live NPC ships (does not include the player).
     public private(set) var npcs: [Ship] = []
@@ -1069,6 +1382,8 @@ public final class World {
     public var galaxy: Galaxy?
     /// Populates and refreshes the NPC population.
     public var spawner: Spawner?
+    /// The original NPC AI, which drives every brained NPC.
+    public let originalAI = OriginalAI()
 
     /// Optional profiling sink for the game loop's stress/perf instrumentation.
     /// When set (only while the debug suite is attached), `step` reports how long
@@ -1105,17 +1420,22 @@ public final class World {
     /// world dominates during play. Read so a demand on an already-owned planet
     /// is a no-op, and so the host can persist a new conquest.
     public var dominatedStellars: Set<Int> = []
-    /// How much combat rating a planet demands *per defending ship* before it
-    /// will take a tribute demand seriously (below the threshold it laughs the
-    /// player off). An engine tunable — stock EV Nova has no rating gate at all
-    /// (the only real gate is defeating the defense fleet), so this is a
-    /// deliberate addition; a tougher planet (more defenders) needs a higher
-    /// rating. Set to 0 to disable the rating gate entirely.
-    public var tributeRatingPerDefender: Int = 2
     /// Live Demand-Tribute contests in this system, keyed by `spöb` id. Tracks
     /// how many defenders a planet still has to launch and its wave size, so the
     /// world can relaunch waves as they're destroyed until the pool is exhausted.
     var stellarDefenses: [Int: StellarDefense] = [:]
+    /// AI-14: mission batches waiting out their rearm delay.
+    public internal(set) var pendingMissionArrivals: [PendingMissionArrival] = []
+    /// AI-14: the bearing (world radians, `Vec2(sin, cos)`) from this
+    /// system toward the one the player arrived from, nil when unknown (a
+    /// ShipStart-1 batch then picks Rand(360)).
+    public var previousSystemBearing: Double?
+    /// AI-15: each stellar's persistent garrison (`spöb` id → ships left),
+    /// seeded by the host from the pilot's save; absent = full `DefCount`.
+    /// `garrisonSnapshot()` reads it back, survivors credited.
+    public var stellarGarrisons: [Int: Int] = [:]
+    /// Garrisons this visit set outright (domination, release).
+    var touchedGarrisons: Set<Int> = []
     /// Reload state for each armed stellar's defense weapon (`spöb.Weapon`),
     /// keyed by `spöb` id and created lazily on first fire opportunity — see
     /// `updateStellarWeapons` (StellarWeapons.swift).
@@ -1124,7 +1444,9 @@ public final class World {
     /// > 0), keyed by `spöb` id and seeded lazily on the first hit. Base-game
     /// stellars are all invulnerable, so this stays empty unless a plug-in or TC
     /// ships shootable planets — see `applyStellarHit` (StellarWeapons.swift).
-    var stellarArmor: [Int: Double] = [:]
+    /// The host seeds it from the pilot and reads it back, since the original
+    /// keeps a stellar's live Strength across visits (OS-13).
+    public var stellarArmor: [Int: Double] = [:]
     /// Stellars destroyed by weapon fire *in this world*. The host drains this to
     /// fire `spöb.OnDestroy` and to schedule regeneration from `spöb.DeadTime`;
     /// it is also what keeps a downed stellar from being re-targeted before the
@@ -1132,10 +1454,14 @@ public final class World {
     public internal(set) var stellarsDestroyedThisSession: Set<Int> = []
 
     /// Live asteroids (real `röid` rocks, from the system's `sÿst.Asteroids`/
-    /// `AstTypes` fields). Stationary — see `Asteroid`'s doc comment.
+    /// `AstTypes` fields): the drifting 16-rock field around the player.
     public private(set) var asteroids: [Asteroid] = []
 
-    public var rng = SplitMix64(seed: 0xE7_0A_5EED)
+    public var rng = NovaRandom(seed: 0xE70A_5EED as UInt32)
+    /// `DAT_007d17ca`: `Rand(0x800)` rolled on each arrival or launch; −1
+    /// once a stellar comm window has opened. Bounds which STR# 7500+ quote
+    /// a ship's Greetings can pick (`Rand(roll % count + 1)`, AI-43).
+    public var commQuoteRoll = 0
     private var nextEntityID = 1
     private var nextAsteroidID = 1
 
@@ -1143,13 +1469,13 @@ public final class World {
     /// again. Each `AIBrain`'s own `scanCooldown` only throttles that one
     /// ship, so a busy system with several patrols could otherwise chain-scan
     /// the player back-to-back as each ship's individual cooldown expired.
-    /// Set on every player scan; checked by `AIBrain.pickScanTarget`.
+    /// Set on every player scan.
     public var playerScanCooldown: Double = 0
     /// Latched true the first time an authority ship scans the player this system
     /// visit. A fresh `World` is built on each system entry, so this resets
     /// naturally per visit — giving the original's "you get buzzed by about one
     /// ship each time you enter," not a repeating cooldown that lets a busy system
-    /// re-scan you every minute you loiter. Checked by `AIBrain.pickScanTarget`.
+    /// re-scan you every minute you loiter.
     public var playerScanned = false
 
     /// Governments with at least one ship the player's fleet has hit THIS
@@ -1214,6 +1540,8 @@ public final class World {
         for shot in projectiles {
             shot.renderPrevPosition = shot.position
         }
+        for rock in asteroids { rock.renderPrevPosition = rock.position }
+        for box in freeflightObjects { box.renderPrevPosition = box.position }
     }
 
     /// How a new NPC came into being, so the renderer can play the right effect:
@@ -1231,38 +1559,82 @@ public final class World {
         case .populate:
             events.append(.shipArrived(entityID: ship.entityID, at: ship.position, fromHyperspace: false))
         case .hyperspace:
-            // A hyperspace jump-in isn't a standing start: the ship tears in along
-            // its inbound heading well above cruise, then its AI brakes down to
-            // normal speed. That physical inrush — not just a fade/scale pop — is
-            // what reads as "warping in." Capped so a very fast hull doesn't shoot
-            // clear across the system before it can slow.
+            // AI-12: the original's arrival state (0x00410e20) starts a jump-in
+            // at 50 px/tick along its inbound heading and lets the desired speed
+            // climb back by 1.165 px/tick each raw call, so the ship brakes to
+            // its cruise in about 27 ticks. The speed cap starts there and decays at
+            // that rate.
+            // A co-op peer's ship (no brain) keeps the port's capped inrush.
             let inbound = Vec2(sin(ship.angle), cos(ship.angle))
-            let entrySpeed = min(ship.stats.maxSpeed * 2.4, 3200)
+            let entrySpeed = ship.brain == nil ? min(ship.stats.maxSpeed * 2.4, 3200)
+                : OriginalClock.perSecond(OriginalSpawnRules.jumpInSpeedPerTick)
             ship.velocity = inbound * entrySpeed
-            // Seed the inertialess throttle to match, so a driftless AI arrival
-            // rides its inbound momentum in and eases down rather than snapping
-            // to cruise on the first frame (harmless for Newtonian hulls, which
-            // ignore `throttleSpeed`).
+            // Seed the inertialess throttle to match, so a driftless arrival
+            // rides its inbound momentum in rather than snapping to cruise.
             ship.throttleSpeed = entrySpeed
-            // Let the speed cap start at the entry speed and bleed back to cruise
-            // over ~1.3s, so the ship visibly rushes in and slows down.
             ship.entryOverspeed = max(0, entrySpeed - ship.stats.maxSpeed)
-            ship.entryOverspeedDecayPerSec = ship.entryOverspeed / 1.3
+            ship.entryOverspeedDecayPerSec = ship.brain == nil ? ship.entryOverspeed / 1.3
+                : OriginalSpawnRules.arrivalBrakePerSecondSquared
             events.append(.shipArrived(entityID: ship.entityID, at: ship.position, fromHyperspace: true))
         case .launch:
             events.append(.shipLaunched(entityID: ship.entityID, at: ship.position))
         case let .gate(spobID):
-            // Emerge from a hypergate: a gentle outward push (like a launch, not a
-            // hyperspace tear-in) along the gate's emerge heading, then the
-            // renderer plays the gate open→emerge→close beat.
+            // AI-12: out of a gate (0x004159e0) the ship leaves along the gate's
+            // emerge heading at 30 px/tick (15 for one attached to the player),
+            // braking at the same 1.165 px/tick per raw call as a jump-in. The
+            // original AI then holds it inside the gate (60 ticks, or the
+            // `escortGateEmergences` hold) before the slide.
             let outward = Vec2(sin(ship.angle), cos(ship.angle))
-            ship.velocity = outward * min(ship.stats.maxSpeed * 0.6, 180)
+            let attached = ship.brain?.leaderID == World.playerEntityID
+            let exitSpeed = OriginalClock.perSecond(attached ? OriginalSpawnRules.gateExitSpeedPerTick / 2
+                                                                  : OriginalSpawnRules.gateExitSpeedPerTick)
+            ship.velocity = outward * exitSpeed
+            ship.throttleSpeed = exitSpeed
+            ship.entryOverspeed = max(0, exitSpeed - ship.stats.maxSpeed)
+            ship.entryOverspeedDecayPerSec = OriginalSpawnRules.arrivalBrakePerSecondSquared
             events.append(.shipEmergedFromGate(entityID: ship.entityID, gateSpobID: spobID, at: ship.position))
         }
         applyDerelictGovtIfNeeded(ship)
         refreshRoster()
         return ship.entityID
     }
+
+    /// AI-12: one of the player's escorts follows the player out of a gate
+    /// (`Stellar_HandleStellarEntryAndExit` 0x00457580): it starts on the
+    /// gate on the player's heading and holds inside for `Rand(20) + 15`
+    /// ticks, not the usual 60, before sliding out at 15 px/tick.
+    @discardableResult
+    public func addEscortEmergingWithPlayer(_ ship: Ship, gateID: Int) -> Int {
+        if let gate = systemContext.bodies.first(where: { $0.id == gateID }) {
+            ship.position = Vec2(gate.position.x.rounded(.towardZero), gate.position.y.rounded(.towardZero))
+        }
+        ship.angle = player.angle
+        let id = addNPC(ship, arrival: .gate(spobID: gateID))
+        escortGateEmergences[id] = (gateID, Double(rng.range(20) + 15))
+        return id
+    }
+
+    /// Ships following the player out of a gate, with the hold that replaces
+    /// the usual 60 ticks; the original AI starts their emergence on its next
+    /// step (the host adds them between steps, so the arrival event is gone).
+    var escortGateEmergences: [Int: (gateID: Int, hold: Double)] = [:]
+
+    /// Flash `text` across the HUD for `frames` 30 Hz ticks (a fleet Quote, a
+    /// reinforcement warning).
+    public func postOverlayMessage(_ text: String, frames: Int) {
+        overlayTicks = frames
+        events.append(.overlayMessage(text: text, frames: frames))
+    }
+
+    /// `DAT_00597a12`: the overlay message's remaining frames (raw calls),
+    /// −1 when none is up. Distress calls wait for it to run down (AI-32).
+    public internal(set) var overlayTicks = -1
+    /// AI-32: `mïsn.ScanMask` of every mission whose cargo the player is
+    /// carrying, OR'd (set by the host); an interceptor warns before
+    /// scanning a matching government's player.
+    public var missionCargoScanMask: UInt16 = 0
+    /// The pilot's name, for broadcasts that address the player.
+    public var pilotName = ""
 
     /// `gövt.Flags` 0x0800 — "Ships of this govt start out disabled (derelicts)."
     /// The base data's gövt #160 "Derelicts" is what every `Drifting Derelict`
@@ -1277,9 +1649,9 @@ public final class World {
     private func applyDerelictGovtIfNeeded(_ ship: Ship) {
         guard !ship.disabled, ship.government >= 128,
               galaxy?.game.govt(ship.government)?.startsDisabled == true else { return }
+        // Disabled by its government whatever its armor, which stays real.
         ship.disabled = true
         ship.shield = 0
-        ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
         ship.velocity = Vec2()
         ship.throttleSpeed = 0
         ship.entryOverspeed = 0
@@ -1401,11 +1773,33 @@ public final class World {
         projectiles.append(projectile)
     }
 
-    /// A government patrol/interceptor completed a scan pass on another ship.
-    /// Called from `AIBrain.scan` when it closes to scan range; the renderer
-    /// turns it into a visible scan sweep. Purely cosmetic in this engine —
-    /// there's no contraband/ScanMask system yet to key consequences off.
+    /// Test seam: run one ship's fire control outside a step.
+    func testFire(_ ship: Ship, primary: Bool) {
+        var intent = ControlIntent()
+        intent.firePrimary = primary
+        fireWeapons(from: ship, intent: intent)
+    }
+
+    /// Test seam: drop one plain rock of integrity `hp` into the field.
+    func testRock(at position: Vec2, hp: Double) -> Asteroid? {
+        var d = [UInt8](repeating: 0, count: 24)
+        d[1] = UInt8(max(1, min(255, Int(hp))))
+        d[23] = 50
+        let roid = RoidRes(Resource(type: NovaType.roid, id: 128, data: Data(d)))
+        let rock = Asteroid(id: asteroids.count, roidTypeID: 128, position: position, angle: 0,
+                            roid: roid, radius: 10, hpScale: 1)
+        rock.hp = hp
+        asteroids.append(rock)
+        return rock
+    }
+
+    /// A government patrol/interceptor completed a scan pass on another ship;
+    /// a scan of the player is the host's cue for the contraband findings
+    /// (EC-15). `Ship_ScanPlayerForContraband` 0x00401800 drops the scan, after
+    /// its roll, once the player's engaged jump is past the tunnel onset
+    /// (jump progress > 0, not disabled) — settles Q-EC-11.
     public func reportScan(scannerID: Int, targetID: Int, at: Vec2) {
+        if targetID == Self.playerEntityID, let jump = playerJump, !player.disabled, jump.progress > 0 { return }
         if targetID == 0 { playerScanCooldown = 60; playerScanned = true }
         events.append(.shipScanned(scannerID: scannerID, targetID: targetID, at: at))
     }
@@ -1463,17 +1857,39 @@ public final class World {
                                   behavior: MissionShipBehavior = .standard,
                                   government: Int? = nil,
                                   arrival: ArrivalMode = .hyperspace,
+                                  navStellarIndex: Int? = nil,
+                                  jumpBearing: Double? = nil,
+                                  startsCloaked: Bool = false,
+                                  preferredShipID: Int? = nil,
                                   name: String = "", subtitle: String = "") -> [Int] {
         guard count > 0, let galaxy = galaxy, let dude = galaxy.game.dude(dudeID) else { return [] }
         var placed: [Int] = []
+        // AI-14: one jump-in bearing for the whole batch — the previous
+        // system's direction when the host knows it, else Rand(360).
+        var batchBearing: Double?
+        switch arrival {
+        case .hyperspace, .gate: batchBearing = jumpBearing ?? Double(rng.range(360)) * .pi / 180
+        case .populate, .launch: break
+        }
         for i in 0..<count {
             let roll = rng.int(in: 0...9999)
-            guard let shipID = dude.pickShip(roll: roll) else { continue }
+            // A përs replacement keeps the përs's hull when the dude flies it.
+            let preferred = preferredShipID.flatMap { id in dude.ships.contains { $0.shipID == id } ? id : nil }
+            guard let shipID = preferred ?? dude.pickShip(roll: roll) else { continue }
             let govt = government ?? (dude.govt >= 128 ? dude.govt : nil)
-            let (pos, ang) = missionSpawnPose(arrival: arrival)
+            var (pos, ang) = missionSpawnPose(arrival: arrival, bearing: batchBearing)
+            // AI-14 (0x0041af90): an escort objective's ships sit within ±256 px
+            // of the origin; a negative ShipStart puts them exactly on that nav
+            // stellar of this system instead.
+            if goal == .escort, batchBearing == nil {
+                pos = Vec2(Double(rng.range(512) - 256), Double(rng.range(512) - 256))
+            }
+            if let nav = navStellarIndex, systemContext.bodies.indices.contains(nav) {
+                pos = systemContext.bodies[nav].position
+            }
             guard let ship = galaxy.makeLoadedShip(shipID, government: govt, at: pos, angle: ang,
-                                                   skillRoll: rng.double(in: -1...1),
-                                                   includeDefaultItems: false) else { continue }
+                                                   skillScale: galaxy.skillVarianceScale(classOf: shipID, rng: &rng),
+                                                   includeDefaultItems: false, defaultItemCapabilities: true) else { continue }
             let brain = AIBrain(aiType: dude.aiType, govt: ship.government)
             brain.behaviorOverride = behavior
             if behavior == .protectPlayer {
@@ -1486,23 +1902,119 @@ public final class World {
             ship.brain = brain
             ship.missionID = missionID
             ship.missionShipGoal = goal
+            ship.dudeID = dudeID
+            // Mission ships take their düde's Booty credits too (EC-18).
+            assignBootyCredits(ship, dude: dude)
             if !name.isEmpty { ship.displayName = name }
             if !subtitle.isEmpty { ship.displaySubtitle = subtitle }
-            // A rescue objective's ship starts as a helpless drifting hulk the
-            // player must protect/tow — same disabled state a crippled ship holds.
+            // A rescue objective's ship is held disabled, at its real armor,
+            // until the player boards it (`Ship_IsShipDisabled`'s ShipGoal-5 arm).
             var mode = arrival
             if goal == .rescue {
+                // AI-14: the wreck waits on a random heading at a third of its
+                // armor (a tenth for hull Flags 0x10), less one point.
                 ship.disabled = true
-                ship.armor = max(1, ship.maxArmor * 0.02)
                 ship.shield = 0
+                ship.angle = Double(rng.range(360)) * .pi / 180
+                let fraction = ship.disableArmorFraction == Ship.lowDisableFraction ? 0.1 : 0.33
+                ship.armor = Double(Float(ship.maxArmor) * Float(fraction) - 1)
                 mode = .populate   // it's adrift in-system, not warping in
             }
             placed.append(addNPC(ship, arrival: mode))
+            // ShipStart 2 (0x0041af90): the ship enters its cloak state at once.
+            if startsCloaked { ship.cloakEngaged = true }
         }
         if !placed.isEmpty {
             events.append(.missionShipsSpawned(missionID: missionID, entityIDs: placed))
         }
         return placed
+    }
+
+    /// AI-39 (0x00454910): a përs whose accepted LinkMission has Flags 0x0040
+    /// and a one-ship mission is replaced by the mission's ship — its own hull
+    /// when the dude flies it — on the same pose, and the përs ship goes. The
+    /// replacement is not linked to the player: the original only makes a
+    /// ShipBehav-1 ship an escort when it builds a system, so it joins at the
+    /// next jump (known bug #119).
+    @discardableResult
+    public func replaceWithMissionShip(entityID: Int, missionID: Int, dudeID: Int,
+                                       goal: MissionShipGoal, behavior: MissionShipBehavior,
+                                       name: String = "", subtitle: String = "") -> Int? {
+        guard let old = ship(id: entityID), !old.isPlayer else { return nil }
+        let ids = spawnMissionShips(missionID: missionID, dudeID: dudeID, count: 1, goal: goal,
+                                    behavior: behavior == .protectPlayer ? .standard : behavior,
+                                    arrival: .populate, preferredShipID: old.shipTypeID,
+                                    name: name, subtitle: subtitle)
+        guard let id = ids.first, let ship = ship(id: id) else { return nil }
+        ship.position = old.position
+        ship.velocity = old.velocity
+        ship.angle = old.angle
+        removeShip(entityID: entityID)
+        return id
+    }
+
+    /// A mission batch waiting out its rearm delay in maintenance ticks (raw
+    /// calls) before it jumps in (AI-14): ShipStart-1 goal ships
+    /// (`Rand(100) + 100`, 30 for a ShipBehav-1 escort) and auxiliary ships
+    /// (`Rand(70) + 70`).
+    public struct PendingMissionArrival: Sendable {
+        public let missionID: Int
+        public let dudeID: Int
+        public let count: Int
+        public let goal: MissionShipGoal
+        public let behavior: MissionShipBehavior
+        public let auxiliary: Bool
+        public let name: String
+        public let subtitle: String
+        public var callsLeft: Int
+    }
+
+    /// Queue a mission batch to jump in after `delayCalls` maintenance ticks.
+    public func scheduleMissionArrival(missionID: Int, dudeID: Int, count: Int,
+                                       goal: MissionShipGoal = .none,
+                                       behavior: MissionShipBehavior = .standard,
+                                       auxiliary: Bool, delayCalls: Int,
+                                       name: String = "", subtitle: String = "") {
+        guard count > 0 else { return }
+        pendingMissionArrivals.append(PendingMissionArrival(
+            missionID: missionID, dudeID: dudeID, count: count, goal: goal, behavior: behavior,
+            auxiliary: auxiliary, name: name, subtitle: subtitle, callsLeft: max(0, delayCalls)))
+    }
+
+    /// The original's ShipStart-1 rearm delay: 30 maintenance ticks for an
+    /// escort that protects the player, else `Rand(100) + 100` (0x0043f8c0 /
+    /// 0x00448910).
+    public func missionRearmDelay(goal: MissionShipGoal, behavior: MissionShipBehavior) -> Int {
+        behavior == .protectPlayer && goal == .escort ? 30 : rng.range(100) + 100
+    }
+
+    /// An arrival's auxiliary-ship timer, `Rand(0x46) + 0x46`.
+    public func missionAuxDelay() -> Int { rng.range(0x46) + 0x46 }
+
+    public func hasPendingMissionArrival(missionID: Int) -> Bool {
+        pendingMissionArrivals.contains { $0.missionID == missionID }
+    }
+
+    /// Count the queued batches down by this step's raw calls and land the
+    /// ones that are due, jumping in on the previous system's bearing (goal
+    /// ships) or a random one (auxiliary ships).
+    func tickPendingMissionArrivals() {
+        guard !pendingMissionArrivals.isEmpty else { return }
+        var due: [PendingMissionArrival] = []
+        for i in pendingMissionArrivals.indices {
+            pendingMissionArrivals[i].callsLeft -= rawCallsThisStep
+            if pendingMissionArrivals[i].callsLeft <= 0 { due.append(pendingMissionArrivals[i]) }
+        }
+        pendingMissionArrivals.removeAll { $0.callsLeft <= 0 }
+        for batch in due {
+            let placed = spawnMissionShips(missionID: batch.missionID, dudeID: batch.dudeID, count: batch.count,
+                                           goal: batch.goal, behavior: batch.behavior, arrival: .hyperspace,
+                                           jumpBearing: batch.auxiliary ? nil : previousSystemBearing,
+                                           name: batch.name, subtitle: batch.subtitle)
+            if batch.auxiliary, !placed.isEmpty {
+                events.append(.missionAuxShipsArrived(missionID: batch.missionID, count: placed.count))
+            }
+        }
     }
 
     /// Remove every ship tagged with `missionID` from the system — the seam for
@@ -1527,6 +2039,30 @@ public final class World {
         refreshRoster()
         events.append(.missionShipsDespawned(missionID: missionID, entityIDs: removedIDs))
         return removedIDs
+    }
+
+    /// Release every ship tagged with `missionID`
+    /// (`Mission_ClearMisnSlotAssignments` 0x00440aa0): the tag is cleared
+    /// and a ship flying in a group (a mission escort, or a ship following
+    /// another) leaves it for `aiType(shipTypeID)`, its class's default AI,
+    /// with no target. The ships stay in the system; while the landing window
+    /// owns the world the original removes them instead
+    /// (`despawnMissionShips`). Returns the ids released.
+    @discardableResult
+    public func releaseMissionShips(missionID: Int, aiType: (Int) -> AIType) -> [Int] {
+        var released: [Int] = []
+        for npc in npcs where npc.missionID == missionID {
+            npc.missionID = nil
+            npc.missionShipGoal = nil
+            if let brain = npc.brain, brain.leaderID != nil {
+                brain.leaderID = nil
+                brain.aiType = aiType(npc.shipTypeID)
+                npc.currentTargetID = nil
+            }
+            released.append(npc.entityID)
+        }
+        if !released.isEmpty { refreshRoster() }
+        return released
     }
 
     /// Remove a single NPC from the world by entity id, sending it off with a
@@ -1554,72 +2090,150 @@ public final class World {
     /// in at the jump ring pointed inward (same as ambient jump-ins); everything
     /// else scatters just inside the system so an already-present ship (a rescue
     /// hulk, an observed convoy) isn't stuck out at the rim.
-    private func missionSpawnPose(arrival: ArrivalMode) -> (Vec2, Double) {
-        let ctx = systemContext
-        let bearing = rng.double(in: 0...(2 * .pi))
+    private func missionSpawnPose(arrival: ArrivalMode, bearing: Double? = nil) -> (Vec2, Double) {
+        // AI-14: a ShipStart-1 ship jumps in from the original radius with a
+        // ±256 px scatter, facing the origin (the original takes the bearing
+        // of the player's previous system; this engine doesn't know it, so the
+        // bearing is random). Anything else is placed like any new ship slot,
+        // over [-750, 750)² around the origin.
         switch arrival {
         case .hyperspace, .gate:
-            let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * ctx.spawnRadius
-            return (pos, (ctx.center - pos).angle)
+            let bearing = bearing ?? Double(rng.range(360)) * .pi / 180
+            let pos = Vec2(sin(bearing), cos(bearing)) * OriginalSpawnRules.jumpInRadius
+                + Vec2(Double(rng.range(512) - 256), Double(rng.range(512) - 256))
+            return (pos, (Vec2() - pos).angle)
         case .populate, .launch:
-            let r = rng.double(in: 300...(ctx.jumpRadius * 0.6))
-            let pos = ctx.center + Vec2(sin(bearing), cos(bearing)) * r
-            return (pos, (ctx.center - pos).angle)
+            let span = 2 * OriginalSpawnRules.initialScatter
+            let pos = Vec2(Double(rng.range(span) - OriginalSpawnRules.initialScatter),
+                           Double(rng.range(span) - OriginalSpawnRules.initialScatter))
+            return (pos, Double(rng.range(360)) * .pi / 180)
         }
     }
 
     // MARK: Asteroids
 
-    /// Scatter `count` real asteroids of the enabled `typeIDs` (a system's
-    /// `sÿst.Asteroids`/`AstTypes`) around `systemContext.center`, in the same
-    /// interior scatter band `Spawner` uses for ship placement
-    /// (`300...(jumpRadius*0.6)`, `Spawner.swift`). Call once after
-    /// `systemContext`/`galaxy` are set. Each rock picks a uniformly-random
-    /// enabled type — the Bible's `AstTypes` only says which types are
-    /// enabled, not a weighting — and looks up its real stats/sprite geometry.
-    /// Candidate spots that land too close to a planet/station are re-rolled
-    /// (`asteroidPlanetClearance`) so rocks never spawn on top of a body a
-    /// player is trying to land on.
+    /// Set up the system's asteroid field: `count` (`sÿst.Asteroids`, at most
+    /// 16) rocks of the enabled `typeIDs` (`AstTypes`). The original keeps them
+    /// in a 16-slot pool around the *player's viewport*, not the system
+    /// (`Asteroid_InitSystem` 0x004216b0): they're scattered on the first step
+    /// around wherever the player is, drift, and any rock that leaves the view
+    /// is dropped and replaced at the edge, so the field travels with the player.
     public func populateAsteroids(typeIDs: [Int], count: Int) {
-        guard count > 0, !typeIDs.isEmpty, let game = galaxy?.game else { return }
-        let minRadius = 300.0
-        let maxRadius = max(minRadius + 1, systemContext.jumpRadius * 0.6)
-        let clearance = 600.0
-        for _ in 0..<count {
-            let typeID = typeIDs[rng.int(in: 0...(typeIDs.count - 1))]
-            var position = Vec2()
-            for attempt in 0..<20 {
-                let bearing = rng.double(in: 0...(2 * Double.pi))
-                let dist = rng.double(in: minRadius...maxRadius)
-                position = systemContext.center + Vec2.heading(bearing) * dist
-                let tooClose = systemContext.bodies.contains {
-                    (position - $0.position).length < $0.radius + clearance
-                }
-                if !tooClose || attempt == 19 { break }
-            }
-            if let a = spawnAsteroid(typeID: typeID, at: position, game: game) {
-                asteroids.append(a)
+        asteroidTypeIDs = typeIDs
+        asteroidFieldSize = typeIDs.isEmpty ? 0 : min(max(0, count), 16)
+        asteroidFieldScattered = false
+    }
+
+    /// The asteroid types this system's field draws from.
+    private var asteroidTypeIDs: [Int] = []
+    /// `sÿst.Asteroids`, capped to the original's 16-slot pool.
+    private var asteroidFieldSize = 0
+    private var asteroidFieldScattered = false
+    /// Half the visible playfield, px — the original's view centre offsets. The
+    /// asteroid field scatters, recycles and re-enters relative to it. The host
+    /// sets it from its window and zoom; the default is an 800×600 screen less
+    /// the original's sidebar.
+    public var viewportHalfExtent = Vec2(320, 300)
+
+    /// One field rock at a random enabled type (`range(16)` until the type's
+    /// `AstTypes` bit is set), spin and frame (`Asteroid_Spawn` 0x00421830 /
+    /// `Asteroid_SpawnRecord` 0x00421e60): spin `(range(41) + 80) × 0.01 ×
+    /// SpinRate`, reversed half the time.
+    private func makeFieldAsteroid(typeID: Int?, at position: Vec2, velocity: Vec2) -> Asteroid? {
+        guard let game = galaxy?.game else { return nil }
+        let type: Int
+        if let typeID {
+            type = typeID
+        } else {
+            guard asteroidTypeIDs.contains(where: { (128..<144).contains($0) }) else { return nil }
+            var k = 128 + rng.range(16)
+            while !asteroidTypeIDs.contains(k) { k = 128 + rng.range(16) }
+            type = k
+        }
+        guard let roid = game.roid(type) else { return nil }
+        let radius = game.spin(type + 672).map { Double($0.tileWidth) / 2 } ?? 24
+        let rock = Asteroid(id: nextAsteroidID, roidTypeID: type, position: position,
+                            angle: Double(rng.range(36)) * 10 * .pi / 180,
+                            roid: roid, radius: radius, hpScale: combatTuning.hpScale)
+        nextAsteroidID += 1
+        rock.velocity = velocity
+        rock.angularVelocityDegPerSec *= Double(rng.range(41) + 80) * 0.01
+        if rng.range(2) == 0 { rock.angularVelocityDegPerSec = -rock.angularVelocityDegPerSec }
+        return rock
+    }
+
+    /// A drift of `(range(400) − 200) × 0.01` px/tick per axis, as px/s.
+    private func fieldDrift() -> Vec2 {
+        Vec2(OriginalClock.perSecond(Double(rng.range(400) - 200) * 0.01),
+             OriginalClock.perSecond(Double(rng.range(400) - 200) * 0.01))
+    }
+
+    /// The first-step scatter: each rock within `(half + 128) / 2` of the
+    /// player on each axis, with a fresh drift.
+    private func scatterAsteroidField() {
+        asteroidFieldScattered = true
+        let w = Int(viewportHalfExtent.x) + 128, h = Int(viewportHalfExtent.y) + 128
+        for _ in 0..<asteroidFieldSize {
+            let offset = Vec2(Double(rng.range(w)) - Double(w) * 0.5,
+                              Double(rng.range(h)) - Double(h) * 0.5)
+            if let rock = makeFieldAsteroid(typeID: nil, at: player.position + offset, velocity: fieldDrift()) {
+                asteroids.append(rock)
             }
         }
     }
 
-    /// Build one asteroid of `typeID` at `position` with a random initial spin
-    /// phase, looking up its real `röid` stats and `spïn` sprite geometry (for
-    /// the physical radius). Returns nil if the type's data can't be resolved.
-    private func spawnAsteroid(typeID: Int, at position: Vec2, game: NovaGame) -> Asteroid? {
-        guard let roid = game.roid(typeID) else { return nil }
-        let radius = game.spin(typeID + 672).map { Double($0.tileWidth) / 2 } ?? 24
-        let angle = rng.double(in: 0...(2 * Double.pi))
-        let a = Asteroid(id: nextAsteroidID, roidTypeID: typeID, position: position, angle: angle,
-                         roid: roid, radius: radius, hpScale: combatTuning.hpScale)
-        nextAsteroidID += 1
-        return a
+    /// Move the field one step: drift and spin every rock, drop any that left
+    /// the view (0x00436910), and — once per raw call while the pool is short —
+    /// bring one in from outside the view, heading back toward the player
+    /// (`Asteroid_Spawn(1)`).
+    private func stepAsteroidField(_ dt: Double, rawCalls: Int) {
+        if !asteroidFieldScattered, asteroidFieldSize > 0 { scatterAsteroidField() }
+        let half = viewportHalfExtent
+        for rock in asteroids where rock.isAlive {
+            rock.position += rock.velocity * dt
+            rock.angle += rock.angularVelocityDegPerSec * .pi / 180.0 * dt
+            // The original tests the rock's sprite against the screen in screen
+            // space (y down), with a lopsided margin: one sprite width past the
+            // right/bottom edge, two past the left/top.
+            let w = rock.radius * 2
+            let dx = rock.position.x - player.position.x
+            let dy = player.position.y - rock.position.y
+            if dx > half.x + 32 + w / 2 || dx < -half.x - 1.5 * w - 32
+                || dy > half.y + 32 + w / 2 || dy < -half.y - 1.5 * w - 32 {
+                rock.isAlive = false
+            }
+        }
+        asteroids.removeAll { !$0.isAlive }
+        guard asteroidFieldSize > 0 else { return }
+        for _ in 0..<rawCalls where asteroids.count < asteroidFieldSize {
+            // Both axes land outside the view by the half-*height* (the
+            // original's quirk), up to half again further, drifting inward.
+            let c = max(half.y.rounded(.down), 2)
+            let reach = Int((c / 2).rounded(.down))
+            var screen = Vec2(), drift = Vec2()
+            if rng.range(2) == 0 {
+                screen.x = c + Double(rng.range(reach)); drift.x = Double(rng.range(200)) * -0.01
+            } else {
+                screen.x = -c - Double(rng.range(reach)); drift.x = Double(rng.range(200)) * 0.01
+            }
+            if rng.range(2) == 0 {
+                screen.y = c + Double(rng.range(reach)); drift.y = Double(rng.range(200)) * -0.01
+            } else {
+                screen.y = -c - Double(rng.range(reach)); drift.y = Double(rng.range(200)) * 0.01
+            }
+            let position = player.position + Vec2(screen.x, -screen.y)
+            let velocity = Vec2(OriginalClock.perSecond(drift.x), OriginalClock.perSecond(-drift.y))
+            if let rock = makeFieldAsteroid(typeID: nil, at: position, velocity: velocity) {
+                asteroids.append(rock)
+            }
+        }
     }
 
-    /// Destroy an asteroid: explosion effect, and — per its real `FragType1/2`/
-    /// `FragCount` — spawn smaller sub-asteroids at the same position (±50%
-    /// count, per the Bible). A "Huge" type naturally shrinks into whatever its
-    /// own `FragType` points at (e.g. "Big"/"Medium"); no invented scale factor.
+    /// Destroy an asteroid (`Asteroid_SpawnDestructionPackage` 0x00462550):
+    /// explosion and debris, `trunc((range(101) + 50) × YieldQty × 0.01)`
+    /// resource boxes of `YieldType` left drifting for a scoop to collect, and
+    /// `range(FragCount) + FragCount / 2` fragments (so FragCount 1 yields none —
+    /// an original quirk) of a random `FragType`, each taking a free pool slot.
     private func destroyAsteroid(_ rock: Asteroid, killerID: Int = -1) {
         rock.isAlive = false
         let rockBoomSound = rock.explosionBoomID.flatMap { galaxy?.game.boom($0)?.soundID }
@@ -1628,22 +2242,112 @@ public final class World {
         if rock.partCount > 0 {
             events.append(.asteroidDebris(at: rock.position, color: rock.partColor, count: rock.partCount))
         }
-        // Mining: if the player destroyed this rock with a mining scoop fitted, it
-        // scoops the röid's YieldType/YieldQty (±50%) yield. The host clamps the
-        // amount to the player's free cargo space (the engine doesn't track cargo).
-        if killerID == player.entityID, player.hasMiningScoop,
-           rock.yieldType >= 0, rock.yieldType <= 5, rock.yieldQty > 0 {
-            let q = rng.int(in: max(1, rock.yieldQty - rock.yieldQty / 2)...(rock.yieldQty + rock.yieldQty / 2))
-            events.append(.asteroidMined(cargoType: rock.yieldType, quantity: q, at: rock.position))
+        if rock.yieldQty > 0 {
+            let boxes = (rng.range(101) + 50) * rock.yieldQty / 100
+            let spriteSet = ((rock.roidTypeID - 128) >> 2) + 1
+            for _ in 0..<boxes {
+                spawnFreeflightObject(at: rock.position, cargoType: rock.yieldType, spriteSet: spriteSet)
+            }
         }
-        let fragTypes = [rock.fragType1, rock.fragType2].filter { $0 >= 128 }
-        guard !fragTypes.isEmpty, rock.fragCount > 0, let game = galaxy?.game else { return }
-        let n = rng.int(in: max(0, rock.fragCount - rock.fragCount / 2)...(rock.fragCount + rock.fragCount / 2))
+        guard rock.fragCount > 0 else { return }
+        let n = rng.range(rock.fragCount) + rock.fragCount / 2
         for _ in 0..<n {
-            let typeID = fragTypes[rng.int(in: 0...(fragTypes.count - 1))]
-            if let frag = spawnAsteroid(typeID: typeID, at: rock.position, game: game) {
+            let a = rock.fragType1 >= 128 ? rock.fragType1 : nil
+            let b = rock.fragType2 >= 128 ? rock.fragType2 : nil
+            let type: Int
+            switch (a, b) {
+            case let (a?, b?): type = rng.range(2) == 0 ? a : b
+            case let (a?, nil): type = a
+            case let (nil, b?): type = b
+            case (nil, nil): return
+            }
+            guard asteroids.filter(\.isAlive).count < 16 else { return }
+            let drift = Vec2(OriginalClock.perSecond(Double(rng.range(200) - 100) * 0.01),
+                             OriginalClock.perSecond(Double(rng.range(200) - 100) * 0.01))
+            if let frag = makeFieldAsteroid(typeID: type, at: rock.position, velocity: drift) {
                 asteroids.append(frag)
             }
+        }
+    }
+
+    // MARK: Freeflight objects
+
+    /// Live freeflight boxes (asteroid yields), at most 64.
+    public private(set) var freeflightObjects: [FreeflightObject] = []
+    private var nextFreeflightID = 1
+    /// Whether the player's hold can take another ton — the host's answer, since
+    /// the pilot's cargo lives outside the engine. With a scoop and room, the
+    /// player collects boxes; otherwise boxes fly on through.
+    public var playerHoldHasRoom: () -> Bool = { true }
+
+    /// A box at `position` drifting off at `(range(81) + 60) × 0.002` px/tick on a
+    /// `range(360)` heading, alive 300–499 ticks, spinning −1/0/0/+1 frames a tick.
+    func spawnFreeflightObject(at position: Vec2, cargoType: Int, spriteSet: Int) {
+        guard freeflightObjects.count < 64 else { return }
+        let life = Double(rng.range(200) + 300) / OriginalClock.ticksPerSecond
+        let frame = Double(rng.range(36))
+        let spin = [-1, 0, 0, 1][rng.range(4)]
+        let speed = Double(rng.range(81) + 60) * 0.2 * 0.01
+        let heading = Double(rng.range(360)) * .pi / 180
+        freeflightObjects.append(FreeflightObject(
+            id: nextFreeflightID, position: position,
+            velocity: Vec2.heading(heading) * OriginalClock.perSecond(speed),
+            lifeRemaining: life, frame: frame, spin: spin,
+            cargoType: cargoType, spriteSet: spriteSet))
+        nextFreeflightID += 1
+    }
+
+    /// Jettisoned cargo (`Ship_SpawnFreeflightObjectForShip` 0x0041f800,
+    /// UI-13): `count` pods from the spïn 500 set, each placed half the ship's
+    /// width behind it, moving with the ship plus `(rand(40) + 30) / 100`
+    /// px/tick on a heading `180 + rand(30) − rand(15)`° from its nose, alive
+    /// 180–269 ticks. They carry no cargo: the original leaves the
+    /// resource-box latch clear, so a scoop passes through them.
+    public func spawnJettisonedPods(from ship: Ship, count: Int) {
+        let back = ship.angle + .pi
+        for _ in 0..<count {
+            guard freeflightObjects.count < 64 else { return }
+            let life = Double(rng.range(90) + 180) / OriginalClock.ticksPerSecond
+            let frame = Double(rng.range(36))
+            let spin = [-1, 0, 0, 1][rng.range(4)]
+            let position = ship.position + Vec2.heading(back) * Double(ship.radius)
+            let speed = Double(rng.range(40) + 30) / 100
+            let jitter = Double(rng.range(30) - rng.range(15)) * .pi / 180
+            let velocity = ship.velocity + Vec2.heading(back + jitter) * OriginalClock.perSecond(speed)
+            freeflightObjects.append(FreeflightObject(
+                id: nextFreeflightID, position: position, velocity: velocity,
+                lifeRemaining: life, frame: frame, spin: spin, cargoType: -1, spriteSet: 0))
+            nextFreeflightID += 1
+        }
+    }
+
+    /// Drift, spin and age the boxes; a player with a mining scoop (ModType 31)
+    /// and room in the hold collects one ton per box it touches (0x004374f0).
+    private func stepFreeflightObjects(_ dt: Double) {
+        guard !freeflightObjects.isEmpty else { return }
+        let ticks = dt * OriginalClock.ticksPerSecond
+        let scooping = player.isAlive && player.hasMiningScoop && playerHoldHasRoom()
+        freeflightObjects.removeAll { box in
+            box.position += box.velocity * dt
+            box.frame = (box.frame + Double(box.spin) * ticks).truncatingRemainder(dividingBy: 36)
+            if box.frame < 0 { box.frame += 36 }
+            box.lifeRemaining -= dt
+            if box.lifeRemaining < 0 { return true }
+            if scooping, box.cargoType >= 0, (box.position - player.position).length < player.radius + 6 {
+                events.append(.asteroidMined(cargoType: box.cargoType, quantity: 1, at: box.position))
+                return true
+            }
+            // AI-31: an NPC miner in state 0x11 scoops a box it touches; a
+            // commodity goes into its hold (junk only counts for the player).
+            if let miner = npcs.first(where: { npc in
+                npc.isAlive && !npc.disabled
+                    && originalAI.record(for: npc.entityID)?.state == OriginalAIState.debris
+                    && (box.position - npc.position).length < npc.radius + 6
+            }) {
+                if (0...5).contains(box.cargoType) { miner.cargo[box.cargoType, default: 0] += 1 }
+                return true
+            }
+            return false
         }
     }
 
@@ -1658,10 +2362,16 @@ public final class World {
 
         events.removeAll(keepingCapacity: true)
         playerScanCooldown = max(0, playerScanCooldown - dt)
+        latchPlayerOutfitGovernments()
+        rawCallsThisStep = cadence.advance(dt)
+        let rawCalls = rawCallsThisStep
+        rawCallCounter &+= rawCalls
 
         prof("sim.spawn") {
             if !spawningPaused { spawner?.update(dt, world: self) }   // paused on a co-op client (mirrors the authority)
             updateStellarDefenses()   // relaunch tribute-defense waves as they're cleared
+            tickPendingMissionArrivals()   // AI-14 delayed mission jump-ins
+            if overlayTicks > -1 { overlayTicks = max(-1, overlayTicks - rawCalls) }
             refreshRoster()
         }
 
@@ -1669,15 +2379,36 @@ public final class World {
         // no firing, and freeze the wreck in place (zero velocity, empty intent) so
         // it doesn't keep flying under live input (looking alive) while the death /
         // explosion sequence plays out and the app returns to the menu.
+        refreshFlightFactors()
+
         prof("sim.player") {
-            if player.isAlive {
+            if escapePodTicksLeft != nil {
+                stepEscapePod(dt)
+            } else if escapePodLanded {
+                player.velocity = Vec2()   // waiting for the host's respawn
+            } else if player.isAlive, var jump = playerJump {
+                jump.tick(player, dt: dt)
+                playerJump = jump
+            } else if player.isAlive, player.disabled {
+                // WP-03: a disabled player has no weapons, thrust or turn
+                // keys — only the face-target auto-turn — and drifts × 0.995
+                // per raw call (0x0044b240).
+                var drift = ControlIntent()
+                drift.desiredHeading = intent.desiredHeading
+                fireWeapons(from: player, intent: ControlIntent())
+                player.velocity = player.velocity * pow(0.995, Double(rawCalls))
+                player.step(dt, intent: drift, tuning: tuning, rawCalls: rawCalls)
+                tickRepairSystem(player, dt: dt)
+            } else if player.isAlive {
                 fireWeapons(from: player, intent: intent)
-                player.step(dt, intent: intent, tuning: tuning)
+                player.step(dt, intent: intent, tuning: tuning, rawCalls: rawCalls)
             } else {
                 player.velocity = Vec2()
-                player.step(dt, intent: ControlIntent(), tuning: tuning)
+                player.step(dt, intent: ControlIntent(), tuning: tuning, rawCalls: rawCalls)
             }
-            wrapIntoSystem(player)
+            stepEjection()
+            stepSelfDestruct(held: intent.selfDestruct, ticks: dt * OriginalClock.ticksPerSecond)
+            recenterForWorldWrap()
         }
 
         // NPCs: each brain decides an intent. Disabled hulks don't think — they
@@ -1687,29 +2418,22 @@ public final class World {
         // This loop (AI think + fire + physics for every NPC) is the sim's
         // dominant cost under a crowded fight, so it gets its own profiler phase.
         prof("sim.ai") {
+            originalAI.beginStep(self, dt: dt)
             for npc in npcs where npc.isAlive {
+                if npc.refillsDefensesEveryTick { npc.shield = npc.maxShield; npc.armor = npc.maxArmor }
                 if npc.disabled {
-                    npc.velocity = npc.velocity * max(0, 1 - 0.35 * dt)
+                    // A disabled hull's velocity (and an inertialess hull's
+                    // speed) damps × 0.995 per raw call (0x00433050).
+                    let damp = pow(0.995, Double(rawCalls))
+                    npc.velocity = npc.velocity * damp
+                    npc.throttleSpeed *= damp
                     npc.position += npc.velocity * dt
-                    wrapIntoSystem(npc)
-                    // `oütf` ModType 49 (repair system): "will occasionally repair
-                    // the ship when it's disabled." The Bible gives no rate, so
-                    // this is a low per-second chance of a partial armor patch —
-                    // "occasionally", not a fast or guaranteed fix — that can take
-                    // more than one success to climb back over the disable
-                    // threshold and return the hulk to action.
-                    if npc.hasRepairSystem, rng.double(in: 0...1) < 0.05 * dt {
-                        npc.armor = min(npc.maxArmor, npc.armor + npc.maxArmor * 0.20)
-                        if npc.armor > npc.maxArmor * npc.disableArmorFraction {
-                            npc.disabled = false
-                            Log.combat.debug("\(npc.name) [\(npc.entityID)] repair system restored it above the disable threshold — back in action")
-                        }
-                    }
+                    tickRepairSystem(npc, dt: dt)
                     continue
                 }
                 let npcIntent: ControlIntent
-                if let brain = npc.brain {
-                    npcIntent = brain.think(ship: npc, world: self, dt: dt)
+                if npc.brain != nil {
+                    npcIntent = originalAI.think(ship: npc, world: self, dt: dt)
                 } else if npc.remotePlayer != nil {
                     // Another player's ship: driven from the outside, just like the
                     // local player, from the intent the net layer published this
@@ -1726,8 +2450,7 @@ public final class World {
                     npcIntent = ControlIntent()
                 }
                 fireWeapons(from: npc, intent: npcIntent)
-                npc.step(dt, intent: npcIntent, tuning: tuning)
-                wrapIntoSystem(npc)
+                npc.step(dt, intent: npcIntent, tuning: tuning, rawCalls: rawCalls)
             }
         }
 
@@ -1738,6 +2461,7 @@ public final class World {
                 for w in s.weapons { w.tick(dt) }
                 s.deionize(dt)
                 if !s.disabled { s.regen(dt) }
+                if s.isPlayer { s.regenFuel(dt) }
             }
         }
 
@@ -1746,23 +2470,24 @@ public final class World {
         // Cloaking devices: fade in/out and drain fuel/shield.
         prof("sim.cloak") { stepCloak(dt) }
 
-        // Asteroids don't move (see `Asteroid`'s doc comment) — they only spin.
         prof("sim.asteroids") {
-            for rock in asteroids where rock.isAlive {
-                rock.angle += rock.angularVelocityDegPerSec * .pi / 180.0 * dt
-            }
+            stepAsteroidField(dt, rawCalls: rawCalls)
+            stepFreeflightObjects(dt)
         }
 
         prof("sim.gravity") { applyStellarGravity(dt) }
         prof("sim.deadlyStellars") { checkDeadlyStellarCollisions() }
         prof("sim.stellarWeapons") { updateStellarWeapons(dt) }
-        prof("sim.pointDefense") { runPointDefense() }
-        prof("sim.projectiles") { stepProjectiles(dt) }
+        prof("sim.pointDefense") { runPointDefense(rawCalls: rawCalls) }
+        prof("sim.projectiles") {
+            stepBeamRecords(rawCalls: rawCalls)
+            stepProjectiles(dt, rawCalls: rawCalls)
+        }
         prof("sim.despawn") { despawnDepartedAndDead(dt) }
         // Ships have moved this step; weld continuous beams to their new
         // positions/headings and expire pulse-beam flashes.
         prof("sim.beams") { refreshActiveBeams(dt) }
-        reportPlayerDeathIfNeeded()
+        reportPlayerDeathIfNeeded(dt)
 
         // Whatever time in `step` wasn't inside a named phase above (event reset,
         // roster bookkeeping, death report) — so the sim phases sum to the real
@@ -1773,62 +2498,70 @@ public final class World {
         }
     }
 
-    /// `spöb.Gravity` (Bible): "The stellar's gravity - 0 for none, positive for
-    /// stellars that [pull ships in]"; negative values push away. Applied as an
-    /// inverse-square acceleration toward (or away from) each gravitating body,
-    /// falling off from its surface so a distant ship is barely nudged and a
-    /// close one is dragged hard.
-    ///
-    /// A hull with `shïp.Flags3` 0x0010 or a fitted `oütf` ModType 41
-    /// (`gravityResist`) is exempt — that's what `Ship.ignoresGravity` is for,
-    /// and until now there was no force for it to be immune to. No stock stellar
-    /// sets a nonzero Gravity (the `spöb` TMPL warns "Confuses AI, not
-    /// recommended"), so this is inert on base-game data.
-    ///
-    /// The strength scale is this engine's own: `Gravity` is treated as an
-    /// acceleration in px/s² at the body's surface, since the Bible gives no
-    /// units. Acceleration, not a velocity nudge, so it composes correctly with
-    /// the Newtonian flight model and is naturally frame-rate independent.
+    /// OS-07, the repair system (oütf ModType 49; `Frame_ShouldTriggerAutoRepairTick`
+    /// 0x0046e540): a disabled ship that owns one (an NPC through its
+    /// DefaultItems) rolls 1 in 500 a tick — once the player's 300-tick
+    /// post-disable window has run out — and on success its armor jumps to
+    /// `max/3 + 1` (`max/10 + 1` with hull Flags 0x0010), just above the
+    /// disable line. The player hears and reads "repair systems engaged".
+    func tickRepairSystem(_ ship: Ship, dt: Double) {
+        let ticks = dt * OriginalClock.ticksPerSecond
+        if ship.recentlyHitTicks >= 0 { ship.recentlyHitTicks -= ticks }
+        guard ship.hasRepairSystem, ship.disabled, !ship.heldDisabled, ship.isAlive,
+              ship.recentlyHitTicks < 0 else { return }
+        let rolls = max(1, Int(ticks.rounded()))
+        guard (0..<rolls).contains(where: { _ in rng.range(500) == 0 }) else { return }
+        let fraction = ship.disableArmorFraction < Ship.standardDisableFraction ? 0.1 : 0.3333
+        ship.armor = ship.maxArmor * fraction + 1
+        events.append(.repairSystemEngaged(entityID: ship.entityID))
+        if ship.formerWingRole != nil { rejoinWing(ship) }
+        Log.combat.debug("\(ship.name) [\(ship.entityID)] repair system brought it back above the disable line")
+    }
+
+    /// `spöb.Gravity` (`Stellar_TickStellarGravityPull` 0x0043adb0 /
+    /// `Ship_AccelerateShipTowardPoint` 0x0046e2f0): every tick each ship is
+    /// pulled toward each stellar with gravity by `Gravity / max(d², 30)`
+    /// px/tick, with `d` measured in hundreds of pixels. Negative values push.
+    /// A ship is shielded by `shïp.Flags3` 0x0020, by flying inertialess, or —
+    /// the player only — by a ModType-41 outfit (`Stellar_ShipHasGravityShielding`
+    /// 0x0046e120). No code reads Flags3 0x0010, the Bible's "ignores gravity".
+    /// No stock stellar sets Gravity.
     func applyStellarGravity(_ dt: Double) {
         let wells = systemContext.bodies.filter { $0.gravity != 0 }
         guard !wells.isEmpty else { return }
-        for ship in allShips where ship.isAlive && !ship.ignoresGravity {
-            // An inertialess hull has no momentum to perturb — it flies exactly
-            // where it points — so gravity has nothing to act on.
-            guard !ship.fliesInertialess(tuning) else { continue }
+        let ticks = dt * OriginalClock.ticksPerSecond
+        for ship in allShips where ship.isAlive && !hasGravityShielding(ship) {
             for body in wells {
                 let rel = body.position - ship.position
-                let d = rel.length
-                let surface = max(1, body.radius)
-                guard d > 1 else { continue }
-                // Inverse-square from the surface, capped at the surface value so
-                // a ship grazing the body doesn't get an unbounded impulse.
-                let falloff = min(1.0, (surface * surface) / (d * d))
-                let accel = Double(body.gravity) * falloff
-                ship.velocity += rel.normalized * (accel * dt)
+                guard rel.x != 0 || rel.y != 0 else { continue }
+                let hundreds = rel * 0.01
+                let d2 = max(hundreds.x * hundreds.x + hundreds.y * hundreds.y, 30)
+                let pullPerTick = Double(body.gravity) / d2 * ticks
+                ship.velocity += rel.normalized * OriginalClock.perSecond(pullPerTick)
             }
         }
     }
 
-    /// `spöb.Flags2` 0x0100 (Bible): "Stellar is deadly - all ships that touch
-    /// it are destroyed immediately." No stock stellar sets this bit (see
-    /// `SpobRes.isDeadly`), so this never fires against the base game, but a
-    /// plug-in stellar that does gets exactly the documented behavior. A ship
-    /// with `ignoresGravity`/`ignoresDeadlyStellars`... only the latter matters
-    /// here (`shïp.Flags3` 0x0020, or a fitted `oütf` ModType 42 stellarResist)
-    /// passes straight through unharmed. Zeroing shield/armor here — rather
-    /// than calling a dedicated "destroy" method — is deliberate: it lets the
-    /// existing `despawnDepartedAndDead`/`reportPlayerDeathIfNeeded` death
-    /// pipeline (already run later this same tick) pick it up exactly like any
-    /// other kill, with the same explosion/event/escape-pod handling, instead
-    /// of duplicating that logic here.
+    func hasGravityShielding(_ ship: Ship) -> Bool {
+        ship.hullShieldsStellars || ship.fliesInertialess(tuning)
+            || (ship.isPlayerControlled && ship.hasGravityResistOutfit)
+    }
+
+    /// `spöb.Flags2` 0x0100: a deadly stellar destroys every ship that touches
+    /// it. Immune: `shïp.Flags3` 0x0020, or the player with a ModType-42 outfit
+    /// (`Stellar_ShipImmuneToStellarCrash` 0x0046e210). No stock stellar sets
+    /// the flag. Zeroing shield/armor lets the ordinary death pipeline later
+    /// this tick handle the kill (explosion, events, escape pod).
     private func checkDeadlyStellarCollisions() {
         let deadly = systemContext.bodies.filter { $0.isDeadly }
         guard !deadly.isEmpty else { return }
-        for ship in allShips where ship.isAlive && !ship.disabled && !ship.ignoresDeadlyStellars {
+        // Disabled hulks included, and the kill is instant (WP-25).
+        for ship in allShips where ship.isAlive {
+            if ship.hullShieldsStellars || (ship.isPlayerControlled && ship.hasStellarResistOutfit) { continue }
             for body in deadly where (ship.position - body.position).length < body.radius + ship.radius {
                 ship.shield = 0
                 ship.armor = 0
+                ship.diesInstantly = true
                 Log.combat.debug("\(ship.name) [\(ship.entityID)] touched deadly stellar #\(body.id) — destroyed")
                 break
             }
@@ -1839,7 +2572,24 @@ public final class World {
     /// (which only ever looks at `npcs`) — report it exactly once via
     /// `.playerDestroyed`, alongside the same explosion effect an NPC kill
     /// gets, so the app can run its escape-pod-or-game-over reaction.
-    private func reportPlayerDeathIfNeeded() {
+    private func reportPlayerDeathIfNeeded(_ dt: Double) {
+        if playerDeathEjected {
+            // Ejected mid-sequence: the wreck finishes dying as an NPC, and
+            // the new craft starts with a clean slate.
+            playerDeathEjected = false
+            playerDeathReported = false
+            playerDeathElapsed = 0
+        }
+        if playerDeathReported, !playerDeathSequenceOver {
+            playerDeathElapsed += dt
+            if playerDeathElapsed >= player.deathSequenceDuration {
+                // The finale: the hull blows (WP-13) and, with no eject, the
+                // pilot is lost.
+                playerDeathSequenceOver = true
+                deathBlast(of: player)
+                events.append(.playerDestroyed)
+            }
+        }
         guard !playerDeathReported, !player.isAlive else { return }
         playerDeathReported = true
         // Since the dead player is no longer stepped through `fireWeapons`, its own
@@ -1848,63 +2598,139 @@ public final class World {
         stopAllBeamLoops(for: player)
         events.append(.explosion(at: player.position, radius: max(24, player.radius * 1.5),
                                  soundID: player.explosionSoundID, boomID: player.explosionBoomID))
-        events.append(.playerDestroyed(hadEscapePod: player.hasEscapePod))
+        events.append(.playerDying)
     }
 
-    /// Toroidal wrap: EV Nova's systems are a fixed finite size — fly off one edge
-    /// and you reappear on the opposite side ("no walls, but you roll over"). Folds
-    /// a ship's position back into the `±wrapExtent` box around `systemContext.center`,
-    /// on the x and y axes independently. Idempotent for in-bounds ships (the guard
-    /// skips them entirely), so it only ever acts the frame a ship actually crosses
-    /// an edge — the player's camera then hard-cuts to the far side, exactly the
-    /// teleport-to-the-other-side the wrap should look like. NPCs heading out to jump
-    /// despawn at `jumpRadius` (< `wrapExtent`), so they never wrap.
-    private func wrapIntoSystem(_ ship: Ship) {
-        let ext = systemContext.wrapExtent
-        guard ext > 0 else { return }
-        let rel = ship.position - systemContext.center
-        guard abs(rel.x) > ext || abs(rel.y) > ext else { return }
-        let span = 2 * ext
-        func fold(_ v: Double) -> Double {
-            var r = (v + ext).truncatingRemainder(dividingBy: span)
-            if r < 0 { r += span }
-            return r - ext
+    /// World wrap (`Ship_RecenterSpaceObjectsForWorldWrap` 0x0045baa0): once the
+    /// player passes 15000 px from the origin on an axis, the player and every
+    /// ship, shot and rock within 15000 px of them (per axis, before the move)
+    /// shift 25000 px back along it. Stellars stay put, so the player reappears
+    /// 10000 px out on the far side with the nearby fight carried along; ships
+    /// left behind never wrap.
+    private func recenterForWorldWrap() {
+        func shift(_ v: Double) -> Double { v > 15000 ? -25000 : (v < -15000 ? 25000 : 0) }
+        let delta = Vec2(shift(player.position.x), shift(player.position.y))
+        guard delta.x != 0 || delta.y != 0 else { return }
+        let origin = player.position
+        func near(_ p: Vec2) -> Bool {
+            abs((p.x - origin.x).rounded(.towardZero)) < 15000
+                && abs((p.y - origin.y).rounded(.towardZero)) < 15000
         }
-        ship.position = systemContext.center + Vec2(fold(rel.x), fold(rel.y))
+        for ship in npcs where near(ship.position) {
+            ship.position += delta
+            ship.renderPrevPosition += delta
+        }
+        for p in projectiles where near(p.position) {
+            p.position += delta
+            p.renderPrevPosition += delta
+        }
+        for rock in asteroids where near(rock.position) {
+            rock.position += delta
+            rock.renderPrevPosition += delta
+        }
+        for box in freeflightObjects where near(box.position) {
+            box.position += delta
+            box.renderPrevPosition += delta
+        }
+        player.position += delta
+        player.renderPrevPosition += delta
+        Log.physics.debug("World wrap: recentred by (\(delta.x), \(delta.y))")
     }
 
-    /// Guidance 9/10 mounts (`WeapRes.isPointDefense`): "fires automatically at
-    /// incoming guided weapons and nearby ships" (Bible) — a targeting loop
-    /// independent of the ship's own `currentTargetID`. Simplified to an
-    /// instant intercept (destroys the incoming shot outright) rather than
-    /// simulating a PD sub-projectile chasing it down; a shot's `Durability`
-    /// (hits-to-kill) isn't modeled.
-    private func runPointDefense() {
-        for ship in allShips where ship.isAlive && !ship.disabled {
-            for mount in ship.weapons where mount.spec.isPointDefense {
-                guard mount.ready else { mount.logBlockedIfNeeded(for: ship); continue }
-                let incoming = projectiles.filter { p in
-                    p.alive && p.homing && p.vulnerableToPD
-                        && canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: ship)
-                        && (p.position - ship.position).length <= mount.spec.range
+    /// Sets this step's strict-play speed bonus and gravity-pull latch on every
+    /// ship before it flies.
+    private func refreshFlightFactors() {
+        let bonus = strictPlay ? 1.0 : 1.5
+        let pull = systemContext.bodies.contains { $0.gravity != 0 }
+        player.topSpeedFactor = bonus
+        player.inGravityPull = pull
+        for npc in npcs {
+            let ledByPlayer = npc.isPlayerControlled || npc.brain?.leaderID == World.playerEntityID
+            npc.topSpeedFactor = ledByPlayer ? bonus : 1
+            npc.inGravityPull = pull
+        }
+    }
+
+    /// `ship`'s top speed (px/s) as this world flies it, strict-play bonus
+    /// included — what a hyperspace arrival hurls the player in at.
+    public func effectiveMaxSpeed(of ship: Ship) -> Double {
+        let ledByPlayer = ship.isPlayerControlled || ship.brain?.leaderID == World.playerEntityID
+        let factor = ledByPlayer && !strictPlay ? 1.5 : 1
+        return ship.stats.maxSpeed * factor
+    }
+
+    /// Point defense (`Weapon_SelectTurretTargetWithinArc` 0x0043a310), once per
+    /// raw call per ship. Only the ship's first ready Guidance 9/10 bank fires.
+    /// Its reach is `range × 1.5` (mode 9) or `BeamLength` (mode 10), outside
+    /// the turret blind spots. It picks the nearest homing shot in its normal
+    /// state, vulnerable to PD (no `wëap` Flags 0x0080), that is aimed at this
+    /// ship or its squad leader; with none, the nearest ship whose hull has
+    /// Flags2 0x0008 and is attacking this ship or its leader. Mode 9 fires a
+    /// real PD round (see `isPointDefenseRound`), mode 10 queues a beam that
+    /// bites `Mass + trunc(Energy / 2)` off the missile's durability per call.
+    /// The bank's cooldown grows by `Reload / mounted`.
+    private func runPointDefense(rawCalls: Int) {
+        guard rawCalls > 0 else { return }
+        for ship in allShips where ship.isAlive && !ship.disabled && !ship.isEffectivelyCloaked {
+            for _ in 0..<rawCalls {
+                guard let mount = ship.weapons.first(where: {
+                    $0.spec.isPointDefense && $0.ready
+                        && (!ship.isEffectivelyCloaked || $0.spec.firesWhileCloaked)
+                }) else { break }
+                let spec = mount.spec
+                let reach = spec.guidance == .pointDefense
+                    ? (Double(Int(spec.range)) * 1.5).rounded(.down) : spec.beamLength
+                let leader = ship.brain?.leaderID
+                var bestShot: Projectile?
+                var bestShip: Ship?
+                var bestD = Double.greatestFiniteMagnitude
+                for p in projectiles where p.alive && !p.visualOnly && p.guidance == .guided
+                    && p.guidanceState == 0 && p.vulnerableToPD {
+                    guard let tid = p.targetID, tid == ship.entityID || tid == leader else { continue }
+                    let d = (p.position - ship.position).length
+                    guard d <= reach, d < bestD,
+                          !turretBlind(ship, spec: spec, bearing: (p.position - ship.position).angle) else { continue }
+                    bestD = d; bestShot = p
                 }
-                guard let target = incoming.min(by: {
-                    ($0.position - ship.position).length < ($1.position - ship.position).length
-                }) else { continue }
-                mount.didFire(shots: 1)
-                events.append(.weaponFired(shooterID: ship.entityID, at: ship.position,
-                                           heading: (target.position - ship.position).angle,
-                                           soundID: mount.spec.fireSoundID, weaponID: mount.spec.id))
-                // `wëap.Durability`: a tough guided shot soaks up N PD hits before
-                // it's destroyed. 0 (the default) ⇒ shot down by this single hit.
-                if target.pdDurability > 0 {
-                    target.pdDurability -= 1
-                    events.append(.explosion(at: target.position, radius: 6, soundID: nil, boomID: nil))
+                if bestShot == nil {
+                    for other in allShips where other.entityID != ship.entityID && other.entityID != leader
+                        && other.isAlive && !other.disabled && other.hullFlags2 & 0x0008 != 0
+                        && canDetect(other, by: ship) {
+                        let attacking = other.currentTargetID == ship.entityID
+                            || (leader != nil && other.currentTargetID == leader)
+                        guard attacking else { continue }
+                        let d = (other.position - ship.position).length
+                        guard d <= reach, d < bestD,
+                              !turretBlind(ship, spec: spec, bearing: (other.position - ship.position).angle) else { continue }
+                        bestD = d; bestShip = other
+                    }
+                }
+                guard bestShot != nil || bestShip != nil else { break }
+                let aimPoint = bestShot?.position ?? bestShip!.position
+                if spec.guidance == .pointDefense {
+                    var aim = (aimPoint - ship.position).angle
+                    if let target = bestShip {
+                        aim = leadAngle(from: ship.position, shooterVel: ship.velocity, target: target,
+                                        spec: spec)
+                    }
+                    aim = wholeDegrees(aim)
+                    if spec.inaccuracyDegrees > 0 {
+                        aim += Double(rng.range(2 * spec.inaccuracyDegrees) - spec.inaccuracyDegrees) * .pi / 180
+                    }
+                    let round = spawnProjectile(spec: spec, muzzle: ship.position, aim: aim,
+                                                ownerID: ship.entityID, ownerGovt: ship.government,
+                                                ownerVelocity: ship.velocity, targetID: nil,
+                                                subDepth: 0, shooter: ship)
+                    round.isPointDefenseRound = true
+                    round.pointDefenseBite = spec.armorDamage + (spec.shieldDamage / 2).rounded(.down)
                 } else {
-                    target.alive = false
-                    events.append(.explosion(at: target.position, radius: 10, soundID: nil, boomID: nil))
-                    Log.combat.debug("\(ship.name) [\(ship.entityID)] point defense shot down an incoming projectile")
+                    queueBeam(from: ship, mountIndex: ship.weapons.firstIndex { $0 === mount } ?? 0,
+                              spec: spec, targetShipID: bestShip?.entityID, targetShot: bestShot)
                 }
+                mount.cooldown += spec.reloadSeconds / Double(max(1, mount.count))
+                events.append(.weaponFired(shooterID: ship.entityID, at: ship.position,
+                                           heading: (aimPoint - ship.position).angle,
+                                           soundID: spec.fireSoundID, weaponID: spec.id))
             }
         }
     }
@@ -1915,23 +2741,23 @@ public final class World {
         let primary = intent.firePrimary
         let secondary = intent.fireSecondary
         let anyTrigger = primary || secondary
-        // NPCs only ever set `firePrimary`; let them fire every weapon group they
-        // carry (guns AND missiles) whenever their brain wants to shoot.
+        // NPCs only ever set `firePrimary`; it fires the one forward bank and
+        // the one turret bank their selectors armed (AI-02).
         let isAI = ship.brain != nil
         updateBeamLoops(for: ship, primary: primary, secondary: secondary, isAI: isAI)
-        guard anyTrigger, ship.isAlive else { return }
+        guard anyTrigger, ship.isAlive, !ship.disabled else { return }
         let target = ship.currentTargetID.flatMap { self.ship(id: $0) }
-        // `wëap.Flags3` 0x0020 (exclusive): while any exclusive weapon on this ship
-        // is firing or still reloading, none of its *other* weapons may fire.
-        let exclusiveBusy = ship.weapons.contains { $0.spec.isExclusive && $0.cooldown > 0 }
+        // AI-03: an NPC shooting at the player reloads slower while the
+        // player's combat rating is low.
+        let reloadScale = isAI && ship.currentTargetID == World.playerEntityID
+            ? Self.ratingFireRamp(rating: livePlayerCombatRating, classZeroStrength: classZeroStrength) : 1
+        let npcBanks = isAI ? (intent.npcMounts ?? npcSelectedMounts(for: ship, target: target)) : []
 
         for (mountIndex, mount) in ship.weapons.enumerated() {
             let spec = mount.spec
             // Point-defense mounts fire themselves via `runPointDefense`.
             if spec.isPointDefense { continue }
-            // Exclusive lock: a non-exclusive weapon holds while an exclusive one
-            // is mid-cycle (the exclusive weapon itself still fires when ready).
-            if exclusiveBusy && !spec.isExclusive { continue }
+            if isAI && spec.guidance != .bay && !npcBanks.contains(mountIndex) { continue }
             // Fire-group gating: guns on the primary trigger, missiles/rockets on
             // the secondary. NPCs fire everything on whichever trigger their AI
             // held. The player fires only the *selected* secondary, not every
@@ -1951,15 +2777,13 @@ public final class World {
                 mount.logBlockedIfNeeded(for: ship)
                 continue
             }
-            // An AI's firing intent is a single blended trigger built from its
-            // *longest*-range weapon (see `AIBrain.attack`), so a ship carrying
-            // e.g. a long-range missile alongside a short-range beam would hold
-            // at missile range and still fire the beam — which visibly falls
-            // short of the target every time. Gate each mount by its own real
-            // range so only weapons that can actually reach fire.
-            if isAI, let target, spec.range > 0 {
-                let engageDist = (target.position - ship.position).length
-                guard engageDist <= spec.range * 1.05 else { continue }
+            // NPC firing envelope (`Weapon_FireShipWeapons` 0x00414550): a beam
+            // needs the target within `BeamLength + 32` px on both axes, a turret
+            // or quadrant gun within `range + 32`; unguided guns, rockets and
+            // homing launchers fire whenever the AI pulls the trigger.
+            if isAI, let target, let envelope = Self.npcFireEnvelope(spec) {
+                let d = target.position - ship.position
+                guard abs(d.x) < envelope, abs(d.y) < envelope else { continue }
             }
             // Seeker 0x0020: this guided weapon refuses to fire while its own
             // ship is fully ionized.
@@ -1988,186 +2812,286 @@ public final class World {
             // AmmoType ≤ -1000: a fuel-burning weapon can't fire without the fuel.
             if spec.fuelPerShot > 0 && ship.fuel < spec.fuelPerShot { continue }
 
-            // Fighter bays (`wëap` Guidance 99) don't fire projectiles — selecting
-            // one as the secondary and pulling the trigger launches a real docked
-            // fighter instead, one per reload tick (same cadence a missile
-            // launcher fires at), matching EV Nova's "bay acts like a secondary
-            // weapon" behavior. NPC carriers are untouched: they keep launching
-            // via `updateFighterBays`'s own combat-driven auto-launch, so a bay
-            // mount is skipped here entirely for AI ships to avoid double-launching.
+            // Fighter bays (`wëap` Guidance 99) don't fire projectiles — the
+            // player's secondary trigger launches a docked fighter (OS-03).
+            // NPC carriers launch through `updateFighterBays`.
             if spec.guidance == .bay {
-                guard !isAI, let bay = ship.fighterBays.first(where: { $0.spec.bayWeaponID == spec.id })
-                else { continue }
-                let barrels = max(1, mount.count)
-                let toLaunch = spec.fireSimultaneously ? barrels : 1
-                var launched = 0
-                // Running slot counter across this whole volley — see the
-                // matching comment in `updateFighterBays`. A multi-barrel bay
-                // firing simultaneously launches several fighters in one call,
-                // all reading the same pre-launch `allShips` snapshot, so
-                // without this every fighter in the volley collides on one
-                // formation slot.
-                var nextFormationSlot = allShips.filter { $0.brain?.leaderID == ship.entityID }.count
-                for _ in 0..<toLaunch {
-                    guard bay.docked > 0,
-                          let fighter = launchFighter(from: ship, bay: bay, formationSlot: nextFormationSlot)
-                    else { break }
-                    nextFormationSlot += 1
-                    bay.docked -= 1
-                    bay.deployed.insert(fighter.entityID)
-                    launched += 1
-                }
-                guard launched > 0 else { mount.logBlockedIfNeeded(for: ship); continue }
-                mount.didFire(shots: launched)
-                mount.ammo = bay.docked   // `bay.docked` stays the single source of truth
-                let muzzle = ship.muzzle(exitType: spec.exitType, index: mount.exitCursor)
-                events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: ship.angle,
-                                           soundID: spec.fireSoundID, weaponID: spec.id))
+                guard !isAI else { continue }
+                launchPlayerBayFighter(from: ship, mount: mount)
                 continue
             }
 
-            // A group fires ONE barrel per event (cycling exit points) — unless
-            // it has the "fire simultaneously" flag, which volleys all `count`.
-            let barrels = max(1, mount.count)
-            let shots = spec.fireSimultaneously ? barrels : 1
+            // A Reload-0 weapon may fire on every raw call (WP-20).
+            let volleys = spec.reloadSeconds <= 0 ? max(1, rawCallsThisStep) : 1
             var fired = 0
-            for k in 0..<shots {
-                // Flags3 0x0010: fire from the exit point closest to the target
-                // (when there is one), rather than cycling the exit cursor.
-                let exitIndex: Int
-                if spec.firesFromClosestExit, let target {
-                    exitIndex = ship.closestExitIndex(exitType: spec.exitType, to: target.position)
-                } else {
-                    exitIndex = spec.fireSimultaneously ? k : mount.exitCursor
-                }
-                let muzzle = ship.muzzle(exitType: spec.exitType, index: exitIndex)
-                // Nil = can't fire (turret/quadrant with no target in arc): hold fire.
-                guard var aim = fireAngle(for: spec, ship: ship, muzzle: muzzle, target: target) else { continue }
-                if spec.accuracyRadians > 0 && !spec.firesAtFixedAngle {
-                    aim += rng.double(in: -spec.accuracyRadians...spec.accuracyRadians)
-                }
-                if spec.isBeam {
-                    fireBeam(from: ship, mount: mount, mountIndex: mountIndex, spec: spec, aim: aim, target: target)
-                } else {
-                    spawnProjectile(spec: spec, muzzle: muzzle, aim: aim,
-                                    ownerID: ship.entityID, ownerGovt: ship.government,
-                                    ownerVelocity: ship.velocity,
-                                    targetID: spec.homes ? ship.currentTargetID : nil,
-                                    subDepth: 0)
-                    events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: aim, soundID: spec.fireSoundID, weaponID: spec.id))
-                }
-                applyRecoil(to: ship, spec: spec, aim: aim)
-                fired += 1
-                if !spec.fireSimultaneously { mount.exitCursor = (mount.exitCursor + 1) % barrels }
+            for _ in 0..<volleys {
+                guard mount.ready else { break }
+                let shotsThisVolley = fireVolley(from: ship, mount: mount, mountIndex: mountIndex,
+                                                 spec: spec, target: target)
+                guard shotsThisVolley > 0 else { break }
+                fired += shotsThisVolley
+                mount.didFire(shots: shotsThisVolley, reloadScale: reloadScale)
+                if spec.reloadSeconds > 0 { break }
             }
             // Only spend the reload/ammo if a shot actually left (a turret with no
             // target produces `fired == 0` and stays ready).
-            if fired > 0 {
-                mount.didFire(shots: fired)
-                // AmmoType ≤ -1000: burn fuel per shot instead of drawing ammo.
-                if spec.fuelPerShot > 0 {
-                    ship.fuel = max(0, ship.fuel - spec.fuelPerShot * Double(fired))
-                }
-                // AmmoType == -999: the firing ship self-destructs. Zeroing armor
-                // makes it not-alive; the despawn / player-death path finalizes it
-                // (explosion + shipDestroyed), same as any other kill.
-                if spec.selfDestructsOnFire {
-                    ship.shield = 0
-                    ship.armor = 0
+            guard fired > 0 else { continue }
+            applyRecoil(to: ship, spec: spec)
+            // AmmoType ≤ -1000: burn fuel per shot instead of drawing ammo.
+            if spec.fuelPerShot > 0 {
+                ship.fuel = max(0, ship.fuel - spec.fuelPerShot * Double(fired))
+            }
+            // AmmoType == -999: the firing ship self-destructs. Zeroing armor
+            // makes it not-alive; the despawn / player-death path finalizes it
+            // (explosion + shipDestroyed), same as any other kill.
+            if spec.selfDestructsOnFire {
+                ship.shield = 0
+                ship.armor = 0
+            }
+            // Flags3 0x0020 (exclusive): every other bank waits until this
+            // one's cooldown plus two ticks (0x00575040).
+            if spec.isExclusive {
+                let hold = mount.cooldown + 2 / OriginalClock.ticksPerSecond
+                for other in ship.weapons where other !== mount && other.cooldown < hold {
+                    other.cooldown = hold
                 }
             }
         }
     }
 
+    /// One volley of `mount`: a single barrel, or every barrel for a
+    /// fire-simultaneously weapon. Returns the shots that left.
+    private func fireVolley(from ship: Ship, mount: WeaponMount, mountIndex: Int,
+                            spec: WeaponSpec, target: Ship?) -> Int {
+        let barrels = max(1, mount.count)
+        let shots = spec.fireSimultaneously ? barrels : 1
+        var fired = 0
+        for k in 0..<shots {
+            // Flags3 0x0010: fire from the exit point closest to the target
+            // (when there is one); otherwise the ship's own cursor for this
+            // exit type, which starts on a random quadrant and steps +1 mod 4
+            // per shot (`Weapon_SelectTurretQuadrant` 0x0046c320, WP-25).
+            _ = k
+            let exitIndex: Int
+            if spec.firesFromClosestExit, let target {
+                exitIndex = ship.closestExitIndex(exitType: spec.exitType, to: target.position)
+            } else {
+                exitIndex = nextExitQuadrant(ship, spec.exitType)
+            }
+            mount.exitCursor = exitIndex
+            let muzzle = ship.muzzle(exitType: spec.exitType, index: exitIndex)
+            // Nil = can't fire (turret/quadrant with no target in arc): hold fire.
+            guard let aim = fireAngle(for: spec, ship: ship, muzzle: muzzle, target: target) else { continue }
+            if spec.isBeam {
+                let record = queueBeam(from: ship, mountIndex: mountIndex, spec: spec,
+                                       targetShipID: spec.guidance == .beamTurret ? target?.entityID : nil,
+                                       targetShot: nil, exitIndex: exitIndex)
+                // Telemetry/audio (the renderer draws from `activeBeams`);
+                // looping beams get their audio from beamLoopStart/Stop.
+                events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: muzzle,
+                                    to: record?.lastEnd ?? muzzle + Vec2.heading(aim) * spec.beamLength,
+                                    hit: record?.lastHit ?? false,
+                                    soundID: spec.loopSound ? nil : spec.fireSoundID, weaponID: spec.id))
+            } else {
+                let launchAim = parallelLaunchAim(aim, spec: spec, ship: ship, exitIndex: exitIndex)
+                spawnProjectile(spec: spec, muzzle: muzzle, aim: launchAim,
+                                ownerID: ship.entityID, ownerGovt: ship.government,
+                                ownerVelocity: ship.velocity,
+                                targetID: spec.homes ? ship.currentTargetID : nil,
+                                subDepth: 0, shooter: ship)
+                events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: launchAim,
+                                           soundID: spec.fireSoundID, weaponID: spec.id))
+            }
+            fired += 1
+        }
+        return fired
+    }
+
+    /// The ship's next exit quadrant for `type` (see `fireVolley`).
+    private func nextExitQuadrant(_ ship: Ship, _ type: WeaponExitType) -> Int {
+        let current = ship.exitQuadrants[type] ?? rng.range(4)
+        ship.exitQuadrants[type] = (current + 1) % 4
+        return current
+    }
+
+    /// A negative `Inaccuracy` is "parallel launch": no random spread, the shot
+    /// leaves `|s|` degrees off the hull heading toward the side its exit point
+    /// sits on (the class exit table's sign, 0x0041fd30). Returns `aim` as is
+    /// otherwise.
+    private func parallelLaunchAim(_ aim: Double, spec: WeaponSpec, ship: Ship, exitIndex: Int) -> Double {
+        guard spec.inaccuracyDegrees < 0, let ep = ship.exitPoints else { return aim }
+        let pts = ep.points(for: spec.exitType)
+        guard !pts.isEmpty else { return aim }
+        let x = pts[((exitIndex % pts.count) + pts.count) % pts.count].x
+        guard x != 0 else { return aim }
+        let offset = Double(-spec.inaccuracyDegrees) * .pi / 180
+        return wholeDegrees(ship.angle) + (x > 0 ? offset : -offset)
+    }
+
+    /// The NPC firing envelope per axis for `spec`, or nil when it fires at
+    /// any range (`Weapon_FireShipWeapons` 0x00414550).
+    static func npcFireEnvelope(_ spec: WeaponSpec) -> Double? {
+        switch spec.guidance {
+        case .beam, .beamTurret: return spec.beamLength + 32
+        case .turret, .frontQuadrant, .rearQuadrant: return (spec.range + 32).rounded(.down)
+        default: return nil
+        }
+    }
+
+    /// AI-03: the reload multiplier for an NPC whose target is the player,
+    /// from the player's combat rating against class 0's Strength (×1.75 /
+    /// 1.5 / 1.25 / 1.1 below Strength × 100 / 400 / 800 / 1600).
+    static func ratingFireRamp(rating: Int, classZeroStrength: Int) -> Double {
+        let s = classZeroStrength
+        if rating < s * 100 { return 1.75 }
+        if rating < s * 400 { return 1.5 }
+        if rating < s * 800 { return 1.25 }
+        if rating < s * 1600 { return 1.1 }
+        return 1
+    }
+
+    /// The player's combat rating as it stands this instant: the host's
+    /// synced value plus kills made since the last fold.
+    public var livePlayerCombatRating: Int {
+        CombatRatingRule.fold(playerCombatRating, adding: diplomacy?.combatRating ?? 0)
+    }
+
+    /// `shïp` 128's Strength — class 0, which the rating ramp is scaled by.
+    var classZeroStrength: Int { galaxy?.game.ship(128)?.strength ?? 2 }
+
     /// The world angle a weapon fires at this frame given its guidance, or nil if
-    /// it can't fire (turret/quadrant with no target in arc). Mirrors EV Nova /
-    /// NovaJS: turrets and in-arc quadrant guns lead the moving target; guided,
-    /// rockets, and plain guns fire along the hull heading (the projectile does
-    /// any homing itself).
+    /// it can't fire. Turrets (modes 3/4) and in-arc quadrant guns aim at the
+    /// target (`Ship_AimWeaponPredictive` 0x0043b740 for projectiles); a turret
+    /// whose bearing falls in a blind spot holds. A front-quadrant gun (7) with
+    /// no target, or its target out of its 46° arc, dumb-fires along the nose
+    /// for the player and holds for an NPC; a rear one (8) holds. Everything
+    /// else fires along the whole-degree hull heading. The integer spread
+    /// `rand(2s) − s` is added here, except for bombs (mode 5).
     private func fireAngle(for spec: WeaponSpec, ship: Ship, muzzle: Vec2, target: Ship?) -> Double? {
+        let heading = wholeDegrees(ship.angle)
+        var aim: Double
         switch spec.guidance {
         case .turret, .beamTurret:
             guard let t = target else { return nil }
-            // Flags 0x1000/0x2000/0x4000: a turret can be given blind arcs to the
-            // front, sides and/or rear. A target sitting in one is simply not
-            // engageable by this mount — hold fire rather than shoot through the
-            // hull. Bearing is measured off the ship's nose, not the muzzle's.
-            let bearing = angleDelta(from: ship.angle, to: (t.position - ship.position).angle)
-            guard spec.flags.turretCanBear(relativeBearing: bearing) else { return nil }
-            return leadAngle(from: muzzle, shooterVel: ship.velocity, target: t,
-                             shotSpeed: spec.projectileSpeed, instantHit: spec.isBeam)
+            let bearing = (t.position - ship.position).angle
+            guard !turretBlind(ship, spec: spec, bearing: bearing) else { return nil }
+            aim = spec.isBeam ? wholeDegrees((t.position - muzzle).angle)
+                              : leadAngle(from: muzzle, shooterVel: ship.velocity, target: t, spec: spec)
         case .frontQuadrant, .rearQuadrant:
-            let base = spec.guidance == .rearQuadrant ? ship.angle + .pi : ship.angle
-            guard let t = target else { return base }
-            let q = quadrant(source: ship.position, facing: ship.angle, target: t.position)
-            let inArc = (spec.guidance == .frontQuadrant && q == .front)
-                     || (spec.guidance == .rearQuadrant && q == .rear)
-            return inArc ? leadAngle(from: muzzle, shooterVel: ship.velocity, target: t,
-                                     shotSpeed: spec.projectileSpeed, instantHit: false) : base
+            let rear = spec.guidance == .rearQuadrant
+            let inArc: Bool
+            if let t = target {
+                let base = rear ? ship.angle + .pi : ship.angle
+                inArc = abs(angleDelta(from: base, to: (t.position - ship.position).angle)) < 46 * .pi / 180
+            } else {
+                inArc = false
+            }
+            if let t = target, inArc {
+                aim = leadAngle(from: muzzle, shooterVel: ship.velocity, target: t, spec: spec)
+            } else if !rear && ship.brain == nil {
+                aim = heading
+            } else if !rear && target == nil {
+                aim = heading
+            } else {
+                return nil
+            }
         default:
-            // guided / rocket / plain gun / plain beam: along the hull heading.
-            return ship.angle
+            aim = heading
         }
+        if spec.inaccuracyDegrees > 0, spec.guidance != .freefallBomb {
+            aim += Double(rng.range(2 * spec.inaccuracyDegrees) - spec.inaccuracyDegrees) * .pi / 180
+        }
+        return aim
+    }
+
+    /// `Weapon_IsTargetBearingInTurretBlindSpot` (0x0046b360): a bearing under
+    /// 46° from the nose is "front", under 136° "sides", else "rear"; the arc is
+    /// blind if the weapon's Flags or the hull's Flags carry 0x1000 / 0x2000 /
+    /// 0x4000 for it.
+    func turretBlind(_ ship: Ship, spec: WeaponSpec, bearing: Double) -> Bool {
+        let off = abs(angleDelta(from: wholeDegrees(ship.angle), to: wholeDegrees(bearing))) * 180 / .pi
+        let bit = off < 46 ? 0x1000 : off < 136 ? 0x2000 : 0x4000
+        let weaponBlind = bit == 0x1000 ? spec.flags.turretBlindFront
+            : bit == 0x2000 ? spec.flags.turretBlindSides : spec.flags.turretBlindRear
+        return weaponBlind || ship.hullFlags & bit != 0
     }
 
     enum FireQuadrant { case front, sides, rear }
-    private func quadrant(source: Vec2, facing: Double, target: Vec2) -> FireQuadrant {
-        let rel = abs(angleDelta(from: facing, to: (target - source).angle))
-        if rel < .pi / 4 { return .front }
-        if rel > 3 * .pi / 4 { return .rear }
-        return .sides
+
+    /// `angle` truncated to the whole degree the original stores.
+    func wholeDegrees(_ angle: Double) -> Double {
+        var deg = (angle * 180 / .pi).truncatingRemainder(dividingBy: 360)
+        if deg < 0 { deg += 360 }
+        return (deg + 1e-9).rounded(.down) * .pi / 180
     }
 
-    /// First-order intercept ("lead"): the world angle to fire a shot of
-    /// `shotSpeed` so it meets a moving target. Falls back to aiming straight at
-    /// the target when there's no real solution (or the shot is an instant-hit
-    /// beam). Ported from NovaJS `guidance.ts` `firstOrderWithFallback`.
+    /// `Ship_AimWeaponPredictive` (0x0043b740): one-step lead. The shot's time
+    /// to target is `distance / speed` (a rocket's `(d − 19.59 v) / v + 2.067`
+    /// beyond 19.59 speeds, else `d / (0.316 v)`), and the aim point is the
+    /// target moved that long at its velocity relative to the shooter's.
+    /// Returns a whole-degree bearing.
+    func leadAngle(from origin: Vec2, shooterVel: Vec2, target: Ship, spec: WeaponSpec) -> Double {
+        let rel = target.position - origin
+        let speed = spec.speedPerTick
+        guard speed > 0 else { return wholeDegrees(rel.angle) }
+        let dist = rel.length
+        let ticks: Double
+        if spec.guidance == .rocket {
+            ticks = dist > speed * 19.59 ? (dist - speed * 19.59) / speed + 2.066666666666667
+                                         : dist / (speed * 0.316)
+        } else {
+            ticks = dist / speed
+        }
+        let relVelPerTick = (target.velocity - shooterVel) * (1 / OriginalClock.ticksPerSecond)
+        return wholeDegrees((rel + relVelPerTick * ticks).angle)
+    }
+
+    /// Kept for the stellar batteries' callers: lead with a raw shot speed.
     func leadAngle(from origin: Vec2, shooterVel: Vec2, target: Ship,
                    shotSpeed: Double, instantHit: Bool) -> Double {
-        let straight = (target.position - origin).angle
-        guard !instantHit, shotSpeed > 0 else { return straight }
-        let pos = (target.position - origin) * (1.0 / shotSpeed)
-        let vel = (target.velocity - shooterVel) * (1.0 / shotSpeed)
-        let a = vel.dot(vel) - 1
-        let b = 2 * pos.dot(vel)
-        let c = pos.dot(pos)
-        var time: Double?
-        if abs(a) < 1e-9 {
-            if abs(b) > 1e-9 { let t = -c / b; if t >= 0 { time = t } }
-        } else {
-            let det = b * b - 4 * a * c
-            if det >= 0 {
-                let s = det.squareRoot()
-                time = [(-s - b) / (2 * a), (s - b) / (2 * a)].filter { $0 >= 0 }.sorted().first
-            }
-        }
-        guard let t = time else { return straight }
-        return (pos + vel * t).angle
+        let rel = target.position - origin
+        guard !instantHit, shotSpeed > 0 else { return wholeDegrees(rel.angle) }
+        let t = rel.length / shotSpeed
+        return wholeDegrees((rel + (target.velocity - shooterVel) * t).angle)
     }
 
-    /// Build and register a projectile (primary shot or submunition). Movement
-    /// follows guidance: guided homes inertialessly, rockets accelerate from the
-    /// owner's velocity, everything else inherits the owner's velocity plus the
-    /// muzzle vector.
+    /// Build and register a projectile (`Shot_SpawnShotFromWeapon` 0x0041fd30).
+    ///
+    /// A ship's shot starts at its velocity plus `Speed` along `aim` — except
+    /// the player's bombs (mode 5), which keep 0.8 × the ship's velocity, and
+    /// the player's rockets (mode 6), which start at the ship's velocity and
+    /// blend toward `Speed` in flight. A homing shot's velocity is replaced by
+    /// its guidance every tick. A submunition (`subDepth > 0`) starts from
+    /// rest, except a rocket, which keeps its parent's velocity. A bomb's
+    /// spread is applied after its velocity, to the sprite alone. Modes 4 and 9
+    /// roll the turret tracking roll (WP-26).
     @discardableResult
     func spawnProjectile(spec: WeaponSpec, muzzle: Vec2, aim: Double,
                          ownerID: Int, ownerGovt: Int, ownerVelocity: Vec2,
-                         targetID: Int?, subDepth: Int) -> Projectile {
+                         targetID: Int?, subDepth: Int, shooter: Ship? = nil) -> Projectile {
         let dir = Vec2.heading(aim)
         let homing = spec.homes
         let accelerating = spec.accelerates
-        let vel: Vec2
+        let ownerIsPlayer = shooter?.isPlayerControlled ?? false
+        var vel = ownerVelocity
+        if subDepth > 0 && spec.guidance != .rocket { vel = Vec2() }
+        let skipsLaunchSpeed = ownerIsPlayer && subDepth == 0
+            && (spec.guidance == .freefallBomb || spec.guidance == .rocket)
+        if ownerIsPlayer && subDepth == 0 && spec.guidance == .freefallBomb { vel = vel * 0.8 }
+        if !skipsLaunchSpeed { vel += dir * spec.projectileSpeed }
         if homing { vel = dir * spec.projectileSpeed }
-        else if accelerating { vel = ownerVelocity }
-        else { vel = ownerVelocity + dir * spec.projectileSpeed }
-        let life = spec.range / max(1, spec.projectileSpeed)
-        let p = Projectile(position: muzzle, velocity: vel, life: life,
+        var facing = aim
+        if spec.guidance == .freefallBomb, spec.inaccuracyDegrees > 0 {
+            facing += Double(rng.range(2 * spec.inaccuracyDegrees) - spec.inaccuracyDegrees) * .pi / 180
+        }
+        let lifeTicks = spec.lifeTicks > 0 ? spec.lifeTicks : spec.range / max(1, spec.speedPerTick)
+        let p = Projectile(position: muzzle, velocity: vel, life: lifeTicks / OriginalClock.ticksPerSecond,
                            shieldDamage: spec.shieldDamage, armorDamage: spec.armorDamage,
                            blastRadius: spec.blastRadius, ownerID: ownerID, ownerGovt: ownerGovt,
                            homing: homing, turnRate: spec.turnRate, speed: spec.projectileSpeed,
                            targetID: homing ? targetID : nil,
                            vulnerableToPD: spec.vulnerableToPD, ionization: spec.ionization,
-                           accelerating: accelerating, facing: aim,
+                           accelerating: accelerating, facing: facing,
                            decayPerSec: spec.decayPerSec, proxRadius: spec.proxRadius,
                            proxSafetyRemaining: spec.proxSafetySeconds, proxHitAll: spec.proxHitAll,
                            detonateOnExpire: spec.detonateOnExpire, impact: spec.impact,
@@ -2180,17 +3104,41 @@ public final class World {
                            weaponID: spec.id, pdDurability: spec.durability,
                            translucentShots: spec.translucentShots, flags: spec.flags)
         p.ionizeColor = spec.ionizeColor
+        p.guidance = spec.guidance == .unguided && spec.isGuided ? .guided : spec.guidance
+        p.lifeTicks = lifeTicks
+        p.decayInterval = spec.decayTicks
+        p.animFrameDelayTicks = spec.animFrameDelayTicks
+        p.animFlags2 = spec.animFlags2
+        p.headingDegrees = wholeDegrees(facing) * 180 / .pi
+        p.turnDegreesPerTick = spec.turnDegreesPerTick
+        p.hitsAnyShip = spec.hitsAnyShip
+        p.subsOnExpire = !spec.noSubmunitionsOnExpire
+        p.expiryBlast = spec.detonateOnExpire && spec.blastRadius > 0 && !spec.isPlanetTypeWeapon
+        p.nonLethal = spec.disablesOnly
+        p.ownerLeaderID = shooter?.brain?.leaderID
+        p.jamLocks = spec.jamVulnerability.map { $0 > 0 ? rng.range($0 + 1) : 0 }
+        if let shooter, subDepth == 0,
+           spec.guidance == .turret || spec.guidance == .pointDefense {
+            p.turretRoll = shooter.turretRating < 1 ? rng.range(100) + 1 : rng.range(shooter.turretRating) + 1
+        }
+        // Seeker 0x0008 (WP-10): in an interference system a homing shot may
+        // launch confused — `rand(100 / scale) + 1 ≤ Interference` latches the
+        // weave (state 999). The scale is the steady 0.63.
+        if p.guidance == .guided, spec.confusedByInterference {
+            let bound = max(1, Int(100 / OriginalClock.rawCallTickScale))
+            if rng.range(bound) + 1 <= systemInterference { p.guidanceState = 999 }
+        }
         projectiles.append(p)
         return p
     }
 
     /// Nearest hittable ship to `pos` (for submunitions that seek the nearest
-    /// valid target). Skips the owner and its own faction.
-    private func nearestHostile(to pos: Vec2, ownerID: Int, ownerGovt: Int) -> Ship? {
+    /// valid target).
+    private func nearestHostile(to pos: Vec2, shot: Projectile) -> Ship? {
         var best: Ship?
         var bestD = Double.greatestFiniteMagnitude
         for other in allShips where other.isAlive {
-            guard canHit(owner: ownerID, ownerGovt: ownerGovt, victim: other) else { continue }
+            guard canShotHit(shot, other) else { continue }
             let d = (other.position - pos).length
             if d < bestD { bestD = d; best = other }
         }
@@ -2270,86 +3218,190 @@ public final class World {
     /// `fireWeapons` (the only other place loops stop) won't run for it again.
     private func stopAllBeamLoops(for ship: Ship) {
         guard !ship.activeBeamLoopMounts.isEmpty else { return }
-        for idx in ship.activeBeamLoopMounts {
+        for idx in ship.activeBeamLoopMounts.sorted() {   // stable event order
             events.append(.beamLoopStop(shooterID: ship.entityID, mountIndex: idx))
             removeActiveBeam(shooterID: ship.entityID, mountIndex: idx)
         }
         ship.activeBeamLoopMounts.removeAll()
     }
 
-    /// Recoil impulse on the firing ship, scaled down by its own mass (radius
-    /// proxy) — applies to every weapon that fires, beam or projectile, since
-    /// the Bible doesn't exempt beams from `Recoil`. Positive kicks the ship
-    /// backward, opposite the shot; negative thrusts it forward along the shot
-    /// direction instead (the documented "0 or -1 = none, else may be negative
-    /// to thrust forwards" `Recoil` semantics).
-    private func applyRecoil(to ship: Ship, spec: WeaponSpec, aim: Double) {
-        guard spec.recoil != 0 else { return }
-        let shotDir = Vec2(cos(aim), sin(aim))
-        let kickDir = spec.recoil > 0 ? shotDir * -1 : shotDir
-        ship.velocity += kickDir * (abs(spec.recoil) * 6.0 / max(4, ship.radius))
+    /// Recoil (`Weapon_FireShipWeapons` 0x00414550 / the player's 0x00455150):
+    /// once per volley, `Recoil / mass` px/tick added toward the hull's rear,
+    /// per axis up to its base top speed. The player recoils only for a
+    /// positive value; an NPC for any value but −1 (a negative one pushes it
+    /// forward).
+    private func applyRecoil(to ship: Ship, spec: WeaponSpec) {
+        guard spec.recoil != 0, ship.massTons > 0 else { return }
+        if ship.isPlayerControlled && spec.recoil < 0 { return }
+        let step = OriginalClock.perSecond(spec.recoil / ship.massTons)
+        ship.addPolarVelocityWithClamp(heading: wholeDegrees(ship.angle) + .pi, step: step,
+                                       max: ship.stats.maxSpeed)
     }
 
-    /// Instant-hit beam fired this reload tick: apply damage along the ray from
-    /// the mount's real exit point. Continuous beams keep their persistent
-    /// `ActiveBeam` (refreshed each frame); pulse beams get a brief flash beam
-    /// and their own fire sound.
-    private func fireBeam(from ship: Ship, mount: WeaponMount, mountIndex: Int,
-                          spec: WeaponSpec, aim: Double, target: Ship?) {
-        let origin = ship.muzzle(for: mount)
-        let dir = Vec2.heading(aim)
-        let cast = beamCast(from: origin, dir: dir, range: spec.range,
-                            ownerID: ship.entityID, ownerGovt: ship.government,
-                            planetTypeOnly: spec.isPlanetTypeWeapon)
+    /// One queued beam (`Shot_QueueBeamHit` 0x00427a90 /
+    /// `Shot_UpdateBeamHitQueue` 0x0042f270): every fire of a beam bank adds a
+    /// record that lives `Count` raw calls (plus `16 − CoronaFalloff` fading
+    /// calls when `Decay > 0`) and, on every call it touches a ship, deals the
+    /// weapon's full mass and energy damage — so a beam whose Count exceeds its
+    /// Reload stacks records (the original's "machine-gun beam").
+    final class BeamRecord {
+        let shooterID: Int
+        let mountIndex: Int
+        let spec: WeaponSpec
+        /// A turret beam (mode 3) tracks this ship; a PD beam this shot.
+        let targetShipID: Int?
+        weak var targetShot: Projectile?
+        let exitIndex: Int
+        var callsLeft: Int
+        var fadeCallsLeft: Int
+        /// Visual for a pulse beam (nil for a looping beam, whose persistent
+        /// `ActiveBeam` already shows).
+        var visual: ActiveBeam?
+        /// Where the last call's sweep ended, and whether it touched anything.
+        var lastEnd = Vec2()
+        var lastHit = false
+        init(shooterID: Int, mountIndex: Int, spec: WeaponSpec, targetShipID: Int?,
+             targetShot: Projectile?, exitIndex: Int) {
+            self.shooterID = shooterID; self.mountIndex = mountIndex; self.spec = spec
+            self.targetShipID = targetShipID; self.targetShot = targetShot
+            self.exitIndex = exitIndex
+            callsLeft = max(1, Int(spec.lifeTicks)); fadeCallsLeft = spec.beamFadeCalls
+        }
+    }
+
+    @discardableResult
+    private func queueBeam(from ship: Ship, mountIndex: Int, spec: WeaponSpec,
+                           targetShipID: Int?, targetShot: Projectile?, exitIndex: Int? = nil) -> BeamRecord? {
+        guard beamRecords.count < Self.beamRecordLimit else { return nil }
+        let record = BeamRecord(shooterID: ship.entityID, mountIndex: mountIndex, spec: spec,
+                                targetShipID: targetShipID, targetShot: targetShot,
+                                exitIndex: exitIndex ?? (mountIndex < ship.weapons.count ? ship.weapons[mountIndex].exitCursor : 0))
+        if !spec.loopSound || spec.isPointDefense {
+            let visual = ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex, weaponID: spec.id,
+                                    from: ship.position, to: ship.position, hit: false,
+                                    continuous: false, life: .infinity,
+                                    maxLife: Double(record.callsLeft + record.fadeCallsLeft) * OriginalClock.rawCallSeconds,
+                                    width: spec.beamWidth, color: spec.beamColor,
+                                    coronaColor: spec.coronaColor, coronaFalloff: spec.coronaFalloff)
+            record.visual = visual
+            activeBeams.append(visual)
+        }
+        beamRecords.append(record)
+        runBeamRecord(record)
+        return record
+    }
+
+    /// The original's 64-slot beam queue.
+    static let beamRecordLimit = 64
+
+    /// Advance every beam record by this step's raw calls.
+    private func stepBeamRecords(rawCalls: Int) {
+        guard !beamRecords.isEmpty else { return }
+        for _ in 0..<rawCalls {
+            for record in beamRecords where record.callsLeft > 0 || record.fadeCallsLeft > 0 {
+                if record.callsLeft > 0 { record.callsLeft -= 1 } else { record.fadeCallsLeft -= 1 }
+                if record.callsLeft > 0 || record.fadeCallsLeft > 0 { runBeamRecord(record) }
+            }
+        }
+        beamRecords.removeAll { record in
+            let done = record.callsLeft <= 0 && record.fadeCallsLeft <= 0
+            if done, let visual = record.visual { activeBeams.removeAll { $0 === visual } }
+            return done
+        }
+    }
+
+    /// One raw call of a beam record: aim, sweep, and damage whatever it
+    /// touches. While fading (`callsLeft == 0`) it draws but no longer hurts.
+    private func runBeamRecord(_ record: BeamRecord) {
+        guard let ship = ship(id: record.shooterID), ship.isAlive else {
+            record.callsLeft = 0; record.fadeCallsLeft = 0; return
+        }
+        let spec = record.spec
+        let origin = ship.muzzle(exitType: spec.exitType, index: record.exitIndex)
+        var angle: Double
+        if spec.guidance == .pointDefenseBeam {
+            guard let shot = record.targetShot, shot.alive else {
+                if let tid = record.targetShipID, let t = self.ship(id: tid), t.isAlive {
+                    angle = wholeDegrees((t.position - origin).angle)
+                    return castAndHitBeam(record, ship: ship, origin: origin, angle: angle)
+                }
+                record.callsLeft = 0; record.fadeCallsLeft = 0; return
+            }
+            angle = wholeDegrees((shot.position - origin).angle)
+            record.visual?.from = origin
+            record.visual?.to = shot.position
+            record.visual?.hit = true
+            guard record.callsLeft > 0 else { return }
+            // A PD beam bites `Mass + trunc(Energy / 2)` out of the shot's
+            // durability each call; the shot dies once it can't absorb more.
+            if shot.pdDurability < 1 {
+                shot.alive = false
+                events.append(.explosion(at: shot.position, radius: 10, soundID: nil, boomID: nil))
+                record.callsLeft = 0
+            } else {
+                shot.pdDurability -= Int(spec.armorDamage + (spec.shieldDamage / 2).rounded(.down))
+            }
+            return
+        }
+        if spec.guidance == .beamTurret {
+            guard let tid = record.targetShipID, let t = self.ship(id: tid), t.isAlive else {
+                record.callsLeft = 0; record.fadeCallsLeft = 0; return
+            }
+            angle = wholeDegrees((t.position - origin).angle)
+        } else {
+            angle = spriteFrameHeading(ship)
+        }
+        if spec.inaccuracyDegrees > 0 {
+            angle += Double(rng.range(2 * spec.inaccuracyDegrees) - spec.inaccuracyDegrees) * .pi / 180
+        }
+        castAndHitBeam(record, ship: ship, origin: origin, angle: angle)
+    }
+
+    private func castAndHitBeam(_ record: BeamRecord, ship: Ship, origin: Vec2, angle: Double) {
+        let spec = record.spec
+        let dir = Vec2.heading(angle)
+        let cast = beamCast(from: origin, dir: dir, range: spec.beamLength, ownerID: ship.entityID,
+                            ownerGovt: ship.government, planetTypeOnly: spec.isPlanetTypeWeapon)
+        let hit = cast.hitShip != nil || cast.hitAsteroid != nil || cast.hitStellar != nil
+        if let visual = record.visual { visual.from = origin; visual.to = cast.end; visual.hit = hit }
+        record.lastEnd = cast.end
+        record.lastHit = hit
+        guard record.callsLeft > 0 else { return }
         if let body = cast.hitStellar {
-            applyStellarHit(body, shield: spec.shieldDamage, armor: spec.armorDamage)
+            applyStellarHit(body, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID)
         } else if let h = cast.hitShip {
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization, ionizeColor: spec.ionizeColor,
                      piercing: spec.penetratesShields, weaponID: spec.id,
-                     disablesOnly: spec.disablesOnly)
-            // Tractor beam (negative Impact): pull the target toward the firing
-            // ship each time the beam connects, more strongly on lighter hulls.
-            if spec.isTractorBeam {
-                let pull = (ship.position - h.position).normalized * (-spec.impact * 3.0 / max(4, h.radius))
-                h.velocity += pull
-            } else if spec.impact > 0 {
-                // Positive Impact: knockback along the beam's travel direction,
-                // same model as a projectile's direct-hit knockback in `detonate`
-                // — beams aren't exempt from `Impact` any more than they are `Recoil`.
-                h.velocity += dir * (spec.impact * 6.0 / max(4, h.radius))
-            }
+                     disablesOnly: spec.disablesOnly,
+                     impact: spec.impact, impactFrom: origin, hitPoint: cast.end)
         } else if let rock = cast.hitAsteroid {
-            // Flags2 0x8000: mining beams do ×10 mass damage to rocks.
-            let rockArmor = spec.tenTimesVersusAsteroids ? spec.armorDamage * 10 : spec.armorDamage
-            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: rockArmor, shooterID: ship.entityID)
+            applyAsteroidHit(rock, shield: spec.shieldDamage, armor: spec.armorDamage,
+                             tenTimes: spec.tenTimesVersusAsteroids, shooterID: ship.entityID,
+                             impact: spec.impact, from: origin)
         }
-        let hit = cast.hitShip != nil || cast.hitAsteroid != nil || cast.hitStellar != nil
-        if !spec.loopSound {
-            // Pulse beam: a short-lived flash welded to the exit point. Continuous
-            // beams instead keep the persistent ActiveBeam from updateBeamLoops.
-            if let existing = activeBeams.first(where: { $0.shooterID == ship.entityID && $0.mountIndex == mountIndex && !$0.continuous }) {
-                existing.from = origin; existing.to = cast.end; existing.hit = hit
-                existing.life = existing.maxLife
-            } else {
-                activeBeams.append(ActiveBeam(shooterID: ship.entityID, mountIndex: mountIndex,
-                                              weaponID: spec.id, from: origin, to: cast.end, hit: hit,
-                                              continuous: false, life: spec.pulseBeamLifeSeconds,
-                                              width: spec.beamWidth, color: spec.beamColor,
-                                              coronaColor: spec.coronaColor, coronaFalloff: spec.coronaFalloff))
-            }
-        }
-        // Telemetry/audio event (renderer draws geometry from `activeBeams`, not
-        // this). `loopSound` beams get their audio from beamLoopStart/Stop, so
-        // they carry no one-shot id here.
-        events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: origin, to: cast.end,
-                            hit: hit, soundID: spec.loopSound ? nil : spec.fireSoundID, weaponID: spec.id))
     }
 
-    /// Raycast a beam of `range` px from `origin` along unit `dir`: the nearest
-    /// hittable ship or asteroid, and the clipped endpoint. The owner is passed
-    /// as id + government (not a `Ship`) so a stellar defense weapon — whose
-    /// shooter is a planet, not a ship — can cast too.
+    /// A fixed beam points along the hull's *sprite frame*: the heading
+    /// quantized to the sheet's rotation frames (0x0042f270).
+    private func spriteFrameHeading(_ ship: Ship) -> Double {
+        let frames = max(1, ship.stats.rotationFrames)
+        return Double(ship.spriteFrame % frames) * (2 * .pi / Double(frames))
+    }
+
+    /// A beam's sweep (`Shot_UpdateBeamHitQueue` 0x0042f270) from `origin`
+    /// along unit `dir`, `range` px long. A ship is a candidate when its
+    /// *centre* lies within `w/2 + range` of the muzzle and within
+    /// `w × 10 / 32` degrees of the beam's bearing, `w` being 0.66 × its sprite
+    /// width — so a beam can slip past the edge of a large hull (the "beam
+    /// holes" quirk), and the bearing test doesn't wrap at north. The nearest
+    /// candidate is hit, and the beam ends 0.2 sprite widths short of its
+    /// centre. Beams ignore government: they spare only the shooter's own
+    /// escorts and leader (and the player's squad, for a player-squad
+    /// shooter), the escape pod, and ships of the other planet-type class.
+    /// Asteroids and destroyable stellars use a plain distance-to-ray test.
+    /// The owner is passed as id + government so a stellar battery can cast
+    /// too.
     func beamCast(from origin: Vec2, dir: Vec2, range: Double, ownerID: Int, ownerGovt: Int,
                   planetTypeOnly: Bool = false)
         -> (end: Vec2, hitShip: Ship?, hitAsteroid: Asteroid?, hitStellar: StellarBody?) {
@@ -2357,19 +3409,29 @@ public final class World {
         var hitShip: Ship?
         var hitAsteroid: Asteroid?
         var hitStellar: StellarBody?
-        // `wëap.Flags2` 0x0400 ("planet-type weapon"): the beam passes straight
-        // through ships and rocks, connecting only with a destroyable stellar.
-        if !planetTypeOnly {
-            for other in allShips where other.entityID != ownerID && other.isAlive {
-                if !canHit(owner: ownerID, ownerGovt: ownerGovt, victim: other) { continue }
-                let rel = other.position - origin
-                let along = rel.dot(dir)
-                guard along > 0, along <= range else { continue }
-                let perp = (rel - dir * along).length
-                if perp <= other.radius + 4 && along < bestT {
-                    bestT = along; hitShip = other; hitAsteroid = nil; hitStellar = nil
-                }
+        let shooter = ship(id: ownerID)
+        let shooterInPlayerSquad = shooter.map { isPlayerFleetMember($0.entityID) } ?? false
+        let beamDeg = Int((wholeDegrees(dir.angle) * 180 / .pi).rounded())
+        var bestShipDist = Double.greatestFiniteMagnitude
+        for other in allShips where other.entityID != ownerID && other.isAlive
+            && other.shipTypeID != Ship.escapePodShipID && other.isPlanetTypeShip == planetTypeOnly {
+            if let shooter {
+                if other.brain?.leaderID == shooter.entityID { continue }
+                if shooter.brain?.leaderID == other.entityID { continue }
+                if shooterInPlayerSquad && isPlayerFleetMember(other.entityID) { continue }
+                if other.isPlayerControlled, shooter.isPlayerControlled, !pvpAllowed { continue }
             }
+            let w = (2 * other.radius * 0.66).rounded()
+            let reach = w / 2 + range
+            let rel = other.position - origin
+            let d = rel.length
+            guard d <= reach else { continue }
+            let bearing = Int((wholeDegrees(rel.angle) * 180 / .pi).rounded())
+            guard Double(abs(bearing - beamDeg)) <= (w * 10 / 32).rounded(.towardZero) else { continue }
+            if d < bestShipDist { bestShipDist = d; hitShip = other }
+        }
+        if let h = hitShip { bestT = max(0, bestShipDist - 2 * h.radius * 0.2) }
+        if !planetTypeOnly {
             for rock in asteroids where rock.isAlive {
                 let rel = rock.position - origin
                 let along = rel.dot(dir)
@@ -2424,15 +3486,13 @@ public final class World {
         let mount = ship.weapons[beam.mountIndex]
         let spec = mount.spec
         let origin = ship.muzzle(for: mount)
-        // Reuse `fireAngle`'s own guidance switch so the *visual* weld matches
-        // what actually deals damage each reload tick: unconditionally tracking
-        // the current target here (regardless of guidance) used to make a
-        // fixed-mount beam visibly swivel onto a locked target while the real
-        // hit-detecting raycast (driven by `fireAngle`) kept firing straight
-        // along the hull — a beam that looked like it connected but didn't.
+        // The same aim the damaging records use (`runBeamRecord`), without the
+        // per-call spread: a turret beam tracks its target, a fixed one lies
+        // along the hull's sprite frame.
         let target: Ship? = ship.currentTargetID.flatMap { self.ship(id: $0) }.flatMap { $0.isAlive ? $0 : nil }
-        let aim = fireAngle(for: spec, ship: ship, muzzle: origin, target: target) ?? ship.angle
-        let cast = beamCast(from: origin, dir: Vec2.heading(aim), range: spec.range,
+        let aim = spec.guidance == .beamTurret && target != nil
+            ? wholeDegrees((target!.position - origin).angle) : spriteFrameHeading(ship)
+        let cast = beamCast(from: origin, dir: Vec2.heading(aim), range: spec.beamLength,
                             ownerID: ship.entityID, ownerGovt: ship.government,
                             planetTypeOnly: spec.isPlanetTypeWeapon)
         beam.from = origin
@@ -2459,27 +3519,45 @@ public final class World {
         }
     }
 
-    /// Weapon → asteroid damage. Asteroids have no shields, so shield+armor
-    /// damage both come off `hp` (scaled the same way ship armor is via
-    /// `combatTuning`). Not modeling the wëap "x10 mass damage to asteroids"
-    /// flag — that bit isn't decoded on `WeaponSpec` anywhere in this engine
-    /// yet, so every weapon currently does its normal damage to rock.
-    func applyAsteroidHit(_ rock: Asteroid, shield: Double, armor: Double, shooterID: Int) {
-        rock.hp -= (shield + armor) * combatTuning.damageScale
-        if rock.hp <= 0 { destroyAsteroid(rock, killerID: shooterID) }
+    /// Weapon → asteroid (WP-18): the rock's integrity loses the weapon's
+    /// *energy* damage (× 10 with `wëap` Flags2 0x8000); mass damage does
+    /// nothing. It breaks once integrity goes below zero. A surviving rock is
+    /// nudged by `impact / mass` px/tick away from the hit, each axis clamped
+    /// to ±2 px/tick.
+    func applyAsteroidHit(_ rock: Asteroid, shield: Double, armor: Double, tenTimes: Bool = false,
+                          shooterID: Int, impact: Double = 0, from: Vec2? = nil) {
+        rock.hp -= shield * (tenTimes ? 10 : 1)
+        if rock.hp < 0 {
+            destroyAsteroid(rock, killerID: shooterID)
+        } else if impact != 0, rock.mass > 0, let from {
+            let push = Vec2.heading((rock.position - from).angle) * OriginalClock.perSecond(impact / rock.mass)
+            let cap = OriginalClock.perSecond(2)
+            rock.velocity = Vec2(max(-cap, min(cap, rock.velocity.x + push.x)),
+                                 max(-cap, min(cap, rock.velocity.y + push.y)))
+        }
     }
 
     // MARK: Projectiles
 
-    private func stepProjectiles(_ dt: Double) {
+    /// One step of every shot (`Shot_HandleShot` 0x00435830 with
+    /// `Shot_UpdateShotGuidance` 0x00431530 and `Shot_ResolveCollisions`
+    /// 0x00437e20). A shot lives `Count` ticks and decays a point of damage
+    /// each time `Decay` ticks pass. Its guidance runs (`stepGuidance`), it
+    /// moves, and then it may connect: a shot with a proximity fuse detonates
+    /// within `trunc(ProxRadius + 0.333 × width)` of a ship it may hit (that
+    /// pass also releases submunitions), and otherwise by touching one, which
+    /// does not. Neither works before `ProxSafety` ticks have passed.
+    private func stepProjectiles(_ dt: Double, rawCalls: Int) {
         // Submunitions spawned this frame are collected and appended after the
         // loop so we don't mutate `projectiles` while iterating it.
         var spawned: [Projectile] = []
+        let ticks = dt * OriginalClock.ticksPerSecond
         for p in projectiles where p.alive {
             // Co-op visual echo (client): fly straight on its velocity and expire,
             // no collision/damage/submunitions — the real shot lives on the
             // authority and its damage rides ship-health sync.
             if p.visualOnly {
+                if p.spinShots { advanceShotAnimation(p, rawCalls: rawCalls) }
                 p.facing = p.velocity.angle
                 p.position += p.velocity * dt
                 p.life -= dt
@@ -2487,66 +3565,31 @@ public final class World {
                 continue
             }
             p.proxSafetyRemaining = max(0, p.proxSafetyRemaining - dt)
-
-            // Movement by guidance.
-            if p.homing {
-                // Seeker 0x0010 "turns away if jammed": each second in flight, an
-                // at-risk shot rolls against its target's ECM to lose lock. The
-                // roll is **per jammer type** — the target's four jam strengths
-                // (`gövt.InhJam1-4` plus its own ModType 33-36 outfits) are
-                // weighed against this weapon's own `wëap.JamVuln1-4`, so an IR
-                // jammer only ever troubles IR-guided ordnance and a seeker with
-                // no vulnerability at all is immune however heavy the ECM.
-                if p.turnsAwayIfJammed, p.flags.jamVulnerability.contains(where: { $0 > 0 }),
-                   let tid = p.targetID, let t = ship(id: tid) {
-                    let strength = t.combinedJamming(govtJamming: diplomacy?.govt(t.government)?.jamming)
-                    let chance = p.flags.jamChance(against: strength)
-                    if chance > 0, rng.double(in: 0...1) < chance * dt {
-                        // Seeker 0x8000 "may attack parent ship if jammed": half
-                        // the time a jammed seeker of this kind comes home to
-                        // roost instead of merely going ballistic.
-                        if p.flags.mayAttackParentIfJammed, rng.double(in: 0...1) < 0.5,
-                           let parent = ship(id: p.ownerID), parent.isAlive {
-                            p.targetID = parent.entityID
-                            p.turnedOnParent = true
-                        } else {
-                            p.targetID = nil
-                        }
-                    }
+            p.ageTicks += ticks
+            p.life -= dt
+            // Decay: one point per `Decay` ticks, counted per raw call.
+            if p.decayInterval > 0 {
+                for _ in 0..<rawCalls {
+                    p.decayTimer += OriginalClock.rawCallTickScale
+                    if p.decayTimer > p.decayInterval { p.decayTimer = 0; p.decayPoints += 1 }
                 }
-                // Seeker 0x4000 "loses lock if target not directly ahead": once
-                // the target slides outside the seeker's forward cone it goes
-                // ballistic rather than pulling an impossible turn.
-                if p.flags.losesLockOffBoresight, let tid = p.targetID, let t = ship(id: tid) {
-                    let bearing = abs(angleDelta(from: p.facing, to: (t.position - p.position).angle))
-                    if bearing > .pi / 4 { p.targetID = nil }
-                }
-                // Steer the heading toward the first-order intercept, then fly
-                // inertialessly at cruise speed along it (EV Nova guided shots
-                // don't drift — they point where they're going).
-                if let tid = p.targetID, let t = ship(id: tid), t.isAlive {
-                    let lead = leadAngle(from: p.position, shooterVel: p.velocity, target: t,
-                                         shotSpeed: p.speed, instantHit: false)
-                    var d = angleDelta(from: p.facing, to: lead)
-                    // Seeker 0x0008 "confused by sensor interference": the
-                    // same range-degrading curve `effectiveSensorRange` uses
-                    // for AI perception, applied to steering rate instead.
-                    let turnRate = p.confusedByInterference
-                        ? p.turnRate * max(0, 1 - Double(systemInterference) / 100)
-                        : p.turnRate
-                    let maxTurn = turnRate * dt
-                    d = max(-maxTurn, min(maxTurn, d))
-                    p.facing += d
-                }
-                p.velocity = Vec2.heading(p.facing) * p.speed
-            } else if p.accelerating {
-                // Rocket: accelerate forward up to cruise speed (reach it in ~0.5s).
-                let along = Vec2.heading(p.facing)
-                p.velocity += along * (p.speed / 0.5 * dt)
-                if p.velocity.length > p.speed { p.velocity = p.velocity.normalized * p.speed }
-            } else {
-                p.facing = p.velocity.angle
             }
+            p.shieldDamage = p.decayedShieldDamage
+            p.armorDamage = p.decayedArmorDamage
+            if p.life <= 0 {
+                p.alive = false
+                expire(p, spawned: &spawned)
+                continue
+            }
+            // A homing shot whose target died goes inert (state 998): it flies
+            // on and can hit nothing.
+            if p.guidance == .guided, p.guidanceState == 0, let tid = p.targetID,
+               ship(id: tid)?.isAlive != true {
+                p.guidanceState = 998
+                p.targetID = nil
+            }
+            stepGuidance(p, dt: dt, ticks: ticks, rawCalls: rawCalls)
+            if p.spinShots { advanceShotAnimation(p, rawCalls: rawCalls) }
             // Remember where the shot was so collision can sweep the whole path it
             // covered this frame, not just its endpoint — a fast shot moves many
             // times a small ship's radius per frame and would otherwise tunnel
@@ -2554,75 +3597,61 @@ public final class World {
             let prevPos = p.position
             p.position += p.velocity * dt
 
-            // Power decay: the shot loses damage the longer it flies.
-            if p.decayPerSec > 0 {
-                p.shieldDamage = max(0, p.shieldDamage - p.decayPerSec * dt)
-                p.armorDamage = max(0, p.armorDamage - p.decayPerSec * dt)
-            }
-
-            p.life -= dt
-            if p.life <= 0 {
-                p.alive = false
-                detonate(p, at: p.position, directHit: nil, expired: true, spawned: &spawned)
-                continue
-            }
-
-            // Collision — direct hit, or within the proximity radius once armed.
-            guard p.proxSafetyRemaining <= 0 else { continue }
-            let reach = p.proxRadius
+            guard p.guidanceState != 998, p.proxSafetyRemaining <= 0 else { continue }
 
             // Destroyable stellars (`spöb.Strength` > 0) are real targets — but
-            // only for a planet-type weapon (`wëap.Flags2` 0x0400: "Weapon is a
-            // planet-type weapon, and can only hit planet-type ships or
-            // destroyable stellars"; `spöb.Strength` is likewise "the amount of
-            // combined mass and energy damage this stellar can take **from
-            // planetary-type weapons**"). Every other shot flies straight past.
-            // Without this gate ordinary blaster fire chipped away at planets and
-            // hypergates — nearly every base-game stellar carries a Strength of
-            // 1000-10000, not 0 — so a firefight near a world could blow it up,
-            // firing its `OnDestroy` bits (e.g. Earth's `b6200`, which summons the
-            // Federation task force) and stranding the player when the casualty
-            // was a hypergate.
-            // Checked before ships so a siege round aimed at a planet isn't eaten
-            // by a defender drifting across the muzzle.
+            // only for a planet-type weapon (`wëap.Flags2` 0x0400).
             if p.flags.isPlanetTypeWeapon,
-               let body = destroyableStellarHit(from: prevPos, to: p.position, reach: reach) {
-                applyStellarHit(body, shield: p.shieldDamage, armor: p.armorDamage)
+               let body = destroyableStellarHit(from: prevPos, to: p.position, reach: p.proxRadius) {
+                applyStellarHit(body, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID)
                 p.alive = false
-                detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
+                explode(p, at: p.position)
                 continue
+            }
+
+            // A point-defense round (mode 9) collides only with homing shots,
+            // friend or foe (0x00438630): a shot with durability left loses the
+            // round's bite, one without dies.
+            if p.isPointDefenseRound {
+                for m in projectiles where m.alive && m !== p && m.guidance == .guided && !m.visualOnly
+                    && Self.segmentPointDistance(prevPos, p.position, m.position) <= 6 {
+                    if m.pdDurability > 0 {
+                        m.pdDurability -= Int(p.pointDefenseBite)
+                    } else {
+                        m.alive = false
+                        events.append(.explosion(at: m.position, radius: 10, soundID: nil, boomID: nil))
+                    }
+                    p.alive = false
+                    break
+                }
+                guard p.alive else { continue }
             }
 
             var struck: Ship?
-            // Flags2 0x0400: "planet-type weapon" — only hits planet-type ships or
-            // destroyable stellars, so it flies straight through ordinary hulls
-            // (the stellar test above is the shot's only way to connect).
-            for other in allShips where other.isAlive && !p.flags.isPlanetTypeWeapon {
-                // Seeker 0x8000: a jammed seeker that turned on its parent must be
-                // able to hit it, so the no-self-hit rule is lifted for that shot.
-                if p.turnedOnParent && other.entityID == p.ownerID {
-                    // fall through to the distance test below
-                } else {
-                    guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: other) else { continue }
-                }
-                // Swept distance: shortest gap between the ship and the segment the
-                // shot travelled this frame, so a high-velocity round still connects
-                // with a small hull it flew past between samples.
-                let dist = Self.segmentPointDistance(prevPos, p.position, other.position)
-                if dist <= other.radius {
-                    struck = other; break
-                }
-                // Proximity fuse: detonate near a valid ship. When the shot only
-                // arms on its own target, ignore proximity to anyone else.
-                if reach > 0 && dist <= other.radius + reach {
-                    if p.proxHitAll || p.targetID == nil || p.targetID == other.entityID {
-                        struck = other; break
+            var byProximity = false
+            if p.proxRadius > 0 {
+                for other in allShips where other.isAlive && canShotHit(p, other) {
+                    let fuse = (p.proxRadius + 0.333 * hullFrameWidth(other)).rounded(.down)
+                    if Self.segmentPointDistance(prevPos, p.position, other.position) <= fuse {
+                        struck = other; byProximity = true; break
                     }
+                }
+            }
+            if struck == nil, !p.isPointDefenseRound {
+                if galaxy == nil {
+                    // No sprite data (hand-built test worlds): the round outline.
+                    for other in allShips where other.isAlive && canShotHit(p, other) {
+                        if Self.segmentPointDistance(prevPos, p.position, other.position) <= other.radius {
+                            struck = other; break
+                        }
+                    }
+                } else {
+                    struck = spriteContact(p, from: prevPos, rawCalls: rawCalls)
                 }
             }
             if let h = struck {
                 p.alive = false
-                detonate(p, at: p.position, directHit: h, expired: false, spawned: &spawned)
+                resolveHit(p, on: h, linkedShots: byProximity, spawned: &spawned)
                 continue
             }
 
@@ -2632,15 +3661,14 @@ public final class World {
             if !p.flags.passesOverAsteroids && !p.flags.isPlanetTypeWeapon {
                 // Flags2 0x0004: the proximity fuse ignores asteroids, so the
                 // shot needs an actual contact hit to trip on a rock.
-                let rockReach = p.flags.proxIgnoresAsteroids ? 0 : reach
+                let rockReach = p.flags.proxIgnoresAsteroids ? 0 : p.proxRadius
                 for rock in asteroids where rock.isAlive {
                     if Self.segmentPointDistance(prevPos, p.position, rock.position) <= rock.radius + rockReach {
-                        // Flags2 0x8000: ×10 mass (armor) damage against
-                        // asteroids — the mining weapons' whole point.
-                        let rockArmor = p.flags.tenTimesVersusAsteroids ? p.armorDamage * 10 : p.armorDamage
-                        applyAsteroidHit(rock, shield: p.shieldDamage, armor: rockArmor, shooterID: p.ownerID)
+                        applyAsteroidHit(rock, shield: p.shieldDamage, armor: p.armorDamage,
+                                         tenTimes: p.flags.tenTimesVersusAsteroids, shooterID: p.ownerID,
+                                         impact: p.impact, from: p.position)
                         p.alive = false
-                        detonate(p, at: p.position, directHit: nil, expired: false, spawned: &spawned)
+                        explode(p, at: p.position)
                         break
                     }
                 }
@@ -2649,6 +3677,232 @@ public final class World {
         projectiles.append(contentsOf: spawned)
         projectiles.removeAll { !$0.alive }
         asteroids.removeAll { !$0.isAlive }
+    }
+
+    /// A ship's frame width for the proximity fuse (`Sprite_GetFrameFullWidth`
+    /// 0x00462390): its hull sprite's width, or its diameter without sprite data.
+    func hullFrameWidth(_ ship: Ship) -> Double {
+        if let hull = galaxy?.hullCollisionMask(ship.shipTypeID) { return Double(hull.mask.width) }
+        return 2 * ship.radius
+    }
+
+    /// Steps a cycling shot sprite one frame per `animFrameDelayTicks`, per raw
+    /// call (`Shot_HandleShot` 0x00435830). It wraps to frame 0, or holds on
+    /// the last frame with `wëap.Flags2` 0x0002; with Flags2 0x0001 it shows
+    /// frame 0 while ProxSafety runs (and with both bits restarts from there).
+    func advanceShotAnimation(_ p: Projectile, rawCalls: Int) {
+        guard let spin = p.graphicSpinID,
+              let count = galaxy?.shotCollisionMask(spinID: spin)?.frameCount, count > 0 else { return }
+        for _ in 0..<rawCalls {
+            p.animElapsed += OriginalClock.rawCallTickScale
+            if p.animFrameDelayTicks < 1 || p.animElapsed >= p.animFrameDelayTicks {
+                p.animFrame += 1
+                p.animElapsed = 0
+            }
+            if p.animFrame >= count { p.animFrame = p.animFlags2 & 0x0002 == 0 ? 0 : count - 1 }
+            if p.animFlags2 & 0x0003 == 0x0003, p.proxSafetyRemaining > 0 { p.animFrame = 0 }
+        }
+    }
+
+    /// The frame of a shot's sprite the original draws, and so collides with:
+    /// the heading frame for a static sprite, the cycling frame for a spin shot.
+    func shotSpriteFrame(_ p: Projectile, frameCount: Int) -> Int {
+        guard frameCount > 1 else { return 0 }
+        if !p.spinShots { return SpriteFrames.headingFrame(degrees: p.headingDegrees, frames: frameCount) }
+        if p.animFlags2 & 0x0001 != 0, p.proxSafetyRemaining > 0 { return 0 }
+        return min(max(0, p.animFrame), frameCount - 1)
+    }
+
+    /// Direct shot → ship contact (WP-17, `Ship_HandleSpritePairCollision`
+    /// 0x004374f0). The original moves a shot and tests it once per raw call,
+    /// at that call's position — no swept path, so a fast shot can skip past
+    /// a small hull. At each of this step's raw-call positions every ship the
+    /// shot may hit is tested in order: a hull frame ≤ 32 px wide by the
+    /// strict bounding circle (0x00475be0), a wider one by the opaque pixels
+    /// of both frames (0x00475c80). A ship with no sprite data falls back to
+    /// the swept circle.
+    func spriteContact(_ p: Projectile, from prev: Vec2, rawCalls: Int) -> Ship? {
+        let shotMask = p.graphicSpinID.flatMap { galaxy?.shotCollisionMask(spinID: $0) }
+        let shotFrame = shotMask.map { shotSpriteFrame(p, frameCount: $0.frameCount) } ?? 0
+        let calls = max(1, rawCalls)
+        let travel = p.position - prev
+        for k in 1...calls {
+            let pos = k == calls ? p.position : prev + travel * (Double(k) / Double(calls))
+            let shot = ContactSprite.shot(shotMask, frame: shotFrame, at: pos)
+            for other in allShips where other.isAlive && canShotHit(p, other) {
+                guard let hull = galaxy?.hullCollisionMask(other.shipTypeID) else {
+                    if k == calls, Self.segmentPointDistance(prev, p.position, other.position) <= other.radius {
+                        return other
+                    }
+                    continue
+                }
+                let ship = ContactSprite.hull(hull.mask, frame: hull.frame(angle: other.angle), at: other.position)
+                guard SpriteContact.boundsOverlap(ship, shot) else { continue }
+                if SpriteContact.shotTouchesShip(ship: ship, shot: shot) { return other }
+            }
+        }
+        return nil
+    }
+
+    /// `Shot_UpdateShotGuidance` (0x00431530) for one step.
+    ///
+    /// - A homing shot (mode 1) steers by pure pursuit — straight at its
+    ///   target, no lead — but only once it is older than 15 raw calls (15 ×
+    ///   the 0.63 tick scale); it then turns `GuidedTurn × 0.1`° a tick, and
+    ///   only while the bearing is further off than one turn, so it holds
+    ///   rather than overshooting. Its velocity is `Speed` along its heading
+    ///   every tick. While its target jams it on any channel
+    ///   (`jamScore > 100 − lock`), it flies straight but keeps the target
+    ///   (Seeker 0x0010 instead turns it away); a Seeker 0x8000 shot then
+    ///   turns on its owner at 1/500 per raw call. Losing sight of a cloaked
+    ///   target also flattens the turn (1/1000 per raw call for 0x8000).
+    ///   Seeker 0x4000 drops a target within 250 px that sits more than 45°
+    ///   off the nose. Seeker 0x0002 lets an asteroid within 200 px per axis
+    ///   and 16° of the nose steal the lock, 1 in 10 per raw call.
+    /// - State 999 (interference, WP-10) weaves ±`GuidedTurn` a raw call on a
+    ///   300-call phase once 15 ticks old.
+    /// - A rocket (mode 6) blends its velocity `v = (95 v + 5 × Speed) / 100`
+    ///   along its heading each raw call; a bomb (mode 5) turns its sprite 1°
+    ///   a raw call toward its velocity.
+    private func stepGuidance(_ p: Projectile, dt: Double, ticks: Double, rawCalls: Int) {
+        func setHeading(_ deg: Double) {
+            var d = deg.truncatingRemainder(dividingBy: 360)
+            if d < 0 { d += 360 }
+            p.headingDegrees = d
+            p.facing = d * .pi / 180
+        }
+        func flyAtSpeed() { p.velocity = Vec2.heading(p.facing) * p.speed }
+        func bearingDegrees(to point: Vec2) -> Double {
+            (wholeDegrees((point - p.position).angle) * 180 / .pi)
+        }
+        /// Signed shortest turn from heading to `target`, whole degrees.
+        func delta(to target: Double) -> Double {
+            var d = (target - p.headingDegrees.rounded(.down)).truncatingRemainder(dividingBy: 360)
+            if d > 180 { d -= 360 }
+            if d < -180 { d += 360 }
+            return d
+        }
+        switch p.guidance {
+        case .guided:
+            switch p.guidanceState {
+            case 0:
+                var turn = p.turnDegreesPerTick
+                let target = p.targetID.flatMap { ship(id: $0) }
+                let desired = target.map { bearingDegrees(to: $0.position) } ?? p.headingDegrees.rounded(.down)
+                if p.ageTicks > 15 * OriginalClock.rawCallTickScale {
+                    if let t = target {
+                        let jam = jamScores(of: t)
+                        if (0..<4).contains(where: { p.jamLocks[$0] > 0 && jam[$0] > 100 - p.jamLocks[$0] }) {
+                            if turn > 0 { turn = p.turnsAwayIfJammed ? -turn : 0 }
+                            if p.flags.mayAttackParentIfJammed, oneIn(500, rawCalls: rawCalls) {
+                                retargetOwner(p)
+                            }
+                        }
+                    }
+                    if let t = p.targetID.flatMap({ ship(id: $0) }), let owner = ship(id: p.ownerID),
+                       !canDetect(t, by: owner) {
+                        turn = 0
+                        if p.flags.mayAttackParentIfJammed, oneIn(1000, rawCalls: rawCalls) { retargetOwner(p) }
+                    }
+                    if p.flags.losesLockOffBoresight, let t = p.targetID.flatMap({ ship(id: $0) }) {
+                        let rel = t.position - p.position
+                        if abs(rel.x) < 250, abs(rel.y) < 250,
+                           abs(angleDelta(from: p.facing, to: rel.angle)) > 45 * .pi / 180 {
+                            p.targetID = nil
+                        }
+                    }
+                    let d = delta(to: desired)
+                    if abs(turn) < abs(d) {
+                        setHeading(p.headingDegrees + (d > 0 ? turn : -turn) * ticks)
+                    }
+                }
+                flyAtSpeed()
+                if p.flags.decoyedByAsteroids, oneIn(10, rawCalls: rawCalls),
+                   let rock = asteroids.first(where: {
+                       $0.isAlive && abs($0.position.x - p.position.x) < 200
+                           && abs($0.position.y - p.position.y) < 200
+                           && abs(delta(to: bearingDegrees(to: $0.position))) < 16
+                   }) {
+                    p.guidanceState = 1
+                    p.decoyRock = rock
+                    p.targetID = nil
+                }
+            case 999:
+                if p.ageTicks > 15 {
+                    for k in 0..<rawCalls {
+                        let sign: Double = (rawCallCounter - rawCalls + 1 + k) % 300 < 150 ? -1 : 1
+                        setHeading(p.headingDegrees + sign * p.turnDegreesPerTick)
+                    }
+                }
+                flyAtSpeed()
+                if p.flags.mayAttackParentIfJammed, oneIn(1000, rawCalls: rawCalls) {
+                    retargetOwner(p)
+                    p.guidanceState = 0
+                }
+            case 1:
+                if let rock = p.decoyRock, rock.isAlive {
+                    let desired = bearingDegrees(to: rock.position)
+                    if p.ageTicks > 15 {
+                        for _ in 0..<rawCalls {
+                            let d = delta(to: desired)
+                            if p.turnDegreesPerTick < abs(d) {
+                                setHeading(p.headingDegrees + (d > 0 ? p.turnDegreesPerTick : -p.turnDegreesPerTick))
+                            }
+                        }
+                    }
+                } else {
+                    p.decoyRock = nil
+                }
+                flyAtSpeed()
+            default:
+                break   // 998: inert, coasting on
+            }
+        case .rocket:
+            let polar = Vec2.heading(p.facing) * p.speed
+            for _ in 0..<rawCalls { p.velocity = (p.velocity * 95 + polar * 5) * 0.01 }
+        case .freefallBomb:
+            for _ in 0..<rawCalls {
+                guard p.velocity.length > 0 else { break }
+                let d = delta(to: bearingDegrees(to: p.position + p.velocity))
+                if d != 0 { setHeading(p.headingDegrees + (d > 0 ? 1 : -1)) }
+            }
+        default:
+            break
+        }
+    }
+
+    /// A 1-in-`n` roll made once per raw call this step.
+    private func oneIn(_ n: Int, rawCalls: Int) -> Bool {
+        for _ in 0..<rawCalls where rng.range(n) == 0 { return true }
+        return false
+    }
+
+    /// Seeker 0x8000: the shot turns on the ship that fired it.
+    private func retargetOwner(_ p: Projectile) {
+        guard let owner = ship(id: p.ownerID), owner.isAlive else { return }
+        p.targetID = owner.entityID
+        p.turnedOnParent = true
+    }
+
+    /// `Ship_GetShipJammingScore` (0x00464810), per channel: the hull's
+    /// inherent government's InhJam plus the ship's jammer outfits (the
+    /// player's once per owned def; an NPC's from its DefaultItems), halved
+    /// for an NPC whose government has Flags 0x0080, clamped 0…100, and 0
+    /// while disabled.
+    func jamScores(of ship: Ship) -> [Int] {
+        guard !ship.disabled else { return [0, 0, 0, 0] }
+        let inherent = govtRes(ship.inherentJamGovt)?.jamming ?? []
+        let halve = !ship.isPlayerControlled && (govtRes(ship.government)?.flags1 ?? 0) & 0x0080 != 0
+        return (0..<4).map { ch in
+            var v = (inherent.count > ch ? inherent[ch] : 0) + (ship.jamming.count > ch ? ship.jamming[ch] : 0)
+            if halve { v = (v + (v < 0 ? 0 : 1)) >> 1 }
+            return max(0, min(100, v))
+        }
+    }
+
+    func govtRes(_ id: Int) -> GovtRes? {
+        guard id >= 128 else { return nil }
+        return diplomacy?.govt(id) ?? galaxy?.game.govt(id)
     }
 
     /// Shortest distance from point `c` to the line segment `a`→`b`. Backs swept
@@ -2663,113 +3917,185 @@ public final class World {
         return (c - (a + ab * t)).length
     }
 
-    /// Resolve a shot ending: apply its direct/blast damage and knockback, emit
-    /// the explosion effect, and launch any submunitions. `expired` distinguishes
-    /// end-of-life (which only detonates flak / expiry-submunition shots) from a
-    /// real hit.
-    private func detonate(_ p: Projectile, at pos: Vec2, directHit: Ship?, expired: Bool,
-                          spawned: inout [Projectile]) {
-        if let h = directHit {
-            applyHit(to: h, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
-                     ionization: p.ionization, ionizeColor: p.ionizeColor,
-                     piercing: p.penetratesShields, weaponID: p.weaponID,
-                     disablesOnly: p.flags.disablesOnly)
-            if p.impact > 0 {
-                // Knockback along the shot's travel, inversely ∝ target size
-                // (a proxy for mass — heavier hulls barely budge).
-                h.velocity += p.velocity.normalized * (p.impact * 6.0 / max(4, h.radius))
-            }
-        }
-        // Blast splash to everyone else in radius.
-        if p.blastRadius > 0 {
-            let ownerIsPlayer = ship(id: p.ownerID)?.isPlayerControlled == true
-            for splash in allShips where splash.isAlive && splash.entityID != directHit?.entityID {
-                guard canHit(owner: p.ownerID, ownerGovt: p.ownerGovt, victim: splash) else { continue }
-                // Co-op friendly fire: a player's blast only catches another player
-                // when friendly fire is enabled (direct hits already pass canHit's
-                // pvp gate; this is the extra splash-only guard).
-                if ownerIsPlayer, splash.isPlayerControlled, !friendlyFireAllowed { continue }
-                // Flags 0x0100: "Weapon's blast doesn't hurt the player" — the
-                // splash still catches NPCs, it just never touches the player.
-                if p.flags.blastSparesPlayer, splash.isPlayerControlled { continue }
-                if (splash.position - pos).length <= p.blastRadius {
-                    applyHit(to: splash, shield: p.shieldDamage * 0.5, armor: p.armorDamage * 0.5,
-                             ownerID: p.ownerID, ionization: p.ionization * 0.5, ionizeColor: p.ionizeColor,
-                             piercing: p.penetratesShields, weaponID: p.weaponID,
-                             disablesOnly: p.flags.disablesOnly)
-                }
-            }
-        }
-        // Explosion effect — only for a shot that actually explodes (has splash,
-        // detonates on expiry like flak, or carries its own authored `bööm`).
-        // A plain direct hit (e.g. a Blaster bolt) is NOT an explosion in the
-        // real game: it's just the shield/armor spark `applyHit` already raised
-        // above (`.shieldHit`/`.armorHit`). Treating every hit as `shouldExplode`
-        // made every weapon — including ones with no explosion at all — flash a
-        // fireball and fall back to a generic "boom" sound (id 303) on impact.
-        let shouldExplode = p.blastRadius > 0 || p.detonateOnExpire || p.explosionBoomID != nil
-        if shouldExplode {
-            let boomSound = p.explosionBoomID.flatMap { galaxy?.game.boom($0)?.soundID }
-            let radius = p.blastRadius > 0 ? p.blastRadius : 12
-            events.append(.explosion(at: pos, radius: max(8, radius), soundID: boomSound,
-                                     boomID: p.explosionBoomID))
-        }
-        // Submunitions: split into child weapons on detonation (and on expiry
-        // when `subIfExpire`), capped by the recursion limit.
-        if let sub = p.submunition, sub.count > 0, p.subDepth <= sub.limit,
-           !(expired && !sub.ifExpire), let subSpec = galaxy?.weaponSpec(sub.weaponID) {
-            for _ in 0..<sub.count {
-                var aim = p.facing
-                var subTarget = p.targetID
-                if sub.fireAtNearest, let near = nearestHostile(to: pos, ownerID: p.ownerID, ownerGovt: p.ownerGovt) {
-                    aim = subSpec.guidance == .guided ? aim : (near.position - pos).angle
-                    subTarget = near.entityID
-                }
-                if sub.thetaRadians > 0 {
-                    aim += rng.double(in: -sub.thetaRadians...sub.thetaRadians)
-                }
-                let child = spawnProjectile(spec: subSpec, muzzle: pos, aim: aim,
-                                            ownerID: p.ownerID, ownerGovt: p.ownerGovt,
-                                            ownerVelocity: Vec2(), targetID: subTarget,
-                                            subDepth: p.subDepth + 1)
-                // `spawnProjectile` appended to `projectiles`; move it to the
-                // deferred list so we don't process it again this same frame.
-                if projectiles.last === child { projectiles.removeLast(); spawned.append(child) }
-            }
+    /// A shot connects with `victim` (`Shot_ResolveShotCollisionHit`
+    /// 0x00437780): its decayed damage and impact on the victim, then the
+    /// blast — every *other* ship within `BlastRadius` on both axes takes the
+    /// weapon's full undecayed damage and impact, whatever its government;
+    /// only the shooter is spared, always if it is an NPC and the player only
+    /// with `wëap` Flags 0x0100. Splash ionization falls off as `1 − d²/r²`. Submunitions
+    /// launch only on a proximity-fuse hit.
+    private func resolveHit(_ p: Projectile, on victim: Ship, linkedShots: Bool,
+                            spawned: inout [Projectile]) {
+        applyHit(to: victim, shield: p.shieldDamage, armor: p.armorDamage, ownerID: p.ownerID,
+                 ionization: p.ionization, ionizeColor: p.ionizeColor,
+                 piercing: p.penetratesShields, weaponID: p.weaponID,
+                 disablesOnly: p.nonLethal || p.flags.disablesOnly,
+                 impact: p.impact, impactFrom: p.position, hitPoint: p.position)
+        blast(p, at: p.position, sparing: victim, expiry: false)
+        explode(p, at: p.position)
+        if linkedShots { spawnSubmunitions(p, at: p.position, spawned: &spawned) }
+    }
+
+    /// A shot reaching the end of its life: submunitions unless `wëap` Flags2
+    /// 0x0020, and an area blast only with Flags 0x8000 (WP-07, WP-08).
+    private func expire(_ p: Projectile, spawned: inout [Projectile]) {
+        if p.subsOnExpire { spawnSubmunitions(p, at: p.position, spawned: &spawned) }
+        if p.expiryBlast || (p.detonateOnExpire && p.lifeTicks == 0 && p.blastRadius > 0) {
+            blast(p, at: p.position, sparing: nil, expiry: true)
+            explode(p, at: p.position)
+        } else if p.explosionBoomID != nil {
+            explode(p, at: p.position)
         }
     }
 
-    /// Whether a shot from `owner` (faction `ownerGovt`) may damage `victim`.
-    /// No self-hits and no friendly fire between the same government.
-    private func canHit(owner: Int, ownerGovt: Int, victim: Ship) -> Bool {
-        if victim.entityID == owner { return false }
-        // Player-vs-player: co-op partners carry a shared government (so they'd
-        // normally be un-hittable allies), so PvP is gated by the session rule
-        // instead of that government — regardless of faction, one player can only
-        // damage another when the host has enabled PvP.
-        if victim.isPlayerControlled, let ownerShip = ship(id: owner), ownerShip.isPlayerControlled {
+    /// The area damage of a shot's blast (square, inclusive), at full
+    /// undecayed damage and with its impact. An expiry blast also passes
+    /// over planet-type ships.
+    private func blast(_ p: Projectile, at pos: Vec2, sparing direct: Ship?, expiry: Bool) {
+        guard p.blastRadius > 0 else { return }
+        let r = p.blastRadius
+        let ownerIsPlayer = ship(id: p.ownerID)?.isPlayerControlled == true
+        for splash in allShips where splash.isAlive && splash !== direct {
+            if splash.entityID == p.ownerID && (!ownerIsPlayer || p.flags.blastSparesPlayer) { continue }
+            // Co-op friendly fire: a player's blast only catches another player
+            // when friendly fire is enabled.
+            if ownerIsPlayer, splash.isPlayerControlled, splash.entityID != p.ownerID,
+               !friendlyFireAllowed { continue }
+            if expiry && splash.isPlanetTypeShip { continue }
+            let d = splash.position - pos
+            guard abs(d.x) <= r, abs(d.y) <= r else { continue }
+            let falloff = max(0, 1 - (d.x * d.x + d.y * d.y) / (r * r))
+            applyHit(to: splash, shield: p.baseShieldDamage, armor: p.baseArmorDamage,
+                     ownerID: p.ownerID, ionization: p.ionization * falloff, ionizeColor: p.ionizeColor,
+                     piercing: p.penetratesShields, weaponID: p.weaponID,
+                     disablesOnly: p.nonLethal || p.flags.disablesOnly,
+                     impact: p.impact, impactFrom: pos)
+        }
+    }
+
+    /// The shot's impact effect: an explosion for a weapon with a blast or a
+    /// `bööm`, else just the hit spark `applyHit` already raised.
+    private func explode(_ p: Projectile, at pos: Vec2) {
+        guard p.blastRadius > 0 || p.explosionBoomID != nil else { return }
+        let boomSound = p.explosionBoomID.flatMap { galaxy?.game.boom($0)?.soundID }
+        let radius = p.blastRadius > 0 ? p.blastRadius : 12
+        events.append(.explosion(at: pos, radius: max(8, radius), soundID: boomSound,
+                                 boomID: p.explosionBoomID))
+    }
+
+    /// `Shot_SpawnLinkedShotsOnImpact` (0x00420d30): `SubCount` children of
+    /// `SubType`, while under `SubLimit` deep. A positive `SubTheta` spreads
+    /// each child `rand(2θ) − θ` degrees; a negative one fans them evenly
+    /// across `±|θ|`. Flags2 0x0010 aims them at the nearest ship.
+    private func spawnSubmunitions(_ p: Projectile, at pos: Vec2, spawned: inout [Projectile]) {
+        guard let sub = p.submunition, sub.count > 0, p.subDepth <= sub.limit,
+              let subSpec = galaxy?.weaponSpec(sub.weaponID) else { return }
+        let theta = Int((sub.thetaRadians * 180 / .pi).rounded())
+        for i in 0..<sub.count {
+            var aim = wholeDegrees(p.facing)
+            var subTarget = p.targetID
+            if sub.fireAtNearest, let near = nearestHostile(to: pos, shot: p) {
+                aim = subSpec.guidance == .guided ? aim : wholeDegrees((near.position - pos).angle)
+                subTarget = near.entityID
+            }
+            if theta > 0 {
+                aim += Double(rng.range(2 * theta) - theta) * .pi / 180
+            } else if theta < 0, sub.count > 1 {
+                let span = Double(-theta) * 2
+                aim += (Double(theta) + span * Double(i) / Double(sub.count - 1)) * .pi / 180
+            }
+            let parentVelocity = subSpec.guidance == .rocket ? p.velocity : Vec2()
+            let child = spawnProjectile(spec: subSpec, muzzle: pos, aim: aim,
+                                        ownerID: p.ownerID, ownerGovt: p.ownerGovt,
+                                        ownerVelocity: parentVelocity, targetID: subTarget,
+                                        subDepth: p.subDepth + 1, shooter: ship(id: p.ownerID))
+            // `spawnProjectile` appended to `projectiles`; move it to the
+            // deferred list so we don't process it again this same frame.
+            if projectiles.last === child { projectiles.removeLast(); spawned.append(child) }
+        }
+    }
+
+    /// Whether `shot` may hit `victim` (`Weapon_CanWeaponHitTarget` 0x00426ef0),
+    /// for both contact and proximity. Never its owner (unless a jammed
+    /// seeker turned on it), an inert shot, or the escape pod. A homing shot
+    /// hits only its target unless `wëap` Flags2 0x0008. A ship's shot spares
+    /// its squad mates, ships of its own government, fellow defenders of the
+    /// same stellar, and the victim's own squad root; a turret shot passes
+    /// through a target rated below its tracking roll unless that target is
+    /// disabled (WP-26). Player-squad shots pass through ships whose
+    /// government is immune to the player (gövt Flags 0x0008) or never
+    /// attacks the player (0x0040, against the player or a direct escort),
+    /// and through the squad's second-level escorts. A planet-type weapon
+    /// hits only planet-type ships, and an ordinary one never does. A
+    /// stellar battery's shot hits only its target.
+    func canShotHit(_ shot: Projectile, _ victim: Ship) -> Bool {
+        guard victim.isAlive else { return false }
+        if victim.entityID == shot.ownerID && !shot.turnedOnParent { return false }
+        if shot.guidanceState == 998 || victim.shipTypeID == Ship.escapePodShipID { return false }
+        if shot.guidance == .guided, !shot.hitsAnyShip, victim.entityID != shot.targetID { return false }
+        if victim.isPlanetTypeShip != shot.flags.isPlanetTypeWeapon { return false }
+        if shot.ownerID < 0 {
+            // A stellar battery (WP-22).
+            if let tid = shot.targetID ?? shot.batteryTargetID, tid != victim.entityID { return false }
+            return true
+        }
+        let owner = ship(id: shot.ownerID)
+        // Player-vs-player: co-op partners are gated by the session rule.
+        if victim.isPlayerControlled, owner?.isPlayerControlled == true, victim.entityID != shot.ownerID {
             return pvpAllowed
         }
-        // Same government doesn't shoot itself (independents are fair game).
-        if ownerGovt != independentGovt && victim.government == ownerGovt { return false }
+        if let leader = shot.ownerLeaderID, victim.brain?.leaderID == leader { return false }
+        // The player flies for no government in the original (its slot holds
+        // −1), so this spares only an NPC's own government.
+        if shot.ownerGovt >= 128, victim.government == shot.ownerGovt,
+           owner?.isPlayerControlled != true { return false }
+        if let stellar = owner?.spobDefenderOf, victim.spobDefenderOf == stellar { return false }
+        if shot.turretRoll > 0, victim.turretRating < shot.turretRoll, !victim.disabled { return false }
+        let ownerInPlayerSquad = isPlayerFleetMember(shot.ownerID)
+        if ownerInPlayerSquad {
+            if let lid = victim.brain?.leaderID, lid != World.playerEntityID,
+               ship(id: lid)?.brain?.leaderID == World.playerEntityID { return false }
+            if (govtRes(victim.government)?.flags1 ?? 0) & 0x0008 != 0 { return false }
+        }
+        if !victim.isPlayer, (govtRes(victim.government)?.flags1 ?? 0) & 0x0040 != 0,
+           isCreditedToPlayer(shot.ownerID) { return false }
+        if !shot.turnedOnParent, let owner, squadRoot(of: owner) == squadRoot(of: victim) { return false }
         return true
     }
 
+    /// The top of a ship's chain of leaders (itself when it has none).
+    func squadRoot(of ship: Ship) -> Int {
+        var id = ship.entityID
+        for _ in 0..<8 {
+            guard let leader = self.ship(id: id)?.brain?.leaderID, leader != id else { return id }
+            id = leader
+        }
+        return id
+    }
+
+    /// One hit landing on `ship` (`Ship_ApplyDamageToShip` 0x004192d0): the
+    /// knockback, the damage itself (`Ship.applyDamage`), and the disable and
+    /// kill transitions the hit causes.
+    ///
+    /// The legal penalties and combat rating are credited when the attacker is
+    /// the player or one of the player's direct escorts, and the victim is not
+    /// a stellar's defense ship: crossing the disable line costs `DisabPenalty`
+    /// (a ship blown straight past it pays that too, as in the original), and
+    /// the killing hit costs `KillPenalty` and earns `CombatRatingRule.points`
+    /// unless the victim flies for a derelict government.
+    ///
+    /// - Parameters:
+    ///   - nonLethal: `wëap` Flags2 0x1000 — armor stops at 1 instead of 0.
+    ///   - impact / impactFrom: the weapon's `Impact` and where it struck from
+    ///     (the shot's position, or the beam's source); 0 for no push.
     func applyHit(to ship: Ship, shield: Double, armor: Double, ownerID: Int,
                   ionization: Double = 0, ionizeColor: (r: Double, g: Double, b: Double)? = nil,
                   piercing: Bool = false, weaponID: Int = -1,
-                  disablesOnly: Bool = false) {
-        // Difficulty: scale only the damage the *player* takes (Easy softens,
-        // Hard sharpens); NPC-vs-NPC combat is untouched.
+                  disablesOnly: Bool = false, impact: Double = 0, impactFrom: Vec2? = nil,
+                  keepsAboveDisable: Bool = false, hitPoint: Vec2? = nil) {
         var shield = shield, armor = armor
-        // `wëap.Flags2` 0x1000: "Weapon can disable but not destroy". Clamp the
-        // armor damage so it can carry the target down to — but never through —
-        // its own disable threshold, leaving a boardable hulk. Shields are
-        // untouched: knocking them flat is how you reach the armor at all.
-        if disablesOnly {
-            let floor = ship.maxArmor * ship.disableArmorFraction
-            armor = max(0, min(armor, ship.armor - floor))
-        }
+        // Difficulty (an enhancement-type setting): scale only the damage the
+        // *player* takes; 1.0, the default, is the original.
         if ship.isPlayer, combatTuning.playerDamageScale != 1.0 {
             shield *= combatTuning.playerDamageScale
             armor  *= combatTuning.playerDamageScale
@@ -2780,28 +4106,40 @@ public final class World {
            let ownerShip = self.ship(id: ownerID), ownerShip.isPlayerControlled {
             shield = 0; armor = 0
         }
+        if impact != 0, let from = impactFrom { applyKnockback(to: ship, impact: impact, from: from) }
+        let wasDisabled = ship.disabled
+        let wasAlive = ship.isAlive
         let hadShield = ship.shield > 0
         // Per-hit logging isn't gated like everything else in this file (no
         // "log on change/transition" here — every hit is its own event), and
         // splash damage can call this several times in the same instant for a
-        // clustered group. Destroy/disable transitions already get their own
-        // log lines below/at despawn, so a routine chip-damage hit doesn't
-        // need one too — this was real, uncapped log volume that scaled
-        // directly with how many ships were fighting.
-        _ = ship.applyDamage(shield: shield, armor: armor, piercing: piercing)
+        // clustered group. Destroy/disable transitions get their own lines.
+        ship.applyDamage(shield: shield, armor: armor, piercing: piercing, nonLethal: disablesOnly)
+        originalAI.noteHit(ship, attackerID: ownerID, shield: shield, armor: armor, world: self)
+        // A death blast never disables: past the line, armor is set back to
+        // just above it (`max × 0.3333 + 1`, or `0.1` with hull Flags 0x0010).
+        if keepsAboveDisable, !wasDisabled, ship.disabled, ship.isAlive {
+            let fraction = ship.disableArmorFraction < Ship.standardDisableFraction ? 0.1 : 0.3333
+            ship.armor = ship.maxArmor * fraction + 1
+        }
         // Co-op no-death (`deathReal` off): a player-controlled ship can't be
         // destroyed — floor its armor so it survives however hard it's hit.
         if !playerDeathReal, ship.isPlayerControlled, ship.armor < 1 { ship.armor = 1 }
-        // Cloak flag 0x0008: taking damage forces the cloak off.
+        // Cloak flag 0x0008: damage drops the cloak — only once it has fully
+        // faded in, or while it is fading in (OS-04).
         if ship.cloakEngaged, ship.cloakDropsOnDamage { ship.cloakEngaged = false }
         if ionization > 0, ship.ionizeMax > 0 {
-            ship.ionCharge = min(ship.ionizeMax, ship.ionCharge + ionization)
+            // Charge accumulates uncapped (WP-11); intensity caps at 0.7.
+            ship.ionCharge += ionization
             // Remember the hue to glow: this weapon's IonizeColor, or keep any
             // prior tint if this shot doesn't specify one (0 = "default bluish").
             ship.ionizeColor = ionizeColor ?? ship.ionizeColor
         }
-        events.append(hadShield ? .shieldHit(at: ship.position, weaponID: weaponID)
-                                 : .armorHit(at: ship.position, weaponID: weaponID))
+        // A piercing hit never touches the shields, so it never flashes them.
+        // The hit spray rises where the shot struck (WP-24).
+        let at = hitPoint ?? ship.position
+        events.append(hadShield && !piercing ? .shieldHit(at: at, weaponID: weaponID)
+                                             : .armorHit(at: at, weaponID: weaponID))
 
         // Player-fleet fire (the player OR one of their escorts/fighters)
         // provokes the victim into fighting the whole fleet, not just
@@ -2817,8 +4155,7 @@ public final class World {
             // targeting a fleet member, or belongs to a government at war
             // with the player, started (or is part of) this fight itself —
             // hitting it back is self-defense. Self-defense must NOT mark the
-            // player an aggressor for the piracy police (`wrongedByPlayer`)
-            // nor flip the victim's whole government hostile: defending
+            // flip the victim's whole government hostile: defending
             // against one grudge-holder or mission assassin used to turn his
             // entire otherwise-neutral government (and then the local police,
             // and then THEIR government...) on the player — the cascading
@@ -2828,29 +4165,23 @@ public final class World {
                 || (diplomacy?.isHostileToPlayer(ship.government) ?? false)
             ship.brain?.provokedByPlayer = true
             if !wasAlreadyFightingFleet {
-                // Unprovoked player aggression against a bystander — the flag
-                // the local authority's piracy-police perception keys on.
-                ship.brain?.wrongedByPlayer = true
-                // Attacking any one ship of a government turns the WHOLE
-                // government hostile in this system immediately, not just the
-                // ship actually hit — matches the real game's "you shot one of
-                // ours" reaction and is independent of whether the player's
-                // legal record has crossed that government's CrimeTol yet (that
-                // gate, `Diplomacy.isHostileToPlayer`, is untouched — this is a
-                // separate, purely combat-hostility/reinforcement trigger). Only
-                // real resource-defined governments (id >= 128, matching the
-                // convention `Spawner.governmentUnderAttackAndOutmatched` already
-                // uses) qualify — `independentGovt` (-1) has no organized "side"
-                // to provoke.
-                if ship.government >= 128 {
-                    provokedGovernments.insert(ship.government)
-                    for other in allShips
-                    where other.entityID != ship.entityID && other.government == ship.government
-                        && !isPlayerFleetMember(other.entityID) {
-                        other.brain?.provokedByPlayer = true
-                    }
-                }
+                // Unprovoked player aggression against a bystander: the
+                // government counts as provoked in this system (the
+                // reinforcement and stellar-battery triggers read it).
+                if ship.government >= 128 { provokedGovernments.insert(ship.government) }
             }
+            // AI-06: the player's own shot on the ship it was aimed at calls
+            // the victim's friends in (`Government_PropagateHostilityFromAttack`
+            // 0x004102e0).
+            if ownerID == World.playerEntityID, player.currentTargetID == ship.entityID {
+                propagateHostilityFromPlayerAttack(on: ship)
+            }
+        }
+        // AI-07: any player hit on a përs with Flags 0x0001 makes it hold a grudge.
+        if ownerID == World.playerEntityID, let pid = ship.personID, ship.personFlags & 0x0001 != 0,
+           !playerPersGrudges.contains(pid) {
+            playerPersGrudges.insert(pid)
+            events.append(.personGrudge(personID: pid))
         }
         // The reverse: something that shoots a player-fleet member becomes
         // provoked (hostile) toward the whole fleet too — an escort fighting
@@ -2861,46 +4192,139 @@ public final class World {
             attacker.brain?.provokedByPlayer = true
         }
 
-        // EV Nova disables a ship the moment its armor crosses a fixed threshold
-        // (`shïp.Flags` 0x0010 → 10%, otherwise 33% of max armor) — a one-time
-        // deterministic state transition, not a random roll. Once already
-        // disabled, further damage that zeroes armor is a real kill (handled by
-        // `isAlive`/`despawnDepartedAndDead`, not here). No **player-controlled**
-        // ship is disabled this way (the local player's death is the app's; a
-        // co-op remote player dies or is floored by `deathReal`, never a hulk).
-        if !ship.isPlayerControlled, !ship.disabled, ship.armor <= ship.maxArmor * ship.disableArmorFraction {
-            ship.disabled = true
-            ship.armor = max(1, ship.maxArmor * 0.02)   // a sliver — still "alive"
-            ship.shield = 0
-            ship.wantsToDepart = false
-            ship.currentTargetID = nil
-            ship.brain?.targetID = nil
-            clearTarget(ship.entityID)               // everyone stops shooting it
-            stopAllBeamLoops(for: ship)               // a hulk doesn't fire — stop its beam loop
-            events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
-            // A mission "disable this ship" objective is met the instant it's
-            // crippled (a later kill doesn't un-meet it). Board/rescue objectives
-            // remain outstanding until the player actually boards the hulk.
-            if let mid = ship.missionID, let goal = ship.missionShipGoal,
-               goal == .disable {
-                events.append(.missionShipGoalReached(missionID: mid, entityID: ship.entityID,
-                                                       goal: goal, byPlayer: ownerID == 0))
-            }
-            Log.combat.notice("\(LogTag.ship(id: ship.entityID, name: ship.name)) disabled (armor at/below \(Int(ship.disableArmorFraction * 100))% threshold) — now a drifting hulk")
-            if ownerID == 0, let dip = diplomacy {
-                dip.recordDisable(of: ship.government)
-            }
-            // A named person the player just crippled holds a grudge from now on.
-            if ownerID == 0, let pid = ship.personID {
-                playerPersGrudges.insert(pid)
-                events.append(.personGrudge(personID: pid))
-            }
-        } else if ownerID == 0 && !ship.isPlayer && !ship.isAlive {
-            // Zeroed an already-disabled hulk's sliver of armor — a real kill,
-            // finalized by `despawnDepartedAndDead` once per frame. Remember
-            // it was the player's doing so that pass can credit `recordKill`.
-            ship.killedByPlayer = true
+        let credited = !ship.isPlayer && ship.spobDefenderOf == nil && isCreditedToPlayer(ownerID)
+        if credited, !wasDisabled, ship.disabled {
+            diplomacy?.recordDisable(of: ship.government, missionShip: ship.missionID != nil)
         }
+        if wasAlive, !ship.isAlive {
+            // The killing hit. `despawnDepartedAndDead` finalizes it next pass
+            // and credits the kill from these flags.
+            ship.killedByPlayer = ownerID == World.playerEntityID
+            ship.killCredited = credited && !isDerelictGovernment(ship.government)
+            return
+        }
+        if !wasDisabled, ship.disabled { didBecomeDisabled(ship, ownerID: ownerID) }
+    }
+
+    /// Whether `ownerID`'s hits count as the player's for the legal record and
+    /// combat rating: the player, or a ship whose squad leader is the player.
+    func isCreditedToPlayer(_ ownerID: Int) -> Bool {
+        ownerID == World.playerEntityID || ship(id: ownerID)?.brain?.leaderID == World.playerEntityID
+    }
+
+    /// `gövt` Flags 0x0800 (`Government_IsShipGovernmentDerelict`).
+    func isDerelictGovernment(_ govt: Int) -> Bool {
+        govt >= 128 && galaxy?.game.govt(govt)?.startsDisabled == true
+    }
+
+    /// A ship just crossed the disable line and lives (`Ship_ApplyDamageToShip`'s
+    /// disabled arm). The player gets the "disabled" overlay (STR# 2002 #287,
+    /// shown by the host on `.shipDisabled`), a 300-tick post-disable window and
+    /// its armor truncated to a whole number; the host fails Flags-0x0004
+    /// missions. Everyone stops shooting the hulk.
+    private func didBecomeDisabled(_ ship: Ship, ownerID: Int) {
+        ship.wantsToDepart = false
+        ship.currentTargetID = nil
+        ship.brain?.targetID = nil
+        clearTarget(ship.entityID)               // everyone stops shooting it
+        stopAllBeamLoops(for: ship)               // a hulk doesn't fire — stop its beam loop
+        if ship.isPlayer {
+            ship.recentlyHitTicks = 300
+            ship.armor = ship.armor.rounded(.down)
+        }
+        events.append(.shipDisabled(entityID: ship.entityID, at: ship.position))
+        leaveWingWhenDisabled(ship)
+        // The story counts every disabled mission ship (MS-11): it meets a
+        // "disable" goal (a later kill doesn't un-meet it), and a disabled
+        // escort fails its mission. Board/rescue objectives remain outstanding
+        // until the player actually boards the hulk.
+        if let mid = ship.missionID, let goal = ship.missionShipGoal,
+           goal == .disable || goal == .escort {
+            events.append(.missionShipGoalReached(missionID: mid, entityID: ship.entityID,
+                                                   goal: goal, byPlayer: ownerID == 0))
+        }
+        Log.combat.notice("\(LogTag.ship(id: ship.entityID, name: ship.name)) disabled (armor below \(Int(ship.disableArmorFraction * 100))% of max) — now a drifting hulk")
+    }
+
+    /// Whether a përs's alive flag clears when its ship is destroyed
+    /// (`Ship_UpdateVisualState` 0x00428340): slot 0x3fe (përs 1150) on a
+    /// `Rand(8) == 0`; any other only without the escape-pod flag 0x0002.
+    static func persDiesWithShip(_ persID: Int, flags: Int, rng: inout NovaRandom) -> Bool {
+        if persID == 1150 { return rng.range(8) == 0 }
+        return flags & 0x0002 == 0
+    }
+
+    /// OS-10: the governments an IFF scrambler or reinforcement inhibitor the
+    /// player carries matches are latched for the rest of the session
+    /// (`GovernmentLatches`), so selling the outfit later changes nothing.
+    func latchPlayerOutfitGovernments() {
+        let scramblers = player.iffScramblerClasses, inhibitors = player.reinforcementInhibitorClasses
+        guard !scramblers.isEmpty || !inhibitors.isEmpty, let dip = diplomacy,
+              latchedOutfitClasses != [scramblers, inhibitors] else { return }
+        latchedOutfitClasses = [scramblers, inhibitors]
+        dip.latches.latch(scramblerClasses: scramblers, inhibitorClasses: inhibitors,
+                          govts: Array(dip.govts.values))
+    }
+
+    /// `Government_PropagateHostilityFromAttack` 0x004102e0 (AI-06): every
+    /// warship or interceptor in the system that isn't already attacking
+    /// turns on the player when its government is the victim's or allied with
+    /// it (either way round), or is nosy (`Flags` 0x0002) — unless it is
+    /// hostile to the victim, holds the player's no-attack rank privilege, is
+    /// allied with the player's own government, or flies in the player's
+    /// wing. A xenophobic victim calls only its own government; an
+    /// independent victim only nosy governments; an independent responder
+    /// answers any non-xenophobic victim. A victim of a derelict (`Flags`
+    /// 0x0800) or ignored (0x0020) government calls nobody, and neither does
+    /// the shareware Enforcer slot. There is no distance limit.
+    func propagateHostilityFromPlayerAttack(on victim: Ship) {
+        guard let dip = diplomacy, victim.personID != 1151 else { return }
+        let govts = dip.govts
+        let victimGovt = victim.government
+        let vg = govts[victimGovt]
+        if vg?.startsDisabled == true || vg?.ignoredWhenAttacked == true { return }
+        for responder in npcs where responder.entityID != victim.entityID && responder.isAlive {
+            guard let brain = responder.brain, brain.aiType.isWarship, brain.state != .attacking,
+                  responder.personID != 1151, !isPlayerFleetMember(responder.entityID) else { continue }
+            let rg = responder.government
+            let nosy = govts[rg]?.nosy ?? false
+            var eligible = true
+            if rg != independentGovt, victimGovt != independentGovt {
+                if GovtRelations.hostileOrXenophobic(rg, victimGovt, govts: govts) { continue }
+                if vg?.xenophobic == true, rg != victimGovt { eligible = false }
+                if dip.rankProtectedGovts.contains(rg) { eligible = false }
+                if !GovtRelations.allied(rg, victimGovt, govts: govts), !nosy { eligible = false }
+                if GovtRelations.allied(rg, player.government, govts: govts) { eligible = false }
+            } else if rg != independentGovt {
+                eligible = nosy
+            } else if victimGovt != independentGovt {
+                eligible = !(vg?.xenophobic ?? false)
+            }
+            guard eligible else { continue }
+            brain.provokedByPlayer = true
+            // The original AI reads the responder's own record: state 4 on
+            // the attacker (0x004102e0).
+            originalAI.joinAttack(responder, attackerID: World.playerEntityID)
+        }
+    }
+
+    /// Weapon knockback (`Ship_ApplyDamageToShip` 0x004192d0): `impact / mass`
+    /// px/tick along the bearing from where the shot struck to the ship, added
+    /// per axis up to the hull's base top speed, then clamped per axis to its
+    /// effective top speed (1.8 × for the player while the afterburner widens
+    /// the caps). No push on a massless hull or one with shïp Flags 0x0400, nor
+    /// during the player's hyperjump. A negative (tractor) impact is dropped
+    /// within 50 px on either axis.
+    func applyKnockback(to ship: Ship, impact: Double, from: Vec2) {
+        guard ship.massTons > 0, !ship.isPlanetTypeShip, !(ship.isPlayer && playerJump != nil) else { return }
+        let rel = ship.position - from
+        if impact < 0, abs(rel.x) < 50 || abs(rel.y) < 50 { return }
+        guard rel.x != 0 || rel.y != 0 else { return }
+        let step = OriginalClock.perSecond(impact / ship.massTons)
+        ship.addPolarVelocityWithClamp(heading: rel.angle, step: step, max: ship.stats.maxSpeed)
+        let cap = ship.isPlayerControlled && ship.afterburnerActive && !ship.inGravityPull
+            ? ship.effectiveMaxSpeed * 1.8 : ship.effectiveMaxSpeed
+        ship.velocity = Vec2(max(-cap, min(cap, ship.velocity.x)), max(-cap, min(cap, ship.velocity.y)))
     }
 
     // MARK: Despawn
@@ -2923,17 +4347,22 @@ public final class World {
                     // harmless: everywhere `disabled` gates *behavior* also
                     // gates on `isAlive`, which is already false here.
                     npc.disabled = true
-                    if npc.killedByPlayer, let dip = diplomacy {
-                        dip.recordKill(of: npc.government, shipStrength: Int(npc.combatStrength))
+                    if npc.killCredited, let dip = diplomacy {
+                        dip.recordKill(of: npc.government, shipStrength: Int(npc.combatStrength),
+                                       missionShip: npc.missionID != nil)
                     }
-                    // A named person the player destroyed won't appear again.
-                    if npc.killedByPlayer, let pid = npc.personID {
+                    // UI-17: a destroyed përs is gone for good, whoever killed
+                    // it — unless its Flags carry 0x0002 (it ejected); the
+                    // revenge përs 1150 dies only one time in eight.
+                    if let pid = npc.personID, Self.persDiesWithShip(pid, flags: npc.personFlags, rng: &rng) {
                         events.append(.personDefeated(personID: pid))
                     }
-                    events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
-                                             soundID: npc.explosionSoundID, boomID: npc.explosionBoomID))
-                    events.append(.shipDying(entityID: npc.entityID, at: npc.position,
-                                             boomID: npc.explosionBoomID))
+                    if !npc.wreckOfPlayer {
+                        events.append(.explosion(at: npc.position, radius: max(24, npc.radius * 1.5),
+                                                 soundID: npc.explosionSoundID, boomID: npc.explosionBoomID))
+                        events.append(.shipDying(entityID: npc.entityID, at: npc.position,
+                                                 boomID: npc.explosionBoomID))
+                    }
                     Log.combat.notice("\(LogTag.ship(id: npc.entityID, name: npc.name)) destroyed\(npc.killedByPlayer ? " by player" : "")")
                     // A destroyed mission ship meets a "destroy" (or "chase off",
                     // which a kill satisfies) objective. A kill is not a boarding
@@ -2943,10 +4372,13 @@ public final class World {
                         events.append(.missionShipGoalReached(missionID: mid, entityID: npc.entityID,
                                                               goal: goal, byPlayer: npc.killedByPlayer))
                     }
-                    // An escort/rescue ship the player was supposed to keep alive just
-                    // died → a loss, so the story layer can fail the mission.
+                    // Any other mission ship that dies is a loss the story
+                    // counts (MS-11): it fails a disable, escort or
+                    // not-yet-boarded board/rescue mission. A boarded one
+                    // already met its goal.
                     if let mid = npc.missionID, let goal = npc.missionShipGoal,
-                       goal == .escort || goal == .rescue {
+                       goal != .destroy, goal != .chaseOff, goal != .none,
+                       !npc.missionBoardingGoalReported {
                         events.append(.missionShipLost(missionID: mid, goal: goal))
                     }
                     Log.combat.debug("\(npc.name) [\(npc.entityID)] destroyed (shipTypeID=\(npc.shipTypeID))")
@@ -2957,13 +4389,14 @@ public final class World {
                     continue
                 }
                 npc.deathTimer! += dt
-                if npc.deathTimer! < Ship.deathSequenceDuration {
+                if npc.deathTimer! < npc.deathSequenceDuration, !npc.diesInstantly {
                     // Still mid-explosion — keep the wreck around so its sprite
                     // stays on screen for the sequence to play over.
                     survivors.append(npc)
                     continue
                 }
-                // Sequence finished — actually gone now.
+                // Sequence finished — the hull blows (WP-13) and is gone.
+                deathBlast(of: npc)
                 events.append(.shipDestroyed(entityID: npc.entityID, shipTypeID: npc.shipTypeID,
                                              at: npc.position))
                 continue
@@ -2975,16 +4408,34 @@ public final class World {
                 stopAllBeamLoops(for: npc)
                 continue
             }
+            // The original AI's jump finished where the ship stands (or its
+            // gate entry faded out).
+            if npc.wantsToDepart, npc.departsInPlace {
+                if let gateID = npc.brain?.departViaGateID {
+                    events.append(.shipDepartedViaGate(entityID: npc.entityID, gateSpobID: gateID, at: npc.position))
+                } else {
+                    events.append(.shipDeparted(entityID: npc.entityID, at: npc.position, heading: npc.angle))
+                }
+                clearTarget(npc.entityID)
+                stopAllBeamLoops(for: npc)
+                continue
+            }
             // Departed past the system edge → gone to hyperspace. A ship that
-            // rolled in favor of a hypergate departure (`AIBrain.pickDepartureGate`)
+            // rolled in favor of a hypergate departure (`AIBrain.departViaGateID`)
             // instead transits there, so the gate visibly opens for it too.
             if npc.wantsToDepart {
+                // A chase-off mission ship leaving counts for its goal; it is
+                // reported (as a `missionShipLost` with the chase-off goal)
+                // by whichever exit below it takes.
+                let chasedOff: WorldEvent? = npc.missionShipGoal == .chaseOff
+                    ? npc.missionID.map { .missionShipLost(missionID: $0, goal: .chaseOff) } : nil
                 if let gateID = npc.brain?.departViaGateID,
                    let gate = systemContext.bodies.first(where: { $0.id == gateID }) {
                     let d = (npc.position - gate.position).length
                     if d <= gate.radius + 40 {
                         events.append(.shipDepartedViaGate(entityID: npc.entityID, gateSpobID: gateID,
                                                            at: npc.position))
+                        if let chasedOff { events.append(chasedOff) }
                         clearTarget(npc.entityID)
                         stopAllBeamLoops(for: npc)
                         continue
@@ -2994,6 +4445,7 @@ public final class World {
                     if d >= systemContext.jumpRadius {
                         events.append(.shipDeparted(entityID: npc.entityID, at: npc.position,
                                                     heading: npc.angle))
+                        if let chasedOff { events.append(chasedOff) }
                         clearTarget(npc.entityID)
                         stopAllBeamLoops(for: npc)
                         continue
@@ -3005,6 +4457,25 @@ public final class World {
         npcs = survivors
         refreshRoster()
         // Player death is left to the app (respawn / game-over UI).
+    }
+
+    /// The death blast at the end of a hull's death sequence (WP-13,
+    /// `Ship_UpdateVisualState` 0x00428340): a hull of 100 t or more (not a
+    /// planet-type ship) hits every other ship within `trunc(mass × 0.075 +
+    /// 50)` px on both axes for `trunc(mass × 0.0375 + 25)` shield and armor
+    /// damage with impact 750. The blast is non-lethal and can't disable: a
+    /// ship it would push past the disable line is left just above it.
+    func deathBlast(of dying: Ship) {
+        guard dying.massTons >= 100, !dying.isPlanetTypeShip else { return }
+        let radius = (dying.massTons * 0.075 + 50).rounded(.down)
+        let damage = (dying.massTons * 0.0375 + 25).rounded(.down)
+        for other in allShips where other !== dying && other.isAlive {
+            let d = other.position - dying.position
+            guard abs(d.x) <= radius, abs(d.y) <= radius else { continue }
+            applyHit(to: other, shield: damage, armor: damage, ownerID: dying.entityID,
+                     disablesOnly: true, impact: 750, impactFrom: dying.position,
+                     keepsAboveDisable: true)
+        }
     }
 
     private func clearTarget(_ id: Int) {
@@ -3048,7 +4519,7 @@ public final class World {
     @discardableResult
     public func selectNearestTarget(hostileOnly: Bool) -> Ship? {
         let candidates = npcs.filter { npc in
-            npc.isAlive && canDetect(npc, by: player)
+            npc.isAlive && canTarget(npc, by: player)
                 && !isPlayerFleetMember(npc.entityID)
                 && (!hostileOnly || (!npc.disabled && isEffectivelyHostileToPlayer(npc)))
         }
@@ -3110,6 +4581,7 @@ public final class World {
     /// the wing they belong to.
     public func setPlayerEscortOrder(_ order: EscortOrder) {
         for npc in npcs where npc.isAlive && isPlayerEscort(npc) { npc.brain?.escortOrder = order }
+        originalAI.commandPlayerEscorts(order, world: self)
     }
 
     /// The current wing order (the most common one among escorts), or nil when
@@ -3126,6 +4598,8 @@ public final class World {
     /// wherever they appear (`pêrs.Flags 0x0001` grudge). Synced from the pilot
     /// by the host; read by the AI's hostility test.
     public var playerPersGrudges: Set<Int> = []
+    /// The scrambler / inhibitor classes last latched (`latchPlayerOutfitGovernments`).
+    var latchedOutfitClasses: [Set<Int>] = []
     /// Host gate for whether a `pêrs` may appear now — evaluates its `ActiveOn`
     /// NCB test and "not already defeated" against live pilot state (the engine
     /// can't evaluate NCB itself). Default: always eligible.
@@ -3167,15 +4641,17 @@ public final class World {
     /// systems get their colored haze. No gameplay effect.
     public var systemBackgroundColor = NovaColor(r: 0, g: 0, b: 0)
 
-    /// `base` sensor range reduced by the effective interference `observer`
-    /// experiences: `base × (1 − netInterference/100)`, where net interference
-    /// is the system's static minus the observer's anti-interference outfits.
-    /// At 100 net interference the range is zero (complete sensor blackout, per
-    /// the Bible's 0-100 endpoints; the linear curve between them is this
-    /// engine's reading of "how thick the static is").
-    public func effectiveSensorRange(_ base: Double, for observer: Ship) -> Double {
-        let net = max(0, min(100, systemInterference - observer.interferenceReduction))
-        return base * (1 - Double(net) / 100)
+    /// Sensor range under system interference. The original never shortens it
+    /// (OS-05): interference only fills the player's radar with static now and
+    /// then (`radarStaticChance`), and AI perception ignores it.
+    public func effectiveSensorRange(_ base: Double, for observer: Ship) -> Double { base }
+
+    /// The percent chance one radar refresh (at most every 250 ms) shows only
+    /// static: the system's Interference less the observer's ModType-24
+    /// anti-interference (clamped to ±100), clamped to 0…100 (0x0045d030,
+    /// 0x0046abb0; OS-05).
+    public func radarStaticChance(for observer: Ship) -> Int {
+        max(0, min(100, systemInterference - max(-100, min(100, observer.interferenceReduction))))
     }
 
     /// `systemMurk` net of `observer`'s ModType-28 murk outfits, capped at the
@@ -3186,13 +4662,24 @@ public final class World {
         min(100, systemMurk - observer.murkModifier)
     }
 
-    /// Whether `observer` can detect (and therefore target) `target`, accounting
-    /// for cloaking. A cloaked target is hidden unless the observer carries a
-    /// cloak scanner able to target cloaked ships (ModType 30 bit 0x0008).
-    /// Non-cloaked targets pass here; range/interference gating is separate.
+    /// Whether `observer` can detect (and therefore target) `target` through
+    /// its cloak (`Ship_CanShipEngageTargetUnderCloakRules` 0x00464a90): an
+    /// uncloaked ship always; a cloaked one only within 200 px on both axes of
+    /// an observer with cloak-scanner bit 0x0002, or by the cloaker's own
+    /// escorts.
     public func canDetect(_ target: Ship, by observer: Ship) -> Bool {
         guard target.isEffectivelyCloaked else { return true }
-        return observer.cloakScannerFlags & 0x0008 != 0
+        if observer.brain?.leaderID == target.entityID { return true }
+        let d = target.position - observer.position
+        return observer.cloakScannerFlags & 0x0002 != 0 && abs(d.x) < 200 && abs(d.y) < 200
+    }
+
+    /// `shïp` Flags2 0x0010 / ModType 30 bit 0x0004: untargetable hulls (OS-12)
+    /// — a ship with hull Flags2 0x0004 can't be targeted, cycled or picked
+    /// unless the observer carries a scanner with bit 0x0004.
+    public func canTarget(_ target: Ship, by observer: Ship) -> Bool {
+        guard canDetect(target, by: observer) else { return false }
+        return target.hullFlags2 & 0x0004 == 0 || observer.cloakScannerFlags & 0x0004 != 0
     }
 
     /// A ship's formation key: an escort's is its leader's entity id; a leader
@@ -3200,22 +4687,32 @@ public final class World {
     /// — the grouping `cloakIsArea` (0x1000) shares a cloak across.
     private func formationKey(_ s: Ship) -> Int { s.brain?.leaderID ?? s.entityID }
 
-    /// Fade cloaks in/out and drain their fuel/shield upkeep. A cloak forced off
-    /// (out of fuel/shields) simply disengages and fades back to visible.
+    /// The cloak (OS-04, `Ship_UpdateVisualState` 0x00428340 and the upkeep
+    /// in 0x00464db0 / 0x00465090 / 0x00467e80). The fade runs 0.75 of 32 a
+    /// tick (1.5 with hull Flags2 0x0001; the device's own 0x0001 is never
+    /// read). Engaged, it costs the device's fuel nibble (bits 0x00F0) and
+    /// shield nibble (0x0F00) per second; the shield drain applies only while
+    /// the shields hold at least a tick's worth, so the last points stay. With
+    /// 0x0004 the player's shields are zeroed every tick, an NPC's only on
+    /// engaging. It can't be held disabled, out of fuel (even by a device that
+    /// burns none), or — for the player — while spinning up a jump unless the
+    /// hull has Flags2 0x0400.
     private func stepCloak(_ dt: Double) {
-        let baseFade = 1.0 / 1.2                    // full fade in ~1.2s
+        let ticks = dt * OriginalClock.ticksPerSecond
         for s in allShips where s.hasCloak {
-            let rate = baseFade * (s.cloakFlags & 0x0001 != 0 ? 2 : 1)   // 0x0001 = faster fading
             if s.cloakEngaged {
-                if s.cloakLevel == 0, s.cloakDropsShields { s.shield = 0 }   // 0x0004
-                s.cloakLevel = min(1, s.cloakLevel + rate * dt)
+                let jumping = s.isPlayer && playerJump != nil && s.hullFlags2 & 0x0400 == 0
+                if s.disabled || s.fuel <= 0 || jumping { s.cloakEngaged = false }
+            }
+            let rate = (s.hullFlags2 & 0x0001 != 0 ? 1.5 : 0.75) / 32 * ticks
+            if s.cloakEngaged {
+                if s.cloakDropsShields, s.isPlayer || s.cloakLevel == 0 { s.shield = 0 }
+                s.cloakLevel = min(1, s.cloakLevel + rate)
                 if s.cloakFuelPerSec > 0 { s.fuel = max(0, s.fuel - s.cloakFuelPerSec * dt) }
-                if s.cloakShieldPerSec > 0 { s.shield = max(0, s.shield - s.cloakShieldPerSec * dt) }
-                if (s.cloakFuelPerSec > 0 && s.fuel <= 0) || (s.cloakShieldPerSec > 0 && s.shield <= 0) {
-                    s.cloakEngaged = false                                   // can't power it — drop cloak
-                }
+                let shieldDrain = s.cloakShieldPerSec * dt
+                if shieldDrain > 0, s.shield >= shieldDrain { s.shield -= shieldDrain }
             } else if s.cloakLevel > 0 {
-                s.cloakLevel = max(0, s.cloakLevel - rate * dt)
+                s.cloakLevel = max(0, s.cloakLevel - rate)
             }
         }
 
@@ -3240,59 +4737,58 @@ public final class World {
 
     // MARK: Fighter bays (wëap Guidance 99)
 
-    /// Whether `carrier` is currently engaged (has a live hostile target) — the
-    /// condition under which EV Nova carriers auto-deploy their fighters.
-    private func carrierInCombat(_ carrier: Ship) -> Bool {
-        guard let tid = carrier.currentTargetID, let t = ship(id: tid) else { return false }
-        return t.isAlive && !t.disabled
+    /// The carrier's target, when it has one in the system — the condition for
+    /// launching (`Ship_LaunchShipFromCarrierBay` 0x0040d9a0).
+    private func carrierTarget(_ carrier: Ship) -> Ship? {
+        guard let tid = carrier.currentTargetID, let t = ship(id: tid), t.isAlive else { return nil }
+        return t
     }
 
-    /// Per-frame fighter-bay processing: NPC carriers in combat auto-launch
-    /// fighters up to each bay's capacity (throttled by the bay's launch
-    /// interval) — the player instead launches via selecting the bay as a
-    /// secondary weapon and firing (see `fireWeapons`), so this pass skips the
-    /// player entirely. Deployed fighters that run out of ammo or get badly hurt
-    /// return and dock (restoring the bay) — simply losing their target or their
-    /// carrier's combat ending does NOT recall them; they keep flying escort
-    /// until actually damaged/dry or explicitly recalled (`playerRecallFighters`/
-    /// `f.recallToCarrier`). A carrier's death orphans its still-flying fighters
-    /// (they become independent ships of the same govt).
+    /// Carried fighters (OS-03). An NPC carrier with a target launches from
+    /// its first loaded bay whose cooldown has run out, restarting it at
+    /// `Reload / mounted` (mounted bays, not loaded fighters: a quirk); the
+    /// player launches through the secondary trigger (`launchPlayerBayFighter`).
+    /// A carrier that stands down — no target — calls its fighters home, as
+    /// the escort "recall" command does. A returning fighter docks within 75
+    /// px of its carrier on both axes: the bay gains a fighter, and an empty
+    /// bay's cooldown re-arms to a full Reload (`Ship_RecoverCarriedShipToBay`
+    /// 0x00415ea0). A carrier's death orphans its flying fighters.
     private func updateFighterBays(_ dt: Double) {
         guard galaxy != nil else { return }   // fighters are spawned via the galaxy
 
         // Launch pass over a snapshot (launching appends to `npcs`).
         for carrier in allShips where !carrier.fighterBays.isEmpty && carrier.isAlive && !carrier.disabled {
-            let inCombat = !carrier.isPlayer && carrierInCombat(carrier)
-            // Running slot counter for this carrier, seeded from its existing
-            // wing and incremented as bays launch below — `allShips` itself
-            // only refreshes via `refreshRoster()`, so if two-plus bays come
-            // off cooldown the same frame, re-deriving each slot from
-            // `allShips` would hand every fighter launched this pass the exact
-            // same (stale) count, and they'd all fight over one formation slot.
             var nextFormationSlot = allShips.filter { $0.brain?.leaderID == carrier.entityID }.count
             for bay in carrier.fighterBays {
                 bay.launchCooldown = max(0, bay.launchCooldown - dt)
                 // Drop dead/orphaned fighters from the roster.
                 bay.deployed = bay.deployed.filter { ship(id: $0)?.carrierID == carrier.entityID }
-                if inCombat, bay.docked > 0, bay.launchCooldown <= 0,
-                   let fighter = launchFighter(from: carrier, bay: bay, formationSlot: nextFormationSlot) {
-                    nextFormationSlot += 1
-                    bay.docked -= 1
-                    bay.deployed.insert(fighter.entityID)
-                    bay.launchCooldown = Double(bay.spec.launchIntervalFrames) / 30.0
-                }
-                // Keep the bay's WeaponMount ammo readout (the HUD's "Bay - N"
-                // secondary-weapon display) in sync with the real docked count —
-                // the mount only exists for secondary-weapon selection/display;
-                // `bay.docked` stays the single source of truth (also updated
-                // directly by the player's own launch path in `fireWeapons`).
+            }
+            if !carrier.isPlayer, carrierTarget(carrier) != nil,
+               let bay = carrier.fighterBays.first(where: { $0.docked > 0 && $0.launchCooldown <= 0 }),
+               let fighter = launchFighter(from: carrier, bay: bay, formationSlot: nextFormationSlot) {
+                nextFormationSlot += 1
+                bay.docked -= 1
+                bay.deployed.insert(fighter.entityID)
+                bay.launchCooldown = bayReload(carrier, bay) / Double(bayMounted(carrier, bay))
+            }
+            // Keep the bay's WeaponMount ammo readout (the HUD's "Bay - N"
+            // secondary-weapon display) in sync with the real docked count.
+            for bay in carrier.fighterBays {
                 if let mount = carrier.weapons.first(where: { $0.spec.id == bay.spec.bayWeaponID }) {
                     mount.ammo = bay.docked
                 }
             }
+            // Standing down calls the wing home (NPC carriers; the player
+            // recalls by command or by jumping).
+            if !carrier.isPlayer, carrierTarget(carrier) == nil {
+                for bay in carrier.fighterBays {
+                    for id in bay.deployed { ship(id: id)?.recallToCarrier = true }
+                }
+            }
         }
 
-        // Recall & dock pass — collect removals, apply after iterating.
+        // Dock pass — collect removals, apply after iterating.
         var docked: Set<Int> = []
         for f in npcs where f.carrierID != nil && f.isAlive {
             guard let carrier = ship(id: f.carrierID!), carrier.isAlive else {
@@ -3302,30 +4798,17 @@ public final class World {
                 continue
             }
             // A *disabled* carrier is a hulk, not a wreck: it can't take fighters
-            // aboard while it's adrift, but its wing still belongs to it and it
-            // may yet be repaired. Orphaning the wing here (permanently — nothing
-            // ever re-adopts them) sent every fighter off to fly for itself the
-            // moment its carrier took a bad hit.
-            guard !carrier.disabled else { continue }
-            if !f.recallToCarrier {
-                // Only return when the fighter itself needs it (dry on ammo,
-                // badly hurt) or the player explicitly recalls it — NOT just
-                // because the carrier lost its target/left combat, which used
-                // to yank every fighter home the instant you deselected a
-                // target rather than only on an actual command.
-                let outOfAmmo = !f.weapons.isEmpty && f.weapons.allSatisfy { $0.ammo == 0 }
-                if outOfAmmo || f.healthFraction < 0.3 {
-                    f.recallToCarrier = true
-                }
+            // aboard while it's adrift, but its wing still belongs to it.
+            guard !carrier.disabled, f.recallToCarrier else { continue }
+            let d = f.position - carrier.position
+            guard abs(d.x) < 75, abs(d.y) < 75 else { continue }
+            if let bay = carrier.fighterBays.first(where: { $0.deployed.contains(f.entityID) })
+                ?? carrier.fighterBays.first(where: { $0.spec.fighterShipID == f.shipTypeID }) {
+                bay.deployed.remove(f.entityID)
+                if bay.docked == 0 { bay.launchCooldown = max(bay.launchCooldown, bayReload(carrier, bay)) }
+                bay.docked += 1
             }
-            if f.recallToCarrier,
-               (f.position - carrier.position).length <= carrier.radius + f.radius + 30 {
-                if let bay = carrier.fighterBays.first(where: { $0.deployed.contains(f.entityID) }) {
-                    bay.deployed.remove(f.entityID)
-                    bay.docked = min(bay.spec.capacity, bay.docked + 1)
-                }
-                docked.insert(f.entityID)
-            }
+            docked.insert(f.entityID)
         }
         if !docked.isEmpty {
             for id in docked { clearTarget(id) }
@@ -3333,40 +4816,70 @@ public final class World {
         }
     }
 
-    /// Launch one fighter from `carrier`'s `bay`: a real sub-ship of the bay's
-    /// fighter class, joining the carrier's formation as an escort — matching
-    /// real EV Nova, where launched fighters behave like any other escort rather
-    /// than auto-hunting.
+    /// A bay's `Reload` in seconds, and how many bay mounts it has.
+    private func bayReload(_ carrier: Ship, _ bay: Ship.FighterBay) -> Double {
+        Double(bay.spec.launchIntervalFrames) / OriginalClock.ticksPerSecond
+    }
+    private func bayMounted(_ carrier: Ship, _ bay: Ship.FighterBay) -> Int {
+        max(1, carrier.weapons.first(where: { $0.spec.id == bay.spec.bayWeaponID })?.count ?? 1)
+    }
+
+    /// The player's secondary trigger on a fighter bay (OS-03): with a target
+    /// in the system, launch one docked fighter; the bay then waits `Reload /
+    /// mounted`.
+    private func launchPlayerBayFighter(from ship: Ship, mount: WeaponMount) {
+        let spec = mount.spec
+        guard carrierTarget(ship) != nil,
+              let bay = ship.fighterBays.first(where: { $0.spec.bayWeaponID == spec.id }),
+              bay.docked > 0 else { mount.logBlockedIfNeeded(for: ship); return }
+        let slot = allShips.filter { $0.brain?.leaderID == ship.entityID }.count
+        guard let fighter = launchFighter(from: ship, bay: bay, formationSlot: slot) else { return }
+        bay.docked -= 1
+        bay.deployed.insert(fighter.entityID)
+        mount.ammo = bay.docked   // `bay.docked` stays the single source of truth
+        mount.cooldown = spec.reloadSeconds / Double(max(1, mount.count))
+        events.append(.weaponFired(shooterID: ship.entityID, at: ship.position, heading: ship.angle,
+                                   soundID: spec.fireSoundID, weaponID: spec.id))
+    }
+
+    /// Launch one fighter from `carrier`'s `bay` (`Ship_LaunchShipFromCarrierBay`
+    /// 0x0040d9a0): a behavior-5 escort of the carrier, so its maximum shield
+    /// and armor and its shield regeneration are × 1.333 (AI-41). It starts at
+    /// the carrier's centre on its heading ± the bay's Inaccuracy, moving at
+    /// the bay's `Speed / 100` px/tick (per axis, up to its own top speed), and
+    /// takes the carrier's target — except off the player's carrier.
     ///
     /// A fighter flies under whatever standing order its carrier's wing is on,
-    /// so it fights exactly like the escorts around it: the player's own bays
-    /// inherit the wing order set in the escort command window, and an NPC
-    /// carrier's fighters inherit that carrier's own order (which, for a carrier
-    /// escorting the player, is itself the player's wing order). Hardcoding
-    /// `.defensive` here is what left fighters holding fire in a fight the rest
-    /// of a wing set to Attack had already joined.
+    /// so it fights exactly like the escorts around it.
     private func launchFighter(from carrier: Ship, bay: Ship.FighterBay, formationSlot: Int) -> Ship? {
         guard let galaxy else { return nil }
-        let pos = carrier.position + Vec2.heading(carrier.angle) * (carrier.radius + 20)
-        // A launched fighter is AI-flown and was neither bought nor captured, so
-        // it too ignores its hull's `DefaultItems` (Bible). It flies the fighter
-        // class exactly as authored — which is what the carrier's bay stocks.
+        let bayMount = carrier.weapons.first(where: { $0.spec.id == bay.spec.bayWeaponID })
+        var heading = wholeDegrees(carrier.angle)
+        if let spec = bayMount?.spec, spec.inaccuracyDegrees > 0 {
+            heading += Double(rng.range(2 * spec.inaccuracyDegrees) - spec.inaccuracyDegrees) * .pi / 180
+        }
+        // A launched fighter is AI-flown, so like any NPC its stats ignore its
+        // hull's `DefaultItems` while its capabilities still read them.
         guard let fighter = galaxy.makeLoadedShip(bay.spec.fighterShipID, government: carrier.government,
-                                                  at: pos, angle: carrier.angle,
-                                                  includeDefaultItems: false) else { return nil }
+                                                  at: carrier.position, angle: heading,
+                                                  includeDefaultItems: false, defaultItemCapabilities: true) else { return nil }
+        fighter.applyCarriedFighterScale()
         let brain = fighter.brain ?? AIBrain(aiType: .interceptor, govt: carrier.government)
         fighter.brain = brain
         brain.leaderID = carrier.entityID
         brain.escortOrder = carrier.isPlayer ? (playerEscortOrder ?? .defensive)
                                              : (carrier.brain?.escortOrder ?? .defensive)
-        // Distinct slots so a bay's fighters fan out into their own formation
-        // positions behind the carrier instead of converging on the same spot.
-        // Passed in by the caller, which tracks a running count across this
-        // frame's whole launch pass — see the comment at the call site.
         brain.formationSlot = formationSlot
         brain.provokedByPlayer = carrier.isPlayer ? false : (carrier.brain?.provokedByPlayer ?? false)
         fighter.carrierID = carrier.entityID
-        fighter.velocity = carrier.velocity
+        if !carrier.isPlayer, let t = carrierTarget(carrier) {
+            fighter.currentTargetID = t.entityID
+            brain.targetID = t.entityID
+        }
+        fighter.velocity = Vec2()
+        fighter.addPolarVelocityWithClamp(heading: wholeDegrees(heading),
+                                          step: bayMount?.spec.projectileSpeed ?? 0,
+                                          max: fighter.effectiveMaxSpeed)
         _ = addNPC(fighter, arrival: .launch)
         return fighter
     }
@@ -3401,9 +4914,7 @@ public final class World {
     /// shows the same haul.
     public func boardingManifest(for shipID: Int) -> BoardingManifest? {
         guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled else { return nil }
-        let cargo = s.cargo.filter { $0.value > 0 }
-            .map { (commodity: $0.key, tons: $0.value) }
-            .sorted { $0.commodity < $1.commodity }
+        let cargo = rolledPlunderCargo(s).map { [$0] } ?? []
         return BoardingManifest(shipID: shipID, name: personName(s) ?? s.name,
                                 credits: rolledPlunderCredits(s), cargo: cargo,
                                 captureChance: captureChance(of: s),
@@ -3436,29 +4947,161 @@ public final class World {
         return loot
     }
 
-    /// Total effective crew the player brings to a boarding action — the sum EV
-    /// Nova's capture math puts on the attacker's side: the player ship's own
-    /// `Crew`, its marines outfits' bonus crew, and the `Crew` of every escort
-    /// under the player's command.
-    public var playerBoardingCrew: Int {
-        player.crew + player.marineCrew + playerEscorts.reduce(0) { $0 + $1.crew }
+    /// The crew and strength the player brings to a boarding action
+    /// (`Boarding_BuildOptions` 0x00484230, EC-18): the player's class Crew and
+    /// Strength, plus a tenth (truncated, one escort at a time) of each
+    /// non-mission escort whose hull's InherentAI is above 2, plus the crew of
+    /// positive marines outfits.
+    public var playerBoardingForce: (crew: Int, strength: Int) {
+        var crew = player.crew
+        var strength = classStrength(player)
+        for e in playerEscorts where e.missionID == nil {
+            if let eh = galaxy?.game.ship(e.shipTypeID), eh.inherentAI <= 2 { continue }
+            strength = Int(Double(strength) + Double(classStrength(e)) * 0.1)
+            crew = Int(Double(crew) + Double(e.crew) * 0.1)
+        }
+        return (crew + player.marineCrew, strength)
     }
 
+    /// A ship's class `Strength`, or its live combat strength when the hull
+    /// isn't in the data.
+    private func classStrength(_ s: Ship) -> Int {
+        galaxy?.game.ship(s.shipTypeID)?.strength ?? Int(s.combatStrength)
+    }
+
+    /// Effective crew the player brings to a boarding action.
+    public var playerBoardingCrew: Int { playerBoardingForce.crew }
+
     /// Capture odds (percent) for the player taking disabled hulk `target`, or
-    /// nil if it can't be captured. EV Nova's documented formula:
-    ///   odds = (attackerCrew / (targetCrew × 10)) × 100
-    ///        + the player's marines odds bonus (negative-ModVal ModType-25)
-    ///        + 10 if the player's Strength exceeds 5× the target's Strength
-    /// clamped to 1…75%. The defender's ×10 crew advantage is why capture is hard
-    /// without marines or escorts. The ±5% random jitter is applied at the moment
-    /// of the attempt (`attemptCapture`), not here, so a *displayed* chance is
-    /// stable while the roll still varies.
+    /// nil if it can't be captured (`Boarding_BuildOptions` 0x00484230):
+    ///   odds = trunc(crew / (targetCrew × 10) × 100)
+    ///        + the negative-ModVal marines bonus
+    ///        + 10 when the player's strength exceeds 5 × the target class's
+    /// clamped to 1…75 %, and 0 for a derelict government (Flags 0x0800) or
+    /// when the escort wing is full. The original's ±5 jitter is applied at the
+    /// attempt (`attemptCapture`), so the displayed chance is stable.
     public func captureChance(of target: Ship) -> Int? {
         guard target.crew > 0 else { return nil }   // nothing to overpower
-        let ratio = Double(playerBoardingCrew) / Double(target.crew * 10) * 100
-        var odds = Int(ratio.rounded()) + player.captureOddsBonus
-        if player.combatStrength > target.combatStrength * 5 { odds += 10 }
-        return min(75, max(1, odds))
+        let force = playerBoardingForce
+        var odds = Int(Double(force.crew) / (Double(target.crew) * 10) * 100) + player.captureOddsBonus
+        if classStrength(target) * 5 < force.strength { odds += 10 }
+        odds = min(75, max(1, odds))
+        if let g = diplomacy?.govt(target.government), g.flags1 & 0x0800 != 0 { return 0 }
+        if !playerHasEscortRoom { return 0 }
+        return odds
+    }
+
+    /// `Ship_CanPlayerHaveMoreEscorts` 0x00468920: fewer than six non-mission
+    /// escorts.
+    public var playerHasEscortRoom: Bool {
+        // Bay fighters (behavior 5) are not escorts and never count.
+        playerEscorts.filter { $0.carrierID != Self.playerEntityID && $0.missionID == nil }.count < 6
+    }
+
+    // MARK: Disabled escorts (AI-38, AI-41)
+
+    /// `Ship_ApplyDamageToShip` (0x004192d0), disabled arm: a non-mission ship
+    /// in the player's wing leaves it the moment it is disabled. It remembers
+    /// it flew as a bay fighter or an escort (`+0xc8de`), takes its class's
+    /// own AI, and a freighter escort (InherentAI < 3) first takes its share
+    /// of the fleet's cargo (`.escortLeftWingDisabled`, the host's
+    /// `Player_TransferCargoAndJunkToEscortByRatio` 0x00469810). A fighter
+    /// drops its × 1.333 pools with its behavior.
+    func leaveWingWhenDisabled(_ ship: Ship) {
+        guard !ship.isPlayerControlled, ship.missionID == nil, ship.spobDefenderOf == nil,
+              let brain = ship.brain, brain.leaderID == Self.playerEntityID else { return }
+        let inherent = galaxy?.game.ship(ship.shipTypeID)?.inherentAI ?? 0
+        let fighter = ship.carrierID == Self.playerEntityID
+        ship.formerWingRole = fighter ? .fighter : .escort
+        brain.leaderID = nil
+        brain.aiType = AIType(raw: inherent)
+        if fighter {
+            for bay in player.fighterBays { bay.deployed.remove(ship.entityID) }
+            ship.carrierID = nil
+            ship.recallToCarrier = false
+            ship.removeCarriedFighterScale()
+        }
+        events.append(.escortLeftWingDisabled(entityID: ship.entityID, freighter: !fighter && inherent < 3))
+        Log.combat.notice("\(LogTag.ship(id: ship.entityID, name: ship.name)) disabled — left the player's wing")
+    }
+
+    /// A former escort or fighter rejoins (its repair system fired,
+    /// `Ship_HandleShip` 0x00433050): leader the player again, shields 0, no
+    /// target; a fighter as behavior 5 with its × 1.333 pools ("Fighter
+    /// repaired.", STR# 2002 #128), an escort as behavior 6 ("Escort
+    /// repaired.", #127). There is no wing-size check on this path.
+    func rejoinWing(_ ship: Ship) {
+        guard let role = ship.formerWingRole else { return }
+        ship.formerWingRole = nil
+        ship.shield = 0
+        ship.currentTargetID = nil
+        switch role {
+        case .fighter:
+            let brain = ship.brain ?? AIBrain(aiType: .interceptor, govt: player.government)
+            ship.brain = brain
+            brain.leaderID = Self.playerEntityID
+            brain.targetID = nil
+            brain.escortOrder = playerEscortOrder ?? .defensive
+            ship.carrierID = Self.playerEntityID
+            player.fighterBays.first { $0.spec.fighterShipID == ship.shipTypeID }?.deployed.insert(ship.entityID)
+            ship.applyCarriedFighterScale(keepingLevels: true)
+        case .escort:
+            recruitEscort(ship)
+        }
+        events.append(.escortRejoined(entityID: ship.entityID, fighter: role == .fighter))
+    }
+
+    /// What boarding a disabled hulk does before any plunder window
+    /// (`Player_HandleBoardTargetCommand` 0x0045a3d0), for a non-mission,
+    /// non-përs ship:
+    /// - a former escort, with room in the wing, is repaired back into it at
+    ///   `max/3 + 1` armor (`max/10 + 1` with hull Flags 0x0010), bringing the
+    ///   cargo it carried off back with it ("Escort repaired.", #127);
+    /// - a former bay fighter, or any hulk of a class one of the player's bays
+    ///   carries and has room for, goes straight into that bay ("Fighter
+    ///   repaired." #128 / "Fighter captured." #129) — it is docked, so its
+    ///   behavior-5 × 1.333 pools take effect when it is next launched.
+    /// Returns nil when the boarding goes on to the plunder window.
+    public enum BoardingRecovery: Equatable, Sendable {
+        case escortRepaired(cargo: [Int: Int])
+        case fighterRepaired
+        case fighterCaptured
+    }
+
+    public func recoverOnBoarding(shipID: Int) -> BoardingRecovery? {
+        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
+              s.missionID == nil, s.personID == nil else { return nil }
+        if s.formerWingRole == .escort, playerHasEscortRoom {
+            s.formerWingRole = nil
+            s.armor = s.maxArmor * (s.disableArmorFraction < Ship.standardDisableFraction ? 0.1 : 0.3333) + 1
+            let cargo = s.cargo
+            s.cargo = [:]
+            recruitEscort(s)
+            events.append(.escortRejoined(entityID: s.entityID, fighter: false))
+            return .escortRepaired(cargo: cargo)
+        }
+        guard s.formerWingRole != .escort, let bay = playerBayWithRoom(for: s.shipTypeID) else { return nil }
+        let captured = s.formerWingRole == nil
+        s.formerWingRole = nil
+        if bay.docked == 0 { bay.launchCooldown = max(bay.launchCooldown, Double(bay.spec.launchIntervalFrames) / OriginalClock.ticksPerSecond) }
+        bay.docked += 1
+        if let mount = player.weapons.first(where: { $0.spec.id == bay.spec.bayWeaponID }) { mount.ammo = bay.docked }
+        clearTarget(s.entityID)
+        npcs.removeAll { $0 === s }
+        events.append(.fighterRecoveredToBay(entityID: s.entityID, captured: captured))
+        return captured ? .fighterCaptured : .fighterRepaired
+    }
+
+    /// `ShipClass_HasPlayerBayCapacityFor` (0x004694a0): a player bay that
+    /// launches `shipTypeID` and holds fewer than its capacity, counting its
+    /// fighters in flight.
+    func playerBayWithRoom(for shipTypeID: Int) -> Ship.FighterBay? {
+        player.fighterBays.first { bay in
+            guard bay.spec.fighterShipID == shipTypeID else { return false }
+            let flying = npcs.filter { $0.isAlive && $0.carrierID == Self.playerEntityID
+                && $0.shipTypeID == shipTypeID && $0.missionID == nil }.count
+            return bay.docked + flying < bay.spec.capacity
+        }
     }
 
     /// Board disabled hulk `shipID`: emit `.shipBoarded` and return its plunder
@@ -3473,8 +5116,12 @@ public final class World {
         // Forcing entry onto a hulk is itself the crime (`BoardPenalty`),
         // independent of what's later taken or whether capture succeeds —
         // this is the only call site (`board` only ever fires for the
-        // player; NPCs don't board).
-        diplomacy?.recordBoard(of: s.government)
+        // player; NPCs don't board). The revenge përs (slot 0x3fe, përs 1150)
+        // and the shareware Enforcer slot after it are exempt
+        // (`Player_HandleBoardTargetCommand` 0x0045a3d0).
+        if s.personID != 1150 && s.personID != 1151 {
+            diplomacy?.recordBoard(of: s.government, missionShip: s.missionID != nil)
+        }
         // Boarding is the actual goal for both board and rescue missions. This
         // also handles ships that started disabled through their government,
         // without requiring a damage-induced disable transition. Report each
@@ -3482,20 +5129,25 @@ public final class World {
         if let mid = s.missionID, let goal = s.missionShipGoal,
            (goal == .board || goal == .rescue), !s.missionBoardingGoalReported {
             s.missionBoardingGoalReported = true
+            // A boarded rescue ship is no longer held; its armor decides.
+            if goal == .rescue { s.heldDisabled = false }
             events.append(.missionShipGoalReached(missionID: mid, entityID: s.entityID,
                                                   goal: goal, byPlayer: true))
         }
         return manifest
     }
 
-    /// Credits aboard a hulk, rolled once (deterministically from its identity +
-    /// toughness) and cached on the ship.
+    /// Credits aboard a hulk (EC-18): a düde ship with Booty 0x40 has them set
+    /// at spawn (`assignBootyCredits`); a named person carries
+    /// `bootyCredits(Credits, × 0.5)` with no floor; any other ship carries
+    /// none. Rolled once and cached on the ship.
     private func rolledPlunderCredits(_ s: Ship) -> Int {
         if s.plunderCredits < 0 {
-            var h = UInt64(bitPattern: Int64(s.entityID &+ 1)) &* 0x9E3779B97F4A7C15
-            h ^= UInt64(bitPattern: Int64(s.shipTypeID &+ 7)) &* 0xD1B54A32D192ED03
-            let value = max(40, Int((s.maxArmor + s.maxShield) / 2))
-            s.plunderCredits = value / 2 + Int(h % UInt64(max(1, value)))
+            if let pid = s.personID, let pers = galaxy?.game.pers(pid) {
+                s.plunderCredits = Self.bootyCredits(base: pers.credits, factor: 0.5, floorAt1000: false) { rng.range($0) }
+            } else {
+                s.plunderCredits = 0
+            }
         }
         return s.plunderCredits
     }
@@ -3508,22 +5160,42 @@ public final class World {
         return c
     }
 
-    /// Move a hulk's cargo into the player's hold, limited by free space, and
-    /// return what was actually taken (commodity id → tons).
-    @discardableResult
-    public func takePlunderCargo(from shipID: Int) -> [(commodity: Int, tons: Int)] {
-        guard let s = ship(id: shipID) else { return [] }
-        var taken: [(commodity: Int, tons: Int)] = []
-        for (commodity, tons) in s.cargo.sorted(by: { $0.key < $1.key }) where tons > 0 {
-            let room = player.cargoFree
-            guard room > 0 else { break }
-            let move = min(tons, room)
-            player.cargo[commodity, default: 0] += move
-            s.cargo[commodity]! -= move
-            if s.cargo[commodity]! <= 0 { s.cargo[commodity] = nil }
-            taken.append((commodity, move))
+    /// The cargo a boarded hulk offers (`Boarding_BuildOptions` 0x00484230,
+    /// EC-18) — rolled from its düde's Booty, not from what its hold carries:
+    /// one commodity drawn by `rand(7)` until it lands on a Booty bit
+    /// (0x01 food … 0x20 equipment), in `rand(holds/2) + holds/2` tons of the
+    /// hull's Holds. No Booty commodity bit (or no holds) means no cargo. The
+    /// original's draw spins forever on Booty with only bits above 0x40; that
+    /// case offers nothing here. Rolled once per hulk.
+    private func rolledPlunderCargo(_ s: Ship) -> (commodity: Int, tons: Int)? {
+        if let roll = s.plunderCargoRoll { return roll }
+        var roll: (commodity: Int, tons: Int)?
+        if s.dudeBooty & 0x3f != 0 {
+            var commodity = rng.range(7)
+            while commodity > 5 || s.dudeBooty & (1 << commodity) == 0 { commodity = rng.range(7) }
+            let holds = galaxy?.game.ship(s.shipTypeID)?.cargoSpace ?? 0
+            if holds >= 1 {
+                let half = holds / 2
+                let tons = rng.range(half) + half
+                if tons >= 1 { roll = (commodity, tons) }
+            }
         }
-        return taken
+        s.plunderCargoRoll = .some(roll)
+        return roll
+    }
+
+    /// Take a hulk's cargo roll into the player's hold, cut to the free space
+    /// (`room`, the fleet's when the host knows it; else the player ship's),
+    /// and return what was taken. The roll is spent either way — with no room
+    /// the original still clears the option (0x00482940).
+    @discardableResult
+    public func takePlunderCargo(from shipID: Int, room: Int? = nil) -> [(commodity: Int, tons: Int)] {
+        guard let s = ship(id: shipID), let roll = rolledPlunderCargo(s) else { return [] }
+        s.plunderCargoRoll = .some(nil)
+        let move = min(roll.tons, room ?? player.cargoFree)
+        guard move >= 1 else { return [] }
+        player.cargo[roll.commodity, default: 0] += move
+        return [(roll.commodity, move)]
     }
 
     /// Attempt to capture a hulk given a 0–99 `roll` (supplied by the caller so
@@ -3537,9 +5209,9 @@ public final class World {
     /// this same roll rather than re-rolling for each possible outcome.
     public func attemptCapture(shipID: Int, roll: Int) -> (shipTypeID: Int, name: String)? {
         guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
-              let chance = captureChance(of: s) else { return nil }
-        let effective = min(75, max(1, chance + rng.int(in: -5...5)))
-        guard roll < effective else { return nil }
+              let chance = captureChance(of: s), chance > 0 else { return nil }
+        let effective = min(75, max(1, chance + 5 - rng.range(11)))
+        guard roll <= effective else { return nil }
         events.append(.shipCaptured(entityID: s.entityID, shipTypeID: s.shipTypeID, at: s.position))
         Log.combat.notice("\(LogTag.ship(id: s.entityID, name: s.name)) captured (roll \(roll) < \(effective))")
         return (s.shipTypeID, personName(s) ?? s.name)
@@ -3563,10 +5235,9 @@ public final class World {
     /// *saving* it (`World.board`), so blowing it up afterward would fire a
     /// contradictory `missionShipLost` right behind the success.
     public func finishBoardingWithoutCapture(shipID: Int) {
-        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
-              s.missionShipGoal != .rescue else { return }
-        s.armor = 0
-        s.shield = 0
+        // The original only marks the hulk boarded and leaves it drifting
+        // disabled (EC-18); nothing to do here.
+        _ = shipID
     }
 
     /// Recruit `ship` as a player escort — ally it to the player, clear any
@@ -3579,11 +5250,25 @@ public final class World {
         brain.leaderID = Self.playerEntityID
         brain.escortOrder = .defensive
         brain.provokedByPlayer = false
-        brain.wrongedByPlayer = false
         brain.formationSlot = playerEscorts.filter { $0.entityID != ship.entityID }.count
+        // A captured hulk joins at half its armor (0x00482940); disable is
+        // derived from armor, so it is no longer disabled.
+        if ship.disabled { ship.armor = ship.maxArmor * 0.5 }
         ship.disabled = false
         ship.currentTargetID = nil
         Log.combat.notice("\(LogTag.ship(id: ship.entityID, name: ship.name)) recruited as escort")
+    }
+
+    /// Release `ship` from the player's command (the escort window's Release,
+    /// 0x004853a0): it stays in the system as an ordinary NPC flying `aiType`,
+    /// its class's default behavior, with no target. The original escort
+    /// supervisor sees the missing leader and drops the escort behavior itself.
+    public func releaseFromPlayerCommand(_ ship: Ship, aiType: AIType) {
+        guard let brain = ship.brain, brain.leaderID == Self.playerEntityID else { return }
+        brain.leaderID = nil
+        brain.aiType = aiType
+        ship.currentTargetID = nil
+        Log.combat.notice("\(LogTag.ship(id: ship.entityID, name: ship.name)) released from the player's command")
     }
 
     /// Lock a specific ship by id (click-to-select). Unlike
@@ -3591,7 +5276,8 @@ public final class World {
     /// selectable, including disabled hulks that can be boarded.
     @discardableResult
     public func selectTarget(id: Int) -> Ship? {
-        guard let ship = npcs.first(where: { $0.entityID == id }), ship.isAlive else { return nil }
+        guard let ship = npcs.first(where: { $0.entityID == id }), ship.isAlive,
+              canTarget(ship, by: player) else { return nil }
         player.currentTargetID = id
         events.append(.targetAcquired(entityID: id))
         return ship

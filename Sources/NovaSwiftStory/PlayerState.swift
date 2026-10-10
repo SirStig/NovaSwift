@@ -41,6 +41,39 @@ public struct ActiveMission: Codable, Hashable, Sendable {
     /// for save-compat (like `travelSpobID`).
     public var acceptSystemID: Int?
 
+    // The original's per-slot runtime (0x0043f100 / 0x00443c60). All optional
+    // so older saves decode; nil reads as false / 0.
+
+    /// The mission has failed. It stays listed until the player lands at its
+    /// return stellar, where the failure is resolved (MS-07).
+    public var failed: Bool?
+    /// The objective-complete latch; OnShipDone and ShipDoneText fire on its
+    /// first rise, and an auto-abort mission resolves there (MS-06).
+    public var objectiveComplete: Bool?
+    /// Mission ships destroyed, boarded, disabled and chased off — the
+    /// original's goal counters A, B, C and E (MS-11).
+    public var shipsDestroyed: Int?
+    public var shipsBoarded: Int?
+    public var shipsDisabled: Int?
+    public var shipsChasedOff: Int?
+    /// An escort-goal ship has been present, or an observe-goal ship seen.
+    public var shipsSighted: Bool?
+    /// The mission cargo has been unloaded at its drop-off point.
+    public var cargoDelivered: Bool?
+    /// The `mïsn.ShipName` STR# entry (1-based) rolled at accept for `<SN>`.
+    public var shipNameEntry: Int?
+    /// Identifies this slot while scripts run; a mission started twice by `S`
+    /// has two slots (OQ D9).
+    public var serial: Int?
+    /// AI-14: auxiliary ships the mission can still bring in (nil = its
+    /// full `AuxShipCount`). Spent as they jump in unless the mission has
+    /// Flags 0x0010.
+    public var auxShipsRemaining: Int?
+
+    public var isFailed: Bool { failed ?? false }
+    /// The mission cargo is aboard: loaded and not yet delivered.
+    public var isCarryingCargo: Bool { cargoPickedUp && !(cargoDelivered ?? false) }
+
     public init(missionID: Int, acceptedDate: GameDate, deadline: GameDate?,
                 cargoPickedUp: Bool, shipObjectivesRemaining: Int,
                 visitedTravelStellar: Bool = false,
@@ -74,6 +107,15 @@ public struct CronRuntime: Codable, Hashable, Sendable {
     /// but is holding for `PreHoldoff` days before starting. nil = not pending.
     public var pendingStart: GameDate?
 
+    /// The original's slot counters (0x00439500). `active` is set from the day
+    /// the event triggers until it deactivates, holdoffs included; `holdoff`
+    /// counts down a pre- or post-holdoff wait and `duration` the event itself
+    /// (-1 once it has ended). nil in a save written before these existed:
+    /// `StoryEngine` converts the old dates on first use.
+    public var active: Bool?
+    public var holdoff: Int?
+    public var duration: Int?
+
     public init(cronID: Int, startedDate: GameDate? = nil, endDate: GameDate? = nil,
                 earliestStart: GameDate? = nil, pendingStart: GameDate? = nil) {
         self.cronID = cronID
@@ -83,7 +125,53 @@ public struct CronRuntime: Codable, Hashable, Sendable {
         self.pendingStart = pendingStart
     }
 
-    public var isActive: Bool { startedDate != nil }
+    /// The event counts as running — for Contribute bits and news — from the
+    /// day it triggers until it deactivates, holdoffs included.
+    public var isActive: Bool { active ?? (startedDate != nil) }
+}
+
+/// Where a mission offered at the current landing would send the player, and
+/// what it would load — the original's per-definition target table
+/// (0x0043d240), resolved once per landing so the offer text, the BBS list and
+/// the accepted mission all agree.
+public struct MissionTargets: Codable, Hashable, Sendable {
+    public var travelSpob: Int?
+    public var returnSpob: Int?
+    public var cargoType: Int
+    public var cargoQty: Int
+    public var deadline: GameDate?
+
+    public init(travelSpob: Int?, returnSpob: Int?, cargoType: Int, cargoQty: Int, deadline: GameDate?) {
+        self.travelSpob = travelSpob
+        self.returnSpob = returnSpob
+        self.cargoType = cargoType
+        self.cargoQty = cargoQty
+        self.deadline = deadline
+    }
+}
+
+/// The original's mission-offer bookkeeping between system arrivals and
+/// landings: the AvailRandom rolls, the resolved targets, and the bar /
+/// spaceport offer lane (0x00448670).
+public struct MissionOfferState: Codable, Sendable {
+    /// Seed of this arrival's AvailRandom rolls (1…100 per mission).
+    public var rollSeed: UInt64 = 0
+    /// Missions whose roll was zeroed by an accept (a 0 roll always passes).
+    public var zeroedRolls: Set<Int> = []
+    /// Targets resolved since the last arrival or rebuild.
+    public var targets: [Int: MissionTargets] = [:]
+    /// The stellar the offer lists were last built for; nil forces a rebuild
+    /// on the next landing (set after any mission success or failure).
+    public var listStellar: Int?
+    /// Lane offers accepted or refused: gone until the lane is rebuilt.
+    public var removed: Set<Int> = []
+    /// Lane offers whose activation failed: shown again only after the
+    /// context changes away from the main spaceport.
+    public var shown: Set<Int> = []
+    /// The offer context last run (the `AvailLoc` value).
+    public var context: Int?
+
+    public init() {}
 }
 
 /// How a ship under the player's command was acquired — this is what decides
@@ -126,12 +214,15 @@ public struct EscortRecord: Codable, Hashable, Sendable, Identifiable {
     public var dailyFee: Int
     /// The mission this escort is tied to, when `origin == .mission`.
     public var missionID: Int?
-    /// A requested-but-not-yet-charged `UpgradeTo` hull. Set by the "Upgrade"
-    /// hail action; only actually applied (hull swap + `EscUpgrdCost` charge)
-    /// the next time the player lands somewhere with a shipyard — see
-    /// `PilotStore.applyPendingEscortUpgrades`. Free to cancel any time before
-    /// then. `nil` for old saves (no key present) via `Codable` synthesis.
+    /// The upgrade mark (ShipState +0xBF): the `UpgradeTo` hull requested in
+    /// the escort window. Applied (hull swap + `EscUpgrdCost` charge) by the
+    /// fleet pass when the player leaves a shipyard stellar —
+    /// `PilotEconomy.processEscortFleetAtStellar`. Free to clear before then.
+    /// `nil` for old saves (no key present) via `Codable` synthesis.
     public var pendingUpgradeTo: Int?
+    /// The sale mark (ShipState +0xBE): sold by the same fleet pass. Exclusive
+    /// with `pendingUpgradeTo`. `nil` (no mark) for older saves.
+    public var pendingSale: Bool?
 
     public init(id: Int, shipType: Int, name: String, origin: EscortOrigin,
                 hireFee: Int = 0, dailyFee: Int = 0, missionID: Int? = nil,
@@ -162,6 +253,17 @@ public struct EscortHireTally: Codable, Sendable {
     }
 }
 
+/// Classes whose daily stock roll was redrawn today. The original keeps one
+/// roll per ship class for the shipyard and one for the bar, redrawn at every
+/// daily tick and again when that class is bought or hired (0x00492f30); the
+/// port derives each day's roll from the date, so a redraw is a counter.
+public struct StockRerolls: Codable, Sendable, Equatable {
+    public var day: Int
+    public var ships: [Int: Int] = [:]   // shïp id → shipyard redraws today
+    public var hires: [Int: Int] = [:]   // shïp id → bar redraws today
+    public init(day: Int) { self.day = day }
+}
+
 /// The complete, serialisable player / campaign state — the "pilot file". Owns
 /// the control-bit vector, mission log, ranks, standings and galaxy clock. This
 /// is the single source of truth the story engine reads and mutates; combat,
@@ -171,6 +273,17 @@ public struct PlayerState: Codable, Sendable {
     public var pilotName: String
     public var isMale: Bool
     public var unregisteredDays: Int
+    /// The original's per-pilot Strict Play option, chosen at creation (default
+    /// off) and saved with the pilot. Off, the player and their direct escorts
+    /// fly at 1.5 × top speed. `nil` (an older save) reads as off.
+    public var strictPlay: Bool?
+    public var isStrictPlay: Bool { strictPlay ?? false }
+    /// The chär DatePrefix / DateSuffix ("" / " NC"), copied at creation and
+    /// kept with the pilot as the original does (pilot +0x5ede / +0x5eee); every
+    /// displayed date wears them. `nil` in an older save (`OriginalText` then
+    /// falls back to the first chär's).
+    public var datePrefix: String?
+    public var dateSuffix: String?
 
     // Assets
     public var credits: Int
@@ -214,11 +327,12 @@ public struct PlayerState: Codable, Sendable {
     /// ModType 16) but not physically visited — shown named on the galaxy map
     /// yet distinct from `exploredSystems`. A map is a one-shot reveal recorded
     /// here at acquisition time (see `applyOutfitAcquisition`), so it survives
-    /// the (usually intangible) map item being consumed. Kept SEPARATE from
-    /// `exploredSystems` on purpose: `exploredSystems` drives the NCB `Exxx`
-    /// "has the player *been* to system X" test, and buying a chart must not
-    /// satisfy a story gate that requires actually travelling there. Optional so
-    /// older saves without the field still decode (like `fuel`/`armor`).
+    /// the (usually intangible) map item being consumed. In the original a map
+    /// writes discovery level 2 — the same as landing — so a charted system
+    /// counts as explored for NCB `Exxx` and shows its services on the map
+    /// (UI-04, `isSystemExplored`). Kept apart from `exploredSystems` only so
+    /// the map can still tell visited from charted. Optional so older saves
+    /// without the field still decode (like `fuel`/`armor`).
     public var chartedSystems: Set<Int>?
     /// Current hyperspace fuel, in the engine's units (100 = one jump). `nil`
     /// means "uninitialized" — treated as a full tank until the first jump/save.
@@ -247,19 +361,19 @@ public struct PlayerState: Codable, Sendable {
 
     // Reputation
     public var combatRating: Int
-    /// The *universal* (mission-driven) component of legal standing per govt
-    /// — the EVN wiki's Legal Status page: "status changes due to missions
-    /// will be reflected universally." Combine with `localLegalRecord` via
-    /// `effectiveLegalRecord`/`effectiveLegalRecords` to get the actual
-    /// "displayed legal status" at a given system; don't read this alone for
-    /// anything player-facing.
-    public var legalRecord: [Int: Int]    // govt id → standing (+ good, − wanted)
-    /// The *local* (combat/boarding/smuggling-driven) component of legal
-    /// standing: govt id -> system id -> standing. Per the wiki: "Hostile
-    /// actions against ships will be reflected locally", felt in full at the
-    /// system it happened in and at reduced weight in a radius around it (see
-    /// `LegalRecordPropagation.applyLocal`). Optional so pilots saved before
-    /// this existed still decode (treated as empty), like `dominatedStellars`.
+    /// The player's legal record, as the original keeps it: one reputation per
+    /// **system** (system id → value, ±32000; a missing system is 0), with no
+    /// per-government record at all (EC-02). Crimes flood outward from where
+    /// they happen, mission rewards walk the galaxy (`SystemReputation`).
+    /// Read it with `reputation(atSystem:)`. Nil only in a pilot saved before
+    /// this existed, until `migrateLegalRecordIfNeeded` seeds it.
+    public var systemReputation: [Int: Int]?
+    /// **Legacy, read-only.** The per-government record pilots saved before
+    /// EC-02 carry (govt id → standing). Kept decodable so the migration can
+    /// seed `systemReputation` from it; nothing writes it any more.
+    public var legalRecord: [Int: Int]
+    /// **Legacy, read-only.** The old per-government, per-system combat
+    /// component (govt id → system id → standing), read only by the migration.
     public var localLegalRecord: [Int: [Int: Int]]?
     public var activeRanks: Set<Int>      // ränk ids currently held
     /// `spöb` ids the player has dominated via Demand Tribute. Each pays its
@@ -284,6 +398,11 @@ public struct PlayerState: Codable, Sendable {
     /// an entry: the `U` op is their only way back, exactly as EV Nova scripts
     /// them. Optional so older pilots still decode (treated as empty).
     public var stellarDestroyedOnDay: [Int: Int]?
+    /// The strength each damaged-but-standing destroyable stellar has left
+    /// (`spöb` id → points). The original keeps a stellar's live Strength
+    /// across visits (OS-13), so a half-shot planet is still half-shot when
+    /// the player returns. Optional so older pilots still decode.
+    public var stellarStrengthLeft: [Int: Double]?
 
     /// The player's persistent escort wing — hired (paying a daily fee),
     /// captured (free), or mission-granted (free, temporary). Source of truth
@@ -297,22 +416,23 @@ public struct PlayerState: Codable, Sendable {
     /// escort never collides with a live one. Optional for save-compat.
     public var nextEscortRecordID: Int?
 
-    /// Per-bar daily patron-offer marker: spöb id → the julian day this bar last
-    /// rolled its one-per-day mission offer. The original never re-pestered you
-    /// with the same patron every time you re-entered the bar the same day; this
-    /// gates the roll to once per bar per day. Optional + defaulted for
-    /// save-compat (older pilots decode as "no bar has rolled yet").
+    /// The old one-offer-per-bar-per-day marker. The bar now offers every
+    /// eligible mission in turn (`MissionOfferState`, MS-05); the field stays
+    /// only so older saves decode unchanged.
     public var barOfferDays: [Int: Int]? = nil
 
-    /// Whether `spob`'s bar has already made its daily patron offer on `day`.
-    public func barOffered(spob: Int, day: Int) -> Bool { barOfferDays?[spob] == day }
+    /// Shipyard (`hire: false`) or bar (`hire: true`) redraws of `shipType`'s
+    /// roll on `day`.
+    public func stockRerollCount(shipType: Int, hire: Bool, day: Int) -> Int {
+        guard let r = stockRerolls, r.day == day else { return 0 }
+        return (hire ? r.hires : r.ships)[shipType] ?? 0
+    }
 
-    /// Record that `spob`'s bar made its daily offer on `day`, pruning entries
-    /// from earlier days so the map stays bounded to the bars visited today.
-    public mutating func markBarOffered(spob: Int, day: Int) {
-        var m = (barOfferDays ?? [:]).filter { $0.value == day }
-        m[spob] = day
-        barOfferDays = m
+    /// Redraw `shipType`'s shipyard or bar roll for the rest of `day`.
+    public mutating func rerollStock(shipType: Int, hire: Bool, day: Int) {
+        var r = stockRerolls?.day == day ? stockRerolls! : StockRerolls(day: day)
+        if hire { r.hires[shipType, default: 0] += 1 } else { r.ships[shipType, default: 0] += 1 }
+        stockRerolls = r
     }
 
     /// How many escorts of each hull the player has already hired *today at the
@@ -351,6 +471,15 @@ public struct PlayerState: Codable, Sendable {
     /// Optional for save-compatibility with pilots written before disasters
     /// existed (decodes to nil → treated as no active disasters).
     public var activeDisasters: [Int: GameDate]?
+    /// AI-13: days before each system (`sÿst` id) can call its
+    /// reinforcement fleet again — `max(ReinfIntrval, 1)` after a call, 1
+    /// after a ModType-44 inhibitor spends it; counted down by the daily tick.
+    /// Optional for older saves.
+    public var reinforcementRetriggerDays: [Int: Int]?
+    /// AI-15: each stellar's garrison (`spöb` id → ships left in its defense
+    /// pool, survivors credited back), persisted across visits. Absent =
+    /// full `DefCount`. Dominated stellars regrow +1 a day at 1 in 450.
+    public var stellarGarrisons: [Int: Int]?
 
     /// Whether this pilot's `outfits` already includes everything their hull came
     /// with — its `shïp.DefaultItems` **and** its `shïp.WeapType` stock weapons,
@@ -371,6 +500,38 @@ public struct PlayerState: Codable, Sendable {
     /// loadout stopped applying hull weapons, would have been left unarmed.
     public var hullFittingsGranted: Bool? = nil
 
+    // MARK: Original mission runtime (missions batch). Optional for save-compat.
+
+    /// The story engine's random state, so every engine built over this pilot
+    /// continues one sequence (the original has one global generator).
+    public var storyRandomState: UInt64? = nil
+    /// The rank most recently activated by `K` — the `<RRK>` wildcard.
+    public var recentRank: Int? = nil
+    /// Mission-offer rolls, targets and the offer lane.
+    public var missionOffers: MissionOfferState? = nil
+    /// Systems the player has landed in — exploration level 2, which (with a
+    /// map reveal) shows a system's services on the galaxy map (UI-04).
+    public var landedSystems: Set<Int>? = nil
+    /// A `Q` message staged while landed, shown on the next launch (MS-18).
+    public var pendingLaunchMessage: String? = nil
+    /// Counter behind `ActiveMission.serial`.
+    public var nextMissionSerial: Int? = nil
+    /// `nëbu` ids whose OnExplore has run (once per game, OS-14).
+    public var exploredNebulae: Set<Int>? = nil
+
+    /// The original's 16 mission slots (ui_rules B6): activation fails when
+    /// every slot is taken.
+    public static let missionSlotCount = 16
+
+    /// The stellar each active `öops` with `Stellar = −1` picked when it
+    /// activated (one random inhabited stellar, `System_UpdateDisasterStates`
+    /// 0x00424f90): öops id → `spöb` id. Optional for save-compat.
+    public var disasterStellars: [Int: Int]? = nil
+
+    /// Today's shipyard and bar re-rolls (EC-11, EC-19): buying a ship or hiring
+    /// one redraws that class's daily roll. Optional for save-compat.
+    public var stockRerolls: StockRerolls? = nil
+
     public init(pilotName: String = "Captain",
                 isMale: Bool = true,
                 shipType: Int = 128,
@@ -390,6 +551,7 @@ public struct PlayerState: Codable, Sendable {
         self.exploredSystems = [currentSystem]
         self.chartedSystems = []
         self.combatRating = 0
+        self.systemReputation = [:]
         self.legalRecord = [:]
         self.activeRanks = []
         self.setBits = []
@@ -438,12 +600,14 @@ public struct PlayerState: Codable, Sendable {
     public mutating func markStellarRegenerated(_ id: Int) {
         destroyedStellars?.remove(id)
         stellarDestroyedOnDay?[id] = nil
+        stellarStrengthLeft?[id] = nil
     }
     /// Record stellar `id` as destroyed by **weapon fire** on `day`, so its
     /// `spöb.DeadTime` regeneration timer can run. Distinct from the story `Y`
     /// op above, which is permanent until a matching `U`.
     public mutating func markStellarShotDown(_ id: Int, onDay day: Int) {
         markStellarDestroyed(id)
+        stellarStrengthLeft?[id] = nil
         stellarDestroyedOnDay = (stellarDestroyedOnDay ?? [:]).merging([id: day]) { old, _ in old }
     }
 
@@ -496,6 +660,17 @@ public struct PlayerState: Codable, Sendable {
     public mutating func setPendingEscortUpgrade(id: Int, to newShipType: Int) {
         guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return }
         escorts?[idx].pendingUpgradeTo = newShipType
+        escorts?[idx].pendingSale = nil                  // the two marks are exclusive
+    }
+    /// Mark `id` to be sold at the next shipyard (EC-22); clears an upgrade mark.
+    public mutating func setPendingEscortSale(id: Int) {
+        guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return }
+        escorts?[idx].pendingSale = true
+        escorts?[idx].pendingUpgradeTo = nil
+    }
+    public mutating func clearPendingEscortSale(id: Int) {
+        guard let idx = escorts?.firstIndex(where: { $0.id == id }) else { return }
+        escorts?[idx].pendingSale = nil
     }
     /// Cancel a requested-but-not-yet-charged upgrade — free, since nothing was
     /// ever charged for it.
@@ -522,43 +697,18 @@ public struct PlayerState: Codable, Sendable {
         chartedSystems = (chartedSystems ?? []).union(ids)
     }
 
-    /// Clear the player's legal record with government `govt` (set standing back
-    /// to neutral), or with *every* government when `govt == -1` — the effect of
-    /// an acquired `oütf` ModType 21 ("clean legal record") item. Clears both
-    /// the universal and local (every system) components — a clean record
-    /// wipes your history everywhere, not just where you're currently docked.
-    public mutating func clearLegalRecord(govt: Int) {
-        if govt == -1 {
-            legalRecord.removeAll()
-            localLegalRecord = nil
-        } else {
-            legalRecord[govt] = nil
-            localLegalRecord?[govt] = nil
-        }
-    }
+    /// The player's reputation in `system` (EC-02). Positive is good standing,
+    /// negative criminal.
+    public func reputation(atSystem system: Int) -> Int { systemReputation?[system] ?? 0 }
 
-    /// The player's standing with `govt`, combining the universal (mission-
-    /// driven) component with the local (combat/boarding/smuggling-driven)
-    /// component at `system` — the EVN wiki's "displayed legal status." This
-    /// is what player-facing reads (landing gates, hailing, status displays)
-    /// should use, not `legalRecord` alone. `fallback` is returned only when
-    /// *neither* component has ever been touched for this government
-    /// (matches the common `?? govt.initialRecord` caller pattern).
-    public func effectiveLegalRecord(govt: Int, atSystem system: Int, fallback: Int = 0) -> Int {
-        guard legalRecord[govt] != nil || localLegalRecord?[govt]?[system] != nil else { return fallback }
-        return legalRecord[govt, default: 0] + (localLegalRecord?[govt]?[system] ?? 0)
-    }
+    /// The player's reputation in the system they are in.
+    public var reputationHere: Int { reputation(atSystem: currentSystem) }
 
-    /// Every government's `effectiveLegalRecord` at `system` — the union of
-    /// every government either component has ever touched. Used to seed a
-    /// live `Diplomacy` when entering a system.
-    public func effectiveLegalRecords(atSystem system: Int) -> [Int: Int] {
-        var result = legalRecord
-        for (govt, bySystem) in localLegalRecord ?? [:] {
-            guard let local = bySystem[system], local != 0 else { continue }
-            result[govt, default: 0] += local
-        }
-        return result
+    /// The old per-government standing `govt` held at `system`: the universal
+    /// component plus the per-system combat component. Read only by the
+    /// legal-record migration.
+    public func legacyStanding(govt: Int, atSystem system: Int) -> Int {
+        legalRecord[govt, default: 0] + (localLegalRecord?[govt]?[system] ?? 0)
     }
 
     // MARK: pêrs interaction helpers
@@ -575,6 +725,10 @@ public struct PlayerState: Codable, Sendable {
 extension PlayerState: NCBTestContext {
     public func isBitSet(_ n: Int) -> Bool { setBits.contains(n) }
     public func hasOutfit(_ id: Int) -> Bool { (outfits[id] ?? 0) > 0 }
-    public func isSystemExplored(_ id: Int) -> Bool { exploredSystems.contains(id) }
+    /// NCB `E`: the system's discovery level is above 0 — visited, revealed by
+    /// a mission `X`, or charted by a map outfit (UI-04).
+    public func isSystemExplored(_ id: Int) -> Bool {
+        exploredSystems.contains(id) || (chartedSystems?.contains(id) ?? false)
+    }
     public var playerIsMale: Bool { isMale }
 }

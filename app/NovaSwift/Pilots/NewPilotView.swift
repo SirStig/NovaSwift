@@ -17,6 +17,7 @@ struct NewPilotView: View {
     @State private var step: Step = .scenario
     @State private var name = ""
     @State private var isMale = true
+    @State private var strictPlay = false
     @State private var scenarioIndex = 0
 
     private var scenarios: [CharRes] { model.data.game?.selectableScenarios() ?? [] }
@@ -111,6 +112,11 @@ struct NewPilotView: View {
                     }
                     .frame(width: 200)
                 }
+                // The original's "Strict Play" checkbox (DITL control 4), off by
+                // default: no speed bonus, and death without a pod is permanent.
+                Toggle("Strict Play", isOn: $strictPlay)
+                    .toggleStyle(NovaToggleStyle())
+                    .frame(width: 200)
                 // A one-line reminder of what this scenario starts you with.
                 NovaText(summary(scenario), size: 11, color: .secondary)
             }
@@ -129,7 +135,7 @@ struct NewPilotView: View {
     // MARK: Actions
 
     private func start(_ scenario: CharRes) {
-        _ = model.createPilot(name: name, isMale: isMale, scenario: scenario)
+        _ = model.createPilot(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario)
         onClose()
         if scenario.introSlides.isEmpty && scenario.introTextID == nil {
             // No intro to play — go straight to the flight-training offer.

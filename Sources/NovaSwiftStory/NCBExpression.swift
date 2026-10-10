@@ -259,8 +259,8 @@ public enum NCBSetOp: Equatable, Sendable {
     case exploreSystem(Int)
     case changeShipTitle(Int)      // STR# id
     case leaveStellar(messageStr: Int?)
-    /// A random 50/50 choice between one or two ops (EV Nova's `R(…)`). The
-    /// engine picks one at apply time using its RNG.
+    /// An op that only runs on some of an `R(…)` coin flips. Produced only by
+    /// the static `NCBSet.parse`; `NCBSet.resolve` has already flipped the coin.
     case random([NCBSetOp])
 }
 
@@ -274,30 +274,52 @@ public enum ChangeShipMode: Equatable, Sendable {
     case defaultOutfits    // H
 }
 
-/// Parses a SET expression into an ordered list of `NCBSetOp`.
+/// SET expressions, executed the way the original interpreter does
+/// (`Mission_ExecuteMisnScriptEngine`, 0x00449370). It is a single pass over the
+/// bytes, not a tokenizer:
 ///
-/// SET expressions are whitespace-separated operations. Bit ops are lowercase
-/// (`b350`, `!b363`, `^b12`); command ops are single uppercase letters followed
-/// by a resource id (`S781` start mission, `G152` grant outfit, `K128` activate
-/// rank, `Q25059` leave with message, `R(b1 b2)` random). Unknown tokens are
-/// skipped rather than aborting the whole expression.
+/// - Every byte is upper-cased, so `k148` and `K148` are the same op.
+/// - An opcode letter (`! A C D E F G H K L M N P Q S T U X Y ^`) arms a
+///   pending command and zeroes the operand; `B` arms "set bit" only when
+///   nothing is pending, so `!b12`/`^b12` keep their `!`/`^`.
+/// - Digits accumulate the operand.
+/// - Any other byte — space, parenthesis, an unknown letter, the terminating
+///   NUL — executes the pending command. A second opcode before a delimiter
+///   re-arms without executing: `S862S863` runs only `S863`.
+/// - `R` flips a coin. On 0 the byte right after it (normally `(`) is a
+///   delimiter that skips the following byte, so the first op loses its opcode
+///   and does nothing; on 1 the delimiter ending the second op is swallowed.
+///   Spacing therefore matters, exactly as in the original: `R( g1 g2)` can run
+///   both ops, and a lone `R(b5)` that fires leaves the *next* op suppressed.
+/// - Each command ignores operands outside its resource range.
 public enum NCBSet {
+    /// The ops this expression executes, in order, with each `R`'s coin flip
+    /// (0 or 1) drawn from `pick`.
+    public static func resolve(_ text: String, pick: () -> Int) -> [NCBSetOp] {
+        run(text, pick: pick).map(\.op)
+    }
+
+    /// Every op the expression *can* execute, for static analysis. Ops that only
+    /// run on some coin flips are wrapped in `.random`. Covers each `R` taken
+    /// both ways (all-0 and all-1 flips), which reaches every op of a well-formed
+    /// `R(a b)`.
     public static func parse(_ text: String) -> [NCBSetOp] {
-        var ops: [NCBSetOp] = []
-        for token in tokenize(text) {
-            if let op = parseToken(token) { ops.append(op) }
+        let heads = run(text, pick: { 0 }), tails = run(text, pick: { 1 })
+        let both = Set(heads.map(\.offset)).intersection(tails.map(\.offset))
+        var seen = Set<Int>()
+        return (heads + tails).sorted { $0.offset < $1.offset }.compactMap { entry in
+            guard seen.insert(entry.offset).inserted else { return nil }
+            return both.contains(entry.offset) ? entry.op : .random([entry.op])
         }
-        return ops
     }
 
     /// Every control bit this SET expression can write, and how — the SET-side
     /// counterpart of `NCBTest.referencedBits`, for building "what changes this
     /// bit" indexes.
     ///
-    /// Recurses into `R( … )`. A random op only fires half the time, but it
-    /// still *can* write the bit, so anything asking "what could turn this on"
-    /// has to count it: dropping it makes a bit that's only ever set inside a
-    /// random choice look like nothing sets it at all.
+    /// Includes writes that only happen on some `R` coin flips: anything asking
+    /// "what could turn this on" has to count them, or a bit that's only ever
+    /// set inside a random choice looks like nothing sets it at all.
     public static func referencedBits(_ text: String) -> [(bit: Int, effect: NCBBitEffect)] {
         bitEffects(in: parse(text))
     }
@@ -316,70 +338,83 @@ public enum NCBSet {
         return out
     }
 
-    /// Split on whitespace, but keep `R( … )` (which contains spaces) together.
-    private static func tokenize(_ text: String) -> [String] {
-        var tokens: [String] = []
-        var current = ""
-        var depth = 0
-        for ch in text {
-            if ch == "(" { depth += 1 }
-            if ch == ")" { depth = max(0, depth - 1) }
-            if ch.isWhitespace && depth == 0 {
-                if !current.isEmpty { tokens.append(current); current = "" }
+    private static let opcodes = Set("!ACDEFGHKLMNPQSTUXY^".utf8)
+    private static let idle = UInt8(ascii: "?")
+    private static let setBitCommand = UInt8(ascii: " ")
+
+    /// The interpreter loop. `offset` is the byte that armed each op, so the two
+    /// coin-flip passes in `parse` can be lined up.
+    private static func run(_ text: String, pick: () -> Int) -> [(offset: Int, op: NCBSetOp)] {
+        let bytes = Array(text.utf8) + [0]
+        var out: [(offset: Int, op: NCBSetOp)] = []
+        var command = idle
+        var armedAt = 0
+        var operand: Int32 = 0
+        var randomPick = -1, randomIndex = 0
+        var i = 0
+        while i < bytes.count {
+            let byte = bytes[i]
+            let upper = (0x61...0x7A).contains(byte) ? byte - 0x20 : byte
+            var execute = false
+            if opcodes.contains(upper) {
+                operand = 0
+                command = upper
+                armedAt = i
+            } else if upper == UInt8(ascii: "B") {
+                operand = 0
+                if command == idle { command = setBitCommand; armedAt = i }
+            } else if upper == UInt8(ascii: "R") {
+                randomIndex = 0
+                command = idle
+                randomPick = pick() == 0 ? 0 : 1
+            } else if (0x30...0x39).contains(byte) {
+                operand = operand &* 10 &+ Int32(byte - 0x30)
+            } else if randomPick == -1 || randomIndex != randomPick {
+                execute = true
             } else {
-                current.append(ch)
+                if randomIndex == 0 { i += 1 } else { randomIndex += 1 }
+                randomPick = -1
+                command = idle
             }
+            if execute, command != idle {
+                // The original stores the operand in a 16-bit short.
+                if let op = makeOp(command, Int(Int16(truncatingIfNeeded: operand))) {
+                    out.append((armedAt, op))
+                }
+                command = idle
+                randomIndex += 1
+            }
+            i += 1
         }
-        if !current.isEmpty { tokens.append(current) }
-        return tokens
+        return out
     }
 
-    private static func parseToken(_ token: String) -> NCBSetOp? {
-        // Bit operations first (lowercase b, optionally prefixed by ! or ^).
-        if token.hasPrefix("!b") || token.hasPrefix("!B") {
-            return intSuffix(token, dropping: 2).map { .clearBit($0) }
-        }
-        if token.hasPrefix("^b") || token.hasPrefix("^B") {
-            return intSuffix(token, dropping: 2).map { .toggleBit($0) }
-        }
-        if token.hasPrefix("b") || token.hasPrefix("B") {
-            return intSuffix(token, dropping: 1).map { .setBit($0) }
-        }
-
-        guard let first = token.first else { return nil }
-        // Random choice: R(op) or R(op op)
-        if first == "R" || first == "r" {
-            let inner = token.dropFirst().trimmingCharacters(in: CharacterSet(charactersIn: "()"))
-            let choices = parse(String(inner))
-            return choices.isEmpty ? nil : .random(choices)
-        }
-
-        // Command ops: <Letter><id>. "Q" may appear bare (no id).
-        let value = intSuffix(token, dropping: 1)
-        switch first {
-        case "S": return value.map { .startMission($0) }
-        case "A": return value.map { .abortMission($0) }
-        case "F": return value.map { .failMission($0) }
-        case "G": return value.map { .grantOutfit($0) }
-        case "D": return value.map { .removeOutfit($0) }
-        case "M": return value.map { .moveToSystem($0, keepPosition: false) }
-        case "N": return value.map { .moveToSystem($0, keepPosition: true) }
-        case "C": return value.map { .changeShip($0, .keepOutfits) }
-        case "E": return value.map { .changeShip($0, .addDefaultOutfits) }
-        case "H": return value.map { .changeShip($0, .defaultOutfits) }
-        case "K": return value.map { .activateRank($0) }
-        case "L": return value.map { .deactivateRank($0) }
-        case "P": return value.map { .playSound($0) }
-        case "Y": return value.map { .destroyStellar($0) }
-        case "U": return value.map { .regenerateStellar($0) }
-        case "X": return value.map { .exploreSystem($0) }
-        case "T": return value.map { .changeShipTitle($0) }
-        case "Q": return .leaveStellar(messageStr: value)
+    private static func makeOp(_ command: UInt8, _ v: Int) -> NCBSetOp? {
+        let mission = 128...1127, ship = 128...895, outfit = 128...639
+        let rank = 128...255, systemOrStellar = 128...2175, bit = 0...9999
+        switch Character(Unicode.Scalar(command)) {
+        case " ": return bit.contains(v) ? .setBit(v) : nil
+        case "!": return bit.contains(v) ? .clearBit(v) : nil
+        case "^": return bit.contains(v) ? .toggleBit(v) : nil
+        case "S": return mission.contains(v) ? .startMission(v) : nil
+        case "A": return mission.contains(v) ? .abortMission(v) : nil
+        case "F": return mission.contains(v) ? .failMission(v) : nil
+        case "G": return outfit.contains(v) ? .grantOutfit(v) : nil
+        case "D": return outfit.contains(v) ? .removeOutfit(v) : nil
+        case "C": return ship.contains(v) ? .changeShip(v, .keepOutfits) : nil
+        case "E": return ship.contains(v) ? .changeShip(v, .addDefaultOutfits) : nil
+        case "H": return ship.contains(v) ? .changeShip(v, .defaultOutfits) : nil
+        case "K": return rank.contains(v) ? .activateRank(v) : nil
+        case "L": return rank.contains(v) ? .deactivateRank(v) : nil
+        case "M": return systemOrStellar.contains(v) ? .moveToSystem(v, keepPosition: false) : nil
+        case "N": return systemOrStellar.contains(v) ? .moveToSystem(v, keepPosition: true) : nil
+        case "Y": return systemOrStellar.contains(v) ? .destroyStellar(v) : nil
+        case "U": return systemOrStellar.contains(v) ? .regenerateStellar(v) : nil
+        case "X": return systemOrStellar.contains(v) ? .exploreSystem(v) : nil
+        case "P": return .playSound(v)
+        case "T": return .changeShipTitle(v)
+        case "Q": return .leaveStellar(messageStr: v == 0 ? nil : v)
         default:  return nil
         }
-    }
-
-    private static func intSuffix(_ token: String, dropping n: Int) -> Int? {
-        Int(token.dropFirst(n))
     }
 }

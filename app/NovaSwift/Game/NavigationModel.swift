@@ -15,17 +15,30 @@ enum SystemVisibility {
 }
 
 /// Tracks the player's location in the galaxy and handles hyperspace jumps along
-/// `sÿst` links. Drives the galaxy map. As in EV Nova, you plot a course to any
-/// reachable system (fewest jumps) and the hyperdrive follows it hop by hop —
-/// multi-jump outfits let one jump command cross more than one hop at once — and
-/// every hop costs real hyperspace fuel drawn from the live player ship.
+/// `sÿst` links. Drives the galaxy map. As in EV Nova, a click on the map arms a
+/// jump to one linked system and Shift+click builds a longer route hop by hop
+/// (`StarMapRoute`, UI-05); the `autoRoutePlotting` enhancement plots the
+/// fewest-jumps course to any system instead. The hyperdrive follows the route
+/// hop by hop — multi-jump outfits let one jump command cross more than one hop
+/// at once — and every jump costs one jump of real hyperspace fuel from the live
+/// player ship, however many hops it crosses (FL-06).
 @MainActor
 final class NavigationModel: ObservableObject {
     private(set) var game: NovaGame?
     @Published var currentSystemID: Int
     @Published var showingMap = false
+    /// The plotted route and whether its first hop is armed for a jump.
+    @Published private(set) var plan = StarMapRoute()
     /// The plotted hyperspace course: the remaining hops, in order (empty = none).
-    @Published private(set) var route: [Int] = []
+    var route: [Int] { plan.hops }
+    /// Whether a jump is armed: J goes to `route.first`. A plain map click away
+    /// from the current system's links disarms it, H re-arms it.
+    var jumpArmed: Bool { plan.armed }
+    /// The system the map's info panel describes (the original's selection,
+    /// which a click moves even when it arms nothing). `nil` = the current one.
+    @Published var selectedSystemID: Int?
+    /// The `autoRoutePlotting` enhancement: a tap plots the fewest-jumps course.
+    var autoRoutePlotting = false
     /// Hyperlane hops one `jumpAlongRoute()` call can cross (multi-jump outfits).
     @Published var maxJumpHops: Int = 1
 
@@ -58,9 +71,12 @@ final class NavigationModel: ObservableObject {
     var shipMaxFuel: Double { ship?.maxFuel ?? 0 }
     /// Whole hyperjumps the current fuel can pay for.
     var availableJumps: Int { Int((currentFuel / ShipFuel.perJump).rounded(.down)) }
-    func canAfford(hops: Int) -> Bool { hops > 0 && hops <= availableJumps }
-    /// How many leading route hops the next `jumpAlongRoute()` call will consume.
-    var nextJumpHopCount: Int { min(maxJumpHops, route.count) }
+    /// A jump needs fuel for one jump whatever its hop count: the original
+    /// debits 100 once, after the multi-jump loop (OQ A3).
+    func canAfford(hops: Int) -> Bool { hops > 0 && availableJumps >= 1 }
+    /// How many leading route hops the next `jumpAlongRoute()` call will consume
+    /// (none while no jump is armed).
+    var nextJumpHopCount: Int { jumpArmed ? min(maxJumpHops, route.count) : 0 }
 
     init(game: NovaGame?, startSystemID: Int) {
         self.game = game
@@ -71,7 +87,8 @@ final class NavigationModel: ObservableObject {
     func configure(game: NovaGame?, startSystemID: Int) {
         self.game = game
         self.currentSystemID = startSystemID
-        self.route = []
+        self.plan = StarMapRoute()
+        self.selectedSystemID = nil
     }
 
     var current: SystRes? { game?.system(currentSystemID) }
@@ -88,35 +105,64 @@ final class NavigationModel: ObservableObject {
     var destinationID: Int? { route.last }
 
     /// Plot a hyperspace course to a system: the fewest-jumps path along `sÿst`
-    /// links (breadth-first). Returns false if the system is unreachable.
-    /// Plotting to the current system clears the course.
+    /// links (breadth-first) — the `autoRoutePlotting` enhancement's tap, its
+    /// "Nearest System" button and the system finder. Returns false if the
+    /// system is unreachable. Plotting to the current system clears the course.
     @discardableResult
     func plotCourse(to id: Int) -> Bool {
-        guard id != currentSystemID else { route = []; return true }
+        selectedSystemID = id
+        guard id != currentSystemID else { plan.clear(); return true }
         guard let path = shortestPath(from: currentSystemID, to: id) else { return false }
-        route = path
+        plan.set(path, cap: false)
         return true
     }
 
-    func clearCourse() { route = [] }
+    /// A plain click on a map system (UI-05): arms a jump to it when it is
+    /// linked to the current system, otherwise only moves the selection.
+    func click(system id: Int) {
+        selectedSystemID = id
+        plan.click(id, current: currentSystemID, linked: isLinked)
+    }
+
+    /// A Shift+click: extend the route from its tail, truncate it at a plotted
+    /// hop, or clear it on the current system (at most 31 hops).
+    func shiftClick(system id: Int) {
+        selectedSystemID = id
+        plan.shiftClick(id, current: currentSystemID, linked: isLinked)
+    }
+
+    /// Re-arm the route's first hop (H, and closing the map). Returns whether a
+    /// jump is now armed.
+    @discardableResult
+    func rearmRoute() -> Bool { plan.rearm() }
+
+    func clearCourse() { plan.clear() }
+
+    /// A stellar took the travel selection, or it was cleared: no jump armed.
+    func disarmJump() { plan.disarm() }
+
+    /// Whether `b` is one visible hyperspace link from `a`.
+    private func isLinked(_ a: Int, _ b: Int) -> Bool { visibleNeighbors(a).contains(b) }
 
     /// Engage the hyperdrive along the plotted course: jump `nextJumpHopCount`
     /// hops at once (more than one only with a multi-jump outfit), keeping the
-    /// rest of the route so the next jump continues it. Requires enough fuel for
-    /// every hop consumed. Returns true if the jump happened.
+    /// rest of the route so the next jump continues it. Costs one jump of fuel.
+    /// Returns true if the jump happened.
     @discardableResult
     func jumpAlongRoute() -> Bool {
         let hops = nextJumpHopCount
         guard canAfford(hops: hops), let ship else { return false }
-        for _ in 0..<hops { _ = ship.consumeJumpFuel() }
-        currentSystemID = route[hops - 1]
-        route.removeFirst(hops)
+        _ = ship.consumeJumpFuel()
+        let dest = route[hops - 1]
+        plan.arrive(at: dest, crossing: hops)
+        currentSystemID = dest
+        selectedSystemID = nil
         showingMap = false
         return true
     }
 
     /// Commit a hyperspace *arrival* at `dest` after crossing `hops` hops: spend
-    /// the fuel, drop those hops from the plotted route, and set the current
+    /// one jump's fuel, drop those hops from the plotted route, and set the current
     /// system. Used by the in-scene jump animation's flash-peak commit so the
     /// arrival is atomic and the destination can't drift even if the route was
     /// re-plotted mid-animation (in which case the stale route is just cleared).
@@ -124,13 +170,10 @@ final class NavigationModel: ObservableObject {
     @discardableResult
     func commitArrival(at dest: Int, hops: Int) -> Bool {
         guard hops > 0, canAfford(hops: hops), let ship else { return false }
-        for _ in 0..<hops { _ = ship.consumeJumpFuel() }
-        if route.count >= hops, route[hops - 1] == dest {
-            route.removeFirst(hops)
-        } else {
-            route = []                       // route drifted under us — drop it
-        }
+        _ = ship.consumeJumpFuel()
+        plan.arrive(at: dest, crossing: hops)   // a route that drifted under us is dropped
         currentSystemID = dest
+        selectedSystemID = nil
         showingMap = false
         return true
     }
@@ -170,8 +213,9 @@ final class NavigationModel: ObservableObject {
     @discardableResult
     func jump(to id: Int) -> Bool {
         guard canJump(to: id) else { return false }
-        if route.first == id { route.removeFirst() } else { route = [] }
+        plan.arrive(at: id)
         currentSystemID = id
+        selectedSystemID = nil
         showingMap = false
         return true
     }
@@ -181,8 +225,9 @@ final class NavigationModel: ObservableObject {
     /// course that doesn't continue from `dest`.
     @discardableResult
     func arriveViaGate(at dest: Int) -> Bool {
-        if route.first == dest { route.removeFirst() } else { route = [] }
+        plan.arrive(at: dest)
         currentSystemID = dest
+        selectedSystemID = nil
         showingMap = false
         return true
     }

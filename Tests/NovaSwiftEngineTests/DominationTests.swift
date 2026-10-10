@@ -23,8 +23,9 @@ final class DominationTests: XCTestCase {
         put16(&b, 8, ship); put16(&b, 40, 100)
         return Resource(type: NovaType.dude, id: id, name: "Def\(id)", data: Data(b))
     }
-    private func govt(_ id: Int) -> Resource {
+    private func govt(_ id: Int, killPenalty: Int = 0) -> Resource {
         var b = [UInt8](repeating: 0, count: 200)
+        put16(&b, 16, killPenalty)
         for i in 0..<4 { put16(&b, 24 + i * 2, i == 0 ? 1 : -1) }
         for i in 0..<4 { put16(&b, 32 + i * 2, -1) }
         for i in 0..<4 { put16(&b, 40 + i * 2, -1) }
@@ -81,15 +82,39 @@ final class DominationTests: XCTestCase {
         return (world, galaxy, spobID)
     }
 
+    /// AI-15: the garrison persists across visits — leaving with 3 of 10
+    /// defenders killed and coming back finds 7.
+    func testGarrisonSurvivorsAreCreditedBackAcrossVisits() {
+        let (world, _, spobID) = makeWorld(defenseCount: 10)
+        world.playerCombatRating = 20_000
+        _ = world.demandTribute(spobID: spobID)
+        let defenders = world.npcs.filter { $0.spobDefenderOf == spobID }
+        XCTAssertEqual(defenders.count, 10)
+        for d in defenders.prefix(3) { d.armor = 0 }
+        world.step(1.0 / 30.0)
+        let snapshot = world.garrisonSnapshot()
+        XCTAssertEqual(snapshot[spobID] ?? nil, 7)
+        // Next visit: a fresh world seeded from the save.
+        let (again, _, _) = makeWorld(defenseCount: 10)
+        again.playerCombatRating = 20_000
+        again.stellarGarrisons = [spobID: 7]
+        XCTAssertEqual(again.demandTribute(spobID: spobID), .defending(launched: 7))
+        // Release reseeds it.
+        again.releaseStellar(spobID: spobID)
+        XCTAssertEqual(again.garrisonSnapshot()[spobID] ?? 0, nil)
+    }
+
+    /// EC-16: a flat combat-rating gate of 12,800 (0x00480030).
     func testDemandLaughsBelowCombatRating() {
-        let (world, _, spobID) = makeWorld(defenseCount: 8)   // total 8 → required 16
-        world.playerCombatRating = 10
+        let (world, _, spobID) = makeWorld(defenseCount: 8)
+        world.playerCombatRating = 12_799
         let outcome = world.demandTribute(spobID: spobID)
-        XCTAssertEqual(outcome, .refused(.combatRatingTooLow(required: 16)))
+        XCTAssertEqual(outcome, .refused(.combatRatingTooLow(required: 12_800)))
         XCTAssertTrue(world.npcs.isEmpty, "a laughed-off demand launches no defenders")
     }
 
-    func testNoDefenseFleetRefused() {
+    /// EC-16: a stellar with nothing to fight submits to the first demand.
+    func testUndefendedWorldIsDominatedOnTheFirstDemand() {
         var col = ResourceCollection()
         col.add(ship(128)); col.add(govt(128))
         col.add(spob(128, tribute: 500, govt: 128, defenseDude: -1, defenseCount: 0))
@@ -99,7 +124,35 @@ final class DominationTests: XCTestCase {
         world.systemContext = SystemContext(bodies: [
             StellarBody(id: 128, position: Vec2(200, 0), radius: 40, canLand: true, government: 128)])
         world.playerCombatRating = 100000
-        XCTAssertEqual(world.demandTribute(spobID: 128), .refused(.noDefenseFleet))
+        XCTAssertEqual(world.demandTribute(spobID: 128, firstPressInWindow: false), .stillDefending,
+                       "only the first press in a comm window can win it")
+        XCTAssertEqual(world.demandTribute(spobID: 128), .dominated)
+    }
+
+    /// EC-16: every demand is a crime — a record that still meets MinStatus
+    /// drops to MinStatus − 1, then the kill penalty applies, even when the
+    /// demand is laughed off.
+    func testEveryDemandCostsStanding() {
+        var col = ResourceCollection()
+        col.add(ship(128)); col.add(govt(128, killPenalty: 20))
+        var b = [UInt8](spob(128, tribute: 500, govt: 128, defenseDude: -1, defenseCount: 0).data)
+        put16(&b, 22, 5)                                         // MinStatus
+        col.add(Resource(type: NovaType.spob, id: 128, name: "World", data: Data(b)))
+        let galaxy = Galaxy(game: NovaGame(col))
+        let world = World(player: Ship(name: "P", stats: stats()))
+        world.galaxy = galaxy
+        world.diplomacy = galaxy.makeDiplomacy()
+        world.diplomacy?.reputationMap = ReputationMap(systems: [.init(id: 500, govt: 128, x: 0, y: 0, links: [])])
+        world.diplomacy?.currentSystemID = 500
+        world.diplomacy?.seed(reputation: [500: 40])
+        world.systemContext = SystemContext(bodies: [
+            StellarBody(id: 128, position: Vec2(200, 0), radius: 40, canLand: true, government: 128)])
+        world.playerCombatRating = 0
+        XCTAssertEqual(world.demandTribute(spobID: 128), .refused(.combatRatingTooLow(required: 12_800)))
+        XCTAssertEqual(world.diplomacy?.reputationHere, 4 - 20)
+        world.playerCombatRating = 12_800
+        XCTAssertEqual(world.demandTribute(spobID: 128), .dominated)
+        XCTAssertEqual(world.diplomacy?.reputationHere, 4 - 20 * 7, "one flood, then five more on domination")
     }
 
     func testAlreadyDominatedRefused() {
@@ -110,7 +163,7 @@ final class DominationTests: XCTestCase {
 
     func testDemandLaunchesDefendersThenDominatesWhenCleared() {
         let (world, _, spobID) = makeWorld(defenseCount: 1082)   // total 8, waves of 2
-        world.playerCombatRating = 1000
+        world.playerCombatRating = 12_800
 
         let first = world.demandTribute(spobID: spobID)
         XCTAssertEqual(first, .defending(launched: 2), "the first demand scrambles a wave of two")
@@ -140,7 +193,7 @@ final class DominationTests: XCTestCase {
 
     func testTrickleReplacesIndividualLossesOneForOne() {
         let (world, _, spobID) = makeWorld(defenseCount: 1082)   // total 8, up to 2 at a time
-        world.playerCombatRating = 1000
+        world.playerCombatRating = 12_800
         XCTAssertEqual(world.demandTribute(spobID: spobID), .defending(launched: 2))
         XCTAssertEqual(world.liveDefenders(of: spobID), 2)
 
@@ -154,38 +207,39 @@ final class DominationTests: XCTestCase {
                        "the single loss draws exactly one replacement, back up to the wave size")
     }
 
-    func testDisabledDefenderCountsAsDownAndDrawsAReplacement() {
+    /// AI-15: the original counts every defender slot still active, so a
+    /// disabled hulk keeps its place in the wave and draws no replacement.
+    func testDisabledDefenderStillHoldsItsSlot() {
         let (world, _, spobID) = makeWorld(defenseCount: 1082)   // total 8, up to 2 at a time
-        world.playerCombatRating = 1000
+        world.playerCombatRating = 12_800
         XCTAssertEqual(world.demandTribute(spobID: spobID), .defending(launched: 2))
 
-        // Disable (don't destroy) one defender. A disabled hulk is still technically
-        // alive, but it must not count as an active defender — it frees a slot for a
-        // replacement, so the player never has to hunt disabled hulks down.
         let victim = world.npcs.first { $0.spobDefenderOf == spobID && $0.isAlive }!
         victim.disabled = true
-        XCTAssertTrue(victim.isAlive, "a disabled ship is still technically alive")
-        XCTAssertEqual(world.liveDefenders(of: spobID), 1, "the disabled hulk no longer counts")
+        XCTAssertEqual(world.liveDefenders(of: spobID), 2, "the disabled hulk still counts")
         world.step(1.0 / 30.0)
-        XCTAssertEqual(world.liveDefenders(of: spobID), 2, "a replacement is scrambled for the disabled one")
+        XCTAssertEqual(world.npcs.filter { $0.spobDefenderOf == spobID }.count, 2, "no replacement for a hulk")
     }
 
-    func testDominatesWhenPoolSpentAndSurvivorsAreOnlyDisabledHulks() {
+    /// AI-15: with the pool spent, a field of disabled hulks still blocks the
+    /// surrender; destroying them yields the stellar.
+    func testDisabledHulksBlockSurrenderUntilDestroyed() {
         let (world, _, spobID) = makeWorld(defenseCount: 8)   // total 8, all 8 at once (≤1000)
-        world.playerCombatRating = 1000
+        world.playerCombatRating = 12_800
         XCTAssertEqual(world.demandTribute(spobID: spobID), .defending(launched: 8),
                        "a small fleet scrambles its whole count at once")
 
-        // Pool is now spent (all eight are out). Disable every defender rather than
-        // destroying it. With the pool empty there are no replacements.
         for npc in world.npcs where npc.spobDefenderOf == spobID { npc.disabled = true }
         world.step(1.0 / 30.0)
-        XCTAssertEqual(world.liveDefenders(of: spobID), 0, "a field of disabled hulks counts as cleared")
+        XCTAssertEqual(world.liveDefenders(of: spobID), 8)
+        if case .dominated = world.demandTribute(spobID: spobID) {
+            return XCTFail("disabled hulks still defend the stellar")
+        }
 
-        // Re-demand: pool spent and nothing left standing → the planet yields,
-        // without the player having to finish off the disabled hulks.
+        for npc in world.npcs where npc.spobDefenderOf == spobID { npc.armor = 0 }
+        world.step(1.0 / 30.0)
         guard case .dominated = world.demandTribute(spobID: spobID) else {
-            return XCTFail("a field of disabled hulks with the pool spent should surrender")
+            return XCTFail("with the pool spent and the hulks destroyed the stellar should surrender")
         }
         XCTAssertTrue(world.dominatedStellars.contains(spobID))
     }

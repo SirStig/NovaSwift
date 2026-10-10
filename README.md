@@ -2,32 +2,51 @@
 
 ![NOVA Swift](docs/branding/logo-banner.png)
 
-**A fan rebuild of EV Nova, the 2002 space classic — written from scratch in
-Swift so it runs natively on your Mac, iPad, iPhone, and Apple TV.** Unofficial,
-unaffiliated, and bring-your-own-data. See [Legal](#legal).
+A fan rebuild of EV Nova (Ambrosia Software / ATMOS, 2002), written from scratch
+in Swift. It runs natively on macOS, iPadOS, iOS and tvOS. A Godot frontend for
+Linux and Windows is in progress. Unofficial and unaffiliated. You need your own
+copy of the game; see [Legal](#legal).
 
----
+The original is PowerPC/Carbon code for the Mac and 32-bit code for Windows. It
+doesn't run on a current Mac and never came to phones or tablets. NOVA Swift is a
+new engine, not an emulator or a wrapper: it reads your EV Nova data files and
+plays them.
 
-EV Nova (Ambrosia Software / ATMOS, 2002) is one of the deepest space
-trading-and-combat games ever made — and it's PowerPC/Carbon code. It won't
-launch on a modern Mac, it never came to phones or tablets, and the one serious
-open-source revival went quiet in 2023.
+## How close to the original
 
-NOVA Swift rebuilds it from scratch in Swift: resource parser, flight, combat,
-AI, missions, economy, and UI. Not a wrapper, not an emulator. Point it at a copy
-of EV Nova you already own and it plays your data natively, with touch controls
-built for a screen you hold.
+The original Windows executable (EV Nova CE) has been decompiled, and every
+gameplay system was re-checked and rewritten against it: flight, hyperjump and
+travel days, weapons and damage, the NPC AI state machine, spawning, legal record
+per system, the economy, outfitter and shipyard, missions and control-bit
+scripting, the star map, targeting, landing, Player Info, saving and Strict Play.
+Where a formula was unclear we ran the original routine in an emulator and
+matched its output.
 
-Runs today on **macOS, iPadOS, iOS, and tvOS**, all tested on real devices. A
-**Godot port for Linux and Windows** is [in progress](#linux-and-windows-the-godot-port).
-AI was used to help build it; every change is checked against the real game's
-behavior.
+Original behaviour is the default. The decompiled code is not in this repo; only
+written specs with function addresses are, in
+[docs/reverse-engineering/](docs/reverse-engineering/README.md).
+
+Each square below is one function in the original executable, grouped by
+subsystem. Green ones are cited by a completed item in the
+[fidelity plan](docs/reverse-engineering/FIDELITY_PLAN.md), meaning NovaSwift was
+checked against them. Blue is gameplay code that is decompiled and mapped but not
+cited by an item; dark grey is runtime and library code with nothing to port.
+All 177 plan items are done. [docs/STATUS.md](docs/STATUS.md) explains the
+colours and what's left; the [website](https://sirstig.github.io/NovaSwift/#progress) has a version you can
+hover over.
+
+![One square per function in the original executable](docs/branding/progress-blocks.svg)
+
+### Beyond the original
+
+NovaSwift's own features, one square per task. Green is done, amber partly done,
+outline planned.
+
+![NovaSwift's own features](docs/branding/feature-blocks.svg)
 
 ## Screenshots
 
-### Running on iPhone
-
-| Flight | Galaxy map |
+| Flight (iPhone) | Galaxy map |
 |---|---|
 | ![Flight HUD](docs/branding/screenshots/flight-hud.png) | ![Galaxy map](docs/branding/screenshots/galaxy-map.png) |
 | Touch controls and the classic status bar. | Services, governments, hypergates and wormholes. |
@@ -35,200 +54,141 @@ behavior.
 | Story map | Multiplayer |
 |---|---|
 | ![Story map](docs/branding/screenshots/story-map.png) | ![Multiplayer](docs/branding/screenshots/multiplayer.png) |
-| Every campaign in your data, drawn against your pilot's progress. | Co-op lobbies over local Wi-Fi or Game Center. |
+| Every campaign in your data, against your pilot's progress. | Co-op lobbies over local Wi-Fi or Game Center. |
 
-| Plug-in store |
-|---|
-| ![Plug-in store](docs/branding/screenshots/plugin-store.png) |
-| Community plug-ins and total conversions, installed in-game. |
-
-### Beyond the original
-
-Things EV Nova never shipped with, all of them optional:
-
-| Story Guide | Multiplayer stakes |
+| Story Guide | Host lobby |
 |---|---|
 | ![Story Guide](docs/branding/screenshots/story-guide.webp) | ![Host Lobby](docs/branding/screenshots/host-lobby.webp) |
-| Every campaign in your data as a step list — where you are, what's locked, and which mission unlocks it. Reads your plug-ins too. | Host a co-op session and set the rules: PvP on or off, real damage or friendly sparring, friendly fire, permadeath, player trading. |
+| Each campaign as a list of steps, with the mission that unlocks the next one. | Co-op rules: PvP, real damage, friendly fire, permadeath, trading. |
 
-| Presentation presets | Gameplay dials |
+| Presentation presets | Plug-in manager |
 |---|---|
-| ![Presentation presets](docs/branding/screenshots/presentation-modes.webp) | ![Gameplay settings](docs/branding/screenshots/gameplay-settings.webp) |
-| Classic, Enhanced or Nova Swift as one click — then flip any individual modern touch on or off. Classic is pure 2002. | Difficulty, traffic density from 0.5× to 8×, auto-target, auto-landing, tutorial hints and a flight-training range. |
+| ![Presentation presets](docs/branding/screenshots/presentation-modes.webp) | ![Plug-in manager](docs/branding/screenshots/plugin-manager.webp) |
+| Classic, Enhanced or Nova Swift, then adjust single items. | Import, reorder and toggle plug-ins. |
 
-| Plug-in manager | Debug suite |
+| Plug-in store | Debug suite |
 |---|---|
-| ![Plug-in manager](docs/branding/screenshots/plugin-manager.webp) | ![Debug suite](docs/branding/screenshots/dev-console.webp) |
-| Import a plug-in or `.zip`, reorder the load stack, toggle any of them off — total conversions and small tweaks side by side. | Filtered live logs, a frame-time breakdown by subsystem, a ship/planet inspector and a command console. |
+| ![Plug-in store](docs/branding/screenshots/plugin-store.png) | ![Debug suite](docs/branding/screenshots/dev-console.webp) |
+| Community plug-ins and total conversions. | Live logs, frame timing, an inspector and a console. |
 
-## What you can do
+## What's in it
 
-It's 1177. The Federation is rotting from the inside, the Auroran Empire is
-tearing itself apart over honor, the Polaris won't say what they know, and you're
-in a Shuttle with a few thousand credits and no particular plans.
+The whole game is playable on all four Apple platforms: pick a starting scenario,
+fly, fight, trade, outfit, buy ships, take missions, play the storylines through,
+board and capture ships, dominate planets, hire escorts, and die with the
+original's consequences. Plug-ins and total conversions load the same way they do
+in the original.
 
-- **Fly and fight** — the momentum-heavy flight the original was built on: you
-  don't turn, you swing the nose around and keep going the way you were. Lock a
-  target, strip its shields, watch the ion cannons leave it drifting. The ships
-  shooting back run EV Nova's own `düde`/`flët` decision tables, reconstructed
-  rather than rewritten as scripts. ([docs/AI.md](docs/AI.md))
-- **Explore and trade** — hyperjump between hundreds of systems on real fuel and
-  work the spread, then trade the Shuttle up through a Starbridge to something
-  with real guns on it.
-- **Play the story** — pick a scenario and take the missions people offer you.
-  Fly for the Federation or defect to the Rebellion, get pulled into the Auroran
-  succession, find out what the Vell-os are. Campaigns branch; the news reacts.
-- **Fight dirty, and lose for real** — board a disabled freighter for its cargo
-  or fly the hull home with a prize crew. Demand tribute from a planet and it
-  pays you daily. Shoot the wrong ship and the government remembers.
-- **Meet the locals** — named captains with their own lines turn up in the
-  shipping lanes, hired escorts draw a wage whether they're useful or not, and
-  there's always the holovid races to throw credits at.
-- **Play together** — the one thing the 2002 original never had. Your friend
-  keeps their own galaxy and pilot, but in a shared system you fly it together:
-  same NPCs, same fight, real damage. PvP stakes are yours to set.
-  ([docs/MULTIPLAYER.md](docs/MULTIPLAYER.md))
+### Enhancements
 
-## Modern touches, classic at heart
+A few gameplay changes are available as opt-in Enhancements in
+Settings ▸ Enhancements. All are off by default:
 
-**Anything that wasn't in the 2002 original can be switched off.**
+- Manual plug-in order
+- Frequent autosave
+- Quick hyperjump
+- Forgiving landing
+- Automatic route plotting
+- Nearest-first targeting
+- Modern key layout
+- Tight formations
 
-- **Touch controls** built for a handheld screen, not a desktop UI on glass.
-- **Full controller support** — twin-stick flight, every button remappable, on
-  all four platforms. ([docs/CONTROLS.md](docs/CONTROLS.md))
-- **A live story map** of every campaign in your data.
-- **An in-app plug-in store** for community plug-ins and total conversions.
-- **iCloud data sync** — import once, and your other devices restore it
-  automatically. ([docs/ICLOUD_SYNC.md](docs/ICLOUD_SYNC.md))
-- **Apple TV** with a 10-foot UI, controller required. ([docs/TVOS.md](docs/TVOS.md))
-- **Classic / Enhanced toggles** to opt into the modern layer piece by piece.
-- **A built-in debug suite** — AI visualization, live state editor, stress test.
+### Additions that don't change the rules
 
-## Where it's at
+- Classic, Enhanced and Nova Swift presentation presets, with per-item overrides
+- Touch controls, and full controller support on every platform
+  ([CONTROLS.md](docs/CONTROLS.md))
+- Story Guide and storyline map, tutorial hints, storyline tags
+- In-app plug-in store and manager
+- Co-op multiplayer over local Wi-Fi or Game Center ([MULTIPLAYER.md](docs/MULTIPLAYER.md))
+- iCloud sync of imported game data ([ICLOUD_SYNC.md](docs/ICLOUD_SYNC.md))
+- Apple TV with a 10-foot UI ([TVOS.md](docs/TVOS.md))
+- A debug suite: logs, profiler, inspector, console
 
-**You can play the whole game today, start to finish, on all four platforms.**
-Flight and combat, the economy, branching campaigns, boarding and capture,
-planetary domination, named captains, hired escorts, explosions and particles —
-the systems that make EV Nova *EV Nova* are in and playable. Call it ~90% of a
-full port.
+## Linux and Windows
 
-What's left:
+The data layer, simulation and story runtime are portable Swift. Only the UI and
+rendering use SwiftUI and SpriteKit. A second frontend in Godot 4, bridged with
+[SwiftGodot](https://github.com/migueldeicaza/SwiftGodot), runs the same
+`World.step` as the Apple build.
 
-- **Fidelity** — AI, flight feel, spawn cadence, and the hundred small behaviors
-  that separate "complete" from "hard to tell apart from the original."
-- **Hardening** — bugs, crashes, and performance as more people play on more
-  devices.
-- **Multiplayer polish** — wider multi-device testing, finer PvP toggles, and
-  smoother authority handoff when a host drops mid-session.
-- **Smarter opt-in AI** — better evasion, coordinated fleets, ammo discipline,
-  behind the same brain the base AI uses.
-- **Optional HD art and audio** — layered over the originals, never replacing them.
-
-Found something off? The
-[issue tracker](https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova/issues) is
-the best place to say so. Plans live in
-[docs/ROADMAP.md](docs/ROADMAP.md) and [docs/MODERNIZATION.md](docs/MODERNIZATION.md).
-
-## Linux and Windows: the Godot port
-
-The simulation, data layer, and story runtime are portable Swift with almost no
-Apple coupling — only the UI and rendering are SwiftUI/SpriteKit. So a second
-frontend on **Godot 4**, bridged through
-[SwiftGodot](https://github.com/migueldeicaza/SwiftGodot), reaches Linux and
-Windows without forking any game logic: both builds run the same `World.step`.
-
-In progress. The Godot project flies a ship on the engine's real flight model
-at the same fixed 30 Hz tick the Apple build uses, and renders ships, planets,
-shots, beams, asteroids and explosions decoded from your data — plus a working
-HUD, radar, target lock, landing/launch and a first spaceport screen (the
-commodity exchange). Sound, the galaxy map, the rest of the spaceport, and the
-story runtime are next. Status in
-[docs/GODOT_LAYER.md](docs/GODOT_LAYER.md).
+So far it flies a ship on the real flight model, renders ships, planets, shots,
+beams, asteroids and explosions from your data, and has a HUD, radar, target
+lock, landing and launch, and the trade center. Sound, the galaxy map, the rest
+of the spaceport, saving and the story runtime are still to do. See
+[GODOT_LAYER.md](docs/GODOT_LAYER.md).
 
 ## Beta
 
-Builds for all four platforms are live on TestFlight — one link, no build step:
-
-**→ [testflight.apple.com/join/3FBzwwq1](https://testflight.apple.com/join/3FBzwwq1)**
-
+TestFlight builds for all four Apple platforms:
+[testflight.apple.com/join/3FBzwwq1](https://testflight.apple.com/join/3FBzwwq1).
 You supply your own EV Nova data.
 
-## The one rule: you bring the game
+Bugs go in the [issue tracker](https://github.com/SirStig/NovaSwift/issues).
+In the app, Settings ▸ Support ▸ Report a Bug collects a diagnostics bundle.
 
-We ship the code; you supply the data. EV Nova's content is owned by ATMOS, so
-**this repo contains zero copyrighted game data and never will.** `NovaSwiftKit`
-reads your own legally-owned copy at runtime — classic resource forks, `.ndat`,
-or the modern `BRGR .rez` container — the same model as OpenMW and OpenRA. The
-reasoning is in [docs/CHARTER.md](docs/CHARTER.md), which governs every decision
-in the repo.
+## Bring your own data
 
-## Build it yourself
+This repo contains no EV Nova game data and never will. The game's content is
+owned by ATMOS. `NovaSwiftKit` reads your own copy at runtime, in any of the
+formats it shipped in: classic resource forks, `.ndat`, or the `BRGR .rez`
+container. OpenMW and OpenRA work the same way. How to add your data:
+[GET_THE_DATA.md](docs/GET_THE_DATA.md). The reasoning is in
+[CHARTER.md](docs/CHARTER.md).
 
-> Requires a Mac with Xcode and its command-line tools. Your EV Nova data stays
-> on your machine — it's git-ignored and never uploaded.
+## Building
+
+You need a Mac with Xcode. Your game data stays on your machine; `data/base/` is
+git-ignored.
 
 ```bash
-# 1 · clone
-git clone https://github.com/SirStig/MacOS-iOS-iPadOS-EV-Nova.git
-cd MacOS-iOS-iPadOS-EV-Nova
-
-# 2 · fetch open-source dependencies
-scripts/setup.sh
-
-# 3 · add your EV Nova data into data/base/  (see docs/GET_THE_DATA.md)
-
-# 4 · (optional) free community plug-ins
-scripts/fetch-plugins.sh
-
-# 5 · quick check from the command line
-swift build && swift test
-
-# …then open the app in Xcode to play:
-open app/NovaSwift.xcodeproj
+git clone https://github.com/SirStig/NovaSwift.git
+cd NovaSwift
+scripts/setup.sh                # open-source dependencies
+# copy your EV Nova data into data/base/ (see docs/GET_THE_DATA.md)
+scripts/fetch-plugins.sh        # optional: free community plug-ins
+swift build && swift test       # command-line check
+open app/NovaSwift.xcodeproj    # then pick a target and Run
 ```
-
-Pick a target and hit Run. Data steps: [docs/GET_THE_DATA.md](docs/GET_THE_DATA.md).
 
 ## Repository layout
 
 ```
-docs/                  Charter, roadmap, architecture, data-format reference
+docs/                    Charter, status, roadmap, architecture, formats, RE specs
 Sources/
-  NovaSwiftKit/          Data layer — resource parsing, typed decoders, sprite/PICT decode
-  NovaSwiftEngine/       Live sim — flight, combat, AI, spawning, diplomacy
-  NovaSwiftStory/        Mission/story runtime — mïsn/crön/NCB engine
-  NovaSwiftPluginStore/  Plug-in catalog + download/install pipeline
-  novaswift-extract/     CLI inspector/harness that drives the libraries end-to-end
-Tests/                 Unit tests per library
-app/NovaSwift/         The multiplatform SwiftUI/SpriteKit app (the game itself)
-godot/                 Godot 4 frontend + SwiftGodot bridge (Linux/Windows, in progress)
-data/base/             ⬅ your legally-owned EV Nova data goes here (git-ignored)
+  NovaSwiftKit/          Resource parsing, typed decoders, sprite/PICT decode
+  NovaSwiftEngine/       Simulation: flight, combat, AI, spawning, diplomacy
+  NovaSwiftStory/        Missions, crön events, NCB scripting, pilot economy
+  NovaSwiftNet/          Multiplayer transports (Game Center, local Wi-Fi), sessions
+  NovaSwiftSync/         Multiplayer world-state sync
+  NovaSwiftPluginStore/  Plug-in catalog, download and install
+  novaswift-extract/     Command-line inspector and test harness
+Tests/                   Unit tests per library
+app/NovaSwift/           The SwiftUI/SpriteKit app
+godot/                   Godot 4 frontend and SwiftGodot bridge
+data/base/               Your EV Nova data (git-ignored)
 ```
 
 ## Documentation
 
-Start with the **[Charter](docs/CHARTER.md)** — the authoritative goal. Then
-**[Roadmap](docs/ROADMAP.md)**, **[Architecture](docs/ARCHITECTURE.md)**, and
-**[Data format](docs/DATA_FORMAT.md)**.
-
-Deep dives: [AI](docs/AI.md) · [ship system](docs/SHIP_SYSTEM.md) ·
-[missions & story](docs/MISSIONS.md) · [multiplayer](docs/MULTIPLAYER.md) ·
-[mobile & plug-ins](docs/MOBILE_AND_PLUGINS.md) · [controls](docs/CONTROLS.md) ·
-[tvOS](docs/TVOS.md) · [iCloud sync](docs/ICLOUD_SYNC.md) ·
-[Godot port](docs/GODOT_LAYER.md) ·
-[reverse-engineering](docs/reverse-engineering/README.md)
+[docs/README.md](docs/README.md) is the index. The main ones:
+[Charter](docs/CHARTER.md), [Status](docs/STATUS.md),
+[Roadmap](docs/ROADMAP.md), [Architecture](docs/ARCHITECTURE.md),
+[Data format](docs/DATA_FORMAT.md), and the
+[reverse-engineering specs](docs/reverse-engineering/README.md).
 
 ## Legal
 
-EV Nova and its data are **copyrighted**, and this project never redistributes
-them — you supply your own legally-obtained copy.
+EV Nova and its data are copyrighted. This project does not redistribute them.
 
-- **Base game data** → you must own EV Nova; the tools only extract from *your*
-  copy. It is never bundled here.
-- **Community plug-ins** → freely distributed by their authors; the fetch script
-  and in-app store pull only free downloads, under their own licenses.
-- **This project's code** → open source (see [LICENSE](LICENSE)).
+- Base game data: you must own EV Nova. The tools only read your copy.
+- Community plug-ins: the fetch script and the in-app store only download plug-ins
+  their authors distribute for free, under their own terms.
+- This project's code is open source; see [LICENSE](LICENSE).
 
-A fan interoperability / preservation effort in the spirit of OpenRA, OpenTTD,
-and devilutionX. Unaffiliated with and unendorsed by Ambrosia Software, ATMOS, or
-the original authors.
+The reverse-engineering docs describe behaviour in prose, short formulas and
+constants. No decompiled code is included.
+
+This is a fan preservation and interoperability project in the spirit of OpenRA,
+OpenTTD and devilutionX. It is not affiliated with or endorsed by Ambrosia
+Software, ATMOS or the original authors. AI tools were used in its development.

@@ -18,13 +18,19 @@ public enum GameSession {
     ///     Its combat state is filled in from the matching hull if it looks unset.
     ///   - galaxy: an existing catalog to reuse, or nil to build one.
     ///   - seed: RNG seed, so a session can be replayed deterministically.
+    ///   - spawnModel: which population rules the system's spawner runs
+    ///     (System Aliveness); the initial fill already uses them.
+    ///   - enhancements: the player's Enhancement toggles, in force from the
+    ///     initial fill on.
     /// - Returns: the wired world and the galaxy catalog (for sprite lookups).
     @discardableResult
     public static func makeWorld(game: NovaGame, systemID: Int, player: Ship,
                                  galaxy existing: Galaxy? = nil,
                                  flightTuning: FlightTuning = .default,
                                  combatTuning: CombatTuning = .default,
-                                 seed: UInt64 = 0x5EED_1234) -> (world: World, galaxy: Galaxy) {
+                                 seed: UInt64 = 0x5EED_1234,
+                                 spawnModel: Spawner.SpawnModel = .original,
+                                 enhancements: GameplayEnhancements = GameplayEnhancements()) -> (world: World, galaxy: Galaxy) {
         let galaxy = existing ?? Galaxy(game: game, flightTuning: flightTuning, combatTuning: combatTuning)
 
         // Give the player real combat stats/loadout from its hull if not already set.
@@ -39,9 +45,11 @@ public enum GameSession {
             if player.government == independentGovt { player.government = spec.government }
         }
 
-        let world = World(player: player, tuning: flightTuning, combatTuning: combatTuning)
-        world.rng = SplitMix64(seed: seed)
+        // A reused galaxy built the ships with its own scales; fly them with those.
+        let world = World(player: player, tuning: existing?.flightTuning ?? flightTuning, combatTuning: combatTuning)
+        world.rng = NovaRandom(seed: seed)
         world.galaxy = galaxy
+        world.enhancements = enhancements
         world.diplomacy = galaxy.makeDiplomacy()
         world.systemContext = galaxy.systemContext(for: systemID)
         if let sys = game.system(systemID) {
@@ -49,6 +57,7 @@ public enum GameSession {
             world.systemMurk = sys.murk                    // visual fog (sÿst.Murk)
             world.systemBackgroundColor = sys.backgroundColor  // backdrop tint (sÿst.BkgndColor)
             let spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
+            spawner.model = spawnModel
             world.spawner = spawner
             spawner.populate(world)
             world.populateAsteroids(typeIDs: sys.asteroidTypeIDs, count: sys.asteroidCount)

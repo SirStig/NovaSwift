@@ -23,9 +23,11 @@ final class ContrabandScanTests: XCTestCase {
         return Resource(type: NovaType.mission, id: id, name: "Msn\(id)", data: Data(b))
     }
 
-    private func game(scanFine: Int, crimeTol: Int = 100, smug: Int = 0) -> NovaGame {
+    private func game(scanFine: Int, crimeTol: Int = 100, smug: Int = 5) -> NovaGame {
         var col = ResourceCollection()
         col.add(govt(128, scanMask: 0x8000, scanFine: scanFine, crimeTol: crimeTol, smug: smug))
+        col.add(ownedSystemResource(id: 128, govt: 128, links: [129]))
+        col.add(ownedSystemResource(id: 129, govt: 128, links: [128]))
         col.add(outfit(200, scanMask: 0x8000))   // illegal to govt 128
         col.add(outfit(201, scanMask: 0x0004))   // legal to govt 128
         col.add(mission(400, scanMask: 0x8000))  // illegal mission cargo
@@ -55,30 +57,46 @@ final class ContrabandScanTests: XCTestCase {
     }
 
     func testPercentFine() {
-        var p = PlayerState(currentSystem: 128); p.credits = 20000; p.outfits = [200: 1]
-        _ = ContrabandScan.enforce(on: &p, game: game(scanFine: -10), govtID: 128)   // 10% of cash
-        XCTAssertEqual(p.credits, 18000)
+        var p = PlayerState(currentSystem: 128); p.credits = 20550
+        p.activeMissions = [ActiveMission(missionID: 400, acceptedDate: p.date, deadline: nil,
+                                          cargoPickedUp: true, shipObjectivesRemaining: 0)]
+        _ = ContrabandScan.enforce(on: &p, game: game(scanFine: -10), govtID: 128)
+        XCTAssertEqual(p.credits, 20550 - 2000, "trunc(20550 × 10 × 0.0001) × 100")
     }
 
-    func testSmugglingAppliesEvilness() {
+    /// EC-15: mission contraband is fined but never costs standing (an
+    /// original quirk); an illegal outfit does.
+    func testSmugglingPenaltyComesFromOutfitsNotMissions() {
         var p = PlayerState(currentSystem: 128); p.credits = 20000
         p.activeMissions = [ActiveMission(missionID: 400, acceptedDate: p.date, deadline: nil,
                                           cargoPickedUp: true, shipObjectivesRemaining: 0)]
         let r = ContrabandScan.enforce(on: &p, game: game(scanFine: 1000, smug: 50), govtID: 128)
         XCTAssertEqual(r?.smugglingMissions, [400])
         XCTAssertEqual(p.credits, 19000, "still fined for the illegal cargo")
-        // Smuggling is a hostile-action-style event, so it's LOCAL (the wiki's
-        // Legal Status radius rule) — it lands in `localLegalRecord`, not the
-        // universal `legalRecord`.
-        XCTAssertNil(p.legalRecord[128], "smuggling penalty must not touch the universal component")
-        XCTAssertEqual(p.effectiveLegalRecord(govt: 128, atSystem: 128), -50,
-                       "detected smuggling makes you more wanted here")
+        XCTAssertEqual(r?.smugglingPenalty, 0)
+        XCTAssertEqual(p.reputation(atSystem: 128), 0)
+        p.outfits = [200: 1]
+        let o = ContrabandScan.enforce(on: &p, game: game(scanFine: 1000, smug: 50), govtID: 128)
+        XCTAssertEqual(o?.smugglingPenalty, 50)
+        // Smuggling is a crime event: the SmugPenalty flood (EC-02) — full
+        // here, ×0.65 (truncated) next door.
+        XCTAssertEqual(p.reputation(atSystem: 128), -50, "detected smuggling makes you more wanted here")
+        XCTAssertEqual(p.reputation(atSystem: 129), -32)
     }
 
-    func testAlreadyCriminalIsNotFined() {
+    /// EC-15: no CrimeTol gate, and no scan at all where SmugPenalty is 0.
+    func testCriminalsAreStillFinedButZeroPenaltyGovtsDontScan() {
         var p = PlayerState(currentSystem: 128); p.credits = 20000; p.outfits = [200: 1]
-        p.legalRecord[128] = -150   // evilness 150 ≥ CrimeTol 100 → attackable, not fined
-        XCTAssertNil(ContrabandScan.enforce(on: &p, game: game(scanFine: 5000, crimeTol: 100), govtID: 128))
+        p.systemReputation = [128: -150]   // evilness 150 ≥ CrimeTol 100: still scanned and fined
+        XCTAssertNotNil(ContrabandScan.enforce(on: &p, game: game(scanFine: 5000, crimeTol: 100), govtID: 128))
+        XCTAssertEqual(p.credits, 15000)
+        XCTAssertNil(ContrabandScan.enforce(on: &p, game: game(scanFine: 5000, smug: 0), govtID: 128))
+    }
+
+    func testOutfitsTakeOnlyFlatFines() {
+        var p = PlayerState(currentSystem: 128); p.credits = 20000; p.outfits = [200: 1]
+        let r = ContrabandScan.enforce(on: &p, game: game(scanFine: -10), govtID: 128)
+        XCTAssertEqual(r?.fine, 0)
         XCTAssertEqual(p.credits, 20000)
     }
 }

@@ -123,11 +123,8 @@ struct AuthenticHUDView: View {
             VStack(spacing: 2) {
                 Text(model.targetName)
                     .novaFont(.hud, weight: .bold, size: statusSize)
-                    // Hostile locks take the theme's radar-alert hue (the same
-                    // brightRadar that paints a hostile blip), so a reskin's
-                    // "danger" color drives the name too; friendly/neutral use
-                    // the normal bright text color.
-                    .foregroundStyle(model.targetHostile ? color(style.intf.brightRadar) : color(style.intf.brightText))
+                    // The original panel has no hostility colour (UI-10).
+                    .foregroundStyle(color(style.intf.brightText))
                     .multilineTextAlignment(.center)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
@@ -156,62 +153,45 @@ struct AuthenticHUDView: View {
                 // government); when the shield/armor line is hidden a hostile lock
                 // falls back to the "Hostile" word so the state is never lost.
                 // Hostility for a live ship is otherwise carried by the red name.
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    if model.targetDisabled {
-                        Text("Disabled").novaFont(.hud, weight: .bold, size: subtitleSize)
-                            .foregroundStyle(color(style.intf.dimText))
-                    } else if !model.targetHidesShieldArmorLine {
-                        Text(targetShieldArmorLine)
+                // The original status row (UI-10): "Shield:"/"Armor:" N %, or
+                // "Shields Down" / "No Shields" / "Disabled" / "Waiting", with
+                // the TargetCode (or "Escort"/"Fighter") on the right. Hulls
+                // with shïp Flags 0x0200 (or a përs with negative ShieldMod)
+                // show only the TargetCode, centred.
+                if model.targetHidesShieldArmorLine {
+                    Text(model.targetCode).novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                        .frame(maxWidth: .infinity)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        if !model.targetStatusLabel.isEmpty {
+                            Text(model.targetStatusLabel).novaFont(.hud, size: subtitleSize)
+                                .foregroundStyle(color(style.intf.dimText))
+                        }
+                        Text(model.targetStatusValue)
                             .novaFont(.hud, weight: .semibold, size: subtitleSize).monospacedDigit()
                             .foregroundStyle(color(style.intf.brightText))
-                    } else if model.targetHostile {
-                        Text("Hostile").novaFont(.hud, weight: .bold, size: subtitleSize)
-                            .foregroundStyle(color(style.intf.brightRadar))
-                    }
-                    Spacer(minLength: 0)
-                    if !model.targetGovtLabel.isEmpty {
-                        Text(model.targetGovtLabel).novaFont(.hud, size: subtitleSize)
-                            .foregroundStyle(color(style.intf.dimText))
+                        Spacer(minLength: 0)
+                        if !model.targetCode.isEmpty {
+                            Text(model.targetCode).novaFont(.hud, size: subtitleSize)
+                                .foregroundStyle(color(style.intf.dimText))
+                        }
                     }
                 }
             }
             .padding(.horizontal, 6).padding(.vertical, 4)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        } else if !model.navTargetName.isEmpty {
-            VStack(spacing: 2) {
-                Text(model.navTargetName)
-                    .novaFont(.hud, weight: .bold, size: statusSize)
-                    .foregroundStyle(color(style.intf.brightText))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                Text(model.navTargetLandable ? "Landable" : "No landing clearance")
-                    .novaFont(.hud, size: subtitleSize)
-                    .foregroundStyle(color(style.intf.dimText))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         } else {
-            Text("No Target").novaFont(.hud, size: subtitleSize)
+            // Planets are never drawn here in the original (UI-10).
+            Text(model.noTargetText).novaFont(.hud, size: subtitleSize)
                 .foregroundStyle(color(style.intf.dimText))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
     }
 
-    /// EV Nova draws the target silhouette in red; a brighter red reads a
-    /// hostile lock, a duller one a neutral/known contact.
-    private var targetTint: Color {
-        model.targetHostile ? Color(red: 0.98, green: 0.28, blue: 0.22)
-                            : Color(red: 0.85, green: 0.34, blue: 0.28)
-    }
-
-    /// "Shield N%" while shields remain, "Armor N%" once they're gone. The
-    /// original gated the armor readout on `shïp.Flags` 0x0100 and otherwise
-    /// showed literal "Shields Down"; we show the armor % for every ship, since
-    /// a bare "Shields Down" throws away the number the player is watching for.
-    private var targetShieldArmorLine: String {
-        model.targetShield > 0 ? "Shield \(Int(model.targetShield * 100))%"
-                               : "Armor \(Int(model.targetArmor * 100))%"
-    }
+    /// EV Nova draws the target silhouette in red, the same for every contact
+    /// (the original panel carries no hostility colour).
+    private var targetTint: Color { Color(red: 0.85, green: 0.34, blue: 0.28) }
 
     /// The selected secondary weapon (EV Nova's status bar shows the *secondary*
     /// here) with its ammo count appended — e.g. "Polaron Multi-Torp. - 7".
@@ -249,7 +229,21 @@ struct AuthenticHUDView: View {
     /// matches the original, whose nav box shows only the destination.)
     private var navReadout: some View {
         VStack(spacing: 1) {
-            if !model.navCourseSystemName.isEmpty {
+            if !model.navTitle.isEmpty {
+                // The original's three states (0x0045e400; UI-10): "Hyperspace"
+                // + the armed next hop, "Stellar Navigation" + the selected
+                // stellar, or "Nav System Off".
+                Text(model.navTitle).novaFont(.hud, size: subtitleSize)
+                    .foregroundStyle(color(style.intf.dimText))
+                if !model.navName.isEmpty {
+                    Text(model.navName)
+                        .novaFont(.hud, weight: .semibold, size: statusSize)
+                        .foregroundStyle(color(model.navNameDim ? style.intf.dimText : style.intf.brightText))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
+                }
+            } else if !model.navCourseSystemName.isEmpty {
                 // Grayed while too close to the system's centre to actually engage
                 // hyperspace right now — the same "fly further out" nudge the
                 // no-jump-zone distance gate enforces, given a visual cue here.
@@ -355,13 +349,12 @@ private struct RadarContactsView: View {
     /// colour instead (green friend / red hostile / blue neutral / grey hulk),
     /// the whole point of buying the thing. This used to be unconditional
     /// two-tone, so an IFF Decoder changed nothing on the authentic HUD.
+    ///
+    /// Without one, the original draws every contact in DimRadar and only the
+    /// selected target blinks BrightRadar (OS-05).
     private func radarColor(_ rel: RadarRelationship) -> Color {
         if model.hasIFF { return rel.color }
-        switch rel {
-        case .hostile:                    return novaSwiftUIColor(brightRadar)
-        case .friendlyOrOwned, .neutral:  return novaSwiftUIColor(dimRadar)
-        case .disabled:                   return novaSwiftUIColor(dimRadar, brightness: 0.5)
-        }
+        return novaSwiftUIColor(dimRadar)
     }
 
     var body: some View {
@@ -386,7 +379,17 @@ private struct RadarContactsView: View {
                 // same `TimelineView` idiom as the galaxy map's blinking markers.
                 TimelineView(.periodic(from: .now, by: 0.35)) { timeline in
                     let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.35) % 2 == 0
-                    Canvas { ctx, _ in
+                    Canvas { ctx, size in
+                        // Interference static (OS-05): this refresh shows only
+                        // noise over the whole scope, no contacts.
+                        if model.radarStatic {
+                            for _ in 0..<Int(size.width * size.height / 12) {
+                                let r = CGRect(x: .random(in: 0..<size.width), y: .random(in: 0..<size.height),
+                                               width: 1, height: 1)
+                                ctx.fill(Path(r), with: .color(novaSwiftUIColor(dimRadar)))
+                            }
+                            return
+                        }
                         // Stellar objects: hollow ring outlines (EV Nova draws worlds
                         // as circles, distinct from the small filled ship dots).
                         for b in model.planetBlips {
@@ -410,8 +413,15 @@ private struct RadarContactsView: View {
                                 }
                                 continue
                             }
-                            let r = CGRect(x: cx + b.x * radius - 1, y: cy + b.y * radius - 1, width: 2, height: 2)
-                            ctx.fill(Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
+                            let side: CGFloat = b.large ? 3 : 2
+                            let r = CGRect(x: cx + b.x * radius - side / 2, y: cy + b.y * radius - side / 2,
+                                           width: side, height: side)
+                            if b.isTarget && !model.hasIFF {
+                                // No IFF: the target alone blinks BrightRadar.
+                                ctx.fill(Path(r), with: .color(novaSwiftUIColor(blinkOn ? brightRadar : dimRadar)))
+                                continue
+                            }
+                            ctx.fill(b.large ? Path(r) : Path(ellipseIn: r), with: .color(radarColor(b.relationship)))
                             if b.isTarget && blinkOn {
                                 let ring = r.insetBy(dx: -2.5, dy: -2.5)
                                 ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)

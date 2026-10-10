@@ -97,6 +97,7 @@ final class GameControllerInput {
             case .afterburner: if pressed { c.afterburner = true }
             case .firePrimary: if pressed { c.firePrimary = true }
             case .fireSecondary: if pressed { c.fireSecondary = true }
+            case .selfDestruct: if pressed { c.selfDestruct = true }
             case .none:
                 if pressed, !wasHeld, active {
                     let onDiscrete = onDiscrete

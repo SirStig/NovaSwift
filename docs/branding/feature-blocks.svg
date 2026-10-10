@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="592" height="570" viewBox="0 0 592 570" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<style>.h1{font-size:14px;font-weight:600;fill:#f0e6da}.gh{font-size:12px;font-weight:600;fill:#f0e6da}.gn{font-size:11px;fill:#a89a95}.lg{font-size:11px;fill:#c6bab5}</style>
+<rect width="592" height="570" rx="10" fill="#0d0a0e"/>
+<text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
+<rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
+<text x="30" y="55" class="lg">Done (98)</text>
+<rect x="103" y="46" width="9" height="9" fill="#e3a52b"/>
+<text x="117" y="55" class="lg">Partly done (9)</text>
+<rect x="228" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
+<text x="242" y="55" class="lg">Planned (26)</text>
+<text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">9 of 14 done</text>
+<rect x="216" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Local Wi-Fi lobbies — Done</title></rect>
+<rect x="231" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Game Center matches and invites — Done</title></rect>
+<rect x="246" y="80" width="12" height="12" fill="#e3a52b"><title>Multiplayer co-op: Public online lobby list — Partly done</title></rect>
+<rect x="261" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Host rules: PvP, damage, permadeath — Done</title></rect>
+<rect x="276" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Shared game speed — Done</title></rect>
+<rect x="291" y="80" width="12" height="12" fill="#e3a52b"><title>Multiplayer co-op: Carry encounter outcomes home — Partly done</title></rect>
+<rect x="306" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: System sync and snapshots — Done</title></rect>
+<rect x="321" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Session chat — Done</title></rect>
+<rect x="336" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Player trading — Done</title></rect>
+<rect x="351" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Shared story progress — Done</title></rect>
+<rect x="366" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Kick, ban, plug-in compatibility check — Done</title></rect>
+<rect x="381" y="80" width="12" height="12" fill="#e3a52b"><title>Multiplayer co-op: Seamless host migration — Partly done</title></rect>
+<rect x="396.5" y="80.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Multiplayer co-op: Bandwidth: deltas, interest management — Planned</title></rect>
+<rect x="411.5" y="80.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Multiplayer co-op: Testing on more real devices — Planned</title></rect>
+<text x="16" y="119" class="gh">Story Guide and storyline map</text><text x="576" y="119" class="gn" text-anchor="end">7 of 7 done</text>
+<rect x="216" y="107" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Campaigns rebuilt from the control-bit graph — Done</title></rect>
+<rect x="231" y="107" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Storyline flow view with branches — Done</title></rect>
+<rect x="246" y="107" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Current step and unlock hints — Done</title></rect>
+<rect x="261" y="107" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Links between storylines — Done</title></rect>
+<rect x="276" y="107" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Filter by plug-in — Done</title></rect>
+<rect x="291" y="107" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Abort a mission from the guide — Done</title></rect>
+<rect x="306" y="107" width="12" height="12" fill="#3fb950"><title>Story Guide and storyline map: Open from the in-game menu — Done</title></rect>
+<text x="16" y="146" class="gh">Storyline tags</text><text x="576" y="146" class="gn" text-anchor="end">4 of 4 done</text>
+<rect x="216" y="134" width="12" height="12" fill="#3fb950"><title>Storyline tags: Tag cache per mission — Done</title></rect>
+<rect x="231" y="134" width="12" height="12" fill="#3fb950"><title>Storyline tags: Badges on mission board and offers — Done</title></rect>
+<rect x="246" y="134" width="12" height="12" fill="#3fb950"><title>Storyline tags: Tap a badge to open the Story Guide — Done</title></rect>
+<rect x="261" y="134" width="12" height="12" fill="#3fb950"><title>Storyline tags: Settings toggle — Done</title></rect>
+<text x="16" y="173" class="gh">Debug suite</text><text x="576" y="173" class="gn" text-anchor="end">8 of 8 done</text>
+<rect x="216" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Debug mode switch — Done</title></rect>
+<rect x="231" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Console with commands — Done</title></rect>
+<rect x="246" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Filtered log viewer — Done</title></rect>
+<rect x="261" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Frame profiler and stress test — Done</title></rect>
+<rect x="276" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Entity inspector — Done</title></rect>
+<rect x="291" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Bit, ship, outfit, government browsers — Done</title></rect>
+<rect x="306" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Game state and self-test views — Done</title></rect>
+<rect x="321" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: UI measurement overlay — Done</title></rect>
+<text x="16" y="200" class="gh">Bug reports</text><text x="576" y="200" class="gn" text-anchor="end">5 of 5 done</text>
+<rect x="216" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Settings &gt; Support &gt; Report a Bug — Done</title></rect>
+<rect x="231" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Bundle with pilot, log and self-test — Done</title></rect>
+<rect x="246" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Share sheet export — Done</title></rect>
+<rect x="261" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: List of past reports — Done</title></rect>
+<rect x="276" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Also reachable from debug tools — Done</title></rect>
+<text x="16" y="227" class="gh">Plug-in store and manager</text><text x="576" y="227" class="gn" text-anchor="end">6 of 8 done</text>
+<rect x="216" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Offline catalog (23 entries) — Done</title></rect>
+<rect x="231" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Download and install from original hosts — Done</title></rect>
+<rect x="246" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Store browse, details, screenshots — Done</title></rect>
+<rect x="261" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Import a plug-in or .zip — Done</title></rect>
+<rect x="276" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Enable, disable, delete — Done</title></rect>
+<rect x="291" y="215" width="12" height="12" fill="#3fb950"><title>Plug-in store and manager: Manual load order — Done</title></rect>
+<rect x="306" y="215" width="12" height="12" fill="#e3a52b"><title>Plug-in store and manager: Plug-ins bundled with the app — Partly done</title></rect>
+<rect x="321.5" y="215.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in store and manager: Enhancement packs (HD art, audio) — Planned</title></rect>
+<text x="16" y="254" class="gh">Controller support</text><text x="576" y="254" class="gn" text-anchor="end">8 of 8 done</text>
+<rect x="216" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Gamepad flight — Done</title></rect>
+<rect x="231" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Controller cursor for all menus — Done</title></rect>
+<rect x="246" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Button remapping — Done</title></rect>
+<rect x="261" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: On-screen keyboard for pads — Done</title></rect>
+<rect x="276" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Button glyph prompts — Done</title></rect>
+<rect x="291" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Dead zone and cursor speed — Done</title></rect>
+<rect x="306" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Rumble — Done</title></rect>
+<rect x="321" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Keyboard remapping — Done</title></rect>
+<text x="16" y="281" class="gh">Apple TV</text><text x="576" y="281" class="gn" text-anchor="end">5 of 6 done</text>
+<rect x="216" y="269" width="12" height="12" fill="#3fb950"><title>Apple TV: tvOS target — Done</title></rect>
+<rect x="231" y="269" width="12" height="12" fill="#3fb950"><title>Apple TV: Controller-required screen — Done</title></rect>
+<rect x="246" y="269" width="12" height="12" fill="#3fb950"><title>Apple TV: Import game data over Wi-Fi — Done</title></rect>
+<rect x="261" y="269" width="12" height="12" fill="#3fb950"><title>Apple TV: Restore data from iCloud — Done</title></rect>
+<rect x="276" y="269" width="12" height="12" fill="#3fb950"><title>Apple TV: TV text entry — Done</title></rect>
+<rect x="291.5" y="269.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Apple TV: Testing on more hardware — Planned</title></rect>
+<text x="16" y="308" class="gh">Touch controls</text><text x="576" y="308" class="gn" text-anchor="end">5 of 8 done</text>
+<rect x="216" y="296" width="12" height="12" fill="#3fb950"><title>Touch controls: On-screen buttons — Done</title></rect>
+<rect x="231" y="296" width="12" height="12" fill="#3fb950"><title>Touch controls: Tap or drag to fly — Done</title></rect>
+<rect x="246" y="296" width="12" height="12" fill="#3fb950"><title>Touch controls: Tilt to turn — Done</title></rect>
+<rect x="261" y="296" width="12" height="12" fill="#3fb950"><title>Touch controls: Sensitivity and invert — Done</title></rect>
+<rect x="276" y="296" width="12" height="12" fill="#3fb950"><title>Touch controls: Pinch zoom on the galaxy map — Done</title></rect>
+<rect x="291.5" y="296.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Touch controls: Pinch zoom in flight — Planned</title></rect>
+<rect x="306.5" y="296.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Touch controls: Tap a radar blip to target — Planned</title></rect>
+<rect x="321.5" y="296.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Touch controls: Gestures for land and secondary fire — Planned</title></rect>
+<text x="16" y="335" class="gh">iCloud</text><text x="576" y="335" class="gn" text-anchor="end">4 of 7 done</text>
+<rect x="216" y="323" width="12" height="12" fill="#3fb950"><title>iCloud: Pilot saves in iCloud — Done</title></rect>
+<rect x="231" y="323" width="12" height="12" fill="#3fb950"><title>iCloud: Move pilots between local and iCloud — Done</title></rect>
+<rect x="246" y="323" width="12" height="12" fill="#3fb950"><title>iCloud: Pilot backups browser — Done</title></rect>
+<rect x="261" y="323" width="12" height="12" fill="#e3a52b"><title>iCloud: Upload game data to private iCloud — Partly done</title></rect>
+<rect x="276" y="323" width="12" height="12" fill="#3fb950"><title>iCloud: Restore data on a new device — Done</title></rect>
+<rect x="291" y="323" width="12" height="12" fill="#e3a52b"><title>iCloud: Sync status in Settings — Partly done</title></rect>
+<rect x="306.5" y="323.5" width="11" height="11" fill="none" stroke="#8d807c"><title>iCloud: Sync settings and key bindings — Planned</title></rect>
+<text x="16" y="362" class="gh">Presentation presets</text><text x="576" y="362" class="gn" text-anchor="end">7 of 7 done</text>
+<rect x="216" y="350" width="12" height="12" fill="#3fb950"><title>Presentation presets: Classic, Enhanced, Nova Swift — Done</title></rect>
+<rect x="231" y="350" width="12" height="12" fill="#3fb950"><title>Presentation presets: Full-screen galaxy map — Done</title></rect>
+<rect x="246" y="350" width="12" height="12" fill="#3fb950"><title>Presentation presets: Modern main menu — Done</title></rect>
+<rect x="261" y="350" width="12" height="12" fill="#3fb950"><title>Presentation presets: Modern dialogs — Done</title></rect>
+<rect x="276" y="350" width="12" height="12" fill="#3fb950"><title>Presentation presets: Modern HUD — Done</title></rect>
+<rect x="291" y="350" width="12" height="12" fill="#3fb950"><title>Presentation presets: Per-item overrides — Done</title></rect>
+<rect x="306" y="350" width="12" height="12" fill="#3fb950"><title>Presentation presets: Sidebar pause menu — Done</title></rect>
+<text x="16" y="389" class="gh">Tutorial and flight training</text><text x="576" y="389" class="gn" text-anchor="end">6 of 7 done</text>
+<rect x="216" y="377" width="12" height="12" fill="#3fb950"><title>Tutorial and flight training: Flight-training course — Done</title></rect>
+<rect x="231" y="377" width="12" height="12" fill="#3fb950"><title>Tutorial and flight training: Offered on first launch — Done</title></rect>
+<rect x="246" y="377" width="12" height="12" fill="#3fb950"><title>Tutorial and flight training: Restart from Settings — Done</title></rect>
+<rect x="261" y="377" width="12" height="12" fill="#3fb950"><title>Tutorial and flight training: Instructions per control scheme — Done</title></rect>
+<rect x="276" y="377" width="12" height="12" fill="#3fb950"><title>Tutorial and flight training: One-time spaceport hints — Done</title></rect>
+<rect x="291" y="377" width="12" height="12" fill="#3fb950"><title>Tutorial and flight training: Reset hints — Done</title></rect>
+<rect x="306.5" y="377.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Tutorial and flight training: Hints in flight — Planned</title></rect>
+<text x="16" y="416" class="gh">Gameplay Enhancements</text><text x="576" y="416" class="gn" text-anchor="end">9 of 9 done</text>
+<rect x="216" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Settings section driven by a catalog — Done</title></rect>
+<rect x="231" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Manual plug-in order — Done</title></rect>
+<rect x="246" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Tight formations — Done</title></rect>
+<rect x="261" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Forgiving landing — Done</title></rect>
+<rect x="276" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Quick hyperjump — Done</title></rect>
+<rect x="291" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Frequent autosave — Done</title></rect>
+<rect x="306" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Automatic route plotting — Done</title></rect>
+<rect x="321" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Nearest-first targeting — Done</title></rect>
+<rect x="336" y="404" width="12" height="12" fill="#3fb950"><title>Gameplay Enhancements: Modern key layout — Done</title></rect>
+<text x="16" y="443" class="gh">Accessibility and interface</text><text x="576" y="443" class="gn" text-anchor="end">4 of 5 done</text>
+<rect x="216" y="431" width="12" height="12" fill="#3fb950"><title>Accessibility and interface: Reduce flashing and motion — Done</title></rect>
+<rect x="231" y="431" width="12" height="12" fill="#3fb950"><title>Accessibility and interface: Colour-blind modes — Done</title></rect>
+<rect x="246" y="431" width="12" height="12" fill="#3fb950"><title>Accessibility and interface: Larger and high-contrast HUD — Done</title></rect>
+<rect x="261" y="431" width="12" height="12" fill="#3fb950"><title>Accessibility and interface: UI scale — Done</title></rect>
+<rect x="276.5" y="431.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Accessibility and interface: VoiceOver labels — Planned</title></rect>
+<text x="16" y="470" class="gh">Native Apple builds</text><text x="576" y="470" class="gn" text-anchor="end">4 of 4 done</text>
+<rect x="216" y="458" width="12" height="12" fill="#3fb950"><title>Native Apple builds: macOS (native, not Catalyst) — Done</title></rect>
+<rect x="231" y="458" width="12" height="12" fill="#3fb950"><title>Native Apple builds: iPhone and iPad — Done</title></rect>
+<rect x="246" y="458" width="12" height="12" fill="#3fb950"><title>Native Apple builds: Mouse aiming on Mac — Done</title></rect>
+<rect x="261" y="458" width="12" height="12" fill="#3fb950"><title>Native Apple builds: Shared portable Swift core — Done</title></rect>
+<text x="16" y="497" class="gh">Godot port for Linux and Windows</text><text x="576" y="497" class="gn" text-anchor="end">4 of 13 done</text>
+<rect x="216" y="485" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: SwiftGodot bridge and build script — Done</title></rect>
+<rect x="231" y="485" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Linux and Windows CI — Partly done</title></rect>
+<rect x="246" y="485" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Flight with real-data sprites — Done</title></rect>
+<rect x="261" y="485" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: HUD, radar, targeting — Done</title></rect>
+<rect x="276" y="485" width="12" height="12" fill="#3fb950"><title>Godot port for Linux and Windows: Landing and launch — Done</title></rect>
+<rect x="291" y="485" width="12" height="12" fill="#e3a52b"><title>Godot port for Linux and Windows: Trade center — Partly done</title></rect>
+<rect x="306.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Hyperjump and galaxy map — Planned</title></rect>
+<rect x="321.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Outfitter, shipyard, bar, missions — Planned</title></rect>
+<rect x="336.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Sound — Planned</title></rect>
+<rect x="351.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Saving and loading pilots — Planned</title></rect>
+<rect x="366.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Story runtime — Planned</title></rect>
+<rect x="381.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Gamepad input — Planned</title></rect>
+<rect x="396.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Packaged builds — Planned</title></rect>
+<text x="16" y="524" class="gh">Optional graphics, audio and AI</text><text x="576" y="524" class="gn" text-anchor="end">2 of 8 done</text>
+<rect x="216" y="512" width="12" height="12" fill="#3fb950"><title>Optional graphics, audio and AI: Smoothed sprite filtering — Done</title></rect>
+<rect x="231" y="512" width="12" height="12" fill="#3fb950"><title>Optional graphics, audio and AI: Parallax starfield and engine glow — Done</title></rect>
+<rect x="246.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Smarter optional AI — Planned</title></rect>
+<rect x="261.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Particles, bloom, post effects — Planned</title></rect>
+<rect x="276.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Performance tiers — Planned</title></rect>
+<rect x="291.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Smooth rotation, frame interpolation — Planned</title></rect>
+<rect x="306.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: HD sprite packs — Planned</title></rect>
+<rect x="321.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Spatial audio, dynamic music — Planned</title></rect>
+<text x="16" y="551" class="gh">Editors</text><text x="576" y="551" class="gn" text-anchor="end">1 of 5 done</text>
+<rect x="216" y="539" width="12" height="12" fill="#3fb950"><title>Editors: Editable native pilot saves — Done</title></rect>
+<rect x="231" y="539" width="12" height="12" fill="#e3a52b"><title>Editors: Pilot edits from the debug console — Partly done</title></rect>
+<rect x="246.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Editors: Resource write path — Planned</title></rect>
+<rect x="261.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Editors: In-app resource editor — Planned</title></rect>
+<rect x="276.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Editors: Pilot editor — Planned</title></rect>
+</svg>

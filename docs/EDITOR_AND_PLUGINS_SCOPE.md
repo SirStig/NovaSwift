@@ -1,12 +1,13 @@
 # Scope — Plug-in System, In-App Editor & Save-Game Editing
 
-> **Plan, not built.** Nothing here exists yet.
+> **Mostly a plan.** The plug-in manager, store, load order and native `.evpilot`
+> saves exist. The resource write path, resource editor and pilot editor do not.
 
 This scopes three related capabilities and sequences them into milestones: what to
 build, in what order, and the one architectural change everything depends on.
 
 Related: `docs/MOBILE_AND_PLUGINS.md` (the runtime plug-in/loader design, already partly
-built), `docs/DATA_FORMAT.md` (container + resource formats), `docs/ROADMAP.md` (phase 8).
+built), `docs/DATA_FORMAT.md` (container + resource formats), `docs/ROADMAP.md`.
 
 ---
 

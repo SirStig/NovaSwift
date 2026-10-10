@@ -34,7 +34,7 @@ public struct CombatTuning {
 /// real per-hull hardpoints, so a shot leaves the gun barrel / turret / launch
 /// bay it belongs to instead of the ship's centre. Derived from `wëap`'s
 /// `exitType` field.
-public enum WeaponExitType: Equatable {
+public enum WeaponExitType: Hashable {
     case center, gun, turret, guided, beam
 
     /// Map `WeapRes.exitType` (-1 centre / 0 gun / 1 turret / 2 guided / 3 beam).
@@ -186,6 +186,12 @@ public struct WeaponBehaviorFlags: Sendable, Equatable {
 /// Built from a decoded `WeapRes` via `CombatTuning`.
 public struct WeaponSpec {
     public let id: Int
+    /// A cycling shot sprite's frame delay in ticks (`wëap.BeamWidth`, which
+    /// the original reads as the animation delay for non-beam weapons) and the
+    /// raw `Flags2` bits that hold its frame (0x0001 frame 0 during ProxSafety,
+    /// 0x0002 stop on the last frame). WP-17's collision frame reads these.
+    public var animFrameDelayTicks: Double = 0
+    public var animFlags2: UInt16 = 0
     public let name: String
     public let shieldDamage: Double
     public let armorDamage: Double
@@ -310,6 +316,31 @@ public struct WeaponSpec {
     public let oneAmmoPerBurst: Bool
     /// `Flags3` 0x0002: this weapon's shots are drawn translucent (visual only).
     public let translucentShots: Bool
+
+    // The original's own units, for the rules ported from the exe (WP-xx).
+    /// `Count`: a shot's life in ticks, or a beam record's life in raw calls.
+    public var lifeTicks: Double = 0
+    /// `Decay`: a shot loses one point of each damage once this many ticks
+    /// pass (counted per raw call); 0 = no decay.
+    public var decayTicks: Double = 0
+    /// Signed `Inaccuracy` in whole degrees: positive spreads `rand(2s) − s`,
+    /// negative fans parallel launch by muzzle side (WP-21).
+    public var inaccuracyDegrees: Int = 0
+    /// `GuidedTurn × 0.1`: a homing shot's turn, degrees per tick.
+    public var turnDegreesPerTick: Double = 0
+    /// `BeamLength` in px, exact (no floor).
+    public var beamLength: Double = 0
+    /// A beam record's extra fade calls after `Count` when `Decay > 0`
+    /// (`16 − CoronaFalloff`, while positive).
+    public var beamFadeCalls: Int = 0
+    /// `wëap` Flags2 0x0008: a homing shot may hit (and fuse on) any ship,
+    /// not only its target.
+    public var hitsAnyShip = false
+    /// `wëap` Flags2 0x0020: no submunitions when the shot expires.
+    public var noSubmunitionsOnExpire = false
+    /// Raw `Speed / 100`: launch speed in px/tick.
+    public var speedPerTick: Double = 0
+
     /// The remaining documented `wëap` flag bits, carried verbatim. Forwarding
     /// accessors for the ones the sim reads hot are just below.
     public let flags: WeaponBehaviorFlags
@@ -412,6 +443,18 @@ public struct WeaponSpec {
         self.firesFromClosestExit = firesFromClosestExit; self.durability = durability
         self.oneAmmoPerBurst = oneAmmoPerBurst; self.translucentShots = translucentShots
         self.ammoTypeRaw = ammoTypeRaw
+        // A hand-built spec (tests, tools) states the port's units; derive the
+        // original's from them.
+        let fps = OriginalClock.ticksPerSecond
+        speedPerTick = projectileSpeed / fps
+        lifeTicks = isBeam ? max(1, (pulseBeamLifeSeconds * fps).rounded())
+                           : (projectileSpeed > 0 ? range / projectileSpeed * fps : 0)
+        beamLength = isBeam ? range : 0
+        turnDegreesPerTick = turnRate * 180 / .pi / fps
+        let spread = Int((accuracyRadians * 180 / .pi).rounded())
+        inaccuracyDegrees = firesAtFixedAngle ? -spread : spread
+        decayTicks = decayPerSec > 0 ? fps / decayPerSec : 0
+        hitsAnyShip = proxHitAll && guidance != .guided && !(guidance == .unguided && isGuided)
     }
 
     /// Convert a decoded weapon into simulation units.
@@ -422,19 +465,8 @@ public struct WeaponSpec {
         shieldDamage = Double(w.shieldDamage) * tuning.damageScale
         armorDamage = Double(w.armorDamage) * tuning.damageScale
         penetratesShields = w.penetratesShields
-        // The Bible's `Reload` is "frames to reload; 30 = 1 shot/sec" with no
-        // documented floor — `Reload = 0` (near-universal on beam weapons,
-        // which rely entirely on `BurstCount`/`BurstReload` for their actual
-        // pacing) means "as fast as the sim ticks," i.e. one frame. Flooring at
-        // a flat 0.1s (3 frames) instead of one frame silently capped every
-        // fast/continuous weapon at 10 shots/sec and, worse, stretched a
-        // burst's real duration well past what `BurstCount` specifies — e.g. a
-        // 60-shot burst at `Reload=0` should span 60 frames (2s at 30fps); the
-        // old floor stretched it to 60×0.1s = 6s, more than doubling the real
-        // gap between bursts and cutting sustained DPS by over half. One frame
-        // is still a real floor (never literally 0, avoiding div-by-zero-style
-        // runaway fire), just not one three times too coarse.
-        reloadSeconds = max(1.0 / tuning.framesPerSecond, Double(w.reload) / tuning.framesPerSecond)
+        // No floor (WP-20): a Reload-0 weapon fires on every raw call it may.
+        reloadSeconds = Double(max(0, w.reload)) / tuning.framesPerSecond
         projectileSpeed = Double(w.speed) * tuning.unitToPxPerSec
         // WeapRes.range is speed(unit/frame)×duration(frames); scale to px.
         // A beam's `range` is already a plain pixel length (`max(beamLength, 50)`,
@@ -442,7 +474,7 @@ public struct WeaponSpec {
         // frame-rate scale to it crushed every beam's actual hit distance down to
         // the 60px floor regardless of its real beamLength (a 260–400px beam could
         // only ever connect within ~60px), which read as "this weapon does nothing."
-        range = w.isBeam ? Double(max(60, w.range))
+        range = w.isBeam ? Double(max(0, w.beamLength))
                           : max(60, w.range * tuning.unitToPxPerSec / tuning.framesPerSecond)
         accuracyRadians = Double(w.accuracy) * .pi / 180.0
         isBeam = w.isBeam
@@ -487,6 +519,8 @@ public struct WeaponSpec {
         // so double it here — every downstream consumer (ActiveBeam, the
         // renderer's beam sprite/lightning stroke) expects a full width.
         beamWidth = Double(max(0, w.beamWidth)) * 2
+        animFrameDelayTicks = Double(w.beamWidth)
+        animFlags2 = w.flags2Raw
         beamColor = w.isBeam ? (Double(w.beamColor.r) / 255.0,
                                 Double(w.beamColor.g) / 255.0,
                                 Double(w.beamColor.b) / 255.0) : nil
@@ -542,6 +576,15 @@ public struct WeaponSpec {
         cantFireWhileIonized = w.cantFireWhileIonized
         confusedByInterference = w.confusedByInterference
         turnsAwayIfJammed = w.turnsAwayIfJammed
+        lifeTicks = Double(max(0, w.duration))
+        decayTicks = Double(max(0, w.decay))
+        inaccuracyDegrees = w.firesAtFixedAngle ? -w.accuracy : w.accuracy
+        turnDegreesPerTick = Double(w.turnRate) * 0.1
+        beamLength = Double(max(0, w.beamLength))
+        beamFadeCalls = w.decay > 0 ? max(0, 16 - w.coronaFalloff) : 0
+        hitsAnyShip = w.flags2Raw & 0x0008 != 0
+        noSubmunitionsOnExpire = w.flags2Raw & 0x0020 != 0
+        speedPerTick = Double(w.speed) / 100
     }
 }
 
@@ -574,6 +617,9 @@ public final class WeaponMount {
         self.spec = spec
         self.ammo = ammo
         self.count = max(1, count)
+        // A burst weapon starts its first burst only after a full BurstReload
+        // (`Weapon_InitShipWeaponBursts` 0x00413810, WP-20).
+        if spec.burstCount > 0 { cooldown = spec.burstReloadSeconds }
     }
 
     public var ready: Bool { cooldown <= 0 && (ammo != 0) }
@@ -589,8 +635,10 @@ public final class WeaponMount {
 
     /// Record that the group fired `shots` shots this event: spend ammo, advance
     /// the burst counter, and set the next cooldown (the long burst reload once
-    /// the burst is spent).
-    public func didFire(shots: Int) {
+    /// the burst is spent). `reloadScale` stretches the ordinary reload, not
+    /// the burst reload (the AI-03 rating ramp).
+    public func didFire(shots: Int, reloadScale: Double = 1) {
+        let perShotReload = self.perShotReload * reloadScale
         if spec.burstCount > 0 {
             burstShots += shots
             // Normally ammo is spent per shot. `Flags3` 0x0001 (oneAmmoPerBurst)
@@ -710,6 +758,64 @@ public final class Projectile {
     /// connect.
     public var turnedOnParent = false
 
+    // The original's per-shot state (`Shot_SpawnShotFromWeapon` 0x0041fd30,
+    // `Shot_HandleShot` 0x00435830, `Shot_UpdateShotGuidance` 0x00431530).
+
+    /// Guidance mode (`wëap.Guidance`).
+    public var guidance: WeaponGuidance = .unguided
+    /// Ticks flown, and `Count`, the ticks it may fly (0 = the seconds-based
+    /// `life` alone governs, for test shots built without a weapon).
+    public var ageTicks: Double = 0
+    public var lifeTicks: Double = 0
+    /// The cycling sprite's live frame (`Shot_HandleShot` 0x00435830): it
+    /// steps once `animFrameDelayTicks` have gathered, per raw call, and wraps
+    /// (or holds on the last frame with `wëap.Flags2` 0x0002). Only spin shots
+    /// cycle; collision reads it as the shot's mask frame (WP-17).
+    public var animFrame = 0
+    public var animElapsed: Double = 0
+    public var animFrameDelayTicks: Double = 0
+    public var animFlags2: UInt16 = 0
+    /// Undecayed damage (splash and expiry blasts use it) and the decay count.
+    public var baseShieldDamage: Double = 0
+    public var baseArmorDamage: Double = 0
+    public var decayInterval: Double = 0
+    public var decayTimer: Double = 0
+    public var decayPoints: Double = 0
+    /// Heading in whole degrees as the original keeps it (0 = up, clockwise).
+    public var headingDegrees: Double = 0
+    /// GuidedTurn × 0.1, degrees per tick.
+    public var turnDegreesPerTick: Double = 0
+    /// The homing state: 0 normal, 1 decoyed onto `decoyRock`, 999 the
+    /// interference weave, 998 inert after its target died.
+    public var guidanceState = 0
+    public var decoyRock: Asteroid?
+    /// Per-channel lock rolls `rand(JamVuln + 1)` (WP-09).
+    public var jamLocks: [Int] = [0, 0, 0, 0]
+    /// The turret tracking roll (WP-26): `rand(rating) + 1` for modes 4 and 9,
+    /// −1 otherwise.
+    public var turretRoll = -1
+    /// `wëap` Flags2 0x0008: a homing shot that may hit any ship.
+    public var hitsAnyShip = false
+    /// Expiry: submunitions unless Flags2 0x0020; area blast only with
+    /// Flags 0x8000 (WP-07, WP-08).
+    public var subsOnExpire = true
+    public var expiryBlast = false
+    /// A point-defense (mode 9) round: it collides only with homing shots,
+    /// and with ships only through its proximity fuse (WP-14).
+    public var isPointDefenseRound = false
+    /// A PD round's bite out of a missile's durability: Mass + trunc(Energy / 2).
+    public var pointDefenseBite: Double = 0
+    /// Non-lethal (`wëap` Flags2 0x1000): armor stops at 1.
+    public var nonLethal = false
+    /// The owner's squad leader when it fired (for the squad-mate rule).
+    public var ownerLeaderID: Int?
+    /// A stellar battery's shot hits only the ship it was fired at (WP-22).
+    public var batteryTargetID: Int?
+
+    /// Shield and armor damage this shot deals on a direct hit, net of decay.
+    public var decayedShieldDamage: Double { max(0, baseShieldDamage - decayPoints) }
+    public var decayedArmorDamage: Double { max(0, baseArmorDamage - decayPoints) }
+
     public init(position: Vec2, velocity: Vec2, life: Double,
                 shieldDamage: Double, armorDamage: Double, blastRadius: Double,
                 ownerID: Int, ownerGovt: Int, homing: Bool, turnRate: Double,
@@ -723,6 +829,7 @@ public final class Projectile {
                 penetratesShields: Bool = false, weaponID: Int = -1, pdDurability: Int = 0,
                 translucentShots: Bool = false, flags: WeaponBehaviorFlags = WeaponBehaviorFlags()) {
         self.flags = flags
+        self.baseShieldDamage = shieldDamage; self.baseArmorDamage = armorDamage
         self.weaponID = weaponID; self.pdDurability = pdDurability
         self.translucentShots = translucentShots
         self.confusedByInterference = confusedByInterference; self.turnsAwayIfJammed = turnsAwayIfJammed
@@ -917,6 +1024,10 @@ public enum WorldEvent {
     /// pops the ship out of it, then closes the gate. `gateSpobID` is the gate
     /// spöb to animate; the ship starts at its position heading outward.
     case shipEmergedFromGate(entityID: Int, gateSpobID: Int, at: Vec2)
+    /// A line the original flashes across the HUD for `frames` 30 Hz ticks: a
+    /// fleet's `flët` Quote as it arrives (360 frames), or the reinforcement
+    /// warning (240 frames). AI-10, AI-13.
+    case overlayMessage(text: String, frames: Int)
     /// A ship transited out through a hypergate (the AI-departure counterpart
     /// to `shipEmergedFromGate`): the renderer should flash the gate open,
     /// shrink the ship into it, then close — instead of the plain edge-departure
@@ -924,6 +1035,20 @@ public enum WorldEvent {
     case shipDepartedViaGate(entityID: Int, gateSpobID: Int, at: Vec2)
     /// A ship's armor was knocked out but it survived as a drifting hulk.
     case shipDisabled(entityID: Int, at: Vec2)
+    /// A disabled ship's repair system brought it back above the disable line
+    /// (OS-07). For the player the host shows STR# 2002 #288 and its sound.
+    case repairSystemEngaged(entityID: Int)
+    /// AI-38: a ship in the player's wing was disabled and dropped out of it
+    /// (`Ship_ApplyDamageToShip` 0x004192d0). A freighter escort takes its
+    /// share of the fleet's cargo (the host moves it, EC-21).
+    case escortLeftWingDisabled(entityID: Int, freighter: Bool)
+    /// A former escort or bay fighter rejoined the wing, by its repair system
+    /// or by the player boarding it: STR# 2002 #127 "Escort repaired." or
+    /// #128 "Fighter repaired.".
+    case escortRejoined(entityID: Int, fighter: Bool)
+    /// A boarded hulk went into one of the player's fighter bays: #128
+    /// "Fighter repaired." (a former fighter) or #129 "Fighter captured.".
+    case fighterRecoveredToBay(entityID: Int, captured: Bool)
     /// An NPC's armor just hit 0 — the renderer should start that ship's
     /// staggered wreck-explosion sequence (mirroring the player's own death
     /// spectacle). The ship itself lingers in the world, frozen, until
@@ -936,8 +1061,18 @@ public enum WorldEvent {
     /// A paid "Request Assistance" ally docked with the player and delivered
     /// fuel/repairs — `entityID` is the ally, for the renderer's banner text.
     case assistanceDelivered(entityID: Int)
-    /// The player boarded a disabled hulk (to plunder/attempt capture).
+    /// A disabled hulk was boarded — by the player (to plunder/attempt
+    /// capture), or, with `entityID` 0, the player was boarded by an NPC.
     case shipBoarded(entityID: Int, at: Vec2)
+    /// An NPC boarded the disabled player (AI-29); `ratio` is the boarding
+    /// party's strength. The host resolves the losses with
+    /// `World.resolvePlayerBoarding`.
+    case playerBoarded(byShipID: Int, ratio: Int)
+    /// AI-29: an NPC boarder captured `entityID` into its own wing. When it
+    /// was one of the player's escorts, `stolenLine` is the STR# 2002 entry
+    /// that names it (#168 "Escort", #169 "Fighter"), followed by #374
+    /// "stolen!".
+    case shipCapturedByNPC(entityID: Int, byShipID: Int, stolenLine: Int?)
     /// The player captured a disabled hulk; it joins the escort wing.
     case shipCaptured(entityID: Int, shipTypeID: Int, at: Vec2)
     /// The player attacked a named person (`pêrs`) who now holds a grudge — they
@@ -945,16 +1080,25 @@ public enum WorldEvent {
     case personGrudge(personID: Int)
     /// The player destroyed a named person; they cease to appear again. Persisted.
     case personDefeated(personID: Int)
-    /// The player's own ship was destroyed (armor reached zero). `hadEscapePod`
-    /// (`Loadout.hasEscapePod`, ModType 11) tells the app which outcome to run:
-    /// true survives via rescue at the nearest inhabited port (ship/cargo/
-    /// outfits lost); false is a real game-over. Fires once per `World`.
-    case playerDestroyed(hadEscapePod: Bool)
+    /// The player's hull was destroyed and its death sequence began (OS-02):
+    /// the player may still eject until it runs out.
+    case playerDying
+    /// The player is lost: the death sequence ran out without an eject.
+    case playerDestroyed
+    /// The player ejected (OS-02): from `previousShipType` into the escape pod
+    /// or an ejectable bay's fighter, `newShipType`, leaving the wreck
+    /// `wreckID`.
+    case playerEjected(previousShipType: Int, newShipType: Int, intoPod: Bool, wreckID: Int)
+    /// The escape pod's flight is over: the host respawns the pilot.
+    case escapePodRespawn
 
     /// A mission (`mïsn`) special/aux ship was spawned into the system. The story
     /// layer correlates it by `missionID`; the renderer can flag it as an
     /// objective ship. `count` is how many were placed in this batch.
     case missionShipsSpawned(missionID: Int, entityIDs: [Int])
+    /// AI-14: `count` of a mission's auxiliary ships jumped in; without
+    /// mïsn Flags 0x0010 the host spends them from the mission's aux budget.
+    case missionAuxShipsArrived(missionID: Int, count: Int)
     /// A combat objective on a mission ship was reached: the player (or the
     /// world) destroyed/disabled/boarded a `missionID` ship whose `ShipGoal`
     /// matches `goal`. The story layer decides whether that completes/fails the
@@ -978,6 +1122,10 @@ public enum WorldEvent {
     /// response to a tribute demand. `count` just launched, `remainingPool` still
     /// to come after this wave.
     case stellarDefendersLaunched(spobID: Int, count: Int, remainingPool: Int)
+    /// AI-13: system `systemID` called its reinforcement fleet (or a
+    /// ModType-44 inhibitor spent the call): it can't call again for
+    /// `retriggerDays` game days. The host persists the countdown.
+    case reinforcementsCalled(systemID: Int, retriggerDays: Int)
     /// The player broke a stellar's defenses and it surrendered: it is now
     /// dominated. The host persists it (`PlayerState.dominatedStellars`), applies
     /// the stellar's `OnDominate` control bits, and starts paying its daily tribute.

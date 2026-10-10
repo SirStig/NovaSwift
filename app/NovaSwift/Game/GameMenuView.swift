@@ -167,6 +167,12 @@ struct GameMenuView: View {
 
                     sectionGap
                     row("Save Pilot", "square.and.arrow.down") {
+                        // The original saves only when you leave a spaceport;
+                        // an in-flight save is the `frequentAutosave` enhancement.
+                        guard model.settings.enhancements.frequentAutosave else {
+                            info = "Pilots are saved when you leave a spaceport. Quitting in flight returns you to your last launch."
+                            return
+                        }
                         onSave(.manual)
                         info = model.pilot.rosterID != nil
                             ? "Pilot saved (\(model.pilot.state.pilotName))."
@@ -224,11 +230,15 @@ struct GameMenuView: View {
     /// runs the real `StoryEngine` abort (applying the mission's OnAbort bits),
     /// writes the mutated pilot back to the live store, saves, and refreshes the
     /// panel so the mission drops off the list.
-    /// Dump the hold (the player-info dialog's "Jettison Cargo"). Clears the
-    /// persisted pilot's cargo immediately; the live ship's hold syncs from the
-    /// pilot on the next takeoff/jump rebuild.
+    /// Dump the hold (the player-info dialog's "Jettison Cargo"), with the
+    /// original's mission rules (`StoryEngine.jettisonCargo`, UI-13). This
+    /// menu has no live scene, so no pods are drawn; the live ship's hold
+    /// syncs from the pilot on the next takeoff/jump rebuild.
     private func jettisonCargo() {
-        model.pilot.state.cargo = [:]
+        guard let game = model.data.game else { return }
+        let engine = StoryEngine(game: game, player: model.pilot.state)
+        _ = engine.jettisonCargo(docked: true)
+        model.pilot.state = engine.player
         model.pilot.save()
     }
 

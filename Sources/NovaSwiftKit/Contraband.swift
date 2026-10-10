@@ -16,6 +16,15 @@ import Foundation
 //              smuggling illegal cargo (defined in a mïsn resource)."
 
 public enum Contraband {
+    /// The government half of the scan trigger (`Ship_ScanPlayerForContraband`
+    /// 0x00401800, EC-15): only a government with SmugPenalty ≠ 0 scans at
+    /// all, and then only on `Rand(100) ≤ 75` — rolled only past the penalty
+    /// gate, as the original does. The caller owns the rest: a behavior-3/4
+    /// scanner within 100 px per axis (AI-24).
+    public static func scanFires(smugglePenalty: Int, rand100: () -> Int) -> Bool {
+        smugglePenalty != 0 && rand100() <= 75
+    }
+
     /// Whether two ScanMasks share a set bit — the single rule that decides
     /// illegality on every axis (mission cargo, junk cargo, outfit).
     public static func matches(_ itemMask: UInt16, _ govtMask: UInt16) -> Bool {
@@ -26,14 +35,15 @@ public enum Contraband {
     /// from its `ScanFine` field and the player's current `cash`.
     /// - `>= 1`  → a flat fine of that many credits (never more than the player has).
     /// - `0`     → warning only (`warningOnly == true`, no credits taken).
-    /// - `<= -1` → that percentage of the player's cash (`-5` ⇒ 5%).
+    /// - `<= -1` → that percentage of the player's cash, as the original
+    ///   computes it: `trunc(cash × −ScanFine × 0.0001) × 100`, at least 1
+    ///   (0x00401800).
     public static func fine(scanFine: Int, cash: Int) -> (amount: Int, warningOnly: Bool) {
         let cash = max(0, cash)
         if scanFine == 0 { return (0, true) }
         if scanFine >= 1 { return (min(scanFine, cash), false) }
-        // scanFine <= -1: percentage of cash.
-        let percent = min(100, -scanFine)
-        return (cash * percent / 100, false)
+        let amount = max(1, Int(Double(cash) * Double(-scanFine) * 1e-4) * 100)
+        return (min(amount, cash), false)
     }
 }
 

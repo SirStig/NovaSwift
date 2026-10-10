@@ -58,10 +58,11 @@ final class BoardingTests: XCTestCase {
         escort.brain?.leaderID = World.playerEntityID
         _ = world.addNPC(escort)
         let target = disabledTarget(crew: 20, strength: 100, in: world)
-        // attackerCrew = 30 + 10 marines + 10 escort = 50 → (50/200)×100 = 25,
-        // + 5 odds bonus = 30. Strength 1 not > 5×100, no strength bonus.
-        XCTAssertEqual(world.playerBoardingCrew, 50)
-        XCTAssertEqual(world.captureChance(of: target), 30)
+        // EC-18: an escort adds a tenth of its crew. attackerCrew = 30 + 1
+        // escort + 10 marines = 41 → trunc(41/200 × 100) = 20, + 5 odds bonus
+        // = 25. Strength 1 not > 5×100, no strength bonus.
+        XCTAssertEqual(world.playerBoardingCrew, 41)
+        XCTAssertEqual(world.captureChance(of: target), 25)
     }
 
     func testCaptureChanceClampsAndUncapturable() {
@@ -99,20 +100,59 @@ final class BoardingTests: XCTestCase {
 
     // MARK: fuel plunder ("Energy" button)
 
-    func testPlunderFuelSiphonsCappedAtPlayerCapacity() {
-        let player = Ship(name: "P", stats: stats())
-        player.maxFuel = 400; player.fuel = 100          // room for 300
-        let world = World(player: player)
-        let hulk = disabledTarget(crew: 5, strength: 1, in: world)
-        hulk.maxFuel = 500; hulk.fuel = 500
-        XCTAssertEqual(world.fuelAboard(hulk.entityID), 500)
+    /// A hull with `holds` tons and `fuel` units, for the loot rolls.
+    private func lootHull(_ id: Int, holds: Int, fuel: Int) -> Resource {
+        var b = [UInt8](repeating: 0, count: 2000)
+        put16(&b, 0, holds); put16(&b, 10, fuel); put16(&b, 14, 100)
+        return Resource(type: NovaType.ship, id: id, name: "Hull", data: Data(b))
+    }
 
+    /// EC-18: the fuel option is `rand(fuel / 10) × 10` of the hull's
+    /// capacity, cut to the player's room, and spent once taken.
+    func testPlunderFuelIsARollOfTheHullsCapacity() {
+        var col = ResourceCollection()
+        col.add(lootHull(128, holds: 0, fuel: 500))
+        let player = Ship(name: "P", stats: stats())
+        player.maxFuel = 400; player.fuel = 380          // room for 20
+        let world = World(player: player)
+        world.galaxy = Galaxy(game: NovaGame(col))
+        let hulk = disabledTarget(crew: 5, strength: 1, in: world)
+        hulk.shipTypeID = 128
+        hulk.fuel = 0                                     // what is left aboard does not matter
+        let offered = world.fuelAboard(hulk.entityID)
+        XCTAssertEqual(offered.truncatingRemainder(dividingBy: 10), 0)
+        XCTAssertLessThan(offered, 500)
+        XCTAssertEqual(world.fuelAboard(hulk.entityID), offered, "rolled once")
         let took = world.takePlunderFuel(from: hulk.entityID)
-        XCTAssertEqual(took, 300, "clamped to the player's 300 units of room")
-        XCTAssertEqual(player.fuel, 400)
-        XCTAssertEqual(hulk.fuel, 200, "the siphoned fuel leaves the hulk")
-        // Re-boarding a full tank yields nothing more.
-        XCTAssertEqual(world.takePlunderFuel(from: hulk.entityID), 0)
+        XCTAssertEqual(took, min(offered, 20))
+        XCTAssertEqual(world.takePlunderFuel(from: hulk.entityID), 0, "spent")
+    }
+
+    /// EC-18: the cargo option is one Booty commodity in
+    /// `rand(holds/2) + holds/2` tons, whatever the hold carries; no Booty
+    /// commodity bit, no cargo.
+    func testPlunderCargoIsRolledFromTheBooty() {
+        var col = ResourceCollection()
+        col.add(lootHull(128, holds: 40, fuel: 0))
+        let player = Ship(name: "P", stats: stats())
+        player.cargoCapacity = 100
+        let world = World(player: player)
+        world.galaxy = Galaxy(game: NovaGame(col))
+        let hulk = disabledTarget(crew: 5, strength: 1, in: world)
+        hulk.shipTypeID = 128
+        hulk.cargo = [0: 40]
+        hulk.dudeBooty = 0x0008 | 0x0040                 // luxury goods, credits
+        let cargo = world.boardingManifest(for: hulk.entityID)?.cargo ?? []
+        XCTAssertEqual(cargo.count, 1)
+        XCTAssertEqual(cargo.first?.commodity, 3)
+        XCTAssertTrue((20..<40).contains(cargo.first?.tons ?? 0))
+        XCTAssertEqual(world.takePlunderCargo(from: hulk.entityID, room: 5).first?.tons, 5)
+        XCTAssertTrue(world.takePlunderCargo(from: hulk.entityID).isEmpty, "spent")
+
+        let plain = disabledTarget(crew: 5, strength: 1, in: world)
+        plain.shipTypeID = 128
+        plain.cargo = [0: 40]
+        XCTAssertEqual(world.boardingManifest(for: plain.entityID)?.cargo.count, 0)
     }
 
     func testPlunderFuelIgnoresNonHulks() {
@@ -189,5 +229,77 @@ final class BoardingTests: XCTestCase {
         XCTAssertEqual(lo.crew, 30)
         XCTAssertEqual(lo.marineCrew, 10)
         XCTAssertEqual(lo.captureOddsBonus, 15)
+    }
+
+    // MARK: an NPC boarding (AI-29)
+
+    func testNPCBoardingRatioIsClampedAndCrewScaled() {
+        // 40 crew vs 10: trunc(4000 / 20) = 200, + 10 − 0 → clamped to 100.
+        XCTAssertEqual(World.npcBoardingRatio(boarderCrew: 40, boarderOddsBonus: 0, victimCrew: 10,
+                                              victimOddsBonus: 0) { _ in 0 }, 100)
+        // 4 vs 10: 20, + 10 − 20 = 10; a victim with no crew counts as 1.
+        XCTAssertEqual(World.npcBoardingRatio(boarderCrew: 4, boarderOddsBonus: 0, victimCrew: 10,
+                                              victimOddsBonus: 0) { _ in 20 }, 10)
+        XCTAssertEqual(World.npcBoardingRatio(boarderCrew: 0, boarderOddsBonus: 25, victimCrew: 0,
+                                              victimOddsBonus: 0) { _ in 10 }, 25)
+    }
+
+    func testNPCBoardingCreditsAndCargoTransfer() {
+        XCTAssertEqual(World.npcBoardingCreditsTaken(playerCredits: 100_000, ratio: 50), 15_000)
+        var cargo = [0: 10, 3: 4]
+        var picks = [3, 1, 0, 0].makeIterator()
+        let moved = World.npcBoardingCargoTransfer(victimCargo: &cargo, victimCapacity: 20,
+                                                   boarderFree: 9) { _ in picks.next() ?? 0 }
+        XCTAssertEqual(moved, [3: 4, 0: 5], "random slots until the boarder's hold is full")
+        XCTAssertEqual(cargo, [0: 5])
+    }
+
+    func testNPCBoardsAnNPCVictimAndTakesItsCargo() {
+        let world = World(player: Ship(name: "P", stats: stats()))
+        let victim = disabledTarget(crew: 5, strength: 10, in: world)
+        victim.cargoCapacity = 20; victim.cargo = [1: 6]; victim.plunderCredits = 900
+        let pirate = Ship(name: "Pirate", stats: stats())
+        pirate.crew = 20; pirate.cargoCapacity = 50
+        _ = world.addNPC(pirate)
+        world.npcBoard(victim, by: pirate)
+        XCTAssertEqual(pirate.cargo, [1: 6])
+        XCTAssertEqual(victim.cargo, [:])
+        XCTAssertEqual(victim.plunderCredits, 0)
+    }
+
+    /// AI-29's capture arm: a strong boarding party (ratio ≥ 41) takes the hulk
+    /// into its wing about ratio/2 % of the time; a captured player escort is
+    /// announced and leaves the roster.
+    func testNPCBoarderSometimesCapturesThePlayersEscort() {
+        var captured = 0, trials = 0, stolen = 0
+        for seed in 1...300 {
+            let world = World(player: Ship(name: "P", stats: stats()))
+            world.rng = NovaRandom(seed: UInt32(seed))
+            let victim = disabledTarget(crew: 5, strength: 10, in: world)
+            victim.brain = AIBrain(aiType: .warship, govt: 128)
+            victim.brain?.leaderID = World.playerEntityID
+            victim.escortRecordID = 3
+            let pirate = Ship(name: "Pirate", stats: stats())
+            pirate.crew = 50; pirate.government = 129
+            pirate.brain = AIBrain(aiType: .warship, govt: 129)
+            _ = world.addNPC(pirate)
+            world.step(1.0 / 30.0)
+            world.npcBoard(victim, by: pirate)
+            trials += 1
+            if victim.brain?.leaderID == pirate.entityID {
+                captured += 1
+                XCTAssertEqual(victim.government, 129)
+                XCTAssertNil(victim.escortRecordID)
+                XCTAssertEqual(victim.shield, 0)
+                XCTAssertEqual(victim.armor, Double(Float(victim.maxArmor) * 0.66), accuracy: 1e-3)
+                XCTAssertEqual(world.originalAI.record(for: victim.entityID)?.behavior, 6)
+            }
+            if world.events.contains(where: { if case .shipCapturedByNPC(_, _, 168) = $0 { return true }; return false }) {
+                stolen += 1
+            }
+        }
+        XCTAssertEqual(captured, stolen, "every captured escort is announced")
+        // Ratio 100 (capped): Rand(101) ≤ 50 → about half.
+        XCTAssertTrue((100...200).contains(captured), "\(captured) of \(trials)")
     }
 }

@@ -40,11 +40,12 @@ extension NovaGame {
         return bits
     }
 
-    /// Whether `outfit`'s `Require` bits actually gate purchase *at this
-    /// spöb*, per its `RequireGovt` scoping (Bible: -1 everywhere; 128-383
-    /// this govt/allies only; 1128-1383 + independent; 2128-2383 all-but;
-    /// 3128-3383 all-but + independent). Outside the scope, the Require gate
-    /// simply doesn't apply there.
+    /// Whether `outfit` may be bought *at this spöb* per its `RequireGovt`
+    /// band (Bible: -1 everywhere; 128-383 this govt/allies only; 1128-1383 +
+    /// independent; 2128-2383 all-but; 3128-3383 all-but + independent).
+    /// Outside the band the original refuses the purchase outright, and the
+    /// Require bits are checked everywhere (`NovaLanded_CanBuyOutfit`
+    /// 0x00491950, EC-12).
     private func requireGovtApplies(_ requireGovt: Int, at spob: SpobRes, diplomacy: Diplomacy) -> Bool {
         guard requireGovt >= 0 else { return true }
         let scopeGovt = requireGovt % 1000
@@ -67,8 +68,8 @@ extension NovaGame {
         // gate here. See OUTFITTERS.md §3.5.
         if pilot.hasOutfit(item.id) { return .available }
         let availOK = NCBTest(item.availBits).evaluate(pilot)
-        let requireOK = !requireGovtApplies(item.requireGovt, at: spob, diplomacy: diplomacy)
-            || (item.require & contributedBits(pilot: pilot)) == item.require
+        let requireOK = requireGovtApplies(item.requireGovt, at: spob, diplomacy: diplomacy)
+            && (item.require & contributedBits(pilot: pilot)) == item.require
         if availOK && requireOK { return .available }
         return item.hidesWhenLocked ? .hidden : .locked
     }

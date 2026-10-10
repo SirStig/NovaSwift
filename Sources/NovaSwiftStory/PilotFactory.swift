@@ -65,11 +65,13 @@ public enum PilotFactory {
                                  isMale: isMale,
                                  shipType: shipID,
                                  shipName: shipName,
-                                 credits: scenario.cash,
+                                 credits: max(0, scenario.cash),
                                  currentSystem: system,
                                  date: date)
         player.combatRating = scenario.kills
-        player.legalRecord = initialLegalRecord(scenario: scenario, game: game)
+        player.systemReputation = initialReputation(scenario: scenario, game: game)
+        player.datePrefix = scenario.datePrefix
+        player.dateSuffix = scenario.dateSuffix
 
         // Everything the starting hull comes with becomes *owned* outfits, the
         // same way `PilotEconomy.buyShip` grants a purchased hull's: its
@@ -98,27 +100,21 @@ public enum PilotFactory {
 
         // Apply the OnStart NCB via a throwaway StoryEngine so the exact same SET
         // grammar/side-effects (bits, ranks, outfits, missions, ship swap) run.
+        // The same engine then books the start system and every visible system
+        // one jump from it as explored (UI-04) and draws the first mission-offer
+        // rolls, as the original's new game does.
+        let engine = StoryEngine(game: game, player: player, seed: resolvedSeed)
         if !scenario.onStart.isEmpty {
-            let engine = StoryEngine(game: game, player: player, seed: resolvedSeed)
             engine.apply(set: scenario.onStart,
                          source: "chär \(scenario.id) \"\(scenario.name)\" OnStart")
-            player = engine.player
         }
-
-        // Ensure a fresh pilot sees colorized radar from the start: EV Nova gates
-        // allegiance-tinted radar blips on an IFF outfit (oütf ModType 14). If
-        // neither the starting hull nor the scenario's OnStart grant already
-        // provides one, grant the data's standard IFF outfit so the radar isn't a
-        // confusing monochrome field for a brand-new player. Faithful otherwise:
-        // any ship/plugin loadout that lacks IFF still reads monochrome.
-        func providesIFF(_ outfitID: Int) -> Bool { game.outfit(outfitID)?.has(.iff) == true }
-        let hullOutfitIDs = (game.ship(shipID)?.outfits ?? []).map(\.id)
-        let alreadyHasIFF = player.outfits.keys.contains(where: providesIFF)
-            || hullOutfitIDs.contains(where: providesIFF)
-        if !alreadyHasIFF, let iff = game.outfits().first(where: { $0.has(.iff) }) {
-            player.grantOutfit(iff.id)
-            Log.pilot.debug("PilotFactory.make: granted starting IFF outfit \(iff.id) (colorized radar)")
+        if let start = game.system(engine.player.currentSystem) {
+            for link in start.links where link >= 128 && engine.isSystemVisible(link) {
+                engine.player.exploredSystems.insert(link)
+            }
         }
+        engine.rerollMissionOffers()
+        player = engine.player
 
         Log.pilot.debug("PilotFactory.make: pilot \"\(name, privacy: .public)\" started at system \(system) with ship \(shipID), credits=\(player.credits)")
         return player
@@ -140,24 +136,13 @@ public enum PilotFactory {
                            credits: 0, currentSystem: game.startingSystem()?.id ?? 128)
     }
 
-    /// The scenario's initial per-govt legal standings. The status is applied to
-    /// the named government, and its negation to that govt's enemies (govts whose
-    /// class membership intersects the named govt's `enemies` classes) — matching
-    /// the `chär` template's "applies negative value to govt's enemies" note.
-    private static func initialLegalRecord(scenario: CharRes, game: NovaGame) -> [Int: Int] {
-        guard !scenario.govtStatuses.isEmpty else { return [:] }
-        let allGovts = game.govts()
-        var record: [Int: Int] = [:]
-        for gs in scenario.govtStatuses {
-            record[gs.govt, default: 0] += gs.status
-            guard let govt = game.govt(gs.govt), !govt.enemies.isEmpty else { continue }
-            let enemyClasses = Set(govt.enemies)
-            for other in allGovts where other.id != gs.govt {
-                if !enemyClasses.isDisjoint(with: other.classes) {
-                    record[other.id, default: 0] -= gs.status
-                }
-            }
-        }
-        return record
+    /// The new pilot's per-system reputations (EC-02): every system starts at
+    /// its owner's `gövt` InitialRec (0 if negative or independent), then each
+    /// `chär` government status overwrites the systems of that government's
+    /// allies with `status` and those of its enemies (and xenophobes) with
+    /// `−status` — see `SystemReputation.initial`.
+    private static func initialReputation(scenario: CharRes, game: NovaGame) -> [Int: Int] {
+        SystemReputation.initial(statuses: scenario.govtStatuses.map { ($0.govt, $0.status) },
+                                 govts: game.govtTable(), map: game.reputationMap())
     }
 }

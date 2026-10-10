@@ -14,14 +14,6 @@ import NovaSwiftStory
 /// classic pilot file is unresearched, so we persist `PlayerState` directly.
 @MainActor
 final class PilotStore: ObservableObject {
-    /// The cap on simultaneous hired/captured/mission escorts — `EscortRecord`s
-    /// in the roster, not bay-launched fighters (those aren't roster members;
-    /// see `PlayerState.escortWing`). Not a Bible-documented field — no `shïp`/
-    /// `flët` field or the EVN wiki describes a wing-size limit — this is a
-    /// deliberate house rule. Lives in `PilotEconomy`; aliased here since
-    /// external call sites reference `PilotStore.maxEscorts`.
-    static let maxEscorts = PilotEconomy.maxEscorts
-
     /// The live pilot. Published so shopping and the HUD update in place.
     @Published var state: PlayerState
     /// True once a real pilot exists (loaded from disk or started from `chär`).
@@ -30,6 +22,9 @@ final class PilotStore: ObservableObject {
     /// multi-pilot roster). Durable multi-file saves + backups persist under this
     /// id via `PilotRoster`; `save()` here is the frequent crash-safe autosave.
     @Published private(set) var rosterID: UUID?
+    /// What the current spaceport visit has done that costs days on departure
+    /// (FL-05). Reset when the player lands; session-only.
+    var visitDays = SpaceportVisitDays()
 
     // MARK: Location on disk
 
@@ -91,7 +86,11 @@ final class PilotStore: ObservableObject {
     /// `PilotEconomy.migrateHullFittings`.
     func migrateIfNeeded(game: NovaGame) {
         guard started else { return }
-        guard PilotEconomy.migrateHullFittings(&state, game: game) else { return }
+        // Pilots saved under the old per-government legal record get one
+        // reputation per system seeded from it (EC-02).
+        let reputationMigrated = state.migrateLegalRecordIfNeeded(game: game)
+        let fittingsMigrated = PilotEconomy.migrateHullFittings(&state, game: game)
+        guard reputationMigrated || fittingsMigrated else { return }
         save()
     }
 
@@ -209,8 +208,10 @@ final class PilotStore: ObservableObject {
         return n
     }
 
-    func tickJunkCargo(galaxy: Galaxy) {
-        if PilotEconomy.tickJunkCargo(&state, galaxy: galaxy) { save() }
+    /// One in-flight junk cargo event (tribbles, perishables; EC-24). Not
+    /// saved here: the original saves only on leaving a spaceport.
+    func runJunkCargoEvent(galaxy: Galaxy) -> Bool {
+        PilotEconomy.runJunkCargoEvent(&state, galaxy: galaxy)
     }
 
     @discardableResult
@@ -230,60 +231,79 @@ final class PilotStore: ObservableObject {
         sellCargo(id: c.cargoID, tons: tons, unitPrice: unitPrice)
     }
 
-    func effectiveCost(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
-        PilotEconomy.effectiveCost(state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
+    func effectiveCost(_ o: OutfRes, galaxy: Galaxy) -> Int {
+        PilotEconomy.effectiveCost(state, o, galaxy: galaxy)
     }
 
-    func rankPriceMultiplier(govt: Int, game: NovaGame) -> Double {
-        PilotEconomy.rankPriceMultiplier(state, govt: govt, game: game)
+    /// The rank price scale at `spob` (ships, trade-ins and hires; EC-10).
+    func rankPriceScale(at spob: SpobRes, galaxy: Galaxy) -> Float {
+        LandedServices.rankPriceScale(state, stellarGovt: spob.government, game: galaxy.game,
+                                      diplomacy: galaxy.makeDiplomacy())
     }
 
     func maxInstallable(_ o: OutfRes, galaxy: Galaxy) -> Int {
         PilotEconomy.maxInstallable(state, o, galaxy: galaxy)
     }
 
-    func canBuyOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
-        PilotEconomy.canBuyOutfit(state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
+    func canBuyOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
+        PilotEconomy.canBuyOutfit(state, o, galaxy: galaxy)
+    }
+
+    func canSellOutfit(_ o: OutfRes) -> Bool {
+        PilotEconomy.canSellOutfit(state, o)
+    }
+
+    func outfitSalePrice(_ o: OutfRes, galaxy: Galaxy, ownedAtOpen: Int?) -> Int {
+        PilotEconomy.outfitSalePrice(state, o, galaxy: galaxy, ownedAtOpen: ownedAtOpen)
     }
 
     @discardableResult
-    func buyOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
-        let ok = PilotEconomy.buyOutfit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
-        if ok { save() }
+    func buyOutfit(_ o: OutfRes, galaxy: Galaxy) -> Bool {
+        let ok = PilotEconomy.buyOutfit(&state, o, galaxy: galaxy)
+        if ok { visitDays.outfitTransaction = true; save() }
         return ok
     }
 
     @discardableResult
-    func buyOutfit(_ o: OutfRes, count: Int, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
-        let bought = PilotEconomy.buyOutfit(&state, o, count: count, galaxy: galaxy, priceMultiplier: priceMultiplier)
-        if bought > 0 { save() }
+    func buyOutfit(_ o: OutfRes, count: Int, galaxy: Galaxy) -> Int {
+        let bought = PilotEconomy.buyOutfit(&state, o, count: count, galaxy: galaxy)
+        if bought > 0 { visitDays.outfitTransaction = true; save() }
         return bought
     }
 
     @discardableResult
-    func sellOutfit(_ o: OutfRes, galaxy: Galaxy, priceMultiplier: Double = 1) -> Bool {
-        let ok = PilotEconomy.sellOutfit(&state, o, galaxy: galaxy, priceMultiplier: priceMultiplier)
-        if ok { save() }
+    func sellOutfit(_ o: OutfRes, galaxy: Galaxy, ownedAtOpen: Int?) -> Bool {
+        let ok = PilotEconomy.sellOutfit(&state, o, galaxy: galaxy, ownedAtOpen: ownedAtOpen)
+        if ok { visitDays.outfitTransaction = true; save() }
         return ok
     }
 
     @discardableResult
-    func sellOutfit(_ o: OutfRes, count: Int, galaxy: Galaxy, priceMultiplier: Double = 1) -> Int {
-        let sold = PilotEconomy.sellOutfit(&state, o, count: count, galaxy: galaxy, priceMultiplier: priceMultiplier)
-        if sold > 0 { save() }
+    func sellOutfit(_ o: OutfRes, count: Int, galaxy: Galaxy, ownedAtOpen: Int?) -> Int {
+        let sold = PilotEconomy.sellOutfit(&state, o, count: count, galaxy: galaxy, ownedAtOpen: ownedAtOpen)
+        if sold > 0 { visitDays.outfitTransaction = true; save() }
         return sold
     }
 
-    func tradeInValue(game: NovaGame) -> Int { PilotEconomy.tradeInValue(state, game: game) }
+    func tradeInValue(at spob: SpobRes, galaxy: Galaxy) -> Int {
+        PilotEconomy.tradeInValue(state, game: galaxy.game, scale: rankPriceScale(at: spob, galaxy: galaxy),
+                                  stellarTech: spob.techLevel)
+    }
 
-    func netPrice(of ship: ShipRes, game: NovaGame, priceMultiplier: Double = 1) -> Int {
-        PilotEconomy.netPrice(state, of: ship, game: game, priceMultiplier: priceMultiplier)
+    func shipPrice(_ ship: ShipRes, at spob: SpobRes, galaxy: Galaxy) -> Int {
+        LandedServices.shipPrice(ship, scale: rankPriceScale(at: spob, galaxy: galaxy), stellarTech: spob.techLevel)
+    }
+
+    func netPrice(of ship: ShipRes, at spob: SpobRes, galaxy: Galaxy) -> Int {
+        PilotEconomy.netPrice(state, of: ship, game: galaxy.game, scale: rankPriceScale(at: spob, galaxy: galaxy),
+                              stellarTech: spob.techLevel)
     }
 
     @discardableResult
-    func buyShip(_ ship: ShipRes, game: NovaGame, priceMultiplier: Double = 1) -> Bool {
-        let ok = PilotEconomy.buyShip(&state, ship, game: game, priceMultiplier: priceMultiplier)
-        if ok { save() }
+    func buyShip(_ ship: ShipRes, at spob: SpobRes, galaxy: Galaxy) -> Bool {
+        let ok = PilotEconomy.buyShip(&state, ship, game: galaxy.game, scale: rankPriceScale(at: spob, galaxy: galaxy),
+                                      stellarTech: spob.techLevel)
+        if ok { visitDays.shipPurchase = true; save() }
         return ok
     }
 
@@ -292,21 +312,22 @@ final class PilotStore: ObservableObject {
     // See `PilotEconomy`'s own escort-economics section for the design note;
     // these remain thin autosave-adding forwarders like everything else here.
 
-    func escortAvailableToday(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
-        PilotEconomy.escortAvailableToday(ship, at: spob, day: day)
+    func escortAvailableToday(_ ship: ShipRes, day: Int) -> Bool {
+        PilotEconomy.escortAvailableToday(state, ship, day: day)
     }
 
-    func escortHireStock(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Int {
-        PilotEconomy.escortHireStock(ship, at: spob, day: day)
+    func escortHirePrice(_ ship: ShipRes, at spob: SpobRes, galaxy: Galaxy) -> Int {
+        PilotEconomy.escortHirePrice(ship, scale: rankPriceScale(at: spob, galaxy: galaxy), stellarTech: spob.techLevel)
     }
 
-    func escortHireRemaining(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Int {
-        PilotEconomy.escortHireRemaining(state, ship, at: spob, day: day)
+    func canAddEscort() -> Bool {
+        PilotEconomy.canAddEscort(state)
     }
 
     @discardableResult
-    func hireEscort(_ ship: ShipRes, at spob: SpobRes, day: Int) -> Bool {
-        let ok = PilotEconomy.hireEscort(&state, ship, at: spob, day: day)
+    func hireEscort(_ ship: ShipRes, at spob: SpobRes, day: Int, galaxy: Galaxy) -> Bool {
+        let ok = PilotEconomy.hireEscort(&state, ship, day: day, scale: rankPriceScale(at: spob, galaxy: galaxy),
+                                         stellarTech: spob.techLevel)
         if ok { save() }
         return ok
     }
@@ -323,21 +344,26 @@ final class PilotStore: ObservableObject {
         save()
     }
 
-    typealias EscortUpgradeResult = PilotEconomy.EscortUpgradeResult
-
     @discardableResult
-    func applyPendingEscortUpgrades(at spob: SpobRes, game: NovaGame) -> [EscortUpgradeResult] {
-        let results = PilotEconomy.applyPendingEscortUpgrades(&state, at: spob, game: game)
-        if !results.isEmpty { save() }
-        return results
+    func requestEscortSale(recordID: Int) -> Bool {
+        let marked = PilotEconomy.requestEscortSale(&state, recordID: recordID)
+        if marked { save() }
+        return marked
+    }
+
+    func cancelEscortSale(recordID: Int) {
+        PilotEconomy.cancelEscortSale(&state, recordID: recordID)
+        save()
+    }
+
+    /// The escort fleet pass on leaving `spob` (EC-22): marked sales and
+    /// upgrades at a shipyard stellar, each pair costing a day of the visit.
+    @discardableResult
+    func runEscortFleetPass(at spob: SpobRes, game: NovaGame, disabled: Set<Int>) -> PilotEconomy.EscortFleetPass {
+        let pass = PilotEconomy.processEscortFleetAtStellar(&state, spob: spob, game: game, disabled: disabled)
+        if pass.transactions > 0 { visitDays.escortsSoldOrUpgraded += pass.transactions; save() }
+        return pass
     }
 
     func escortSellValue(for ship: ShipRes) -> Int { PilotEconomy.escortSellValue(for: ship) }
-
-    @discardableResult
-    func sellEscort(recordID: Int, game: NovaGame) -> Int? {
-        let value = PilotEconomy.sellEscort(&state, recordID: recordID, game: game)
-        if value != nil { save() }
-        return value
-    }
 }

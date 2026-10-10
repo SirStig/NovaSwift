@@ -342,8 +342,8 @@ struct AuthenticMainMenuView: View {
 
                 VStack(alignment: .leading, spacing: 7 * sc) {
                     infoField("Legal Status", legalStatusText(save), bright, dim, sc)
-                    infoField("Combat Rating", save.snapshot.ratingTitle.isEmpty ? "Harmless" : save.snapshot.ratingTitle, bright, dim, sc)
-                    infoField("Current Date", Self.menuDate(save.player.date), bright, dim, sc)
+                    infoField("Combat Rating", combatRatingText(save), bright, dim, sc)
+                    infoField("Current Date", menuDate(save.player), bright, dim, sc)
                 }
                 .frame(width: 150 * sc, alignment: .leading)
             }
@@ -369,33 +369,24 @@ struct AuthenticMainMenuView: View {
         }
     }
 
-    /// The player's standing with the government of the system they're docked
-    /// in, as the menu's short status label.
+    /// The legal status in the system the pilot is docked in: the original's
+    /// STR# 134 label scaled by that government's CrimeTol (UI-14).
     private func legalStatusText(_ save: PilotSave) -> String {
-        guard let game = model.data.game,
-              let govt = game.system(save.player.currentSystem)?.government,
-              let record = save.player.legalRecord[govt], record != 0
-        else { return "No Record" }
-        switch record {
-        case ..<(-200): return "Enemy"
-        case ..<0:      return "Criminal"
-        case 1..<200:   return "Clean"
-        default:        return "Trusted"
-        }
+        guard let game = model.data.game else { return "" }
+        return LegalStatus.label(inSystem: save.player.currentSystem, player: save.player, game: game)
     }
 
-    /// EV Nova's long-form calendar date, e.g. "June 23rd, 1177 NC".
-    private static func menuDate(_ d: GameDate) -> String {
-        let months = ["January","February","March","April","May","June","July",
-                      "August","September","October","November","December"]
-        let month = (1...12).contains(d.month) ? months[d.month - 1] : "\(d.month)"
-        let s: String
-        switch d.day % 100 {
-        case 11, 12, 13: s = "th"
-        default:
-            switch d.day % 10 { case 1: s = "st"; case 2: s = "nd"; case 3: s = "rd"; default: s = "th" }
-        }
-        return "\(month) \(d.day)\(s), \(d.year) NC"
+    /// The combat rating from STR# 138 (its lowest tier is "No Ability").
+    private func combatRatingText(_ save: PilotSave) -> String {
+        guard let game = model.data.game else { return save.snapshot.ratingTitle }
+        return OriginalText(game: game).combatRating(save.player.combatRating)
+    }
+
+    /// The long-form date from STR# 137 with the chär prefix/suffix, e.g.
+    /// "June 23rd, 1177 NC".
+    private func menuDate(_ player: PlayerState) -> String {
+        guard let game = model.data.game else { return player.date.description }
+        return OriginalText(game: game).date(for: player, long: true)
     }
 
     /// The current pilot's ship in EV Nova's red silhouette style. Uses the

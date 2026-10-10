@@ -1,0 +1,726 @@
+{
+ "_comment": "NovaSwift's own features, one entry per task. Hand-maintained: status is done, partial or planned, checked against the code. Rendered on the website and into docs/branding/feature-blocks.svg.",
+ "features": [
+  {
+   "name": "Multiplayer co-op",
+   "tasks": [
+    {
+     "name": "Local Wi-Fi lobbies",
+     "status": "done",
+     "where": "Sources/NovaSwiftNet/MultipeerTransport.swift"
+    },
+    {
+     "name": "Game Center matches and invites",
+     "status": "done",
+     "where": "app/NovaSwift/Multiplayer/GameCenterMatchmaking.swift"
+    },
+    {
+     "name": "Public online lobby list",
+     "status": "partial",
+     "where": "OnlineLobbyDirectory.swift; CloudKit schema not yet in Production"
+    },
+    {
+     "name": "Host rules: PvP, damage, permadeath",
+     "status": "done",
+     "where": "MultiplayerLobbyViews.swift HostSetupView"
+    },
+    {
+     "name": "Shared game speed",
+     "status": "done",
+     "where": "GameContainerView gameSpeedMultiplierOverride"
+    },
+    {
+     "name": "Carry encounter outcomes home",
+     "status": "partial",
+     "where": "SessionRules.carryEncounter is declared but not read"
+    },
+    {
+     "name": "System sync and snapshots",
+     "status": "done",
+     "where": "Sources/NovaSwiftSync/SystemSyncCoordinator.swift"
+    },
+    {
+     "name": "Session chat",
+     "status": "done",
+     "where": "MultiplayerSession.sendChat"
+    },
+    {
+     "name": "Player trading",
+     "status": "done",
+     "where": "Multiplayer/TradeView.swift"
+    },
+    {
+     "name": "Shared story progress",
+     "status": "done",
+     "where": "MultiplayerSession NCB sync"
+    },
+    {
+     "name": "Kick, ban, plug-in compatibility check",
+     "status": "done",
+     "where": "MultiplayerSession kick/ban, manifest.isCompatible"
+    },
+    {
+     "name": "Seamless host migration",
+     "status": "partial",
+     "where": "new host rebuilds its world (needsResync)"
+    },
+    {
+     "name": "Bandwidth: deltas, interest management",
+     "status": "planned"
+    },
+    {
+     "name": "Testing on more real devices",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Story Guide and storyline map",
+   "tasks": [
+    {
+     "name": "Campaigns rebuilt from the control-bit graph",
+     "status": "done",
+     "where": "Sources/NovaSwiftStory/StorylineAnalyzer.swift"
+    },
+    {
+     "name": "Storyline flow view with branches",
+     "status": "done",
+     "where": "Story/StorylineFlowView.swift"
+    },
+    {
+     "name": "Current step and unlock hints",
+     "status": "done",
+     "where": "StoryGuideModel.currentStepID"
+    },
+    {
+     "name": "Links between storylines",
+     "status": "done",
+     "where": "StoryGuideModel.crossLinks"
+    },
+    {
+     "name": "Filter by plug-in",
+     "status": "done",
+     "where": "StoryGuideView filterControl"
+    },
+    {
+     "name": "Abort a mission from the guide",
+     "status": "done",
+     "where": "StoryGuideView onAbort"
+    },
+    {
+     "name": "Open from the in-game menu",
+     "status": "done",
+     "where": "Game/GameMenuView.swift"
+    }
+   ]
+  },
+  {
+   "name": "Storyline tags",
+   "tasks": [
+    {
+     "name": "Tag cache per mission",
+     "status": "done",
+     "where": "Sources/NovaSwiftStory/StorylineTagCache.swift"
+    },
+    {
+     "name": "Badges on mission board and offers",
+     "status": "done",
+     "where": "Story/StorylineTagBadge.swift"
+    },
+    {
+     "name": "Tap a badge to open the Story Guide",
+     "status": "done",
+     "where": "StorylineTagBadge action"
+    },
+    {
+     "name": "Settings toggle",
+     "status": "done",
+     "where": "GameSettings.showMissionStorylineTags"
+    }
+   ]
+  },
+  {
+   "name": "Debug suite",
+   "tasks": [
+    {
+     "name": "Debug mode switch",
+     "status": "done",
+     "where": "GameSettings.debugModeEnabled"
+    },
+    {
+     "name": "Console with commands",
+     "status": "done",
+     "where": "GameContainerView registerConsoleCommands"
+    },
+    {
+     "name": "Filtered log viewer",
+     "status": "done",
+     "where": "Debug/ConsoleLogStore.swift"
+    },
+    {
+     "name": "Frame profiler and stress test",
+     "status": "done",
+     "where": "Debug/FrameProfiler.swift"
+    },
+    {
+     "name": "Entity inspector",
+     "status": "done",
+     "where": "Debug/DevEntityRef.swift"
+    },
+    {
+     "name": "Bit, ship, outfit, government browsers",
+     "status": "done",
+     "where": "Debug/DevBrowsers.swift"
+    },
+    {
+     "name": "Game state and self-test views",
+     "status": "done",
+     "where": "Debug/DebugTestsView.swift"
+    },
+    {
+     "name": "UI measurement overlay",
+     "status": "done",
+     "where": "UI/NovaDebug.swift"
+    }
+   ]
+  },
+  {
+   "name": "Bug reports",
+   "tasks": [
+    {
+     "name": "Settings > Support > Report a Bug",
+     "status": "done",
+     "where": "Launcher/SettingsView.swift"
+    },
+    {
+     "name": "Bundle with pilot, log and self-test",
+     "status": "done",
+     "where": "Debug/BugReport.swift"
+    },
+    {
+     "name": "Share sheet export",
+     "status": "done",
+     "where": "Debug/BugReportView.swift"
+    },
+    {
+     "name": "List of past reports",
+     "status": "done",
+     "where": "BugReport.existingReports"
+    },
+    {
+     "name": "Also reachable from debug tools",
+     "status": "done",
+     "where": "Debug/DevToolsPane.swift"
+    }
+   ]
+  },
+  {
+   "name": "Plug-in store and manager",
+   "tasks": [
+    {
+     "name": "Offline catalog (23 entries)",
+     "status": "done",
+     "where": "Sources/NovaSwiftPluginStore/Resources/PluginCatalog.json"
+    },
+    {
+     "name": "Download and install from original hosts",
+     "status": "done",
+     "where": "PluginDownloader, PluginInstaller"
+    },
+    {
+     "name": "Store browse, details, screenshots",
+     "status": "done",
+     "where": "Store/PluginStoreView.swift"
+    },
+    {
+     "name": "Import a plug-in or .zip",
+     "status": "done",
+     "where": "Launcher/PluginsView.swift"
+    },
+    {
+     "name": "Enable, disable, delete",
+     "status": "done",
+     "where": "PluginsView.swift"
+    },
+    {
+     "name": "Manual load order",
+     "status": "done",
+     "where": "GameDataController.movePlugin"
+    },
+    {
+     "name": "Plug-ins bundled with the app",
+     "status": "partial",
+     "where": "hooks exist, none ship"
+    },
+    {
+     "name": "Enhancement packs (HD art, audio)",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Controller support",
+   "tasks": [
+    {
+     "name": "Gamepad flight",
+     "status": "done",
+     "where": "Input/GameControllerInput.swift"
+    },
+    {
+     "name": "Controller cursor for all menus",
+     "status": "done",
+     "where": "Input/ControllerCursor.swift"
+    },
+    {
+     "name": "Button remapping",
+     "status": "done",
+     "where": "Input/PadBindings.swift"
+    },
+    {
+     "name": "On-screen keyboard for pads",
+     "status": "done",
+     "where": "Input/PadKeyboard.swift"
+    },
+    {
+     "name": "Button glyph prompts",
+     "status": "done",
+     "where": "UI/PadGlyph.swift"
+    },
+    {
+     "name": "Dead zone and cursor speed",
+     "status": "done",
+     "where": "GameSettings.stickDeadzone"
+    },
+    {
+     "name": "Rumble",
+     "status": "done",
+     "where": "Game/Haptics.swift"
+    },
+    {
+     "name": "Keyboard remapping",
+     "status": "done",
+     "where": "Input/KeyBindings.swift"
+    }
+   ]
+  },
+  {
+   "name": "Apple TV",
+   "tasks": [
+    {
+     "name": "tvOS target",
+     "status": "done",
+     "where": "Package.swift .tvOS"
+    },
+    {
+     "name": "Controller-required screen",
+     "status": "done",
+     "where": "App/RootView.swift ControllerRequiredView"
+    },
+    {
+     "name": "Import game data over Wi-Fi",
+     "status": "done",
+     "where": "Data/WebImportServer.swift"
+    },
+    {
+     "name": "Restore data from iCloud",
+     "status": "done",
+     "where": "AppModel restoreGameDataFromCloud"
+    },
+    {
+     "name": "TV text entry",
+     "status": "done",
+     "where": "Input/TVTextEntry.swift"
+    },
+    {
+     "name": "Testing on more hardware",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Touch controls",
+   "tasks": [
+    {
+     "name": "On-screen buttons",
+     "status": "done",
+     "where": "Input/TouchControlsOverlay.swift"
+    },
+    {
+     "name": "Tap or drag to fly",
+     "status": "done",
+     "where": "ControlScheme.tapToTurn"
+    },
+    {
+     "name": "Tilt to turn",
+     "status": "done",
+     "where": "Input/TiltInput.swift"
+    },
+    {
+     "name": "Sensitivity and invert",
+     "status": "done",
+     "where": "GameSettings.controlSensitivity"
+    },
+    {
+     "name": "Pinch zoom on the galaxy map",
+     "status": "done",
+     "where": "Game/GalaxyMapView.swift"
+    },
+    {
+     "name": "Pinch zoom in flight",
+     "status": "planned"
+    },
+    {
+     "name": "Tap a radar blip to target",
+     "status": "planned"
+    },
+    {
+     "name": "Gestures for land and secondary fire",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "iCloud",
+   "tasks": [
+    {
+     "name": "Pilot saves in iCloud",
+     "status": "done",
+     "where": "Sources/NovaSwiftStory/PilotArchive.swift"
+    },
+    {
+     "name": "Move pilots between local and iCloud",
+     "status": "done",
+     "where": "PilotArchive.importPilots"
+    },
+    {
+     "name": "Pilot backups browser",
+     "status": "done",
+     "where": "Pilots/PilotBackupsView.swift"
+    },
+    {
+     "name": "Upload game data to private iCloud",
+     "status": "partial",
+     "where": "GameDataCloudSync; CloudKit schema still Development-only"
+    },
+    {
+     "name": "Restore data on a new device",
+     "status": "done",
+     "where": "GameDataCloudSync.restore"
+    },
+    {
+     "name": "Sync status in Settings",
+     "status": "partial",
+     "where": "state exists, not shown"
+    },
+    {
+     "name": "Sync settings and key bindings",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Presentation presets",
+   "tasks": [
+    {
+     "name": "Classic, Enhanced, Nova Swift",
+     "status": "done",
+     "where": "GameSettings.UIMode"
+    },
+    {
+     "name": "Full-screen galaxy map",
+     "status": "done",
+     "where": "fullscreenGalaxyMap"
+    },
+    {
+     "name": "Modern main menu",
+     "status": "done",
+     "where": "Launcher/ModernMainMenuView.swift"
+    },
+    {
+     "name": "Modern dialogs",
+     "status": "done",
+     "where": "UI/NovaDialog.swift"
+    },
+    {
+     "name": "Modern HUD",
+     "status": "done",
+     "where": "modernHUD"
+    },
+    {
+     "name": "Per-item overrides",
+     "status": "done",
+     "where": "UIMode.custom"
+    },
+    {
+     "name": "Sidebar pause menu",
+     "status": "done",
+     "where": "GameSettings.sidebarPauseMenu"
+    }
+   ]
+  },
+  {
+   "name": "Tutorial and flight training",
+   "tasks": [
+    {
+     "name": "Flight-training course",
+     "status": "done",
+     "where": "Tutorial/TutorialModel.swift"
+    },
+    {
+     "name": "Offered on first launch",
+     "status": "done",
+     "where": "TutorialOfferView"
+    },
+    {
+     "name": "Restart from Settings",
+     "status": "done",
+     "where": "SettingsView startTutorial"
+    },
+    {
+     "name": "Instructions per control scheme",
+     "status": "done",
+     "where": "TutorialModel"
+    },
+    {
+     "name": "One-time spaceport hints",
+     "status": "done",
+     "where": "Tutorial/GameHints.swift"
+    },
+    {
+     "name": "Reset hints",
+     "status": "done",
+     "where": "SettingsView"
+    },
+    {
+     "name": "Hints in flight",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Gameplay Enhancements",
+   "tasks": [
+    {
+     "name": "Settings section driven by a catalog",
+     "status": "done",
+     "where": "Sources/NovaSwiftEngine/GameplayEnhancements.swift"
+    },
+    {
+     "name": "Manual plug-in order",
+     "status": "done"
+    },
+    {
+     "name": "Tight formations",
+     "status": "done"
+    },
+    {
+     "name": "Forgiving landing",
+     "status": "done"
+    },
+    {
+     "name": "Quick hyperjump",
+     "status": "done"
+    },
+    {
+     "name": "Frequent autosave",
+     "status": "done"
+    },
+    {
+     "name": "Automatic route plotting",
+     "status": "done"
+    },
+    {
+     "name": "Nearest-first targeting",
+     "status": "done"
+    },
+    {
+     "name": "Modern key layout",
+     "status": "done"
+    }
+   ]
+  },
+  {
+   "name": "Accessibility and interface",
+   "tasks": [
+    {
+     "name": "Reduce flashing and motion",
+     "status": "done",
+     "where": "reduceFlashing"
+    },
+    {
+     "name": "Colour-blind modes",
+     "status": "done",
+     "where": "colorblindMode"
+    },
+    {
+     "name": "Larger and high-contrast HUD",
+     "status": "done",
+     "where": "largerHUD, highContrastHUD"
+    },
+    {
+     "name": "UI scale",
+     "status": "done",
+     "where": "uiScale"
+    },
+    {
+     "name": "VoiceOver labels",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Native Apple builds",
+   "tasks": [
+    {
+     "name": "macOS (native, not Catalyst)",
+     "status": "done",
+     "where": "project.pbxproj"
+    },
+    {
+     "name": "iPhone and iPad",
+     "status": "done",
+     "where": "project.pbxproj"
+    },
+    {
+     "name": "Mouse aiming on Mac",
+     "status": "done",
+     "where": "GameSettings.mouseAiming"
+    },
+    {
+     "name": "Shared portable Swift core",
+     "status": "done",
+     "where": "Package.swift"
+    }
+   ]
+  },
+  {
+   "name": "Godot port for Linux and Windows",
+   "tasks": [
+    {
+     "name": "SwiftGodot bridge and build script",
+     "status": "done",
+     "where": "godot/bridge"
+    },
+    {
+     "name": "Linux and Windows CI",
+     "status": "partial",
+     "where": "workflow exists; Linux and Windows builds not verified yet"
+    },
+    {
+     "name": "Flight with real-data sprites",
+     "status": "done",
+     "where": "NovaWorld, Main.gd"
+    },
+    {
+     "name": "HUD, radar, targeting",
+     "status": "done",
+     "where": "Main.gd"
+    },
+    {
+     "name": "Landing and launch",
+     "status": "done",
+     "where": "NovaWorld.attemptLand"
+    },
+    {
+     "name": "Trade center",
+     "status": "partial",
+     "where": "buy/sell work; placeholder screen"
+    },
+    {
+     "name": "Hyperjump and galaxy map",
+     "status": "planned"
+    },
+    {
+     "name": "Outfitter, shipyard, bar, missions",
+     "status": "planned"
+    },
+    {
+     "name": "Sound",
+     "status": "planned"
+    },
+    {
+     "name": "Saving and loading pilots",
+     "status": "planned"
+    },
+    {
+     "name": "Story runtime",
+     "status": "planned"
+    },
+    {
+     "name": "Gamepad input",
+     "status": "planned"
+    },
+    {
+     "name": "Packaged builds",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Optional graphics, audio and AI",
+   "tasks": [
+    {
+     "name": "Smoothed sprite filtering",
+     "status": "done",
+     "where": "GameSettings.smoothSprites"
+    },
+    {
+     "name": "Parallax starfield and engine glow",
+     "status": "done",
+     "where": "GameScene"
+    },
+    {
+     "name": "Smarter optional AI",
+     "status": "planned"
+    },
+    {
+     "name": "Particles, bloom, post effects",
+     "status": "planned"
+    },
+    {
+     "name": "Performance tiers",
+     "status": "planned"
+    },
+    {
+     "name": "Smooth rotation, frame interpolation",
+     "status": "planned"
+    },
+    {
+     "name": "HD sprite packs",
+     "status": "planned"
+    },
+    {
+     "name": "Spatial audio, dynamic music",
+     "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Editors",
+   "tasks": [
+    {
+     "name": "Editable native pilot saves",
+     "status": "done",
+     "where": "Sources/NovaSwiftStory/PilotSave.swift"
+    },
+    {
+     "name": "Pilot edits from the debug console",
+     "status": "partial",
+     "where": "debug mode only"
+    },
+    {
+     "name": "Resource write path",
+     "status": "planned"
+    },
+    {
+     "name": "In-app resource editor",
+     "status": "planned"
+    },
+    {
+     "name": "Pilot editor",
+     "status": "planned"
+    }
+   ]
+  }
+ ]
+}

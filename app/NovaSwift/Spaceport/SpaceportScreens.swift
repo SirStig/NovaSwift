@@ -27,29 +27,19 @@ private let gridHeight = gridTileSize.height * CGFloat(gridRows)
 
 // MARK: - Trade Center (commodity exchange)
 
-/// One row in the Trade dialog — a standard `Commodity` (which trades in both
-/// directions wherever there's an exchange, at a Low/Med/High price) or a `jünk`
-/// specialty good (which trades only at specific stellars, one flat BasePrice,
-/// gated by `BuyOn`/`SellOn` and the SoldAt/BoughtAt stellar lists). Both are
-/// stored in `state.cargo` keyed by `cargoID` (0-5 standard, 128+ junk).
+/// One row in the Trade dialog: a standard `Commodity` at its Low/Med/High
+/// price, or one of the two junk rows (a junk this stellar buys, priced high;
+/// one it sells, priced low). Both trade in either direction, as in the
+/// original (0x0048c730). Stored in `state.cargo` keyed by `cargoID` (0-5
+/// standard, 128+ junk).
 private struct TradeRow: Identifiable {
-    enum Origin {
-        case commodity(PriceLevel)
-        case junk(buy: Bool, sell: Bool)
-    }
     let cargoID: Int
     let name: String
-    let origin: Origin
+    let level: PriceLevel
     let price: Int
-    var id: Int { cargoID }
-    /// Whether Buy is allowed here at all (junk only trades where its stellar
-    /// list + control bits permit; commodities always do at an exchange).
-    var canBuyHere: Bool {
-        switch origin { case .commodity: return true; case .junk(let b, _): return b }
-    }
-    var canSellHere: Bool {
-        switch origin { case .commodity: return true; case .junk(_, let s): return s }
-    }
+    /// The two junk rows can name the same junk, so rows are keyed by
+    /// commodity and level.
+    var id: Int { cargoID * 8 + level.rawValue }
 }
 
 struct TradeCenterView: View {
@@ -71,32 +61,16 @@ struct TradeCenterView: View {
     @State private var pendingQty = tradeStep
     @State private var showQtyPrompt = false
     private var game: NovaGame { graphics.game }
+    /// The trade center's rows (`LandedServices.tradeRows`): the price scale
+    /// follows the system reputation and domination, an active disaster
+    /// replaces a price, and at most one junk row each way. Rank `PriceMod`
+    /// never reaches commodities.
     private var market: [TradeRow] {
-        // Apply active öops disaster price deltas, then any rank PriceMod discount
-        // for this port's government, on top of the base market (a food surplus
-        // drops food; an affiliated rank shaves a percentage off every good).
-        let activeOops: [Int] = pilot.state.activeDisasters.map { Array($0.keys) } ?? []
-        let rankMult: Double = pilot.rankPriceMultiplier(govt: spob.government, game: game)
-        var rows: [TradeRow] = game.commodityMarket(at: spob).map { row in
-            let delta = game.disasterPriceDelta(spobID: spob.id, commodity: row.commodity, activeOops: activeOops)
-            let price = max(1, Int((Double(row.price + delta) * rankMult).rounded()))
-            return TradeRow(cargoID: row.commodity.cargoID, name: game.commodityName(row.commodity),
-                            origin: .commodity(row.level), price: price)
+        LandedServices.tradeRows(at: spob, state: pilot.state, game: game).map { row in
+            let name = Commodity.standard(cargoID: row.cargoID).map(game.commodityName)
+                ?? game.junk(row.cargoID)?.name ?? "\(row.cargoID)"
+            return TradeRow(cargoID: row.cargoID, name: name, level: row.level, price: row.price)
         }
-        // jünk specialty goods for *this* stellar: buyable where spob.id is in its
-        // SoldAt list (and BuyOn passes), sellable where it's in BoughtAt (and
-        // SellOn passes). A junk type the player is *carrying* is always listed so
-        // they can see and unload it, even where it can't be traded. Junk has one
-        // flat BasePrice (no Low/Med/High tier) — only the rank discount applies.
-        for j in game.junks() {
-            let buyHere = j.lows.contains(spob.id) && NCBTest(j.buyOn).evaluate(pilot.state)
-            let sellHere = j.highs.contains(spob.id) && NCBTest(j.sellOn).evaluate(pilot.state)
-            guard buyHere || sellHere || pilot.held(cargo: j.id) > 0 else { continue }
-            let price = max(1, Int((Double(j.basePrice) * rankMult).rounded()))
-            rows.append(TradeRow(cargoID: j.id, name: j.name,
-                                 origin: .junk(buy: buyHere, sell: sellHere), price: price))
-        }
-        return rows
     }
 
     // Layout straight from DLOG/DITL #1001 "Trade" against the real 426×252
@@ -213,8 +187,7 @@ struct TradeCenterView: View {
     /// Active `öops` disaster names for this stellar, joined for display, or
     /// `nil` when none are active here right now.
     private var disasterBanner: String? {
-        let activeOops = pilot.state.activeDisasters.map { Array($0.keys) } ?? []
-        let names = game.activeDisasterNames(spobID: spob.id, activeOops: activeOops)
+        let names = LandedServices.activeDisasterNames(at: spob.id, state: pilot.state, game: game)
         return names.isEmpty ? nil : names.joined(separator: ", ")
     }
 
@@ -222,11 +195,11 @@ struct TradeCenterView: View {
         market.indices.contains(selected) ? market[selected] : nil
     }
     private var canBuy: Bool {
-        guard let c = current, c.canBuyHere else { return false }
+        guard let c = current else { return false }
         return pilot.state.credits >= c.price && pilot.cargoFree(galaxy: galaxy) > 0
     }
     private var canSell: Bool {
-        guard let c = current, c.canSellHere else { return false }
+        guard let c = current else { return false }
         return pilot.held(cargo: c.cargoID) > 0
     }
     private func buy() {
@@ -235,7 +208,7 @@ struct TradeCenterView: View {
             return
         }
         let free = pilot.cargoFree(galaxy: galaxy)
-        let bought = pilot.buyCargo(id: c.cargoID, tons: pendingQty, unitPrice: c.price, cargoFree: free)
+        let bought = pilot.buyCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price, cargoFree: free)
         if bought == 0 {
             Log.spaceport.notice("Trade buy no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) price=\(c.price, privacy: .public)cr/ton credits=\(pilot.state.credits, privacy: .public) cargoFree=\(free, privacy: .public)")
         } else {
@@ -249,7 +222,7 @@ struct TradeCenterView: View {
             return
         }
         let held = pilot.held(cargo: c.cargoID)
-        let sold = pilot.sellCargo(id: c.cargoID, tons: pendingQty, unitPrice: c.price)
+        let sold = pilot.sellCargo(id: c.cargoID, tons: min(pendingQty, 32000), unitPrice: c.price)
         if sold == 0 {
             Log.spaceport.notice("Trade sell no-op at spöb \(spob.id, privacy: .public): cargo=\(c.cargoID, privacy: .public) held=\(held, privacy: .public) — nothing to sell")
         } else {
@@ -257,28 +230,9 @@ struct TradeCenterView: View {
             onLiveSync()
         }
     }
-    /// Middle "level" column text for a row: a standard commodity shows its
-    /// Low/Med/High tier; a junk good shows the direction it trades here (Buy at
-    /// a SoldAt stellar, Sell at a BoughtAt stellar, "—" when only carried).
-    private func rowLabel(_ row: TradeRow) -> String {
-        switch row.origin {
-        case .commodity(let level): return level.label
-        case .junk(let buy, let sell):
-            if buy && sell { return "Trade" }
-            if buy { return "Buy" }
-            if sell { return "Sell" }
-            return "—"
-        }
-    }
-    private func rowLabelColor(_ row: TradeRow) -> Color {
-        switch row.origin {
-        case .commodity(let level): return levelColor(level)
-        case .junk(let buy, let sell):
-            if buy { return Color(red: 0.5, green: 0.9, blue: 0.5) }
-            if sell { return Color(red: 1, green: 0.5, blue: 0.5) }
-            return .gray
-        }
-    }
+    /// Middle "level" column text for a row: Low/Med/High.
+    private func rowLabel(_ row: TradeRow) -> String { row.level.label }
+    private func rowLabelColor(_ row: TradeRow) -> Color { levelColor(row.level) }
     private func levelColor(_ l: PriceLevel) -> Color {
         switch l {
         case .low:  return Color(red: 0.5, green: 0.9, blue: 0.5)
@@ -321,15 +275,15 @@ struct OutfitterView: View {
     private enum QtyPromptMode { case buy, sell }
     private var game: NovaGame { graphics.game }
     private var diplomacy: Diplomacy { galaxy.makeDiplomacy() }
-    /// Port rank `PriceMod` discount for this spöb's govt (1.0 = none) — folded
-    /// into the displayed price and every buy/sell transaction here.
-    private var rankMult: Double { pilot.rankPriceMultiplier(govt: spob.government, game: game) }
+    /// What the player owned when this outfitter opened: units beyond it were
+    /// bought this visit and sell back at full price, the rest at half (EC-07).
+    @State private var ownedAtOpen: [Int: Int]?
     /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
     /// items that opt into full hiding (Bible `oütf.Flags` 0x0100/0x4000)
     /// dropped when the player doesn't meet their Availability/Require and
     /// doesn't already own one.
     private var stock: [OutfRes] {
-        let sold = game.outfitsSold(at: spob, day: pilot.state.date.julianDay)
+        let sold = game.outfitsSold(at: spob, day: pilot.state.date.julianDay, owned: ownedIDs)
             .filter { lockState(for: $0) != .hidden }
         let stocked = Set(sold.map(\.id))
         let extras = sellBackOnly(excluding: stocked)
@@ -367,9 +321,15 @@ struct OutfitterView: View {
             .sorted { $0.id < $1.id }
     }
 
+    /// Owned outfits skip the day's `BuyRandom` roll (the original zeroes it).
+    private var ownedIDs: Set<Int> { Set(pilot.state.outfits.filter { $0.value > 0 }.keys) }
+
+    /// Units of `o` owned when the outfitter opened.
+    private func ownedAtOpen(_ o: OutfRes) -> Int? { ownedAtOpen.map { $0[o.id] ?? 0 } }
+
     /// Outfits listed for sell-back only — they can be sold here but never bought.
     private var sellOnlyIDs: Set<Int> {
-        let stocked = Set(game.outfitsSold(at: spob, day: pilot.state.date.julianDay).map(\.id))
+        let stocked = Set(game.outfitsSold(at: spob, day: pilot.state.date.julianDay, owned: ownedIDs).map(\.id))
         return Set(sellBackOnly(excluding: stocked).map(\.id))
     }
     private var selected: OutfRes? {
@@ -381,6 +341,7 @@ struct OutfitterView: View {
 
     var body: some View {
         outfitterBody
+            .onAppear { if ownedAtOpen == nil { ownedAtOpen = pilot.state.outfits } }
             .gameHint(GameHints.outfitter, active: showHints, dismissed: $hintDismissed)
             .animation(.easeInOut(duration: 0.25), value: hintDismissed)
             .sheet(isPresented: Binding(get: { qtyPromptMode != nil }, set: { if !$0 { qtyPromptMode = nil } })) {
@@ -399,8 +360,8 @@ struct OutfitterView: View {
     private func qtyUpperBound(_ mode: QtyPromptMode, _ o: OutfRes) -> Int {
         switch mode {
         case .buy:
-            guard pilot.canBuyOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) else { return 1 }
-            let cost = pilot.effectiveCost(o, galaxy: galaxy, priceMultiplier: rankMult)
+            guard pilot.canBuyOutfit(o, galaxy: galaxy) else { return 1 }
+            let cost = pilot.effectiveCost(o, galaxy: galaxy)
             let affordable = cost > 0 ? pilot.state.credits / cost : Int.max
             let cap = pilot.maxInstallable(o, galaxy: galaxy)
             return cap > 0 ? min(affordable, max(0, cap - pilot.owned(outfit: o.id))) : affordable
@@ -412,11 +373,11 @@ struct OutfitterView: View {
     private func transact(_ mode: QtyPromptMode, _ o: OutfRes, _ qty: Int) {
         switch mode {
         case .buy:
-            let bought = pilot.buyOutfit(o, count: qty, galaxy: galaxy, priceMultiplier: rankMult)
+            let bought = pilot.buyOutfit(o, count: qty, galaxy: galaxy)
             Log.spaceport.debug("Outfitter bought \(bought, privacy: .public)× outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public)")
             if bought > 0 { onLiveSync() }
         case .sell:
-            let sold = pilot.sellOutfit(o, count: qty, galaxy: galaxy, priceMultiplier: rankMult)
+            let sold = pilot.sellOutfit(o, count: qty, galaxy: galaxy, ownedAtOpen: ownedAtOpen(o))
             Log.spaceport.debug("Outfitter sold \(sold, privacy: .public)× outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public)")
             if sold > 0 { onLiveSync() }
         }
@@ -509,7 +470,7 @@ struct OutfitterView: View {
         // owned-quantity of the selected item, which is instead shown as the
         // small badge on the item's grid tile.
         return VStack(alignment: .leading, spacing: 8) {
-            infoRow("Item Price:", o.map { pilot.effectiveCost($0, galaxy: galaxy, priceMultiplier: rankMult).creditsAbbreviated } ?? "—")
+            infoRow("Item Price:", o.map { pilot.effectiveCost($0, galaxy: galaxy).creditsAbbreviated } ?? "—")
             infoRow("You Have:", pilot.state.credits.creditsAbbreviated)
             infoRow("Item Mass:", o.map { "\($0.mass) tons" } ?? "—")
             infoRow("Free Mass:", "\(pilot.freeMass(galaxy: galaxy)) tons")
@@ -550,7 +511,7 @@ struct OutfitterView: View {
         // item) can never be bought here, however affordable it is.
         let canBuy = o.map {
             !sellOnlyIDs.contains($0.id)
-                && pilot.canBuyOutfit($0, galaxy: galaxy, priceMultiplier: rankMult)
+                && pilot.canBuyOutfit($0, galaxy: galaxy)
                 && lockState(for: $0) == .available
         } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
@@ -560,7 +521,7 @@ struct OutfitterView: View {
                 Log.spaceport.error("Outfitter buy tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            if pilot.buyOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) {
+            if pilot.buyOutfit(o, galaxy: galaxy) {
                 Log.spaceport.debug("Bought outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
                 onLiveSync()
             } else {
@@ -568,7 +529,7 @@ struct OutfitterView: View {
             }
         }
         .novaPlace(space, -94, 128)
-        let canSell = o.map { pilot.owned(outfit: $0.id) > 0 } ?? false
+        let canSell = o.map { pilot.canSellOutfit($0) } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
                    width: 73, enabled: canSell,
                    onQuantity: canSell ? { qtyPromptMode = .sell } : nil) {
@@ -576,11 +537,11 @@ struct OutfitterView: View {
                 Log.spaceport.error("Outfitter sell tapped with no outfit selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            if pilot.sellOutfit(o, galaxy: galaxy, priceMultiplier: rankMult) {
+            if pilot.sellOutfit(o, galaxy: galaxy, ownedAtOpen: ownedAtOpen(o)) {
                 Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
                 onLiveSync()
             } else {
-                Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned")
+                Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned, unsellable, or free mass would go negative")
             }
         }
         .novaPlace(space, 12, 128)
@@ -610,16 +571,20 @@ struct ShipyardView: View {
     /// The full Ship Info card, opened by tapping the large preview picture.
     @State private var showInfo = false
     private var game: NovaGame { graphics.game }
-    /// Port rank `PriceMod` discount for this spöb's govt (1.0 = none) — applied
-    /// to the new-hull cost in the displayed net price and the buy transaction.
-    private var rankMult: Double { pilot.rankPriceMultiplier(govt: spob.government, game: game) }
-    /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
-    /// hulls that opt into full hiding (Bible `shïp.Flags3` 0x0100/0x0200)
-    /// dropped when the player doesn't meet their Availability/Require and
-    /// don't already fly one.
+    /// Tech-level-eligible stock on today's galaxy-wide `BuyRandom` roll (a
+    /// purchase redraws its class), with any hulls that opt into full hiding
+    /// (Bible `shïp.Flags3` 0x0100/0x0200) dropped when the player doesn't
+    /// meet their Availability/Require and don't already fly one.
     private var stock: [ShipRes] {
-        game.shipsSold(at: spob, day: pilot.state.date.julianDay).filter { lockState(for: $0) != .hidden }
+        let day = pilot.state.date.julianDay
+        let state = pilot.state
+        return game.shipsSold(at: spob, day: day,
+                              redraws: { state.stockRerollCount(shipType: $0, hire: false, day: day) })
+            .filter { lockState(for: $0) != .hidden }
     }
+    /// The net price of `s` here: its price after the tech markdown, rank
+    /// scale and rounding, less the trade-in (EC-09).
+    private func netPrice(_ s: ShipRes) -> Int { pilot.netPrice(of: s, at: spob, galaxy: galaxy) }
     private var selected: ShipRes? { stock.first { $0.id == selectedID } ?? stock.first }
     private func lockState(for s: ShipRes) -> LockState {
         game.lockState(for: s, pilot: pilot.state)
@@ -637,7 +602,7 @@ struct ShipyardView: View {
                     .transition(.opacity)
                 ShipInfoView(graphics: graphics, ship: selected,
                              priceText: selected.map {
-                                 pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult).creditsAbbreviated
+                                 netPrice($0).creditsAbbreviated
                              },
                              onDone: { showInfo = false })
                     .transition(.opacity)
@@ -760,8 +725,8 @@ struct ShipyardView: View {
     private func info(_ space: NovaSpace) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 10) {
-            infoRow("Price:", s.map { pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult).creditsAbbreviated } ?? "—")
-            infoRow("Trade-in:", pilot.tradeInValue(game: game).creditsAbbreviated)
+            infoRow("Price:", s.map { netPrice($0).creditsAbbreviated } ?? "—")
+            infoRow("Trade-in:", pilot.tradeInValue(at: spob, galaxy: galaxy).creditsAbbreviated)
             infoRow("You Have:", pilot.state.credits.creditsAbbreviated)
         }
         // DITL #1004 item 8 (614,214)-(757,314) against the real 765×323
@@ -788,7 +753,7 @@ struct ShipyardView: View {
     @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
         let s = selected
         let canBuy = s.map {
-            $0.id != pilot.state.shipType && pilot.state.credits >= pilot.netPrice(of: $0, game: game, priceMultiplier: rankMult)
+            $0.id != pilot.state.shipType && pilot.state.credits >= netPrice($0)
                 && lockState(for: $0) == .available
         } ?? false
         // DITL #1004 item 9 (253,289)-(342,314), 89×25 — the "Info" button (STR#
@@ -803,11 +768,12 @@ struct ShipyardView: View {
                 Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
             }
-            if pilot.buyShip(s, game: game, priceMultiplier: rankMult) {
-                Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(pilot.netPrice(of: s, game: game, priceMultiplier: rankMult), privacy: .public)cr")
+            let price = netPrice(s)
+            if pilot.buyShip(s, at: spob, galaxy: galaxy) {
+                Log.spaceport.debug("Bought ship \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(price, privacy: .public)cr")
                 onLiveSync()
             } else {
-                Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(pilot.netPrice(of: s, game: game, priceMultiplier: rankMult), privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
+                Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(price, privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
             }
         }
         .novaPlace(space, -18, 128)
@@ -827,6 +793,7 @@ struct BarView: View {
     let graphics: SpaceportGraphics
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
+    let galaxy: Galaxy
     var onDone: () -> Void
 
     @EnvironmentObject private var appModel: AppModel
@@ -836,7 +803,8 @@ struct BarView: View {
     @State private var showHolovid = false
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
-    @State private var rolledPatron = false
+    /// Bumped to schedule the next bar offer (see `offerPatrons`).
+    @State private var nextOffer = 0
     @State private var showStoryGuide = false
     @State private var storyGuideFocusKey: String?
     private var game: NovaGame { graphics.game }
@@ -858,12 +826,12 @@ struct BarView: View {
     // artwork over the hub text, which also exposed the button art's baked
     // grey bezel against a black background.)
     //
-    // Bar missions are NOT a browsable list (that's the Mission BBS). Like the
-    // real game, a patron approaches at most once per visit: the StoryEngine
-    // rolls the bar-location offers (control-bit gates + random-appearance %)
-    // and one of them, picked at random, is presented in the authentic Single
-    // Mission dialog (DITL #1016) over the bar. Accept/refuse run the real
-    // engine flow, so all mission bits fire.
+    // Bar missions are NOT a browsable list (that's the Mission BBS). As in
+    // the original (0x00448670 and the bar loop), every eligible bar mission
+    // is offered in turn, highest DispWeight first, in the authentic Single
+    // Mission dialog (DITL #1016) over the bar: the first a quarter second
+    // after walking in, each next one 0.5–1 s after the last closes.
+    // Accept/refuse run the real engine flow, so all mission bits fire.
     var body: some View {
         ZStack {
             Group {
@@ -921,7 +889,7 @@ struct BarView: View {
                 Color.black.opacity(0.5).ignoresSafeArea()
                     .onTapGesture { showHire = false }
                     .transition(.opacity)
-                HireEscortView(graphics: graphics, spob: spob, pilot: pilot,
+                HireEscortView(graphics: graphics, spob: spob, pilot: pilot, galaxy: galaxy,
                                onDone: { showHire = false })
             }
 
@@ -933,43 +901,28 @@ struct BarView: View {
                             onDone: { showHolovid = false })
             }
         }
-        .onAppear(perform: rollPatron)
+        .onAppear { services.onCloseSpaceportScreen = onDone }   // a `Q` from an accept leaves the bar
+        .task(id: nextOffer) { await offerPatron(after: nextOffer == 0 ? 15 : 30 + Int.random(in: 0..<30)) }
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
     }
 
-    /// One roll per bar visit: build the engine, gather the bar's real offers
-    /// (already control-bit- and random-%-gated by `missionsOffered`), and have
-    /// a random one of the eligible patrons make their pitch.
-    private func rollPatron() {
-        guard !rolledPatron else { return }
-        rolledPatron = true
-        let today = pilot.state.date.julianDay
-        // One patron offer per bar per day. If this bar already took its daily
-        // roll, don't roll again on re-entry — the original never re-pestered
-        // the player with the same patron every time they walked back in, which
-        // is what made the bar feel like it was throwing missions constantly.
-        guard !pilot.state.barOffered(spob: spob.id, day: today) else { return }
-        // Per-landing seed so which bar missions pass their random-appearance
-        // roll actually varies day to day (the fixed default seed made the bar
-        // present the same patron on every single visit).
+    /// The bar's offer timer (60 Hz ticks): wait, then let the next patron in
+    /// the lane make their pitch (0x00448670). Accept and decline arm the next
+    /// wait; an empty lane ends the round until the player comes back in.
+    private func offerPatron(after ticks: Int) async {
+        try? await Task.sleep(nanoseconds: UInt64(ticks) * 1_000_000_000 / 60)
+        guard !Task.isCancelled, services.pendingOffer == nil else { return }
         let e = StoryEngine(game: game, player: pilot.state, services: services,
                             seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
         engine = e
-        // Mark the bar as having taken its daily roll *now* — whether or not a
-        // patron actually turns up — so a re-entry today is a no-op.
-        pilot.state.markBarOffered(spob: spob.id, day: today)
-        pilot.save()
-        // `missionsOffered` already applied each mission's AvailBits test and
-        // random % — the survivors are genuinely on offer here right now. The
-        // bar picks the highest-weighted one to make its pitch (deterministic
-        // within a landing), skipping any with no briefing text to show.
-        let offers = e.missionsOffered(at: .bar, spob: spob.id)
-        guard let mission = offers.first(where: { !e.briefing(for: $0).isEmpty }) else {
-            Log.spaceport.debug("Bar at spöb \(spob.id, privacy: .public): no eligible bar mission with briefing today")
+        let mission = e.nextLaneOffer(at: .bar, spob: spob.id)
+        pilot.state = e.player                                   // the offer context latch
+        guard let mission else {
+            Log.spaceport.debug("Bar at spöb \(spob.id, privacy: .public): no more bar missions this visit")
             return
         }
-        Log.spaceport.debug("Bar patron offers mission \(mission.id, privacy: .public) at spöb \(spob.id, privacy: .public) (of \(offers.count, privacy: .public) eligible)")
+        Log.spaceport.debug("Bar patron offers mission \(mission.id, privacy: .public) at spöb \(spob.id, privacy: .public)")
         e.present(mission)
     }
 
@@ -979,6 +932,7 @@ struct BarView: View {
         pilot.state = engine.player
         pilot.save()
         services.pendingOffer = nil
+        nextOffer += 1
     }
 
     private func decline(_ offer: MissionOffer) {
@@ -987,6 +941,7 @@ struct BarView: View {
         pilot.state = engine.player
         pilot.save()
         services.pendingOffer = nil
+        nextOffer += 1
     }
 
     /// From the table prewarmed once per data set at load time
@@ -1032,10 +987,13 @@ struct HolovidView: View {
 
     /// This station's live news feed, read on demand. Empty when nothing in the
     /// galaxy is currently generating news.
+    /// The one news body the original shows (MS-20): this station's crön
+    /// news if any, else a generic item from STR# 8101.
     private var news: [String] {
-        StoryEngine(game: game, player: pilot.state,
-                    seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
-            .stationNews(forGovt: stationGovt)
+        let engine = StoryEngine(game: game, player: pilot.state,
+                                 seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        let cron = engine.stationNews(forGovt: stationGovt)
+        return cron.isEmpty ? engine.genericNews().map { [$0] } ?? [] : cron
     }
 
     var body: some View {

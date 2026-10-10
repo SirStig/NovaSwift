@@ -237,8 +237,8 @@ struct DebugGameStateView: View {
             NavigationLink {
                 DebugRelationsView(debug: debug)
             } label: {
-                LabeledContent("Government relations") {
-                    Text("\(pilot.state.legalRecord.count) set").foregroundStyle(.secondary)
+                LabeledContent("Legal record here") {
+                    Text("\(pilot.state.reputationHere)").foregroundStyle(.secondary)
                 }
             }
         } header: {
@@ -581,47 +581,42 @@ private struct DebugOutfitsView: View {
 
 // MARK: - Relations editor
 
-/// Set the player's standing with each government — persisted to `legalRecord`
-/// and pushed live so ships react at once.
+/// Set the player's reputation in the current system — the original keeps one
+/// per system (EC-02) — persisted to `systemReputation` and pushed live so
+/// ships react at once.
 private struct DebugRelationsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var pilot: PilotStore
     @ObservedObject var debug: DebugController
-    @State private var query = ""
-
-    private var govts: [GovtRes] {
-        let all = (model.data.game?.govts() ?? []).sorted { $0.name < $1.name }
-        guard !query.isEmpty else { return all }
-        return all.filter { $0.name.localizedCaseInsensitiveContains(query) }
-    }
 
     var body: some View {
-        List(govts, id: \.id) { govt in
+        List {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(govt.name.isEmpty ? "Govt #\(govt.id)" : govt.name)
+                    Text(model.data.game?.system(pilot.state.currentSystem)?.name
+                         ?? "System #\(pilot.state.currentSystem)")
                     Spacer()
-                    Text("\(pilot.state.legalRecord[govt.id] ?? 0)")
+                    Text("\(pilot.state.reputationHere)")
                         .monospacedDigit().foregroundStyle(.secondary)
                 }
                 HStack {
-                    presetButton("Hostile", -30_000, for: govt.id, role: .destructive)
-                    presetButton("Neutral", 0, for: govt.id)
-                    presetButton("Friendly", 30_000, for: govt.id)
+                    presetButton("Hostile", -30_000, role: .destructive)
+                    presetButton("Neutral", 0)
+                    presetButton("Friendly", 30_000)
                 }
             }
             .padding(.vertical, 2)
         }
-        .searchable(text: $query)
         .navigationTitle("Relations")
     }
 
-    private func presetButton(_ title: String, _ value: Int, for govt: Int,
-                              role: ButtonRole? = nil) -> some View {
+    private func presetButton(_ title: String, _ value: Int, role: ButtonRole? = nil) -> some View {
         Button(role: role) {
-            pilot.state.legalRecord[govt] = value
+            let system = pilot.state.currentSystem
+            pilot.state.systemReputation = (pilot.state.systemReputation ?? [:])
+                .merging([system: value]) { _, new in new }
             pilot.save()
-            debug.scene?.debugSetLiveRelation(govt: govt, record: value)
+            debug.scene?.debugSetLiveReputation(value)
         } label: {
             Text(title).font(.caption.weight(.semibold)).frame(maxWidth: .infinity)
         }

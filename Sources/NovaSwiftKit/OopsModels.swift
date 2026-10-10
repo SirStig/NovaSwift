@@ -76,8 +76,9 @@ public struct OopsRes {
     /// `commodity` as the typed six-way enum, or nil if (contrary to every
     /// real base-game record) it falls outside 0-5.
     public var commodityEnum: Commodity? { Commodity(rawValue: commodity) }
-    /// `Stellar` == -1: applies galaxy-wide rather than to one specific stellar.
-    public var appliesToAnyStellar: Bool { stellar == -1 }
+    /// `Stellar` == -1: each activation picks one random inhabited stellar
+    /// (0x00424f90) — not every stellar at once.
+    public var picksRandomStellar: Bool { stellar == -1 }
     /// `Stellar` == -2: a no-op disaster with no price effect, used purely to
     /// drive mission/news flavor text via its own name.
     public var isNewsOnly: Bool { stellar == -2 }
@@ -103,23 +104,4 @@ extension NovaGame {
         resources.resources(of: NovaType.oops).map(OopsRes.init)
     }
 
-    /// Additive price adjustment for `commodity` at `spobID` from the currently
-    /// active `öops` disasters (`activeOops` = the ids the pilot has active). Sums
-    /// every matching disaster — one pinned to this stellar or galaxy-wide (-1).
-    public func disasterPriceDelta(spobID: Int, commodity: Commodity, activeOops: [Int]) -> Int {
-        var delta = 0
-        for id in activeOops {
-            guard let o = oops(id), o.commodityEnum == commodity else { continue }
-            if o.stellar == spobID || o.appliesToAnyStellar { delta += o.priceDelta }
-        }
-        return delta
-    }
-
-    /// Names of active disasters affecting `spobID`, for display in the commodity
-    /// exchange dialog (the öops `name` doubles as its in-UI label, per the Bible).
-    public func activeDisasterNames(spobID: Int, activeOops: [Int]) -> [String] {
-        activeOops.compactMap { oops($0) }
-            .filter { $0.stellar == spobID || $0.appliesToAnyStellar }
-            .map(\.name)
-    }
 }

@@ -101,7 +101,7 @@ struct HailDialogView: View {
         responseButton("Greetings", width: 140, action: onGreetings, graphics: graphics)
             .novaPlace(space, -190.5, 17.5)      // item 2 (top): (21,125)-(187,151)
         if showAssistButton {
-            responseButton("Request Assistance", width: 140, enabled: assistEnabled,
+            responseButton(state.assistTitle, width: 140, enabled: assistEnabled,
                             action: onRequestAssistance, graphics: graphics)
                 .novaPlace(space, -190.5, 45.5)  // item 1 (mid): (21,153)-(187,179)
         }
@@ -127,30 +127,27 @@ struct HailDialogView: View {
             .novaPlace(space, -254, -65.5)        // item 5: (16,82)-(136,132) 120×50
 
         // Items 1/2/0 top-to-bottom (146×26 each, stacked left column, x=27):
-        //  • top: Greetings, or "Request Landing" when clearance isn't granted
-        //  • middle: Demand Tribute — the forceful-takeover option, only where
-        //    it could actually do something (see `canDemandTribute`)
+        // Items 1/2/0 are always shown (0x004a0f90):
+        //  • top: Greetings, or Offer Bribe where landing is refused (the
+        //    `forgivingLanding` enhancement's Request Landing stands in when
+        //    only its own gates refuse)
+        //  • middle: Demand Tribute, or Release on a dominated world
         //  • bottom: Close Channel
-        if planetLandable {
-            responseButton(graphics.buttonLabel(SpaceportLabel.greetings, fallback: "Greetings"),
-                           width: 120, action: onGreetings, graphics: graphics)
-                .novaPlace(space, -243, 36.5)     // item 1 (top): (27,184)-(173,210)
-        } else {
-            responseButton(graphics.buttonLabel(SpaceportLabel.requestLanding, fallback: "Request Landing"),
-                           width: 120, action: onRequestLanding, graphics: graphics)
-                .novaPlace(space, -243, 36.5)
-        }
-        if state.canDemandTribute {
-            responseButton(graphics.buttonLabel(SpaceportLabel.demandTribute, fallback: "Demand Tribute"),
-                           width: 120, action: onDemandTribute, graphics: graphics)
-                .novaPlace(space, -243, 66.5)     // item 2 (middle): (27,214)-(173,240)
-        }
+        responseButton(state.topButtonTitle, width: 120,
+                       action: state.topButtonTitle == requestLandingTitle(graphics) ? onRequestLanding : onGreetings,
+                       graphics: graphics)
+            .novaPlace(space, -243, 36.5)         // item 1 (top): (27,184)-(173,210)
+        responseButton(state.tributeTitle, width: 120, enabled: state.tributeEnabled,
+                       action: onDemandTribute, graphics: graphics)
+            .novaPlace(space, -243, 66.5)         // item 2 (middle): (27,214)-(173,240)
         responseButton(graphics.buttonLabel(SpaceportLabel.closeChannel, fallback: "Close Channel"),
                        width: 120, action: onClose, graphics: graphics)
             .novaPlace(space, -243, 96.5)         // item 0 (bottom): (27,244)-(173,270)
     }
 
-    private var planetLandable: Bool { state.landable }
+    private func requestLandingTitle(_ graphics: SpaceportGraphics) -> String {
+        graphics.buttonLabel(SpaceportLabel.requestLanding, fallback: "Request Landing")
+    }
 
     // MARK: - Shared pieces
 
@@ -163,6 +160,9 @@ struct HailDialogView: View {
             if !state.govtLabel.isEmpty {
                 NovaText(state.govtLabel, size: 10,
                          color: state.hostile ? .red : Color(white: 0.75), width: width)
+            }
+            if let status = state.statusText {
+                NovaText(status, size: 10, color: state.statusHostile ? .red : Color(white: 0.75), width: width)
             }
         }
         .frame(width: width, alignment: .leading)
@@ -204,7 +204,7 @@ struct HailDialogView: View {
                 Spacer()
                 fallbackButton("Greetings", width: 76, action: onGreetings)
                 if showAssistButton {
-                    fallbackButton("Request Assistance", width: 150, enabled: assistEnabled, action: onRequestAssistance)
+                    fallbackButton(state.assistTitle, width: 150, enabled: assistEnabled, action: onRequestAssistance)
                 }
                 fallbackButton("Close Channel", width: 106, action: onClose)
             }

@@ -1,4 +1,5 @@
 import SwiftUI
+import NovaSwiftEngine
 
 /// Full settings, bound to the persisted `GameSettings`. A sidebar of
 /// categories plus a scrolling detail `Form` — rather than one long stacked
@@ -136,6 +137,8 @@ struct SettingsView: View {
                 hudInterfaceSection
             case .gameplay:
                 gameplaySection
+            case .enhancements:
+                enhancementsSection
             case .controls:
                 controlsSection
             case .graphics:
@@ -193,18 +196,12 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Interface Options", icon: "slider.horizontal.3")
         } footer: {
-            Text("Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. With the sidebar pause menu off (the Classic default), pausing saves and drops straight to the main menu; on it opens the port's own menu. On mobile the sidebar is always available via the ☰ button. Storyline tags mark missions that continue a reconstructed campaign and jump to it in the Story Guide — an aftermarket hint the original game never had.")
+            Text("Mix the port's modern touches over the authentic EV Nova presentation. Full-screen map opens the galaxy map without its dialog frame. The sidebar pause menu (on by default) opens the port's own menu, with the Story Guide and, in debug mode, the Debug Suite; off, pausing saves and drops straight to the main menu. On mobile the sidebar is always available via the ☰ button. Storyline tags mark missions that continue a reconstructed campaign and jump to it in the Story Guide — an aftermarket hint the original game never had.")
         }
     }
 
     private var gameplaySection: some View {
         Section {
-            NovaMenuPicker(title: "Difficulty", selection: binding(\.difficulty),
-                           options: GameSettings.Difficulty.allCases) { $0.label }
-            NovaMenuPicker(title: "System Aliveness", selection: binding(\.systemAliveness),
-                           options: GameSettings.SystemAliveness.allCases) { $0.label }
-            Text(model.settings.systemAliveness.blurb)
-                .novaFont(.caption).foregroundStyle(.secondary)
             NovaSegmentedPicker(selection: binding(\.gameSpeed), options: GameSettings.GameSpeed.allCases) { $0.label }
                 .disabled(model.session.isActive)
             if model.session.isActive {
@@ -212,7 +209,6 @@ struct SettingsView: View {
                     .novaFont(.caption).foregroundStyle(.secondary)
             }
             Toggle("Auto-target after firing", isOn: binding(\.autoTargetAfterFiring))
-            Toggle("Auto-landing", isOn: binding(\.autoLanding))
             Toggle("Confirm before landing", isOn: binding(\.confirmLanding))
             Toggle("Tutorial hints", isOn: binding(\.tutorialHints))
             if model.settings.tutorialHints {
@@ -240,7 +236,47 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Gameplay", icon: "gamecontroller")
         } footer: {
-            Text("Difficulty scales the damage you take, from Very Easy for a mostly-story run up to Hard. System Aliveness controls how much traffic systems carry and how often ships actually land — Authentic thins it out and sends most traders cruising through instead of docking, closer to the original game's pace; Bustling pushes past the default for even busier systems. Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. With Auto-landing on, targeting a planet or station and pressing Land flies you there and sets down automatically. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back.")
+            Text("Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back. Difficulty, traffic and other options the original didn't have are under Enhancements.")
+        }
+    }
+
+    /// Every NovaSwift behaviour the original doesn't have, off by default. The
+    /// toggles come straight from `GameplayEnhancements.catalog`, so a new one
+    /// shows up here without touching this view.
+    @ViewBuilder
+    private var enhancementsSection: some View {
+        Section {
+            ForEach(GameplayEnhancements.catalog, id: \.key) { entry in
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle(entry.title, isOn: Binding(
+                        get: { model.settings.enhancements[keyPath: entry.keyPath] },
+                        set: { model.settings.enhancements[keyPath: entry.keyPath] = $0; model.commitSettings() }
+                    ))
+                    Text(entry.replaces).novaFont(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            sectionHeader("Enhancements", icon: "wand.and.stars")
+        } footer: {
+            Text("Behaviours NovaSwift adds that the original EV Nova doesn't have. Each is off by default, so the game plays as the original did unless you turn one on.")
+        }
+
+        Section {
+            NovaMenuPicker(title: "Difficulty", selection: binding(\.difficulty),
+                           options: GameSettings.Difficulty.allCases) { $0.label }
+            Text("Scales the damage you take. The original has no setting; Normal matches it.")
+                .novaFont(.caption).foregroundStyle(.secondary)
+            NovaMenuPicker(title: "System Aliveness", selection: binding(\.systemAliveness),
+                           options: GameSettings.SystemAliveness.allCases) { $0.label }
+            Text(model.settings.systemAliveness.blurb)
+                .novaFont(.caption).foregroundStyle(.secondary)
+            Toggle("Auto-landing", isOn: binding(\.autoLanding))
+            Text("Pressing Land flies you to the target and sets down. The original has no autopilot.")
+                .novaFont(.caption).foregroundStyle(.secondary)
+        } header: {
+            sectionHeader("Port Options", icon: "slider.horizontal.3")
+        } footer: {
+            Text("System Aliveness controls how much traffic systems carry and how often ships land — Authentic is the closest to the original's pace; Normal and Bustling are livelier.")
         }
     }
 
@@ -280,10 +316,11 @@ struct SettingsView: View {
             Toggle("Smooth sprite scaling", isOn: binding(\.smoothSprites))
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Screen shake", isOn: binding(\.screenShake))
+            Toggle("Windows hyperspace look", isOn: binding(\.ceHyperspaceLook))
         } header: {
             sectionHeader("Graphics", icon: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes. Jump timing is the same either way. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
         }
     }
 
@@ -476,10 +513,10 @@ struct SettingsView: View {
     }
 }
 
-/// The sidebar's categories — 10 old stacked sections consolidated into 7,
+/// The sidebar's categories — 10 old stacked sections consolidated into 8,
 /// each shown as its own pane instead of one long scroll.
 private enum SettingsCategory: CaseIterable, Identifiable, Hashable {
-    case interface, gameplay, controls, graphics, audio, accessibility, data
+    case interface, gameplay, enhancements, controls, graphics, audio, accessibility, data
 
     var id: Self { self }
 
@@ -487,6 +524,7 @@ private enum SettingsCategory: CaseIterable, Identifiable, Hashable {
         switch self {
         case .interface: return "Interface"
         case .gameplay: return "Gameplay"
+        case .enhancements: return "Enhancements"
         case .controls: return "Controls"
         case .graphics: return "Graphics"
         case .audio: return "Audio"
@@ -499,6 +537,7 @@ private enum SettingsCategory: CaseIterable, Identifiable, Hashable {
         switch self {
         case .interface: return "sparkles.tv"
         case .gameplay: return "gamecontroller"
+        case .enhancements: return "wand.and.stars"
         case .controls: return "dpad"
         case .graphics: return "sparkles"
         case .audio: return "speaker.wave.2"

@@ -86,3 +86,50 @@ public enum NovaType {
     public static let ditl        = FourCharCode("DITL")! // dialog item list (layout)
     public static let dlog       = FourCharCode("DLOG")! // dialog window template
 }
+
+// MARK: Loader normalisation
+
+extension NovaType {
+    /// The size every record of a scenario type is zero-padded to before any
+    /// field is read (`Resource_ByteSwapAndPadRecordByType` 0x004ce700), so a
+    /// short or old plug-in record reads its missing tail as zeros.
+    public static let minimumRecordSize: [FourCharCode: Int] = [
+        mission: 1970, ship: 1860, spob: 1118, outfit: 1028, cron: 822, junk: 676,
+        nebula: 518, syst: 428, pers: 400, fleet: 306, oops: 282, colr: 244, govt: 192,
+        shan: 192, intf: 166, rank: 152, weapon: 134, dude: 88, roid: 40, spin: 12,
+        boom: 6, char: 362,
+    ]
+
+    /// The ids the scenario loader (0x004bd3c0) keeps for each slot-table type:
+    /// a fixed number of slots, id = slot + 128. Records outside are ignored.
+    public static let slotRange: [FourCharCode: ClosedRange<Int>] = [
+        spob: 128...(128 + 0x800 - 1), syst: 128...(128 + 0x800 - 1),
+        outfit: 128...(128 + 0x200 - 1), weapon: 128...(128 + 0x100 - 1),
+        ship: 128...(128 + 0x300 - 1), dude: 128...(128 + 0x200 - 1),
+        govt: 128...(128 + 0x100 - 1), pers: 128...(128 + 0x400 - 1),
+        fleet: 128...(128 + 0x100 - 1), cron: 128...(128 + 0x200 - 1),
+        junk: 128...(128 + 0x80 - 1),
+    ]
+}
+
+extension ResourceCollection {
+    /// Applies the original loader's view of the merged data: scenario records
+    /// outside their type's slot range are dropped, and short records are
+    /// zero-padded to their type's minimum size.
+    public mutating func normalizeScenarioRecords() {
+        for (type, range) in NovaType.slotRange {
+            for resource in resources(of: type) where !range.contains(resource.id) {
+                remove(type, resource.id)
+            }
+        }
+        for (type, size) in NovaType.minimumRecordSize {
+            for resource in resources(of: type) where resource.data.count < size {
+                var padded = resource
+                var data = Data(resource.data)
+                data.append(Data(count: size - data.count))
+                padded.data = data
+                add(padded)
+            }
+        }
+    }
+}

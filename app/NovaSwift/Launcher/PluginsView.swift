@@ -79,7 +79,9 @@ struct PluginsView: View {
         do {
             guard let src = try result.get().first else { return }
             let id = try model.data.importPlugin(from: src)
-            importMessage = "Imported \"\(id)\". Enable it below to use it."
+            importMessage = model.data.manualPluginOrder
+                ? "Imported \"\(id)\". Enable it below to use it."
+                : "Imported \"\(id)\". It loads with your other plug-ins next time you start a game."
         } catch {
             importMessage = "That didn't work — \(error.localizedDescription)"
         }
@@ -92,7 +94,7 @@ struct PluginsView: View {
                     title: "No plug-ins installed",
                     message: "Switch to Store to browse and install plug-ins, or use Import above for a .rez/.ndat/.zip you got elsewhere.")
             } else {
-                Section(footer: Text("Total conversions replace the base scenario; small plug-ins can stack. When two plug-ins define the same thing, the one lower in this list wins — use the arrows to reorder. Changes apply next time you start a game.")) {
+                Section(footer: Text(installedFooter)) {
                     let plugins = model.data.plugins
                     ForEach(Array(plugins.enumerated()), id: \.element.id) { index, plugin in
                         row(plugin, index: index, count: plugins.count)
@@ -100,6 +102,13 @@ struct PluginsView: View {
                 }
             }
         }
+    }
+
+    private var installedFooter: String {
+        if model.data.manualPluginOrder {
+            return "Total conversions replace the base scenario; small plug-ins can stack. When two plug-ins define the same thing, the one lower in this list wins — use the arrows to reorder. Changes apply next time you start a game."
+        }
+        return "As in the original, every installed plug-in loads, in alphabetical order, and when two define the same thing the later one wins. To choose which load and reorder them, turn on Settings ▸ Enhancements ▸ Manual plug-in order."
     }
 
     private func row(_ plugin: PluginBundle, index: Int, count: Int) -> some View {
@@ -111,23 +120,25 @@ struct PluginsView: View {
             // enabled plug-ins, but we don't restrict the arrows to those —
             // disabled plug-ins keep a place in the persisted order too, so
             // re-enabling one later doesn't silently reset its priority.
-            VStack(spacing: 2) {
-                Button {
-                    model.data.movePlugin(id: plugin.id, by: -1)
-                } label: {
-                    Image(systemName: "chevron.up")
+            if model.data.manualPluginOrder {
+                VStack(spacing: 2) {
+                    Button {
+                        model.data.movePlugin(id: plugin.id, by: -1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                    }
+                    .disabled(index == 0)
+                    Button {
+                        model.data.movePlugin(id: plugin.id, by: 1)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .disabled(index == count - 1)
                 }
-                .disabled(index == 0)
-                Button {
-                    model.data.movePlugin(id: plugin.id, by: 1)
-                } label: {
-                    Image(systemName: "chevron.down")
-                }
-                .disabled(index == count - 1)
+                .buttonStyle(.novaPlain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .buttonStyle(.novaPlain)
-            .font(.caption)
-            .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(plugin.name).novaFont(.heading)
@@ -142,15 +153,17 @@ struct PluginsView: View {
                 }
                 .buttonStyle(.novaPlain)
             }
-            Toggle("", isOn: Binding(
-                get: { plugin.isEnabled },
-                set: { model.data.setPlugin(plugin.id, enabled: $0) }
-            ))
-            .labelsHidden()
-            // A system Toggle registers no cursor target, so Ⓐ had nothing to
-            // press here — enabling a plug-in was mouse/touch-only. Purely
-            // additive: the switch keeps its stock appearance.
-            .cursorClickable { model.data.setPlugin(plugin.id, enabled: !plugin.isEnabled) }
+            if model.data.manualPluginOrder {
+                Toggle("", isOn: Binding(
+                    get: { plugin.isEnabled },
+                    set: { model.data.setPlugin(plugin.id, enabled: $0) }
+                ))
+                .labelsHidden()
+                // A system Toggle registers no cursor target, so Ⓐ had nothing to
+                // press here — enabling a plug-in was mouse/touch-only. Purely
+                // additive: the switch keeps its stock appearance.
+                .cursorClickable { model.data.setPlugin(plugin.id, enabled: !plugin.isEnabled) }
+            }
         }
     }
 }

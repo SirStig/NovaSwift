@@ -4,8 +4,10 @@ import XCTest
 final class FlightTests: XCTestCase {
 
     private func makeWorld() -> World {
-        let stats = ShipStats(maxSpeed: 100, acceleration: 50, turnRate: .pi) // 180°/s
-        return World(player: Ship(name: "Test", stats: stats))
+        let stats = ShipStats(maxSpeed: 100, acceleration: 50, turnRate: .pi) // 180°/s = 6°/tick
+        let world = World(player: Ship(name: "Test", stats: stats))
+        world.strictPlay = true   // no ×1.5, so top speed is the stat
+        return world
     }
 
     func testThrustAcceleratesAlongHeading() {
@@ -47,12 +49,14 @@ final class FlightTests: XCTestCase {
     }
 
     func testDesiredHeadingRotatesToward() {
-        let world = makeWorld() // turnRate = π rad/s (180°/s)
+        let world = makeWorld() // 6°/tick
         world.intent.desiredHeading = .pi / 2 // aim right (east)
         world.step(0.25) // can turn up to 45°; needs 90°, so partial
         XCTAssertEqual(world.player.angle, .pi / 4, accuracy: 1e-9)
-        world.step(1.0) // plenty to finish
-        XCTAssertEqual(world.player.angle, .pi / 2, accuracy: 1e-9)
+        // The player's auto-turn steps whole turn steps and stops, without
+        // snapping, once within one step (0x0044c8d0): 45 → 51 … 81, 87 stays.
+        for _ in 0..<30 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(world.player.angle * 180 / .pi, 87, accuracy: 1e-9)
     }
 
     func testDiscreteTurnBeatsDesiredHeading() {
@@ -73,14 +77,12 @@ final class FlightTests: XCTestCase {
     }
 
     func testStatsFromNovaUnits() {
-        // Raw stat -> px/sec(²) goes through `FlightTuning.default`'s
-        // speed/accel scale (currently 0.55, calibrated against the
-        // original's flight feel — see `FlightTuning`'s doc comment), not a
-        // 1:1 passthrough.
+        // FL-02: Speed/100 px/tick, Accel/10000 × 2 px/tick², Maneuver × 0.1
+        // deg/tick, at 30 ticks/s.
         let s = ShipStats(speed: 300, acceleration: 500, turnRate: 40)
-        XCTAssertEqual(s.maxSpeed, 300 * FlightTuning.default.speedScale, accuracy: 1e-9)
-        XCTAssertEqual(s.acceleration, 500 * FlightTuning.default.accelScale, accuracy: 1e-9)
-        XCTAssertGreaterThan(s.turnRate, 0)
+        XCTAssertEqual(s.maxSpeed, 90, accuracy: 1e-9)
+        XCTAssertEqual(s.acceleration, 90, accuracy: 1e-9)
+        XCTAssertEqual(s.turnRate, 120 * .pi / 180, accuracy: 1e-12)
     }
 
     /// Inertialess flight (shïp Flags2 0x40): velocity tracks the nose with no
@@ -92,8 +94,9 @@ final class FlightTests: XCTestCase {
         world.intent.thrust = true
         for _ in 0..<30 { world.step(1.0 / 30.0) }          // build speed heading "up"
         XCTAssertGreaterThan(ship.velocity.y, 50)           // moving north
-        // Command an east heading; velocity should swing east and the north drift decay.
-        world.intent.desiredHeading = .pi / 2
+        // Swing the nose east; velocity should follow it and the north drift go,
+        // each axis steering by at most 4 × thrust per tick (0x0043b020).
+        ship.angle = .pi / 2
         for _ in 0..<60 { world.step(1.0 / 30.0) }          // 2s
         XCTAssertGreaterThan(ship.velocity.x, 80, "inertialess ship moves along its new heading")
         XCTAssertEqual(ship.velocity.y, 0, accuracy: 5, "no leftover drift in the old direction")
@@ -103,18 +106,18 @@ final class FlightTests: XCTestCase {
     /// Newtonian momentum — what makes the reverse-and-fire "Monty Python" maneuver
     /// possible — while a ship holding formation flies driftless so it glues to its
     /// slot (the EV Nova escort behavior). Only the hull flag overrides otherwise.
-    func testDefaultScopeFliesLoneShipsNewtonianButFormationsDriftless() {
+    func testDefaultFlightFliesEveryoneByTheirHull() {
+        // FL-11: the original flies an NPC inertialess only with hull Flags2
+        // 0x0040; the formation model is the `formationFlying` enhancement.
         let world = World(player: Ship(name: "P", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3)))
-        let npc = Ship(name: "NPC", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
-        npc.brain = AIBrain(aiType: .warship, govt: 500)
-        XCTAssertEqual(world.tuning.aiInertialess, .formations, "formation-flyers driftless by default")
-        XCTAssertFalse(npc.fliesInertialess(world.tuning), "a lone AI ship flies Newtonian by default")
-        XCTAssertFalse(world.player.fliesInertialess(world.tuning), "the player keeps Newtonian flight")
-
+        XCTAssertEqual(world.tuning.aiInertialess, .off)
         let escort = Ship(name: "Escort", stats: ShipStats(maxSpeed: 300, acceleration: 200, turnRate: 3))
         let eb = AIBrain(aiType: .interceptor, govt: 500); eb.leaderID = World.playerEntityID
         escort.brain = eb
-        XCTAssertTrue(escort.fliesInertialess(world.tuning), "an escort holding formation flies driftless")
+        XCTAssertFalse(escort.fliesInertialess(world.tuning), "a non-0x40 escort flies Newtonian")
+
+        var e = GameplayEnhancements(); e.formationFlying = true
+        XCTAssertTrue(escort.fliesInertialess(FlightTuning(enhancements: e)), "…unless formations are enhanced")
     }
 
     /// `.formations` scope: only ships flying in formation (a leader-following
@@ -150,17 +153,21 @@ final class FlightTests: XCTestCase {
         XCTAssertTrue(npc.fliesInertialess(tuning), "the hull flag always wins, whatever the AI scope")
     }
 
-    /// Inertialess hulls have no momentum: release the throttle and they bleed to a
-    /// stop rather than coasting forever like an inertial ship.
-    func testInertialessShipCoastsToStopWhenIdle() {
+    /// FL-11: an inertialess hull's speed has no idle decay — release the
+    /// throttle and it keeps flying where it points; reverse slows it.
+    func testInertialessShipKeepsItsSpeedWhenThrustIsReleased() {
         let ship = Ship(name: "I", stats: ShipStats(maxSpeed: 120, acceleration: 100, turnRate: .pi))
         ship.inertialess = true
         let world = World(player: ship)
+        world.strictPlay = true
         world.intent.thrust = true
-        for _ in 0..<40 { world.step(1.0 / 30.0) }
-        XCTAssertGreaterThan(ship.velocity.length, 50)
+        for _ in 0..<60 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(ship.velocity.length, 120, accuracy: 1e-6)
         world.intent = ControlIntent()                      // release everything
         for _ in 0..<120 { world.step(1.0 / 30.0) }         // 4s
-        XCTAssertLessThan(ship.velocity.length, 1, "inertialess ship should coast to a stop, not glide on")
+        XCTAssertEqual(ship.velocity.length, 120, accuracy: 1e-6, "no idle decay")
+        world.intent.reverse = true
+        for _ in 0..<30 { world.step(1.0 / 30.0) }          // thrust × 1 s = 100 px/s off
+        XCTAssertEqual(ship.velocity.length, 20, accuracy: 1e-6, "reverse bleeds speed by thrust × time")
     }
 }

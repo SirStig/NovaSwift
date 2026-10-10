@@ -107,26 +107,74 @@ public enum NovaDescFormatter {
     /// Resolve every `{…}` conditional in a `dësc` body and normalize the
     /// classic-Mac carriage returns the resources are stored with.
     ///
-    /// Unrecognized or malformed sequences are emitted verbatim: a plug-in
-    /// author's stray `{` should show up as a stray `{`, not swallow the rest of
-    /// the description.
+    /// This is the original's character machine (0x0044a4d0, MS-21), quirks
+    /// included: the `!` negate latch is never reset, so every conditional
+    /// after the first `{!…}` in a text is inverted too; a `{` whose header
+    /// isn't `b`/`g`/`p` swallows text until one turns up; a `\` escapes the
+    /// next character inside an arm; and anything after the chosen arm up to
+    /// the `}` is dropped.
     public static func render(_ raw: String, context: NovaTextContext = .init()) -> String {
+        enum State { case copy, header, digits, seekTaken, taken, seekSkipped, skipped, afterSkipped, discard }
         var out = ""
         out.reserveCapacity(raw.count)
-
-        var i = raw.startIndex
-        while i < raw.endIndex {
-            guard raw[i] == "{" else {
-                out.append(raw[i])
-                i = raw.index(after: i)
-                continue
-            }
-            if let (replacement, next) = parseConditional(raw, from: i, context: context) {
-                out += replacement
-                i = next
-            } else {
-                out.append(raw[i])           // not a conditional — pass it through
-                i = raw.index(after: i)
+        var state = State.copy
+        var negate = false
+        var escaped = false
+        var count = 0
+        var isBitTest = false
+        for ch in raw {
+            switch state {
+            case .copy:
+                if ch == "{" { state = .header } else { out.append(ch) }
+            case .header:
+                switch ch {
+                case "g", "G":
+                    state = (context.isMale != negate) ? .seekTaken : .seekSkipped
+                case "p", "P":
+                    count = 0; isBitTest = false; state = .digits
+                case "b", "B":
+                    count = 0; isBitTest = true; state = .digits
+                case "!":
+                    negate = true
+                default:
+                    break
+                }
+            case .digits:
+                if let d = ch.wholeNumberValue, ch.isASCII {
+                    count = count &* 10 &+ d
+                    continue
+                }
+                let pass = isBitTest ? (count >= 0 && context.isBitSet(count)) : context.isRegistered
+                if pass != negate {
+                    state = ch == "\"" ? .taken : .seekTaken
+                } else {
+                    state = ch == "\"" ? .skipped : .seekSkipped
+                }
+            case .seekTaken:
+                if ch == "\"" { state = .taken }
+            case .taken:
+                if ch == "\\" {
+                    escaped = true
+                } else if ch != "\"" || escaped {
+                    out.append(ch)
+                    escaped = false
+                } else {
+                    state = .discard
+                }
+            case .seekSkipped:
+                if ch == "\"" { state = .skipped }
+            case .skipped:
+                if ch == "\\" {
+                    escaped = true
+                } else if ch != "\"" || escaped {
+                    escaped = false
+                } else {
+                    state = .afterSkipped
+                }
+            case .afterSkipped:
+                if ch == "}" { state = .copy } else if ch == "\"" { state = .taken }
+            case .discard:
+                if ch == "}" { state = .copy }
             }
         }
         return normalizeNewlines(out)
@@ -136,113 +184,5 @@ public enum NovaDescFormatter {
     public static func normalizeNewlines(_ s: String) -> String {
         s.replacingOccurrences(of: "\r\n", with: "\n")
          .replacingOccurrences(of: "\r", with: "\n")
-    }
-
-    // MARK: Parsing
-
-    /// Parse `{[!]TEST "a" ["b"]}` starting at `open` (which must be `{`).
-    /// Returns the substituted text and the index just past the closing brace,
-    /// or nil when this isn't a well-formed conditional.
-    private static func parseConditional(
-        _ s: String, from open: String.Index, context: NovaTextContext
-    ) -> (String, String.Index)? {
-        var i = s.index(after: open)
-        guard i < s.endIndex else { return nil }
-
-        var negate = false
-        if s[i] == "!" {
-            negate = true
-            i = s.index(after: i)
-            guard i < s.endIndex else { return nil }
-        }
-
-        guard let (test, afterTest) = parseTest(s, from: i, context: context) else { return nil }
-        i = afterTest
-
-        // Up to two quoted strings, whitespace-separated.
-        var strings: [String] = []
-        while strings.count < 2 {
-            skipSpaces(s, &i)
-            guard i < s.endIndex else { return nil }
-            if s[i] == "}" { break }
-            guard s[i] == "\"", let (str, afterStr) = parseQuoted(s, from: i) else { return nil }
-            strings.append(str)
-            i = afterStr
-        }
-
-        skipSpaces(s, &i)
-        guard i < s.endIndex, s[i] == "}" else { return nil }
-        guard !strings.isEmpty else { return nil }
-
-        let value = negate ? !test : test
-        // "If there is no second string, nothing will be substituted."
-        let replacement = value ? strings[0] : (strings.count > 1 ? strings[1] : "")
-        return (replacement, s.index(after: i))
-    }
-
-    /// Parse the test token: `bXXX`, `G`, or `P` / `Pxxx`.
-    private static func parseTest(
-        _ s: String, from start: String.Index, context: NovaTextContext
-    ) -> (Bool, String.Index)? {
-        var i = start
-        guard i < s.endIndex else { return nil }
-
-        switch s[i] {
-        case "b", "B":
-            i = s.index(after: i)
-            guard let (bitIndex, afterDigits) = parseDigits(s, from: i) else { return nil }
-            return (context.isBitSet(bitIndex), afterDigits)
-
-        case "G", "g":
-            i = s.index(after: i)
-            return (context.isMale, i)
-
-        case "P", "p":
-            i = s.index(after: i)
-            // Optional day count: "registered at least xxx days ago".
-            if let (days, afterDigits) = parseDigits(s, from: i) {
-                return (context.isRegistered && context.daysRegistered >= days, afterDigits)
-            }
-            return (context.isRegistered, i)
-
-        default:
-            return nil
-        }
-    }
-
-    private static func parseDigits(_ s: String, from start: String.Index) -> (Int, String.Index)? {
-        var i = start
-        var value = 0
-        var any = false
-        while i < s.endIndex, let d = s[i].wholeNumberValue, s[i].isNumber {
-            value = value * 10 + d
-            any = true
-            i = s.index(after: i)
-        }
-        return any ? (value, i) : nil
-    }
-
-    /// Parse a `"…"` string, honoring C-style `\"` and `\\` escapes.
-    private static func parseQuoted(_ s: String, from start: String.Index) -> (String, String.Index)? {
-        var i = s.index(after: start)   // skip opening quote
-        var out = ""
-        while i < s.endIndex {
-            let c = s[i]
-            if c == "\\" {
-                let next = s.index(after: i)
-                guard next < s.endIndex else { return nil }
-                out.append(s[next])          // \" → ", \\ → \
-                i = s.index(after: next)
-                continue
-            }
-            if c == "\"" { return (out, s.index(after: i)) }
-            out.append(c)
-            i = s.index(after: i)
-        }
-        return nil   // unterminated
-    }
-
-    private static func skipSpaces(_ s: String, _ i: inout String.Index) {
-        while i < s.endIndex, s[i] == " " || s[i] == "\t" { i = s.index(after: i) }
     }
 }

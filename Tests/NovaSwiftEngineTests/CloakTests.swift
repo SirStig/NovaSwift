@@ -36,14 +36,34 @@ final class CloakTests: XCTestCase {
     // MARK: cloak fade + fuel drain
 
     func testCloakFadesInAndDrainsFuel() {
+        // OS-04: 0.75 of 32 a tick → 42.7 ticks to full; the fuel nibble per second.
         let player = Ship(name: "P", stats: stats())
         player.cloakFlags = 0x0010          // 1 fuel/sec
         player.maxFuel = 100; player.fuel = 100
         player.cloakEngaged = true
         let world = World(player: player)
-        world.step(1.0)
-        XCTAssertGreaterThan(player.cloakLevel, 0, "cloak fades in while engaged")
+        for _ in 0..<30 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(player.cloakLevel, 30 * 0.75 / 32, accuracy: 1e-9)
+        XCTAssertFalse(player.isCloaked, "not hidden until past 24/32 while fading in")
         XCTAssertEqual(player.fuel, 99, accuracy: 0.01, "1 fuel/sec drained")
+        for _ in 0..<3 { world.step(1.0 / 30.0) }
+        XCTAssertTrue(player.isCloaked, "33 ticks: 24.75/32")
+        player.cloakEngaged = false
+        for _ in 0..<20 { world.step(1.0 / 30.0) }
+        XCTAssertTrue(player.isCloaked, "still hidden until under 8/32 while clearing")
+        for _ in 0..<15 { world.step(1.0 / 30.0) }
+        XCTAssertFalse(player.isCloaked)
+    }
+
+    func testCloakNeedsFuelEvenWithoutAFuelDrain() {
+        let player = Ship(name: "P", stats: stats())
+        player.cloakFlags = 0x0100          // shield drain only
+        player.maxFuel = 100; player.fuel = 0
+        player.maxShield = 100; player.shield = 100
+        player.cloakEngaged = true
+        let world = World(player: player)
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(player.cloakEngaged, "the cloak always needs fuel > 0 (quirk)")
     }
 
     func testCloakForcedOffWhenFuelRunsOut() {
@@ -54,33 +74,72 @@ final class CloakTests: XCTestCase {
         let world = World(player: player)
         world.step(1.0)
         XCTAssertEqual(player.fuel, 0, accuracy: 0.001)
+        world.step(1.0 / 30.0)
         XCTAssertFalse(player.cloakEngaged, "cloak drops when it can't be powered")
     }
 
-    func testCloakDropsShieldsOnActivation() {
+    func testShieldDrainLeavesTheLastPointsAndDisabledDropsTheCloak() {
+        let npc = Ship(name: "N", stats: stats())
+        npc.cloakFlags = 0x0810            // 8 shield/sec, 1 fuel/sec
+        npc.maxFuel = 100; npc.fuel = 100
+        npc.maxShield = 100; npc.shield = 0.2
+        npc.cloakEngaged = true
+        let world = World(player: Ship(name: "P", stats: stats()))
+        world.addNPC(npc)
+        world.step(1.0 / 30.0)
+        XCTAssertEqual(npc.shield, 0.2, accuracy: 1e-9, "drain applies only while shields ≥ a tick's 8/30")
+        XCTAssertTrue(npc.cloakEngaged, "the shield gate never drops the cloak (quirk)")
+        npc.armor = 1
+        world.step(1.0 / 30.0)
+        XCTAssertFalse(npc.cloakEngaged, "a disabled ship can't hold its cloak")
+    }
+
+    func testPlayerShieldsStayZeroedEveryTickWithFlag0004() {
         let player = Ship(name: "P", stats: stats())
-        player.cloakFlags = 0x0004          // drops shields on activation
+        player.cloakFlags = 0x0014
+        player.maxFuel = 100; player.fuel = 100
         player.maxShield = 100; player.shield = 100
+        player.shieldRechargePerSec = 30
         player.cloakEngaged = true
         let world = World(player: player)
-        world.step(0.1)
-        XCTAssertEqual(player.shield, 0, accuracy: 0.001)
+        for _ in 0..<10 { world.step(1.0 / 30.0) }
+        XCTAssertEqual(player.shield, 0, accuracy: 1e-9)
     }
 
     // MARK: detection
 
-    func testCloakedShipUndetectableWithoutScanner() {
+    func testCloakedShipEngageableOnlyCloseWithScannerBit0002OrByItsEscorts() {
         let observer = Ship(name: "O", stats: stats())
         let world = World(player: observer)
-        let target = Ship(name: "T", stats: stats())
-        target.cloakFlags = 0x0010; target.cloakLevel = 1.0    // fully cloaked
+        let target = Ship(name: "T", stats: stats(), position: Vec2(150, 150))
+        target.cloakFlags = 0x0010; target.cloakLevel = 1.0; target.cloakEngaged = true
         _ = world.addNPC(target)
         XCTAssertFalse(world.canDetect(target, by: observer))
-        observer.cloakScannerFlags = 0x0008                    // can target cloaked
-        XCTAssertTrue(world.canDetect(target, by: observer))
-        target.cloakLevel = 0                                  // decloaked
+        observer.cloakScannerFlags = 0x0002
+        XCTAssertTrue(world.canDetect(target, by: observer), "within 200 px per axis")
+        target.position = Vec2(150, 250)
+        XCTAssertFalse(world.canDetect(target, by: observer))
+        let escort = Ship(name: "E", stats: stats(), position: Vec2(2000, 0))
+        let eb = AIBrain(aiType: .warship, govt: 130); eb.leaderID = target.entityID
+        escort.brain = eb
+        world.addNPC(escort)
+        XCTAssertTrue(world.canDetect(target, by: escort), "its own escorts see it")
+        target.cloakLevel = 0; target.cloakEngaged = false
         observer.cloakScannerFlags = 0
         XCTAssertTrue(world.canDetect(target, by: observer))
+    }
+
+    func testUntargetableHullNeedsScannerBit0004() {
+        // OS-12: shïp Flags2 0x0004.
+        let player = Ship(name: "P", stats: stats())
+        let world = World(player: player)
+        let ghost = Ship(name: "G", stats: stats(), position: Vec2(0, 300))
+        ghost.hullFlags2 = 0x0004
+        world.addNPC(ghost)
+        XCTAssertNil(world.selectNearestTarget(hostileOnly: false))
+        XCTAssertNil(world.selectTarget(id: ghost.entityID))
+        player.cloakScannerFlags = 0x0004
+        XCTAssertEqual(world.selectNearestTarget(hostileOnly: false)?.entityID, ghost.entityID)
     }
 
     // MARK: area cloak (0x1000) — shared onto formation-mates
@@ -143,18 +202,24 @@ final class CloakTests: XCTestCase {
                        "an area-cloaked escort is undetectable just like its cloaking leader")
     }
 
-    // MARK: interference-scaled range
+    // MARK: interference (OS-05)
 
-    func testInterferenceShrinksSensorRange() {
+    /// Interference never shortens sensor range in the original; it only turns
+    /// some radar refreshes into static, net of anti-interference outfits.
+    func testInterferenceGivesRadarStaticNotShorterRange() {
         let observer = Ship(name: "O", stats: stats())
         let world = World(player: observer)
         world.systemInterference = 50
-        XCTAssertEqual(world.effectiveSensorRange(1500, for: observer), 750, accuracy: 0.1)
+        XCTAssertEqual(world.effectiveSensorRange(1500, for: observer), 1500, accuracy: 0.1)
+        XCTAssertEqual(world.radarStaticChance(for: observer), 50)
         world.systemInterference = 100
-        XCTAssertEqual(world.effectiveSensorRange(1500, for: observer), 0, accuracy: 0.1, "blackout")
+        XCTAssertEqual(world.radarStaticChance(for: observer), 100)
         world.systemInterference = 50
         observer.interferenceReduction = 50   // anti-interference cancels it
-        XCTAssertEqual(world.effectiveSensorRange(1500, for: observer), 1500, accuracy: 0.1)
+        XCTAssertEqual(world.radarStaticChance(for: observer), 0)
+        observer.interferenceReduction = 300  // the outfit sum is clamped to 100 first
+        world.systemInterference = 100
+        XCTAssertEqual(world.radarStaticChance(for: observer), 0)
     }
 
     // MARK: murk (sÿst.Murk / ModType 28)

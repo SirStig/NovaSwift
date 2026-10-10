@@ -65,6 +65,9 @@ public struct StellarBody {
     public let gravity: Int
     /// Whether this stellar can be destroyed by weapon fire at all.
     public var isDestroyable: Bool { strength > 0 }
+    /// `spöb.Flags` 0x20 (uninhabited). AI-12's travel pick skips such a
+    /// stellar unless it is a gate.
+    public var isUninhabited = false
 
     public init(id: Int, position: Vec2, radius: Double, canLand: Bool, isLandable: Bool? = nil,
                 government: Int = independentGovt, isHypergate: Bool = false,
@@ -102,13 +105,6 @@ public struct SystemContext {
     public var jumpRadius: Double = 1400
     /// Where arriving NPCs pop in (just inside the edge).
     public var spawnRadius: Double = 1190
-    /// Half-width of the wrap-around playfield, centred on `center`. EV Nova's
-    /// systems are a fixed finite size that wraps toroidally: fly off one edge and
-    /// you reappear on the opposite side (the player's "no walls, but you roll over
-    /// to the other side"). Kept comfortably larger than `jumpRadius` so an NPC
-    /// heading out to jump reaches the hyperspace edge (and despawns) well before
-    /// it would ever wrap. See `World.wrapIntoSystem`.
-    public var wrapExtent: Double = 10000
     /// The government that controls this system (`sÿst.Govt`). Drives which
     /// ships count as "the local authority" and may run the patrol beat / scan
     /// traffic — foreign combat ships just pass through. `independentGovt`
@@ -118,10 +114,9 @@ public struct SystemContext {
     public init() {}
     public init(bodies: [StellarBody], center: Vec2 = Vec2(),
                 jumpRadius: Double = 1400, spawnRadius: Double = 1190,
-                wrapExtent: Double = 10000, systemGovt: Int = independentGovt) {
+                systemGovt: Int = independentGovt) {
         self.bodies = bodies; self.center = center
         self.jumpRadius = jumpRadius; self.spawnRadius = spawnRadius
-        self.wrapExtent = wrapExtent
         self.systemGovt = systemGovt
     }
 }
@@ -192,19 +187,15 @@ extension Galaxy {
     }
 }
 
-/// EV Nova's `shïp.SkillVar`: "the amount (in percent) to which this ship's
-/// pilots' skill varies... a skill variance of 10% would make each ship of a
-/// given type up to 10% slower or faster than stock" (Bible) — applied to
-/// acceleration and turn rate alike (one pilot-skill roll, not two independent
-/// ones), so ships of the same class aren't all identical. `roll` is a value
-/// in −1...1 (typically `world.rng.double(in: -1...1)` at spawn time); nil
-/// means no jitter (e.g. the player's own ship, or deterministic test fixtures).
-func jitteredStats(_ stats: ShipStats, skillVar: Int, roll: Double?) -> ShipStats {
-    guard let roll, skillVar > 0 else { return stats }
-    let variance = Double(min(50, max(0, skillVar))) / 100.0
-    let factor = 1 + max(-1, min(1, roll)) * variance
-    return ShipStats(maxSpeed: stats.maxSpeed, acceleration: stats.acceleration * factor,
-                     turnRate: stats.turnRate * factor, rotationFrames: stats.rotationFrames)
+/// Applies a spawn's pilot-skill scale to `stats`: `skillScale` (from
+/// `Galaxy.skillVarianceScale`) times the ship's government `SkillMult` scales
+/// top speed and thrust, never turn (`Ship_ComputeShipEffectiveThrust`
+/// 0x004640a0 / `…MaxSpeed` 0x004642e0). nil — the player, test fixtures —
+/// leaves the stats alone; the player path reads neither multiplier.
+func skilledStats(_ stats: ShipStats, skillScale: Double?, government: Int, game: NovaGame?) -> ShipStats {
+    guard let skillScale else { return stats }
+    let skillMult = game?.govt(government)?.skillMult ?? 1
+    return stats.scaled(speedAndThrust: skillScale * skillMult)
 }
 
 /// The catalog that turns decoded EV Nova resources into simulation objects:
@@ -220,6 +211,8 @@ public final class Galaxy {
     private var shipCache: [Int: ShipSpec] = [:]
     private var diplomacyCache: Diplomacy?
     private var fleetCatalogCache: [FleetRes]?
+    private var hullMaskCache: [Int: HullCollisionMask?] = [:]
+    private var shotMaskCache: [Int: SpriteMaskSet?] = [:]
 
     public init(game: NovaGame, flightTuning: FlightTuning = .default,
                 combatTuning: CombatTuning = .default) {
@@ -249,6 +242,43 @@ public final class Galaxy {
         let fleets = game.fleets()
         fleetCatalogCache = fleets
         return fleets
+    }
+
+    // MARK: Collision masks (WP-17)
+
+    /// A hull's collision masks and how many heading frames make one set.
+    public struct HullCollisionMask {
+        public let mask: SpriteMaskSet
+        public let framesPerSet: Int
+
+        /// The frame the hull shows at compass `angle`: the level-flight set's
+        /// heading frame. (Banking and animation sets, which the renderer
+        /// picks from its own turn history and clocks, are not tracked here;
+        /// they share the level set's silhouette closely.)
+        public func frame(angle: Double) -> Int {
+            min(SpriteFrames.headingFrame(angle: angle, frames: framesPerSet), mask.frameCount - 1)
+        }
+    }
+
+    /// The base-hull collision masks of `shïp` `shipTypeID`, cached; nil when
+    /// the data has no sprite for it.
+    public func hullCollisionMask(_ shipTypeID: Int) -> HullCollisionMask? {
+        if let hit = hullMaskCache[shipTypeID] { return hit }
+        var result: HullCollisionMask?
+        if shipTypeID >= 128, let mask = game.shipCollisionMask(shipTypeID) {
+            let perSet = game.shan(shipTypeID)?.framesPerSet ?? 36
+            result = HullCollisionMask(mask: mask, framesPerSet: max(1, min(perSet, mask.frameCount)))
+        }
+        hullMaskCache[shipTypeID] = .some(result)
+        return result
+    }
+
+    /// A shot graphic's collision masks (`spïn` id), cached.
+    public func shotCollisionMask(spinID: Int) -> SpriteMaskSet? {
+        if let hit = shotMaskCache[spinID] { return hit }
+        let mask = game.weaponCollisionMask(spinID: spinID)
+        shotMaskCache[spinID] = .some(mask)
+        return mask
     }
 
     // MARK: Specs
@@ -299,11 +329,10 @@ public final class Galaxy {
             shieldRechargePerSec: max(0, Double(s.shieldRecharge) * 0.03),
             armorRechargePerSec: Double(s.armorRecharge) * 0.03,
             radius: radius, government: s.inherentCombatGovt, strength: s.strength,
-            disableArmorFraction: (s.flags & 0x0010 != 0) ? 0.10 : 0.33, skillVar: s.skillVar,
+            disableArmorFraction: (s.flags & 0x0010 != 0) ? Ship.lowDisableFraction : Ship.standardDisableFraction, skillVar: s.skillVar,
             fleeWhenOutOfAmmo: s.fleeWhenOutOfAmmo, inertialess: s.inertialess,
             ionizeMax: Double(max(0, s.ionizeMax)),
-            deionizePerSec: Ship.flooredDeionize(rate: Double(max(0, s.deionize)) * 0.3,
-                                                 ionizeMax: Double(max(0, s.ionizeMax))),
+            deionizePerSec: s.deionizePerTick * 30,
             mounts: mounts, explosionSoundID: game.deathExplosionSoundID(s),
             explosionBoomID: s.finalExplosionBoomID ?? s.breakupExplosionBoomID,
             exitPoints: exitPoints(forShip: id))
@@ -313,14 +342,25 @@ public final class Galaxy {
 
     // MARK: Factories
 
+    /// A spawn's pilot-skill roll (`ShipClass_ComputeShipClassSkillVarianceScale`
+    /// 0x0046b870): `(range(2p + 1) + 100 − p) × 0.01` with p the class's
+    /// `SkillVar` (1…50), so SkillVar 20 lands in 0.80…1.20. Random dudes and
+    /// mission ships roll their own class; fleet members, përs, defense ships
+    /// and hired escorts roll class 0, the first `shïp` (pass nil).
+    public func skillVarianceScale(classOf shipID: Int?, rng: inout NovaRandom) -> Double {
+        let p = game.ship(shipID ?? 128)?.skillVar ?? 1
+        return Double(rng.range(2 * p + 1) + 100 - p) * 0.01
+    }
+
     /// Build a live, combat-ready ship of type `shipID`. Health starts full and a
     /// weapon loadout is installed. Government defaults to the hull's inherent one
     /// unless overridden. No brain is attached (that's the spawner's / player's job).
     public func makeShip(_ shipID: Int, government govt: Int? = nil,
                          at position: Vec2 = Vec2(), angle: Double = 0,
-                         skillRoll: Double? = nil) -> Ship? {
+                         skillScale: Double? = nil) -> Ship? {
         guard let spec = shipSpec(shipID) else { return nil }
-        let stats = jitteredStats(spec.stats, skillVar: spec.skillVar, roll: skillRoll)
+        let stats = skilledStats(spec.stats, skillScale: skillScale,
+                                 government: govt ?? spec.government, game: game)
         let ship = Ship(name: spec.name, stats: stats, position: position, angle: angle)
         ship.shipTypeID = shipID
         ship.explosionSoundID = spec.explosionSoundID
@@ -339,6 +379,7 @@ public final class Galaxy {
         ship.inertialess = spec.inertialess
         ship.ionizeMax = spec.ionizeMax
         ship.deionizePerSec = spec.deionizePerSec
+        if let res = game.ship(shipID) { ship.applyHullTraits(res) }
         return ship
     }
 
@@ -383,6 +424,7 @@ public final class Galaxy {
                 explosionHasSparks: s.explosionHasSparks,
                 regenerationDays: s.regenerationDays,
                 gravity: s.gravity))
+            bodies[bodies.count - 1].isUninhabited = s.isUninhabited
         }
         // The system's actual centre of mass — not the world origin, which a
         // system's stellar objects don't necessarily cluster around. Everything
@@ -409,12 +451,8 @@ public final class Galaxy {
         let ref: Double = dists.isEmpty ? 900
             : dists[min(dists.count - 1, Int((Double(dists.count - 1) * 0.8).rounded()))]
         let jumpRadius = min(3200, max(1400, ref * 1.1 + 400))
-        // Fixed, finite playfield that wraps toroidally (EV Nova's systems roll
-        // over at the edge). Held well clear of `jumpRadius` (max 6000) so ships
-        // heading out to jump always hit the hyperspace edge before the wrap.
-        let wrapExtent = max(jumpRadius + 3000, 10000)
         return SystemContext(bodies: bodies, center: center,
                              jumpRadius: jumpRadius, spawnRadius: jumpRadius * 0.85,
-                             wrapExtent: wrapExtent, systemGovt: sys.government)
+                             systemGovt: sys.government)
     }
 }
