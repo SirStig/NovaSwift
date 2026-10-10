@@ -2691,8 +2691,17 @@ public final class World {
                     for other in allShips where other.entityID != ship.entityID && other.entityID != leader
                         && other.isAlive && !other.disabled && other.hullFlags2 & 0x0008 != 0
                         && canDetect(other, by: ship) {
-                        let attacking = other.currentTargetID == ship.entityID
-                            || (leader != nil && other.currentTargetID == leader)
+                        // "Attacking" in the original's sense (0x0040faa0): a ship
+                        // closing in to scan, parking or escorting is not.
+                        // Reading the bare target made a Fed destroyer's PD
+                        // open fire on a Fed scout that merely scanned it.
+                        let attacking: Bool
+                        if other.isPlayer {
+                            attacking = other.currentTargetID == ship.entityID
+                                || (leader != nil && other.currentTargetID == leader)
+                        } else {
+                            attacking = originalAI.isEngagedAgainst(other, ship, leader: leader, world: self)
+                        }
                         guard attacking else { continue }
                         let d = (other.position - ship.position).length
                         guard d <= reach, d < bestD,

@@ -65,6 +65,16 @@ extension OriginalAI {
         return host.ship(target).map { leader(of: $0) == candidate.entityID && $0.isAlive } ?? false
     }
 
+    /// Whether NPC `attacker` is actually attacking `victim` or the squad
+    /// leader `leader` (`Ship_IsShipAcquirableAsTarget`): its AI state must be
+    /// an engaged one, so a scanning approach never counts.
+    func isEngagedAgainst(_ attacker: Ship, _ victim: Ship, leader: Int?, world: World) -> Bool {
+        let host = WorldAIHost(world: world, ai: self)
+        if isAttacking(attacker, victim, host: host) { return true }
+        guard let leader, let lead = host.ship(leader) else { return false }
+        return isAttacking(attacker, lead, host: host)
+    }
+
     /// `Ship_ShouldShipKeepPressingTarget` (0x0040f780).
     func keepsPressing(_ ship: Ship, host: OriginalAIHost) -> Bool {
         if let cached = pressingCache[ship.entityID] { return cached }
