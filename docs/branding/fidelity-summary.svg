@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="640" height="500" viewBox="0 0 640 500" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.hl{font-size:22px;font-weight:700;fill:#f0e6da}.sb{font-size:12px;fill:#a89a95}.nm{font-size:13px;fill:#f0e6da}.pc{font-size:13px;font-weight:600;fill:#f0e6da}</style>
 <rect width="640" height="500" rx="10" fill="#0d0a0e"/>
-<text x="20" y="34" class="hl">Matches the original game: 100%</text>
-<text x="20" y="56" class="sb">Share of the original game's code that has been checked against NovaSwift and behaves the same.</text>
+<text x="20" y="34" class="hl">Original code compared: 100%</text>
+<text x="20" y="56" class="sb">How much of the original's code has been compared with NovaSwift. Still in beta: bugs remain.</text>
 <text x="20" y="90" class="nm">Flight &amp; collision</text>
 <rect x="230" y="78" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="78" width="14" height="14" rx="2" fill="#3fb950"/>

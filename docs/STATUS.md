@@ -80,6 +80,12 @@ the original (some after a fix), 22 are done differently by design (NovaSwift's
 own save format, input layer and frame loop), and 154 turned out to be drawing
 or debug plumbing with nothing to port.
 
+That is a measure of how much code has been compared, not a promise that the
+game plays identically or is bug-free. A comparison can miss timing, ordering
+and interaction effects that only show up in play, and NovaSwift is still in
+beta. Reports of anything that plays differently from the original are the
+most useful feedback.
+
 A function is checked in one of two ways: a completed item in
 FIDELITY_PLAN.md cites its address, or a line-by-line comparison of its
 decompiled code against NovaSwift found it matching or found a difference that
