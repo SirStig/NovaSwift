@@ -3348,7 +3348,8 @@ struct GameContainerView: View {
                 host?.hud.post(host?.game?.stringList(2002)?.string(at: 53) ?? "")   // "No response."
                 return
             }
-            if let govt { model.audio.playHailVoice(govt: govt, hostile: hostile) }
+            // No voice line: the original's voice banks (snd 1000+) are only
+            // escort-command chatter (Frame_UpdateCombatChatter 0x004311f0).
             // The comm identifies a generic ship by its government's `CommName`
             // (Bible: "the short string to show for ships of this government when
             // they are hailed"), not its internal ship name. `nonTalkative`

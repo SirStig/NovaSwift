@@ -2881,12 +2881,13 @@ public final class World {
                 let record = queueBeam(from: ship, mountIndex: mountIndex, spec: spec,
                                        targetShipID: spec.guidance == .beamTurret ? target?.entityID : nil,
                                        targetShot: nil, exitIndex: exitIndex)
-                // Telemetry/audio (the renderer draws from `activeBeams`);
-                // looping beams get their audio from beamLoopStart/Stop.
+                // Telemetry/audio (the renderer draws from `activeBeams`). The
+                // fire sound goes once per volley, for every beam kind; wëap
+                // Flags 0x0010 is applied by the mixer (0x00414550 / 0x00455150).
                 events.append(.beam(shooterID: ship.entityID, mountIndex: mountIndex, from: muzzle,
                                     to: record?.lastEnd ?? muzzle + Vec2.heading(aim) * spec.beamLength,
                                     hit: record?.lastHit ?? false,
-                                    soundID: spec.loopSound ? nil : spec.fireSoundID, weaponID: spec.id))
+                                    soundID: fired == 0 ? spec.fireSoundID : nil, weaponID: spec.id))
             } else {
                 let launchAim = parallelLaunchAim(aim, spec: spec, ship: ship, exitIndex: exitIndex)
                 spawnProjectile(spec: spec, muzzle: muzzle, aim: launchAim,
@@ -2894,8 +2895,9 @@ public final class World {
                                 ownerVelocity: ship.velocity,
                                 targetID: spec.homes ? ship.currentTargetID : nil,
                                 subDepth: 0, shooter: ship)
+                // One fire sound per volley, not per barrel (0x00414550).
                 events.append(.weaponFired(shooterID: ship.entityID, at: muzzle, heading: launchAim,
-                                           soundID: spec.fireSoundID, weaponID: spec.id))
+                                           soundID: fired == 0 ? spec.fireSoundID : nil, weaponID: spec.id))
             }
             fired += 1
         }
