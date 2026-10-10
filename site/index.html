@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
   <div class="space-bg" aria-hidden="true"></div>
@@ -85,31 +85,23 @@
       <div class="head">
         <p class="eyebrow">Fidelity</p>
         <h2>Checked against the original code.</h2>
-      </div>
-      <div class="prose">
-        <p>The Windows executable of EV Nova CE has been decompiled. Every gameplay system was re-checked and
-           rewritten against it: flight, hyperjump and travel days, weapons and damage, the NPC AI, spawning,
-           legal records, the economy, outfitter and shipyard, missions and their scripting, the star map,
-           targeting, landing, Player Info, saving and Strict Play. Where a formula was unclear, we ran the
-           original routine in an emulator and matched its output.</p>
-        <p>Original behaviour is the default. Eight optional Enhancements (quick hyperjump, forgiving landing,
-           frequent autosave and a few others) sit in Settings and are off unless you turn them on.
-           No decompiled code is published; the repository has written specs only.</p>
+        <p>We decompiled the original game and compared every part of it with NovaSwift. Original behaviour is the
+           default; a few optional Enhancements live in Settings.</p>
       </div>
 
-      <div class="grid-card">
-        <h3>The original executable, one square per function</h3>
-        <p>One square per function in the original. Green ones have been compared with NovaSwift and match (some after a fix);
-           teal ones NovaSwift does its own way on purpose, like saves and controls. This shows how much has been checked,
-           not that the game is finished: NovaSwift is in beta and still has bugs. Hover or tap a square for details.</p>
-        <div id="grid-exe" class="grid-exe"><p class="grid-note">Loading…</p></div>
+      <div class="grid-card summary-card">
+        <img src="assets/fidelity-summary.svg" alt="How much of the original game's code has been compared with NovaSwift, by area" />
+        <p class="note">This shows how much has been compared, not that the game is finished. NovaSwift is in beta and
+           still has bugs. Found something that plays differently?
+           <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">Open an issue</a>.</p>
       </div>
-      <p class="note">
-        How the colours are assigned is explained in
-        <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/STATUS.md" target="_blank" rel="noopener">STATUS.md</a>.
-        Found something that doesn't match the original? Please
-        <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">open an issue</a>.
-      </p>
+
+      <details class="grid-card" open>
+        <summary>Every function, one square each</summary>
+        <p>One square per function in the original. Green: compared and matching. Teal: done differently on purpose,
+           like saves and controls. Hover or tap a square for details.</p>
+        <div id="grid-exe" class="grid-exe"><p class="grid-note">Loading…</p></div>
+      </details>
     </div>
   </section>
 

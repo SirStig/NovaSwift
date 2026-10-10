@@ -432,3 +432,11 @@ h1, h2, h3 {
   html { scroll-behavior: auto; }
   .btn, .tablist label, .legend .key { transition: none; }
 }
+
+/* fidelity summary + collapsible detail grid */
+.summary-card img { display: block; width: 100%; max-width: 640px; height: auto; margin: 0 auto var(--s2); }
+details.grid-card > summary { cursor: pointer; font-weight: 600; color: var(--bone); list-style: none; }
+details.grid-card > summary::-webkit-details-marker { display: none; }
+details.grid-card > summary::before { content: "▸ "; color: var(--muted); }
+details.grid-card[open] > summary::before { content: "▾ "; }
+details.grid-card[open] > summary { margin-bottom: var(--s2); }
