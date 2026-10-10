@@ -696,6 +696,41 @@
    ]
   },
   {
+   "name": "Pilot converter",
+   "tasks": [
+    {
+     "name": "Read Windows EV Nova CE .plt pilots (decrypt the XOR blocks)",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Read classic Mac EV Nova pilots (resource fork, MacBinary/AppleDouble)",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Map every saved field to a NovaSwift pilot",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Warn about plug-in content that isn't installed",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Import screen with a preview before creating the pilot",
+     "status": "planned",
+     "where": "not started"
+    },
+    {
+     "name": "Round-trip tests against the original's own save code",
+     "status": "planned",
+     "where": "not started"
+    }
+   ]
+  },
+  {
    "name": "Editors",
    "tasks": [
     {
