@@ -42,16 +42,33 @@ public struct PluginBundle: Identifiable, Codable, Hashable, Sendable {
     public let id: String        // stable identity (folder / file name)
     public var name: String      // display name
     public var kind: PluginKind
+    /// The plug-in files: top-level `.rez`/`.ndat` of the folder, as if they sat
+    /// directly in `Nova Plug-Ins` (for a total conversion: its own `Plug-Ins/`).
     public var fileURLs: [URL]
     public var isEnabled: Bool
+    /// A total conversion's own `Nova Files/*.rez`. Non-empty marks the bundle
+    /// as a TC: it replaces the stock `Nova Files` instead of overlaying them
+    /// (the original runs a TC with its own `Nova Files` + `Plug-Ins`; only
+    /// `Nova.rez` is shared).
+    public var novaFilesURLs: [URL] = []
+    /// A subfolder of a plug-in folder. The original never loads subfolders,
+    /// so these are inert unless the user opts in (manual plug-in order).
+    public var isOptional: Bool = false
+
+    public var isTotalConversion: Bool { !novaFilesURLs.isEmpty }
+    /// Every container the bundle owns (TC base files first).
+    public var allFileURLs: [URL] { novaFilesURLs + fileURLs }
 
     public init(id: String, name: String, kind: PluginKind = .unknown,
-                fileURLs: [URL], isEnabled: Bool = false) {
+                fileURLs: [URL], isEnabled: Bool = false,
+                novaFilesURLs: [URL] = [], isOptional: Bool = false) {
         self.id = id
         self.name = name
         self.kind = kind
         self.fileURLs = fileURLs
         self.isEnabled = isEnabled
+        self.novaFilesURLs = novaFilesURLs
+        self.isOptional = isOptional
     }
 }
 
@@ -79,14 +96,89 @@ public enum GameLibrary {
         for case let url as URL in e where resourceExtensions.contains(url.pathExtension.lowercased()) {
             out.append(url)
         }
-        let sorted = out.sorted { $0.path < $1.path }
+        let sorted = out.sorted { ($0.path.uppercased(), $0.path) < ($1.path.uppercased(), $1.path) }
         Log.data.debug("Found \(sorted.count, privacy: .public) resource file(s) under \(directory.path, privacy: .public)")
         return sorted
     }
 
+    /// The resource containers sitting directly in `directory` (no recursion), in
+    /// the original folder scan's case-insensitive name order
+    /// (`nv_LoadFilesInFolder` 0x0046f500 skips directories).
+    public static func topLevelResourceFiles(in directory: URL) -> [URL] {
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles])) ?? []
+        return entries
+            .filter { resourceExtensions.contains($0.pathExtension.lowercased()) && !isDirectory($0) }
+            .sorted(by: nameOrder)
+    }
+
+    /// Case-insensitive file-name order, ties by raw bytes.
+    static func nameOrder(_ a: URL, _ b: URL) -> Bool {
+        (a.lastPathComponent.uppercased(), a.lastPathComponent) < (b.lastPathComponent.uppercased(), b.lastPathComponent)
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+    }
+
+    private static func subdirectories(of directory: URL) -> [URL] {
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles])) ?? []
+        return entries.filter(isDirectory).sorted(by: nameOrder)
+    }
+
+    /// A total conversion is a folder holding its own `Nova Files/` (the `.nplay`
+    /// convention: `Nova Files/`, `Plug-Ins/`, `Pilots/`). Nil when `folder` isn't one.
+    static func totalConversion(at folder: URL, id: String) -> PluginBundle? {
+        let subs = subdirectories(of: folder)
+        guard let novaFiles = subs.first(where: { $0.lastPathComponent.caseInsensitiveCompare("Nova Files") == .orderedSame }) else { return nil }
+        let base = topLevelResourceFiles(in: novaFiles)
+        guard !base.isEmpty else { return nil }
+        let plugDir = subs.first { ["NOVA PLUG-INS", "PLUG-INS"].contains($0.lastPathComponent.uppercased()) }
+        var name = id
+        let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        if let nplay = entries.first(where: { $0.pathExtension.lowercased() == "nplay" }),
+           let data = try? Data(contentsOf: nplay),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let n = json["name"] as? String, !n.trimmingCharacters(in: .whitespaces).isEmpty {
+            name = n
+        }
+        return PluginBundle(id: id, name: name, kind: .totalConversion,
+                            fileURLs: plugDir.map(topLevelResourceFiles(in:)) ?? [],
+                            novaFilesURLs: base)
+    }
+
+    /// Bundles for one plug-in folder: its top-level files are the plug-in (as
+    /// if they sat in `Nova Plug-Ins`); each subfolder with files is an opt-in
+    /// sub-item, since the original never descends. A folder holding only one
+    /// subfolder is an archive's wrapper directory and is looked through.
+    private static func bundles(forFolder folder: URL, id: String, name: String) -> [PluginBundle] {
+        if let tc = totalConversion(at: folder, id: id) { return [tc] }
+        let files = topLevelResourceFiles(in: folder)
+        let subs = subdirectories(of: folder)
+        if files.isEmpty, subs.count == 1 {
+            return bundles(forFolder: subs[0], id: id, name: name)
+        }
+        var out: [PluginBundle] = []
+        if !files.isEmpty { out.append(PluginBundle(id: id, name: name, fileURLs: files)) }
+        for sub in subs {
+            let inner = bundles(forFolder: sub, id: id + "/" + sub.lastPathComponent,
+                                name: name + " – " + sub.lastPathComponent)
+            for var b in inner where !b.isTotalConversion {
+                b.isOptional = true
+                out.append(b)
+            }
+        }
+        return out
+    }
+
     /// Each top-level item in `directory` becomes one `PluginBundle`: a folder
-    /// gathers every resource file within it; a loose `.rez`/`.ndat` is its own
-    /// bundle. Bundles start disabled; the launcher persists the enabled set.
+    /// contributes its top-level resource files (subfolders become opt-in
+    /// sub-items, a total conversion keeps its own `Nova Files`); a loose
+    /// `.rez`/`.ndat` is its own bundle. Bundles start disabled; the launcher
+    /// persists the enabled set.
     public static func discoverPlugins(in directory: URL) -> [PluginBundle] {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
@@ -97,17 +189,14 @@ public enum GameLibrary {
         }
 
         var bundles: [PluginBundle] = []
-        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+        for entry in entries.sorted(by: nameOrder) {
             let isDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
             if isDir {
-                let files = discoverResourceFiles(in: entry)
-                guard !files.isEmpty else {
+                let found = Self.bundles(forFolder: entry, id: entry.lastPathComponent, name: entry.lastPathComponent)
+                if found.isEmpty {
                     Log.data.debug("Plug-in folder \(entry.lastPathComponent, privacy: .public) has no .rez/.ndat files — skipped")
-                    continue
                 }
-                bundles.append(PluginBundle(id: entry.lastPathComponent,
-                                            name: entry.lastPathComponent,
-                                            fileURLs: files))
+                bundles.append(contentsOf: found)
             } else if resourceExtensions.contains(entry.pathExtension.lowercased()) {
                 bundles.append(PluginBundle(id: entry.lastPathComponent,
                                             name: entry.deletingPathExtension().lastPathComponent,
@@ -125,7 +214,7 @@ public enum GameLibrary {
     /// every bundle up front.
     public static func classify(_ bundle: PluginBundle) -> PluginKind {
         var systems = 0, ships = 0, total = 0
-        for url in bundle.fileURLs {
+        for url in bundle.allFileURLs {
             guard let col = try? ResourceFile.read(contentsOf: url) else {
                 Log.data.error("classify(\(bundle.id, privacy: .public)): failed to parse \(url.path, privacy: .public) — skipped, kind guess may be inaccurate")
                 continue
@@ -159,9 +248,61 @@ public enum GameLibrary {
     /// installed plug-in loads, in the folder's case-insensitive alphabetical
     /// order, and a later one wins a conflict. The launcher's enable switches
     /// and drag order are the `manualPluginOrder` enhancement.
+    ///
+    /// Two kinds are never auto-loaded: subfolder sub-items (the original never
+    /// descends into folders) and total conversions (you run one *instead of*
+    /// the stock scenario; selecting it is an explicit choice, kept from
+    /// `isEnabled`, and only one can be selected).
     public static func originalPluginOrder(_ plugins: [PluginBundle]) -> [PluginBundle] {
-        plugins.map { p in var p = p; p.isEnabled = true; return p }
-            .sorted { ($0.id.uppercased(), $0.id) < ($1.id.uppercased(), $1.id) }
+        var chosenTC = false
+        var out = plugins.reversed().map { p -> PluginBundle in
+            var p = p
+            if p.isTotalConversion {
+                p.isEnabled = p.isEnabled && !chosenTC
+                if p.isEnabled { chosenTC = true }
+            } else {
+                p.isEnabled = !p.isOptional
+            }
+            return p
+        }
+        out.reverse()
+        return out.sorted { ($0.id.uppercased(), $0.id) < ($1.id.uppercased(), $1.id) }
+    }
+
+    /// What actually loads. With a total conversion selected (the last enabled
+    /// one) the stock `Nova Files` are dropped (only `Nova.rez` is shared), the
+    /// TC's own `Nova Files` take their place, its `Plug-Ins` are the only
+    /// plug-ins, and the user's global plug-ins do not apply. Otherwise the
+    /// base is all `baseFiles` and the plug-ins are the enabled ones.
+    ///
+    /// With `flat` (the original) the plug-in files of all bundles form one
+    /// list ordered by file name, case-insensitively, as if they sat in one
+    /// folder. Otherwise (manual plug-in order) bundle order is kept.
+    static func resolveLayers(baseFiles: [URL], plugins: [PluginBundle], flat: Bool)
+        -> (base: [URL], plugins: [(id: String, url: URL)]) {
+        let enabled = plugins.filter(\.isEnabled)
+        var base = baseFiles
+        var layered: [PluginBundle]
+        if let tc = enabled.last(where: \.isTotalConversion) {
+            let shared = baseFiles.filter { $0.lastPathComponent.uppercased() == "NOVA.REZ" }
+            base = (shared.isEmpty ? baseFiles : shared) + tc.novaFilesURLs
+            var own = tc
+            own.novaFilesURLs = []
+            layered = [own]
+        } else {
+            layered = enabled
+        }
+        var files: [(id: String, url: URL)] = []
+        for p in layered { for u in p.fileURLs.sorted(by: nameOrder) { files.append((p.id, u)) } }
+        if flat {
+            // Ties keep the bundle order they were gathered in.
+            files = files.enumerated().sorted { a, b in
+                let ka = (a.element.url.lastPathComponent.uppercased(), a.element.url.lastPathComponent)
+                let kb = (b.element.url.lastPathComponent.uppercased(), b.element.url.lastPathComponent)
+                return ka != kb ? ka < kb : a.offset < b.offset
+            }.map(\.element)
+        }
+        return (base, files)
     }
 
     // MARK: Merge (the override chain)
@@ -170,21 +311,22 @@ public enum GameLibrary {
     /// `baseLoadOrder`; plug-ins are applied in the given order and
     /// `isEnabled == false` bundles are skipped. The result is normalised the
     /// way the original loader sees it (`normalizeScenarioRecords`).
-    public static func merge(baseFiles: [URL], plugins: [PluginBundle] = []) throws -> ResourceCollection {
+    public static func merge(baseFiles: [URL], plugins: [PluginBundle] = [],
+                             flatPluginOrder: Bool = true) throws -> ResourceCollection {
         var collection = ResourceCollection()
+        let layers = resolveLayers(baseFiles: baseFiles, plugins: plugins, flat: flatPluginOrder)
         // Reading + parsing a container is independent per file and CPU/IO-bound,
         // so parse them concurrently and then overlay in load order (the overlay
         // itself must stay ordered — later layers override earlier ones).
-        for col in try parseConcurrently(baseLoadOrder(baseFiles), context: "base file") {
+        for col in try parseConcurrently(baseLoadOrder(layers.base), context: "base file") {
             collection.overlay(col)
         }
-        Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(baseFiles.count, privacy: .public) file(s)")
-        for plugin in plugins where plugin.isEnabled {
-            for col in try parseConcurrently(plugin.fileURLs, context: "plug-in \(plugin.name)") {
-                collection.overlay(col, tag: plugin.id)
-            }
-            Log.data.debug("merge: applied plug-in \(plugin.name, privacy: .public) (\(plugin.id, privacy: .public)) — collection now \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
+        Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(layers.base.count, privacy: .public) file(s)")
+        let parsed = try parseConcurrently(layers.plugins.map(\.url), context: "plug-in file")
+        for (i, col) in parsed.enumerated() {
+            collection.overlay(col, tag: layers.plugins[i].id)
         }
+        Log.data.debug("merge: applied \(layers.plugins.count, privacy: .public) plug-in file(s) — collection now \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s)")
         collection.normalizeScenarioRecords()
         return collection
     }
@@ -220,7 +362,7 @@ public enum GameLibrary {
     /// memory. Order-stable (files sorted by path).
     public static func contentHash(of bundle: PluginBundle) -> String {
         var hasher = SHA256()
-        for url in bundle.fileURLs.sorted(by: { $0.path < $1.path }) {
+        for url in bundle.allFileURLs.sorted(by: { $0.path < $1.path }) {
             // Fold the filename in too, so identical bytes under different names
             // (e.g. load-order-significant containers) don't collide.
             hasher.update(data: Data(url.lastPathComponent.utf8))
@@ -248,7 +390,8 @@ public enum GameLibrary {
     ///
     /// `SHA256` (not `Hasher`) because `Hasher` is seeded randomly per process —
     /// its output would differ every launch, defeating a cross-launch cache.
-    public static func fingerprint(baseFiles: [URL], plugins: [PluginBundle]) -> String {
+    public static func fingerprint(baseFiles: [URL], plugins: [PluginBundle],
+                                   flatPluginOrder: Bool = true) -> String {
         let fm = FileManager.default
         func stamp(_ url: URL) -> String {
             let attrs = try? fm.attributesOfItem(atPath: url.path)
@@ -256,15 +399,12 @@ public enum GameLibrary {
             let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
             return "\(url.lastPathComponent)|\(size)|\(Int(mtime))"
         }
+        // The resolved layers (TC replacement + plug-in order), in load order:
+        // order changes which file wins an override, so it is part of the key.
+        let layers = resolveLayers(baseFiles: baseFiles, plugins: plugins, flat: flatPluginOrder)
         var parts: [String] = []
-        for url in baseFiles.sorted(by: { $0.path < $1.path }) { parts.append("B|" + stamp(url)) }
-        // NOT sorted by id: `plugins`' array order is load order, and load order
-        // changes which plug-in wins an override, so it must be part of the key.
-        for plugin in plugins.filter(\.isEnabled) {
-            for url in plugin.fileURLs.sorted(by: { $0.path < $1.path }) {
-                parts.append("P|\(plugin.id)|" + stamp(url))
-            }
-        }
+        for url in layers.base.sorted(by: { $0.path < $1.path }) { parts.append("B|" + stamp(url)) }
+        for (id, url) in layers.plugins { parts.append("P|\(id)|" + stamp(url)) }
         let digest = SHA256.hash(data: Data(parts.joined(separator: "\n").utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }

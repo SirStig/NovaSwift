@@ -27,7 +27,7 @@ func usage() -> Never {
       \(name) char    <baseDir> [id]      List starting scenarios (chär), or preview a new pilot
       \(name) sounds  <baseDir>           List all snd resources (id, name, rate, length)
       \(name) sound   <baseDir> <id> [out] Decode one snd → WAV (default: <id>.wav)
-      \(name) ai      <baseDir> [sysID] [secs]   Headless AI sim: populate + run a system
+      \(name) ai      <baseDir> [sysID] [secs] [pluginsDir]   Headless AI sim (NOVASWIFT_TC=<id> plays that total conversion)
       \(name) mission-spawn <baseDir> <sysID> <dudeID> <count> [goal] [behav] [secs]
                                           Spawn mission ships into a live system + run
                                           goal: 0 destroy 1 disable 2 board 3 escort 4 observe 5 rescue 6 chaseOff
@@ -272,11 +272,25 @@ case "library":
         let baseOnly = try GameLibrary.merge(baseFiles: baseFiles)
         print("\nbase only:            \(baseOnly.totalCount) resources, \(baseOnly.types.count) types")
         if !plugins.isEmpty {
-            // Enable every discovered plug-in to demonstrate the override chain.
-            let enabled = plugins.map { var p = $0; p.isEnabled = true; return p }
+            // The original's load: every installed plug-in, ordered by file name
+            // (total conversions and subfolder sub-items are opt-in).
+            let enabled = GameLibrary.originalPluginOrder(plugins)
             let merged = try GameLibrary.merge(baseFiles: baseFiles, plugins: enabled)
             let delta = merged.totalCount - baseOnly.totalCount
             print("base + all plug-ins:  \(merged.totalCount) resources, \(merged.types.count) types  (\(delta >= 0 ? "+" : "")\(delta) net after overrides)")
+            // Each bundle on its own (a TC replaces the base), to show load errors per plug-in.
+            var failed = 0
+            for p in plugins {
+                var one = p; one.isEnabled = true
+                do {
+                    let m = try GameLibrary.merge(baseFiles: baseFiles, plugins: [one])
+                    print("  load \(p.id): ok  \(m.totalCount) resources, \(m.resources(of: NovaType.syst).count) systems\(p.isTotalConversion ? "  [total conversion]" : "")")
+                } catch {
+                    failed += 1
+                    print("  load \(p.id): FAILED \(error)")
+                }
+            }
+            if failed > 0 { exit(1) }
         }
     } catch {
         FileHandle.standardError.write(Data("error: \(error)\n".utf8))
@@ -830,7 +844,14 @@ case "ai":
     guard args.count >= 2 else { usage() }
     let aiBase = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
     let aiGame: NovaGame
-    do { aiGame = NovaGame(try GameLibrary.merge(baseFiles: aiBase)) }
+    var aiPlugins: [PluginBundle] = []
+    if args.count >= 5 {
+        aiPlugins = GameLibrary.discoverPlugins(in: URL(fileURLWithPath: args[4]))
+        let tcID = ProcessInfo.processInfo.environment["NOVASWIFT_TC"]
+        for i in aiPlugins.indices where aiPlugins[i].isTotalConversion { aiPlugins[i].isEnabled = aiPlugins[i].id == tcID }
+        aiPlugins = GameLibrary.originalPluginOrder(aiPlugins)
+    }
+    do { aiGame = NovaGame(try GameLibrary.merge(baseFiles: aiBase, plugins: aiPlugins)) }
     catch { FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1) }
 
     let galaxy = Galaxy(game: aiGame)
@@ -853,7 +874,7 @@ case "ai":
     }
 
     // A player ship at the centre (using the system's dominant hull if we can).
-    let playerHull = aiGame.ship(sys.spawns.first?.id ?? 128).map { _ in sys.spawns.first!.id } ?? 128
+    let playerHull = sys.spawns.first.flatMap { s in aiGame.ship(s.id).map { _ in s.id } } ?? 128
     let player = galaxy.makeShip(playerHull, government: independentGovt, at: Vec2())
         ?? Ship(name: "Player", stats: ShipStats(speed: 300, acceleration: 300, turnRate: 100))
     let world = World(player: player)
