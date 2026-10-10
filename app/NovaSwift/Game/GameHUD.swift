@@ -67,6 +67,9 @@ final class GameHUDModel: ObservableObject {
     /// per-commodity source is wired up yet — `cargoUsed`/`cargoCapacity`
     /// above remain the source of truth for the aggregate tonnage.
     @Published var cargoByCommodity: [(name: String, tons: Int)] = []
+    /// The cargo panel's "Special:" value (0x004612c0): the one mission
+    /// cargo's name, else the one junk's, else "Multiple"; empty for none.
+    @Published var cargoSpecial = ""
     /// Non-empty while a landable stellar object is in reach (shown as a prompt).
     @Published var landPrompt = ""
     /// Structured land-prompt state (drives the platform-specific prompt: a

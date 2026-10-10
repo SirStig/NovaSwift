@@ -337,6 +337,12 @@ final class GameHost {
                 guard let ship = scanGame.ship(id), !ship.appearOn.isEmpty else { return true }
                 return StoryEngine(game: scanGame, player: store.state).evaluate(test: ship.appearOn)
             }
+            // The status bar's cargo panel (0x004612c0): the commodity bins,
+            // the Special line, and the fleet's capacity for Free.
+            scene.cargoPanelProvider = { [weak pilotStore] in
+                guard let state = pilotStore?.state else { return ([], "", 0) }
+                return GameContainerView.cargoPanel(state, game: scanGame)
+            }
             scene.missionBoardStandsDown = { id in
                 guard let m = scanGame.mission(id) else { return false }
                 return m.flags1 & 0x0001 != 0 && m.shipCount == 1
@@ -374,6 +380,7 @@ final class GameHost {
             scene.onPlayerDestroyed = { [weak pilotStore] in
                 guard let pilotStore else { return }
                 if pilotStore.state.strictPlayDeathDeletesPilot { model.deleteStrictPlayPilot() }
+                model.killedPilotID = pilotStore.rosterID
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
                     model.returnToMainMenu()
                 }
@@ -1284,7 +1291,13 @@ struct GameContainerView: View {
         // Commands read `debug`/`model` live at call time (they close over
         // `self`), so registering once per session is enough — a jump
         // rebuild doesn't need to re-wire them the way pad bindings do.
-        .onAppear { registerConsoleCommands() }
+        .onAppear {
+            registerConsoleCommands()
+            if let notice = model.pendingLoadNotice {
+                model.pendingLoadNotice = nil
+                flightMissionServices.storyText = (title: "", text: notice)
+            }
+        }
         .onChange(of: model.settings.controlScheme) { _, _ in applyControlScheme() }
         // Push any settings change into the live scene's own copy so display
         // options (ship bars, planet labels, smooth sprites, engine glow, screen
@@ -2170,6 +2183,35 @@ struct GameContainerView: View {
         saveGame(reason: .event)
     }
 
+    /// The cargo panel's rows, Special line and fleet capacity (0x004612c0).
+    static func cargoPanel(_ state: PlayerState, game: NovaGame)
+        -> (rows: [(name: String, tons: Int)], special: String, fleetCapacity: Int) {
+        let mission = PilotEconomy.missionCargo(state, game: game)
+        var rows: [(name: String, tons: Int)] = []
+        for c in Commodity.allCases {
+            let tons = (state.cargo[c.cargoID] ?? 0) - (mission[c.cargoID] ?? 0)
+            if tons > 0 { rows.append((game.commodityName(c), tons)) }
+        }
+        let loaded = state.activeMissions.filter { am in
+            am.isCarryingCargo && (am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1) != -1
+        }
+        let junk = state.cargo.filter { $0.key >= 128 && $0.value > 0 }.keys.sorted()
+        var special = ""
+        if !loaded.isEmpty || !junk.isEmpty {
+            let misc = game.stringList(2002)
+            if loaded.count == 1, let am = loaded.first {
+                let type = am.resolvedCargoType ?? game.mission(am.missionID)?.cargoType ?? -1
+                special = Commodity(rawValue: type).map { game.commodityName($0) }
+                    ?? game.junk(type)?.name ?? (misc?.string(at: 21) ?? "")
+            } else if loaded.isEmpty, junk.count == 1 {
+                special = game.junk(junk[0])?.name ?? ""
+            } else {
+                special = misc?.string(at: 21) ?? "Multiple"
+            }
+        }
+        return (rows, special, PilotEconomy.cargoCapacity(state, galaxy: Galaxy(game: game)))
+    }
+
     /// Live auxiliary ships go back to their missions' budgets as the player
     /// leaves the system (0x0041ad50), capped at AuxShipCount.
     private func creditSurvivingAuxShips() {
@@ -2801,7 +2843,7 @@ struct GameContainerView: View {
         // own cargo/speed readouts are separate manually-synced caches too, and
         // were missing from this sync entirely, so buying one of these left the
         // sidebar showing stale numbers until the next takeoff rebuilt the ship.
-        host.hud.cargoCapacity = lo.cargoCapacity
+        host.hud.cargoCapacity = PilotEconomy.cargoCapacity(state, galaxy: galaxy)   // the fleet's, for Free (0x004612c0)
         host.hud.cargoUsed = state.usedCargoSpace
         host.hud.maxSpeed = lo.speed
     }

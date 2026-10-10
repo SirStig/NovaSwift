@@ -1,6 +1,15 @@
 import Foundation
 
 extension Int {
+    /// The status bar's credits figure (FUN_00465af0): below 1,000 plain;
+    /// below a million "N,NNN"; else "N.NNM" with the hundredths truncated.
+    var creditsHUD: String {
+        let n = self
+        if n < 1000 { return "\(n)" }
+        if n < 1_000_000 { return "\(n / 1000)," + String(format: "%03d", n % 1000) }
+        return "\(n / 1_000_000)." + String(format: "%02d", (n % 1_000_000) / 10_000) + "M"
+    }
+
     /// The credit balance in EV Nova's compact, abbreviated form — millions as
     /// "1.10M cr", large thousands as "12.4k cr", smaller amounts spelled out
     /// in full with grouping ("850 cr"). Used everywhere the UI shows a credit

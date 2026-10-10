@@ -20,7 +20,8 @@ final class NCBTests: XCTestCase {
 
     func testEmptyExpressionIsAlwaysTrue() {
         XCTAssertTrue(NCBTest("").evaluate(Ctx()))
-        XCTAssertTrue(NCBTest("   ").isAlwaysTrue)
+        // 0x00447f20: only an empty string is always true; a leading space is false.
+        XCTAssertFalse(NCBTest("   ").evaluate(Ctx()))
     }
 
     func testSingleBit() {

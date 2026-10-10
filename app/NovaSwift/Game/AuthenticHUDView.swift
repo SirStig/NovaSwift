@@ -269,6 +269,17 @@ struct AuthenticHUDView: View {
     /// value), centered, with the labels dim and the values bright.
     private var cargoReadout: some View {
         VStack(spacing: 2) {
+            // One row per commodity aboard (0x004612c0), then Free (the
+            // fleet's room) and, with mission cargo or junk, Special.
+            ForEach(Array(model.cargoByCommodity.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 4) {
+                    Text(row.name).novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                    Spacer(minLength: 2)
+                    Text("\(row.tons)").novaFont(.hud, size: subtitleSize).monospacedDigit()
+                        .foregroundStyle(color(style.intf.brightText))
+                }
+            }
             HStack(spacing: 4) {
                 Text("Free:").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
@@ -276,11 +287,20 @@ struct AuthenticHUDView: View {
                     .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
                     .foregroundStyle(color(style.intf.brightText))
             }
+            if !model.cargoSpecial.isEmpty {
+                HStack(spacing: 4) {
+                    Text("Special:").novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.dimText))
+                    Text(model.cargoSpecial).novaFont(.hud, size: subtitleSize)
+                        .foregroundStyle(color(style.intf.brightText))
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                }
+            }
             Spacer(minLength: 2)
             VStack(spacing: 1) {
                 Text("Credits:").novaFont(.hud, size: subtitleSize)
                     .foregroundStyle(color(style.intf.dimText))
-                Text(model.credits.creditsAbbreviated)
+                Text(model.credits.creditsHUD)
                     .novaFont(.hud, weight: .semibold, size: statusSize).monospacedDigit()
                     .foregroundStyle(color(style.intf.brightText))
             }

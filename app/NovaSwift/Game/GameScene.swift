@@ -241,6 +241,11 @@ final class GameScene: SKScene {
     var persSpawnEligible: ((Int) -> Bool)?
     /// Host gate: whether a hull with a non-blank `shïp.AppearOn` may spawn now.
     var shipSpawnEligible: ((Int) -> Bool)?
+    /// The cargo panel's pilot-side figures (0x004612c0): the commodity rows
+    /// (the trade bins, mission cargo excluded), the Special line and the
+    /// fleet's cargo capacity. Polled a few times a second.
+    var cargoPanelProvider: (() -> (rows: [(name: String, tons: Int)], special: String, fleetCapacity: Int))?
+    private var cargoPanelTick = 0
     /// Host gate: whether boarding mission `id`'s ship stands its attackers down.
     var missionBoardStandsDown: ((Int) -> Bool)?
     /// The player's mining scoop collected (cargoType, quantity) from a destroyed
@@ -5539,7 +5544,15 @@ final class GameScene: SKScene {
         updateTargetHUD(p.currentTargetID.flatMap { world.ship(id: $0) })
         updateNavTargetHUD()
         hud.cargoUsed = p.cargoUsed
-        hud.cargoCapacity = p.cargoCapacity
+        cargoPanelTick += 1
+        if let provider = cargoPanelProvider, cargoPanelTick % 10 == 1 {
+            let panel = provider()
+            hud.cargoByCommodity = panel.rows
+            hud.cargoSpecial = panel.special
+            hud.cargoCapacity = panel.fleetCapacity
+        } else if cargoPanelProvider == nil {
+            hud.cargoCapacity = p.cargoCapacity
+        }
         // The weapon readout tracks the selected *secondary* (what the secondary
         // trigger / weapon-switch control fires), matching EV Nova's status bar.
         // A guns-only ship (no secondary fitted) correctly shows nothing here —
