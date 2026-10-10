@@ -3283,7 +3283,9 @@ public final class World {
             let bound = max(1, Int(100 / OriginalClock.rawCallTickScale))
             if rng.range(bound) + 1 <= systemInterference { p.guidanceState = 999 }
         }
-        projectiles.append(p)
+        // The shot pool holds 128 (0x0041fd30 returns -1 with no free slot): a
+        // shot that finds it full is simply not fired.
+        if projectiles.count < OriginalRendering.shotPoolSize { projectiles.append(p) }
         return p
     }
 
@@ -3883,7 +3885,7 @@ public final class World {
                 }
             }
         }
-        projectiles.append(contentsOf: spawned)
+        projectiles.append(contentsOf: spawned.prefix(max(0, OriginalRendering.shotPoolSize - projectiles.count)))
         projectiles.removeAll { !$0.alive }
         asteroids.removeAll { !$0.isAlive }
     }

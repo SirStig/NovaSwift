@@ -425,6 +425,9 @@ final class GameScene: SKScene {
         let endSize: CGFloat
         let startAlpha: CGFloat
         let drag: CGFloat
+        /// SWParticles (0x0047bdd0): one solid 1-px point, no drag or size change,
+        /// opaque until the last 32 ticks of life.
+        var classic = false
     }
     private var activeParticles: [Particle] = []
     private var particlePool: [SKSpriteNode] = []
@@ -1779,6 +1782,7 @@ final class GameScene: SKScene {
         effectClock += dt
         updateFlashes(dt)
         updateParticles(dt)
+        updateSmokePuffs(dt)
         updateSpriteAnims(dt)
         lap("effects")
         syncProjectiles()
@@ -3240,8 +3244,9 @@ final class GameScene: SKScene {
             thruster.isHidden = true
             return
         }
-        thruster.isHidden = !active
-        guard active else { return }
+        // The original draws no plume when a hull has no glow art (Classic).
+        thruster.isHidden = !active || !settings.modernHUD
+        guard active, settings.modernHUD else { return }
         // Sit at the tail (opposite heading) and point backward, with a flicker.
         let back = -angle
         let tail = CGPoint(x: sin(angle) * -shipRadius * 0.7, y: cos(angle) * -shipRadius * 0.7)
@@ -3342,7 +3347,10 @@ final class GameScene: SKScene {
             if s.weaponID >= 128, let trail = trailInfo(for: s.weaponID) {
                 let tail = CGPoint(x: node.position.x - CGFloat(cos(s.facing)) * 4,
                                    y: node.position.y - CGFloat(sin(s.facing)) * 4)
-                if trail.smoke {
+                if trail.smoke, !settings.modernHUD,
+                   spawnSmokePuff(at: tail, weaponID: s.weaponID, big: trail.big) {
+                    // drawn as the original's cicn smoke sprite
+                } else if trail.smoke {
                     spawnParticles(at: tail, count: 1, color: trail.color,
                                    speed: trail.big ? 12 : 8, life: trail.big ? 0.9 : 0.55,
                                    size: trail.big ? 10 : 6, additive: false, grow: true, drag: 2.5)
@@ -4693,6 +4701,8 @@ final class GameScene: SKScene {
         flashPool.removeAll()
         activeParticles.removeAll()
         particlePool.removeAll()
+        for p in smokePuffs { p.node.removeFromParent() }
+        smokePuffs.removeAll()
         activeAnims.removeAll()
         animPool.removeAll()
         for (_, n) in aiLabelNodes { n.removeFromParent() }
@@ -4851,8 +4861,8 @@ final class GameScene: SKScene {
             return
         }
         guard let thruster = n.thruster else { return }
-        thruster.isHidden = !active
-        guard active else { return }
+        thruster.isHidden = !active || !settings.modernHUD
+        guard active, settings.modernHUD else { return }
         let tail = CGPoint(x: sin(npc.angle) * -Double(n.radius) * 0.7,
                            y: cos(npc.angle) * -Double(n.radius) * 0.7)
         thruster.position = tail
@@ -5298,6 +5308,22 @@ final class GameScene: SKScene {
         }
         return out
     }()
+    /// The stellar selection cursor: cicn 10000-10007 (0x0042eac0). Frames 0-3
+    /// normally, 4-7 for a destroyed stellar.
+    private lazy var navCursorTextures: [SKTexture] = {
+        guard let res = galaxy?.game.resources else { return [] }
+        var out: [SKTexture] = []
+        for id in 10000..<10008 {
+            guard let r = res.resource(NovaType.cicn, id), let sheet = try? CICN.decode(r.data),
+                  let cg = sheet.makeCGImage() else { return [] }
+            let t = SKTexture(cgImage: cg)
+            t.filteringMode = spriteFilter
+            out.append(t)
+        }
+        return out
+    }()
+    private var navCursorCorners: [SKSpriteNode] = []
+    private var navCursorZoom: CGFloat = 0
     private var reticleCorners: [SKSpriteNode] = []
     /// Zoom-in offset: 256 when a target is picked, shrinking ~60 per 30 Hz tick.
     private var reticleZoom: CGFloat = 0
@@ -5324,7 +5350,30 @@ final class GameScene: SKScene {
         }
     }
 
+    private func updateNavCursor(pv: PlanetVisual, newTarget: Bool) {
+        if navCursorCorners.isEmpty {
+            for _ in 0..<4 {
+                let n = SKSpriteNode(texture: navCursorTextures[0])
+                selectionLayer.addChild(n)
+                navCursorCorners.append(n)
+            }
+        }
+        if newTarget { navCursorZoom = 256 } else { navCursorZoom = max(0, navCursorZoom - 1800 * CGFloat(frameDT)) }
+        let base = destroyedStellarIDs.contains(pv.id) ? 4 : 0
+        let half = pv.texture.map { max($0.size().width, $0.size().height) / 2 } ?? 64
+        let off = half.rounded(.up) + navCursorZoom + 16
+        let corners = [(-off, off), (off, off), (off, -off), (-off, -off)]
+        for (i, n) in navCursorCorners.enumerated() {
+            n.texture = navCursorTextures[base + i]
+            n.size = n.texture!.size()
+            n.position = CGPoint(x: pv.position.x + corners[i].0, y: pv.position.y + corners[i].1)
+            n.isHidden = false
+        }
+    }
+
     private func updateSelectionBrackets() {
+        let useNavCursor = !settings.modernHUD && navCursorTextures.count == 8
+        if selectedPlanetID == nil || !useNavCursor { for n in navCursorCorners { n.isHidden = true } }
         let useReticle = !settings.modernHUD && reticleTextures.count == 16
         if !(world.player.currentTargetID != nil) || !useReticle { for n in reticleCorners { n.isHidden = true } }
         if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
@@ -5350,7 +5399,12 @@ final class GameScene: SKScene {
             shipBracket.removeAllActions()
         }
 
-        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
+        if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }), useNavCursor {
+            planetBracket.isHidden = true
+            let isNew = lockedPlanetBracketID != pid
+            lockedPlanetBracketID = pid
+            updateNavCursor(pv: pv, newTarget: isNew)
+        } else if let pid = selectedPlanetID, let pv = planetVisuals.first(where: { $0.id == pid }) {
             let landable = world.systemContext.bodies.first { $0.id == pid }?.canLand ?? false
             planetBracket.position = pv.position
             planetBracket.isHidden = false
@@ -5475,7 +5529,8 @@ final class GameScene: SKScene {
     /// sequence finishes (`updateSpriteAnims`).
     private func spawnSpriteAnim(frames: [SKTexture], frameDuration: Double,
                                  at point: CGPoint, diameter: CGFloat) {
-        guard !frames.isEmpty else { return }
+        // The explosion sprite pool holds 32 (0x004af020); a 33rd is not drawn.
+        guard !frames.isEmpty, activeAnims.count < OriginalRendering.explosionPoolSize else { return }
         let node = animPool.popLast() ?? {
             let s = SKSpriteNode(texture: frames[0])
             s.zPosition = 14
@@ -5525,7 +5580,8 @@ final class GameScene: SKScene {
                                 additive: Bool, grow: Bool, drag: CGFloat = 1.5,
                                 cone: (angle: CGFloat, spread: CGFloat)? = nil) {
         guard count > 0, !settings.reduceFlashing else { return }
-        let n = min(count, maxParticles - activeParticles.count)
+        let classic = !settings.modernHUD
+        let n = min(count, (classic ? OriginalRendering.particlePoolSize : maxParticles) - activeParticles.count)
         guard n > 0 else { return }
         for _ in 0..<n {
             let node = particlePool.popLast() ?? {
@@ -5537,9 +5593,9 @@ final class GameScene: SKScene {
             }()
             let dir: CGFloat = cone.map { $0.angle + .random(in: -$0.spread...$0.spread) }
                 ?? .random(in: 0...(2 * .pi))
-            let spd = speed * CGFloat.random(in: 0.4...1.0)
-            let startSize = size * CGFloat.random(in: 0.7...1.2)
-            node.blendMode = additive ? .add : .alpha
+            let spd = classic ? speed : speed * CGFloat.random(in: 0.4...1.0)
+            let startSize = classic ? 1 : size * CGFloat.random(in: 0.7...1.2)
+            node.blendMode = (additive && !classic) ? .add : .alpha
             node.colorBlendFactor = 1
             node.color = color
             node.isHidden = false
@@ -5548,9 +5604,66 @@ final class GameScene: SKScene {
             node.size = CGSize(width: startSize, height: startSize)
             activeParticles.append(Particle(
                 node: node, vx: cos(dir) * spd, vy: sin(dir) * spd,
-                age: 0, life: life * Double.random(in: 0.6...1.0),
-                startSize: startSize, endSize: grow ? startSize * 2.4 : startSize * 0.4,
-                startAlpha: additive ? 1.0 : 0.85, drag: drag))
+                age: 0, life: classic ? life : life * Double.random(in: 0.6...1.0),
+                startSize: startSize, endSize: classic ? startSize : (grow ? startSize * 2.4 : startSize * 0.4),
+                startAlpha: classic ? 1 : (additive ? 1.0 : 0.85), drag: classic ? 0 : drag,
+                classic: classic))
+        }
+    }
+
+    // MARK: Smoke sprites (cicn 1000 / 1008 sets, pool of 64)
+
+    private struct SmokePuff { let node: SKSpriteNode; var age: Double; let life: Double; let frames: [SKTexture] }
+    private var smokePuffs: [SmokePuff] = []
+    private var smokeFrameCache: [Int: [SKTexture]] = [:]
+    private var smokeSetCache: [Int: Int] = [:]
+
+    /// The 8 frames of the smoke set starting at cicn `base` (empty when absent).
+    private func smokeFrames(base: Int) -> [SKTexture] {
+        if let hit = smokeFrameCache[base] { return hit }
+        var out: [SKTexture] = []
+        if let res = galaxy?.game.resources {
+            for id in base..<(base + 8) {
+                guard let r = res.resource(NovaType.cicn, id), let sheet = try? CICN.decode(r.data),
+                      let cg = sheet.makeCGImage() else { out = []; break }
+                let t = SKTexture(cgImage: cg); t.filteringMode = spriteFilter
+                out.append(t)
+            }
+        }
+        smokeFrameCache[base] = out
+        return out
+    }
+
+    /// Original smoke (pool of 64, only when cicn 1000 exists): the weapon's
+    /// SmokeSet picks cicn 1000 + 8n; the flag-only default is 1000 (small) or
+    /// 1008 (big). Returns false when the art is missing or the pool is full.
+    private func spawnSmokePuff(at point: CGPoint, weaponID: Int, big: Bool) -> Bool {
+        guard smokePuffs.count < OriginalRendering.smokePoolSize else { return true }
+        let set: Int
+        if let c = smokeSetCache[weaponID] { set = c } else {
+            set = galaxy?.game.weapon(weaponID)?.smokeSet ?? -1
+            smokeSetCache[weaponID] = set
+        }
+        let frames = smokeFrames(base: set >= 0 ? 1000 + 8 * set : (big ? 1008 : 1000))
+        guard frames.count == 8 else { return false }
+        let node = SKSpriteNode(texture: frames[0])
+        node.position = point
+        node.zPosition = 7
+        effectsLayer.addChild(node)
+        smokePuffs.append(SmokePuff(node: node, age: 0, life: big ? 0.9 : 0.55, frames: frames))
+        return true
+    }
+
+    private func updateSmokePuffs(_ dt: Double) {
+        guard !smokePuffs.isEmpty else { return }
+        var i = 0
+        while i < smokePuffs.count {
+            smokePuffs[i].age += dt
+            let p = smokePuffs[i]
+            if p.age >= p.life { p.node.removeFromParent(); smokePuffs.remove(at: i); continue }
+            let idx = min(7, Int(p.age / p.life * 8))
+            if p.node.texture !== p.frames[idx] { p.node.texture = p.frames[idx]; p.node.size = p.frames[idx].size() }
+            i += 1
         }
     }
 
@@ -5568,6 +5681,14 @@ final class GameScene: SKScene {
                 p.node.isHidden = true
                 particlePool.append(p.node)
                 activeParticles.remove(at: i)
+                continue
+            }
+            if p.classic {
+                let ticksLeft = Int(((p.life - p.age) * 30).rounded(.up))
+                p.node.alpha = CGFloat(OriginalRendering.particleAlpha(life: ticksLeft))
+                p.node.position.x += activeParticles[i].vx * fdt
+                p.node.position.y += activeParticles[i].vy * fdt
+                i += 1
                 continue
             }
             // Linear velocity damping (no pow overload ambiguity), clamped to 0.
