@@ -414,6 +414,22 @@ private struct RadarContactsView: View {
                         // Interference static (OS-05): this refresh shows only
                         // noise over the whole scope, no contacts.
                         if model.radarStatic {
+                            if !model.radarPatterns.isEmpty {
+                                if let cg = model.radarPatterns[128 + Int.random(in: 0..<10)] {
+                                    let img = ctx.resolve(Image(decorative: cg, scale: 1))
+                                    let w = CGFloat(cg.width), h = CGFloat(cg.height)
+                                    var y: CGFloat = 0
+                                    while y < size.height {
+                                        var x: CGFloat = 0
+                                        while x < size.width {
+                                            ctx.draw(img, at: CGPoint(x: x, y: y), anchor: .topLeading)
+                                            x += w
+                                        }
+                                        y += h
+                                    }
+                                }
+                                return
+                            }
                             for _ in 0..<Int(size.width * size.height / 12) {
                                 let r = CGRect(x: .random(in: 0..<size.width), y: .random(in: 0..<size.height),
                                                width: 1, height: 1)

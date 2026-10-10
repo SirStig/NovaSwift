@@ -259,6 +259,9 @@ final class GameDataController: ObservableObject {
         cache?.store(tags)
     }
 
+    /// Plug-in files the last load could not open, listed in the Plug-ins screen.
+    @Published private(set) var failedPluginFiles: [GameLibrary.FailedPluginFile] = []
+
     func reload() {
         guard let (baseDir, baseFiles) = prepareReload() else { return }
         do {
@@ -362,6 +365,7 @@ final class GameDataController: ObservableObject {
     /// Publish a successfully merged data set, attaching a cross-launch decoded-
     /// sprite cache keyed by the data set's fingerprint (see `SpriteDiskCache`).
     private func applyMerged(_ merged: ResourceCollection, baseDir: URL, baseFiles: [URL]) {
+        failedPluginFiles = GameLibrary.lastFailedPluginFiles
         let fingerprint = GameLibrary.fingerprint(baseFiles: baseFiles, plugins: plugins, flatPluginOrder: !pluginsAreManual)
         let spriteCache = SpriteDiskCache(fingerprint: fingerprint)
         var newGame = NovaGame(merged, spriteCache: spriteCache)
@@ -592,6 +596,9 @@ final class GameDataController: ObservableObject {
     /// first, then every discovered plugin directory, each the same
     /// direct-hit-then-recursive-search way `raceVideoURL` always has.
     func videoURL(named name: String) -> URL? {
+        // Ui_PlayMovieFileModal 0x0049db00 returns at once under the
+        // "QuickTime Movies" preference being off.
+        guard GameSettings.load().playMovies else { return nil }
         // Ui_PlayMovieFileModal (0x0049db00): "Nova Plug-ins" first, then "Nova Files".
         let dirs = (resolvePluginDirs() + [resolveBaseDir()]).compactMap { $0 }
         let fm = FileManager.default

@@ -42,13 +42,17 @@ struct NewPilotView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: step)
         .onAppear {
-            if scenarios.count <= 1 { step = .name }
+            if scenarios.count <= 1 || classicChrome { step = .name }
             fillDefaults()
         }
     }
 
     // With one scenario there's no picker — jump to the name step (real behavior).
-    private var effectiveStep: Step { scenarios.count <= 1 && step == .scenario ? .name : step }
+    // In the original, several scenarios are a pop-up inside the pilot dialog
+    // (DITL 3101), not a separate step.
+    private var effectiveStep: Step {
+        (scenarios.count <= 1 || classicChrome) && step == .scenario ? .name : step
+    }
 
     /// The fields open prefilled from STR# 128 (0x00489d70).
     private func fillDefaults() {
@@ -93,6 +97,45 @@ struct NewPilotView: View {
     // (item 7) on the same row (both top=36) rather than stacked above it, and
     // CNTL 500 "gender popup" (item 10, 200x20) is its own row below.
     private var nameDialog: some View {
+        if classicChrome { return AnyView(classicNameDialog) }
+        return AnyView(modernNameDialog)
+    }
+
+    private var classicChrome: Bool { !model.settings.modernDialogs && model.data.game != nil }
+
+    /// DLOG/DITL 3102 in the native window: OK (0), Cancel (1), Strict Play
+    /// (3), "Full Name:"/"Nickname:" (4/5) with their edit fields (7/8) and
+    /// the gender pop-up (10).
+    private var classicNameDialog: some View {
+        ClassicDITLDialog(
+            game: model.data.game, graphics: model.uiGraphics, id: scenarios.count > 1 ? 3101 : 3102,
+            fallbackSize: CGSize(width: 360, height: 220),
+            checks: [3: $strictPlay],
+            edits: [7: $name, 8: $nickname],
+            actions: [0: confirmName, 1: cancelName],
+            popups: [10: (labels: ["Male", "Female"],
+                          selection: Binding(get: { isMale ? 0 : 1 }, set: { isMale = $0 == 0 })),
+                     12: (labels: scenarios.map(\.displayName),
+                          selection: Binding(get: { scenarioIndex }, set: { scenarioIndex = $0 }))],
+            defaultItem: 0, cancelItem: 1)
+    }
+
+    private func cancelName() {
+        if scenarios.count > 1 && !classicChrome { step = .scenario } else { onClose() }
+    }
+
+    private func confirmName() {
+        // A name or nickname over 24 characters beeps and is refused.
+        guard name.count <= PilotFactory.maxNameLength,
+              nickname.count <= PilotFactory.maxNameLength else {
+            model.audio.play(.uiError)
+            return
+        }
+        if let game = model.data.game { shipName = PilotFactory.defaultName(.ship, game: game) }
+        step = .shipName
+    }
+
+    private var modernNameDialog: some View {
         let scenario = scenarios[min(scenarioIndex, scenarios.count - 1)]
         return NovaDialog(title: "Create a New Pilot", width: 400, buttons: [
             NovaDialogButton(title: "Cancel") {
@@ -156,6 +199,26 @@ struct NewPilotView: View {
     /// The ship-name prompt after the pilot dialog (0x00489d70): STR# 2002
     /// #121 and the hull's name. Cancelling abandons the new pilot.
     private var shipNameDialog: some View {
+        classicChrome ? AnyView(classicShipNameDialog) : AnyView(modernShipNameDialog)
+    }
+
+    /// DLOG/DITL 3001 "Text Input": the prompt (2), the name field (4, 64
+    /// characters at most — longer input beeps), OK (0) and Cancel (5).
+    private var classicShipNameDialog: some View {
+        let scenario = scenarios[min(scenarioIndex, scenarios.count - 1)]
+        let prompt = model.data.game.map { PilotFactory.shipNamePrompt(scenario: scenario, game: $0) } ?? ""
+        return ClassicDITLDialog(
+            game: model.data.game, graphics: model.uiGraphics, id: 3001,
+            fallbackSize: CGSize(width: 360, height: 140),
+            texts: [2: prompt], edits: [4: $shipName],
+            actions: [0: {
+                guard shipName.utf8.count <= 64 else { model.audio.play(.uiError); return }
+                start(scenario)
+            }, 5: { onClose() }],
+            defaultItem: 0, cancelItem: 5)
+    }
+
+    private var modernShipNameDialog: some View {
         let scenario = scenarios[min(scenarioIndex, scenarios.count - 1)]
         let prompt = model.data.game.map { PilotFactory.shipNamePrompt(scenario: scenario, game: $0) } ?? ""
         return NovaDialog(title: "", width: 400, buttons: [

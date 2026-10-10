@@ -86,6 +86,10 @@ final class GameHUDModel: ObservableObject {
     /// The original's text expansion (`{G …}` conditionals and `<PSN>`-style
     /// wildcards), applied to every posted line; set by the container.
     var expandText: ((String) -> String)?
+    /// The radar's interference patterns: the `ppat` 128-137 that exist, keyed
+    /// by id. A static refresh tiles 128 + rand(10) over the scope
+    /// (0x0045d600); an id with no pattern draws nothing.
+    var radarPatterns: [Int: CGImage] = [:]
 
     /// Sim time left on the current message, in seconds: a message lasts its
     /// own number of the original's raw sim calls and freezes while the game
