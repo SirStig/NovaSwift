@@ -62,9 +62,39 @@ final class PlayerTargetCycleTests: XCTestCase {
         let world = makeWorld()
         let idle = addShip(world, "Idle", distance: 100)
         let attacker = addShip(world, "Attacker", distance: 8000)
-        attacker.brain?.state = .attacking
-        attacker.brain?.targetID = World.playerEntityID
+        let rec = record(world, attacker)
+        rec.state = OriginalAIState.attack
+        rec.primary = World.playerEntityID
         XCTAssertEqual(world.selectNearestHostileThreat()?.entityID, attacker.entityID)
         XCTAssertEqual(world.selectNearestEngaged()?.entityID, idle.entityID)
+    }
+
+    /// `Ship_IsThreatToPlayerSquad` (0x0040f6d0): any engaged state counts,
+    /// but not a coasting ship, one in a disengaged state, or one after a
+    /// ship the player doesn't lead directly.
+    func testThreatToSquadIsTheOriginalRule() {
+        let world = makeWorld()
+        let escort = addShip(world, "Escort", distance: 50, escort: true)
+        let fighter = addShip(world, "Fighter", distance: 60)
+        fighter.brain?.leaderID = escort.entityID
+        let npc = addShip(world, "Npc", distance: 400)
+        let rec = record(world, npc)
+        rec.primary = World.playerEntityID
+        rec.state = OriginalAIState.travel
+        XCTAssertTrue(world.isThreatToPlayerSquad(npc), "the state need not be attack")
+        rec.state = OriginalAIState.escortStation
+        XCTAssertFalse(world.isThreatToPlayerSquad(npc), "state 0x0a is disengaged")
+        rec.state = OriginalAIState.attack
+        rec.maneuverTimer = 5
+        XCTAssertFalse(world.isThreatToPlayerSquad(npc), "coasting on the maneuver timer")
+        rec.maneuverTimer = 0
+        rec.primary = escort.entityID
+        XCTAssertTrue(world.isThreatToPlayerSquad(npc))
+        rec.primary = fighter.entityID
+        XCTAssertFalse(world.isThreatToPlayerSquad(npc), "only one level of the squad")
+    }
+
+    private func record(_ world: World, _ ship: Ship) -> OriginalAIShipState {
+        world.originalAI.ensureRecord(ship, host: WorldAIHost(world: world, ai: world.originalAI))
     }
 }

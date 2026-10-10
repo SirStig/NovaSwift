@@ -76,7 +76,8 @@ extension OriginalAI {
     private func computeKeepsPressing(_ ship: Ship, host: OriginalAIHost) -> Bool {
         guard ship.isAlive, !ship.disabled, !ship.isPlayer, let rec = records[ship.entityID] else { return false }
         guard leader(of: ship) != World.playerEntityID, let target = rec.primary else { return false }
-        guard canEngage(host.player, by: ship, host: host) else { return false }
+        // 0x00464a90(ship, player): the player can see this ship.
+        guard canEngage(ship, by: host.player, host: host) else { return false }
         if rec.defenseHome != nil { return true }
         let coasting = rec.maneuverTimer > 0
         let engaged = !Self.disengagedStates.contains(rec.state)
@@ -94,7 +95,10 @@ extension OriginalAI {
         return false
     }
 
-    /// `Ship_IsThreatenedByEnemyOfShip` (0x00410110).
+    /// `Ship_IsThreatenedByEnemyOfShip` (0x00410110): the player is
+    /// threatened when any pressing ship is an enemy of `context`; an NPC
+    /// when it keeps pressing itself, or when it is attacking some third ship
+    /// `c` (0x0040faa0(c, ship)) that is an enemy of `context`.
     func isThreatenedByEnemy(_ ship: Ship, of context: Ship, host: OriginalAIHost) -> Bool {
         if ship.isPlayer {
             return host.ships.contains { other in
@@ -105,7 +109,7 @@ extension OriginalAI {
         if keepsPressing(ship, host: host) { return true }
         return host.ships.contains { c in
             !c.isPlayer && c.isAlive && c.entityID != context.entityID && c.entityID != ship.entityID
-                && isAttacking(c, ship, host: host) && isEnemy(context, c, host: host)
+                && isAttacking(ship, c, host: host) && isEnemy(context, c, host: host)
         }
     }
 
