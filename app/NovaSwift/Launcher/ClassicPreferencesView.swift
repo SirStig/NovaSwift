@@ -18,6 +18,7 @@ struct ClassicPreferencesView: View {
     var onPortOptions: () -> Void
 
     @State private var showKeys = false
+    @State private var showMoreKeys = false
 
     private func flag(_ kp: WritableKeyPath<GameSettings, Bool>) -> Binding<Bool> {
         Binding(get: { model.settings[keyPath: kp] },
@@ -32,10 +33,6 @@ struct ClassicPreferencesView: View {
 
     private func step(_ kp: WritableKeyPath<GameSettings, Int>, by d: Int, max m: Int) {
         model.settings[keyPath: kp] = Swift.min(m, Swift.max(0, model.settings[keyPath: kp] + d))
-        if kp == \GameSettings.soundVolumeStep {
-            // 5 is the stock level (full gain here); lower steps attenuate.
-            model.settings.masterVolume = Swift.min(1, Double(model.settings.soundVolumeStep) / 5)
-        }
         model.commitSettings()
     }
 
@@ -73,7 +70,14 @@ struct ClassicPreferencesView: View {
                     .padding(.bottom, 12)
             }
         }
-        .sheet(isPresented: $showKeys) {
+        .overlay {
+            if showKeys {
+                ClassicKeySettingsView(onClose: { showKeys = false },
+                                       onMoreKeys: { showKeys = false; showMoreKeys = true })
+                    .transition(.opacity)
+            }
+        }
+        .sheet(isPresented: $showMoreKeys) {
             NavigationStack { ControlsView() }
                 .frame(minWidth: 480, minHeight: 560)
                 .preferredColorScheme(.dark)

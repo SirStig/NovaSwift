@@ -1381,7 +1381,7 @@ final class GameScene: SKScene {
             }
             layer.stars.append(star)
             layer.bases.append(base)
-            layer.factors.append(CGFloat(OriginalRendering.starFactor(random35: Int.random(in: 0..<35), parallax: true)))
+            layer.factors.append(CGFloat(OriginalRendering.starFactor(random35: Int.random(in: 0..<35), parallax: settings.parallaxStarfield)))
             layer.container.addChild(star)
         }
         addChild(layer.container)
@@ -2152,8 +2152,10 @@ final class GameScene: SKScene {
         let id = p.shipTypeID
         rotationTextures = game.shipSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         engineGlowTextures = game.engineGlowSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
-        lightTextures = game.lightSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
-        weaponGlowTextures = game.weaponGlowSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
+        // "Running Lights" / "Weapon Effects" off: the original skips those
+        // overlay layers when it builds the ship (0x004b4ee0).
+        lightTextures = !settings.runningLights ? [] : game.lightSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
+        weaponGlowTextures = !settings.weaponEffects ? [] : game.weaponGlowSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         altTextures = game.altSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         shieldTextures = game.shieldSprite(id).map { SpriteTextures.rotationFrames(from: $0) } ?? []
         hullAnim = game.shan(id).map(HullAnim.init) ?? HullAnim()
@@ -5246,7 +5248,7 @@ final class GameScene: SKScene {
     private func npcLightTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcLightCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, let sheet = galaxy?.game.lightSprite(shipTypeID) {
+        if shipTypeID >= 128, settings.runningLights, let sheet = galaxy?.game.lightSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcLightCache[shipTypeID] = textures
@@ -5269,7 +5271,7 @@ final class GameScene: SKScene {
     private func npcWeaponGlowTextures(for shipTypeID: Int) -> [SKTexture] {
         if let cached = npcWeaponGlowCache[shipTypeID] { return cached }
         var textures: [SKTexture] = []
-        if shipTypeID >= 128, let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
+        if shipTypeID >= 128, settings.weaponEffects, let sheet = galaxy?.game.weaponGlowSprite(shipTypeID) {
             textures = SpriteTextures.allFrames(from: sheet)
         }
         npcWeaponGlowCache[shipTypeID] = textures

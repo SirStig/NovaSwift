@@ -42,13 +42,17 @@ struct NewPilotView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: step)
         .onAppear {
-            if scenarios.count <= 1 { step = .name }
+            if scenarios.count <= 1 || classicChrome { step = .name }
             fillDefaults()
         }
     }
 
     // With one scenario there's no picker — jump to the name step (real behavior).
-    private var effectiveStep: Step { scenarios.count <= 1 && step == .scenario ? .name : step }
+    // In the original, several scenarios are a pop-up inside the pilot dialog
+    // (DITL 3101), not a separate step.
+    private var effectiveStep: Step {
+        (scenarios.count <= 1 || classicChrome) && step == .scenario ? .name : step
+    }
 
     /// The fields open prefilled from STR# 128 (0x00489d70).
     private func fillDefaults() {
@@ -104,18 +108,20 @@ struct NewPilotView: View {
     /// the gender pop-up (10).
     private var classicNameDialog: some View {
         ClassicDITLDialog(
-            game: model.data.game, graphics: model.uiGraphics, id: 3102,
+            game: model.data.game, graphics: model.uiGraphics, id: scenarios.count > 1 ? 3101 : 3102,
             fallbackSize: CGSize(width: 360, height: 220),
             checks: [3: $strictPlay],
             edits: [7: $name, 8: $nickname],
             actions: [0: confirmName, 1: cancelName],
             popups: [10: (labels: ["Male", "Female"],
-                          selection: Binding(get: { isMale ? 0 : 1 }, set: { isMale = $0 == 0 }))],
+                          selection: Binding(get: { isMale ? 0 : 1 }, set: { isMale = $0 == 0 })),
+                     12: (labels: scenarios.map(\.displayName),
+                          selection: Binding(get: { scenarioIndex }, set: { scenarioIndex = $0 }))],
             defaultItem: 0, cancelItem: 1)
     }
 
     private func cancelName() {
-        if scenarios.count > 1 { step = .scenario } else { onClose() }
+        if scenarios.count > 1 && !classicChrome { step = .scenario } else { onClose() }
     }
 
     private func confirmName() {

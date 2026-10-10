@@ -544,8 +544,9 @@ final class GameHost {
         // scene can select the live set/heading — not just the first 36 frames.
         if let sheet = game.shipSprite(shipID) { textures = SpriteTextures.allFrames(from: sheet) }
         if let glow = game.engineGlowSprite(shipID) { engineTextures = SpriteTextures.allFrames(from: glow) }
-        if let lights = game.lightSprite(shipID) { lightTextures = SpriteTextures.allFrames(from: lights) }
-        if let wg = game.weaponGlowSprite(shipID) { weaponGlowTextures = SpriteTextures.allFrames(from: wg) }
+        let prefs = GameSettings.load()
+        if prefs.runningLights, let lights = game.lightSprite(shipID) { lightTextures = SpriteTextures.allFrames(from: lights) }
+        if prefs.weaponEffects, let wg = game.weaponGlowSprite(shipID) { weaponGlowTextures = SpriteTextures.allFrames(from: wg) }
         if let alt = game.altSprite(shipID) { altTextures = SpriteTextures.allFrames(from: alt) }
         // The shän shield-bubble layer (single-frame overlay), only present when a
         // "Shields" graphics plug-in populated it — nil/empty for stock hulls.

@@ -20,6 +20,16 @@ struct RootView: View {
     }()
     #endif
 
+    @ViewBuilder private var brightnessVeil: some View {
+        let gamma = Double(min(6, max(0, model.settings.brightnessStep)) * 10 + 70) / 100
+        if gamma < 1 {
+            Color.black.opacity(1 - gamma).ignoresSafeArea().allowsHitTesting(false)
+        } else if gamma > 1 {
+            Color.white.opacity((gamma - 1) * 0.5).blendMode(.plusLighter)
+                .ignoresSafeArea().allowsHitTesting(false)
+        }
+    }
+
     var body: some View {
         ZStack {
             switch model.screen {
@@ -60,6 +70,11 @@ struct RootView: View {
                 GameContainerView()
                     .transition(.opacity)
             }
+
+            // "Brightness" preference: the original sets a display gamma of
+            // step * 10 + 70 percent (0x00416100; 100 at the default step 3).
+            // Approximated as a black or white veil over everything.
+            brightnessVeil
 
             // A new pilot's scenario intro, full-screen and outside any dialog's
             // sheet frame — see AppModel.pendingIntro.

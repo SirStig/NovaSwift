@@ -83,7 +83,11 @@ final class GameAudio: ObservableObject {
     }
 
     private func applyVolumes() {
-        let master = settings.muteAll ? 0 : Float(settings.masterVolume)
+        // The sound preference (0...8) drives the effects level exactly as
+        // NovaAudio_UpdateCenteredGainFromPreference 0x0046ab60 does:
+        // min(256, step * 8), here relative to the step-8 maximum (64).
+        let level = Float(OriginalAudio.masterVolume(preference: settings.soundVolumeStep)) / 64
+        let master = settings.muteAll ? 0 : Float(settings.masterVolume) * min(1, level)
         engine.masterVolume = master
         engine.sfxVolume = Float(settings.sfxVolume)
         // Music level is the original's preference-derived movie volume
@@ -94,7 +98,7 @@ final class GameAudio: ObservableObject {
     // MARK: Music
 
     /// The music slider as the original's 0…8 sound preference.
-    private var musicPreference: Int { Int((settings.musicVolume * 8).rounded()) }
+    private var musicPreference: Int { max(0, min(8, settings.soundVolumeStep)) }
 
     /// `pref × 0x30` at start, `pref × 0x20` while playing (QuickTime 0…256).
     private var musicGains: (start: Float, playing: Float) {
@@ -119,7 +123,8 @@ final class GameAudio: ObservableObject {
     }
 
     private var musicEnabled: Bool {
-        settings.musicEnabled && !settings.muteAll && settings.musicVolume > 0
+        // "Intro Music" off: the title music never starts (0x004ab5d0).
+        settings.musicEnabled && settings.introMusic && !settings.muteAll && settings.musicVolume > 0
     }
 
     private func updateMusicState(restart: Bool) {
@@ -264,6 +269,8 @@ final class GameAudio: ObservableObject {
     /// Start (or switch) the ambient loop for the spöb the player just landed
     /// on. No-op if that spöb has no `ambientSoundID` (`-1`/nil in the data).
     func startAmbient(soundID: Int?) {
+        // "Ambient Sounds" off: the landed screen plays no spaceport loop (0x00491f30).
+        guard settings.ambientSounds else { engine.stopLoop(id: Self.ambientLoopKey); return }
         guard !settings.muteAll, let soundID, soundID >= 0, let buffer = library.buffer(for: soundID) else {
             engine.stopLoop(id: Self.ambientLoopKey)
             return
