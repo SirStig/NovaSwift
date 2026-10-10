@@ -120,12 +120,12 @@ costing a day.
 
 ## Beyond the original
 
-![NovaSwift's own features](branding/feature-blocks.svg?v=4978b310)
+![NovaSwift's own features](branding/feature-blocks.svg?v=acfdf088)
 
 NovaSwift's own features, one square per task: green done, amber partly done,
 outline planned. Currently 98 done, 9 partly done, 26 planned. The list is kept
 by hand in `site/assets/features.json`, with a pointer to the code for each
-task, and the same script renders [feature-blocks.svg](branding/feature-blocks.svg?v=4978b310)
+task, and the same script renders [feature-blocks.svg](branding/feature-blocks.svg?v=acfdf088)
 from it. Update the JSON when a feature changes.
 
 Partly done, in short: the public online lobby list and iCloud game-data upload

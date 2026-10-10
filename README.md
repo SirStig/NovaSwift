@@ -41,7 +41,7 @@ in ways a code comparison doesn't catch. If something plays differently, please
 
 ### Beyond the original
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=a996abb9)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=95150f5b)
 
 ### Not needed
 
