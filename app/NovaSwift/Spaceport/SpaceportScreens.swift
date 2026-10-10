@@ -912,6 +912,8 @@ struct BarView: View {
     @EnvironmentObject private var appModel: AppModel
 
     @State private var showGambling = false
+    /// Gamble with no credits: the original (0x0047c8e0) raises STR# 2002 #361 instead.
+    @State private var showBrokeAlert = false
     @State private var showHire = false
     @State private var showHolovid = false
     @StateObject private var services = AppGameServices()
@@ -971,7 +973,7 @@ struct BarView: View {
                             .ditlPlace(space, d, holo)
                         let gamble = d.rect(1, top: 125, left: 156, bottom: 151, right: 255)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.gamble, fallback: "Gamble"),
-                                   ditl: gamble) { showGambling = true }
+                                   ditl: gamble) { openGambling() }
                             .ditlPlace(space, d, gamble)
                         let leave = d.rect(0, top: 154, left: 156, bottom: 180, right: 255)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
@@ -982,7 +984,7 @@ struct BarView: View {
                     VStack {
                         Text(barText).foregroundStyle(.white).padding()
                         HStack {
-                            Button("Gamble") { showGambling = true }
+                            Button("Gamble") { openGambling() }
                             Button("Leave", action: onDone)
                         }
                     }
@@ -1026,6 +1028,12 @@ struct BarView: View {
         .task(id: nextOffer) { await offerPatron(after: nextOffer == 0 ? 15 : 30 + Int.random(in: 0..<30)) }
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
+        .alert(game.stringList(2002)?.string(at: 361) ?? "You have no money to gamble with.",
+               isPresented: $showBrokeAlert) { Button("OK", role: .cancel) {} }
+    }
+
+    private func openGambling() {
+        if pilot.state.credits < 1 { showBrokeAlert = true } else { showGambling = true }
     }
 
     /// The bar's offer timer (60 Hz ticks): wait, then let the next patron in
