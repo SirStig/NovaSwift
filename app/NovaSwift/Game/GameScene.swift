@@ -329,7 +329,6 @@ final class GameScene: SKScene {
     private var npcDeathSequenceStarted: Set<Int> = []
     private var shipSprite: SKSpriteNode?
     private var debrisPodFrames: [SKTexture]?
-    private var debrisPuffCount = 0
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
     private var thruster: SKNode!
@@ -2428,8 +2427,6 @@ final class GameScene: SKScene {
             switch event {
             case let .areaBlast(at, blastRadius):
                 spawnAreaBlast(at: CGPoint(x: at.x, y: at.y), blastRadius: blastRadius)
-            case let .debrisPuff(at, velocity, lifeTicks):
-                spawnDebrisPuff(at: CGPoint(x: at.x, y: at.y), velocity: velocity, lifeTicks: lifeTicks)
             case let .playerCloakChanged(engaging):
                 audio?.playSound(engaging ? 381 : 380)
             case let .combatChatter(soundID):
@@ -3248,20 +3245,26 @@ final class GameScene: SKScene {
     /// The 32 debris-puff slots (0x0043b170): drawn where the pool says,
     /// opaque until the last 32 ticks of life, then fading out.
     private func syncDebrisPuffs() {
+        if debrisPodFrames == nil {
+            debrisPodFrames = galaxy?.game.shipSprite(Ship.escapePodShipID).map { SpriteTextures.allFrames(from: $0) } ?? []
+        }
+        let frames = debrisPodFrames ?? []
         while debrisPuffNodes.count < world.debrisPuffs.count {
-            let dot = SKSpriteNode(texture: projectileTexture)
-            dot.size = CGSize(width: 3, height: 3)
-            dot.color = SKColor(white: 0.62, alpha: 1)
-            dot.colorBlendFactor = 1
-            dot.zPosition = 8
-            effectsLayer.addChild(dot)
-            debrisPuffNodes.append(dot)
+            let node = SKSpriteNode(texture: frames.first ?? projectileTexture)
+            node.zPosition = 13
+            effectsLayer.addChild(node)
+            debrisPuffNodes.append(node)
         }
         for (node, puff) in zip(debrisPuffNodes, world.debrisPuffs) {
             guard puff.life > 0 else { node.isHidden = true; continue }
             node.isHidden = false
             node.position = CGPoint(x: puff.position.x, y: puff.position.y)
             node.alpha = CGFloat(puff.opacity)
+            // Sprite_SetCurrentFrame: the pod frame follows the velocity bearing.
+            if !frames.isEmpty {
+                let bearing = OriginalMath.bearingRadians(of: puff.velocity) * 180 / .pi
+                node.texture = frames[max(0, min(frames.count - 1, Int(Double(frames.count) * bearing / 360)))]
+            }
         }
     }
 
@@ -5366,28 +5369,6 @@ final class GameScene: SKScene {
         }
         for _ in 0..<Int(bd * 0.04) { puff(boom: 129, spread: Int(bd * 0.5), shift: bd * 0.25, delayRange: 8, delayBase: 4) }
         for _ in 0..<Int(bd * 0.16) { puff(boom: 128, spread: b, shift: bd * 0.5, delayRange: 16, delayBase: 8) }
-    }
-
-    /// One death-debris puff (A9): the escape-pod sprite, its frame taken from
-    /// the bearing of its velocity, drifting for `lifeTicks` ticks. The
-    /// original's pool holds 32 at a time.
-    private func spawnDebrisPuff(at point: CGPoint, velocity: Vec2, lifeTicks: Int) {
-        if debrisPodFrames == nil {
-            debrisPodFrames = galaxy?.game.shipSprite(Ship.escapePodShipID).map { SpriteTextures.allFrames(from: $0) } ?? []
-        }
-        guard let frames = debrisPodFrames, !frames.isEmpty, debrisPuffCount < 32 else { return }
-        let bearing = OriginalMath.bearingRadians(of: velocity) * 180 / .pi
-        let frame = max(0, min(frames.count - 1, Int(Double(frames.count) * bearing / 360)))
-        let node = SKSpriteNode(texture: frames[frame])
-        node.zPosition = 13
-        node.position = point
-        effectsLayer.addChild(node)
-        debrisPuffCount += 1
-        let life = Double(lifeTicks) / OriginalClock.ticksPerSecond
-        node.run(.sequence([
-            .moveBy(x: CGFloat(velocity.x * life), y: CGFloat(velocity.y * life), duration: life),
-            .removeFromParent()
-        ])) { [weak self] in self?.debrisPuffCount -= 1 }
     }
 
     /// Decoded, cached explosion frames + per-frame duration for a `bööm` id.

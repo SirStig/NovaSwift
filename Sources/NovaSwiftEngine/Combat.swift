@@ -1026,9 +1026,6 @@ public enum WorldEvent {
     /// An `ExplodType` ≥ 1000 impact (`Shot_SpawnAreaImpactEffects` 0x004211d0):
     /// scatter small bööm sprites around `at` over the weapon's `blastRadius`.
     case areaBlast(at: Vec2, blastRadius: Int)
-    /// A dying hull throws a pod-sprite debris puff (`Shot_SpawnShipDestructionDebrisPuff`
-    /// 0x00428090): drifts at `velocity` (px/s) for `lifeTicks` 30 Hz ticks.
-    case debrisPuff(at: Vec2, velocity: Vec2, lifeTicks: Int)
     /// The player's cloak started engaging (snd 381) or clearing (snd 380),
     /// from any cause (0x004680d0 / 0x00468190, D-4).
     case playerCloakChanged(engaging: Bool)

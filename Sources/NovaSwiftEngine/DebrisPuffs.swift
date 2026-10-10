@@ -27,16 +27,22 @@ extension World {
     }
 
     /// The shed cadence in Ship_HandleShip (0x00433050): while the hull is
-    /// at or below half armor and still alive, with pods left, one puff every
+    /// at or below half armor and still alive (armor > 0, never during the death delay), with pods left, one puff every
     /// `max(10, round(armor / PodCount × 0.4))` raw calls, the first at once.
+    /// Raw calls between puffs: `max(10, round(shïp.Armor / PodCount × 0.4))`
+    /// (integer division first, as the original does).
+    static func debrisPuffPeriod(hullArmor: Int, podCount: Int) -> Int {
+        max(10, Int((Double(hullArmor / podCount) * 0.4).rounded()))
+    }
+
     func tickDebrisPuffs(rawCalls: Int) {
         guard rawCalls > 0, let game = galaxy?.game else { return }
-        for npc in npcs where npc.isAlive && npc.armor > 0 {
+        for npc in npcs + [player] where npc.isAlive {
             guard let hull = game.ship(npc.shipTypeID), hull.podCount > 0,
                   npc.armor <= npc.maxArmor * 0.5 else { continue }
             if npc.debrisPodsLeft == nil { npc.debrisPodsLeft = hull.podCount }
             guard let left = npc.debrisPodsLeft, left > 0 else { continue }
-            let period = max(10, Int((Double(hull.armor / hull.podCount) * 0.4).rounded()))
+            let period = Self.debrisPuffPeriod(hullArmor: hull.armor, podCount: hull.podCount)
             for k in 0..<rawCalls {
                 guard let now = npc.debrisPodsLeft, now > 0 else { break }
                 if (rawCallCounter - rawCalls + 1 + k) % period == 0 || now == hull.podCount {

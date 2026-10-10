@@ -263,6 +263,14 @@ final class DebrisPuffTests: XCTestCase {
         XCTAssertEqual(MurkFog.backgroundLevel(murk: 100), 29)
     }
 
+    func testPuffCadenceMatchesOriginal() {
+        // 0x00433050: max(10, round(Armor / PodCount x 0.4)) raw calls.
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 1000, podCount: 4), 100)
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 300, podCount: 5), 24)
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 100, podCount: 10), 10)
+        XCTAssertEqual(World.debrisPuffPeriod(hullArmor: 50, podCount: 1), 20)
+    }
+
     func testPuffFades() {
         var p = DebrisPuff(); p.life = 40
         XCTAssertEqual(p.opacity, 1)
