@@ -60,6 +60,10 @@ struct GalaxyMapView: View {
         let label: String
     }
     var destinationPreview: DestinationPreview?
+    /// The in-flight hyperspace-selection mini map (`Ui_DrawSystemRouteMap`
+    /// 0x004a99f0): the same drawing, centred on the current system at the
+    /// HUD map zoom, with no chrome and no input.
+    var miniMap: Bool = false
 
     // Zoom is points-per-map-unit. Median link length in the data is ~37 units,
     // so 2.4 puts directly-linked systems ~90pt apart — a comfortable local view.
@@ -77,7 +81,11 @@ struct GalaxyMapView: View {
     @State private var showingFinder = false
     /// The political overlay, toggled by Show/Hide Borders (STR# 150 #56/#57)
     /// and remembered like the original's preference (UI-18).
-    @AppStorage("com.novaswift.map.showBorders") private var showBorders = true
+    /// Off by default, as the original's prefs reset (0x004c7400) leaves it.
+    @AppStorage("com.novaswift.map.showBorders") private var showBorders = false
+    /// The Classic overlay's rendered cell grid, rebuilt only when its inputs
+    /// change (not on every blink redraw).
+    @State private var overlayCache = PoliticalOverlayCache()
     /// Decoded `nëbu` regions with their resolved artwork, built once per data
     /// load. Drawn behind the systems in map-space (`x,y,w,h` share the `syst`
     /// coordinate system), scaled by the current zoom.
@@ -102,8 +110,15 @@ struct GalaxyMapView: View {
     private struct GateLink { let a, b: Int; let wormhole: Bool }
 
     static let defaultZoom: CGFloat = 2.4
-    private let minZoom: CGFloat = 0.5    // whole galaxy (~945 units wide) in view
-    private let maxZoom: CGFloat = 16     // a linked neighbor fills most of the screen
+    private var minZoom: CGFloat { fullscreen ? 0.5 : Self.classicMinZoom }   // whole galaxy (~945 units wide) in view
+    private var maxZoom: CGFloat { fullscreen ? 16 : Self.classicMaxZoom }    // a linked neighbor fills most of the screen
+    /// The original map's zoom is map units per pixel, 0.5…2.0 (0x00575a00 /
+    /// 0x00575a08), starting at 0.5625 (0x005759d8); − multiplies it by 4/3,
+    /// + by 0.75 (0x00575660 / 0x00575640). Here zoom is points per unit, so
+    /// the Classic map runs 0.5…2.0 starting at 1/0.5625.
+    static let classicMinZoom: CGFloat = 0.5
+    static let classicMaxZoom: CGFloat = 2.0
+    static let classicDefaultZoom: CGFloat = 1 / 0.5625
 
     @Environment(\.novaTheme) private var theme
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
@@ -116,6 +131,21 @@ struct GalaxyMapView: View {
     private let gateRouteBlue = Color(red: 0.25, green: 0.62, blue: 1.0)
 
     var body: some View {
+        if miniMap {
+            GeometryReader { _ in
+                Canvas { ctx, size in drawMap(ctx: &ctx, size: size, blinkOn: true) }
+            }
+            .background(Color.black)
+            .onAppear {
+                zoom = Self.classicDefaultZoom
+                rebuildMissionDestinations()
+            }
+        } else {
+            mapBody
+        }
+    }
+
+    private var mapBody: some View {
         ZStack {
             Color.black.opacity(0.94).ignoresSafeArea()
 
@@ -135,6 +165,7 @@ struct GalaxyMapView: View {
         }
         .novaResponsive()
         .onAppear {
+            if !fullscreen, zoom == Self.defaultZoom { zoom = Self.classicDefaultZoom }
             rebuildGovtColors()
             let g = graphics ?? nav.game.map { SpaceportGraphics(game: $0) }
             if graphics == nil { graphics = g }
@@ -394,7 +425,10 @@ struct GalaxyMapView: View {
         // resource), and gated to known systems so adjacency alone never leaks
         // a system's allegiance (matching the dot colours below). The glow
         // radius tracks zoom so neighbours' halos overlap at any scale.
-        if showBorders {
+        if showBorders && !fullscreen {
+            drawClassicPoliticalOverlay(ctx: &ctx, size: size, systems: systems, visibility: visibility,
+                                        plot: plot, game: game)
+        } else if showBorders {
             var tctx = ctx
             tctx.blendMode = .plusLighter
             let glowR = min(max(30 * zoom, 16), 320)
@@ -466,13 +500,28 @@ struct GalaxyMapView: View {
                 }
             }
         }
-        ctx.stroke(links, with: .color(.white.opacity(0.16)), lineWidth: 1)
         let canJumpNow = nav.availableJumps >= 1
-        ctx.stroke(currentLinks, with: .color((canJumpNow ? routeGreen : routeWarn).opacity(0.6)), lineWidth: 1.3)
+        if fullscreen {
+            ctx.stroke(links, with: .color(.white.opacity(0.16)), lineWidth: 1)
+            ctx.stroke(currentLinks, with: .color((canJumpNow ? routeGreen : routeWarn).opacity(0.6)), lineWidth: 1.3)
+        } else {
+            // Classic (0x004a8100): every link in theme grey 0x00733b62
+            // (20000), the dark 0x00733b68 (4000) in gate mode, and the armed
+            // link in 0x00733b38 (0, 0x9900, 0). No fuel tint.
+            let linkGrey = Color(white: gateSelection != nil ? 4000.0 / 65535 : 20000.0 / 65535)
+            ctx.stroke(links, with: .color(linkGrey), lineWidth: 1)
+            ctx.stroke(currentLinks, with: .color(linkGrey), lineWidth: 1)
+            if nav.jumpArmed, let head = nav.route.first, let h = byID[head] {
+                var armed = Path(); armed.move(to: plot(cur.x, cur.y)); armed.addLine(to: plot(h.x, h.y))
+                ctx.stroke(armed, with: .color(Color(red: 0, green: 0x99 / 255.0, blue: 0)), lineWidth: 1)
+            }
+        }
 
         // Hypergate (cyan) and wormhole (violet) connections, dashed to set them
-        // apart from the solid hyperspace web. Shown only between known systems.
-        for gl in gateLinks {
+        // apart from the solid hyperspace web. Shown only between known systems
+        // (Enhanced / Nova Swift; the original draws gate spokes only in the
+        // gate picker).
+        for gl in gateLinks where fullscreen {
             guard let a = byID[gl.a], let b = byID[gl.b],
                   visibility[gl.a] != .unknown, visibility[gl.b] != .unknown else { continue }
             let pa = plot(a.x, a.y), pb = plot(b.x, b.y)
@@ -485,7 +534,23 @@ struct GalaxyMapView: View {
         // Gate destination picker: bold, solid blue lines from the origin gate's
         // system to each gate it reaches, with a ring on each tappable target.
         // Destinations are always shown (using a gate bypasses fog of war).
-        if let gs = gateSelection, let origin = byID[gs.originSystem] {
+        if let gs = gateSelection, let origin = byID[gs.originSystem], !fullscreen {
+            // Classic: spokes with ±45° barbs of 8 px, 3 px white for the
+            // selection and 2 px cyan otherwise (0x004a8100).
+            let pa = plot(origin.x, origin.y)
+            for dest in gs.destinations {
+                guard let d = byID[dest.systemID] else { continue }
+                let pb = plot(d.x, d.y)
+                let selected = dest.systemID == nav.selectedSystemID
+                var line = Path(); line.move(to: pa); line.addLine(to: pb)
+                let angle = atan2(pb.y - pa.y, pb.x - pa.x)
+                for barb in [angle + .pi * 3 / 4, angle - .pi * 3 / 4] {
+                    line.move(to: pb)
+                    line.addLine(to: CGPoint(x: pb.x + 8 * cos(barb), y: pb.y + 8 * sin(barb)))
+                }
+                ctx.stroke(line, with: .color(selected ? .white : .cyan), lineWidth: selected ? 3 : 2)
+            }
+        } else if let gs = gateSelection, let origin = byID[gs.originSystem] {
             let pa = plot(origin.x, origin.y)
             for dest in gs.destinations {
                 guard let d = byID[dest.systemID] else { continue }
@@ -499,7 +564,13 @@ struct GalaxyMapView: View {
 
         // The plotted course: green while your current fuel can still reach that
         // hop, warning red past it — segment by segment, drawn on top of the web.
-        if !nav.route.isEmpty {
+        if !nav.route.isEmpty, !fullscreen, gateSelection == nil {
+            // Classic: one solid 2 px line in 0x00733b32, hidden in gate mode.
+            var path = Path()
+            path.move(to: plot(cur.x, cur.y))
+            for hop in nav.route { guard let s = byID[hop] else { break }; path.addLine(to: plot(s.x, s.y)) }
+            ctx.stroke(path, with: .color(Color(red: 0, green: 1, blue: 0)), lineWidth: 2)
+        } else if !nav.route.isEmpty, fullscreen {
             let greenHops = min(nav.availableJumps, nav.route.count)
             var from = plot(cur.x, cur.y)
             for (i, hop) in nav.route.enumerated() {
@@ -543,9 +614,29 @@ struct GalaxyMapView: View {
             // seen-as-adjacent (unconfirmed allegiance). The current system is
             // filled solid in amber (not dark) so "you are here" reads at a
             // glance under the blinking crosshair.
+            if !fullscreen {
+                // Classic markers (0x004a8100): the 0x00466260 ring, the
+                // current system a filled cyan dot, the selection eight-stroke
+                // corner brackets in 0x00733b32.
+                let r: CGFloat = 4
+                let ring = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+                ctx.fill(ring, with: .color(Color(white: 0.03)))
+                ctx.stroke(ring, with: .color(originalMarkerColor(for: s, game: game, visited: isKnownDetail)), lineWidth: 1.4)
+                if isCurrent {
+                    ctx.fill(Path(ellipseIn: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)), with: .color(.cyan))
+                }
+                if s.id == nav.selectedSystemID {
+                    ctx.stroke(crosshair(at: p, arm: 3, gap: 4), with: .color(Color(red: 0, green: 1, blue: 0)), lineWidth: 1)
+                }
+                if isKnownDetail, showLabels || isCurrent || s.id == nav.selectedSystemID {
+                    ctx.draw(Text(s.displayName).font(.custom(NovaFontRole.hud.family, size: labelSize))
+                                .foregroundStyle(Color.white.opacity(0.85)),
+                             at: CGPoint(x: p.x + r + 5, y: p.y), anchor: .leading)
+                }
+                continue
+            }
             let markColor: Color = isCurrent ? amber
                 : onRoute ? (hopAffordable ? routeGreen : routeWarn)
-                : !fullscreen ? originalMarkerColor(for: s, game: game, visited: isKnownDetail)
                 : isKnownDetail ? relationColor(for: s, game: game)
                 : adjacentGrey
             let r: CGFloat = isCurrent || isDestination ? 5 : 4
@@ -602,8 +693,9 @@ struct GalaxyMapView: View {
             guard let s = byID[dest.systemID] else { continue }
             let p = plot(s.x, s.y)
             guard visibleRect.contains(p) else { continue }
-            drawMissionArrow(ctx: &ctx, at: p, bob: bob)
-            drawMissionLabel(ctx: &ctx, at: p, names: dest.names)
+            drawMissionArrow(ctx: &ctx, at: p, bob: fullscreen ? bob : 0)
+            // The original marks a mission system with the ring and arrow only.
+            if fullscreen { drawMissionLabel(ctx: &ctx, at: p, names: dest.names) }
         }
 
         // Multiplayer presence markers — drawn last (over the dots/labels/arrows),
@@ -790,6 +882,51 @@ struct GalaxyMapView: View {
         #endif
     }
 
+    /// A Classic button step: gated by the current value, not clamped.
+    private func stepZoom(_ value: CGFloat) {
+        let factor = value / zoom
+        pan.width *= factor
+        pan.height *= factor
+        zoom = value
+    }
+
+    /// The Classic political overlay (`PoliticalOverlay`, 0x004a9d50): one
+    /// disc per visible twin group, only for a visible, known system with a
+    /// government whose Flags2 0x0004 is clear and a usable stellar.
+    private func drawClassicPoliticalOverlay(ctx: inout GraphicsContext, size: CGSize, systems: [SystRes],
+                                             visibility: [Int: SystemVisibility],
+                                             plot: (Int, Int) -> CGPoint, game: NovaGame) {
+        let w = Int(size.width) / PoliticalOverlay.cellSize, h = Int(size.height) / PoliticalOverlay.cellSize
+        let unitsPerPixel = 1 / Double(zoom)
+        var discs: [PoliticalOverlay.Disc] = []
+        var seenSpots = Set<[Int]>()
+        for s in systems {
+            guard pilot.state.isSystemExplored(s.id), visibility[s.id] != .unknown, s.government >= 128,
+                  let g = game.govt(s.government), g.flags2 & 0x0004 == 0,
+                  !usableStellars(s, game: game).isEmpty,
+                  seenSpots.insert([s.x, s.y]).inserted else { continue }
+            let p = plot(s.x, s.y)
+            discs.append(.init(cellX: Int(p.x) / PoliticalOverlay.cellSize, cellY: Int(p.y) / PoliticalOverlay.cellSize,
+                               govt: s.government, small: g.flags2 & 0x0002 != 0))
+        }
+        let key = PoliticalOverlayCache.Key(w: w, h: h, zoom: Double(zoom), discs: discs.map { [$0.cellX, $0.cellY, $0.govt, $0.small ? 1 : 0] })
+        guard let image = overlayCache.image(for: key, build: {
+            var grid = PoliticalOverlay(width: w, height: h)
+            for d in discs {
+                grid.paint(d, zoom: unitsPerPixel) { a, b in
+                    a == b || (game.govt(a)?.allies.contains(b) ?? false) || (game.govt(b)?.allies.contains(a) ?? false)
+                }
+            }
+            return grid.rgba { id in
+                let c = game.govt(id)?.mapColor
+                return (Int(c?.r ?? 0), Int(c?.g ?? 0), Int(c?.b ?? 0))
+            }
+        }) else { return }
+        let octx = ctx
+        octx.draw(octx.resolve(Image(decorative: image, scale: 1).interpolation(.none)),
+                  in: CGRect(x: 0, y: 0, width: CGFloat(w * PoliticalOverlay.cellSize), height: CGFloat(h * PoliticalOverlay.cellSize)))
+    }
+
     private func setZoom(_ value: CGFloat) {
         let clamped = min(maxZoom, max(minZoom, value))
         // Keep the point at the view centre fixed while zooming.
@@ -958,10 +1095,15 @@ struct GalaxyMapView: View {
                 let explored = pilot.state.exploredSystems
                 let charted = pilot.chartedSystems
                 let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
-                let vis = nav.visibility(of: infoID, explored: explored, adjacent: adjacent, charted: charted)
-                let known = vis == .explored || vis == .chartered
+                // Discovery level > 0 (visited, revealed or charted, shared by
+                // twins); below it the panel shows only "<Unknown>" (#310).
+                let known = pilot.state.isSystemExplored(infoID)
+                // #337 current, #340 a gate destination in the gate picker,
+                // #339 whenever a jump is armed, else #338 (0x004a51f0).
+                let gateDest = gateSelection?.destinations.contains { $0.systemID == infoID } ?? false
                 let header = infoID == cur.id ? text.misc(337)
-                    : (nav.jumpArmed && infoID == nav.destinationID) ? text.misc(339)
+                    : (gateDest && gateSelection != nil) ? text.misc(340)
+                    : nav.jumpArmed ? text.misc(339)
                     : text.misc(338)
                 let usable = usableStellars(sys, game: game)
                 // Goods and services need discovery level 2 — landed here, or
@@ -974,12 +1116,14 @@ struct GalaxyMapView: View {
                         panelLabel(header)
                         panelValue(known ? sys.displayName : text.misc(310),
                                    color: sys.id == cur.id ? amber : .white, bold: true)
-                        if usable.isEmpty {
+                        if !known {
+                            EmptyView()
+                        } else if usable.isEmpty {
                             panelLabel(text.misc(334)).padding(.top, 8)
                         } else {
                             panelLabel(text.misc(325)).padding(.top, 8)
                             panelValue(game.govt(sys.government)?.displayName ?? text.misc(333),
-                                       color: govtMapColor(sys.government, game: game))
+                                       color: fullscreen ? govtMapColor(sys.government, game: game) : .white)
                             panelLabel(text.misc(326)).padding(.top, 6)
                             panelValue(LegalStatus.label(inSystem: sys.id, player: pilot.state, game: game))
                             panelLabel(text.misc(327)).padding(.top, 6)
@@ -996,10 +1140,12 @@ struct GalaxyMapView: View {
         }
     }
 
-    /// A system's usable stellars: not gates, not uninhabited, not destroyed.
+    /// A system's usable stellars (0x00468210 / 0x004682d0): not
+    /// uninhabited, and usable for travel — landable, not a gate, destroyed
+    /// exactly when its Flags 0x0080 asks.
     private func usableStellars(_ sys: SystRes, game: NovaGame) -> [SpobRes] {
         sys.spobs.compactMap { game.spob($0) }.filter {
-            !$0.isGate && !$0.isUninhabited && !pilot.state.isStellarDestroyed($0.id)
+            !$0.isUninhabited && $0.usableForTravel(destroyed: pilot.state.isStellarDestroyed($0.id))
         }
     }
 
@@ -1035,7 +1181,7 @@ struct GalaxyMapView: View {
         if let game = nav.game {
             let text = OriginalText(game: game)
             let infoID = nav.selectedSystemID ?? nav.destinationID ?? nav.currentSystemID
-            let known = pilot.state.exploredSystems.contains(infoID) || pilot.chartedSystems.contains(infoID)
+            let known = pilot.state.isSystemExplored(infoID)
             let sys = nav.system(infoID)
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -1068,6 +1214,10 @@ struct GalaxyMapView: View {
     private func hazards(_ sys: SystRes?, game: NovaGame, text: OriginalText) -> String {
         guard let sys else { return text.misc(336) }
         var parts: [String] = []
+        // Gravity shear comes first (0x004a51f0).
+        if sys.spobs.compactMap({ game.spob($0) }).contains(where: { $0.gravity != 0 }) {
+            parts.append(text.misc(312))
+        }
         if sys.asteroidCount > 0 {
             let level = sys.asteroidCount < 4 ? 313 : sys.asteroidCount < 7 ? 314 : 315
             parts.append("\(text.misc(level)) \(text.misc(316))")
@@ -1079,9 +1229,6 @@ struct GalaxyMapView: View {
         if sys.murk > 0 {
             let level = sys.murk < 31 ? 321 : sys.murk < 61 ? 322 : 323
             parts.append("\(text.misc(level)) \(text.misc(324))")
-        }
-        if sys.spobs.compactMap({ game.spob($0) }).contains(where: { $0.gravity != 0 }) {
-            parts.append(text.misc(312))
         }
         return parts.isEmpty ? text.misc(336) : parts.joined(separator: ", ")
     }
@@ -1156,8 +1303,11 @@ struct GalaxyMapView: View {
             NovaButton(graphics: graphics, title: buttonLabel(SpaceportLabel.done, fallback: "Done"),
                        width: CGFloat(Item.done.w - 26), action: onClose)
                 .novaPlace(space, cx(Item.done, nw), cy(Item.done, nh))
+            // Clear Route only with a route and outside the gate picker
+            // (`DAT_007dc744`).
             NovaButton(graphics: graphics, title: buttonLabel(49, fallback: "Clear Route"),
-                       width: CGFloat(Item.clear.w - 26)) { nav.clearCourse() }
+                       width: CGFloat(Item.clear.w - 26),
+                       enabled: !nav.route.isEmpty && gateSelection == nil) { nav.clearCourse() }
                 .novaPlace(space, cx(Item.clear, nw), cy(Item.clear, nh))
             // The original row is Show/Hide Borders, Find, Clear Route, −, +,
             // Done (UI-18). "Nearest System" exists only with the
@@ -1178,9 +1328,15 @@ struct GalaxyMapView: View {
                 .novaPlace(space, cx(Item.named, nw), cy(Item.named, nh))
             // idx3/idx4 (25×25) — the authentic button art at its minimum
             // 26×25 geometry with −/+ glyphs, not a translucent system chip.
-            NovaIconButton(graphics: graphics, systemName: "minus") { setZoom(zoom / 1.4) }
+            // − / + step the original's zoom by 4/3 and 0.75, each disabled at
+            // its limit (`DAT_007dc742` / `DAT_007dc743`).
+            NovaIconButton(graphics: graphics, systemName: "minus", enabled: zoom > Self.classicMinZoom) {
+                stepZoom(zoom * 0.75)
+            }
                 .novaPlace(space, cx(Item.zoomOut, nw), cy(Item.zoomOut, nh))
-            NovaIconButton(graphics: graphics, systemName: "plus") { setZoom(zoom * 1.4) }
+            NovaIconButton(graphics: graphics, systemName: "plus", enabled: zoom < Self.classicMaxZoom) {
+                stepZoom(zoom / 0.75)
+            }
                 .novaPlace(space, cx(Item.zoomIn, nw), cy(Item.zoomIn, nh))
         }
     }
@@ -1317,5 +1473,27 @@ struct GalaxyMapView: View {
                 .background(amber.opacity(0.14), in: Circle())
                 .overlay(Circle().strokeBorder(amber.opacity(0.5)))
         }.buttonStyle(.novaPlain)
+    }
+}
+
+/// Memoises the Classic political overlay's rendered grid by its inputs.
+final class PoliticalOverlayCache {
+    struct Key: Equatable { let w: Int, h: Int; let zoom: Double; let discs: [[Int]] }
+    private var key: Key?
+    private var image: CGImage?
+
+    func image(for key: Key, build: () -> [UInt8]) -> CGImage? {
+        if key == self.key, let image { return image }
+        self.key = key
+        guard key.w > 0, key.h > 0 else { image = nil; return nil }
+        var pixels = build()
+        let made: CGImage? = pixels.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: key.w, height: key.h, bitsPerComponent: 8,
+                                      bytesPerRow: key.w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            return ctx.makeImage()
+        }
+        image = made
+        return made
     }
 }
