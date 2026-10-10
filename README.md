@@ -34,7 +34,7 @@ code not checked yet, and dark grey is code with nothing to port. [docs/STATUS.m
 colours and what's left; the [website](https://sirstig.github.io/NovaSwift/#progress) has a version you can
 hover over.
 
-![One square per function in the original executable](docs/branding/progress-blocks.svg?v=d874b9a7)
+![One square per function in the original executable](docs/branding/progress-blocks.svg?v=58799898)
 
 ### Beyond the original
 
