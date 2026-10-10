@@ -139,8 +139,8 @@ public struct CronRuntime: Codable, Hashable, Sendable {
         self.pendingStart = pendingStart
     }
 
-    /// The event counts as running — for Contribute bits and news — from the
-    /// day it triggers until it deactivates, holdoffs included.
+    /// The event counts as running — for news — from the day it triggers until
+    /// it deactivates, holdoffs included; Contribute bits use `contributes`.
     public var isActive: Bool { active ?? (startedDate != nil) }
 
     /// The event's Contribute bits count (0x0046cca0): active and its holdoff

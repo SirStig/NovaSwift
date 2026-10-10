@@ -170,31 +170,37 @@ final class BoardingTests: XCTestCase {
 
     // MARK: ammo plunder ("Ammo" button)
 
-    private func ammoWeap(_ id: Int, maxAmmo: Int) -> Resource {
-        var b = [UInt8](repeating: 0, count: 200)
-        put16(&b, 108, maxAmmo)   // WeapRes.MaxAmmo @108
-        return Resource(type: NovaType.weapon, id: id, name: "Missile", data: Data(b))
+    /// An ammo outfit (ModType 3 naming weapon `weaponID`) with the given Mass and Max.
+    private func ammoOutfit(_ id: Int, weaponID: Int, mass: Int, max: Int) -> Resource {
+        var b = [UInt8](repeating: 0, count: 60)
+        put16(&b, 2, mass); put16(&b, 10, max)
+        put16(&b, 6, 3); put16(&b, 8, weaponID)
+        return Resource(type: NovaType.outfit, id: id, name: "Missile", data: Data(b))
     }
-    private func ammoSpec(_ id: Int) -> WeaponSpec {
+    /// A weapon drawing from AmmoType pool `type` (the ammo outfit names 128 + type).
+    private func ammoSpec(_ id: Int, type: Int) -> WeaponSpec {
         WeaponSpec(id: id, name: "Missile", shieldDamage: 10, armorDamage: 10,
                    reloadSeconds: 1, projectileSpeed: 500, range: 500,
                    accuracyRadians: 0, isBeam: false, isGuided: false, turnRate: 0,
-                   blastRadius: 0, ammoPerShot: 1)
+                   blastRadius: 0, ammoPerShot: 1, ammoTypeRaw: type)
     }
 
+    /// B-11: one bank's rounds, matched by AmmoType pool, limited by the ammo
+    /// outfit's Max and the player's free mass.
     func testPlunderAmmoToppsUpMatchingWeapons() {
         var col = ResourceCollection()
-        col.add(ammoWeap(140, maxAmmo: 10))
+        col.add(ammoOutfit(300, weaponID: 140, mass: 1, max: 10))
         let galaxy = Galaxy(game: NovaGame(col))
 
         let player = Ship(name: "P", stats: stats())
-        player.weapons = [WeaponMount(spec: ammoSpec(140), ammo: 2)]   // room for 8
+        player.weapons = [WeaponMount(spec: ammoSpec(140, type: 12), ammo: 2)]   // room for 8 under Max 10
         let world = World(player: player)
         world.galaxy = galaxy
         let hulk = disabledTarget(crew: 5, strength: 1, in: world)
-        hulk.weapons = [WeaponMount(spec: ammoSpec(140), ammo: 6)]
+        hulk.weapons = [WeaponMount(spec: ammoSpec(140, type: 12), ammo: 6)]
 
         XCTAssertEqual(world.ammoAboard(hulk.entityID), 6, "6 rounds fit in the 8 rounds of room")
+        XCTAssertEqual(world.ammoAboard(hulk.entityID, freeMass: 4), 4, "free mass limits the take")
         let took = world.takePlunderAmmo(from: hulk.entityID)
         XCTAssertEqual(took, 6)
         XCTAssertEqual(player.weapons[0].ammo, 8)
@@ -203,20 +209,40 @@ final class BoardingTests: XCTestCase {
 
     func testPlunderAmmoOnlyForWeaponsThePlayerCarries() {
         var col = ResourceCollection()
-        col.add(ammoWeap(140, maxAmmo: 10))
-        col.add(ammoWeap(141, maxAmmo: 10))
+        col.add(ammoOutfit(300, weaponID: 140, mass: 1, max: 10))
+        col.add(ammoOutfit(301, weaponID: 141, mass: 1, max: 10))
         let galaxy = Galaxy(game: NovaGame(col))
 
         let player = Ship(name: "P", stats: stats())
-        player.weapons = [WeaponMount(spec: ammoSpec(140), ammo: 0)]   // player has weapon 140 only
+        player.weapons = [WeaponMount(spec: ammoSpec(140, type: 12), ammo: 0)]   // player draws pool 12 only
         let world = World(player: player)
         world.galaxy = galaxy
         let hulk = disabledTarget(crew: 5, strength: 1, in: world)
-        hulk.weapons = [WeaponMount(spec: ammoSpec(141), ammo: 9)]     // hulk carries 141
+        hulk.weapons = [WeaponMount(spec: ammoSpec(141, type: 13), ammo: 9)]     // hulk carries pool 13
 
-        XCTAssertEqual(world.ammoAboard(hulk.entityID), 0, "no matching weapon → nothing to take")
+        XCTAssertEqual(world.ammoAboard(hulk.entityID), 0, "no matching pool → nothing to take")
         XCTAssertEqual(world.takePlunderAmmo(from: hulk.entityID), 0)
         XCTAssertEqual(hulk.weapons[0].ammo, 9)
+    }
+
+    /// Two qualifying hulk banks: one boarding offers only one of them.
+    func testPlunderAmmoOffersOneBank() {
+        var col = ResourceCollection()
+        col.add(ammoOutfit(300, weaponID: 140, mass: 1, max: 10))
+        col.add(ammoOutfit(301, weaponID: 141, mass: 1, max: 10))
+        let galaxy = Galaxy(game: NovaGame(col))
+        let player = Ship(name: "P", stats: stats())
+        player.weapons = [WeaponMount(spec: ammoSpec(140, type: 12), ammo: 0),
+                          WeaponMount(spec: ammoSpec(141, type: 13), ammo: 0)]
+        let world = World(player: player)
+        world.galaxy = galaxy
+        let hulk = disabledTarget(crew: 5, strength: 1, in: world)
+        hulk.weapons = [WeaponMount(spec: ammoSpec(140, type: 12), ammo: 3),
+                        WeaponMount(spec: ammoSpec(141, type: 13), ammo: 4)]
+        let offered = world.ammoAboard(hulk.entityID)
+        XCTAssertTrue(offered == 3 || offered == 4)
+        XCTAssertEqual(world.takePlunderAmmo(from: hulk.entityID), offered)
+        XCTAssertEqual(hulk.weapons.map(\.ammo).reduce(0, +), 7 - offered, "the other bank is untouched")
     }
 
     func testMarinesLoadoutConsumption() throws {

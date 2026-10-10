@@ -121,7 +121,7 @@ public struct PlayerHyperjump: Sendable {
                 player.throttleSpeed = max(0, player.throttleSpeed - thrust * dt)
                 steerInertialess(player, thrust: thrust, dt: dt)
             } else {
-                let reverse = player.velocity.angle + .pi
+                let reverse = OriginalMath.bearingRadians(of: player.velocity) + .pi
                 turn(player, toward: reverse, stepDeg: turnDeg * ticks)
                 let off = abs(angleDelta(from: player.angle, to: reverse)) * 180 / .pi
                 if off < max(turnDeg + 1, 20) {

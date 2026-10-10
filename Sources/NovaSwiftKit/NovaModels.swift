@@ -236,7 +236,11 @@ public struct ShanRes {
         animDelay = i16(d, 48)
         weapDecay = i16(d, 50)
         blinkMode = i16(d, 54)
-        blinkValues = (a: i16(d, 56), b: i16(d, 58), c: i16(d, 60), d: i16(d, 62))
+        // The loader clamps the blink values the animation reads: mode 2's C
+        // and mode 3's B to at most 31 (0x004b4ee0, C-3).
+        let blinkB = i16(d, 58), blinkC = i16(d, 60)
+        blinkValues = (a: i16(d, 56), b: blinkMode == 3 ? min(blinkB, 31) : blinkB,
+                       c: blinkMode == 2 ? min(blinkC, 31) : blinkC, d: i16(d, 62))
 
         func points(xBase: Int, yBase: Int, zBase: Int) -> [ShanExitPoint] {
             (0..<4).map { i in
@@ -249,8 +253,8 @@ public struct ShanRes {
         turretPoints = points(xBase: 88, yBase: 96, zBase: 152)
         guidedPoints = points(xBase: 104, yBase: 112, zBase: 160)
         beamPoints = points(xBase: 120, yBase: 128, zBase: 168)
-        // 0 on disk means "unset" → 100% (no compression).
-        func comp(_ off: Int) -> Int { let v = i16(d, off); return v == 0 ? 100 : v }
+        // 0 on disk means "unset", and a negative value is read the same: → 100%.
+        func comp(_ off: Int) -> Int { let v = i16(d, off); return v <= 0 ? 100 : v }
         upCompress = (x: comp(136), y: comp(138))
         downCompress = (x: comp(140), y: comp(142))
     }

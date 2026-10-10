@@ -86,7 +86,8 @@ extension OriginalAI {
     private func computeKeepsPressing(_ ship: Ship, host: OriginalAIHost) -> Bool {
         guard ship.isAlive, !ship.disabled, !ship.isPlayer, let rec = records[ship.entityID] else { return false }
         guard leader(of: ship) != World.playerEntityID, let target = rec.primary else { return false }
-        guard canEngage(host.player, by: ship, host: host) else { return false }
+        // 0x00464a90(ship, player): the player can see this ship.
+        guard canEngage(ship, by: host.player, host: host) else { return false }
         if rec.defenseHome != nil { return true }
         let coasting = rec.maneuverTimer > 0
         let engaged = !Self.disengagedStates.contains(rec.state)
@@ -104,7 +105,10 @@ extension OriginalAI {
         return false
     }
 
-    /// `Ship_IsThreatenedByEnemyOfShip` (0x00410110).
+    /// `Ship_IsThreatenedByEnemyOfShip` (0x00410110): the player is
+    /// threatened when any pressing ship is an enemy of `context`; an NPC
+    /// when it keeps pressing itself, or when some third ship `c` that is an
+    /// enemy of `context` is attacking it (0x0040faa0(c, ship)).
     func isThreatenedByEnemy(_ ship: Ship, of context: Ship, host: OriginalAIHost) -> Bool {
         if ship.isPlayer {
             return host.ships.contains { other in
@@ -582,13 +586,11 @@ extension OriginalAI {
 
     // MARK: Geometry
 
-    /// Compass bearing (0 = up, clockwise) from `a` to `b`, in degrees [0, 360).
+    /// Compass bearing (0 = up, clockwise) from `a` to `b`: the original's
+    /// whole-degree table bearing (`Math_BearingFromPointToPoint` 0x0043b670,
+    /// C-1), in [0, 360).
     static func bearingDeg(_ a: Vec2, _ b: Vec2) -> Double {
-        let d = b - a
-        if d.x == 0 && d.y == 0 { return 0 }
-        var deg = atan2(d.x, d.y) * 180 / .pi
-        if deg < 0 { deg += 360 }
-        return deg
+        Double(OriginalMath.bearing(from: a, to: b))
     }
 
     static func headingDeg(_ ship: Ship) -> Double {

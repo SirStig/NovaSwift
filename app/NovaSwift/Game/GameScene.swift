@@ -185,6 +185,8 @@ final class GameScene: SKScene {
             guard let pid = npc.personID, let pers = game.pers(pid), pers.hailQuote >= 1,
                   world.canTarget(npc, by: world.player), !world.player.isEffectivelyCloaked else { continue }
             if npc.disabled != pers.hailQuoteWhenDisabled { continue }
+            // Flags 0x0800 stays silent while the ship is in AI state 2 (0x00433050).
+            if npc.personFlags & 0x0800 != 0, world.originalAI.record(for: npc.entityID)?.state == OriginalAIState.departJump { continue }
             var forced = false
             if pers.hailQuoteWhenAttacking, !npc.disabled {
                 guard !hailQuoted.contains(npc.entityID), world.isThreatToPlayerSquad(npc) else { continue }
@@ -326,6 +328,8 @@ final class GameScene: SKScene {
     /// sequence. Entries are removed once `.shipDestroyed` retires the entityID.
     private var npcDeathSequenceStarted: Set<Int> = []
     private var shipSprite: SKSpriteNode?
+    private var debrisPodFrames: [SKTexture]?
+    private var debrisPuffCount = 0
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
     private var thruster: SKNode!
@@ -1804,7 +1808,7 @@ final class GameScene: SKScene {
             alt.texture = altTextures[hullAnim.frameIndex(set: set, heading: heading, count: altTextures.count)]
         }
         if let wg = weaponGlowNode, !weaponGlowTextures.isEmpty {
-            weaponGlowFlare *= hullAnim.weaponGlowDecay(dt: dt)
+            weaponGlowFlare = hullAnim.weaponGlowAfter(weaponGlowFlare, dt: dt)
             wg.texture = weaponGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: weaponGlowTextures.count)]
             wg.isHidden = weaponGlowFlare <= 0.02
             wg.alpha = weaponGlowFlare
@@ -2288,7 +2292,7 @@ final class GameScene: SKScene {
         // with before its real radius (needed for `formationStation`) is known.
         let slot = world.playerEscorts.count
         let heading = AIBrain.wingHeading(for: player)
-        guard let ship = galaxy.makeLoadedShip(shipType, government: player.government,
+        guard let ship = galaxy.makeLoadedShip(shipType, government: independentGovt,
                                                at: player.position, angle: heading,
                                                skillScale: galaxy.skillVarianceScale(classOf: nil, rng: &world.rng)) else { return false }
         ship.position = AIBrain.formationStation(leaderPosition: player.position, leaderRadius: player.radius,
@@ -2322,6 +2326,13 @@ final class GameScene: SKScene {
                 world.addNPC(ship, arrival: .hyperspace)
             }
         } else {
+            // #21 (0x00422400 from a pilot load): around the player at
+            // `Rand(50) + 50` px on a `Rand(360)` bearing, on the player's
+            // heading.
+            let bearing = Double(world.rng.range(360)) * .pi / 180
+            let dist = Double(world.rng.range(50) + 50)
+            ship.position = player.position + Vec2.heading(bearing) * dist
+            ship.angle = player.angle
             world.addNPC(ship, arrival: .populate)
         }
         world.recruitEscort(ship)
@@ -2415,6 +2426,20 @@ final class GameScene: SKScene {
         guard let world else { return }
         for event in world.drainEvents() {
             switch event {
+            case let .areaBlast(at, blastRadius):
+                spawnAreaBlast(at: CGPoint(x: at.x, y: at.y), blastRadius: blastRadius)
+            case let .debrisPuff(at, velocity, lifeTicks):
+                spawnDebrisPuff(at: CGPoint(x: at.x, y: at.y), velocity: velocity, lifeTicks: lifeTicks)
+            case let .playerCloakChanged(engaging):
+                audio?.playSound(engaging ? 381 : 380)
+            case let .combatChatter(soundID):
+                let length = audio?.playChatter(soundID) ?? 0
+                if length > 0 {
+                    run(.sequence([.wait(forDuration: length),
+                                   .run { [weak self] in self?.world?.combatChatterPlaying = false }]))
+                } else {
+                    world.combatChatterPlaying = false
+                }
             case let .weaponFired(shooterID, at, _, soundID, weaponID):
                 // Positional for every shooter — the player's own shots report
                 // right at the listener (near-zero distance = full volume), NPC
@@ -2763,9 +2788,9 @@ final class GameScene: SKScene {
     /// Siphon a boarded hulk's jump fuel into the player; returns units taken.
     func plunderFuel(_ id: Int) -> Double { world?.takePlunderFuel(from: id) ?? 0 }
     /// Ammunition a boarded hulk holds for weapons the player also carries.
-    func ammoAboard(_ id: Int) -> Int { world?.ammoAboard(id) ?? 0 }
+    func ammoAboard(_ id: Int, freeMass: Int = .max) -> Int { world?.ammoAboard(id, freeMass: freeMass) ?? 0 }
     /// Transfer a boarded hulk's matching ammunition into the player's weapons.
-    func plunderAmmo(_ id: Int) -> Int { world?.takePlunderAmmo(from: id) ?? 0 }
+    func plunderAmmo(_ id: Int, freeMass: Int = .max) -> Int { world?.takePlunderAmmo(from: id, freeMass: freeMass) ?? 0 }
 
     /// Roll to capture a boarded hulk. On success returns the captured hull's
     /// live entityID / shïp type / name, but doesn't decide what happens to
@@ -2773,9 +2798,23 @@ final class GameScene: SKScene {
     /// and commits via `recruitCapturedEscort` or its own flagship swap.
     /// nil on failure.
     func attemptCapture(_ id: Int) -> (entityID: Int, shipType: Int, name: String)? {
-        guard let world, let cap = world.attemptCapture(shipID: id, roll: Int.random(in: 0..<100)) else { return nil }
+        guard let world, let cap = world.attemptCapture(shipID: id, roll: world.rng.range(100)) else { return nil }
         return (id, cap.shipTypeID, cap.name)
     }
+
+    /// The crew-scuttle roll after a successful capture: one in ten, drawn
+    /// from the world's generator (0x00482940).
+    func rollCaptureScuttle() -> Bool { world.rng.range(10) == 0 }
+
+    /// The persistent roster record of a live player escort, if it is one.
+    func escortRecordID(forEntity id: Int) -> Int? { world?.ship(id: id)?.escortRecordID }
+
+    /// The three digits (1-9 each) of the default captured-ship name.
+    func rollCaptureNameDigits() -> String { (0..<3).map { _ in String(world.rng.range(9) + 1) }.joined() }
+
+    /// The player's hull crew; a captain with none sends the prize straight
+    /// into the wing without the take-command question.
+    var playerHullCrew: Int { world.player.crew }
 
     /// Commit the "use as escort" outcome for a hulk `attemptCapture` already
     /// rolled a success for.
@@ -3805,7 +3844,7 @@ final class GameScene: SKScene {
                 alt.texture = node.altTextures[node.hullAnim.frameIndex(set: altSet, heading: heading, count: node.altTextures.count)]
             }
             if let wg = node.weaponGlow, !node.weaponGlowTextures.isEmpty {
-                node.weaponGlowFlare *= node.hullAnim.weaponGlowDecay(dt: frameDT)
+                node.weaponGlowFlare = node.hullAnim.weaponGlowAfter(node.weaponGlowFlare, dt: frameDT)
                 wg.texture = node.weaponGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.weaponGlowTextures.count)]
                 wg.isHidden = node.weaponGlowFlare <= 0.02
                 wg.alpha = node.weaponGlowFlare
@@ -5307,6 +5346,50 @@ final class GameScene: SKScene {
                        speed: 90, life: 0.3, size: 3, additive: true, grow: false)
     }
 
+    /// `Shot_SpawnAreaImpactEffects` (0x004211d0): trunc(B × 0.04) bööm-1 sprites
+    /// at `Rand(trunc(B × 0.5)) − B × 0.25` per axis, each starting
+    /// `Rand(8) + 4` ticks late, then trunc(B × 0.16) bööm-0 sprites at
+    /// `Rand(B) − B × 0.5` starting `Rand(16) + 8` ticks late.
+    private func spawnAreaBlast(at point: CGPoint, blastRadius b: Int) {
+        let bd = Double(b)
+        func puff(boom: Int, spread: Int, shift: Double, delayRange: Int, delayBase: Int) {
+            guard let tex = boomTextures(boom) else { return }
+            let dx = Double(world.rng.range(max(1, spread))) - shift
+            let dy = Double(world.rng.range(max(1, spread))) - shift
+            let delay = Double(world.rng.range(delayRange) + delayBase) / OriginalClock.ticksPerSecond
+            let p = CGPoint(x: point.x + CGFloat(dx), y: point.y + CGFloat(dy))
+            run(.sequence([.wait(forDuration: delay),
+                           .run { [weak self] in
+                               self?.spawnSpriteAnim(frames: tex.frames, frameDuration: tex.frameDuration,
+                                                     at: p, diameter: max(bd * 0.3, 5))
+                           }]))
+        }
+        for _ in 0..<Int(bd * 0.04) { puff(boom: 129, spread: Int(bd * 0.5), shift: bd * 0.25, delayRange: 8, delayBase: 4) }
+        for _ in 0..<Int(bd * 0.16) { puff(boom: 128, spread: b, shift: bd * 0.5, delayRange: 16, delayBase: 8) }
+    }
+
+    /// One death-debris puff (A9): the escape-pod sprite, its frame taken from
+    /// the bearing of its velocity, drifting for `lifeTicks` ticks. The
+    /// original's pool holds 32 at a time.
+    private func spawnDebrisPuff(at point: CGPoint, velocity: Vec2, lifeTicks: Int) {
+        if debrisPodFrames == nil {
+            debrisPodFrames = galaxy?.game.shipSprite(Ship.escapePodShipID).map { SpriteTextures.allFrames(from: $0) } ?? []
+        }
+        guard let frames = debrisPodFrames, !frames.isEmpty, debrisPuffCount < 32 else { return }
+        let bearing = OriginalMath.bearingRadians(of: velocity) * 180 / .pi
+        let frame = max(0, min(frames.count - 1, Int(Double(frames.count) * bearing / 360)))
+        let node = SKSpriteNode(texture: frames[frame])
+        node.zPosition = 13
+        node.position = point
+        effectsLayer.addChild(node)
+        debrisPuffCount += 1
+        let life = Double(lifeTicks) / OriginalClock.ticksPerSecond
+        node.run(.sequence([
+            .moveBy(x: CGFloat(velocity.x * life), y: CGFloat(velocity.y * life), duration: life),
+            .removeFromParent()
+        ])) { [weak self] in self?.debrisPuffCount -= 1 }
+    }
+
     /// Decoded, cached explosion frames + per-frame duration for a `bööm` id.
     /// Resolves the bööm's `graphicSpinID` → `rlëD` sheet once and derives the
     /// frame duration from `FrameAdvance` (Bible: 100 ⇒ 30 fps, like `SpinRate`),
@@ -5636,7 +5719,9 @@ final class GameScene: SKScene {
             // weapon had unlimited ammo, even while it's really being consumed.
             hud.weaponAmmo = mount.spec.hidesAmmoCount ? -1 : mount.ammo   // -1 = unlimited
         } else {
-            hud.weaponName = ""
+            // No secondary selected (`+0x72 == −1`): the panel reads STR#
+            // 2002 #350 (0x00460ec0).
+            hud.weaponName = galaxy?.game.stringList(2002)?.string(at: 350) ?? ""
             hud.weaponAmmo = -1
         }
         hud.hasSecondary = !p.secondaryWeaponIDs.isEmpty

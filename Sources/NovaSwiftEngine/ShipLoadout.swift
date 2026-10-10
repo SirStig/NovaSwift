@@ -405,6 +405,13 @@ extension Galaxy {
             // `PilotStore`, via `Loadout.freeGunSlots`/`.freeTurretSlots`.
             if o.isFixedGunOutfit { usedGunSlots += count }
             if o.isTurretOutfit { usedTurretSlots += count }
+            if o.techLevel < 0x7fff {
+                if o.firstSlot.type == OutfitModType.weapon.rawValue {
+                    grantedWeapons[o.firstSlot.value, default: 0] += count
+                } else if o.firstSlot.type == OutfitModType.ammunition.rawValue {
+                    ammoAdds[o.firstSlot.value, default: 0] += count
+                }
+            }
             for (type, value) in o.modifiers {
                 let v = value * count
                 switch type {
@@ -426,8 +433,9 @@ extension Galaxy {
                 case .multiJump:       multiJumpBonus += value    // once per def (0x0046cdd0)
                 case .fastJump:        fastJump = true            // skips the jump's brake (FL-06)
                 case .hyperspaceSpeed: hyperspaceSpeed += v        // faster jump entry/exit sequence
-                case .weapon:          grantedWeapons[value, default: 0] += count
-                case .ammunition:      ammoAdds[value, default: 0] += count
+                // Weapons and ammunition come from the first slot only, and
+                // not from a TechLevel-32767 outfit (0x00463260); see below.
+                case .weapon, .ammunition: break
                 case .marines:
                     // ModType 25 (marines) feeds capture-odds, not ship stats.
                     // Positive ModVal → +effective crew; negative (-1..-100) →
@@ -605,7 +613,7 @@ extension Galaxy {
             interferenceReduction: interferenceReduction, murkModifier: murkModifier,
             hasEscapePod: hasEscapePod, hasAutoEject: hasAutoEject, inertialess: inertialess,
             crew: max(0, s.crew), marineCrew: marineCrew, captureOddsBonus: captureOddsBonus,
-            ionCapacityBonus: max(0, ionCapBonus), deionizeBonus: max(0, deionizeBonus),
+            ionCapacityBonus: ionCapBonus, deionizeBonus: deionizeBonus,
             jamming: jammingBonus.map { max(0, min(100, $0)) }, hasMiningScoop: hasMiningScoop,
             hyperspaceDistBonus: hyperspaceDistBonus,
             hasAutoRefuel: hasAutoRefuel, hasDensityScanner: hasDensityScanner,
@@ -716,6 +724,20 @@ extension Galaxy {
             // instead of correctly unable to fire.
             let ammo = spec.ammoPerShot > 0 ? max(0, w.ammo) : -1
             mounts.append(WeaponMount(spec: spec, ammo: ammo, count: n))
+        }
+        // The player's ammo weapons share one pool per AmmoType (B-3); NPCs
+        // and bays keep their own rounds. The loadout already credited the
+        // whole pool to each mount naming it.
+        if !includeHullWeapons {
+            var pools: [Int: AmmoPool] = [:]
+            for m in mounts where (0...255).contains(m.spec.ammoTypeRaw) && m.spec.guidance != .bay && m.ammo >= 0 {
+                let key = m.spec.ammoTypeRaw
+                if let p = pools[key] { m.pool = p } else {
+                    let p = AmmoPool(rounds: m.ammo)
+                    pools[key] = p
+                    m.pool = p
+                }
+            }
         }
         ship.weapons = mounts
         return ship
