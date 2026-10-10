@@ -56,22 +56,26 @@ extension World {
         return best?.index
     }
 
-    /// `Weapon_SelectGuidedWeaponBankForPrimaryTarget` 0x0040d220: the first
-    /// homing bank that can track the target (a target turning more than 3°
-    /// a tick needs a missile that turns faster than 2° a tick and lacks
-    /// `wëap` Flags 0x0008) and has it within `dist² × 0.95 ≤ range²`. Armed
-    /// only if that bank is ready.
+    /// `Weapon_SelectGuidedWeaponBankForPrimaryTarget` 0x0040d220: nothing
+    /// while the shots already inbound on the target would take its shields
+    /// and armor (#6); else the first homing bank that can track the target
+    /// (`Weapon_WeaponCanTrackTarget` 0x00463dc0: a target turning more than
+    /// 3° a tick needs a missile that turns faster than 2° a tick and lacks
+    /// `wëap` Flags 0x0008), can fire, and has it within `dist² × 0.95 ≤
+    /// range²`. Armed only if that bank is ready.
     func npcGuidedBank(for ship: Ship, target: Ship) -> Int? {
+        if inboundThreatExceedsDefenses(target) { return nil }
         let d = target.position - ship.position
         let distSq = d.x * d.x + d.y * d.y
-        // shïp TurnRate is tenths of a degree per tick (FL-10).
-        let targetTurn = Int(Double(target.rawTurnRate) / 10)
+        // The target's effective turn rate (`Ship_ComputeShipMaxTurnRateDeg`,
+        // outfits included), truncated to whole degrees a tick (B-8).
+        let targetTurn = Int(target.stats.turnRate * 180 / .pi / OriginalClock.ticksPerSecond)
         for (i, mount) in ship.weapons.enumerated() where mount.spec.guidance == .guided {
             let spec = mount.spec
             let tracks = targetTurn <= 3
                 || (!spec.wontFireAtFastShips && spec.turnRate * 180 / .pi / 30 > 2)
             guard tracks, spec.isPlanetTypeWeapon == target.isPlanetTypeShip,
-                  mount.ammo != 0, distSq * 0.95 <= spec.range * spec.range else { continue }
+                  canFireBank(ship, mount), distSq * 0.95 <= spec.range * spec.range else { continue }
             return mount.ready ? i : nil
         }
         return nil

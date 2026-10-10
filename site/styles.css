@@ -341,7 +341,7 @@ h1, h2, h3 {
 .grp-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 6px; }
 .grp-head h3 { font-family: var(--body); font-size: 0.9rem; font-weight: 700; color: var(--bone); }
 .grp-head span { font-size: 0.8rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.cells { display: flex; flex-wrap: wrap; gap: 2px; }
+.cells { display: flex; flex-wrap: wrap; gap: 2px; max-width: calc(50 * 10px); } /* 50 per row (8px + 2px gap) */
 
 /* status squares: colour comes from --c (set by progress.js) */
 .sq {
@@ -358,6 +358,7 @@ h1, h2, h3 {
 .cells .sq:hover { outline: 1px solid #fff; }
 
 .big .sq { width: 14px; height: 14px; }
+.big .cells { max-width: calc(14 * 16px); } /* 14 per row, like the README */
 .big .cells { gap: 3px; }
 .big .grp { display: grid; grid-template-columns: 220px 1fr; gap: var(--s2); align-items: center; margin-bottom: 10px; }
 .big .grp-head { display: block; margin: 0; }

@@ -70,10 +70,10 @@ struct HullAnim {
     /// Folding / keyCarried aren't wired to their triggers yet, so they draw the
     /// level set (set 0) — no worse than today, and ready to extend.
     /// - Parameter carriesKeyShip: whether a `shïp.KeyCarried`-type ship is still
-    ///   aboard. Only consulted in `.keyCarried` mode, where the Bible has the
-    ///   second set shown precisely when none are.
+    ///   aboard. Only consulted in `.keyCarried` mode, where the original shows
+    ///   the second set while one is.
     func baseSet(turnSign: Int, animClock: Double, disabled: Bool,
-                 carriesKeyShip: Bool = true) -> Int {
+                 carriesKeyShip: Bool = false) -> Int {
         guard setCount > 1 else { return 0 }
         // A hulk has no attitude control, so it can't bank and its animation is
         // dead: it always draws the level set, whatever it seems to be doing.
@@ -86,9 +86,9 @@ struct HullAnim {
         case .animation:
             return Int(animClock / animDelaySec) % setCount
         case .keyCarried:
-            // Bible: the second set is shown "when not carrying key ships" — an
-            // empty carrier visibly reads as empty (open, dark bay doors).
-            return carriesKeyShip ? 0 : min(1, setCount - 1)
+            // The original (0x00428340) shows set 1 while a key-carried ship
+            // IS aboard (`Weapon_HasLoadedLaunchBayAmmo`), set 0 otherwise.
+            return carriesKeyShip ? min(1, setCount - 1) : 0
         case .none, .folding:
             return 0
         }
@@ -141,13 +141,12 @@ struct HullAnim {
         }
     }
 
-    /// Per-frame decay factor applied to a weapon-glow flare (0…1): the flare is
-    /// set to 1 on firing and multiplied by this each frame. `weapDecay` is the
-    /// Bible rate — lower = slower fade (50 ≈ a ~0.4 s tail).
-    func weaponGlowDecay(dt: TimeInterval) -> CGFloat {
-        let perTick = Double(max(1, weapDecay)) / 100.0   // fraction lost per 1/30 s tick
-        let ticks = dt * 30.0
-        return CGFloat(pow(max(0.0, 1.0 - perTick), ticks))
+    /// A weapon-glow flare (1 = the value 32 set on firing) after `dt` seconds:
+    /// it loses `WeapDecay × 0.333` of its 0…32 value every 30 Hz tick, linearly,
+    /// and is off at or below zero (`Ship_UpdateVisualState` 0x00428340, C-4).
+    func weaponGlowAfter(_ flare: CGFloat, dt: TimeInterval) -> CGFloat {
+        let perTick = Double(max(0, weapDecay)) * 0.333 / 32.0
+        return CGFloat(max(0.0, Double(flare) - perTick * dt * 30.0))
     }
 }
 

@@ -73,16 +73,20 @@ struct PlayerInfoView: View {
             .clipped()
             .ditlPlace(space, d, paneRect)
 
-            NovaButton(graphics: graphics,
-                       title: graphics.buttonLabel(SpaceportLabel.jettisonCargo, fallback: "Jettison Cargo"),
-                       ditl: jettison, enabled: onJettison != nil && pilot.state.usedCargoSpace > 0) {
-                confirmingJettison = true
+            // Drawn only on the Cargo page, and only with something to throw
+            // out (0x004a1c40, 0x0046f140).
+            if tab == .cargo, onJettison != nil, pages.canJettison {
+                NovaButton(graphics: graphics,
+                           title: graphics.buttonLabel(SpaceportLabel.jettisonCargo, fallback: "Jettison Cargo"),
+                           ditl: jettison) {
+                    confirmingJettison = true
+                }
+                .alert(game.stringList(2002)?.string(at: 291) ?? "", isPresented: $confirmingJettison) {
+                    Button(graphics.buttonLabel(50, fallback: "Yes"), role: .destructive) { onJettison?() }
+                    Button(graphics.buttonLabel(51, fallback: "No"), role: .cancel) {}
+                }
+                .ditlPlace(space, d, jettison)
             }
-            .alert(game.stringList(2002)?.string(at: 291) ?? "", isPresented: $confirmingJettison) {
-                Button(graphics.buttonLabel(50, fallback: "Yes"), role: .destructive) { onJettison?() }
-                Button(graphics.buttonLabel(51, fallback: "No"), role: .cancel) {}
-            }
-            .ditlPlace(space, d, jettison)
 
             NovaButton(graphics: graphics,
                        title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
@@ -135,7 +139,8 @@ struct PlayerInfoView: View {
             }
             .padding(.top, 4).padding(.leading, 6)
         case .cargo:
-            paneText(pages.cargo())
+            paneText(pages.cargo(shipCapacity: PilotEconomy.shipCargoCapacity(pilot.state, galaxy: Galaxy(game: game)),
+                                 fleetCapacity: PilotEconomy.cargoCapacity(pilot.state, galaxy: Galaxy(game: game))))
         case .extras:
             paneText(pages.extras(tradeInValue: PilotEconomy.tradeInValue(pilot.state, game: game)))
         case .honors:

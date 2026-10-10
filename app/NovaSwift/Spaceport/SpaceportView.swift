@@ -36,6 +36,10 @@ struct SpaceportView: View {
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var rolledLanding = false
+    /// Re-arms the shops' idle offer poll (see `pollShopOffers`).
+    @State private var shopPoll = 0
+    /// Bumped to reopen the Mission BBS afresh after an accept.
+    @State private var bbsGeneration = 0
 
     private var game: NovaGame { graphics.game }
 
@@ -66,7 +70,9 @@ struct SpaceportView: View {
                     case .bar:      BarView(graphics: graphics, spob: spob, pilot: pilot, galaxy: galaxy,
                                             onDone: { screen = .hub })
                     case .missions: MissionBBSView(graphics: graphics, spob: spob, pilot: pilot,
-                                                   showHints: showHints, onDone: { screen = .hub })
+                                                   showHints: showHints, onDone: { screen = .hub },
+                                                   onReopen: reopenMissionBBS)
+                                        .id(bbsGeneration)
                     }
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
@@ -83,6 +89,10 @@ struct SpaceportView: View {
                                     onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
                     .transition(.opacity)
             }
+
+            // Briefings, refusals and other story texts raised here, one
+            // dialog each, in order.
+            StoryTextOverlay(services: services)
         }
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
@@ -102,8 +112,11 @@ struct SpaceportView: View {
             rollLandingOffer()
             autoRecharge()
         }
-        .onChange(of: screen) { _, newValue in
+        .onChange(of: screen) { oldValue, newValue in
             Log.spaceport.debug("Spaceport screen -> \(String(describing: newValue), privacy: .public) at spöb \(spob.id, privacy: .public)")
+            // Closing the trade centre, outfitter or shipyard resets the
+            // lane-offer context (0x00448660).
+            if [.trade, .outfit, .shipyard].contains(oldValue) { clearLaneOfferContext() }
             // Opening a shop can also surface an offer (its own AvailLocation),
             // exactly as EV Nova can hand you a mission when you walk into the
             // trade centre / shipyard / outfitter.
@@ -113,7 +126,57 @@ struct SpaceportView: View {
             case .outfit:   rollOffer(at: .outfitter)
             default: break
             }
+            shopPoll += 1
         }
+        .task(id: shopPoll) { await pollShopOffers() }
+    }
+
+    /// The shops keep offering while open (0x0048d190, 0x004903c0,
+    /// 0x00493fc0): every `30 + Random(30)` ticks with no offer up, the next
+    /// one in the lane comes.
+    private func pollShopOffers() async {
+        while !Task.isCancelled {
+            let ticks = 30 + Int.random(in: 0..<30)
+            try? await Task.sleep(nanoseconds: UInt64(ticks) * 1_000_000_000 / 60)
+            guard !Task.isCancelled else { return }
+            guard services.pendingOffer == nil, services.storyText == nil else { continue }
+            switch screen {
+            case .trade:    rollOffer(at: .tradeCenter)
+            case .shipyard: rollOffer(at: .shipyard)
+            case .outfit:   rollOffer(at: .outfitter)
+            default:        return
+            }
+        }
+    }
+
+    private func clearLaneOfferContext() {
+        let eng = StoryEngine(game: game, player: pilot.state, services: services,
+                              seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        eng.clearLaneOfferContext()
+        pilot.state = eng.player
+    }
+
+    /// The Mission BBS button (0x0043c470): with every slot taken, or nothing
+    /// on the board still eligible, the board doesn't open and a text says
+    /// why. After an accept the board reopens, silently closing if empty.
+    private func openMissionBBS() {
+        let eng = StoryEngine(game: game, player: pilot.state, services: services,
+                              seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        if let refusal = eng.missionBBSRefusal(spob: spob.id) {
+            pilot.state = eng.player
+            if !refusal.isEmpty { services.showStoryText(refusal, title: "") }
+            return
+        }
+        pilot.state = eng.player
+        screen = .missions
+    }
+
+    private func reopenMissionBBS() {
+        let eng = StoryEngine(game: game, player: pilot.state, services: services,
+                              seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
+        let refused = eng.missionBBSRefusal(spob: spob.id) != nil
+        pilot.state = eng.player
+        if refused { screen = .hub } else { bbsGeneration += 1 }
     }
 
     // MARK: Location-triggered mission offers
@@ -140,7 +203,11 @@ struct SpaceportView: View {
         pilot.state = eng.player                             // the offer context latch
         guard let mission else { return }
         Log.spaceport.debug("Location offer at spöb \(spob.id, privacy: .public) loc=\(String(describing: location), privacy: .public): mission \(mission.id, privacy: .public)")
-        eng.present(mission)
+        if !eng.present(mission) {
+            // A can't-refuse offer with no text activated silently.
+            pilot.state = eng.player
+            pilot.save()
+        }
     }
 
     private func acceptOffer(_ offer: MissionOffer) {
@@ -261,7 +328,7 @@ struct SpaceportView: View {
         // Mission BBS — a standard spaceport service at inhabited ports.
         if !spob.isUninhabited {
             items.append(("missionBBS", graphics.buttonLabel(SpaceportLabel.missionBBS, fallback: "Mission BBS"),
-                          { screen = .missions }))
+                          { openMissionBBS() }))
         }
         if spob.hasCommodityExchange {
             items.append(("tradeCenter", graphics.buttonLabel(SpaceportLabel.tradeCenter, fallback: "Trade Center"), { screen = .trade }))
@@ -352,7 +419,7 @@ struct SpaceportView: View {
         }
         // Leave sits directly below Recharge in the right column's 4th slot.
         slotButton(space, d, key: "leave", x: Self.rightX, y: Self.rightSlotY["leave"] ?? 198,
-                   title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), action: onDepart)
+                   title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), action: depart)
     }
 
     /// The Recharge button (EC-23, 0x00491f30 item 4): nothing at an
@@ -373,6 +440,13 @@ struct SpaceportView: View {
         Log.spaceport.debug("Recharged fuel to \(fill.fuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(fill.cost, privacy: .public)cr")
     }
 
+    /// Leaving the spaceport window resets the lane-offer context
+    /// (0x00448660, from 0x0047c8e0).
+    private func depart() {
+        clearLaneOfferContext()
+        onDepart()
+    }
+
     // MARK: Fallback (data has no interface PICT)
 
     private var fallbackHub: some View {
@@ -385,7 +459,8 @@ struct SpaceportView: View {
                 if spob.hasOutfitter { Button("Outfitter") { screen = .outfit } }
                 if spob.hasCommodityExchange { Button("Trade Center") { screen = .trade } }
                 if spob.hasBar { Button("Bar") { screen = .bar } }
-                Button("Leave", action: onDepart).novaProminentButton()
+                if !spob.isUninhabited { Button("Mission BBS") { openMissionBBS() } }
+                Button("Leave", action: depart).novaProminentButton()
             }
         }
         .padding(40)
@@ -417,11 +492,17 @@ struct MissionBBSView: View {
     @ObservedObject var pilot: PilotStore
     var showHints: Bool = false
     var onDone: () -> Void
+    /// After an accept the original closes the board and its caller opens it
+    /// again (0x0043c470, 0x00491f30): fresh, or not at all when nothing is
+    /// left to offer.
+    var onReopen: (() -> Void)? = nil
 
     @StateObject private var services = AppGameServices()
     @State private var engine: StoryEngine?
     @State private var offered: [MissionRes] = []
     @State private var hintDismissed = false
+    /// Close the board once the accept's texts have been read.
+    @State private var reopenAfterTexts = false
     private var game: NovaGame { graphics.game }
 
     var body: some View {
@@ -431,8 +512,15 @@ struct MissionBBSView: View {
                 let d = DITLPlacement(game, 1006, frame: frame)
                 NovaMenu(frame: frame, overlay: true) { space in
                     let header = d.rect(7, top: 3, left: 14, bottom: 18, right: 410)
-                    NovaText("Mission BBS", size: 10, width: header.width, align: .leading, weight: .bold)
-                        .ditlPlace(space, d, header)
+                    HStack(spacing: 0) {
+                        NovaText("Mission BBS", size: 10, width: header.width / 2, align: .leading, weight: .bold)
+                        Spacer(minLength: 0)
+                        // The current date (0x00441620).
+                        NovaText(OriginalText(game: game).date(for: pilot.state), size: 10,
+                                 color: Color(white: 0.75), width: header.width / 2, align: .trailing)
+                    }
+                    .frame(width: header.width)
+                    .ditlPlace(space, d, header)
                     let list = d.rect(1, top: 30, left: 10, bottom: 174, right: 205)
                     offerList(width: list.width)
                         .frame(width: list.width, height: list.height)
@@ -440,14 +528,9 @@ struct MissionBBSView: View {
                         .ditlPlace(space, d, list)
                     if let offer = services.pendingOffer {
                         let title = d.rect(4, top: 34, left: 233, bottom: 55, right: 502)
-                        HStack(spacing: 4) {
-                            NovaText(offer.title, size: 10, width: max(0, title.width - 84), weight: .bold)
-                            Spacer(minLength: 0)
-                            NovaText(offer.mission.pay.creditsAbbreviated, size: 10,
-                                     color: Color(red: 1, green: 0.85, blue: 0.4), width: 80, align: .trailing)
-                        }
-                        .frame(width: title.width, height: title.height)
-                        .ditlPlace(space, d, title)
+                        NovaText(offer.title, size: 10, width: title.width, weight: .bold)
+                            .frame(width: title.width, height: title.height, alignment: .leading)
+                            .ditlPlace(space, d, title)
                         let brief = d.rect(3, top: 60, left: 233, bottom: 153, right: 500)
                         ScrollView(showsIndicators: false) {
                             NovaText(offer.briefingText, size: 10, width: brief.width, align: .leading)
@@ -456,12 +539,15 @@ struct MissionBBSView: View {
                         .clipped()
                         .ditlPlace(space, d, brief)
                         let acceptRect = d.rect(0, top: 170, left: 266, bottom: 195, right: 365)
-                        NovaButton(graphics: graphics, title: offer.acceptButton, ditl: acceptRect) { accept(offer) }
+                        // The BBS's own fixed labels: STR# 150 #26 "Accept" and
+                        // #1 "Leave", never the mïsn's (0x004a1290).
+                        NovaButton(graphics: graphics, title: graphics.buttonLabel(26, fallback: "Accept"),
+                                   ditl: acceptRect) { accept(offer) }
                             .ditlPlace(space, d, acceptRect)
                     }
                     let done = d.rect(6, top: 170, left: 368, bottom: 195, right: 467)
                     NovaButton(graphics: graphics,
-                               title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
+                               title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
                                ditl: done, action: onDone)
                         .ditlPlace(space, d, done)
                 }
@@ -469,13 +555,21 @@ struct MissionBBSView: View {
                 VStack {
                     Text("Mission BBS").foregroundStyle(.white)
                     MissionBoardView(game: game, pilot: pilot, spob: spob, location: .missionComputer)
-                    Button("Done", action: onDone)
+                    Button("Leave", action: onDone)
                 }.padding()
             }
         }
+        .overlay { StoryTextOverlay(services: services) }
         .gameHint(GameHints.missionBBS, active: showHints, dismissed: $hintDismissed)
         .animation(.easeInOut(duration: 0.25), value: hintDismissed)
         .onAppear(perform: buildEngine)
+        .onChange(of: services.storyQueue.count) { _, count in
+            if count == 0, reopenAfterTexts { reopenAfterTexts = false; reopen() }
+        }
+    }
+
+    private func reopen() {
+        if let onReopen { onReopen() } else { onDone() }
     }
 
     private func offerList(width: CGFloat) -> some View {
@@ -487,7 +581,7 @@ struct MissionBBSView: View {
                 }
                 ForEach(offered, id: \.id) { mission in
                     let isSelected = services.pendingOffer?.mission.id == mission.id
-                    Button { engine?.present(mission) } label: {
+                    Button { present(mission) } label: {
                         NovaText(engine?.resolvedName(for: mission) ?? mission.displayName, size: 10,
                                  color: isSelected ? .white : Color(white: 0.65), width: max(0, width - 6))
                             .padding(.vertical, 1.5).padding(.horizontal, 3)
@@ -505,18 +599,36 @@ struct MissionBBSView: View {
         let e = StoryEngine(game: game, player: pilot.state, services: services,
                             seed: StoryEngine.landingSeed(player: pilot.state, spobID: spob.id))
         engine = e
-        offered = e.missionsOffered(at: .missionComputer, spob: spob.id)
-        if let first = offered.first { e.present(first) }
+        offered = e.missionComputerList(spob: spob.id)
+        if let first = offered.first { present(first) }
     }
 
+    /// Show a listed mission; a can't-refuse one with no offer text
+    /// activates on the spot, which counts as an accept.
+    private func present(_ mission: MissionRes) {
+        guard let engine else { return }
+        if !engine.present(mission) {
+            pilot.state = engine.player
+            pilot.save()
+            finishAccept()
+        }
+    }
+
+    /// Accept: a failed activation keeps the board open (its no-room text
+    /// shows over it); a success closes it, and it reopens afresh.
     private func accept(_ offer: MissionOffer) {
         guard let engine else { return }
-        _ = engine.accept(offer.mission.id)
+        let ok = engine.accept(offer.mission.id)
         pilot.state = engine.player
         pilot.save()
-        services.pendingOffer = nil
-        offered = engine.missionsOffered(at: .missionComputer, spob: spob.id)
-        if let first = offered.first { engine.present(first) }
+        if ok {
+            services.pendingOffer = nil
+            finishAccept()
+        }
+    }
+
+    private func finishAccept() {
+        if services.storyText == nil { reopen() } else { reopenAfterTexts = true }
     }
 
 }

@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="592" height="597" viewBox="0 0 592 597" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="592" height="639" viewBox="0 0 592 639" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.h1{font-size:14px;font-weight:600;fill:#f0e6da}.gh{font-size:12px;font-weight:600;fill:#f0e6da}.gn{font-size:11px;fill:#a89a95}.lg{font-size:11px;fill:#c6bab5}</style>
-<rect width="592" height="597" rx="10" fill="#0d0a0e"/>
+<rect width="592" height="639" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
 <text x="30" y="55" class="lg">Done (98)</text>
 <rect x="103" y="46" width="9" height="9" fill="#e3a52b"/>
 <text x="117" y="55" class="lg">Partly done (9)</text>
 <rect x="228" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
-<text x="242" y="55" class="lg">Planned (32)</text>
+<text x="242" y="55" class="lg">Planned (49)</text>
 <text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">9 of 14 done</text>
 <rect x="216" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Local Wi-Fi lobbies — Done</title></rect>
 <rect x="231" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Game Center matches and invites — Done</title></rect>
@@ -144,15 +144,13 @@
 <rect x="366.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Story runtime — Planned</title></rect>
 <rect x="381.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Gamepad input — Planned</title></rect>
 <rect x="396.5" y="485.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Godot port for Linux and Windows: Packaged builds — Planned</title></rect>
-<text x="16" y="524" class="gh">Optional graphics, audio and AI</text><text x="576" y="524" class="gn" text-anchor="end">2 of 8 done</text>
+<text x="16" y="524" class="gh">Optional graphics, audio and AI</text><text x="576" y="524" class="gn" text-anchor="end">2 of 6 done</text>
 <rect x="216" y="512" width="12" height="12" fill="#3fb950"><title>Optional graphics, audio and AI: Smoothed sprite filtering — Done</title></rect>
 <rect x="231" y="512" width="12" height="12" fill="#3fb950"><title>Optional graphics, audio and AI: Parallax starfield and engine glow — Done</title></rect>
 <rect x="246.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Smarter optional AI — Planned</title></rect>
 <rect x="261.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Particles, bloom, post effects — Planned</title></rect>
 <rect x="276.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Performance tiers — Planned</title></rect>
 <rect x="291.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Smooth rotation, frame interpolation — Planned</title></rect>
-<rect x="306.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: HD sprite packs — Planned</title></rect>
-<rect x="321.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Spatial audio, dynamic music — Planned</title></rect>
 <text x="16" y="551" class="gh">Pilot converter</text><text x="576" y="551" class="gn" text-anchor="end">0 of 6 done</text>
 <rect x="216.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Pilot converter: Read Windows EV Nova CE .plt pilots (decrypt the XOR blocks) — Planned</title></rect>
 <rect x="231.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Pilot converter: Read classic Mac EV Nova pilots (resource fork, MacBinary/AppleDouble) — Planned</title></rect>
@@ -160,10 +158,30 @@
 <rect x="261.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Pilot converter: Warn about plug-in content that isn't installed — Planned</title></rect>
 <rect x="276.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Pilot converter: Import screen with a preview before creating the pilot — Planned</title></rect>
 <rect x="291.5" y="539.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Pilot converter: Round-trip tests against the original's own save code — Planned</title></rect>
-<text x="16" y="578" class="gh">Editors</text><text x="576" y="578" class="gn" text-anchor="end">1 of 5 done</text>
-<rect x="216" y="566" width="12" height="12" fill="#3fb950"><title>Editors: Editable native pilot saves — Done</title></rect>
-<rect x="231" y="566" width="12" height="12" fill="#e3a52b"><title>Editors: Pilot edits from the debug console — Partly done</title></rect>
-<rect x="246.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Editors: Resource write path — Planned</title></rect>
-<rect x="261.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Editors: In-app resource editor — Planned</title></rect>
-<rect x="276.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Editors: Pilot editor — Planned</title></rect>
+<text x="16" y="578" class="gh">Plug-in editor</text><text x="576" y="578" class="gn" text-anchor="end">1 of 15 done</text>
+<rect x="216.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Resource write path and round-trip tests — Planned</title></rect>
+<rect x="231.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Schemas for every resource type — Planned</title></rect>
+<rect x="246.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Browser, hex editor and previews — Planned</title></rect>
+<rect x="261.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Ship, outfit and weapon editors — Planned</title></rect>
+<rect x="276.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Galaxy editor — Planned</title></rect>
+<rect x="291.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Mission and control-bit editor — Planned</title></rect>
+<rect x="306.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Validation against the original's rules — Planned</title></rect>
+<rect x="321.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Test in engine — Planned</title></rect>
+<rect x="336.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Export to Windows and Mac plug-in formats — Planned</title></rect>
+<rect x="351.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Publish to the plug-in store — Planned</title></rect>
+<rect x="366.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Command-line tool — Planned</title></rect>
+<rect x="381.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Templates and guides — Planned</title></rect>
+<rect x="396" y="566" width="12" height="12" fill="#3fb950"><title>Plug-in editor: Editable native pilot saves — Done</title></rect>
+<rect x="411" y="566" width="12" height="12" fill="#e3a52b"><title>Plug-in editor: Pilot edits from the debug console — Partly done</title></rect>
+<rect x="216.5" y="581.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Pilot editor — Planned</title></rect>
+<text x="16" y="620" class="gh">HD plug-in extensions</text><text x="576" y="620" class="gn" text-anchor="end">0 of 9 done</text>
+<rect x="216.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Extension format keyed to original resources — Planned</title></rect>
+<rect x="231.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Fallback to classic resources — Planned</title></rect>
+<rect x="246.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: HD sprites with smooth rotation — Planned</title></rect>
+<rect x="261.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Normal-mapped lighting — Planned</title></rect>
+<rect x="276.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: 3D model import (glTF, USDZ) — Planned</title></rect>
+<rect x="291.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Live 3D in modern presentations — Planned</title></rect>
+<rect x="306.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Bake 3D models into classic sprite sheets — Planned</title></rect>
+<rect x="321.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: High-quality sound and music packs — Planned</title></rect>
+<rect x="336.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: HD landing and planet art — Planned</title></rect>
 </svg>

@@ -42,6 +42,17 @@ struct MissionSpec {
     var pay = 0
     var shipCount = 0
     var shipGoal = -1
+    var shipSystem = -1
+    var shipDude = -1
+    var shipNameStrID = -1
+    var shipSubtitleStrID = -1
+    var auxShipCount = 0
+    var auxShipDude = -1
+    var auxShipSystem = -1
+    var quickBriefText = -1
+    var offerAcceptButton = ""
+    var offerRefuseButton = ""
+    var displayWeight = 0
     var compRewardGovt = -1
     var compLegalReward = 0
     var timeLimit = -1
@@ -77,7 +88,18 @@ struct MissionSpec {
         Bytes.i16(&b, 22, cargoDropoff)
         Bytes.i32(&b, 28, pay)
         Bytes.i16(&b, 32, shipCount)
+        Bytes.i16(&b, 34, shipSystem)
+        Bytes.i16(&b, 36, shipDude)
         Bytes.i16(&b, 38, shipGoal)
+        Bytes.i16(&b, 42, shipNameStrID)
+        Bytes.i16(&b, 50, shipSubtitleStrID)
+        Bytes.i16(&b, 54, quickBriefText)
+        Bytes.i16(&b, 72, auxShipCount)
+        Bytes.i16(&b, 74, auxShipDude)
+        Bytes.i16(&b, 76, auxShipSystem)
+        Bytes.cstr(&b, 1887, offerAcceptButton)
+        Bytes.cstr(&b, 1919, offerRefuseButton)
+        Bytes.i16(&b, 1952, displayWeight)
         Bytes.i16(&b, 46, compRewardGovt)
         Bytes.i16(&b, 48, compLegalReward)
         Bytes.i16(&b, 52, briefText)

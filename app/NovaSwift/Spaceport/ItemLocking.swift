@@ -34,7 +34,7 @@ extension NovaGame {
         for rankID in pilot.activeRanks {
             bits |= rank(rankID)?.contribute ?? 0
         }
-        for (cronID, rt) in pilot.cronRuntime where rt.isActive {
+        for (cronID, rt) in pilot.cronRuntime where rt.contributes {
             bits |= cron(cronID)?.contribute ?? 0
         }
         return bits
@@ -81,6 +81,10 @@ extension NovaGame {
         let availOK = NCBTest(item.availBits).evaluate(pilot)
         let requireOK = (item.require & contributedBits(pilot: pilot)) == item.require
         if availOK && requireOK { return .available }
-        return item.hidesWhenLocked ? .hidden : .locked
+        // Each hide bit answers its own test (0x00469e90): 0x0200 hides on a
+        // failed Require, 0x0100 on a failed Availability.
+        if item.flags3 & 0x0200 != 0, !requireOK { return .hidden }
+        if item.flags3 & 0x0100 != 0, !availOK { return .hidden }
+        return .locked
     }
 }

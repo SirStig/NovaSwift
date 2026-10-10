@@ -96,9 +96,9 @@ public final class AIBrain {
     ///   one of the player's escorts (`leaderID = playerEntityID`) at spawn, so
     ///   the existing escort logic makes it defend the player. Nothing extra is
     ///   needed here beyond the friend/foe flip.
-    /// - `.attackStellars` — no ship-vs-stellar combat exists in this engine yet,
-    ///   so this currently falls through to the ship's normal AI (documented
-    ///   stub, not silently equivalent to `.standard`).
+    /// - `.attackStellars` — the original AI's 0x004053c0 directive takes the
+    ///   ship to state 0x12 against a hostile destroyable stellar, else flies
+    ///   it as a warship (`OriginalAI.stellarAttackDirective`).
     public var behaviorOverride: MissionShipBehavior = .standard
 
     /// The hypergate this ship is leaving through, set by the original AI's

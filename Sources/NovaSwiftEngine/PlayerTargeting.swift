@@ -51,13 +51,13 @@ extension World {
         return selectTarget(id: next.entityID)
     }
 
-    /// Whether `npc` is coming after the player's squad: its target is the
-    /// player or one of the player's ships and it is attacking.
+    /// `Ship_IsThreatToPlayerSquad` (0x0040f6d0): not coasting on its
+    /// maneuver timer, not disabled, not in one of the disengaged states, and
+    /// targeting the player or a ship the player leads directly. A ship with no
+    /// AI record (the player, a remote player) is never a threat.
     public func isThreatToPlayerSquad(_ npc: Ship) -> Bool {
-        guard let brain = npc.brain, brain.state == .attacking, let target = brain.targetID else { return false }
-        if target == Self.playerEntityID { return true }
-        guard let t = ship(id: target) else { return false }
-        return isInPlayerSquad(t)
+        guard !npc.isPlayer, let rec = originalAI.record(for: npc.entityID) else { return false }
+        return originalAI.isThreatToPlayerSquad(rec, ship: npc, host: WorldAIHost(world: self, ai: originalAI))
     }
 
     /// R: the nearest ship threatening the player's squad, not disabled, with

@@ -59,17 +59,26 @@ Apple builds. See [GODOT_LAYER.md](GODOT_LAYER.md).
 Wider device testing, finer PvP options, and handing authority over when the
 host drops. See [MULTIPLAYER.md](MULTIPLAYER.md).
 
-### Plug-in tooling
+### Plug-in toolkit
 
-An in-app resource editor and pilot editor. Both need a write path in
-`NovaSwiftKit`, which only reads today. Scoped in
-[EDITOR_AND_PLUGINS_SCOPE.md](EDITOR_AND_PLUGINS_SCOPE.md).
+A full plug-in editor and HD extensions, so the community can build things the
+original tools never allowed:
+
+- An editor for every resource type, with ship, galaxy and mission editors,
+  validation against the original's rules, "test in engine", and export to
+  Windows and Mac plug-in formats.
+- An optional HD layer beside any plug-in: high-resolution sprites, 3D models
+  (shown in 3D or baked into classic sprite sheets), better audio and music,
+  and HD landing art. Gameplay never changes, and plain plug-ins still work in
+  the original game.
+- Publishing to the plug-in store, a command-line tool, templates and guides.
+
+The plan is in [PLUGIN_TOOLKIT.md](PLUGIN_TOOLKIT.md).
 
 ### Optional extras
 
 All off by default and never replacing the original:
 
-- HD art and audio packs layered over the originals.
 - An optional smarter AI behind the same seam as the original AI.
 - More accessibility options.
 

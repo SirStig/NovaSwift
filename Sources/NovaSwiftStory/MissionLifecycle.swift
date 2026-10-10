@@ -18,8 +18,10 @@ extension StoryEngine {
         static let list = 2002
         static let missionShipLost = 0x11c   // a mission ship was lost — mission failed
         static let timeLimitExceeded = 0x11d // "Time limit exceeded - mission failed."
-        static let noCargoRoom = 0x165       // not enough cargo space
-        static let noFreeCargoRoom = 0x166   // not enough free cargo space
+        static let noCargoRoomAccept = 0x163     // #355 "…enough cargo space to accept this mission"
+        static let noFreeCargoRoomAccept = 0x164 // #356 "…enough free cargo space to accept…"
+        static let noCargoRoom = 0x165           // #357 "…enough cargo space to load this cargo"
+        static let noFreeCargoRoom = 0x166       // #358 "…enough free cargo space to load…"
     }
 
     // MARK: Slots
@@ -55,6 +57,12 @@ extension StoryEngine {
         }
     }
 
+    /// The first of the 16 slots no active mission holds (0x0043f100).
+    private func firstFreeSlot() -> Int {
+        let used = Set(player.activeMissions.enumerated().map { $0.element.slot ?? $0.offset })
+        return (0..<PlayerState.missionSlotCount).first { !used.contains($0) } ?? player.activeMissions.count
+    }
+
     private func nextSerial() -> Int {
         let s = player.nextMissionSerial ?? 1
         player.nextMissionSerial = s + 1
@@ -84,6 +92,7 @@ extension StoryEngine {
         if isLaneLocation(m.availLocation) {
             recordLaneOffer(missionID, ok ? .closed : .activationFailed)
         }
+        if ok, player.landedSpob != nil { compactOfferLists(accepted: missionID) }
         return ok
     }
 
@@ -103,14 +112,16 @@ extension StoryEngine {
     }
 
     private func activate(_ m: MissionRes, targets t: MissionTargets) -> Bool {
-        if t.cargoQty > 0, cargoCapacity() < t.cargoQty || freeCargoSpace() < t.cargoQty {
-            Log.mission.debug("activate: mission \(m.id) refused — no room for \(t.cargoQty)t")
-            showMiscText(cargoCapacity() < t.cargoQty ? MiscString.noCargoRoom : MiscString.noFreeCargoRoom)
-            return false
-        }
+        // The free slot comes first and fails silently; only then the cargo
+        // room, with the "to accept this mission" texts (0x0043f100).
         ensureSerials()
         guard player.activeMissions.count < PlayerState.missionSlotCount else {
             Log.mission.notice("activate: mission \(m.id) refused — all \(PlayerState.missionSlotCount) mission slots in use")
+            return false
+        }
+        if t.cargoQty > 0, cargoCapacity() < t.cargoQty || freeCargoSpace() < t.cargoQty {
+            Log.mission.debug("activate: mission \(m.id) refused — no room for \(t.cargoQty)t")
+            showMiscText(cargoCapacity() < t.cargoQty ? MiscString.noCargoRoomAccept : MiscString.noFreeCargoRoomAccept)
             return false
         }
         Log.mission.notice("accept: mission \(m.id) (\"\(m.name, privacy: .public)\") accepted")
@@ -127,9 +138,9 @@ extension StoryEngine {
         am.serial = serial
         am.failed = false
         am.objectiveComplete = false
-        if m.shipNameStrID >= 128, let n = game.stringList(m.shipNameStrID)?.strings.count, n > 0 {
-            am.shipNameEntry = random(n) + 1
-        }
+        am.slot = firstFreeSlot()
+        populateMissionShips(&am, m)
+        am.shipSystemResolved = true
         player.activeMissions.append(am)
 
         // OnAccept runs first, then the acceptance fee (clamped at 0), then
@@ -151,7 +162,7 @@ extension StoryEngine {
         if m.cargoPickup == .atStart, let i = slotIndex(serial: serial) {
             showMissionText(m.loadCargoText, for: m, active: player.activeMissions[i])
         }
-        if m.hasShipObjective { services?.spawnMissionShips(missionID: m.id, mission: m) }
+        if m.shipCount > 0, m.shipDude >= 128 { services?.spawnMissionShips(missionID: m.id, mission: m) }
 
         // A no-ship auto-abort mission accepted while docked, with its travel
         // leg already done and no return stellar, resolves on the spot.
@@ -290,11 +301,14 @@ extension StoryEngine {
             }
             evaluateObjective(serial: serial, landing: true)
         }
+        // A success here rebuilds the lists (0x00443780).
         if anySuccess {
             offerState.removed = []
             offerState.targets = [:]
+            buildOfferLists(atSpob: spobID)
+        } else if offerState.computerList == nil || offerState.laneList == nil {
+            buildOfferLists(atSpob: spobID)
         }
-        prepareOffers(atSpob: spobID)
     }
 
     /// Cargo at the travel and return stellars (0x004438d0).
@@ -651,11 +665,7 @@ extension StoryEngine {
     /// commodity bins and junk; NovaSwift merges it into `player.cargo`, so
     /// fleet-wide hold operations (EC-21, UI-13) subtract this first.
     public func carriedMissionCargo() -> [Int: Int] {
-        var tons: [Int: Int] = [:]
-        for am in player.activeMissions where am.isCarryingCargo {
-            if let c = cargo(of: am) { tons[c.type, default: 0] += c.qty }
-        }
-        return tons
+        PilotEconomy.missionCargo(player, game: game)
     }
 
     private func currentFuel() -> Double {

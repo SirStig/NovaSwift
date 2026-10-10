@@ -34,6 +34,8 @@ struct OriginalAIHull {
     /// `EscortType` as the loader stores it: 0 fighter, 1 medium, 2 warship, 3 freighter.
     var escortClass = 0
     var inherentCombatGovt = -1
+    /// The attribute (voice, jamming) government, −1 for none.
+    var attributesGovt = -1
     var fuelCapacity = 0
 }
 
@@ -79,7 +81,15 @@ protocol OriginalAIHost {
     /// `Weapon_ClassifyShipWeaponAmmoReadiness`: 0 all ready, 1 some ammo out,
     /// 2 nothing can fire.
     func ammoReadiness(_ ship: Ship) -> Int
+    /// `Weapon_GetShipMaxWeaponRange` (0x0046cec0), px.
     func maxWeaponRange(_ ship: Ship) -> Double
+    /// `Weapon_IsShipWithinWeaponRangeOfTarget(ship, target, −1)` (0x00411600):
+    /// the class's stock weapons' envelope.
+    func withinStockWeaponRange(_ ship: Ship, of target: Ship) -> Bool
+    /// No chatter is queued or playing (`DAT_007353fe == −1 && DAT_00591a8c == 0`).
+    var chatterIdle: Bool { get }
+    /// `Frame_QueueCombatChatter` (0x00426ce0).
+    func queueChatter(category: Int, govt: Int, voice: Int)
     /// Whether any of `ship`'s guided weapons can intercept `target` from here
     /// (the bank walk inside 0x00410f20).
     func hasInterceptingGuidedBank(_ ship: Ship, against target: Ship) -> Bool
@@ -124,6 +134,8 @@ protocol OriginalAIHost {
     func tryAssistanceEncounter(_ ship: Ship, odds: Double)
     func transferFuel(to ship: Ship, amount: Double)
     func repairAboveDisable(_ ship: Ship)
+    /// A destroyable stellar (Strength > 0) still standing (0x0046e3c0 false).
+    func stellarAttackable(_ id: Int) -> Bool
 }
 
 /// The original AI's view of a live `World`.
@@ -136,6 +148,10 @@ struct WorldAIHost: OriginalAIHost {
     func ship(_ id: Int) -> Ship? { world.ship(id: id) }
     func random(_ n: Int) -> Int { world.rng.range(n) }
     var stellars: [OriginalAIStellar] { ai.stellars(of: world) }
+    func stellarAttackable(_ id: Int) -> Bool {
+        guard let body = world.systemContext.bodies.first(where: { $0.id == id }), body.isDestroyable else { return false }
+        return !world.stellarsDestroyedThisSession.contains(id) && (world.stellarArmor[id] ?? body.strength) >= 0
+    }
     func hull(of ship: Ship) -> OriginalAIHull { ai.hull(of: ship, world: world) }
     func govt(_ id: Int) -> GovtRes? { id >= govtResourceBase ? world.diplomacy?.govt(id) : nil }
 
@@ -185,16 +201,18 @@ struct WorldAIHost: OriginalAIHost {
     /// `Weapon_HasAnyFireableNonSecondaryWeapon` as Batch 2/3 ported it.
     func hasLethalWeapon(_ ship: Ship) -> Bool { AIBrain.hasLethalWeapon(ship) }
 
-    func ammoReadiness(_ ship: Ship) -> Int {
-        let mounts = ship.weapons.filter { $0.spec.guidance != .bay && !$0.spec.isPointDefense }
-        guard !mounts.isEmpty else { return 2 }
-        let dry = mounts.filter { $0.ammo == 0 }.count
-        if dry == mounts.count { return 2 }
-        return dry > 0 ? 1 : 0
+    func ammoReadiness(_ ship: Ship) -> Int { world.ammoReadiness(ship) }
+
+    func maxWeaponRange(_ ship: Ship) -> Double { Double(world.maxWeaponRange(ship)) }
+
+    func withinStockWeaponRange(_ ship: Ship, of target: Ship) -> Bool {
+        world.withinStockWeaponRange(ship, of: target)
     }
 
-    func maxWeaponRange(_ ship: Ship) -> Double {
-        ship.weapons.filter { $0.spec.guidance != .bay }.map(\.spec.range).max() ?? 0
+    var chatterIdle: Bool { world.combatChatterIdle }
+
+    func queueChatter(category: Int, govt: Int, voice: Int) {
+        world.queueCombatChatter(category: category, govt: govt, voice: voice)
     }
 
     func hasInterceptingGuidedBank(_ ship: Ship, against target: Ship) -> Bool {

@@ -106,41 +106,82 @@ extension World {
         return Double(take)
     }
 
-    /// Total ammunition aboard disabled hulk `shipID` that the player could take
-    /// — only rounds for weapon types the player also carries (and that have room
-    /// to spare) can be looted, matching EV Nova's "the ammo tops up your guns"
-    /// behavior. 0 if it isn't a boardable hulk.
-    public func ammoAboard(_ shipID: Int) -> Int {
-        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled else { return 0 }
-        var total = 0
-        for hulkMount in s.weapons where hulkMount.ammo > 0 {
-            let cap = galaxy?.game.weapon(hulkMount.spec.id)?.maxAmmo ?? 0
-            for mine in player.weapons where mine.spec.id == hulkMount.spec.id && mine.ammo >= 0 {
-                total += min(hulkMount.ammo, max(0, cap - mine.ammo))
-            }
+    /// `Weapon_HasMatchingWeaponAmmoCarried` (0x00469230): the hulk bank
+    /// qualifies when the player has a mounted bank drawing the same AmmoType
+    /// pool; the first player bay met ends the scan with whether that bay's
+    /// AmmoType equals the bank's.
+    private func plunderBankQualifies(_ bank: WeaponMount) -> Bool {
+        guard bank.ammo > 0, bank.spec.guidance != .bay,
+              (0...255).contains(bank.spec.ammoTypeRaw) else { return false }
+        for mine in player.weapons {
+            if mine.spec.guidance == .bay { return mine.spec.ammoTypeRaw == bank.spec.ammoTypeRaw }
+            if mine.spec.ammoTypeRaw == bank.spec.ammoTypeRaw { return true }
         }
-        return total
+        return false
     }
 
-    /// Transfer a boarded hulk's ammunition into the player's matching weapons,
-    /// each pool capped at that weapon's `maxAmmo`. Decrements the hulk's rounds
-    /// (so re-boarding can't duplicate them) and returns the rounds taken.
-    /// `WeaponMount` is a reference type, so mutating the elements in place sticks.
-    @discardableResult
-    public func takePlunderAmmo(from shipID: Int) -> Int {
-        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled else { return 0 }
-        var taken = 0
-        for hulkMount in s.weapons where hulkMount.ammo > 0 {
-            let cap = galaxy?.game.weapon(hulkMount.spec.id)?.maxAmmo ?? 0
-            for mine in player.weapons where mine.spec.id == hulkMount.spec.id && mine.ammo >= 0 {
-                let move = min(hulkMount.ammo, max(0, cap - mine.ammo))
-                guard move > 0 else { continue }
-                mine.ammo += move
-                hulkMount.ammo -= move
-                taken += move
-            }
+    /// The one hulk bank whose rounds the boarding offers, picked at random
+    /// among the qualifying ones once per hulk (0x00484230); nil if none.
+    private func plunderAmmoBank(_ s: Ship) -> WeaponMount? {
+        if let id = s.plunderAmmoBankID {
+            return s.weapons.first { $0.spec.id == id && $0.ammo > 0 }
         }
-        return taken
+        let eligible = s.weapons.filter { plunderBankQualifies($0) }
+        guard !eligible.isEmpty else { return nil }
+        let pick = eligible[rng.range(eligible.count)]
+        s.plunderAmmoBankID = pick.spec.id
+        return pick
+    }
+
+    /// The ammo outfit (ModType 3, the lowest id) that feeds `bank`'s pool.
+    private func plunderAmmoOutfit(for bank: WeaponMount) -> OutfRes? {
+        guard let game = galaxy?.game else { return nil }
+        let target = bank.spec.ammoTypeRaw + 128
+        return game.outfits().sorted { $0.id < $1.id }.first {
+            $0.firstSlot.type == OutfitModType.ammunition.rawValue && $0.firstSlot.value == target
+        }
+    }
+
+    /// How many of the offered bank's rounds the player can take: one round
+    /// at a time while free mass covers the ammo outfit's Mass and the
+    /// player's count stays under its Max (0x00482940).
+    private func plunderAmmoRoom(bank: WeaponMount, freeMass: Int) -> Int {
+        guard let outfit = plunderAmmoOutfit(for: bank),
+              let mine = player.weapons.first(where: { $0.spec.ammoTypeRaw == bank.spec.ammoTypeRaw && $0.ammo >= 0 })
+        else { return 0 }
+        var rounds = 0, owned = mine.ammo, free = freeMass
+        while rounds < bank.ammo, free >= outfit.mass,
+              outfit.maxInstallable <= 0 || owned < outfit.maxInstallable {
+            rounds += 1; owned += 1; free -= outfit.mass
+        }
+        return rounds
+    }
+
+    /// Ammunition the boarding offers from disabled hulk `shipID` (one bank's
+    /// rounds, limited by `freeMass`). 0 if it isn't a boardable hulk.
+    public func ammoAboard(_ shipID: Int, freeMass: Int = .max) -> Int {
+        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
+              let bank = plunderAmmoBank(s) else { return 0 }
+        return plunderAmmoRoom(bank: bank, freeMass: freeMass)
+    }
+
+    /// Move the offered bank's rounds into the player's matching pool and
+    /// return the rounds taken. Decrements the hulk's rounds so re-boarding
+    /// can't duplicate them.
+    @discardableResult
+    public func takePlunderAmmo(from shipID: Int, freeMass: Int = .max) -> Int {
+        guard let s = ship(id: shipID), s !== player, s.isAlive, s.disabled,
+              let bank = plunderAmmoBank(s) else { return 0 }
+        let take = plunderAmmoRoom(bank: bank, freeMass: freeMass)
+        guard take > 0 else { return 0 }
+        var credited = Set<ObjectIdentifier>()
+        for mine in player.weapons where mine.spec.ammoTypeRaw == bank.spec.ammoTypeRaw && mine.ammo >= 0 {
+            // Mounts sharing a pool see the credit once.
+            let key = mine.pool.map(ObjectIdentifier.init) ?? ObjectIdentifier(mine)
+            if credited.insert(key).inserted { mine.ammo += take }
+        }
+        bank.ammo -= take
+        return take
     }
 }
 

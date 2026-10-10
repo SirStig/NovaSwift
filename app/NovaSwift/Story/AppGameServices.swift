@@ -13,12 +13,27 @@ final class AppGameServices: GameServices, ObservableObject {
     /// The mission currently being offered, if any — a mission/spöb screen
     /// observes this to show the briefing sheet.
     @Published var pendingOffer: MissionOffer?
-    /// The most recent narrative text the engine wants shown (mission
-    /// completion, cron news), if any.
-    @Published var storyText: (title: String, text: String)?
-    /// The `dësc` the current `storyText` came from (nil = plain text), so the
-    /// dialog can draw that `dësc`'s graphic.
-    var storyDescID: Int?
+    /// Narrative texts the engine wants shown (briefings, completion and
+    /// failure texts, refusals), oldest first. The original shows each in a
+    /// modal dialog of its own (0x004982a0), so none overwrites another.
+    @Published private(set) var storyQueue: [(title: String, text: String)] = []
+    private var queuedDescIDs: [Int?] = []
+    private var stagedDescID: Int?
+    /// The `dësc` the shown text came from (nil = plain text), so the dialog
+    /// can draw that `dësc`'s graphic. Set just before assigning `storyText`.
+    var storyDescID: Int? {
+        get { queuedDescIDs.first ?? nil }
+        set { stagedDescID = newValue }
+    }
+    /// The text on screen: the head of `storyQueue`. Assigning a text queues
+    /// it behind any already waiting; assigning nil dismisses the one shown.
+    var storyText: (title: String, text: String)? {
+        get { storyQueue.first }
+        set {
+            if let newValue { storyQueue.append(newValue); queuedDescIDs.append(stagedDescID); stagedDescID = nil }
+            else if !storyQueue.isEmpty { storyQueue.removeFirst(); if !queuedDescIDs.isEmpty { queuedDescIDs.removeFirst() } }
+        }
+    }
 
     var audio: GameAudio?
 

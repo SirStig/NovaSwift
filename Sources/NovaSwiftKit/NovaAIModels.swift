@@ -145,6 +145,10 @@ public struct OutfRes {
     /// The outfit's modifier slots: (function, value). Slots that are empty
     /// (`.none`/`.unknown`) are stripped.
     public let modifiers: [(type: OutfitModType, value: Int)]
+    /// The first modifier slot as stored (@6/@8), empty or not: the original
+    /// mounts weapons (ModType 1) and loads ammunition (ModType 3) from this
+    /// slot alone (0x00463260).
+    public let firstSlot: (type: Int, value: Int)
 
     // Mission/story-gated availability (Nova Bible; offsets verified against
     // ResForge's `oütf` TMPL — see docs/DATA_FORMAT.md). Distinct from
@@ -212,6 +216,7 @@ public struct OutfRes {
             mods.append((t, ai16(d, pos + 2)))
         }
         modifiers = mods
+        firstSlot = (ai16(d, 6), ai16(d, 8))
         contribute = au64(d, 30)
         require = au64(d, 38)
         availBits = acstr(d, 46, 255)
@@ -353,6 +358,25 @@ public struct GovtRes {
     public let name: String
 
     public let voiceType: Int
+    /// `VoiceType` as the loader splits it (0x004bd3c0): 0–7 a voice set
+    /// whose ships use either voice; 1000–1007 that set, voice 1 only;
+    /// 2000–2007 voice 0 only; anything else no voice (−1).
+    public var voiceSet: Int {
+        switch voiceType {
+        case 0...7: return voiceType
+        case 1000...1007: return voiceType - 1000
+        case 2000...2007: return voiceType - 2000
+        default: return -1
+        }
+    }
+    /// The fixed voice a `VoiceType` of 1000+ / 2000+ imposes, −1 for none.
+    public var fixedVoice: Int {
+        switch voiceType {
+        case 1000...1007: return 1
+        case 2000...2007: return 0
+        default: return -1
+        }
+    }
     public let flags1: UInt16
     public let flags2: UInt16
     public let scanFine: Int
@@ -684,6 +708,8 @@ public struct WeapRes {
     /// `bööm` id detonated on impact/expiry (drives the hit/explosion sound and
     /// sprite), or nil if this weapon has no explosion.
     public let explosionBoomID: Int?
+    /// `ExplodType` ≥ 1000: the impact also scatters small bööm sprites.
+    public let explosionIsBig: Bool
     /// Continuous-fire weapons (typically beams) loop their fire sound instead of
     /// retriggering it every simulation frame while held.
     public let loopSound: Bool
@@ -1001,6 +1027,7 @@ public struct WeapRes {
         fireSoundID = OriginalAudio.weaponSoundID(raw: rawSound)   // played only when ≥ 0
         impact = ai16(d, 20)
         explosionBoomID = boomID(raw: ai16(d, 22))
+        explosionIsBig = ai16(d, 22) >= 1000
         let flags = au16(d, 28)
         loopSound = flags & 0x0010 != 0
         flagsRaw = flags

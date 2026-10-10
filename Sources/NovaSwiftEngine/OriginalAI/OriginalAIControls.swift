@@ -282,7 +282,17 @@ extension OriginalAI {
             }
             vel = Vec2(ramp(vel.x, tv.x), ramp(vel.y, tv.y))
             ship.velocity = vel * OriginalClock.ticksPerSecond
-            rec.desiredHeadingDeg = Int(Self.bearingDeg(ship.position, rock.position))
+            // The ship also creeps toward the rock until within 150 px on each
+            // axis, then is pushed out of an 80 px window around it
+            // (0x00408150, B-7).
+            func creep(_ pos: Double, _ goal: Double) -> Double {
+                var p = pos
+                if goal + 150 < p { p -= step } else if p < goal - 150 { p += step }
+                if goal < p, p < goal + 80 { p += step } else if p < goal, goal - 80 < p { p -= step }
+                return p
+            }
+            ship.position = Vec2(creep(ship.position.x, rock.position.x), creep(ship.position.y, rock.position.y))
+            rec.desiredHeadingDeg = Int(Self.rockLeadBearingDeg(ship: ship, rock: rock, bank: rec.activeBank))
             if delta() < f.turnDeg + 10 {
                 rec.primary = nil
                 rec.fire.insert(.unguided)
@@ -291,6 +301,26 @@ extension OriginalAI {
         default:
             break
         }
+    }
+
+    /// `Ship_AimWeaponLeadVelocity` (0x0043b8c0): the bearing to the rock,
+    /// led by `dist / Speed` ticks of relative velocity when the active bank
+    /// is an unguided, turret, quadrant or point-defense weapon; the plain
+    /// bearing with no bank.
+    static func rockLeadBearingDeg(ship: Ship, rock: (position: Vec2, velocity: Vec2), bank: Int?) -> Double {
+        let straight = bearingDeg(ship.position, rock.position)
+        guard let bank, ship.weapons.indices.contains(bank) else { return straight }
+        let spec = ship.weapons[bank].spec
+        switch spec.guidance {
+        case .unguided, .turret, .frontQuadrant, .rearQuadrant, .pointDefense: break
+        default: return straight
+        }
+        let rawSpeed = spec.speedPerTick * 100
+        guard rawSpeed > 0 else { return straight }
+        let rel = rock.position - ship.position
+        let t = rel.length / rawSpeed
+        let dv = (rock.velocity - ship.velocity) * (1 / OriginalClock.ticksPerSecond)
+        return bearingDeg(ship.position, rock.position + dv * t)
     }
 
     // MARK: Mode bodies

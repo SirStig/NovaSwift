@@ -181,6 +181,16 @@ final class GameAudio: ObservableObject {
                     volume: OriginalAudio.unityVolume, gainScale: gainScale)
     }
 
+    /// Play an escort chatter line unpositioned and report its length in
+    /// seconds (0 if it can't play), so the world can hold the next line until
+    /// this one ends (`DAT_00591a8c`).
+    func playChatter(_ id: Int) -> Double {
+        guard !settings.muteAll, let buffer = library.buffer(for: id) else { return 0 }
+        engine.play(buffer, soundID: id, priority: OriginalAudio.Priority.klaxxon,
+                    volume: OriginalAudio.unityVolume, gainScale: Float(settings.uiVolume))
+        return Double(buffer.frameLength) / max(1, buffer.format.sampleRate)
+    }
+
     /// `NovaAudio_PlaySpatialByDistance`: play a `snd ` id at a world point
     /// heard from `listener` (the player). Mono; never quieter than 1/8.
     func play(_ id: Int, at source: CGPoint, listener: CGPoint,

@@ -250,7 +250,11 @@ public struct ShanRes {
         animDelay = i16(d, 48)
         weapDecay = i16(d, 50)
         blinkMode = i16(d, 54)
-        blinkValues = (a: i16(d, 56), b: i16(d, 58), c: i16(d, 60), d: i16(d, 62))
+        // The loader clamps the blink values the animation reads: mode 2's C
+        // and mode 3's B to at most 31 (0x004b4ee0, C-3).
+        let blinkB = i16(d, 58), blinkC = i16(d, 60)
+        blinkValues = (a: i16(d, 56), b: blinkMode == 3 ? min(blinkB, 31) : blinkB,
+                       c: blinkMode == 2 ? min(blinkC, 31) : blinkC, d: i16(d, 62))
 
         func points(xBase: Int, yBase: Int, zBase: Int) -> [ShanExitPoint] {
             (0..<4).map { i in
@@ -263,8 +267,8 @@ public struct ShanRes {
         turretPoints = points(xBase: 88, yBase: 96, zBase: 152)
         guidedPoints = points(xBase: 104, yBase: 112, zBase: 160)
         beamPoints = points(xBase: 120, yBase: 128, zBase: 168)
-        // 0 on disk means "unset" → 100% (no compression).
-        func comp(_ off: Int) -> Int { let v = i16(d, off); return v == 0 ? 100 : v }
+        // 0 on disk means "unset", and a negative value is read the same: → 100%.
+        func comp(_ off: Int) -> Int { let v = i16(d, off); return v <= 0 ? 100 : v }
         upCompress = (x: comp(136), y: comp(138))
         downCompress = (x: comp(140), y: comp(142))
     }
@@ -320,6 +324,8 @@ public struct ShipRes {
 
     // Economy / meta
     public let techLevel: Int       // @46
+    /// `DispWeight` @60 (0x3c): the shipyard and hire lists run highest first.
+    public let displayWeight: Int
     /// Purchase price, credits. A 4-byte `DLNG` at @48 — NOT the 2-byte @50 word
     /// it was long mis-decoded as, which silently dropped the high 16 bits and
     /// wrapped every hull over 32,767 cr (e.g. Fed Viper read −31,072 instead of
@@ -518,6 +524,7 @@ public struct ShipRes {
         maxGuns = i16(d, 42)
         maxTurrets = i16(d, 44)
         techLevel = i16(d, 46)
+        displayWeight = i16(d, 60)
         cost = i32(d, 48)
         deathDelay = i16(d, 52)
         armorRecharge = i16(d, 54)

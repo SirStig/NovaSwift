@@ -3713,3 +3713,16 @@ default and permadeath scope (FL-03), and the hyperspace fade (FL-04).
    NovaSwift save slots with it (FL-03).
 5. Hitch behaviour (Q-FL-13) and persisting offer rolls / aux ships in `.evpilot` (Q-MS-06).
 6. Whether any FIX-only item listed at the end of §3 should be kept as a toggle instead.
+
+## Missions / economy sweep (fix/missions-economy)
+
+Done: the missions_session and economy_save reports' offers, cargo, special-ship, BBS, status-bar
+cargo panel, hire/shipyard list, pilot-open items, murk as a per-sprite distance fog (`MurkFog`,
+0x00438db0), background-sprite murk level (0x0042e590; the tiled star layers keep their own
+wrap), debris puffs (`DebrisPuffs.swift`, 0x00428090 / 0x0043b170; drawn as grey dots, the puff
+art is not identified) and the ambush hail quote's 'STR ' override. Offer movies autoplay with Skip.
+Left: hail-quote wildcard expansion (rides on main's `expandStatusText`).
+## AI / spawn / weapons sweep fixes (fix/ai-combat)
+
+Done from `ai_spawn_comm.md` and `weapons_flight.md`: A1, A2, A3, A4, A5/A6/B-13, A7, A8, B-1 to B-6, B-8 to B-12, B-14, C-1, C-2, D-1 to D-4, and ai_spawn_comm #2, #4, #6, #9 to #19 and #20 (hull availability, gate hold). Pinned by `AICombatFidelityTests`, `BoardingTests`, `ShipSystemTests`.
+Also done: chatter categories 0 and 2, the capture name prompt (#119), comm and capture window text and keys (#22), A9 (area blasts, pod debris), C-3, C-4, and the B-7 test. Not done: #20's RNG draw shapes (they change only the random stream), the pod-debris sound (DAT_00591a80, id unknown) and the pers-flag debris arm at 0x00433050 l.904.
