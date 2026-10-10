@@ -254,12 +254,13 @@
     },
     {
      "name": "Icons and screenshots for catalog entries",
-     "status": "planned"
+     "status": "partial",
+     "where": "24 of 61 entries have icons; installed plug-ins without one get an icon made from their own art"
     },
     {
      "name": "Rehost plug-ins whose authors allow it",
-     "status": "partial",
-     "where": "archive job in progress"
+     "status": "done",
+     "where": "23 plug-ins in the archive-v1 release, permission quoted per entry"
     },
     {
      "name": "Plug-ins bundled with the app",
