@@ -346,12 +346,27 @@ final class GameDataController: ObservableObject {
         return (baseDir, GameLibrary.discoverResourceFiles(in: baseDir))
     }
 
+    /// `EVNova.ini` string overrides (`[<STR# id>] S<n>`), from the data folder
+    /// or the one above it (the install root in an unflattened layout).
+    nonisolated static func loadIniOverrides(near baseDir: URL) -> [Int: [Int: String]] {
+        for dir in [baseDir, baseDir.deletingLastPathComponent()] {
+            let hit = (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?
+                .first { $0.caseInsensitiveCompare("EVNova.ini") == .orderedSame }
+            if let hit, let data = try? Data(contentsOf: dir.appendingPathComponent(hit)) {
+                return IniStringOverrides.parse(data)
+            }
+        }
+        return [:]
+    }
+
     /// Publish a successfully merged data set, attaching a cross-launch decoded-
     /// sprite cache keyed by the data set's fingerprint (see `SpriteDiskCache`).
     private func applyMerged(_ merged: ResourceCollection, baseDir: URL, baseFiles: [URL]) {
         let fingerprint = GameLibrary.fingerprint(baseFiles: baseFiles, plugins: plugins, flatPluginOrder: !pluginsAreManual)
         let spriteCache = SpriteDiskCache(fingerprint: fingerprint)
-        game = NovaGame(merged, spriteCache: spriteCache)
+        var newGame = NovaGame(merged, spriteCache: spriteCache)
+        newGame.iniStringOverrides = Self.loadIniOverrides(near: baseDir)
+        game = newGame
         if let game { CreditsFormatting.refresh(from: game) }
         storylineTagCache = StorylineTagCache(fingerprint: fingerprint)
         storylineTags = [:]   // stale from any previous data set until `prewarm()` recomputes

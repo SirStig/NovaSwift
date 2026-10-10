@@ -65,6 +65,9 @@ enum DataImporter {
                 + GameDataController.discoverAudioFiles(in: src)
                 + GameDataController.discoverFontFiles(in: src)
                 + GameDataController.discoverVideoFiles(in: src)
+                + ((try? fm.contentsOfDirectory(at: src, includingPropertiesForKeys: nil)) ?? []).filter {
+                    $0.lastPathComponent.caseInsensitiveCompare("EVNova.ini") == .orderedSame
+                }
         } else {
             sources = [src]
         }

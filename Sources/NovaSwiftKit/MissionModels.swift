@@ -480,6 +480,10 @@ public struct StringListRes: Sendable {
     public let name: String
     public let strings: [String]
 
+    public init(id: Int, name: String, strings: [String]) {
+        self.id = id; self.name = name; self.strings = strings
+    }
+
     /// 1-based lookup (EV Nova indexes STR# entries from 1); returns nil if out
     /// of range.
     public func string(at index1: Int) -> String? {

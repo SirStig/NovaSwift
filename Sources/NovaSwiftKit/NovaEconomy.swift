@@ -148,11 +148,9 @@ extension NovaGame {
     /// Display name of one of the six standard commodities (`STR# 4000`, falling
     /// back to the built-in name if the data doesn't define it).
     public func commodityName(_ commodity: Commodity) -> String {
-        if let list = stringList(4000), commodity.rawValue < list.strings.count {
-            let s = list.strings[commodity.rawValue]
-            if !s.isEmpty { return s }
-        }
-        return commodity.fallbackName
+        // `STR ` 9000+i wins over STR# 4000 entry i+1 (0x004c7040); the built-in
+        // name is only for data that defines neither.
+        return commodityDisplayName(commodity.rawValue) ?? commodity.fallbackName
     }
 
     /// A single `STR ` resource (**not** the indexed `STR#` list): one length
