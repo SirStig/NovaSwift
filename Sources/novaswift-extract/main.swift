@@ -889,9 +889,31 @@ case "ai":
             print("DIGEST \(digestTick) \(phase) rng \(world.rng.seed) n \(world.allShips.count) h \(String(h, radix: 16))")
         }
     }
+    // NOVASWIFT_SIM_PROFILE=1: per-phase totals and the per-step cost
+    // distribution (mean / p99 / max) — the sim's share of a 60 fps frame.
+    let simProfile = ProcessInfo.processInfo.environment["NOVASWIFT_SIM_PROFILE"] == "1"
+    var phaseTotals: [String: Double] = [:]
+    var stepCosts: [Double] = []
+    if simProfile {
+        world.profiler = { phase, seconds in phaseTotals[phase, default: 0] += seconds }
+    }
+    defer {
+        if simProfile, !stepCosts.isEmpty {
+            let sorted = stepCosts.sorted()
+            let mean = stepCosts.reduce(0, +) / Double(stepCosts.count)
+            print(String(format: "step cost: mean %.3f ms  p99 %.3f ms  max %.3f ms over %d steps",
+                         mean * 1000, sorted[Int(Double(sorted.count - 1) * 0.99)] * 1000,
+                         sorted.last! * 1000, sorted.count))
+            for (phase, t) in phaseTotals.sorted(by: { $0.value > $1.value }) {
+                print(String(format: "  %-28@ %8.3f ms/step", phase as NSString, t * 1000 / Double(stepCosts.count)))
+            }
+        }
+    }
     for i in 0..<steps {
         digestTick = i
+        let stepStart = simProfile ? DispatchTime.now().uptimeNanoseconds : 0
         world.step(dt)
+        if simProfile { stepCosts.append(Double(DispatchTime.now().uptimeNanoseconds - stepStart) / 1e9) }
         for e in world.events {
             switch e {
             case let .shipArrived(_, _, fromHyperspace): arrivals += 1; if fromHyperspace { jumpIns += 1 }
