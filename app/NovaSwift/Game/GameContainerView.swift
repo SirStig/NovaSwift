@@ -1333,23 +1333,23 @@ struct GameContainerView: View {
 
     var body: some View {
         gameStackWithMidLifecycle
-        .alert(model.data.game?.stringList(2002)?.string(at: 119) ?? "Name your new ship.",
-               isPresented: Binding(get: { captureNamePrompt != nil },
-                                    set: { if !$0 { captureNamePrompt = nil } })) {
-            TextField("Ship name", text: Binding(get: { captureNamePrompt?.text ?? "" },
-                                                 set: { captureNamePrompt?.text = String($0.prefix(63)) }))
-            Button("OK") {
+        .classicTextPrompt(
+            isPresented: Binding(get: { captureNamePrompt != nil },
+                                 set: { if !$0 { captureNamePrompt = nil } }),
+            prompt: model.data.game?.stringList(2002)?.string(at: 119) ?? "Name your new ship.",
+            text: Binding(get: { captureNamePrompt?.text ?? "" },
+                          set: { captureNamePrompt?.text = $0 }),
+            onOK: { name in
                 if let p = captureNamePrompt {
                     captureNamePrompt = nil
-                    takeCommandOfCapturedShip(p.cap, name: p.text)
+                    takeCommandOfCapturedShip(p.cap, name: name)
                 }
-            }
-            Button("Cancel", role: .cancel) {
+            },
+            onCancel: {
                 captureNamePrompt = nil
                 pendingCaptureChoice = nil
                 host?.hud.post(model.data.game?.stringList(2002)?.string(at: 122) ?? "Cancelled.")
-            }
-        }
+            })
         // Leaving the game unsuppresses the UI cursor so it works on the menus.
         .onDisappear { CursorTargets.shared.suppressed = false }
         // Keep cursor suppression tracking who owns the screen. `wirePadController`
@@ -4462,7 +4462,14 @@ struct MessageLogView: View {
             Spacer()
             HStack {
                 if let m = hud.message {
-                    Text(m.text)
+                    // One Pascal string in one rect: the original fills the
+                    // rect before drawing, so a new message replaces the old
+                    // line outright and anything past the rect is clipped
+                    // (no ellipsis). Updated in place (no per-message
+                    // identity), so a fading old view can never sit beside
+                    // the new text in the stack.
+                    Text(m.text.replacingOccurrences(of: "\r", with: " ")
+                            .replacingOccurrences(of: "\n", with: " "))
                         #if os(iOS)
                         .novaFont(.hud, weight: .semibold, size: 12)
                         #else
@@ -4470,8 +4477,10 @@ struct MessageLogView: View {
                         #endif
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                        .fixedSize(horizontal: true, vertical: false)
                         .shadow(color: .black.opacity(0.9), radius: 2, y: 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .clipped()
                         .transition(.opacity)
                 }
                 Spacer(minLength: 0)

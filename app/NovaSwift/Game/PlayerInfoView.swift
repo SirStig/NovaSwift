@@ -81,10 +81,6 @@ struct PlayerInfoView: View {
                            ditl: jettison) {
                     confirmingJettison = true
                 }
-                .alert(game.stringList(2002)?.string(at: 291) ?? "", isPresented: $confirmingJettison) {
-                    Button(graphics.buttonLabel(50, fallback: "Yes"), role: .destructive) { onJettison?() }
-                    Button(graphics.buttonLabel(51, fallback: "No"), role: .cancel) {}
-                }
                 .ditlPlace(space, d, jettison)
             }
 
@@ -94,6 +90,10 @@ struct PlayerInfoView: View {
                 .ditlPlace(space, d, done)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .topLeading)
+        .classicConfirm(isPresented: $confirmingJettison,
+                                prompt: game.stringList(2002)?.string(at: 291) ?? "",
+                                okTitle: graphics.buttonLabel(50, fallback: "Yes"),
+                                cancelTitle: graphics.buttonLabel(51, fallback: "No"), fit: false) { onJettison?() }
     }
 
     /// The dialog's own stretchable frame: fixed 40px caps, middle stretched to

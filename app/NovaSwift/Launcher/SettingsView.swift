@@ -26,8 +26,19 @@ struct SettingsView: View {
     /// first. See `BugReportView`.
     @State private var showBugReport = false
     @State private var showAbout = false
+    /// Classic presentation opens the original's Preferences window first;
+    /// the port's full settings sit behind its "Port options…" link.
+    @State private var showPortOptions = false
 
     var body: some View {
+        if !model.settings.modernDialogs && !showPortOptions && model.data.game != nil {
+            ClassicPreferencesView(onClose: onClose, onPortOptions: { showPortOptions = true })
+        } else {
+            portBody
+        }
+    }
+
+    private var portBody: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
             HStack(spacing: 0) {
                 sidebar

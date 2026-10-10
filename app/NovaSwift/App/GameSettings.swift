@@ -427,6 +427,35 @@ struct GameSettings: Codable, Equatable {
     /// Global UI scale factor (0.8…1.4).
     var uiScale: Double = 1.0
 
+    // MARK: The original's Preferences dialog (DLOG/DITL 4003)
+    // Defaults are NovaPrefs_ResetToDefaults 0x004b4320.
+
+    /// "QuickTime Movies" (prefs +3 inverted, DAT_005914d3): dësc movies,
+    /// docking/jump movies and the race clips all play. On by default.
+    var playMovies: Bool = true
+    /// "Intro Music" (DAT_005914d1).
+    var introMusic: Bool = true
+    /// "Smoke Trails" (DAT_005914d5 inverted).
+    var smokeTrails: Bool = true
+    /// "Ship Animations" (DAT_005914da).
+    var shipAnimations: Bool = true
+    /// "Running Lights" (DAT_005914dd).
+    var runningLights: Bool = true
+    /// "Weapon Effects" (DAT_005914dc).
+    var weaponEffects: Bool = true
+    /// "Parallax Starfield" (DAT_005914d7).
+    var parallaxStarfield: Bool = true
+    /// "Ambient Sounds" (DAT_005914de).
+    var ambientSounds: Bool = true
+    /// "Check For Updates" (DAT_005914e1 inverted): off by default.
+    var checkForUpdates: Bool = false
+    /// "Share Processor Time" (DAT_005914d6).
+    var shareProcessorTime: Bool = true
+    /// "Sound Volume" 0...8 (DAT_005914e2), default 5; labels STR# 136.
+    var soundVolumeStep: Int = 5
+    /// "Brightness" 0...6 (DAT_005914e4), default 3; labels STR# 139.
+    var brightnessStep: Int = 3
+
     // MARK: Persistence
 
     // Kept at v1: the resilient decoder above fills any field a v1 blob lacks, so
@@ -529,5 +558,17 @@ struct GameSettings: Codable, Equatable {
         reduceFlashing        = v(.reduceFlashing, d.reduceFlashing)
         noHyperspaceEffects   = v(.noHyperspaceEffects, d.noHyperspaceEffects)
         uiScale               = v(.uiScale, d.uiScale)
+        playMovies            = v(.playMovies, d.playMovies)
+        introMusic            = v(.introMusic, d.introMusic)
+        smokeTrails           = v(.smokeTrails, d.smokeTrails)
+        shipAnimations        = v(.shipAnimations, d.shipAnimations)
+        runningLights         = v(.runningLights, d.runningLights)
+        weaponEffects         = v(.weaponEffects, d.weaponEffects)
+        parallaxStarfield     = v(.parallaxStarfield, d.parallaxStarfield)
+        ambientSounds         = v(.ambientSounds, d.ambientSounds)
+        checkForUpdates       = v(.checkForUpdates, d.checkForUpdates)
+        shareProcessorTime    = v(.shareProcessorTime, d.shareProcessorTime)
+        soundVolumeStep       = v(.soundVolumeStep, d.soundVolumeStep)
+        brightnessStep        = v(.brightnessStep, d.brightnessStep)
     }
 }

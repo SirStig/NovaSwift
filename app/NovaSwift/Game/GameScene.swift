@@ -3444,7 +3444,8 @@ final class GameScene: SKScene {
             // Smoke / spark trail: drop a puff at the shot's tail each frame for
             // weapons that carry a Trail or the smoke flags. Cached per weapon so
             // this stays a dictionary lookup, not a re-decode.
-            if s.weaponID >= 128, let trail = trailInfo(for: s.weaponID) {
+            if s.weaponID >= 128, settings.smokeTrails || !(trailInfo(for: s.weaponID)?.smoke ?? false),
+               let trail = trailInfo(for: s.weaponID) {
                 let tail = CGPoint(x: node.position.x - CGFloat(cos(s.facing)) * 4,
                                    y: node.position.y - CGFloat(sin(s.facing)) * 4)
                 if trail.smoke, !settings.modernHUD,
