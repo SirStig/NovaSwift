@@ -442,10 +442,12 @@ final class AppModel: ObservableObject {
     /// live pilot. Does not change the screen — the new-pilot UI shows the intro
     /// and then calls `beginPlay()`.
     @discardableResult
-    func createPilot(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes) -> CharRes? {
+    func createPilot(name: String, isMale: Bool, strictPlay: Bool = false, scenario: CharRes,
+                     nickname: String = "", shipName: String? = nil) -> CharRes? {
         prepareAudioAndData()
         guard let game = data.game else { return nil }
-        let save = roster.create(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario, game: game)
+        let save = roster.create(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario, game: game,
+                                 nickname: nickname, shipName: shipName)
         roster.setSelected(save.id)                 // a new pilot becomes the loaded one
         pilot.begin(state: save.player, rosterID: save.id)
         pilot.migrateIfNeeded(game: game)

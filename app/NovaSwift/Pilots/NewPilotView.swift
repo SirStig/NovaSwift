@@ -1,5 +1,6 @@
 import SwiftUI
 import NovaSwiftKit
+import NovaSwiftStory
 
 /// The "New Pilot" flow, presented as an authentic EV Nova dialog over the title
 /// backdrop. Like the real game: when the data defines a single scenario it goes
@@ -13,9 +14,14 @@ struct NewPilotView: View {
     /// to lean on) — see `AuthenticMainMenuView.dialogOverlay`.
     var onClose: () -> Void = {}
 
-    private enum Step { case scenario, name }
+    private enum Step { case scenario, name, shipName }
     @State private var step: Step = .scenario
     @State private var name = ""
+    /// The second name field, `<PNN>` (0x0048a7e0).
+    @State private var nickname = ""
+    /// The ship name asked for after the dialog (0x00489d70), `<PSN>`.
+    @State private var shipName = ""
+    @State private var defaultsFilled = false
     @State private var isMale = true
     @State private var strictPlay = false
     @State private var scenarioIndex = 0
@@ -30,15 +36,27 @@ struct NewPilotView: View {
                 switch effectiveStep {
                 case .scenario: scenarioDialog
                 case .name:     nameDialog
+                case .shipName: shipNameDialog
                 }
             }
         }
         .animation(.easeInOut(duration: 0.2), value: step)
-        .onAppear { if scenarios.count <= 1 { step = .name } }
+        .onAppear {
+            if scenarios.count <= 1 { step = .name }
+            fillDefaults()
+        }
     }
 
     // With one scenario there's no picker — jump to the name step (real behavior).
-    private var effectiveStep: Step { scenarios.count <= 1 ? .name : step }
+    private var effectiveStep: Step { scenarios.count <= 1 && step == .scenario ? .name : step }
+
+    /// The fields open prefilled from STR# 128 (0x00489d70).
+    private func fillDefaults() {
+        guard !defaultsFilled, let game = model.data.game else { return }
+        defaultsFilled = true
+        name = PilotFactory.defaultName(.pilot, game: game)
+        nickname = PilotFactory.defaultName(.nickname, game: game)
+    }
 
     // MARK: Scenario select
 
@@ -81,7 +99,14 @@ struct NewPilotView: View {
                 if scenarios.count > 1 { step = .scenario } else { onClose() }
             },
             NovaDialogButton(title: "Create", isDefault: true, enabled: true) {
-                start(scenario)
+                // A name or nickname over 24 characters beeps and is refused.
+                guard name.count <= PilotFactory.maxNameLength,
+                      nickname.count <= PilotFactory.maxNameLength else {
+                    model.audio.play(.uiError)
+                    return
+                }
+                if let game = model.data.game { shipName = PilotFactory.defaultName(.ship, game: game) }
+                step = .shipName
             },
         ]) {
             VStack(alignment: .leading, spacing: 14) {
@@ -105,6 +130,11 @@ struct NewPilotView: View {
                     .buttonStyle(.novaPlain)
                 }
 
+                HStack(spacing: 10) {
+                    NovaText("Nickname:", size: 13, width: 84)
+                    NovaTextField(placeholder: "", text: $nickname)
+                }
+
                 HStack(spacing: 12) {
                     NovaText("Gender:", size: 13, width: 84)
                     NovaSegmentedPicker(selection: $isMale, options: [true, false]) {
@@ -123,6 +153,22 @@ struct NewPilotView: View {
         }
     }
 
+    /// The ship-name prompt after the pilot dialog (0x00489d70): STR# 2002
+    /// #121 and the hull's name. Cancelling abandons the new pilot.
+    private var shipNameDialog: some View {
+        let scenario = scenarios[min(scenarioIndex, scenarios.count - 1)]
+        let prompt = model.data.game.map { PilotFactory.shipNamePrompt(scenario: scenario, game: $0) } ?? ""
+        return NovaDialog(title: "", width: 400, buttons: [
+            NovaDialogButton(title: "Cancel") { onClose() },
+            NovaDialogButton(title: "OK", isDefault: true, enabled: true) { start(scenario) },
+        ]) {
+            VStack(alignment: .leading, spacing: 10) {
+                NovaText(prompt, size: 13, width: 360)
+                NovaTextField(placeholder: "", text: $shipName)
+            }
+        }
+    }
+
     private var noDataDialog: some View {
         NovaDialog(title: "No Scenarios", width: 420, buttons: [
             NovaDialogButton(title: "OK", isDefault: true) { onClose() },
@@ -135,7 +181,8 @@ struct NewPilotView: View {
     // MARK: Actions
 
     private func start(_ scenario: CharRes) {
-        _ = model.createPilot(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario)
+        _ = model.createPilot(name: name, isMale: isMale, strictPlay: strictPlay, scenario: scenario,
+                              nickname: nickname, shipName: shipName)
         onClose()
         if scenario.introSlides.isEmpty && scenario.introTextID == nil {
             // No intro to play — go straight to the flight-training offer.

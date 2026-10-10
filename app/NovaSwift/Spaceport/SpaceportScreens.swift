@@ -135,11 +135,15 @@ struct TradeCenterView: View {
     // ~23px rows that overran the list panel).
     private var list: some View {
         VStack(spacing: 0) {
+            // Column headers from STR# 2002 (0x0048d6f0): #197, the price
+            // level #200, and the hold — #198 when the fleet carries more than
+            // the ship, else #199.
             HStack(spacing: 0) {
-                NovaText("Commodity", size: 10, color: .gray, width: 160)
-                NovaText("Price", size: 10, color: .gray, width: 62, align: .center)
-                NovaText("Cost/ton", size: 10, color: .gray, width: 70, align: .center)
-                NovaText("Hold", size: 10, color: .gray, width: 60, align: .trailing)
+                NovaText(misc(197, "Commodity"), size: 10, color: .gray, width: 160)
+                NovaText(misc(200, "Price"), size: 10, color: .gray, width: 62, align: .center)
+                NovaText("", size: 10, color: .gray, width: 70, align: .center)
+                NovaText(misc(shipCapacity < pilot.cargoCapacity(galaxy: galaxy) ? 198 : 199, "Hold"),
+                         size: 10, color: .gray, width: 60, align: .trailing)
             }
             .frame(height: 17, alignment: .top)
             ForEach(Array(market.enumerated()), id: \.offset) { i, row in
@@ -162,33 +166,32 @@ struct TradeCenterView: View {
         }
     }
 
-    /// DITL #1001 item 14 — the narrow strip between list and buttons. The
-    /// game shows status text here; this port uses it for the credits readout,
-    /// the tap-to-edit transaction quantity (real DITL #1003 "qty" prompt), and
-    /// — when an `öops` disaster is active at this stellar — its name, per the
-    /// Bible's "what's happening here" trade banner (`JUNK_OOPS_DESIGN.md` §B.5).
+    /// DITL #1001 item 14 — the narrow strip between list and buttons: the
+    /// original's status text (0x0048d6f0) — mission and junk cargo aboard,
+    /// the ship's free space and, with freighter escorts, theirs — and the
+    /// first active disaster's sentence.
     private var statusLine: some View {
-        HStack(spacing: 0) {
-            Button { showQtyPrompt = true } label: {
-                NovaText("×\(pendingQty) per tap", size: 10, color: .gray, width: 90)
-                    .contentShape(Rectangle())
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 2) {
+                NovaText(LandedServices.tradeStatus(state: pilot.state, game: game,
+                                                    shipCapacity: shipCapacity,
+                                                    fleetCapacity: pilot.cargoCapacity(galaxy: galaxy),
+                                                    junkRows: Set(market.map(\.cargoID).filter { $0 >= 128 }))
+                            .replacingOccurrences(of: "\r", with: "\n"),
+                         size: 10, color: .gray, width: 346, align: .leading)
+                if let line = LandedServices.tradeDisasterLine(at: spob.id, state: pilot.state, game: game) {
+                    NovaText(line, size: 10, color: Color(red: 1, green: 0.55, blue: 0.3), width: 346, align: .leading)
+                }
             }
-            .buttonStyle(.novaPlain)
-            if let banner = disasterBanner {
-                NovaText(banner, size: 10, color: Color(red: 1, green: 0.55, blue: 0.3), width: 126)
-            }
-            Spacer(minLength: 0)
-            NovaText(pilot.state.credits.creditsAbbreviated, size: 10,
-                     color: Color(red: 1, green: 0.85, blue: 0.4), width: 130, align: .trailing)
         }
         .frame(width: 346, height: 24)
     }
 
-    /// Active `öops` disaster names for this stellar, joined for display, or
-    /// `nil` when none are active here right now.
-    private var disasterBanner: String? {
-        let names = LandedServices.activeDisasterNames(at: spob.id, state: pilot.state, game: game)
-        return names.isEmpty ? nil : names.joined(separator: ", ")
+    private var shipCapacity: Int { PilotEconomy.shipCargoCapacity(pilot.state, galaxy: galaxy) }
+
+    private func misc(_ n: Int, _ fallback: String) -> String {
+        let s = game.stringList(2002)?.string(at: n) ?? ""
+        return s.isEmpty ? fallback : s
     }
 
     private var current: TradeRow? {
@@ -578,9 +581,16 @@ struct ShipyardView: View {
     private var stock: [ShipRes] {
         let day = pilot.state.date.julianDay
         let state = pilot.state
-        return game.shipsSold(at: spob, day: day,
-                              redraws: { state.stockRerollCount(shipType: $0, hire: false, day: day) })
-            .filter { lockState(for: $0) != .hidden }
+        guard spob.hasShipyard else { return [] }
+        return game.shipyardList(
+            at: spob, hire: false,
+            stocked: { s in
+                NovaGame.stocked(buyRandom: s.buyRandom,
+                                 roll: NovaGame.dailyStockRoll(day: day, itemID: s.id, salt: 1,
+                                                               redraw: state.stockRerollCount(shipType: s.id, hire: false, day: day)))
+            },
+            availabilityPasses: { NCBTest($0.availBits).evaluate(state) },
+            requirePasses: { ($0.require & game.contributedBits(pilot: state)) == $0.require })
     }
     /// The net price of `s` here: its price after the tech markdown, rank
     /// scale and rounding, less the trade-in (EC-09).

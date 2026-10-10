@@ -9,6 +9,33 @@ import NovaSwiftKit
 /// in the game.
 public enum PilotFactory {
 
+    /// The longest pilot name or nickname the new-pilot dialog accepts
+    /// (0x0048a7e0): a longer one beeps and is refused.
+    public static let maxNameLength = 24
+
+    /// A default for the new-pilot dialog's fields (0x00489d70): a random
+    /// entry of STR# 128 #1–3 for the name, #4–6 for the nickname and #7–9 for
+    /// the ship name.
+    public static func defaultName(_ field: NameField, game: NovaGame) -> String {
+        let base: Int
+        switch field {
+        case .pilot: base = 1
+        case .nickname: base = 4
+        case .ship: base = 7
+        }
+        return game.stringList(128)?.string(at: base + Int.random(in: 0..<3)) ?? ""
+    }
+
+    public enum NameField { case pilot, nickname, ship }
+
+    /// The ship-name prompt (0x00489d70): STR# 2002 #121 followed by the
+    /// starting hull's name.
+    public static func shipNamePrompt(scenario: CharRes, game: NovaGame) -> String {
+        let prompt = game.stringList(2002)?.string(at: 121) ?? ""
+        let hull = game.ship(scenario.shipID)?.name ?? ""
+        return prompt + hull
+    }
+
     /// Build a new pilot for `scenario`.
     ///
     /// - Parameters:
@@ -22,7 +49,8 @@ public enum PilotFactory {
     ///     system among the scenario's candidates, exactly as EV Nova does. A fixed
     ///     default would make every pilot start in the same system.
     public static func make(name: String, isMale: Bool, scenario: CharRes,
-                            game: NovaGame, seed: UInt64? = nil) -> PlayerState {
+                            game: NovaGame, seed: UInt64? = nil,
+                            nickname: String = "", shipName chosenShipName: String? = nil) -> PlayerState {
         Log.pilot.notice("PilotFactory.make: creating pilot \"\(name, privacy: .public)\" from scenario \(scenario.id) (\"\(scenario.displayName, privacy: .public)\")")
         let resolvedSeed = seed ?? UInt64.random(in: .min ... .max)
         var rng = StoryRNG(seed: resolvedSeed)
@@ -49,7 +77,9 @@ public enum PilotFactory {
             Log.pilot.error("PilotFactory.make: scenario \(scenario.id) has invalid shipID \(scenario.shipID) and game data has no ships; falling back to hardcoded ship 128")
             shipID = 128
         }
-        let shipName = game.ship(shipID)?.name ?? ""
+        // The ship name the player typed at creation (0x00489d70), else the
+        // hull's name.
+        let shipName = chosenShipName.flatMap { $0.isEmpty ? nil : $0 } ?? game.ship(shipID)?.name ?? ""
 
         // Calendar date (guard against empty/invalid scenario dates).
         let date: GameDate
@@ -69,6 +99,7 @@ public enum PilotFactory {
                                  currentSystem: system,
                                  date: date)
         player.combatRating = scenario.kills
+        player.nickname = nickname.isEmpty ? nil : nickname
         player.systemReputation = initialReputation(scenario: scenario, game: game)
         player.datePrefix = scenario.datePrefix
         player.dateSuffix = scenario.dateSuffix

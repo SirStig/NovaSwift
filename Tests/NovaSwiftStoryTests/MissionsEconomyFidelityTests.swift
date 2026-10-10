@@ -230,6 +230,47 @@ final class MissionsEconomyFidelityTests: XCTestCase {
         XCTAssertFalse(pages.canJettison, "a non-abortable mission's cargo alone can't be jettisoned")
     }
 
+    // MARK: Pilot names (EC-30)
+
+    func testNicknameAndShipNameFillTheirWildcards() {
+        var p = PlayerState(pilotName: "Jane Doe", shipName: "Rocinante")
+        p.nickname = "Ace"
+        let game = makeGame([])
+        XCTAssertEqual(MissionText.resolve("<PNN>/<PSN>", fields: nil, player: p, game: game), "Ace/Rocinante")
+        p.nickname = nil
+        XCTAssertEqual(MissionText.resolve("<PNN>", fields: nil, player: p, game: game), "Jane Doe")
+    }
+
+    // MARK: Shipyard list (EC-29)
+
+    func testShipyardListRunsByDispWeightWithFlags3Suppression() {
+        func hull(_ id: Int, weight: Int, flags3: Int = 0) -> Resource {
+            var b = [UInt8](repeating: 0, count: 1860)
+            Bytes.i16(&b, 46, 0)            // TechLevel 0 is eligible
+            Bytes.i16(&b, 60, weight)
+            Bytes.i16(&b, 1830, flags3)
+            return Resource(type: NovaType.ship, id: id, name: "Ship \(id)", data: Data(b))
+        }
+        let game = makeGame([hull(129, weight: 90, flags3: 0x4000), hull(130, weight: 90), hull(131, weight: 50),
+                             landableSpob(id: 500, govt: -1)])
+        let list = game.shipyardList(at: game.spob(500)!, hire: false, stocked: { _ in true },
+                                     availabilityPasses: { _ in true }, requirePasses: { _ in true })
+        XCTAssertEqual(list.map(\.id), [129, 131])
+    }
+
+    // MARK: Trade strip (EC-31)
+
+    func testTradeStripShowsOwnAndEscortFreeSpace() {
+        var misc = Array(repeating: "", count: 400)
+        misc[0] = "ton"; misc[1] = "tons"
+        misc[0x16c - 1] = "Free"; misc[0x16d - 1] = "ship"; misc[0x16e - 1] = "escorts"
+        let game = makeGame([stringListResource(2002, misc)])
+        var p = PlayerState()
+        p.cargo = [0: 30]
+        let s = LandedServices.tradeStatus(state: p, game: game, shipCapacity: 20, fleetCapacity: 120, junkRows: [])
+        XCTAssertEqual(s, "Free ship: 20 tons\rFree escorts: 90 tons")
+    }
+
     // MARK: dësc flags
 
     func testDescMovieFlagsDecodeAfterTheMovieName() {

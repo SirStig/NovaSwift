@@ -306,6 +306,8 @@ public struct ShipRes {
 
     // Economy / meta
     public let techLevel: Int       // @46
+    /// `DispWeight` @60 (0x3c): the shipyard and hire lists run highest first.
+    public let displayWeight: Int
     /// Purchase price, credits. A 4-byte `DLNG` at @48 — NOT the 2-byte @50 word
     /// it was long mis-decoded as, which silently dropped the high 16 bits and
     /// wrapped every hull over 32,767 cr (e.g. Fed Viper read −31,072 instead of
@@ -504,6 +506,7 @@ public struct ShipRes {
         maxGuns = i16(d, 42)
         maxTurrets = i16(d, 44)
         techLevel = i16(d, 46)
+        displayWeight = i16(d, 60)
         cost = i32(d, 48)
         deathDelay = i16(d, 52)
         armorRecharge = i16(d, 54)

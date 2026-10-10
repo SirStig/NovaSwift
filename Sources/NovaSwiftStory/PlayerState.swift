@@ -296,6 +296,9 @@ public struct StockRerolls: Codable, Sendable, Equatable {
 public struct PlayerState: Codable, Sendable {
     // Identity
     public var pilotName: String
+    /// The pilot's nickname, the new-pilot dialog's second name field —
+    /// `<PNN>`. nil or empty (older saves) reads as the full name.
+    public var nickname: String?
     public var isMale: Bool
     public var unregisteredDays: Int
     /// The original's per-pilot Strict Play option, chosen at creation (default
