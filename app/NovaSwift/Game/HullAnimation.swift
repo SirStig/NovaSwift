@@ -94,9 +94,11 @@ struct HullAnim {
         }
     }
 
-    /// Flat index into a `set*framesPerSet + heading` sheet, clamped to `count`.
+    /// Flat index into a `set*framesPerSet + heading` sheet, wrapped by `count`
+    /// like the original's `Sprite_SetCurrentFrame` (0x00475830): a sheet with
+    /// fewer sets than the base shows the heading, not its last frame.
     func frameIndex(set: Int, heading: Int, count: Int) -> Int {
-        min(max(0, set * framesPerSet + heading), max(0, count - 1))
+        OriginalRendering.wrappedFrame(set * framesPerSet + heading, count: count)
     }
 
     /// Running-light opacity (0…1) for a blink clock in seconds. Steady-on for

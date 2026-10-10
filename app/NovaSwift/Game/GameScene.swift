@@ -989,6 +989,8 @@ final class GameScene: SKScene {
         let container = SKNode()
         var stars: [SKSpriteNode] = []
         var bases: [CGPoint] = []
+        /// Original field only: each star's extra drift over the world scroll.
+        var factors: [CGFloat] = []
         let parallax: CGFloat
         let tile: CGFloat
         init(parallax: CGFloat, tile: CGFloat) { self.parallax = parallax; self.tile = tile }
@@ -1126,7 +1128,7 @@ final class GameScene: SKScene {
     }
 
     override func didMove(to view: SKView) {
-        backgroundColor = Self.defaultBackdrop
+        backgroundColor = settings.modernHUD ? Self.defaultBackdrop : .black
         scaleMode = .resizeFill
         #if os(macOS)
         // Needed for `mouseMoved` (the "Aim toward mouse cursor" option) to fire;
@@ -1142,13 +1144,13 @@ final class GameScene: SKScene {
         applySystemBackdrop()
         buildStarfield()
         buildPlanets()
-        npcLayer.zPosition = 9
+        npcLayer.zPosition = 0          // ship z is banded per container (see syncNPCs)
         addChild(npcLayer)
-        projectileLayer.zPosition = 11
+        projectileLayer.zPosition = 8   // shots draw under ships (0x004ab9d4 layer chain)
         addChild(projectileLayer)
         effectsLayer.zPosition = 12
         addChild(effectsLayer)
-        selectionLayer.zPosition = 13
+        selectionLayer.zPosition = 40   // cursors on top
         for bracket in [shipBracket, planetBracket] {
             bracket.fillColor = .clear
             bracket.lineWidth = 1.5
@@ -1158,7 +1160,7 @@ final class GameScene: SKScene {
         addChild(selectionLayer)
         // AI debug overlay sits above ships/selection but below transient
         // effects; stays empty until the debug suite turns it on.
-        aiDebugLayer.zPosition = 14
+        aiDebugLayer.zPosition = 45
         addChild(aiDebugLayer)
         buildShip()
         if arrivedViaJump {
@@ -1339,7 +1341,38 @@ final class GameScene: SKScene {
         max(1600, max(size.width, size.height) * cameraZoom * 1.3)
     }
 
+    /// Classic/Enhanced draw the original's ambient field (0x0046ebf0): at most
+    /// 20 opaque spïn-700 stars at native size, each streaming past at
+    /// (1 + Random(35)·0.01)× the world's scroll. Nova Swift keeps the dense
+    /// three-layer field.
+    private var usesOriginalStarfield: Bool { !settings.modernHUD }
+
+    private func buildOriginalStarfield() {
+        let frames = galaxy?.game.starfieldSprite().map { SpriteTextures.rotationFrames(from: $0, rotationCount: 16) } ?? []
+        let count = OriginalRendering.starCount(viewHeight: Double(size.height * cameraZoom))
+        let tile = requiredStarTile
+        let layer = StarLayer(parallax: 1, tile: tile)
+        layer.container.zPosition = -100
+        for _ in 0..<count {
+            let base = CGPoint(x: .random(in: -tile/2...tile/2), y: .random(in: -tile/2...tile/2))
+            let star: SKSpriteNode
+            if let tex = frames.randomElement() {
+                tex.filteringMode = spriteFilter
+                star = SKSpriteNode(texture: tex)
+            } else {
+                star = SKSpriteNode(color: .white, size: CGSize(width: 2, height: 2))
+            }
+            layer.stars.append(star)
+            layer.bases.append(base)
+            layer.factors.append(CGFloat(OriginalRendering.starFactor(random35: Int.random(in: 0..<35), parallax: true)))
+            layer.container.addChild(star)
+        }
+        addChild(layer.container)
+        starLayers.append(layer)
+    }
+
     private func buildStarfield() {
+        if usesOriginalStarfield { buildOriginalStarfield(); return }
         let density = max(0.2, settings.starfieldDensity)
         // Parallax = each layer's scroll speed as a fraction of ship motion. EV Nova's
         // field barely parallaxes and scrolls close to 1:1, so we push these up (near
@@ -1384,7 +1417,10 @@ final class GameScene: SKScene {
     /// an iOS rotation) — otherwise stars would only fill the old, smaller area.
     override func didChangeSize(_ oldSize: CGSize) {
         super.didChangeSize(oldSize)
-        guard !starLayers.isEmpty, requiredStarTile > starLayers[0].tile else { return }
+        guard !starLayers.isEmpty,
+              requiredStarTile > starLayers[0].tile
+                || (usesOriginalStarfield && starLayers[0].stars.count != OriginalRendering.starCount(viewHeight: Double(size.height * cameraZoom)))
+        else { return }
         for layer in starLayers { layer.container.removeFromParent() }
         starLayers.removeAll()
         buildStarfield()
@@ -1392,13 +1428,14 @@ final class GameScene: SKScene {
 
     private func buildShip() {
         let node = SKNode()
-        node.zPosition = 10
+        node.zPosition = 9.5   // same band as NPC ships, drawn last
 
         // Real engine-glow art, added first so it renders behind the hull.
         if let first = engineGlowTextures.first {
             let glow = SKSpriteNode(texture: first)
             glow.texture?.filteringMode = spriteFilter
             glow.blendMode = .add
+            glow.zPosition = 0.45   // glow sits above the hull and alt layers (0x004af020)
             glow.isHidden = true
             node.addChild(glow)
             engineGlowSprite = glow
@@ -1407,17 +1444,9 @@ final class GameScene: SKScene {
         if let first = rotationTextures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = spriteFilter
-            // `oütf` ModType 43 (paint): a deliberately-chosen custom hull
-            // color overrides the government's own subtle tint outright,
-            // rather than blending with it — there's no sane way to mix "the
-            // player chose this color" with "this government's fleet color."
-            if let paint = world.player.paintColor {
-                sprite.color = SKColor(red: CGFloat(paint.r), green: CGFloat(paint.g),
-                                       blue: CGFloat(paint.b), alpha: 1)
-                sprite.colorBlendFactor = 0.7
-            } else {
-                applyGovernmentShipColor(to: sprite, government: world.player.government)
-            }
+            // The original's tint resolver (0x0046e470): the player gets only the
+            // oütf ModType 43 paint, never the gövt colour.
+            applyShipTint(to: sprite, isPlayer: true, persColor: nil, government: world.player.government)
             node.addChild(sprite)
             shipSprite = sprite
             shipRadius = max(first.size().width, first.size().height) / 2
@@ -1487,6 +1516,7 @@ final class GameScene: SKScene {
             let shield = SKSpriteNode(texture: first)
             shield.texture?.filteringMode = spriteFilter
             shield.zPosition = 1
+            shield.blendMode = .add   // shield layer is additive in the original
             shield.isHidden = true
             node.addChild(shield)
             shieldSprite = shield
@@ -3255,7 +3285,7 @@ final class GameScene: SKScene {
             node.anchorPoint = CGPoint(x: 0, y: 0.5)   // pivot at the muzzle end
             node.colorBlendFactor = 1
             node.blendMode = .add
-            node.zPosition = 12
+            node.zPosition = 20   // beams draw above explosions
             effectsLayer.addChild(node)
             beamNodes.append(node)
         }
@@ -3388,7 +3418,7 @@ final class GameScene: SKScene {
             s.fillColor = .clear
             s.lineCap = .round
             s.blendMode = .add
-            s.zPosition = 12
+            s.zPosition = 20
             s.isAntialiased = true
             effectsLayer.addChild(s)
             lightningNodes.append(s)
@@ -3696,6 +3726,8 @@ final class GameScene: SKScene {
             seen.insert(npc.entityID)
             let node = npcNodes[npc.entityID] ?? makeNPCNode(for: npc)
             node.container.position = renderPoint(npc)
+            // Bands: disabled hulks sink under shots (8), escorts sit under other ships (9).
+            node.container.zPosition = npc.disabled ? 6.5 : (npc.escortRecordID != nil ? 8.5 : 9)
             node.container.alpha = screenRevealsCloaked ? 1.0 : CGFloat(1 - npc.effectiveCloakLevel)
             node.animClock += frameDT
             node.blinkClock += frameDT
@@ -3773,6 +3805,7 @@ final class GameScene: SKScene {
             let glow = SKSpriteNode(texture: first)
             glow.texture?.filteringMode = spriteFilter
             glow.blendMode = .add
+            glow.zPosition = 0.45
             glow.isHidden = true
             n.container.addChild(glow)
             n.engineGlow = glow
@@ -3783,7 +3816,9 @@ final class GameScene: SKScene {
         if let first = textures.first {
             let sprite = SKSpriteNode(texture: first)
             sprite.texture?.filteringMode = spriteFilter
-            applyGovernmentShipColor(to: sprite, government: npc.government)
+            applyShipTint(to: sprite, isPlayer: false,
+                          persColor: npc.personID.flatMap { galaxy?.game.pers($0) }?.color,
+                          government: npc.government)
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
@@ -3863,6 +3898,7 @@ final class GameScene: SKScene {
             let shield = SKSpriteNode(texture: first)
             shield.texture?.filteringMode = spriteFilter
             shield.zPosition = 1
+            shield.blendMode = .add
             shield.isHidden = true
             n.container.addChild(shield)
             n.shield = shield
@@ -3986,7 +4022,7 @@ final class GameScene: SKScene {
         guard c != appliedBackdrop else { return }
         appliedBackdrop = c
         if c == NovaColor(r: 0, g: 0, b: 0) {
-            backgroundColor = Self.defaultBackdrop
+            backgroundColor = settings.modernHUD ? Self.defaultBackdrop : .black
             murkFog?.color = .black
         } else {
             let tint = SKColor(red: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
@@ -4003,7 +4039,12 @@ final class GameScene: SKScene {
     private func updateMurkFog() {
         applySystemBackdrop()   // re-tints after an in-place jump world swap
         let murk = world.effectiveMurk(for: world.player)
-        for layer in starLayers { layer.container.isHidden = murk < 0 }
+        for layer in starLayers {
+            layer.container.isHidden = murk < 0
+            if !layer.factors.isEmpty {
+                layer.container.alpha = CGFloat(OriginalRendering.starTint(rawMurk: max(0, murk))) / 32
+            }
+        }
         guard let murkFog else { return }
         let alpha = CGFloat(max(0, min(100, murk))) / 100 * 0.85
         murkFog.alpha = alpha
@@ -4996,6 +5037,24 @@ final class GameScene: SKScene {
     /// skipped and only governments that actually specify a colour recolour their
     /// fleet. A partial `colorBlendFactor` tints the hull while keeping its
     /// shading, rather than flattening it to a silhouette.
+    private func applyShipTint(to sprite: SKSpriteNode, isPlayer: Bool, persColor: Int?, government: Int) {
+        var paint555: Int?
+        if isPlayer, let p = world.player.paintColor {
+            func c5(_ v: Double) -> Int { max(0, min(31, Int((v * 31).rounded()))) }
+            paint555 = (c5(Double(p.r)) << 10) | (c5(Double(p.g)) << 5) | c5(Double(p.b))
+        }
+        let tint = OriginalRendering.shipTint(isPlayer: isPlayer, paint555: paint555,
+                                              persColor555: persColor, govtShipColor: nil)
+        if !tint.isNeutral {
+            // A per-channel multiply by v/32.
+            let m = tint.multipliers
+            sprite.color = SKColor(red: m.r, green: m.g, blue: m.b, alpha: 1)
+            sprite.colorBlendFactor = 1
+        } else if !isPlayer, settings.modernHUD {
+            applyGovernmentShipColor(to: sprite, government: government)   // Nova Swift keeps its fleet tint
+        }
+    }
+
     private func applyGovernmentShipColor(to sprite: SKSpriteNode, government: Int) {
         guard let sc = galaxy?.game.govt(government)?.shipColor,
               !(sc.r == 255 && sc.g == 255 && sc.b == 255),
@@ -5220,7 +5279,7 @@ final class GameScene: SKScene {
             return s
         }()
         node.texture = frames[0]
-        node.blendMode = .alpha           // real bööm art carries its own mask
+        node.blendMode = .add             // bööm layers are additive (rlëD black ground)
         node.colorBlendFactor = 0
         node.alpha = 1
         node.isHidden = false
@@ -5461,6 +5520,21 @@ final class GameScene: SKScene {
         }
         for layer in starLayers {
             layer.container.position = cam
+            if !layer.factors.isEmpty {
+                // Wrap across the view (+ 2 star widths a side), as the original does.
+                let w = size.width * cameraZoom + 12, h = size.height * cameraZoom + 12
+                func wrapSpan(_ v: CGFloat, _ span: CGFloat) -> CGFloat {
+                    var r = (v + span / 2).truncatingRemainder(dividingBy: span)
+                    if r < 0 { r += span }
+                    return r - span / 2
+                }
+                for (i, star) in layer.stars.enumerated() {
+                    let p = 1 + layer.factors[i]
+                    star.position = CGPoint(x: wrapSpan(layer.bases[i].x - cam.x * p, w),
+                                            y: wrapSpan(layer.bases[i].y - cam.y * p, h))
+                }
+                continue
+            }
             for (i, star) in layer.stars.enumerated() {
                 let base = layer.bases[i]
                 star.position = CGPoint(x: wrap(base.x - cam.x * layer.parallax, layer.tile),

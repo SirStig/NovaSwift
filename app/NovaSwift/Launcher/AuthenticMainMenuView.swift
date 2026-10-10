@@ -395,7 +395,7 @@ struct AuthenticMainMenuView: View {
         case .shipName:     return save.snapshot.shipName
         case .shipClass:    return ship?.displayName ?? ""
         case .shipSubtitle: return ship?.subtitle ?? ""
-        case .combatRating: return save.snapshot.ratingTitle
+        case .combatRating: return game.map { OriginalText(game: $0).combatRating(save.player.combatRating) } ?? save.snapshot.ratingTitle
         case .legalStatus:  return legalStatusText(save, game: game)
         case .date:
             let d = save.player.date
@@ -414,24 +414,8 @@ struct AuthenticMainMenuView: View {
     /// dominated stellars; "N/A" (STR# 2002 #396) in a system with no usable
     /// stellar or under a xenophobic government.
     private func legalStatusText(_ save: PilotSave, game: NovaGame?) -> String {
-        guard let game, let sys = game.system(save.player.currentSystem) else { return "" }
-        let na = game.stringList(2002)?.string(at: MainMenuReadout.notApplicableString) ?? "N/A"
-        let stellars = sys.spobs.compactMap { game.spob($0) }
-        let usable = stellars.prefix(4).contains { $0.flags & 0x20 == 0 && $0.flags2 & 0x3000 == 0 }
-        guard usable else { return na }
-        let govt = game.govt(sys.government)
-        let tolerance = (govt ?? game.govt(128))?.crimeTolerance ?? 0
-        var dominated = 0, other = 0
-        for spob in stellars.prefix(3) where spob.flags & 0x20 == 0 {
-            if save.player.hasDominated(spob.id) { dominated += 1 } else { other += 1 }
-        }
-        let record = save.player.effectiveLegalRecord(govt: sys.government, atSystem: sys.id,
-                                                      fallback: govt?.initialRecord ?? 0)
-        guard let entry = MainMenuReadout.legalStatusEntry(
-            record: record, tolerance: tolerance, dominatedStellars: dominated, otherStellars: other,
-            governmentIsXenophobic: govt?.xenophobic ?? false)
-        else { return na }
-        return game.stringList(134)?.string(at: entry) ?? ""
+        guard let game else { return "" }
+        return LegalStatus.label(inSystem: save.player.currentSystem, player: save.player, game: game)
     }
 
     /// The ship's targeting PICT: 3000 + (class − 128), or — when the class has
