@@ -21,6 +21,11 @@ public protocol GameServices: AnyObject {
     /// Show narrative text (mission completion, cron news, dialog).
     func showStoryText(_ text: String, title: String)
 
+    /// Show the resolved text of `dësc` `descID` — the original's generic
+    /// description dialog, which also draws that `dësc`'s graphic. Defaults to
+    /// `showStoryText(_:title:)`.
+    func showStoryText(_ text: String, title: String, descID: Int)
+
     /// Play a `snd ` resource (audio system).
     func playSound(id: Int)
 
@@ -180,4 +185,10 @@ open class LoggingGameServices: GameServices {
     open func showOverlayMessage(_ text: String) { record("overlay: \(text)") }
     open func closeSpaceportScreen() { record("close spaceport screen") }
     open func releaseMissionShips(missionID: Int) { record("release ships of mission #\(missionID)") }
+}
+
+public extension GameServices {
+    func showStoryText(_ text: String, title: String, descID: Int) {
+        showStoryText(text, title: title)
+    }
 }

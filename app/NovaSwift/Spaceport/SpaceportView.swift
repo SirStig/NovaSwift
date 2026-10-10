@@ -242,6 +242,13 @@ struct SpaceportView: View {
 
     @ViewBuilder private var hub: some View {
         if let frame = graphics.frame(.spaceport) {
+            // Every slot follows DITL #1000 from the loaded data: the stock
+            // positions below (with their hand-tuned nudges) move and resize by
+            // however much a plug-in's replacement DITL moves each item.
+            let d = DITLPlacement(game, 1000, frame: frame)
+            let area = d.delta(4, stock: CGRect(x: 3, y: 3, width: 612, height: 285))
+            let name = d.delta(2, stock: CGRect(x: 159, y: 297, width: 303, height: 18))
+            let desc = d.delta(5, stock: CGRect(x: 160, y: 327, width: 301, height: 185))
             NovaMenu(frame: frame) { space in
                 // The landing view's top area — DITL #1000 item 4 (3,3)-(615,288),
                 // 612×285. A planet fills it with its landscape PICT; a station
@@ -251,38 +258,39 @@ struct SpaceportView: View {
                 if let land = graphics.landscape(for: spob) {
                     Image(decorative: land, scale: 1).interpolation(.high).resizable()
                         .frame(width: CGFloat(land.width), height: CGFloat(land.height))
-                        .novaPlace(space, -306, -256)
+                        .novaPlace(space, -306 + area.dx, -256 + area.dy)
                 } else if let sprite = game.spobSprite(spob.id)?.frameCGImage(0) {
                     // Station sprites are low-res (40–300px); fitting one to the
                     // full 612×285 area upscaled it 2–3× into a blur. Fit it to
                     // the area but cap the upscale at 1.5× so it stays crisp,
                     // centred in the top black region.
                     let w = CGFloat(sprite.width), h = CGFloat(sprite.height)
-                    let s = min(1.5, min(560 / w, 265 / h))
+                    let s = min(1.5, min((560 + area.dw) / w, (265 + area.dh) / h))
                     let dw = w * s, dh = h * s
                     Image(decorative: sprite, scale: 1).interpolation(.high).resizable()
                         .frame(width: dw, height: dh)
-                        .novaPlace(space, -dw / 2, -113 - dh / 2)
+                        .novaPlace(space, -dw / 2 + area.dx + area.dw / 2,
+                                   -113 - dh / 2 + area.dy + area.dh / 2)
                 }
                 // Planet/station name — DITL #1000 item 2 (159,297)-(462,315),
                 // 303×18, centred just below the top image (was ~8px too high,
                 // overlapping the image's bottom edge).
-                NovaText(spob.name, size: 15, width: 303, align: .center)
-                    .novaPlace(space, -150, 39)
+                NovaText(spob.name, size: 15, width: 303 + name.dw, align: .center)
+                    .novaPlace(space, -150 + name.dx, 39 + name.dy)
                 // Spaceport description, in the centre panel (wrap 301, as EV Nova;
                 // Geneva 10 ≈ the reference's 9pt, kept one up for readability and
                 // matching every other in-frame body text in this port).
                 ScrollView(showsIndicators: false) {
-                    NovaText(game.descText(spob.id), size: 10, width: 301, align: .leading)
+                    NovaText(game.descText(spob.id), size: 10, width: 301 + desc.dw, align: .leading)
                 }
-                .frame(width: 301, height: 175)
-                .novaPlace(space, -149, 70)
+                .frame(width: 301 + desc.dw, height: 175 + desc.dh)
+                .novaPlace(space, -149 + desc.dx, 70 + desc.dy)
                 // Service buttons flank the description panel left and right
                 // (confirmed by PICT 8500's symmetric left/right button
                 // panels — see `buttonColumn`). Ship name/credits are no
                 // longer duplicated here since the HUD sidebar stays visible
                 // while landed.
-                buttonColumn(space)
+                buttonColumn(space, d)
             }
         } else {
             // No interface PICT in the data — plain fallback so landing still works.
@@ -380,19 +388,38 @@ struct SpaceportView: View {
         Log.spaceport.debug("Auto-recharger filled fuel to \(fill.fuel, privacy: .public) at spöb \(spob.id, privacy: .public) for \(fill.cost, privacy: .public)cr")
     }
 
-    @ViewBuilder private func buttonColumn(_ space: NovaSpace) -> some View {
+    /// The DITL #1000 item each slot is: left column items 10/9/6, right column
+    /// 8/7/3/11 (all 145×25), with their stock rects.
+    private static let slotItem: [String: (index: Int, stock: CGRect)] = [
+        "bar": (10, CGRect(x: 3, y: 333, width: 145, height: 25)),
+        "missionBBS": (9, CGRect(x: 3, y: 374, width: 145, height: 25)),
+        "tradeCenter": (6, CGRect(x: 3, y: 414, width: 145, height: 25)),
+        "shipyard": (8, CGRect(x: 471, y: 333, width: 145, height: 25)),
+        "outfitter": (7, CGRect(x: 471, y: 375, width: 145, height: 25)),
+        "recharge": (3, CGRect(x: 471, y: 416, width: 145, height: 25)),
+        "leave": (11, CGRect(x: 471, y: 456, width: 145, height: 25)),
+    ]
+
+    /// A slot button at its stock position, shifted/resized by the loaded DITL.
+    private func slotButton(_ space: NovaSpace, _ d: DITLPlacement, key: String, x: CGFloat, y: CGFloat,
+                            title: String, action: @escaping () -> Void) -> some View {
+        let m = Self.slotItem[key].map { d.delta($0.index, stock: $0.stock) } ?? (dx: 0, dy: 0, dw: 0, dh: 0)
+        return NovaButton(graphics: graphics, title: title, width: max(0, 120 + m.dw), action: action)
+            .novaPlace(space, x + m.dx, y + m.dy)
+    }
+
+    @ViewBuilder private func buttonColumn(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         ForEach(leftButtonItems, id: \.key) { item in
-            NovaButton(graphics: graphics, title: item.title, width: 120, action: item.action)
-                .novaPlace(space, Self.leftX, Self.leftSlotY[item.key] ?? 74)
+            slotButton(space, d, key: item.key, x: Self.leftX, y: Self.leftSlotY[item.key] ?? 74,
+                       title: item.title, action: item.action)
         }
         ForEach(rightButtonItems, id: \.key) { item in
-            NovaButton(graphics: graphics, title: item.title, width: 120, action: item.action)
-                .novaPlace(space, Self.rightX, Self.rightSlotY[item.key] ?? 74)
+            slotButton(space, d, key: item.key, x: Self.rightX, y: Self.rightSlotY[item.key] ?? 74,
+                       title: item.title, action: item.action)
         }
         // Leave sits directly below Recharge in the right column's 4th slot.
-        NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
-                   width: 120, action: depart)
-            .novaPlace(space, Self.rightX, Self.rightSlotY["leave"] ?? 198)
+        slotButton(space, d, key: "leave", x: Self.rightX, y: Self.rightSlotY["leave"] ?? 198,
+                   title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), action: depart)
     }
 
     /// The Recharge button (EC-23, 0x00491f30 item 4): nothing at an
@@ -481,40 +508,48 @@ struct MissionBBSView: View {
     var body: some View {
         Group {
             if let frame = graphics.frame(.missionBBS) {
+                // Rects resolve through DITL #1006 (stock rects as fallback).
+                let d = DITLPlacement(game, 1006, frame: frame)
                 NovaMenu(frame: frame, overlay: true) { space in
+                    let header = d.rect(7, top: 3, left: 14, bottom: 18, right: 410)
                     HStack(spacing: 0) {
-                        NovaText("Mission BBS", size: 10, width: 200, align: .leading, weight: .bold)
+                        NovaText("Mission BBS", size: 10, width: header.width / 2, align: .leading, weight: .bold)
                         Spacer(minLength: 0)
                         // The current date (0x00441620).
                         NovaText(OriginalText(game: game).date(for: pilot.state), size: 10,
-                                 color: Color(white: 0.75), width: 196, align: .trailing)
+                                 color: Color(white: 0.75), width: header.width / 2, align: .trailing)
                     }
-                    .frame(width: 396)
-                    .novaPlace(space, -241, -97.5)
-                    offerList
-                        .frame(width: 195, height: 144)
+                    .frame(width: header.width)
+                    .ditlPlace(space, d, header)
+                    let list = d.rect(1, top: 30, left: 10, bottom: 174, right: 205)
+                    offerList(width: list.width)
+                        .frame(width: list.width, height: list.height)
                         .clipped()
-                        .novaPlace(space, -245, -70.5)
+                        .ditlPlace(space, d, list)
                     if let offer = services.pendingOffer {
-                        NovaText(offer.title, size: 10, width: 269, weight: .bold)
-                            .frame(width: 269, height: 21, alignment: .leading)
-                            .novaPlace(space, -22, -66.5)
+                        let title = d.rect(4, top: 34, left: 233, bottom: 55, right: 502)
+                        NovaText(offer.title, size: 10, width: title.width, weight: .bold)
+                            .frame(width: title.width, height: title.height, alignment: .leading)
+                            .ditlPlace(space, d, title)
+                        let brief = d.rect(3, top: 60, left: 233, bottom: 153, right: 500)
                         ScrollView(showsIndicators: false) {
-                            NovaText(offer.briefingText, size: 10, width: 267, align: .leading)
+                            NovaText(offer.briefingText, size: 10, width: brief.width, align: .leading)
                         }
-                        .frame(width: 267, height: 93)
+                        .frame(width: brief.width, height: brief.height)
                         .clipped()
-                        .novaPlace(space, -22, -40.5)
+                        .ditlPlace(space, d, brief)
+                        let acceptRect = d.rect(0, top: 170, left: 266, bottom: 195, right: 365)
                         // The BBS's own fixed labels: STR# 150 #26 "Accept" and
                         // #1 "Leave", never the mïsn's (0x004a1290).
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(26, fallback: "Accept"),
-                                   width: 73) { accept(offer) }
-                            .novaPlace(space, 11, 69.5)
+                                   ditl: acceptRect) { accept(offer) }
+                            .ditlPlace(space, d, acceptRect)
                     }
+                    let done = d.rect(6, top: 170, left: 368, bottom: 195, right: 467)
                     NovaButton(graphics: graphics,
                                title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
-                               width: 73, action: onDone)
-                        .novaPlace(space, 113, 69.5)
+                               ditl: done, action: onDone)
+                        .ditlPlace(space, d, done)
                 }
             } else {
                 VStack {
@@ -537,18 +572,18 @@ struct MissionBBSView: View {
         if let onReopen { onReopen() } else { onDone() }
     }
 
-    private var offerList: some View {
+    private func offerList(width: CGFloat) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 if offered.isEmpty {
-                    NovaText("No missions available.", size: 10, color: Color(white: 0.6), width: 191)
+                    NovaText("No missions available.", size: 10, color: Color(white: 0.6), width: max(0, width - 4))
                         .padding(.top, 2).padding(.leading, 2)
                 }
                 ForEach(offered, id: \.id) { mission in
                     let isSelected = services.pendingOffer?.mission.id == mission.id
                     Button { present(mission) } label: {
                         NovaText(engine?.resolvedName(for: mission) ?? mission.displayName, size: 10,
-                                 color: isSelected ? .white : Color(white: 0.65), width: 189)
+                                 color: isSelected ? .white : Color(white: 0.65), width: max(0, width - 6))
                             .padding(.vertical, 1.5).padding(.horizontal, 3)
                             .background(isSelected ? Color.white.opacity(0.14) : .clear)
                             .contentShape(Rectangle())

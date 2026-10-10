@@ -1024,7 +1024,7 @@ public struct WeapRes {
         accuracy = abs(rawAccuracy)
         firesAtFixedAngle = rawAccuracy < 0
         let rawSound = ai16(d, 18)
-        fireSoundID = rawSound == -1 ? nil : rawSound + 200
+        fireSoundID = OriginalAudio.weaponSoundID(raw: rawSound)   // played only when ≥ 0
         impact = ai16(d, 20)
         explosionBoomID = boomID(raw: ai16(d, 22))
         explosionIsBig = ai16(d, 22) >= 1000
@@ -1114,7 +1114,7 @@ public struct BoomRes {
         let d = r.data
         animationRate = ai16(d, 0)
         let rawSound = ai16(d, 2)
-        soundID = rawSound == -1 ? nil : rawSound + 300
+        soundID = OriginalAudio.boomSoundID(raw: rawSound)   // played only when 0 ≤ s < 64
         graphicSpinID = ai16(d, 4) + 400
     }
 }

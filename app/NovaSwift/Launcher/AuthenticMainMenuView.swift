@@ -75,7 +75,7 @@ struct MainMenuAssets {
         }
         func pict(_ id: Int) -> CGImage? {
             guard let d = game.resources.resource(NovaType.pict, id)?.data,
-                  let s = try? PICT.decode(d) else { return nil }
+                  let s = PICT.decodeLogged(d, id: id) else { return nil }
             return s.makeCGImage()
         }
 
@@ -87,18 +87,19 @@ struct MainMenuAssets {
         // "ATMOS" wordmark shown when nothing is hovered.
         var rolloverFrames: [CGImage] = []
         var rolloverSize = CGSize(width: 136, height: 98)
-        if let rolloverSpin = game.spin(607), let sheet = rle(rolloverSpin.spriteID) {
+        if let sheet = game.spinSheet(607) {
             rolloverFrames = sheet.frameCGImages(0..<sheet.frameCount).map(\.image)
             rolloverSize = CGSize(width: sheet.frameWidth, height: sheet.frameHeight)
         }
 
+        // Menu buttons are spïn 600-605 (0x004ad960), each an rlëD or PICT sheet.
         let specs: [(MainMenuAction, Int)] = [
-            (.newPilot, 8050), (.openPilot, 8051), (.quitNova, 8052),
-            (.enterShip, 8053), (.setPrefs, 8054), (.aboutNova, 8055),
+            (.newPilot, 600), (.openPilot, 601), (.quitNova, 602),
+            (.enterShip, 603), (.setPrefs, 604), (.aboutNova, 605),
         ]
         var buttons: [ButtonArt] = []
         for (i, spec) in specs.enumerated() {
-            guard let sheet = rle(spec.1) else { continue }
+            guard let sheet = game.spinSheet(spec.1) else { continue }
             // Normal (frame 0) + pressed (frame 1) from one grid build, not two.
             let pair = sheet.frameCGImages(0...1)
             guard let n = pair.first(where: { $0.index == 0 })?.image,
@@ -266,7 +267,6 @@ struct AuthenticMainMenuView: View {
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
             startSlideAnimation()               // cölr Slide1-3 shutter flourish
-            model.audio.play(.uiSelect)         // menu appears
             model.prepareAudioAndData()         // ensure main-menu background music is playing
         }
     }
@@ -284,7 +284,16 @@ struct AuthenticMainMenuView: View {
                 case .newPilot:   NewPilotView(onClose: { sheet = nil })
                 case .openPilot:  PilotListView(onClose: { sheet = nil })
                 case .settings:   SettingsView(onClose: { sheet = nil })
-                case .about:      AboutView(onClose: { sheet = nil })
+                case .about:
+                    // About Nova (`Menu_RunAboutNovaDialog` 0x00486120): the
+                    // data's own dësc 32767 in the generic dësc dialog. The
+                    // port's About is under Settings > Support.
+                    if let game = model.data.game, let desc = game.desc(32767) {
+                        DescTextDialog(title: "", text: game.descText(32767),
+                                       graphicID: desc.pictureID, onClose: { sheet = nil })
+                    } else {
+                        AboutView(onClose: { sheet = nil })
+                    }
                 case .plugins:    PluginsView(onClose: { sheet = nil })
                 case .importData: DataSetupWizard(onClose: { sheet = nil }, startAtImport: true)
                 }
@@ -294,110 +303,142 @@ struct AuthenticMainMenuView: View {
         }
     }
 
-    /// The current-pilot/ship status readout for "Enter Ship" — a bright/dim
-    /// two-tone line using the `cölr` resource's real `MenuColor1`/`MenuColor2`
-    /// ("bright & dim colors for main menu") and Geneva, the game's real main
-    /// menu font (`NovaFontRole.body`/`.caption`'s family — see NovaFont.swift).
-    /// Drawn **directly on the backdrop's dark bottom band with no plate or
-    /// border** — the bordered box it used to sit in read as a floating modern
-    /// overlay and collided with the menu's centre knob. The readout itself is
-    /// a port invention (the real menu has none), so it borrows the band the
-    /// backdrop art leaves empty below the button columns. Falls back to the
-    /// port's generic amber styling if the player's data has no cölr resource.
+    /// The loaded-pilot readout, drawn as the original's main-menu redraw
+    /// (`FUN_004873b0`) draws it: STR# 2002 labels in cölr MenuColor2 and values
+    /// in MenuColor1, in the cölr menu font, at fixed offsets from the menu
+    /// centre (see `MainMenuReadout`), with the ship's targeting PICT
+    /// (3000 + class) composited additively below the centre knob. A killed
+    /// pilot shows "<name> has been killed" (or the Kenny line); with no pilot
+    /// loaded the menu shows STR# 2002 #276 once the bottom shutter has landed,
+    /// and #275 while a new pilot is being created.
     @ViewBuilder private func pilotStatus(layout: NovaLayout) -> some View {
-        // Shows the *selected* (loaded) pilot — the one Enter Ship will resume —
-        // not merely the newest save, so the readout matches what happens next.
-        if let save = model.roster.selected {
-            let bright = assets.colr.map { color($0.menuColor1) } ?? novaAmber
-            let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.55)
-            // Everything scales with the backdrop via `layout.scale`, so the
-            // readout grows/shrinks as one piece with the window.
-            let sc = layout.scale
-            let game = model.data.game
+        let bright = assets.colr.map { color($0.menuColor1) } ?? novaAmber
+        let dim = assets.colr.map { color($0.menuColor2) } ?? novaAmber.opacity(0.55)
+        let cx = base.width / 2, cy = base.height / 2
+        let fontSize = CGFloat(assets.colr.map { $0.menuFontSize > 0 ? $0.menuFontSize : 9 } ?? 9)
+        let game = model.data.game
 
-            // The two field columns flank the red ship icon exactly as the
-            // original main menu lays them out: Pilot Name / Ship Name / Ship
-            // Class on the left, Legal Status / Combat Rating / Current Date on
-            // the right — each a dim label above a bright value.
-            HStack(alignment: .top, spacing: 14 * sc) {
-                VStack(alignment: .leading, spacing: 7 * sc) {
-                    infoField("Pilot Name", save.displayName, bright, dim, sc)
-                    infoField("Ship Name", save.snapshot.shipName.isEmpty ? "—" : save.snapshot.shipName, bright, dim, sc)
-                    infoField("Ship Class", game?.ship(save.player.shipType)?.displayName ?? "—", bright, dim, sc)
+        if sheet == .newPilot {
+            centredLine(s2002(MainMenuReadout.creatingPilotString), dim, fontSize, layout)
+        } else if let save = model.roster.selected {
+            if model.killedPilotID == save.id {
+                centredLine(MainMenuReadout.killedLine(pilotName: save.displayName,
+                                                       killedText: s2002(MainMenuReadout.killedString)),
+                            dim, fontSize, layout)
+            } else {
+                ForEach(Array(MainMenuReadout.lines.enumerated()), id: \.offset) { _, line in
+                    readoutText(lineText(line, save: save, game: game), lineIsLabel(line) ? dim : bright, fontSize,
+                                x: cx + CGFloat(line.dx), baseline: cy + CGFloat(line.baselineDY), layout)
                 }
-                // Trailing, not leading: this box's far edge is away from the
-                // ship icon, so anchoring the (internally left-aligned) text
-                // block to the near/right edge instead keeps it flanking the
-                // ship rather than pinned to the outer edge of a fixed-width
-                // box regardless of how short the text is.
-                .frame(width: 150 * sc, alignment: .trailing)
-
-                // Roughly square and tall enough to match the three-field text
-                // columns flanking it: ship sprites are square-ish, so the old
-                // 88×54 letterboxed them down to 54pt of ship in an 88pt slot —
-                // small enough that the hull was hard to make out at a glance.
-                pilotShip(shipType: save.player.shipType)
-                    .frame(width: 104 * sc, height: 100 * sc)
-                    .padding(.top, 4 * sc)
-
-                VStack(alignment: .leading, spacing: 7 * sc) {
-                    infoField("Legal Status", legalStatusText(save), bright, dim, sc)
-                    infoField("Combat Rating", combatRatingText(save), bright, dim, sc)
-                    infoField("Current Date", menuDate(save.player), bright, dim, sc)
+                if let pict = targetingPict(shipType: save.player.shipType) {
+                    Image(decorative: pict, scale: 1)
+                        .resizable().interpolation(.none)
+                        // Transfer mode 0x22 (addOver): the black ground adds nothing.
+                        .blendMode(.plusLighter)
+                        .novaPlace(layout, x: cx - CGFloat(pict.width / 2),
+                                   y: cy + CGFloat(MainMenuReadout.shipPictTopDY),
+                                   w: CGFloat(pict.width), h: CGFloat(pict.height))
                 }
-                .frame(width: 150 * sc, alignment: .leading)
             }
+        } else if slideSettled(2) {
+            centredLine(s2002(MainMenuReadout.noPilotString), dim, fontSize, layout)
+        }
+    }
+
+    private func s2002(_ i: Int) -> String { model.data.game?.stringList(2002)?.string(at: i) ?? "" }
+
+    /// One readout string with its baseline at `baseline` (the original's text
+    /// draw puts the glyph box top at baseline − font size).
+    private func readoutText(_ text: String, _ colour: Color, _ size: CGFloat,
+                             x: CGFloat, baseline: CGFloat, _ layout: NovaLayout) -> some View {
+        Text(text)
+            .font(.custom(assets.colr?.menuFont.isEmpty == false ? assets.colr!.menuFont : NovaFontRole.body.family,
+                          size: size * layout.scale))
+            .foregroundStyle(colour)
+            .lineLimit(1)
             .fixedSize()
-            // In the backdrop's dark red bottom band, below the button knob.
-            .position(layout.point(base.width / 2, 706))
-            .opacity(appeared ? 1 : 0)
-            .animation(.easeOut(duration: 0.4).delay(0.45), value: appeared)
+            .frame(width: layout.length(400), height: layout.length(size * 1.5), alignment: .topLeading)
+            .position(layout.point(x + 200, baseline - size + size * 0.75))
+    }
+
+    /// A line centred between centre ∓ 150 at baseline centre + 0x136.
+    private func centredLine(_ text: String, _ colour: Color, _ size: CGFloat,
+                             _ layout: NovaLayout) -> some View {
+        let half = CGFloat(MainMenuReadout.centredLineHalfWidth)
+        let baseline = base.height / 2 + CGFloat(MainMenuReadout.centredLineBaselineDY)
+        return Text(text)
+            .font(.custom(assets.colr?.menuFont.isEmpty == false ? assets.colr!.menuFont : NovaFontRole.body.family,
+                          size: size * layout.scale))
+            .foregroundStyle(colour)
+            .lineLimit(1)
+            .fixedSize()
+            .frame(width: layout.length(half * 2), height: layout.length(size * 1.5))
+            .position(layout.point(base.width / 2, baseline - size + size * 0.75))
+    }
+
+    private func lineText(_ line: MainMenuReadout.Line, save: PilotSave, game: NovaGame?) -> String {
+        switch line.kind {
+        case .label(let i): return s2002(i)
+        case .value(let f): return readoutValue(f, save: save, game: game)
         }
     }
 
-    /// One pilot-info cell: a small dim label above its bright value, the
-    /// label/value colours coming from the cölr resource's Menu1/Menu2 pair.
-    private func infoField(_ label: String, _ value: String,
-                           _ bright: Color, _ dim: Color, _ sc: CGFloat) -> some View {
-        // Font sizes scale with `sc` like the surrounding frames/spacing, so the
-        // whole readout shrinks as one piece with the backdrop. Hard-coding the
-        // point sizes (as before) left the text full-size while its columns
-        // shrank on a small screen, overflowing the red band on mobile.
-        VStack(alignment: .leading, spacing: 1 * sc) {
-            Text(label).novaFont(.caption, size: 9 * sc).foregroundStyle(dim).lineLimit(1)
-            Text(value).novaFont(.body, weight: .bold, size: 11 * sc).foregroundStyle(bright).lineLimit(1)
+    private func lineIsLabel(_ line: MainMenuReadout.Line) -> Bool {
+        if case .label = line.kind { return true }
+        return false
+    }
+
+    private func readoutValue(_ field: MainMenuReadout.Line.Field, save: PilotSave, game: NovaGame?) -> String {
+        let ship = game?.ship(save.player.shipType)
+        switch field {
+        case .pilotName:    return save.displayName
+        case .shipName:     return save.snapshot.shipName
+        case .shipClass:    return ship?.displayName ?? ""
+        case .shipSubtitle: return ship?.subtitle ?? ""
+        case .combatRating: return game.map { OriginalText(game: $0).combatRating(save.player.combatRating) } ?? save.snapshot.ratingTitle
+        case .legalStatus:  return legalStatusText(save, game: game)
+        case .date:
+            let d = save.player.date
+            let ch = game?.startingChar()
+            let str137 = game?.stringList(137)
+            return MainMenuReadout.date(day: d.day, month: d.month, year: d.year,
+                                        prefix: ch?.datePrefix ?? "", suffix: ch?.dateSuffix ?? "",
+                                        str137: { str137?.string(at: $0) })
         }
     }
 
-    /// The legal status in the system the pilot is docked in: the original's
-    /// STR# 134 label scaled by that government's CrimeTol (UI-14).
-    private func legalStatusText(_ save: PilotSave) -> String {
-        guard let game = model.data.game else { return "" }
+    /// The "legal status in current system" value
+    /// (`NovaUi_DrawSystemFactionConflictStatus` 0x00468d90, gated by
+    /// `System_HasUsableTravelDestination` 0x00468af0): the STR# 134 name for the
+    /// record against the system government's crime tolerance, overridden by
+    /// dominated stellars; "N/A" (STR# 2002 #396) in a system with no usable
+    /// stellar or under a xenophobic government.
+    private func legalStatusText(_ save: PilotSave, game: NovaGame?) -> String {
+        guard let game else { return "" }
         return LegalStatus.label(inSystem: save.player.currentSystem, player: save.player, game: game)
     }
 
-    /// The combat rating from STR# 138 (its lowest tier is "No Ability").
-    private func combatRatingText(_ save: PilotSave) -> String {
-        guard let game = model.data.game else { return save.snapshot.ratingTitle }
-        return OriginalText(game: game).combatRating(save.player.combatRating)
-    }
-
-    /// The long-form date from STR# 137 with the chär prefix/suffix, e.g.
-    /// "June 23rd, 1177 NC".
-    private func menuDate(_ player: PlayerState) -> String {
-        guard let game = model.data.game else { return player.date.description }
-        return OriginalText(game: game).date(for: player, long: true)
-    }
-
-    /// The current pilot's ship in EV Nova's red silhouette style. Uses the
-    /// **in-flight sprite** (which carries a real transparency mask) rather than
-    /// the dedicated shipyard art (whose baked opaque background would tint into
-    /// a solid red box) — so only the ship shape shows, with the scope scanlines.
-    @ViewBuilder private func pilotShip(shipType id: Int) -> some View {
-        if let game = model.data.game, let graphics = model.uiGraphics, let res = game.ship(id),
-           let sprite = graphics.shipFallbackPicture(res) {
-            ShipSilhouetteView(sprite: sprite)
+    /// The ship's targeting PICT: 3000 + (class − 128), or — when the class has
+    /// none — the one of the earlier class whose hull sprite it shares
+    /// (`FUN_004aeda0`).
+    private func targetingPict(shipType id: Int) -> CGImage? {
+        guard let game = model.data.game, let graphics = model.uiGraphics else { return nil }
+        if game.resources.resource(NovaType.pict, 3000 + id - 128) != nil {
+            return graphics.pict(3000 + id - 128)
         }
+        guard let base = game.shan(id)?.baseSpriteID,
+              let donor = game.ships().map(\.id).sorted()
+                .first(where: { $0 < id && game.shan($0)?.baseSpriteID == base }),
+              game.resources.resource(NovaType.pict, 3000 + donor - 128) != nil
+        else { return nil }
+        return graphics.pict(3000 + donor - 128)
+    }
+
+    /// Whether shutter strip `index` has reached its last frame (or there is
+    /// no such strip).
+    private func slideSettled(_ index: Int) -> Bool {
+        guard index < assets.slides.count else { return true }
+        return slideFrame >= assets.slides[index].frames.count - 1
     }
 
     /// The three sliding shutter strips (`cölr` Slide1-3 / `spïn` 608-610),
@@ -425,10 +466,14 @@ struct AuthenticMainMenuView: View {
         let last = assets.slides.map(\.frames.count).max().map { $0 - 1 } ?? 0
         guard last > 0 else { return }
         slideFrame = 0
+        // Each strip plays snd 602 as it starts and 603 as it lands (`FUN_0048bfb0`).
+        let landings = assets.slides.map { $0.frames.count - 1 }
+        for _ in landings { model.audio.playMenuSlide(landed: false) }
         slideTimer = Timer.scheduledTimer(withTimeInterval: Self.slideFrameInterval,
                                           repeats: true) { timer in
             Task { @MainActor in
                 slideFrame += 1
+                for landing in landings where landing == slideFrame { model.audio.playMenuSlide(landed: true) }
                 if slideFrame >= last {
                     slideFrame = last
                     timer.invalidate()
@@ -510,7 +555,6 @@ struct AuthenticMainMenuView: View {
             MenuSpriteButton(art: art,
                              onHoverChange: { isHovering in
                                  if isHovering {
-                                     if hoveredAction != art.action { model.audio.play(.uiSelect) }
                                      hoveredAction = art.action
                                  } else if hoveredAction == art.action {
                                      hoveredAction = nil
@@ -518,15 +562,20 @@ struct AuthenticMainMenuView: View {
                              },
                              action: { activate(art.action) })
                 .novaPlace(layout, origin: art.origin, size: art.size)
-                .opacity(appeared ? 1 : 0)
-                .offset(y: appeared ? 0 : 22)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8)
-                    .delay(0.10 + Double(i) * 0.06), value: appeared)
+                // The original blits each menu button only once the shutter
+                // strip of its row has finished sliding.
+                .opacity(slideSettled(MainMenuReadout.slideIndex(forButton: i)) ? 1 : 0)
+                .allowsHitTesting(slideSettled(MainMenuReadout.slideIndex(forButton: i)))
         }
     }
 
+    /// A menu command plays snd 600, waits for it, plays snd 601, then acts
+    /// (`FUN_0048bc20`).
     private func activate(_ action: MainMenuAction) {
-        model.audio.play(.uiSelect)
+        model.audio.playMenuTransition { perform(action) }
+    }
+
+    private func perform(_ action: MainMenuAction) {
         switch action {
         case .newPilot: sheet = .newPilot
         case .openPilot: sheet = .openPilot

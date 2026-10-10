@@ -87,24 +87,30 @@ struct TradeCenterView: View {
     var body: some View {
         Group {
             if let frame = graphics.frame(.trade) {
+                // Rects resolve through DITL #1001 (stock rects as fallback).
+                let d = DITLPlacement(graphics.game, 1001, frame: frame)
                 NovaMenu(frame: frame, overlay: true) { space in
-                    list.frame(width: 352, alignment: .top).novaPlace(space, -175, -117)
-                    statusLine.novaPlace(space, -172, 64)
+                    let header = d.rect(2, top: 9, left: 38, bottom: 26, right: 390)
+                    list.frame(width: header.width, alignment: .top).ditlPlace(space, d, header)
+                    statusLine.ditlPlace(space, d, d.rect(14, top: 190, left: 41, bottom: 214, right: 387))
                     // Option-click (real EV Nova's Alt-click) / long-press is an
                     // alternate route to the same quantity prompt the "×N per
                     // tap" label above already opens — the game's own documented
                     // shortcut, alongside the tap-to-edit affordance this port added.
+                    let buyRect = d.rect(12, top: 221, left: 60, bottom: 246, right: 159)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buy, fallback: "Buy"),
-                               width: 73, enabled: canBuy,
+                               ditl: buyRect, enabled: canBuy,
                                onQuantity: canBuy ? { showQtyPrompt = true } : nil) { buy() }
-                        .novaPlace(space, -153, 95)
+                        .ditlPlace(space, d, buyRect)
+                    let sellRect = d.rect(13, top: 221, left: 166, bottom: 246, right: 265)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
-                               width: 73, enabled: canSell,
+                               ditl: sellRect, enabled: canSell,
                                onQuantity: canSell ? { showQtyPrompt = true } : nil) { sell() }
-                        .novaPlace(space, -47, 95)
+                        .ditlPlace(space, d, sellRect)
+                    let doneRect = d.rect(0, top: 221, left: 272, bottom: 246, right: 371)
                     NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                               width: 73, action: onDone)
-                        .novaPlace(space, 59, 95)
+                               ditl: doneRect, action: onDone)
+                        .ditlPlace(space, d, doneRect)
                 }
             } else {
                 fallback
@@ -388,21 +394,27 @@ struct OutfitterView: View {
 
     @ViewBuilder private var outfitterBody: some View {
         if let frame = graphics.frame(.outfit) {
+            // Every item follows DITL #1002 from the loaded data (stock
+            // positions below, shifted by however far a plug-in moves them).
+            let d = DITLPlacement(graphics.game, 1002, frame: frame)
+            let pane = d.delta(5, stock: CGRect(x: 354, y: 10, width: 192, height: 267))
+            let pict = d.delta(7, stock: CGRect(x: 557, y: 8, width: 200, height: 200))
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)
-                    .clipped().novaPlace(space, -373.5, -152.5)
+                    .clipped()
+                    .ditlPlace(space, d, 4, stock: CGRect(x: 9, y: 8, width: 333, height: 271), at: -373.5, -152.5)
                 // DITL #1002 items 9/10: the real 25×25 up/down scroll-arrow
                 // buttons at (148,288)/(178,288) — one row per tap.
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.up.fill",
                                enabled: currentTopRow > 0) { scroll(-1) }
-                    .novaPlace(space, -234.5, 127.5)
+                    .ditlPlace(space, d, 9, stock: CGRect(x: 148, y: 288, width: 25, height: 25), at: -234.5, 127.5)
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
                                enabled: currentTopRow < maxTopRow) { scroll(1) }
-                    .novaPlace(space, -204.5, 127.5)
+                    .ditlPlace(space, d, 10, stock: CGRect(x: 178, y: 288, width: 25, height: 25), at: -204.5, 127.5)
                 // Description pane — DITL #1002 item 5 (354,10)-(546,277),
                 // 192×267 (was clipped to 185 tall, so long text was cut off).
-                detail.frame(width: 190, height: 265, alignment: .topLeading)
-                    .clipped().novaPlace(space, -28.5, -150.5)
+                detail.frame(width: 190 + pane.dw, height: 265 + pane.dh, alignment: .topLeading)
+                    .clipped().novaPlace(space, -28.5 + pane.dx, -150.5 + pane.dy)
                 // Item picture — DITL #1002 item 7 (557,8)-(757,208), the full
                 // 200×200 box. The art is a 200×200 canvas, so `.fill` makes it
                 // fill the box edge-to-edge (was 190×185 with `.fit`, which
@@ -410,11 +422,11 @@ struct OutfitterView: View {
                 if let o = selected, let pic = graphics.outfitPicture(o) {
                     Image(decorative: pic, scale: 1).interpolation(.high).resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 200, height: 200).clipped()
-                        .novaPlace(space, 174.5, -152.5)
+                        .frame(width: 200 + pict.dw, height: 200 + pict.dh).clipped()
+                        .novaPlace(space, 174.5 + pict.dx, -152.5 + pict.dy)
                 }
-                info(space)
-                buttons(space)
+                info(space, d)
+                buttons(space, d)
             }
         } else {
             fallback
@@ -466,7 +478,7 @@ struct OutfitterView: View {
         .cursorScrollable()
     }
 
-    private func info(_ space: NovaSpace) -> some View {
+    private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let o = selected
         // "You Have" is the player's credit balance (matching the Shipyard's
         // info panel and the real game, e.g. "You Have: 2.34M cr") — NOT the
@@ -489,7 +501,7 @@ struct OutfitterView: View {
         // DITL #1002 item 8 (618,214)-(753,314) against the real 765×321 Outfit
         // frame (PICT 8502 — matches DLOG #1002's own bounds exactly): cx =
         // 618 − 382.5 ≈ 235, cy = 214 − 160.5 ≈ 53.
-        .novaPlace(space, 235, 53)
+        .ditlPlace(space, d, 8, stock: CGRect(x: 618, y: 214, width: 135, height: 100), at: 235, 53)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -508,7 +520,7 @@ struct OutfitterView: View {
     // (This lands within a couple px of the vendored NovaJS reference's
     // buy@(-100,126)/sell@(0,126)/done@(100,126) — that fix was already close;
     // this just anchors it to the game's own real dialog layout instead.)
-    @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
+    @ViewBuilder private func buttons(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let o = selected
         // A sell-only listing (this port buys anything, but doesn't stock this
         // item) can never be bought here, however affordable it is.
@@ -531,7 +543,7 @@ struct OutfitterView: View {
                 Log.spaceport.notice("Outfitter buy no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) cost=\(o.cost, privacy: .public) credits=\(pilot.state.credits, privacy: .public) freeMass=\(pilot.freeMass(galaxy: galaxy), privacy: .public) — insufficient credits, mass, or max-installed reached")
             }
         }
-        .novaPlace(space, -94, 128)
+        .ditlPlace(space, d, 6, stock: CGRect(x: 288, y: 289, width: 99, height: 25), at: -94, 128)
         let canSell = o.map { pilot.canSellOutfit($0) } ?? false
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.sell, fallback: "Sell"),
                    width: 73, enabled: canSell,
@@ -547,10 +559,10 @@ struct OutfitterView: View {
                 Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned, unsellable, or free mass would go negative")
             }
         }
-        .novaPlace(space, 12, 128)
+        .ditlPlace(space, d, 3, stock: CGRect(x: 394, y: 289, width: 99, height: 25), at: 12, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                    width: 73, action: onDone)
-            .novaPlace(space, 118, 128)
+            .ditlPlace(space, d, 0, stock: CGRect(x: 500, y: 289, width: 99, height: 25), at: 118, 128)
     }
 
     private var fallback: some View {
@@ -623,29 +635,35 @@ struct ShipyardView: View {
 
     @ViewBuilder private var shipyardMenu: some View {
         if let frame = graphics.frame(.shipyard) {
+            // Every item follows DITL #1004 from the loaded data (stock
+            // positions below, shifted by however far a plug-in moves them).
+            let d = DITLPlacement(graphics.game, 1004, frame: frame)
+            let pane = d.delta(5, stock: CGRect(x: 354, y: 10, width: 192, height: 267))
+            let pict = d.delta(7, stock: CGRect(x: 557, y: 8, width: 200, height: 200))
             NovaMenu(frame: frame, overlay: true) { space in
                 grid.frame(width: gridTileSize.width * CGFloat(gridCols), height: gridHeight)
-                    .clipped().novaPlace(space, -373.5, -152.5)
+                    .clipped()
+                    .ditlPlace(space, d, 4, stock: CGRect(x: 9, y: 8, width: 333, height: 271), at: -373.5, -152.5)
                 // DITL #1004 items 11/12: the real 25×25 up/down scroll-arrow
                 // buttons at (141,288)/(171,288) — one row per tap.
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.up.fill",
                                enabled: currentTopRow > 0) { scroll(-1) }
-                    .novaPlace(space, -241.5, 126.5)
+                    .ditlPlace(space, d, 11, stock: CGRect(x: 141, y: 288, width: 25, height: 25), at: -241.5, 126.5)
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
                                enabled: currentTopRow < maxTopRow) { scroll(1) }
-                    .novaPlace(space, -211.5, 126.5)
+                    .ditlPlace(space, d, 12, stock: CGRect(x: 171, y: 288, width: 25, height: 25), at: -211.5, 126.5)
                 // Description pane — DITL #1004 item 5 (354,10)-(546,277),
                 // 192×267 (was clipped to 185 tall, cutting the class blurb).
-                detail.frame(width: 190, height: 265, alignment: .topLeading)
-                    .clipped().novaPlace(space, -28.5, -150.5)
+                detail.frame(width: 190 + pane.dw, height: 265 + pane.dh, alignment: .topLeading)
+                    .clipped().novaPlace(space, -28.5 + pane.dx, -150.5 + pane.dy)
                 // Ship picture — DITL #1004 item 7 (557,8)-(757,208), 200×200.
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
-                        .frame(width: 200, height: 200).clipped()
-                        .novaPlace(space, 174.5, -152.5)
+                        .frame(width: 200 + pict.dw, height: 200 + pict.dh).clipped()
+                        .novaPlace(space, 174.5 + pict.dx, -152.5 + pict.dy)
                 }
-                info(space)
-                buttons(space)
+                info(space, d)
+                buttons(space, d)
             }
         } else {
             fallback
@@ -684,7 +702,13 @@ struct ShipyardView: View {
                 }
             }
         }
-        .gridPaging(currentPage: currentTopRow, pageCount: maxTopRow + 1) { topRow = $0 }
+        // Arrow keys move the selection (0x008722b0); Space is item 10, Info.
+        .gridPaging(currentPage: currentTopRow, pageCount: maxTopRow + 1,
+                    keyboard: GridKeyboardSelection(
+                        selectedIndex: stock.firstIndex { $0.id == (selectedID ?? stock.first?.id) },
+                        count: stock.count,
+                        onSelect: { selectedID = stock[$0].id },
+                        onSpace: { if selected != nil { showInfo = true } })) { topRow = $0 }
     }
 
     /// The shipyard's dedicated display picture for a hull, falling back to the
@@ -732,7 +756,7 @@ struct ShipyardView: View {
         .cursorScrollable()
     }
 
-    private func info(_ space: NovaSpace) -> some View {
+    private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 10) {
             infoRow("Price:", s.map { netPrice($0).creditsAbbreviated } ?? "—")
@@ -742,7 +766,7 @@ struct ShipyardView: View {
         // DITL #1004 item 8 (614,214)-(757,314) against the real 765×323
         // Shipyard frame (PICT 8501 — matches DLOG #1004's own bounds
         // exactly): cx = 614 − 382.5 ≈ 232, cy = 214 − 161.5 ≈ 52.
-        .novaPlace(space, 232, 52)
+        .ditlPlace(space, d, 8, stock: CGRect(x: 614, y: 214, width: 143, height: 100), at: 232, 52)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -760,7 +784,7 @@ struct ShipyardView: View {
     // (Within a couple px of the vendored NovaJS reference's buy@(-20,126)/
     // done@(100,126) — that fix was already close; this anchors it to the
     // game's own real dialog layout instead.)
-    @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
+    @ViewBuilder private func buttons(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         let canBuy = s.map {
             $0.id != pilot.state.shipType && pilot.state.credits >= netPrice($0)
@@ -771,7 +795,7 @@ struct ShipyardView: View {
         // open the detailed ship-info dialog. cx = 253 − 382.5 = −129.5.
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.info, fallback: "Info"),
                    width: 63, enabled: s != nil) { showInfo = true }
-            .novaPlace(space, -129.5, 128)
+            .ditlPlace(space, d, 9, stock: CGRect(x: 253, y: 289, width: 89, height: 25), at: -129.5, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
                    width: 83, enabled: canBuy) {
             guard let s else {
@@ -786,10 +810,10 @@ struct ShipyardView: View {
                 Log.spaceport.notice("Shipyard buy no-op at spöb \(spob.id, privacy: .public): ship=\(s.id, privacy: .public) netPrice=\(price, privacy: .public) credits=\(pilot.state.credits, privacy: .public) — insufficient credits or already owned")
             }
         }
-        .novaPlace(space, -18, 128)
+        .ditlPlace(space, d, 0, stock: CGRect(x: 365, y: 289, width: 109, height: 25), at: -18, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                    width: 83, action: onDone)
-            .novaPlace(space, 98, 128)
+            .ditlPlace(space, d, 6, stock: CGRect(x: 480, y: 289, width: 109, height: 25), at: 98, 128)
     }
 
     private var fallback: some View {
@@ -846,27 +870,34 @@ struct BarView: View {
         ZStack {
             Group {
                 if let frame = graphics.frame(.bar) {
+                    // Rects resolve through DITL #1013 (stock rects as fallback).
+                    let d = DITLPlacement(graphics.game, 1013, frame: frame)
                     NovaMenu(frame: frame, overlay: true) { space in
+                        let text = d.rect(6, top: 10, left: 16, bottom: 116, right: 246)
                         ScrollView(showsIndicators: false) {
-                            NovaText(barText, size: 10, width: 230, align: .leading)
+                            NovaText(barText, size: 10, width: text.width, align: .leading)
                         }
                         .cursorScrollable()
-                        .frame(width: 230, height: 106)
-                        .novaPlace(space, -115.5, -82.5)
+                        .frame(width: text.width, height: text.height)
+                        .ditlPlace(space, d, text)
                         // Escorts are hired from the port's shipyard stock, so the
                         // option is only live where there's a shipyard to hire from.
+                        let hire = d.rect(4, top: 125, left: 6, bottom: 151, right: 152)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.hireEscort, fallback: "Hire Escort"),
-                                   width: 120, enabled: spob.hasShipyard) { showHire = true }
-                            .novaPlace(space, -125.5, 32.5)
+                                   ditl: hire, enabled: spob.hasShipyard) { showHire = true }
+                            .ditlPlace(space, d, hire)
+                        let holo = d.rect(2, top: 154, left: 6, bottom: 180, right: 152)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.holovid, fallback: "Holovid"),
-                                   width: 120) { showHolovid = true }
-                            .novaPlace(space, -125.5, 61.5)
+                                   ditl: holo) { showHolovid = true }
+                            .ditlPlace(space, d, holo)
+                        let gamble = d.rect(1, top: 125, left: 156, bottom: 151, right: 255)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.gamble, fallback: "Gamble"),
-                                   width: 73) { showGambling = true }
-                            .novaPlace(space, 24.5, 32.5)
+                                   ditl: gamble) { showGambling = true }
+                            .ditlPlace(space, d, gamble)
+                        let leave = d.rect(0, top: 154, left: 156, bottom: 180, right: 255)
                         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
-                                   width: 73, action: onDone)
-                            .novaPlace(space, 24.5, 61.5)
+                                   ditl: leave, action: onDone)
+                            .ditlPlace(space, d, leave)
                     }
                 } else {
                     VStack {

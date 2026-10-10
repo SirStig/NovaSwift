@@ -72,25 +72,30 @@ struct HireEscortView: View {
 
     var body: some View {
         if let frame = graphics.frame(.shipyard) {
+            // DITL #1004 item positions, matched to the Shipyard exactly, and
+            // following a plug-in's replacement DITL the same way.
+            let d = DITLPlacement(graphics.game, 1004, frame: frame)
+            let pane = d.delta(5, stock: CGRect(x: 354, y: 10, width: 192, height: 267))
+            let pict = d.delta(7, stock: CGRect(x: 557, y: 8, width: 200, height: 200))
             NovaMenu(frame: frame, overlay: true) { space in
-                // DITL #1004 item positions, matched to the Shipyard exactly.
                 grid.frame(width: hireGridTileSize.width * CGFloat(hireGridCols), height: hireGridHeight)
-                    .clipped().novaPlace(space, -373.5, -152.5)
+                    .clipped()
+                    .ditlPlace(space, d, 4, stock: CGRect(x: 9, y: 8, width: 333, height: 271), at: -373.5, -152.5)
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.up.fill",
                                enabled: currentTopRow > 0) { scroll(-1) }
-                    .novaPlace(space, -241.5, 126.5)
+                    .ditlPlace(space, d, 11, stock: CGRect(x: 141, y: 288, width: 25, height: 25), at: -241.5, 126.5)
                 NovaIconButton(graphics: graphics, systemName: "arrowtriangle.down.fill",
                                enabled: currentTopRow < maxTopRow) { scroll(1) }
-                    .novaPlace(space, -211.5, 126.5)
-                detail.frame(width: 190, height: 265, alignment: .topLeading)
-                    .clipped().novaPlace(space, -28.5, -150.5)
+                    .ditlPlace(space, d, 12, stock: CGRect(x: 171, y: 288, width: 25, height: 25), at: -211.5, 126.5)
+                detail.frame(width: 190 + pane.dw, height: 265 + pane.dh, alignment: .topLeading)
+                    .clipped().novaPlace(space, -28.5 + pane.dx, -150.5 + pane.dy)
                 if let s = selected, let picture = shipPicture(s) {
                     ShipyardPictureView(picture: picture)
-                        .frame(width: 200, height: 200).clipped()
-                        .novaPlace(space, 174.5, -152.5)
+                        .frame(width: 200 + pict.dw, height: 200 + pict.dh).clipped()
+                        .novaPlace(space, 174.5 + pict.dx, -152.5 + pict.dy)
                 }
-                info(space)
-                buttons(space)
+                info(space, d)
+                buttons(space, d)
             }
         } else {
             fallback
@@ -166,14 +171,14 @@ struct HireEscortView: View {
         }
     }
 
-    private func info(_ space: NovaSpace) -> some View {
+    private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         return VStack(alignment: .leading, spacing: 8) {
             infoRow("Hire:", s.map { hireCreditString(hirePrice($0)) } ?? "—")
             infoRow("Per day:", s.map { hireCreditString($0.escortDailyFee) } ?? "—")
             infoRow("You Have:", hireCreditString(pilot.state.credits))
         }
-        .novaPlace(space, 232, 46)
+        .ditlPlace(space, d, 8, stock: CGRect(x: 614, y: 214, width: 143, height: 100), at: 232, 46)
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -183,7 +188,7 @@ struct HireEscortView: View {
         }
     }
 
-    @ViewBuilder private func buttons(_ space: NovaSpace) -> some View {
+    @ViewBuilder private func buttons(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         let s = selected
         // Hiring checks the credits and the Availability test only; Require
         // gates buying, not hiring (0x00498dc0).
@@ -198,10 +203,10 @@ struct HireEscortView: View {
                 Log.spaceport.debug("Hired escort \(s.id, privacy: .public) (\(s.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(price, privacy: .public)cr")
             }
         }
-        .novaPlace(space, -18, 128)
+        .ditlPlace(space, d, 0, stock: CGRect(x: 365, y: 289, width: 109, height: 25), at: -18, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
                    width: 83, action: onDone)
-            .novaPlace(space, 98, 128)
+            .ditlPlace(space, d, 6, stock: CGRect(x: 480, y: 289, width: 109, height: 25), at: 98, 128)
     }
 
     private var fallback: some View {

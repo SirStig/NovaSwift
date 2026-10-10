@@ -106,7 +106,7 @@ struct IntroSequenceView: View {
 
     private func pict(_ id: Int) -> CGImage? {
         guard let d = model.data.game?.resources.resource(NovaType.pict, id)?.data,
-              let sheet = try? PICT.decode(d) else { return nil }
+              let sheet = PICT.decodeLogged(d, id: id) else { return nil }
         return sheet.makeCGImage()
     }
 }

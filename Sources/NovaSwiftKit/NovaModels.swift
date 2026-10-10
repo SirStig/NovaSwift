@@ -101,6 +101,14 @@ public struct ShanExitPoint {
 public struct ShanRes {
     public let id: Int
     public let baseSpriteID: Int   // → rlëD id directly (spïn indirection is a fallback; see NovaGame.shipSpriteData)
+    /// Mask PICT ids for each layer, used only when the layer's sprite id has
+    /// no `rlëD` and is drawn from a PICT sheet instead (@2/@14/@24/@32/@40/@66).
+    public let baseMaskID: Int
+    public let altMaskID: Int
+    public let engineMaskID: Int
+    public let lightMaskID: Int
+    public let weaponGlowMaskID: Int
+    public let shieldMaskID: Int
     public let baseSetCount: Int   // number of animation *sets* (banking/lit variants), NOT headings; hulls rotate through 36 headings
     public let baseWidth: Int
     public let baseHeight: Int
@@ -207,6 +215,12 @@ public struct ShanRes {
         id = r.id
         let d = r.data
         baseSpriteID = i16(d, 0)
+        baseMaskID = i16(d, 2)
+        altMaskID = i16(d, 14)
+        engineMaskID = i16(d, 24)
+        lightMaskID = i16(d, 32)
+        weaponGlowMaskID = i16(d, 40)
+        shieldMaskID = i16(d, 66)
         baseSetCount = i16(d, 4)
         baseWidth = i16(d, 6)
         baseHeight = i16(d, 8)
@@ -997,9 +1011,7 @@ public struct SpobRes {
     /// none (`-1`/≤0 → invulnerable, shown as simply *gone* when destroyed).
     public var destroyedGraphicSpinID: Int? {
         guard destroyedGraphicRaw > 0 else { return nil }
-        var g = destroyedGraphicRaw + 2000
-        if g > 2058 { g -= 1 }
-        return g
+        return destroyedGraphicRaw + 1000
     }
     /// `spöb.Flags` 0x0080 — the stellar can *only* be landed on once destroyed
     /// (a hidden base revealed when its cover is blown). Hidden/unlandable until
@@ -1103,10 +1115,8 @@ public struct SpobRes {
         let d = r.data
         x = i16(d, 0)
         y = i16(d, 2)
-        // Graphic field 0..63 maps to spïn ids 2000+, with one skipped at 2058.
-        var g = i16(d, 4) + 2000
-        if g > 2058 { g -= 1 }
-        graphicSpinID = g
+        // Stellar art is spïn Graphic + 1000 (0x004b0a30).
+        graphicSpinID = i16(d, 4) + 1000
         flags = u32(d, 6)
         techLevel = i16(d, 12)
         government = i16(d, 20)
@@ -1164,6 +1174,8 @@ private final class NovaGameCache {
     var rleSheets: [Int: SpriteSheet?] = [:]
     /// Collision masks keyed by `rlëD` id (WP-17); `nil` = known missing.
     var rleMasks: [Int: SpriteMaskSet?] = [:]
+    /// PICT + mask sprite sheets (no `rlëD`), keyed by sprite/mask/frame size/count.
+    var pictSheets: [String: SpriteSheet?] = [:]
     /// `spöb` id → the id of the system that lists it in its `spobs`. Built once
     /// (walking every system) so gate transport can resolve a linked gate's
     /// destination system without re-scanning the galaxy each time.
@@ -1241,21 +1253,16 @@ public struct NovaGame {
         if resources.resource(NovaType.rleD, shan.baseSpriteID) != nil {
             return collisionMask(rleID: shan.baseSpriteID)
         }
-        if let spin = spin(shan.baseSpriteID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
-            return collisionMask(rleID: spin.spriteID)
-        }
-        return nil
+        return shipSprite(shipID).map(PICTSpriteSheet.masks(of:))
     }
 
     /// A shot graphic's collision mask, resolved like `weaponSprite(spinID:)`.
     public func weaponCollisionMask(spinID: Int) -> SpriteMaskSet? {
-        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+        guard let spin = spin(spinID) else { return nil }
+        if resources.resource(NovaType.rleD, spin.spriteID) != nil {
             return collisionMask(rleID: spin.spriteID)
         }
-        if resources.resource(NovaType.rleD, spinID) != nil {
-            return collisionMask(rleID: spinID)
-        }
-        return nil
+        return spinSheet(spinID).map(PICTSpriteSheet.masks(of:))
     }
 
     /// Release every decoded sprite sheet held in RAM (hulls, engine glows,
@@ -1268,8 +1275,9 @@ public struct NovaGame {
     @discardableResult
     public func flushSpriteSheets() -> Int {
         cache.lock.lock(); defer { cache.lock.unlock() }
-        let released = cache.rleSheets.count
+        let released = cache.rleSheets.count + cache.pictSheets.count
         cache.rleSheets.removeAll(keepingCapacity: false)
+        cache.pictSheets.removeAll(keepingCapacity: false)
         return released
     }
 
@@ -1536,159 +1544,151 @@ public struct NovaGame {
         return nil
     }
 
-    /// Decode a ship's base hull sprite sheet, if available. Cached per hull —
-    /// RLE decode is real work, and this is called repeatedly for the same
-    /// hull (every jump/land rebuilds the scene's own texture cache from
-    /// scratch, and the Shipyard's fallback thumbnail calls this per tile,
-    /// per render).
+    /// The sheet for a sprite id the way the original loads every sprite: the
+    /// `rlëD` with that id when it exists, otherwise a PICT sheet cut into
+    /// `frameWidth`×`frameHeight` frames with mask PICT `maskID` as its alpha
+    /// (`Sprite_CreateFromSpriteSheetResources` 0x00474ab0). `frameCount` 0
+    /// derives the count from the PICT's size. nil (logged) when neither works.
+    public func spriteSheet(spriteID: Int, maskID: Int, frameWidth: Int, frameHeight: Int,
+                            frameCount: Int) -> SpriteSheet? {
+        if resources.resource(NovaType.rleD, spriteID) != nil { return decodedRLE(spriteID) }
+        let key = "\(spriteID)/\(maskID)/\(frameWidth)/\(frameHeight)/\(frameCount)"
+        cache.lock.lock()
+        if let hit = cache.pictSheets[key] { cache.lock.unlock(); return hit }
+        cache.lock.unlock()
+        let sheet = buildPICTSheet(spriteID: spriteID, maskID: maskID, frameWidth: frameWidth,
+                                   frameHeight: frameHeight, frameCount: frameCount)
+        cache.lock.lock(); cache.pictSheets[key] = .some(sheet); cache.lock.unlock()
+        return sheet
+    }
+
+    private func buildPICTSheet(spriteID: Int, maskID: Int, frameWidth: Int, frameHeight: Int,
+                                frameCount: Int) -> SpriteSheet? {
+        guard let imageData = resources.resource(NovaType.pict, spriteID)?.data,
+              let image = PICT.decodeLogged(imageData, id: spriteID) else { return nil }
+        guard let maskData = resources.resource(NovaType.pict, maskID)?.data else {
+            Log.graphics.error("PICT sprite \(spriteID, privacy: .public): mask PICT \(maskID, privacy: .public) not found")
+            return nil
+        }
+        // The exe's same-image mask path (0x00479250) is a stub that fails.
+        guard spriteID != maskID else {
+            Log.graphics.error("PICT sprite \(spriteID, privacy: .public): sprite and mask are the same PICT")
+            return nil
+        }
+        guard let mask = PICT.decodeLogged(maskData, id: maskID) else { return nil }
+        do {
+            return try PICTSpriteSheet.slice(image: image, mask: mask, frameWidth: frameWidth,
+                                             frameHeight: frameHeight, frameCount: frameCount)
+        } catch {
+            Log.graphics.error("PICT sprite \(spriteID, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
+    /// A spïn's sheet: its sprite id as `rlëD`, or its PICT + mask grid.
+    public func spinSheet(_ spinID: Int) -> SpriteSheet? {
+        guard let spin = spin(spinID) else { return nil }
+        return spriteSheet(spriteID: spin.spriteID, maskID: spin.maskID,
+                           frameWidth: spin.tileWidth, frameHeight: spin.tileHeight, frameCount: 0)
+    }
+
+    /// Decode a ship's base hull sprite sheet, if available: the shän base
+    /// image as `rlëD`, else its PICT sheet with the base mask, FramesPer ×
+    /// base sets frames (0x004b4ee0). Cached.
     public func shipSprite(_ shipID: Int) -> SpriteSheet? {
         guard let shan = shan(shipID) else { return nil }
-        // Hulls reference the `rlëD` directly (spïn indirection is for
-        // planets/weapons/asteroids); fall back through spïn only if the data
-        // numbers it that way — matching `shipSpriteData`'s resolution order.
-        if resources.resource(NovaType.rleD, shan.baseSpriteID) != nil {
-            return decodedRLE(shan.baseSpriteID)
-        }
-        if let spin = spin(shan.baseSpriteID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
-            return decodedRLE(spin.spriteID)
-        }
-        return nil
+        return spriteSheet(spriteID: shan.baseSpriteID, maskID: shan.baseMaskID,
+                           frameWidth: shan.baseWidth, frameHeight: shan.baseHeight,
+                           frameCount: shan.framesPerSet * max(1, shan.baseSetCount))
     }
 
     /// Decode a ship's real, per-hull-authored engine-glow overlay sprite (the
     /// `shän` engine layer), if this hull has one. Same rotation-frame layout
-    /// as the base hull sprite — index it with the same `spriteFrame`. Cached
-    /// for the same reason as `shipSprite`.
+    /// as the base hull sprite — index it with the same `spriteFrame`.
     public func engineGlowSprite(_ shipID: Int) -> SpriteSheet? {
-        guard let shan = shan(shipID), shan.engineSpriteID > 0,
-              resources.resource(NovaType.rleD, shan.engineSpriteID) != nil else { return nil }
-        return decodedRLE(shan.engineSpriteID)
+        guard let shan = shan(shipID), shan.engineSpriteID > 0 else { return nil }
+        return spriteSheet(spriteID: shan.engineSpriteID, maskID: shan.engineMaskID,
+                           frameWidth: shan.engineWidth, frameHeight: shan.engineHeight,
+                           frameCount: shan.framesPerSet * max(1, shan.baseSetCount))
     }
 
     /// Decode a ship's shield-bubble overlay sprite (the `shän` shield layer),
-    /// if this hull defines one. Base-game hulls leave `shieldSpriteID` at -1,
-    /// so this is nil for stock data; the "Shields" graphics plug-in populates
-    /// it for every hull. Unlike the hull/engine sheets this is an independent
-    /// animation (its own frame count) — drive it with its own flare clock,
-    /// not the hull's `spriteFrame`. Cached like the other layers.
+    /// if this hull defines one. Base-game hulls leave `shieldSpriteID` at -1;
+    /// the "Shields" graphics plug-in populates it. A PICT shield sheet takes
+    /// its frame count from the picture's size, as in the original.
     public func shieldSprite(_ shipID: Int) -> SpriteSheet? {
-        guard let shan = shan(shipID), shan.shieldSpriteID > 0,
-              resources.resource(NovaType.rleD, shan.shieldSpriteID) != nil else { return nil }
-        return decodedRLE(shan.shieldSpriteID)
+        guard let shan = shan(shipID), shan.shieldSpriteID > 0 else { return nil }
+        return spriteSheet(spriteID: shan.shieldSpriteID, maskID: shan.shieldMaskID,
+                           frameWidth: shan.shieldWidth, frameHeight: shan.shieldHeight, frameCount: 0)
     }
 
     /// Decode a ship's running-lights overlay sprite (the `shän` light layer), if
-    /// present. Shares the base hull's frame layout (same set/heading count,
-    /// including banking sets, per the Bible), so index it with the same
-    /// `set*framesPerSet + heading`. Its opacity is then driven by the shän's
-    /// blink mode. <= 0 / missing → nil.
+    /// present. Shares the base hull's frame layout.
     public func lightSprite(_ shipID: Int) -> SpriteSheet? {
-        guard let shan = shan(shipID), shan.lightSpriteID > 0,
-              resources.resource(NovaType.rleD, shan.lightSpriteID) != nil else { return nil }
-        return decodedRLE(shan.lightSpriteID)
+        guard let shan = shan(shipID), shan.lightSpriteID > 0 else { return nil }
+        return spriteSheet(spriteID: shan.lightSpriteID, maskID: shan.lightMaskID,
+                           frameWidth: shan.lightWidth, frameHeight: shan.lightHeight,
+                           frameCount: shan.framesPerSet * max(1, shan.baseSetCount))
     }
 
     /// Decode a ship's weapon-glow overlay sprite (the `shän` weapon layer), if
-    /// present — the muzzle flash flashed on firing and faded per `weapDecay`.
-    /// Shares the base frame layout like the engine/light layers. <= 0 → nil.
+    /// present. Shares the base frame layout like the engine/light layers.
     public func weaponGlowSprite(_ shipID: Int) -> SpriteSheet? {
-        guard let shan = shan(shipID), shan.weaponGlowSpriteID > 0,
-              resources.resource(NovaType.rleD, shan.weaponGlowSpriteID) != nil else { return nil }
-        return decodedRLE(shan.weaponGlowSpriteID)
+        guard let shan = shan(shipID), shan.weaponGlowSpriteID > 0 else { return nil }
+        return spriteSheet(spriteID: shan.weaponGlowSpriteID, maskID: shan.weaponGlowMaskID,
+                           frameWidth: shan.weaponGlowWidth, frameHeight: shan.weaponGlowHeight,
+                           frameCount: shan.framesPerSet * max(1, shan.baseSetCount))
     }
 
     /// Decode a ship's alternating-sprite overlay (the `shän` alt layer), if this
-    /// hull defines one. Bible: the alt sheet packs `altSetCount` sets that cycle
-    /// on top of the base sprite, each set laid out with the same per-heading
-    /// frame count as the hull — so index it `set * framesPerSet + heading` and
-    /// advance `set` on the hull's `animDelay` clock. Stock hulls leave this
-    /// unset, so it is nil for base-game data. Cached like the other layers.
+    /// hull defines one: `altSetCount` sets of FramesPer frames.
     public func altSprite(_ shipID: Int) -> SpriteSheet? {
-        guard let shan = shan(shipID), shan.hasAltLayer,
-              resources.resource(NovaType.rleD, shan.altSpriteID) != nil else { return nil }
-        return decodedRLE(shan.altSpriteID)
+        guard let shan = shan(shipID), shan.hasAltLayer else { return nil }
+        return spriteSheet(spriteID: shan.altSpriteID, maskID: shan.altMaskID,
+                           frameWidth: shan.altWidth, frameHeight: shan.altHeight,
+                           frameCount: shan.framesPerSet * shan.altSetCount)
     }
 
     // MARK: Stellar objects
 
-    /// Resolve a stellar object's sprite: spöb.graphic → spïn → rlëD.
-    /// (Some stellars use PICT, which isn't decoded yet — those return nil.)
+    /// Resolve a stellar object's sprite: spöb.Graphic → spïn (Graphic + 1000)
+    /// → `rlëD` or PICT sheet (0x004b0a30). No spïn, no sprite.
     public func spobSprite(_ spobID: Int) -> SpriteSheet? {
         guard let spob = spob(spobID) else { return nil }
-        if let spin = spin(spob.graphicSpinID),
-           resources.resource(NovaType.rleD, spin.spriteID) != nil {
-            return decodedRLE(spin.spriteID)
-        }
-        if resources.resource(NovaType.rleD, spob.graphicSpinID) != nil {
-            return decodedRLE(spob.graphicSpinID)
-        }
-        return nil
+        return spinSheet(spob.graphicSpinID)
     }
 
     /// Resolve a stellar's **destroyed** (wreck) sprite: `spöb.DestroyedGraphic`
-    /// → `spïn` → `rlëD`. nil when the stellar is invulnerable / has no wreck art
-    /// (the renderer then just drops it from the system when destroyed).
+    /// → `spïn` (+1000). nil when the stellar has no wreck art (the renderer
+    /// then just drops it from the system when destroyed).
     public func spobDestroyedSprite(_ spobID: Int) -> SpriteSheet? {
         guard let spob = spob(spobID), let spinID = spob.destroyedGraphicSpinID else { return nil }
-        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
-            return decodedRLE(spin.spriteID)
-        }
-        if resources.resource(NovaType.rleD, spinID) != nil {
-            return decodedRLE(spinID)
-        }
-        return nil
+        return spinSheet(spinID)
     }
 
-    /// Resolve a weapon's shot graphic (`wëap.graphicSpinID` → `spïn` → `rlëD`)
-    /// into a sprite sheet — the real torpedo/rocket/bolt animation, so shots
-    /// draw their authored art instead of a generic dot. Decoded once and shared
-    /// through the common sheet cache (the renderer also caches the built
-    /// textures per graphic id).
+    /// Resolve a weapon's shot graphic (`wëap.graphicSpinID` → `spïn`) into a
+    /// sprite sheet. As in the original (0x004ad960), only through the spïn.
     public func weaponSprite(spinID: Int) -> SpriteSheet? {
-        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
-            return decodedRLE(spin.spriteID)
-        }
-        if resources.resource(NovaType.rleD, spinID) != nil {
-            return decodedRLE(spinID)
-        }
-        return nil
+        spinSheet(spinID)
     }
 
     /// Resolve a `bööm` explosion's animation: `bööm` id → its `graphicSpinID`
-    /// (`spïn`, already offset +400 at decode) → `rlëD` sprite sheet, plus the
-    /// bööm's `animationRate` so the renderer can play the frames at the authored
-    /// speed. Same spïn→rlëD path as `weaponSprite`; returns nil when the bööm or
-    /// its graphic is absent (the renderer then falls back to a generic flash).
+    /// (`spïn`, already offset +400 at decode) → sheet, plus the bööm's
+    /// `animationRate`. nil when the bööm or its spïn is absent.
     public func boomSprite(_ boomID: Int) -> (sheet: SpriteSheet, animationRate: Int)? {
-        guard let b = boom(boomID) else { return nil }
-        let spinID = b.graphicSpinID
-        if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil,
-           let sheet = decodedRLE(spin.spriteID) {
-            return (sheet, b.animationRate)
-        }
-        if resources.resource(NovaType.rleD, spinID) != nil, let sheet = decodedRLE(spinID) {
-            return (sheet, b.animationRate)
-        }
-        return nil
+        guard let b = boom(boomID), let sheet = spinSheet(b.graphicSpinID) else { return nil }
+        return (sheet, b.animationRate)
     }
 
     /// Resolve an asteroid type's rotating rock sprite: `röid` id → `spïn`
-    /// (fixed offset `röidID + 672`, the Bible's reserved 800-815 asteroid
-    /// spïn range) → `rlëD`. Cached like `shipSprite`/`engineGlowSprite`.
+    /// (fixed offset `röidID + 672`, the 800-815 asteroid spïn range).
     public func asteroidSprite(_ roidID: Int) -> SpriteSheet? {
-        let spinID = roidID + 672
-        guard let spin = spin(spinID),
-              resources.resource(NovaType.rleD, spin.spriteID) != nil else { return nil }
-        return decodedRLE(spin.spriteID)
+        spinSheet(roidID + 672)
     }
 
-    /// The real background star sprite (`spïn` #700 "Stars" → `rlëD`), a small
-    /// multi-frame tile Nova scatters across the parallax starfield. Cached
-    /// once — there is only ever one.
+    /// The background star sprite (`spïn` #700 "Stars").
     public func starfieldSprite() -> SpriteSheet? {
-        guard let spin = spin(700),
-              resources.resource(NovaType.rleD, spin.spriteID) != nil else { return nil }
-        return decodedRLE(spin.spriteID)
+        spinSheet(700)
     }
 
     /// A reasonable starting system when the pilot's start isn't known: the most

@@ -846,17 +846,31 @@ struct GalaxyMapView: View {
     /// idx6, a disabled 32×32 item at (518,537)-(550,569), falls entirely
     /// outside the 513-tall frame — an off-screen/unused control, not part of
     /// the visible chrome, so it has no entry here.
-    private enum Item {
-        static let canvas   = (left: 9,   top: 8,   w: 458, h: 420)  // idx2 — starmap
-        static let panel    = (left: 474, top: 8,   w: 120, h: 429)  // idx5 — system info
-        static let routeBar = (left: 8,   top: 436, w: 586, h: 42)   // idx1 — course/fuel
-        static let zoomOut  = (left: 408, top: 483, w: 25,  h: 25)   // idx3
-        static let zoomIn   = (left: 438, top: 483, w: 25,  h: 25)   // idx4
-        static let nearest  = (left: 155, top: 483, w: 120, h: 25)   // idx7 — "Nearest System"
-        static let named    = (left: 11,  top: 483, w: 130, h: 25)   // idx8 — "Named System"
-        static let clear    = (left: 288, top: 483, w: 99,  h: 25)   // idx9 — "Clear Route"
-        static let done     = (left: 483, top: 483, w: 99,  h: 25)   // idx0 — "Done"
+    /// Those stock rects are only the fallback: each one resolves through the
+    /// loaded data's DITL #2000, so a plug-in's replacement map layout moves
+    /// the canvas, panels and buttons as it does in the original.
+    private struct Items {
+        typealias R = (left: Int, top: Int, w: Int, h: Int)
+        let canvas, panel, routeBar, zoomOut, zoomIn, nearest, named, clear, done: R
+        init(_ game: NovaGame?) {
+            let l = game?.ditlLayout(2000) ?? DITLLayout(id: 2000, dialog: nil)
+            func r(_ i: Int, _ s: R) -> R {
+                let x = l.rect(i, fallback: NovaRect(top: s.top, left: s.left,
+                                                     bottom: s.top + s.h, right: s.left + s.w))
+                return (x.left, x.top, x.width, x.height)
+            }
+            canvas   = r(2, (left: 9,   top: 8,   w: 458, h: 420))  // idx2 — starmap
+            panel    = r(5, (left: 474, top: 8,   w: 120, h: 429))  // idx5 — system info
+            routeBar = r(1, (left: 8,   top: 436, w: 586, h: 42))   // idx1 — course/fuel
+            zoomOut  = r(3, (left: 408, top: 483, w: 25,  h: 25))   // idx3
+            zoomIn   = r(4, (left: 438, top: 483, w: 25,  h: 25))   // idx4
+            nearest  = r(7, (left: 155, top: 483, w: 120, h: 25))   // idx7 — "Nearest System"
+            named    = r(8, (left: 11,  top: 483, w: 130, h: 25))   // idx8 — "Named System"
+            clear    = r(9, (left: 288, top: 483, w: 99,  h: 25))   // idx9 — "Clear Route"
+            done     = r(0, (left: 483, top: 483, w: 99,  h: 25))   // idx0 — "Done"
+        }
     }
+    private var items: Items { Items(graphics?.game ?? nav.game) }
 
     /// DITL rect → `NovaSpace` offset (see the coordinate-convention doc comment
     /// on `NovaSpace`): children are positioned as an offset from the frame's
@@ -871,6 +885,7 @@ struct GalaxyMapView: View {
     private func authenticChrome(frame: CGImage) -> some View {
         let nw = CGFloat(frame.width), nh = CGFloat(frame.height)
         let space = NovaSpace(width: nw, height: nh)
+        let items = self.items
         return GeometryReader { geo in
             let scale = novaFrameScale(frame: CGSize(width: nw, height: nh), viewport: geo.size)
             ZStack(alignment: .topLeading) {
@@ -878,14 +893,14 @@ struct GalaxyMapView: View {
                     .frame(width: nw, height: nh)
 
                 mapCanvas
-                    .frame(width: CGFloat(Item.canvas.w), height: CGFloat(Item.canvas.h))
+                    .frame(width: CGFloat(items.canvas.w), height: CGFloat(items.canvas.h))
                     .clipped()
-                    .novaPlace(space, cx(Item.canvas, nw), cy(Item.canvas, nh))
+                    .novaPlace(space, cx(items.canvas, nw), cy(items.canvas, nh))
 
                 sidePanel
-                    .frame(width: CGFloat(Item.panel.w), height: CGFloat(Item.panel.h), alignment: .top)
+                    .frame(width: CGFloat(items.panel.w), height: CGFloat(items.panel.h), alignment: .top)
                     .clipped()
-                    .novaPlace(space, cx(Item.panel, nw), cy(Item.panel, nh))
+                    .novaPlace(space, cx(items.panel, nw), cy(items.panel, nh))
 
                 // The original status bar (Ports / Navigation Hazards / date);
                 // in the hypergate picker its "select a destination" prompt.
@@ -899,8 +914,8 @@ struct GalaxyMapView: View {
                         originalStatusBar
                     }
                 }
-                .frame(width: CGFloat(Item.routeBar.w), height: CGFloat(Item.routeBar.h), alignment: .topLeading)
-                .novaPlace(space, cx(Item.routeBar, nw), cy(Item.routeBar, nh))
+                .frame(width: CGFloat(items.routeBar.w), height: CGFloat(items.routeBar.h), alignment: .topLeading)
+                .novaPlace(space, cx(items.routeBar, nw), cy(items.routeBar, nh))
 
                 bottomButtons(space: space, nw: nw, nh: nh)
             }
@@ -1152,36 +1167,37 @@ struct GalaxyMapView: View {
     /// EV Nova UI text instead of a `buttonLabel` lookup.
     @ViewBuilder
     private func bottomButtons(space: NovaSpace, nw: CGFloat, nh: CGFloat) -> some View {
+        let items = self.items
         if let graphics {
             NovaButton(graphics: graphics, title: buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: CGFloat(Item.done.w - 26), action: onClose)
-                .novaPlace(space, cx(Item.done, nw), cy(Item.done, nh))
+                       width: CGFloat(items.done.w - 26), action: onClose)
+                .novaPlace(space, cx(items.done, nw), cy(items.done, nh))
             NovaButton(graphics: graphics, title: buttonLabel(49, fallback: "Clear Route"),
-                       width: CGFloat(Item.clear.w - 26)) { nav.clearCourse() }
-                .novaPlace(space, cx(Item.clear, nw), cy(Item.clear, nh))
+                       width: CGFloat(items.clear.w - 26)) { nav.clearCourse() }
+                .novaPlace(space, cx(items.clear, nw), cy(items.clear, nh))
             // The original row is Show/Hide Borders, Find, Clear Route, −, +,
             // Done (UI-18). "Nearest System" exists only with the
             // `autoRoutePlotting` enhancement, which takes Find's place.
             if nav.autoRoutePlotting {
                 NovaButton(graphics: graphics, title: "Nearest System",
-                           width: CGFloat(Item.nearest.w - 26), action: findNearestSystem)
-                    .novaPlace(space, cx(Item.nearest, nw), cy(Item.nearest, nh))
+                           width: CGFloat(items.nearest.w - 26), action: findNearestSystem)
+                    .novaPlace(space, cx(items.nearest, nw), cy(items.nearest, nh))
             } else {
                 NovaButton(graphics: graphics, title: buttonLabel(60, fallback: "Find"),
-                           width: CGFloat(Item.nearest.w - 26)) { showingFinder = true }
-                    .novaPlace(space, cx(Item.nearest, nw), cy(Item.nearest, nh))
+                           width: CGFloat(items.nearest.w - 26)) { showingFinder = true }
+                    .novaPlace(space, cx(items.nearest, nw), cy(items.nearest, nh))
             }
             NovaButton(graphics: graphics,
                        title: showBorders ? buttonLabel(57, fallback: "Hide Borders")
                                           : buttonLabel(56, fallback: "Show Borders"),
-                       width: CGFloat(Item.named.w - 26)) { showBorders.toggle() }
-                .novaPlace(space, cx(Item.named, nw), cy(Item.named, nh))
+                       width: CGFloat(items.named.w - 26)) { showBorders.toggle() }
+                .novaPlace(space, cx(items.named, nw), cy(items.named, nh))
             // idx3/idx4 (25×25) — the authentic button art at its minimum
             // 26×25 geometry with −/+ glyphs, not a translucent system chip.
             NovaIconButton(graphics: graphics, systemName: "minus") { setZoom(zoom / 1.4) }
-                .novaPlace(space, cx(Item.zoomOut, nw), cy(Item.zoomOut, nh))
+                .novaPlace(space, cx(items.zoomOut, nw), cy(items.zoomOut, nh))
             NovaIconButton(graphics: graphics, systemName: "plus") { setZoom(zoom * 1.4) }
-                .novaPlace(space, cx(Item.zoomIn, nw), cy(Item.zoomIn, nh))
+                .novaPlace(space, cx(items.zoomIn, nw), cy(items.zoomIn, nh))
         }
     }
 

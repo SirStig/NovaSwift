@@ -98,63 +98,78 @@ struct HailDialogView: View {
 
     @ViewBuilder
     private func shipContent(_ space: NovaSpace, _ graphics: SpaceportGraphics) -> some View {
+        // Rects from DITL #1007 (stock rects as fallback), so a plug-in's
+        // replacement layout takes effect.
+        let d = DITLPlacement(graphics.game, 1007, window: space.size)
         if let portrait {
+            let box = d.rect(10, top: 7, left: 216, bottom: 207, right: 416)   // 200×200
             Image(decorative: portrait, scale: 1)
                 .resizable().interpolation(.medium).aspectRatio(contentMode: .fit)
-                .frame(width: 200, height: 200)
-                .novaPlace(space, 4.5, -100.5)   // item 10: (216,7)-(416,207) 200×200
+                .frame(width: box.width, height: box.height)
+                .ditlPlace(space, d, box)
         }
-        NovaText(state.responseText, size: 10, width: 188)
-            .novaPlace(space, -200.5, -99.5)     // item 9: (11,8)-(203,66) 192×58
-        identifierText(width: 130)
-            .novaPlace(space, -171.5, -34.5)     // item 11: (40,73)-(174,119) 134×46
+        let text = d.rect(9, top: 8, left: 11, bottom: 66, right: 203)
+        NovaText(state.responseText, size: 10, width: max(0, text.width - 4))
+            .ditlPlace(space, d, text)
+        let ident = d.rect(11, top: 73, left: 40, bottom: 119, right: 174)
+        identifierText(width: max(0, ident.width - 4))
+            .ditlPlace(space, d, ident)
 
         // Items 2/1/0 top-to-bottom (166×26 each, stacked left column, x=21).
-        responseButton("Greetings", width: 140, action: onGreetings, graphics: graphics)
-            .novaPlace(space, -190.5, 17.5)      // item 2 (top): (21,125)-(187,151)
+        let top = d.rect(2, top: 125, left: 21, bottom: 151, right: 187)
+        responseButton("Greetings", rect: top, action: onGreetings, graphics: graphics)
+            .ditlPlace(space, d, top)
         if showAssistButton {
-            responseButton(state.assistTitle, width: 140, enabled: assistEnabled,
+            let mid = d.rect(1, top: 153, left: 21, bottom: 179, right: 187)
+            responseButton(state.assistTitle, rect: mid, enabled: assistEnabled,
                             action: onRequestAssistance, graphics: graphics)
-                .novaPlace(space, -190.5, 45.5)  // item 1 (mid): (21,153)-(187,179)
+                .ditlPlace(space, d, mid)
         }
-        responseButton("Close Channel", width: 140, action: onClose, graphics: graphics)
-            .novaPlace(space, -190.5, 73.5)      // item 0 (bottom): (21,181)-(187,207)
+        let bottom = d.rect(0, top: 181, left: 21, bottom: 207, right: 187)
+        responseButton("Close Channel", rect: bottom, action: onClose, graphics: graphics)
+            .ditlPlace(space, d, bottom)
     }
 
     // MARK: - Planet comm (DITL #1009, frame 540×295)
 
     @ViewBuilder
     private func planetContent(_ space: NovaSpace, _ graphics: SpaceportGraphics) -> some View {
+        let d = DITLPlacement(graphics.game, 1009, window: space.size)
         if let portrait {
             // Fill the 310×283 comm box edge-to-edge (the landscape is a wide
             // panorama; `.fit` letterboxed it and left the box mostly empty).
+            let box = d.rect(4, top: 5, left: 222, bottom: 288, right: 532)
             Image(decorative: portrait, scale: 1)
                 .resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
-                .frame(width: 310, height: 283).clipped()
-                .novaPlace(space, -48, -142.5)    // item 4: (222,5)-(532,288) 310×283
+                .frame(width: box.width, height: box.height).clipped()
+                .ditlPlace(space, d, box)
         }
-        NovaText(state.responseText, size: 10, width: 196)
-            .novaPlace(space, -265, -142.5)       // item 3: (5,5)-(205,65) 200×60
-        identifierText(width: 116)
-            .novaPlace(space, -254, -65.5)        // item 5: (16,82)-(136,132) 120×50
+        let text = d.rect(3, top: 5, left: 5, bottom: 65, right: 205)
+        NovaText(state.responseText, size: 10, width: max(0, text.width - 4))
+            .ditlPlace(space, d, text)
+        let ident = d.rect(5, top: 82, left: 16, bottom: 132, right: 136)
+        identifierText(width: max(0, ident.width - 4))
+            .ditlPlace(space, d, ident)
+        let top = d.rect(1, top: 184, left: 27, bottom: 210, right: 173)
+        let mid = d.rect(2, top: 214, left: 27, bottom: 240, right: 173)
+        let bottom = d.rect(0, top: 244, left: 27, bottom: 270, right: 173)
 
-        // Items 1/2/0 top-to-bottom (146×26 each, stacked left column, x=27):
         // Items 1/2/0 are always shown (0x004a0f90):
         //  • top: Greetings, or Offer Bribe where landing is refused (the
         //    `forgivingLanding` enhancement's Request Landing stands in when
         //    only its own gates refuse)
         //  • middle: Demand Tribute, or Release on a dominated world
         //  • bottom: Close Channel
-        responseButton(state.topButtonTitle, width: 120,
+        responseButton(state.topButtonTitle, rect: top,
                        action: state.topButtonTitle == requestLandingTitle(graphics) ? onRequestLanding : onGreetings,
                        graphics: graphics)
-            .novaPlace(space, -243, 36.5)         // item 1 (top): (27,184)-(173,210)
-        responseButton(state.tributeTitle, width: 120, enabled: state.tributeEnabled,
+            .ditlPlace(space, d, top)
+        responseButton(state.tributeTitle, rect: mid, enabled: state.tributeEnabled,
                        action: onDemandTribute, graphics: graphics)
-            .novaPlace(space, -243, 66.5)         // item 2 (middle): (27,214)-(173,240)
+            .ditlPlace(space, d, mid)
         responseButton(graphics.buttonLabel(SpaceportLabel.closeChannel, fallback: "Close Channel"),
-                       width: 120, action: onClose, graphics: graphics)
-            .novaPlace(space, -243, 96.5)         // item 0 (bottom): (27,244)-(173,270)
+                       rect: bottom, action: onClose, graphics: graphics)
+            .ditlPlace(space, d, bottom)
     }
 
     private func requestLandingTitle(_ graphics: SpaceportGraphics) -> String {
@@ -181,9 +196,9 @@ struct HailDialogView: View {
     }
 
     @ViewBuilder
-    private func responseButton(_ title: String, width: CGFloat, enabled: Bool = true,
+    private func responseButton(_ title: String, rect: CGRect, enabled: Bool = true,
                                  action: @escaping () -> Void, graphics: SpaceportGraphics) -> some View {
-        NovaButton(graphics: graphics, title: title, width: width, enabled: enabled) {
+        NovaButton(graphics: graphics, title: title, ditl: rect, enabled: enabled) {
             model.audio.play(.uiSelect)
             action()
         }

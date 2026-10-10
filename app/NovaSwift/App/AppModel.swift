@@ -33,6 +33,10 @@ final class AppModel: ObservableObject {
     /// A new pilot has finished their intro and is being offered flight training
     /// before the game begins.
     @Published var pendingTutorialOffer = false
+    /// The roster pilot whose ship was just destroyed (no escape pod) — the
+    /// authentic main menu shows "<name> has been killed" for it, as the
+    /// original does for a loaded pilot whose ship is gone. Session-only.
+    @Published var killedPilotID: UUID?
 
     @Published var settings: GameSettings = .load()
     @Published var bindings: KeyBindings = .load()
@@ -508,10 +512,6 @@ final class AppModel: ObservableObject {
         play(save)
         return true
     }
-
-    /// The loaded pilot whose ship was destroyed this session; Enter Ship
-    /// refuses it until it is opened again from the pilot list.
-    var killedPilotID: UUID?
 
     /// Turn iCloud pilot syncing on or off: persist the preference and migrate
     /// existing pilots into the new store (local ⇄ iCloud). Falls back to local

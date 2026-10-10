@@ -26,10 +26,44 @@ final class TextFormattingTests: XCTestCase {
         XCTAssertEqual("".novaDisplayName, "")
     }
 
-    /// A name that is *only* an annotation would render blank; keep it raw so the
-    /// UI shows something rather than an empty row.
-    func testDisplayNameKeepsLeadingSemicolonNameRaw() {
-        XCTAssertEqual(";internal".novaDisplayName, ";internal")
+    /// 0x004cd230 scans from the end: a name that starts with its only `;` is
+    /// stripped to nothing, as in the original.
+    func testDisplayNameLeadingSemicolonBecomesEmpty() {
+        XCTAssertEqual(";internal".novaDisplayName, "")
+    }
+
+    /// The cut is at the **last** `;`, and trailing spaces/semicolons before it
+    /// go too; leading spaces stay.
+    func testDisplayNameCutsAtLastSemicolon() {
+        XCTAssertEqual("A;B;C".novaDisplayName, "A;B")
+        XCTAssertEqual("AB ;; note".novaDisplayName, "AB")
+        XCTAssertEqual(" Lead;x".novaDisplayName, " Lead")
+    }
+
+    // MARK: Grid names (FUN_0046e6d0)
+
+    func testGridNameSplitsOnceOnEitherCase() {
+        XCTAssertEqual(#"IR Missile\nLauncher"#.novaGridName, "IR Missile\nLauncher")
+        let (a, b) = #"A\NB\nC"#.novaGridLines
+        XCTAssertEqual(a, "A")
+        XCTAssertEqual(b, "BC")
+        XCTAssertNil("Plain".novaGridLines.1)
+        // A trailing backslash is literal.
+        XCTAssertEqual(#"X\"#.novaGridLines.0, #"X\"#)
+    }
+
+    // MARK: Grouped numbers (0x00465af0)
+
+    func testGroupedNumberFormat() {
+        XCTAssertEqual(NovaNumberFormat.grouped(0), "0")
+        XCTAssertEqual(NovaNumberFormat.grouped(999), "999")
+        XCTAssertEqual(NovaNumberFormat.grouped(-5000), "-5000")
+        XCTAssertEqual(NovaNumberFormat.grouped(1005), "1,005")
+        XCTAssertEqual(NovaNumberFormat.grouped(12345), "12,345")
+        XCTAssertEqual(NovaNumberFormat.grouped(999_999), "999,999")
+        XCTAssertEqual(NovaNumberFormat.grouped(1_000_000), "1.00M")
+        XCTAssertEqual(NovaNumberFormat.grouped(1_239_999), "1.23M")
+        XCTAssertEqual(NovaNumberFormat.grouped(25_050_000), "25.05M")
     }
 
     // MARK: Bit conditionals

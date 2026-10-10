@@ -97,20 +97,23 @@ struct GamblingView: View {
             if let bg = graphics.pict(8529) {
                 // `overlay: true`: gambling stacks over the bar (which provides
                 // the dim backdrop), it doesn't black out the whole screen.
+                // Rects resolve through DITL #1023 (stock rects as fallback).
+                let d = DITLPlacement(graphics.game, 1023, frame: bg)
                 NovaMenu(frame: bg, overlay: true) { space in
-                    ForEach(RaceColor.allCases, id: \.rawValue) { colorButton($0, space) }
-                    // Items 1/0: (129,196)-(228,221), (243,196)-(342,221), 99×25 —
-                    // cx = itemLeft − 235, cy = 196 − 115 = 81.
-                    stakeButton(graphics.buttonLabel(SpaceportLabel.bet1000, fallback: "Bet 1000")) {
+                    ForEach(RaceColor.allCases, id: \.rawValue) { colorButton($0, space, d) }
+                    // Items 1/0: (129,196)-(228,221), (243,196)-(342,221), 99×25.
+                    let bet1 = d.rect(1, top: 196, left: 129, bottom: 221, right: 228)
+                    stakeButton(graphics.buttonLabel(SpaceportLabel.bet1000, fallback: "Bet 1000"), bet1) {
                         placeBet(LandedServices.RaceBet.standardWager(credits: pilot.state.credits))
                     }
-                    .novaPlace(space, -106, 81)
+                    .ditlPlace(space, d, bet1)
                     // The original's modifier-key bet: type any amount up to
                     // min(credits, 10000).
-                    stakeButton(graphics.buttonLabel(SpaceportLabel.bet, fallback: "Bet")) {
+                    let bet = d.rect(0, top: 196, left: 243, bottom: 221, right: 342)
+                    stakeButton(graphics.buttonLabel(SpaceportLabel.bet, fallback: "Bet"), bet) {
                         showAmountPrompt = true
                     }
-                    .novaPlace(space, 8, 81)
+                    .ditlPlace(space, d, bet)
                     // DITL #1023 defines no credits/Leave items; they share the
                     // real button row (y=196) flanking the two stake buttons —
                     // INSIDE the 230px-tall frame (the old cy=106/128 spots put
@@ -129,10 +132,13 @@ struct GamblingView: View {
     }
 
     // DITL #1023 items 2-5: (13,88)-(113,188), (128,88)-(228,188),
-    // (243,88)-(343,188), (357,88)-(457,188) — 100×100 each; cx = itemLeft − 235.
-    private static let colorBoxCX: [RaceColor: CGFloat] = [.blue: -222, .green: -107, .yellow: 8, .red: 122]
+    // (243,88)-(343,188), (357,88)-(457,188) — 100×100 each.
+    private static let colorBox: [RaceColor: (index: Int, left: CGFloat)] =
+        [.blue: (2, 13), .green: (3, 128), .yellow: (4, 243), .red: (5, 357)]
 
-    private func colorButton(_ color: RaceColor, _ space: NovaSpace) -> some View {
+    private func colorButton(_ color: RaceColor, _ space: NovaSpace, _ d: DITLPlacement) -> some View {
+        let box = Self.colorBox[color] ?? (2, 13)
+        let rect = d.rect(box.index, x: box.left, y: 88, w: 100, h: 100)
         let clicked = selectedColor == color
         let picID = (clicked ? 8540 : 8530) + (color.rawValue - 1)
         return Button {
@@ -145,16 +151,16 @@ struct GamblingView: View {
                     Text(color.name).foregroundStyle(.white)
                 }
             }
-            .frame(width: 100, height: 100)
+            .frame(width: rect.width, height: rect.height)
             .overlay(RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(clicked ? Color.yellow.opacity(0.85) : Color.clear, lineWidth: 3))
         }
         .buttonStyle(.novaPlain)
-        .novaPlace(space, Self.colorBoxCX[color] ?? 0, -27)
+        .ditlPlace(space, d, rect)
     }
 
-    private func stakeButton(_ label: String, action: @escaping () -> Void) -> some View {
-        NovaButton(graphics: graphics, title: label, width: 73,
+    private func stakeButton(_ label: String, _ rect: CGRect, action: @escaping () -> Void) -> some View {
+        NovaButton(graphics: graphics, title: label, ditl: rect,
                    enabled: selectedColor != nil && pilot.state.credits > 0, action: action)
     }
 
@@ -287,48 +293,60 @@ struct GamblingView: View {
     // MARK: Result — DITL #1015 "Gamble", 251×214, no backdrop art of its own
 
     private var resultView: some View {
-        BareNovaPanel(size: CGSize(width: 251, height: 214)) { space in
-            resultBoxes(space)
+        // DLOG/DITL #1015 from the loaded data: the panel takes the DLOG size
+        // and each item its DITL rect (stock values as fallback).
+        let stock = DITLPlacement(graphics.game, 1015, window: CGSize(width: 251, height: 214))
+        let d = DITLPlacement(graphics.game, 1015, window: stock.windowSize)
+        return BareNovaPanel(size: d.window) { space in
+            resultBoxes(space, d)
             if let winner {
+                // Item 11: (6,125)-(244,173), 238×48.
+                let line = d.rect(11, top: 125, left: 6, bottom: 173, right: 244)
                 NovaText(winner == selectedColor
                          ? "\(graphics.game.stringList(2002)?.string(at: 370) ?? "Your winnings"): \(payout.creditsAbbreviated)"
                          : "\(winner.name) wins — you lose \(stake.creditsAbbreviated).",
                          size: 12,
                          color: winner == selectedColor ? Color(red: 0.5, green: 0.9, blue: 0.5) : Color(red: 1, green: 0.5, blue: 0.5),
-                         width: 238, align: .center)
-                    // Item 11: (6,125)-(244,173), 238×48 — cx = 6 − 125.5, cy = 125 − 107.
-                    .novaPlace(space, -119.5, 18)
+                         width: line.width, align: .center)
+                    .ditlPlace(space, d, line)
             }
             // Item 10 (leftmost, 6,182): Leave. Item 0 (rightmost, 169,182): Bet
             // Again. Item 1 (middle, 87,182) repurposed as the credits readout
             // rather than a third, unneeded button — all 3 real rects still used.
-            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"), width: 49, action: onDone)
-                .novaPlace(space, -119.5, 75)
+            let leave = d.rect(10, top: 182, left: 6, bottom: 207, right: 81)
+            NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
+                       ditl: leave, action: onDone)
+                .ditlPlace(space, d, leave)
+            let credits = d.rect(1, top: 182, left: 87, bottom: 207, right: 162)
             NovaText(pilot.state.credits.creditsAbbreviated, size: 10,
-                     color: Color(red: 1, green: 0.85, blue: 0.4), width: 75, align: .center)
-                .novaPlace(space, -38.5, 79)
-            NovaButton(graphics: graphics, title: "Bet Again", width: 49, action: resetForNextRace)
-                .novaPlace(space, 43.5, 75)
+                     color: Color(red: 1, green: 0.85, blue: 0.4), width: credits.width, align: .center)
+                .ditlPlace(space, d, credits.offsetBy(dx: 0, dy: 4))
+            let again = d.rect(0, top: 182, left: 169, bottom: 207, right: 244)
+            NovaButton(graphics: graphics, title: "Bet Again", ditl: again, action: resetForNextRace)
+                .ditlPlace(space, d, again)
         }
     }
 
     // DITL #1015 items 2-9 (56×48 each, x shared by both rows): top row
     // (items 2-5, y=5) is the real outcome; bottom row (items 6-9, y=67)
-    // echoes the player's pick. cx = itemLeft − 125.5.
-    private static let resultBoxCX: [RaceColor: CGFloat] = [.blue: -119.5, .green: -58.5, .yellow: 2.5, .red: 63.5]
+    // echoes the player's pick.
+    private static let resultBoxLeft: [RaceColor: CGFloat] = [.blue: 6, .green: 67, .yellow: 128, .red: 189]
 
-    private func resultBoxes(_ space: NovaSpace) -> some View {
+    private func resultBoxes(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
         ForEach(RaceColor.allCases, id: \.rawValue) { color in
+            let left = Self.resultBoxLeft[color] ?? 6
+            let top = d.rect(1 + color.rawValue, x: left, y: 5, w: 56, h: 48)
+            let pick = d.rect(5 + color.rawValue, x: left, y: 67, w: 56, h: 48)
             Group {
                 if let img = graphics.pict(winner == color ? (8549 + color.rawValue) : (8559 + color.rawValue)) {
                     Image(decorative: img, scale: 1).resizable().scaledToFit()
-                        .frame(width: 56, height: 48)
-                        .novaPlace(space, Self.resultBoxCX[color] ?? 0, -102)
+                        .frame(width: top.width, height: top.height)
+                        .ditlPlace(space, d, top)
                 }
                 if selectedColor == color, let img = graphics.pict(8539 + color.rawValue) {
                     Image(decorative: img, scale: 1).resizable().scaledToFit()
-                        .frame(width: 56, height: 48)
-                        .novaPlace(space, Self.resultBoxCX[color] ?? 0, -40)
+                        .frame(width: pick.width, height: pick.height)
+                        .ditlPlace(space, d, pick)
                 }
             }
         }

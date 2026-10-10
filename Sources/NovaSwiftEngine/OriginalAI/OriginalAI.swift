@@ -359,16 +359,11 @@ public final class OriginalAI {
         return value
     }
 
-    private var cachedCue: Double?
     private var cachedProbe: Double?
 
-    /// The "Warp up" cue length (FL-04), decoded once.
-    func jumpCueTicks60(_ world: World) -> Double {
-        if let c = cachedCue { return c }
-        let c = world.galaxy?.hyperspaceCueTicks60 ?? PlayerHyperjump.defaultCueTicks60
-        cachedCue = c
-        return c
-    }
+    /// The jump-sequence length (FL-04): `Stellar_GetJumpSequenceDuration60Hz`
+    /// is always 350 ticks, whatever snd 128 a plug-in ships.
+    func jumpCueTicks60(_ world: World) -> Double { PlayerHyperjump.defaultCueTicks60 }
 
     /// The envelope `Ship_IssueEscortOrders` probes: bank 1 (wëap 0x81)
     /// through 0x00411600 — `BeamLength + 32` for a beam, else

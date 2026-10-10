@@ -19,6 +19,9 @@ struct TradeQuantityPrompt: View {
     var onCancel: () -> Void
 
     @State private var text: String
+    /// Classic presentation: the original's native dialog (DITL #1003 in the
+    /// `UiWindow` chrome) instead of the port's dark card.
+    private let classic: Bool
 
     init(title: String, range: ClosedRange<Int>, initial: Int, unitLabel: String = "tons",
          onConfirm: @escaping (Int) -> Void, onCancel: @escaping () -> Void) {
@@ -28,6 +31,7 @@ struct TradeQuantityPrompt: View {
         self._text = State(initialValue: "\(min(max(initial, range.lowerBound), range.upperBound))")
         self.onConfirm = onConfirm
         self.onCancel = onCancel
+        self.classic = !GameSettings.load().modernDialogs
     }
 
     private var parsedQuantity: Int? {
@@ -36,6 +40,59 @@ struct TradeQuantityPrompt: View {
     }
 
     var body: some View {
+        if classic { classicBody } else { modernBody }
+    }
+
+    /// DITL #1003 "qty" (172×72): the prompt (item 2) at (6,8) 102×16, the
+    /// edit field (item 3) at (112,8) 51×16, OK (item 1) at (92,42) and
+    /// Cancel (item 4) at (10,42), both 70×20, in the native white window.
+    /// Return is OK and Esc is Cancel, as in every original dialog.
+    private var classicBody: some View {
+        ClassicUiWindowPanel {
+            ZStack(alignment: .topLeading) {
+                Color.white
+                Text(title)
+                    .lineLimit(2).minimumScaleFactor(0.6)
+                    .frame(width: 102, height: 16, alignment: .topLeading)
+                    .offset(x: 6, y: 8)
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(ClassicUiWindow.font)
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 2)
+                    .frame(width: 51, height: 16)
+                    .background(Color.white)
+                    .overlay(ClassicBevel(topLeft: true).stroke(ClassicUiWindow.buttonDark, lineWidth: 1))
+                    .overlay(ClassicBevel(topLeft: false).stroke(ClassicUiWindow.buttonLight, lineWidth: 1))
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                    #if !os(tvOS)
+                    .onKeyPress(.escape) { onCancel(); return .handled }
+                    #endif
+                    .offset(x: 112, y: 8)
+                Button("OK") { if let q = parsedQuantity { onConfirm(q) } }
+                    .buttonStyle(ClassicUiButtonStyle(isFocused: true))
+                    .frame(width: 70, height: 20)
+                    .disabled(parsedQuantity == nil)
+                    #if os(macOS) || os(iOS)
+                    .keyboardShortcut(.defaultAction)
+                    #endif
+                    .offset(x: 92, y: 42)
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(ClassicUiButtonStyle())
+                    .frame(width: 70, height: 20)
+                    #if os(macOS) || os(iOS)
+                    .keyboardShortcut(.cancelAction)
+                    #endif
+                    .offset(x: 10, y: 42)
+            }
+            .frame(width: 172, height: 72, alignment: .topLeading)
+        }
+        .novaTextScale(1)
+    }
+
+    private var modernBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title)
                 .novaFont(.body, weight: .bold).foregroundStyle(.white)

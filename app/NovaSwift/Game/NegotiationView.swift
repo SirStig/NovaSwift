@@ -52,7 +52,6 @@ struct NegotiationView: View {
     /// PICT #8514 "Haggle" (`Nova Graphics 3.rez`) — not added to
     /// `SpaceportGraphics.Frame` per instructions; a local constant instead.
     private static let framePictID = 8514
-    private static let frameSize = CGSize(width: 262, height: 107)
 
     var body: some View {
         ZStack {
@@ -62,14 +61,19 @@ struct NegotiationView: View {
                 .onTapGesture(perform: onDismiss)
 
             if let graphics, let frame = graphics.pict(Self.framePictID) {
+                // Rects from DITL #1008 (stock rects as fallback).
+                let d = DITLPlacement(graphics.game, 1008, frame: frame)
                 NovaMenu(frame: frame, overlay: true) { space in
-                    NovaText(message, size: 11, width: 248)
-                        .frame(height: 25, alignment: .leading)
-                        .novaPlace(space, 7 - Self.frameSize.width / 2, 6 - Self.frameSize.height / 2)
-                    NovaButton(graphics: graphics, title: primaryLabel, width: 120, enabled: primaryEnabled, action: onPrimary)
-                        .novaPlace(space, 58 - Self.frameSize.width / 2, 39 - Self.frameSize.height / 2)
-                    NovaButton(graphics: graphics, title: secondaryLabel, width: 120, enabled: secondaryEnabled, action: onSecondary)
-                        .novaPlace(space, 58 - Self.frameSize.width / 2, 74 - Self.frameSize.height / 2)
+                    let msg = d.rect(2, top: 6, left: 7, bottom: 31, right: 255)
+                    NovaText(message, size: 11, width: msg.width)
+                        .frame(height: msg.height, alignment: .leading)
+                        .ditlPlace(space, d, msg)
+                    let top = d.rect(1, top: 39, left: 58, bottom: 65, right: 204)
+                    NovaButton(graphics: graphics, title: primaryLabel, ditl: top, enabled: primaryEnabled, action: onPrimary)
+                        .ditlPlace(space, d, top)
+                    let bottom = d.rect(0, top: 74, left: 58, bottom: 100, right: 204)
+                    NovaButton(graphics: graphics, title: secondaryLabel, ditl: bottom, enabled: secondaryEnabled, action: onSecondary)
+                        .ditlPlace(space, d, bottom)
                 }
             } else {
                 fallbackPanel

@@ -9,10 +9,27 @@ import NovaSwiftKit
 final class NovaSoundLibrary {
     private var game: NovaGame?
     private var cache: [Int: AVAudioPCMBuffer?] = [:]   // nil entry = known-undecodable
+    /// Buffers re-rated for a playback speed (the warp-up cue plays at the
+    /// hull's jump multiplier), keyed by id and rate.
+    private var ratedCache: [String: AVAudioPCMBuffer] = [:]
+    /// The loaded data, for callers that need resource lookups (wëap flags).
+    var loadedGame: NovaGame? { game }
 
     func attach(game: NovaGame?) {
         self.game = game
         cache.removeAll()
+        ratedCache.removeAll()
+    }
+
+    /// The buffer for `id` played `rate` times faster (pitch rises with it, as
+    /// with the original voice's `rate` field): resampled from `srcRate × rate`.
+    func buffer(for id: Int, rate: Double) -> AVAudioPCMBuffer? {
+        guard rate > 0, abs(rate - 1) > 1e-6 else { return buffer(for: id) }
+        let key = "\(id)@\(rate)"
+        if let hit = ratedCache[key] { return hit }
+        guard let built = decodeBuffer(id, rate: rate) else { return nil }
+        ratedCache[key] = built
+        return built
     }
 
     /// The set of sound ids the data provides (for a sound browser / test picker).
@@ -28,10 +45,10 @@ final class NovaSoundLibrary {
         return built
     }
 
-    private func decodeBuffer(_ id: Int) -> AVAudioPCMBuffer? {
+    private func decodeBuffer(_ id: Int, rate: Double = 1) -> AVAudioPCMBuffer? {
         guard let sound = game?.sound(id), !sound.samples.isEmpty else { return nil }
         let src = sound.samples
-        let srcRate = sound.sampleRate > 0 ? sound.sampleRate : GameAudioEngine.canonicalRate
+        let srcRate = (sound.sampleRate > 0 ? sound.sampleRate : GameAudioEngine.canonicalRate) * rate
         let dstRate = GameAudioEngine.canonicalRate
 
         let out: [Float]

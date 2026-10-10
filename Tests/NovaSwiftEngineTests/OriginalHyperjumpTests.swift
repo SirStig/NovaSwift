@@ -126,9 +126,13 @@ final class OriginalHyperjumpTests: XCTestCase {
     // MARK: FL-04 player hyperjump
 
     func testCueLengthAndDurationMultiplier() {
-        XCTAssertEqual(PlayerHyperjump.cueTicks60(of: NovaSound(sampleRate: 22050, samples: [Float](repeating: 0, count: 134_016))),
-                       364, "the shipped Warp up cue")
-        XCTAssertEqual(PlayerHyperjump.cueTicks60(of: nil), 350, "the missing-cue fallback")
+        XCTAssertEqual(PlayerHyperjump.soundTicks60(of: NovaSound(sampleRate: 22050, samples: [Float](repeating: 0, count: 134_016))),
+                       364.669, accuracy: 0.001, "the shipped Warp up sound")
+        XCTAssertEqual(PlayerHyperjump.soundTicks60(of: nil), 0, "no sound: nothing to wait for")
+        // The sequence is always 350 ticks: the preload's file probe never
+        // recognises a Mac snd (0x004b0740), whatever snd 128 a plug-in ships.
+        XCTAssertEqual(PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 600).cueTicks60, 350)
+        XCTAssertEqual(PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 120).cueTicks60, 350)
         XCTAssertEqual(PlayerHyperjump.durationMultiplier(hullFlags: 0), 1.3, accuracy: 1e-12)
         XCTAssertEqual(PlayerHyperjump.durationMultiplier(hullFlags: 0x1), 0.91, accuracy: 1e-12)
         XCTAssertEqual(PlayerHyperjump.durationMultiplier(hullFlags: 0x2), 1.69, accuracy: 1e-12)
@@ -148,10 +152,10 @@ final class OriginalHyperjumpTests: XCTestCase {
     }
 
     func testSpinUpLastsTheCueAtTheHullMultiplier() {
-        for (flags, seconds) in [(0, 4.67), (0x4, 2.92), (0x1, 6.67)] {
+        for (flags, seconds) in [(0, 4.49), (0x4, 2.80), (0x1, 6.41)] {   // 350 / mult
             let ship = player()
             let world = World(player: ship)
-            world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, cueTicks60: 364,
+            world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 364,
                                                multiplier: PlayerHyperjump.durationMultiplier(hullFlags: flags))
             let run = flyJump(world)
             XCTAssertEqual(world.playerJump?.phase, .fired)
@@ -160,14 +164,31 @@ final class OriginalHyperjumpTests: XCTestCase {
         }
     }
 
+    /// D-1: a plug-in's snd 128 never changes the ramp; it only fires earlier
+    /// when the sound ends before the 350-tick cut (but not before 30 ticks).
+    func testJumpFiresAtTheSoundEndOrTheFixedCut() {
+        for (sound, seconds) in [(600.0, 4.49), (120.0 * 1.3, 2.0), (10.0, 28.0 / 30)] {
+            let world = World(player: player())
+            world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: sound, multiplier: 1.3)
+            let run = flyJump(world)
+            XCTAssertEqual(world.playerJump?.phase, .fired)
+            XCTAssertEqual(Double(run.spinUp) / 30, seconds, accuracy: 0.05, "snd of \(sound) ticks")
+        }
+        var long = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 600, multiplier: 1.3)
+        var short = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 100, multiplier: 1.3)
+        let a = player(), b = player()
+        for _ in 0..<25 { long.tick(a, dt: tick); short.tick(b, dt: tick) }
+        XCTAssertEqual(long.progress, short.progress, accuracy: 1e-12, "the ramp ignores the sound")
+    }
+
     func testBrakeTurnsAroundAndStopsBeforeSpinUp() {
         let ship = player()
         ship.velocity = Vec2(0, 135)       // full non-strict speed, heading up
         let world = World(player: ship)
-        world.playerJump = PlayerHyperjump(bearing: .pi / 2, fastJump: false, cueTicks60: 364, multiplier: 1.3)
+        world.playerJump = PlayerHyperjump(bearing: .pi / 2, fastJump: false, soundTicks60: 364, multiplier: 1.3)
         let run = flyJump(world)
         XCTAssertGreaterThan(run.brake, 30, "a moving ship brakes first")
-        XCTAssertEqual(Double(run.spinUp) / 30, 4.67, accuracy: 0.05, "then the full cue-timed spin-up")
+        XCTAssertEqual(Double(run.spinUp) / 30, 4.49, accuracy: 0.05, "then the full cue-timed spin-up")
         XCTAssertEqual(world.playerJump?.phase, .fired)
     }
 
@@ -175,7 +196,7 @@ final class OriginalHyperjumpTests: XCTestCase {
     /// the engaged jump is past the tunnel onset; before that it lands.
     func testScansStopOncePastTheTunnelOnset() {
         let world = World(player: player())
-        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, cueTicks60: 364, multiplier: 1.3)
+        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 364, multiplier: 1.3)
         world.reportScan(scannerID: 5, targetID: World.playerEntityID, at: Vec2())
         XCTAssertTrue(world.playerScanned, "still braking: the scan lands")
         world.playerScanned = false
@@ -189,7 +210,7 @@ final class OriginalHyperjumpTests: XCTestCase {
         ship.angle = .pi                    // already facing retrograde
         ship.velocity = Vec2(0, 90)
         let world = World(player: ship)
-        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, cueTicks60: 364, multiplier: 1.3)
+        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 364, multiplier: 1.3)
         while world.playerJump?.phase == .brake { world.step(tick) }
         XCTAssertLessThan(abs(ship.velocity.y / 30), 2.5)
         XCTAssertEqual(world.playerJump?.phase, .spinUp)
@@ -198,7 +219,7 @@ final class OriginalHyperjumpTests: XCTestCase {
         probe.angle = .pi
         probe.velocity = Vec2(0, 90)
         let w2 = World(player: probe)
-        w2.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, cueTicks60: 364, multiplier: 1.3)
+        w2.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 364, multiplier: 1.3)
         w2.step(tick)
         let expected = (3.0 - 0.06) * 0.99203847 * 30   // px/tick − thrust, damped, back to px/s
         XCTAssertEqual(probe.velocity.y, expected, accuracy: 1e-6)
@@ -208,17 +229,17 @@ final class OriginalHyperjumpTests: XCTestCase {
         let ship = player()
         ship.velocity = Vec2(0, 135)
         let world = World(player: ship)
-        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: true, cueTicks60: 364, multiplier: 1.3)
+        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: true, soundTicks60: 364, multiplier: 1.3)
         let run = flyJump(world)
         XCTAssertEqual(run.brake, 1)
-        XCTAssertEqual(Double(run.spinUp) / 30, 4.67, accuracy: 0.05)
+        XCTAssertEqual(Double(run.spinUp) / 30, 4.49, accuracy: 0.05)
         XCTAssertGreaterThan(ship.velocity.length, 100, "keeps its momentum: no spin-up damping")
     }
 
     func testTunnelStepsPositionAtMinProgressFifty() {
         let ship = player()
         let world = World(player: ship)
-        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, cueTicks60: 364, multiplier: 1.3)
+        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 364, multiplier: 1.3)
         world.step(tick)                                // brake → spin-up
         var lastY = ship.position.y
         var maxStep = 0.0
@@ -231,15 +252,15 @@ final class OriginalHyperjumpTests: XCTestCase {
             lastY = ship.position.y
         }
         XCTAssertEqual(maxStep, 50, accuracy: 1e-6, "position steps at most 50 px/tick")
-        // progress = e60 × 1.3 / 3.64 − 35/1.3 > 0 once e60 > 75.4 (≈ 1.26 s).
-        XCTAssertEqual(Double(onsetTick ?? 0) / 30, 75.4 / 60, accuracy: 0.05)
+        // progress = e60 × 1.3 / 3.5 − 35/1.3 > 0 once e60 > 72.5 (≈ 1.21 s).
+        XCTAssertEqual(Double(onsetTick ?? 0) / 30, 72.5 / 60, accuracy: 0.05)
         XCTAssertEqual(ship.velocity.length, 0, accuracy: 1e-9, "the tunnel moves position, not velocity")
     }
 
     func testDisabledPlayerCollapsesTheJump() {
         let ship = player()
         let world = World(player: ship)
-        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, cueTicks60: 364, multiplier: 1.3)
+        world.playerJump = PlayerHyperjump(bearing: 0, fastJump: false, soundTicks60: 364, multiplier: 1.3)
         for _ in 0..<90 { world.step(tick) }            // well into the tunnel
         ship.disabled = true
         world.step(tick)

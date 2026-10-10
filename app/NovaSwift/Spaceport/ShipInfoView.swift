@@ -58,55 +58,68 @@ struct ShipInfoView: View {
 
     /// DLOG #1019 "Shipyard Info + photo" — 614×537, centre (307, 268.5).
     private func photoDialog(_ ship: ShipRes, photo: (image: CGImage, isDedicated: Bool), frame: CGImage) -> some View {
-        NovaMenu(frame: frame, overlay: true) { space in
+        // Rects resolve through DITL #1019 (stock rects as fallback).
+        let d = DITLPlacement(game, 1019, frame: frame)
+        return NovaMenu(frame: frame, overlay: true) { space in
             // [6] ship picture (7,6)-(607,406) 600×400 — the dedicated shipyard art
             // (nebula backdrop baked in) filling the frame's picture box, drawn via
             // the same renderer as the Shipyard preview.
-            ShipyardPictureView(picture: photo).frame(width: 600, height: 400).clipped()
-                .novaPlace(space, -300, -262.5)
+            let pic = d.rect(6, top: 6, left: 7, bottom: 406, right: 607)
+            ShipyardPictureView(picture: photo).frame(width: pic.width, height: pic.height).clipped()
+                .ditlPlace(space, d, pic)
             // [2] class name (7,413)-(607,437) 600×24
-            NovaText(ship.displayName, size: 15, width: 600, align: .center, weight: .bold)
-                .novaPlace(space, -300, 144.5)
+            let name = d.rect(2, top: 413, left: 7, bottom: 437, right: 607)
+            NovaText(ship.displayName, size: 15, width: name.width, align: .center, weight: .bold)
+                .ditlPlace(space, d, name)
             // [4] stat table (11,442)-(267,534) 256×92
-            authStatBlock(ship).frame(width: 256, height: 92, alignment: .topLeading)
-                .novaPlace(space, -296, 173.5)
+            let stats = d.rect(4, top: 442, left: 11, bottom: 534, right: 267)
+            authStatBlock(ship).frame(width: stats.width, height: stats.height, alignment: .topLeading)
+                .ditlPlace(space, d, stats)
             // [7] Standard Weapons (266,442)-(608,501) 342×59
-            authWeaponsBlock(ship, width: 340).frame(width: 342, height: 59, alignment: .topLeading)
-                .novaPlace(space, -41, 173.5)
+            let weapons = d.rect(7, top: 442, left: 266, bottom: 501, right: 608)
+            authWeaponsBlock(ship, width: max(0, weapons.width - 2))
+                .frame(width: weapons.width, height: weapons.height, alignment: .topLeading)
+                .ditlPlace(space, d, weapons)
             // [0] OK (503,507)-(602,532) 99×25
+            let ok = d.rect(0, top: 507, left: 503, bottom: 532, right: 602)
             NovaButton(graphics: graphics,
                        title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: 73, action: onDone)
-                .novaPlace(space, 196, 238.5)
+                       ditl: ok, action: onDone)
+                .ditlPlace(space, d, ok)
         }
     }
 
     /// DLOG #1005 "Shipyard Info" — 250×285, centre (125, 142.5). Text-only: the
     /// body [4] carries the stats, weapons and class description together.
     private func textDialog(_ ship: ShipRes, frame: CGImage) -> some View {
-        NovaMenu(frame: frame, overlay: true) { space in
+        // Rects resolve through DITL #1005 (stock rects as fallback).
+        let d = DITLPlacement(game, 1005, frame: frame)
+        return NovaMenu(frame: frame, overlay: true) { space in
             // [2] class name (3,3)-(243,27) 240×24
-            NovaText(ship.displayName, size: 13, width: 240, align: .center, weight: .bold)
-                .novaPlace(space, -122, -139.5)
+            let name = d.rect(2, top: 3, left: 3, bottom: 27, right: 243)
+            NovaText(ship.displayName, size: 13, width: name.width, align: .center, weight: .bold)
+                .ditlPlace(space, d, name)
             // [4] body (9,32)-(243,246) 234×214
+            let body = d.rect(4, top: 32, left: 9, bottom: 246, right: 243)
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 6) {
                     authStatBlock(ship)
-                    authWeaponsBlock(ship, width: 226)
+                    authWeaponsBlock(ship, width: max(0, body.width - 8))
                     let blurb = classDescription(ship)
                     if !blurb.isEmpty {
-                        NovaText(blurb, size: 9, width: 226, align: .leading).padding(.top, 2)
+                        NovaText(blurb, size: 9, width: max(0, body.width - 8), align: .leading).padding(.top, 2)
                     }
                 }
             }
             .cursorScrollable()
-            .frame(width: 234, height: 214, alignment: .topLeading)
-            .novaPlace(space, -116, -110.5)
+            .frame(width: body.width, height: body.height, alignment: .topLeading)
+            .ditlPlace(space, d, body)
             // [0] OK (86,253)-(160,278) 74×25
+            let ok = d.rect(0, top: 253, left: 86, bottom: 278, right: 160)
             NovaButton(graphics: graphics,
                        title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                       width: 48, action: onDone)
-                .novaPlace(space, -39, 110.5)
+                       ditl: ok, action: onDone)
+                .ditlPlace(space, d, ok)
         }
     }
 

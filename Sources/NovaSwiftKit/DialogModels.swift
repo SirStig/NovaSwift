@@ -37,7 +37,6 @@ public enum DITLItemKind: Equatable, Sendable {
     case userItem
     case button
     case checkbox
-    case radioButton
     case resControl
     case statText
     case editText
@@ -49,8 +48,8 @@ public enum DITLItemKind: Equatable, Sendable {
         switch rawType & 0x7F {
         case 0:  self = .userItem
         case 4:  self = .button
-        case 5:  self = .checkbox
-        case 6:  self = .radioButton
+        // The original builds radio buttons (6) as checkboxes (0x004cef50).
+        case 5, 6: self = .checkbox
         case 7:  self = .resControl
         case 8:  self = .statText
         case 16: self = .editText
@@ -63,7 +62,7 @@ public enum DITLItemKind: Equatable, Sendable {
     /// True when the payload bytes are a Mac Roman label rather than a resource id.
     var payloadIsText: Bool {
         switch self {
-        case .button, .checkbox, .radioButton, .statText, .editText: return true
+        case .button, .checkbox, .statText, .editText: return true
         default: return false
         }
     }
@@ -138,6 +137,18 @@ public struct DITLRes: Equatable, Sendable {
         }
     }
 
+    /// Decoded the way the original's `Dialog_ParseItemList` (0x004cef50)
+    /// walks the list, not the toolbox's generic rule:
+    /// - text kinds (button 4, checkbox 5, radio 6, static 8, edit 16) consume
+    ///   their length byte's worth of payload;
+    /// - control 7, icon 32 and picture 64 read a fixed 2-byte id and ignore
+    ///   the length byte (16 bytes per item);
+    /// - user items (0) and unknown kinds consume a fixed 14 bytes, also
+    ///   ignoring the length byte;
+    /// - unknown kinds create **no item**, so later items take their place in
+    ///   the index order the game addresses them by;
+    /// - radio buttons are built as checkboxes.
+    /// Every item then pads to an even offset.
     private static func decodeItems(_ d: Data) -> [DITLItem] {
         guard d.count >= 2 else { return [] }
         let base = d.startIndex
@@ -156,38 +167,50 @@ public struct DITLRes: Equatable, Sendable {
         items.reserveCapacity(count)
         var off = 2
 
-        for index in 0..<count {
+        for _ in 0..<count {
             // 4 (handle) + 8 (rect) + 1 (type) + 1 (length) must all be present.
             guard off + 14 <= d.count else { break }
-            off += 4  // nil handle placeholder, unused on disk
-
-            let rect = NovaRect(top: s16(off), left: s16(off + 2),
-                                bottom: s16(off + 4), right: s16(off + 6))
-            off += 8
-
-            let rawType = u8(off); off += 1
-            let length  = u8(off); off += 1
-            guard off + length <= d.count else { break }
-
-            let payload = d.subdata(in: (base + off)..<(base + off + length))
-            off += length
-            if length % 2 == 1 { off += 1 }  // items are even-aligned
-
+            let rect = NovaRect(top: s16(off + 4), left: s16(off + 6),
+                                bottom: s16(off + 8), right: s16(off + 10))
+            let rawType = u8(off + 12)
+            let length  = u8(off + 13)
             let kind = DITLItemKind(rawType: rawType)
+
             var text = ""
             var resourceID: Int?
-            if kind.payloadIsText {
+            switch rawType & 0x7F {
+            case 4, 5, 6, 8, 16:
+                guard off + 14 + length <= d.count else { return items }
+                let payload = d.subdata(in: (base + off + 14)..<(base + off + 14 + length))
                 text = String(data: payload, encoding: .macOSRoman) ?? ""
-            } else if kind.payloadIsResourceID, payload.count >= 2 {
-                resourceID = (Int(payload[payload.startIndex]) << 8)
-                           | Int(payload[payload.startIndex + 1])
+                off += 14 + length
+            case 7, 32, 64:
+                guard off + 16 <= d.count else { return items }
+                resourceID = s16(off + 14)
+                off += 16
+            default:
+                off += 14
             }
+            if off % 2 == 1 { off += 1 }  // items are even-aligned
 
-            items.append(DITLItem(index: index, rect: rect, kind: kind,
+            if case .unknown = kind { continue }   // the original builds nothing
+            items.append(DITLItem(index: items.count, rect: rect, kind: kind,
                                   isEnabled: (rawType & 0x80) == 0,
                                   text: text, resourceID: resourceID))
         }
         return items
+    }
+
+    /// The item that takes keyboard focus when the dialog opens: the first
+    /// one that is not a user, static-text, icon or picture item (0x004cef50).
+    /// nil when every item is passive.
+    public var initialFocusIndex: Int? {
+        items.first { item in
+            switch item.kind {
+            case .userItem, .statText, .icon, .picture: return false
+            default: return true
+            }
+        }?.index
     }
 }
 
@@ -312,5 +335,58 @@ public extension NovaGame {
             return NovaDialogRes(window: nil, items: items)
         }
         return nil
+    }
+}
+
+// MARK: - Layout lookup with fallback
+
+/// One screen's layout as the original builds it (`UiWindow_CreateFromDialogResource`):
+/// the window is the `DLOG` rect's **size**, centred on screen (its position is
+/// ignored, 0x008730a1), and each control sits at its `DITL` item rect, which
+/// the code addresses by index. A plug-in or TC that replaces the `DLOG`/`DITL`
+/// therefore moves, resizes and re-hit-tests the controls.
+///
+/// Views ask for every rect through here with the stock value as a fallback,
+/// so a missing resource or a short item list degrades to the shipped layout
+/// instead of collapsing.
+public struct DITLLayout: Equatable, Sendable {
+    public let id: Int
+    public let dialog: NovaDialogRes?
+
+    public init(id: Int, dialog: NovaDialogRes?) {
+        self.id = id
+        self.dialog = dialog
+    }
+
+    /// The rect of item `index` (window-relative pixels), or `fallback` when
+    /// the resource or the item is absent.
+    public func rect(_ index: Int, fallback: NovaRect) -> NovaRect {
+        dialog?[index]?.rect ?? fallback
+    }
+
+    /// The item itself, when present.
+    public func item(_ index: Int) -> DITLItem? { dialog?[index] }
+
+    /// The window size: the `DLOG` bounds' width and height, else `fallback`.
+    public func windowSize(fallback: NovaSize) -> NovaSize {
+        guard let w = dialog?.window, w.bounds.width > 0, w.bounds.height > 0 else { return fallback }
+        return NovaSize(width: w.bounds.width, height: w.bounds.height)
+    }
+
+    /// The window's top-left on a screen of `screen` size: centred, the `DLOG`'s
+    /// own position ignored (integer halves, as the original computes it).
+    public func windowOrigin(screen: NovaSize, fallback: NovaSize) -> (x: Int, y: Int) {
+        let s = windowSize(fallback: fallback)
+        return ((screen.width - s.width) / 2, (screen.height - s.height) / 2)
+    }
+
+    /// The item that takes keyboard focus first (see `DITLRes.initialFocusIndex`).
+    public var initialFocusIndex: Int? { dialog?.items.initialFocusIndex }
+}
+
+public extension NovaGame {
+    /// The layout of dialog `id` (`DLOG` → `DITL`), possibly empty.
+    func ditlLayout(_ id: Int) -> DITLLayout {
+        DITLLayout(id: id, dialog: dialog(id))
     }
 }

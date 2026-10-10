@@ -165,4 +165,97 @@ final class DialogModelsTests: XCTestCase {
                        NovaSize(width: 298, height: 103))
     }
 
+    // MARK: Original parser rules (Dialog_ParseItemList 0x004cef50)
+
+    /// Raw item bytes, so the length byte can disagree with the payload the
+    /// original actually consumes.
+    private func rawItem(t: Int, l: Int, b: Int, r: Int, type: UInt8, length: UInt8, body: [UInt8]) -> [UInt8] {
+        var out: [UInt8] = [0, 0, 0, 0]
+        out += be16(t) + be16(l) + be16(b) + be16(r)
+        out += [type, length] + body
+        if out.count % 2 == 1 { out += [0] }
+        return out
+    }
+
+    /// User items and unknown kinds take a fixed 14 bytes whatever the length
+    /// byte says; controls/icons/pictures a fixed 2-byte id; unknown kinds
+    /// build no item, so the next item takes their index.
+    func testDITLParserFixedSizesAndUnknownKinds() {
+        var bytes: [UInt8] = be16(3 - 1)
+        bytes += rawItem(t: 0, l: 0, b: 10, r: 10, type: 0, length: 6, body: [])        // user, bogus length
+        bytes += rawItem(t: 1, l: 1, b: 11, r: 11, type: 3, length: 0, body: [])        // unknown kind 3
+        bytes += rawItem(t: 2, l: 2, b: 12, r: 12, type: 7, length: 9, body: [0x03, 0xF4]) // control, length ignored
+        let ditl = DITLRes(Resource(type: NovaType.ditl, id: 1, name: "t", data: Data(bytes)))
+        XCTAssertEqual(ditl.items.count, 2, "the unknown kind builds no item")
+        XCTAssertEqual(ditl[0]?.kind, .userItem)
+        XCTAssertEqual(ditl[1]?.kind, .resControl)
+        XCTAssertEqual(ditl[1]?.index, 1)
+        XCTAssertEqual(ditl[1]?.resourceID, 1012)
+        XCTAssertEqual(ditl[1]?.rect, NovaRect(top: 2, left: 2, bottom: 12, right: 12))
+    }
+
+    /// Radio buttons are built as checkboxes; focus starts on the first item
+    /// that isn't a user/static/icon/picture item.
+    func testDITLRadioIsCheckboxAndInitialFocus() {
+        let data = makeDITL([
+            (t: 0, l: 0, b: 10, r: 10, type: 8, payload: Array("Hi".utf8)),   // static
+            (t: 0, l: 0, b: 10, r: 10, type: 0, payload: []),                  // user
+            (t: 0, l: 0, b: 10, r: 10, type: 6, payload: Array("R".utf8)),     // radio
+            (t: 0, l: 0, b: 10, r: 10, type: 4, payload: Array("OK".utf8)),    // button
+        ])
+        let ditl = DITLRes(Resource(type: NovaType.ditl, id: 1, name: "t", data: data))
+        XCTAssertEqual(ditl[2]?.kind, .checkbox)
+        XCTAssertEqual(ditl[2]?.text, "R")
+        XCTAssertEqual(ditl.initialFocusIndex, 2)
+    }
+
+    // MARK: Layout lookup (C I-1)
+
+    private func plunderGame(itemThreeShift: Int) -> NovaGame {
+        // DITL #1011 "Plunder Dialog" as shipped, with item 3 (the third
+        // 89×25 button of row 1) optionally moved right.
+        let s = itemThreeShift
+        let ditl = makeDITL([
+            (t: 166, l: 91, b: 191, r: 217, type: 0, payload: []),
+            (t: 110, l: 110, b: 135, r: 199, type: 0, payload: []),
+            (t: 138, l: 35, b: 163, r: 124, type: 0, payload: []),
+            (t: 110, l: 204 + s, b: 135, r: 293 + s, type: 0, payload: []),
+            (t: 7, l: 11, b: 103, r: 298, type: 0x80, payload: []),
+            (t: 110, l: 16, b: 135, r: 105, type: 0, payload: []),
+            (t: 138, l: 129, b: 163, r: 275, type: 0, payload: []),
+        ])
+        let dlog = makeDLOG(t: 40, l: 40, b: 238, r: 349, procID: 2, visible: 0, goAway: 0,
+                            refCon: 0, itemsID: 1011, title: "")
+        var col = ResourceCollection()
+        col.add(Resource(type: NovaType.ditl, id: 1011, name: "Plunder Dialog", data: ditl))
+        col.add(Resource(type: NovaType.dlog, id: 1011, name: "", data: dlog))
+        return NovaGame(col)
+    }
+
+    /// A plug-in's replacement DITL moves the control; the layout follows it.
+    func testDITLLayoutFollowsReplacementDITL() {
+        let stock = NovaRect(top: 110, left: 204, bottom: 135, right: 293)
+        let moved = plunderGame(itemThreeShift: 40).ditlLayout(1011).rect(3, fallback: stock)
+        XCTAssertEqual(moved, NovaRect(top: 110, left: 244, bottom: 135, right: 333))
+        let shipped = plunderGame(itemThreeShift: 0).ditlLayout(1011).rect(3, fallback: stock)
+        XCTAssertEqual(shipped, stock)
+    }
+
+    /// No resource, or an item index past the list: the stock rect is used.
+    func testDITLLayoutFallsBackWhenMissing() {
+        let stock = NovaRect(top: 1, left: 2, bottom: 3, right: 4)
+        let empty = NovaGame(ResourceCollection()).ditlLayout(1011)
+        XCTAssertEqual(empty.rect(3, fallback: stock), stock)
+        XCTAssertEqual(empty.windowSize(fallback: NovaSize(width: 9, height: 8)), NovaSize(width: 9, height: 8))
+        let game = plunderGame(itemThreeShift: 0).ditlLayout(1011)
+        XCTAssertEqual(game.rect(40, fallback: stock), stock)
+    }
+
+    /// The window is the DLOG's size, centred; its position is ignored.
+    func testDITLLayoutWindowIsDLOGSizeCentred() {
+        let l = plunderGame(itemThreeShift: 0).ditlLayout(1011)
+        XCTAssertEqual(l.windowSize(fallback: NovaSize(width: 1, height: 1)), NovaSize(width: 309, height: 198))
+        let o = l.windowOrigin(screen: NovaSize(width: 800, height: 600), fallback: NovaSize(width: 1, height: 1))
+        XCTAssertEqual(o.x, 245); XCTAssertEqual(o.y, 201)
+    }
 }
