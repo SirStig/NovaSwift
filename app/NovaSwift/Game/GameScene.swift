@@ -5151,9 +5151,57 @@ final class GameScene: SKScene {
     /// position, color (relationship for ships; landable blue / not-landable
     /// red for planets, matching the manual), and a lock-on pulse that only
     /// restarts when the locked id actually changes.
+    /// The original's ship target reticle (0x0042ede0): four corner sprites from
+    /// cicn 10008-10023 (4 categories x 4 corners), shown in Classic/Enhanced.
+    private lazy var reticleTextures: [SKTexture] = {
+        guard let res = galaxy?.game.resources else { return [] }
+        var out: [SKTexture] = []
+        for id in 10008..<10024 {
+            guard let r = res.resource(NovaType.cicn, id), let sheet = try? CICN.decode(r.data),
+                  let cg = sheet.makeCGImage() else { return [] }
+            let t = SKTexture(cgImage: cg)
+            t.filteringMode = spriteFilter
+            out.append(t)
+        }
+        return out
+    }()
+    private var reticleCorners: [SKSpriteNode] = []
+    /// Zoom-in offset: 256 when a target is picked, shrinking ~60 per 30 Hz tick.
+    private var reticleZoom: CGFloat = 0
+
+    private func updateShipReticle(ship: Ship, radius: CGFloat, newTarget: Bool) {
+        if reticleCorners.isEmpty {
+            for _ in 0..<4 {
+                let n = SKSpriteNode(texture: reticleTextures[0])
+                selectionLayer.addChild(n)
+                reticleCorners.append(n)
+            }
+        }
+        if newTarget { reticleZoom = 256 } else { reticleZoom = max(0, reticleZoom - 1800 * CGFloat(frameDT)) }
+        let rel = relationship(for: ship)
+        let base = rel == .disabled ? 12 : (ship.escortRecordID != nil ? 8 : (rel == .hostile ? 0 : 4))
+        let off = radius.rounded(.up) + reticleZoom + 16
+        let cx = CGFloat(ship.position.x), cy = CGFloat(ship.position.y)
+        let corners = [(-off, off), (off, off), (off, -off), (-off, -off)]
+        for (i, n) in reticleCorners.enumerated() {
+            n.texture = reticleTextures[base + i]
+            n.size = n.texture!.size()
+            n.position = CGPoint(x: cx + corners[i].0, y: cy + corners[i].1)
+            n.isHidden = false
+        }
+    }
+
     private func updateSelectionBrackets() {
+        let useReticle = !settings.modernHUD && reticleTextures.count == 16
+        if !(world.player.currentTargetID != nil) || !useReticle { for n in reticleCorners { n.isHidden = true } }
         if let tid = world.player.currentTargetID, let ship = world.ship(id: tid) {
             let radius = npcNodes[tid]?.radius ?? CGFloat(ship.radius)
+            if useReticle {
+                shipBracket.isHidden = true
+                let isNew = lockedShipBracketID != tid
+                lockedShipBracketID = tid
+                updateShipReticle(ship: ship, radius: radius, newTarget: isNew)
+            } else {
             shipBracket.position = CGPoint(x: ship.position.x, y: ship.position.y)
             shipBracket.isHidden = false
             shipBracket.strokeColor = factionColor(for: ship)
@@ -5161,6 +5209,7 @@ final class GameScene: SKScene {
                 lockedShipBracketID = tid
                 shipBracket.path = bracketPath(size: radius * 2 + 14)
                 restartPulse(shipBracket)
+            }
             }
         } else if lockedShipBracketID != nil {
             lockedShipBracketID = nil
