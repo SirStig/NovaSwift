@@ -829,7 +829,7 @@ struct GameContainerView: View {
                                   fullscreen: model.settings.fullscreenGalaxyMap,
                                   gateSelection: .init(
                                     originSystem: nav.currentSystemID,
-                                    destinations: game.gateDestinations(from: gate),
+                                    destinations: game.gateDestinations(from: gate, hidden: game.hiddenSystemIDs(for: model.pilot.state)),
                                     onSelect: { destGate, destSystem in
                                         performGateJump(toSystem: destSystem, arriveAtGate: destGate)
                                     }))
@@ -1098,6 +1098,9 @@ struct GameContainerView: View {
             // its audio behind it (like every other in-flight menu), then hand focus
             // back to flight on close.
             setMenuPaused(open, reason: "showingMap=\(open)")
+            // Closing the map in flight re-syncs the route head (0x004a4fd0 →
+            // 0x004a8080): a plotted route re-arms when its head is linked.
+            if !open, gateMapOrigin == nil, landedSpobID == nil { nav.rearmRoute() }
             if !open { grabSceneFocus(reason: "map closed") }
         }
         .onChange(of: gateMapOrigin) { _, id in
@@ -1107,6 +1110,8 @@ struct GameContainerView: View {
         .onChange(of: nav.plan) { _, _ in
             syncNavCourseToHUD(host)
         }
+        .onChange(of: model.pilot.state.setBits) { _, _ in refreshNavVisibility() }
+        .onChange(of: model.pilot.state.currentSystem) { _, _ in refreshNavVisibility() }
         .onChange(of: hailDialogState != nil) { _, open in
             setMenuPaused(open, reason: "hailDialogState=\(open)")
             if !open { grabSceneFocus(reason: "hail dialog closed") }
@@ -1738,7 +1743,16 @@ struct GameContainerView: View {
     /// Reattach `nav`'s live-fuel/multi-jump sources to the current session's
     /// ship — needed every time `host` is (re)built, since neither survives a
     /// system rebuild on its own.
+    /// Push the story's system visibility into the nav model (which then
+    /// revalidates the plotted route, D-1) — on every control-bit change and
+    /// system change, as 0x00432470 runs after them.
+    private func refreshNavVisibility() {
+        guard let game = model.data.game else { return }
+        nav.hiddenSystems = game.hiddenSystemIDs(for: model.pilot.state)
+    }
+
     private func syncNav(_ host: GameHost?) {
+        refreshNavVisibility()
         // In-place jumps commit nav/fuel/date first, then replace the world.
         // Spawn into that finished destination world so its ships survive the
         // replacement. A discarded host must not reattach an obsolete scene.
@@ -1952,6 +1966,7 @@ struct GameContainerView: View {
         // The original nav panel names the armed next hop, or "Unexplored
         // System" (#346) until it has been visited (UI-10).
         hud.navJumpArmed = nav.jumpArmed
+        hud.navHyperspaceMode = nav.plan.hyperspaceMode
         if let hop = nav.route.first, let system = nav.system(hop) {
             let visited = model.pilot.state.exploredSystems.contains(hop) || model.pilot.chartedSystems.contains(hop)
             hud.navNextHopName = visited ? system.displayName
@@ -2189,7 +2204,7 @@ struct GameContainerView: View {
     private func missionSystemMatches(code: Int, active am: ActiveMission,
                                       currentSystem: Int, game: NovaGame) -> Bool {
         func systemOf(_ spob: Int?) -> Int? {
-            spob.flatMap { s in game.systems().first { $0.spobs.contains(s) }?.id }
+            spob.flatMap { game.owningSystem(ofSpob: $0, state: model.pilot.state) }
         }
         switch code {
         case -6:                       return true                              // follow the player
@@ -2259,6 +2274,15 @@ struct GameContainerView: View {
         model.pilot.state.currentSystem = systemID
         model.pilot.state.exploredSystems.insert(systemID)
         guard let game = model.data.game, game.system(systemID) != nil else { return }
+        // The pilot's system went hidden and the pilot moved to its twin
+        // (0x00448090): the original only retags the player, ships, shots and
+        // objects with the twin's index, so nothing is rebuilt.
+        if keepPosition, let group = game.reputationMap().groups[nav.currentSystemID], group.contains(systemID) {
+            model.pilot.state.shareTwinDiscovery(game.reputationMap())
+            hostSystemID = systemID
+            nav.currentSystemID = systemID
+            return
+        }
         // Docked, the original only stashes the move for the launch tail
         // (MS-18): `M` launches at the new system's first nav stellar, `N`
         // skips the launch snap and keeps the old stellar's coordinates.
@@ -3243,7 +3267,7 @@ struct GameContainerView: View {
             // H: the travel channel goes back to hyperspace, re-arming the
             // plotted route's next hop.
             host?.scene.clearTravelSelection()
-            nav.rearmRoute()
+            nav.selectHyperspace()
         case .dismissMessage:
             host?.hud.dismissMessage()
         case .playerInfo:

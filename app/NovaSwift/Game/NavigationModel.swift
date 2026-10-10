@@ -55,11 +55,39 @@ final class NavigationModel: ObservableObject {
     /// the swapped-out twin. Deliberately NOT consulted by `canJump`: a stale set
     /// there could refuse a jump the player can legitimately make, and stranding
     /// someone is the failure this whole area is meant to prevent.
-    @Published var hiddenSystems: Set<Int> = []
+    @Published var hiddenSystems: Set<Int> = [] {
+        didSet {
+            visibilityKnown = true
+            if hiddenSystems != oldValue { revalidateRoute() }
+        }
+    }
+    /// Whether the owner has pushed the story's visibility yet.
+    private var visibilityKnown = false
 
-    /// `systemNeighbors` minus anything the story currently hides.
+    /// `systemNeighbors`, each resolved to the first visible member of its
+    /// twin group (`System_ResolveVisibleSystemForTravel` 0x0046b920, D-7): a
+    /// link to a hidden system leads to its visible twin, or nowhere.
     private func visibleNeighbors(_ id: Int) -> [Int] {
-        (game?.systemNeighbors(id) ?? []).filter { !hiddenSystems.contains($0) }
+        guard let game else { return [] }
+        var out: [Int] = []
+        for n in game.systemNeighbors(id) {
+            let r = visibilityKnown ? game.visibleTwin(of: n, hidden: hiddenSystems)
+                                    : (hiddenSystems.contains(n) ? nil : n)
+            if let r, r != id, !out.contains(r) { out.append(r) }
+        }
+        return out
+    }
+
+    /// The first visible member of `id`'s twin group, or nil (0x0046b920).
+    func resolveVisible(_ id: Int) -> Int? {
+        guard let game else { return hiddenSystems.contains(id) ? nil : id }
+        return game.visibleTwin(of: id, hidden: hiddenSystems)
+    }
+
+    /// D-1: hops whose system went hidden swap to their visible twin, or cut
+    /// the route there (0x00432470). Runs whenever the visibility changes.
+    func revalidateRoute() {
+        plan.revalidate(isVisible: { !hiddenSystems.contains($0) }, resolveVisible: { resolveVisible($0) })
     }
 
     /// The live player ship, for fuel — attached/reattached by the container
@@ -100,7 +128,9 @@ final class NavigationModel: ObservableObject {
         visibleNeighbors(currentSystemID).compactMap { game?.system($0) }
     }
 
-    func canJump(to id: Int) -> Bool { game?.systemNeighbors(currentSystemID).contains(id) ?? false }
+    func canJump(to id: Int) -> Bool {
+        (game?.systemNeighbors(currentSystemID).contains(id) ?? false) || visibleNeighbors(currentSystemID).contains(id)
+    }
 
     var destinationID: Int? { route.last }
 
@@ -131,10 +161,15 @@ final class NavigationModel: ObservableObject {
         plan.shiftClick(id, current: currentSystemID, linked: isLinked)
     }
 
-    /// Re-arm the route's first hop (H, and closing the map). Returns whether a
-    /// jump is now armed.
+    /// Re-arm the route's first hop when it is linked to the current system
+    /// (H, closing the map, a gate arrival: 0x004a8080). Otherwise nothing
+    /// changes. Returns whether a jump is now armed.
     @discardableResult
-    func rearmRoute() -> Bool { plan.rearm() }
+    func rearmRoute() -> Bool { plan.sync(current: currentSystemID, linked: isLinked) }
+
+    /// H: hyperspace mode with the slot cleared, then the route sync.
+    @discardableResult
+    func selectHyperspace() -> Bool { plan.selectHyperspace(current: currentSystemID, linked: isLinked) }
 
     func clearCourse() { plan.clear() }
 
@@ -154,7 +189,7 @@ final class NavigationModel: ObservableObject {
         guard canAfford(hops: hops), let ship else { return false }
         _ = ship.consumeJumpFuel()
         let dest = route[hops - 1]
-        plan.arrive(at: dest, crossing: hops)
+        plan.arrive(at: dest, crossing: hops, linked: isLinked)
         currentSystemID = dest
         selectedSystemID = nil
         showingMap = false
@@ -171,7 +206,7 @@ final class NavigationModel: ObservableObject {
     func commitArrival(at dest: Int, hops: Int) -> Bool {
         guard hops > 0, canAfford(hops: hops), let ship else { return false }
         _ = ship.consumeJumpFuel()
-        plan.arrive(at: dest, crossing: hops)   // a route that drifted under us is dropped
+        plan.arrive(at: dest, crossing: hops, linked: isLinked)   // a route that drifted under us is kept, disarmed
         currentSystemID = dest
         selectedSystemID = nil
         showingMap = false
@@ -213,7 +248,7 @@ final class NavigationModel: ObservableObject {
     @discardableResult
     func jump(to id: Int) -> Bool {
         guard canJump(to: id) else { return false }
-        plan.arrive(at: id)
+        plan.arrive(at: id, linked: isLinked)
         currentSystemID = id
         selectedSystemID = nil
         showingMap = false
@@ -221,11 +256,12 @@ final class NavigationModel: ObservableObject {
     }
 
     /// Arrive at `dest` via a gate (hypergate/wormhole): no fuel spent and no
-    /// hyperspace link required — the gate did the travelling. Clears any plotted
-    /// course that doesn't continue from `dest`.
+    /// hyperspace link required — the gate did the travelling. The plotted
+    /// course is kept (0x00457580 doesn't normalise it); its head re-arms only
+    /// when it is linked from `dest`.
     @discardableResult
     func arriveViaGate(at dest: Int) -> Bool {
-        plan.arrive(at: dest)
+        plan.arriveViaGate(at: dest, linked: isLinked)
         currentSystemID = dest
         selectedSystemID = nil
         showingMap = false

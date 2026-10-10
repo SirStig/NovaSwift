@@ -182,6 +182,8 @@ final class GameHUDModel: ObservableObject {
     /// "Unexplored System" text below discovery level 1.
     @Published var navNextHopName = ""
     @Published var navJumpArmed = false
+    /// Travel mode 3 with no armed link (H with no linked route head).
+    @Published var navHyperspaceMode = false
     /// True when the player is clear of the system's no-jump zone and could
     /// actually engage hyperspace right now — updated every frame from
     /// `GameScene.isClearOfNoJumpZone`. Grays the destination name in the nav

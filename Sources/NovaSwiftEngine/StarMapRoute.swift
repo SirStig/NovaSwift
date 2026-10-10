@@ -24,11 +24,19 @@ public struct StarMapRoute: Equatable, Sendable {
     public private(set) var hops: [Int] = []
     /// Whether a hyperspace jump is armed (travel mode 3). The armed system is
     /// always the route's head.
-    public private(set) var armed = false
+    public private(set) var armed = false {
+        didSet { if armed { hyperspaceMode = true } }
+    }
+    /// Travel mode 3 (hyperspace) with or without an armed link slot. H, a
+    /// map click and arming a hop select it; a stellar selection or N clears
+    /// it. With the mode on and nothing armed the nav panel reads
+    /// "Hyperspace" / "No Destination" (#345 / #344), not "Nav System Off".
+    public private(set) var hyperspaceMode = false
 
     public init(hops: [Int] = [], armed: Bool = false) {
         self.hops = Array(hops.prefix(Self.maxHops))
         self.armed = armed && !self.hops.isEmpty
+        self.hyperspaceMode = self.armed
     }
 
     /// The system a jump would go to now, if any.
@@ -75,15 +83,38 @@ public struct StarMapRoute: Equatable, Sendable {
         return true
     }
 
-    /// Re-arm the route's first hop (the H key, and the sync after closing the
-    /// map). Returns whether a jump is now armed.
+    /// Re-arm the route's first hop when it is one link from `current` — the
+    /// sync `NovaUi_SyncTravelSelectionFromStarmapRoute` 0x004a8080 run by H,
+    /// by closing the map and after a gate arrival. When the head is not
+    /// linked (or there is no route) nothing changes: a disarmed jump stays
+    /// disarmed. Returns whether a jump is armed afterwards.
+    @discardableResult
+    public mutating func sync(current: Int, linked: (Int, Int) -> Bool) -> Bool {
+        if let head = hops.first, head != current, linked(current, head) { armed = true }
+        return armed
+    }
+
+    /// Re-arm the route's first hop without a link check (the old H).
     @discardableResult
     public mutating func rearm() -> Bool {
         armed = !hops.isEmpty
         return armed
     }
 
-    public mutating func disarm() { armed = false }
+    public mutating func disarm() {
+        armed = false
+        hyperspaceMode = false
+    }
+
+    /// H (0x0044b120): travel mode 3 with the slot cleared, then the sync —
+    /// the route's head re-arms when it is linked, otherwise the panel shows
+    /// "Hyperspace" / "No Destination".
+    @discardableResult
+    public mutating func selectHyperspace(current: Int, linked: (Int, Int) -> Bool) -> Bool {
+        armed = false
+        hyperspaceMode = true
+        return sync(current: current, linked: linked)
+    }
 
     public mutating func clear() {
         hops = []
@@ -97,15 +128,49 @@ public struct StarMapRoute: Equatable, Sendable {
         armed = !hops.isEmpty
     }
 
-    /// Arrival in `system` after crossing `count` hops: the crossed hops are
-    /// popped when they match the route, otherwise the route no longer starts
-    /// here and is dropped. The next hop is re-armed.
-    public mutating func arrive(at system: Int, crossing count: Int = 1) {
+    /// Hyperspace arrival in `system` after crossing `count` hops
+    /// (`System_NormalizePlannedRouteToCurrentSystem` 0x004a7fc0, then the
+    /// 0x004a8080 sync): the crossed hops are popped when they match the
+    /// route. A route that no longer starts here is kept as it is (the
+    /// original only clears an already-empty route). The next hop is armed
+    /// when it is linked to `system`.
+    public mutating func arrive(at system: Int, crossing count: Int = 1,
+                                linked: (Int, Int) -> Bool = { _, _ in true }) {
         if count > 0, hops.count >= count, hops[count - 1] == system {
             hops.removeFirst(count)
-        } else {
-            hops = []
         }
-        armed = !hops.isEmpty
+        armed = false
+        hyperspaceMode = false      // 0x0044f3d0 resets the travel mode
+        sync(current: system, linked: linked)
+    }
+
+    /// A gate arrival (0x00457580): the travel slot is cleared and the route
+    /// synced, but the route itself is not normalised — an off-route arrival
+    /// keeps the old route and re-arms its head only if it is linked here.
+    public mutating func arriveViaGate(at system: Int, linked: (Int, Int) -> Bool) {
+        armed = false
+        sync(current: system, linked: linked)
+    }
+
+    /// Revalidate the hops against the story's visibility — the first loop
+    /// of `System_UpdateSystemAndStellarDisplayState` 0x00432470: each hop
+    /// whose system has gone hidden is replaced by its visible twin
+    /// (`resolveVisible`, 0x0046b920); a hop with no visible twin cuts the
+    /// route there. Returns whether anything changed.
+    @discardableResult
+    public mutating func revalidate(isVisible: (Int) -> Bool, resolveVisible: (Int) -> Int?) -> Bool {
+        var changed = false
+        for i in hops.indices where !isVisible(hops[i]) {
+            if let twin = resolveVisible(hops[i]) {
+                hops[i] = twin
+            } else {
+                hops.removeSubrange(i...)
+                changed = true
+                break
+            }
+            changed = true
+        }
+        if hops.isEmpty { armed = false }
+        return changed
     }
 }
