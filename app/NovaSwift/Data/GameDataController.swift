@@ -333,6 +333,7 @@ final class GameDataController: ObservableObject {
         let fingerprint = GameLibrary.fingerprint(baseFiles: baseFiles, plugins: plugins)
         let spriteCache = SpriteDiskCache(fingerprint: fingerprint)
         game = NovaGame(merged, spriteCache: spriteCache)
+        if let game { CreditsFormatting.refresh(from: game) }
         storylineTagCache = StorylineTagCache(fingerprint: fingerprint)
         storylineTags = [:]   // stale from any previous data set until `prewarm()` recomputes
         hasBaseData = true
