@@ -111,10 +111,10 @@ enum MissionText {
         return sys.displayName
     }
 
-    /// `<CT>`: STR# 4001 entry `type + 1`, its leading `*` (a quantityless
+    /// `<CT>`: `STR ` 9100+type over STR# 4001 entry `type + 1`, its leading `*` (a quantityless
     /// cargo) stripped.
     private static func cargoTypeName(_ type: Int, _ game: NovaGame) -> String {
-        guard (0..<256).contains(type), var name = game.stringList(4001)?.string(at: type + 1) else {
+        guard (0..<256).contains(type), var name = game.cargoTypeName(type) else {
             return errorText
         }
         if name.hasPrefix("*") { name.removeFirst() }

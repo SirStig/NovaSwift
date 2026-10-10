@@ -366,7 +366,7 @@ final class AppModel: ObservableObject {
     private func pluginStamp(_ bundle: PluginBundle) -> String {
         let fm = FileManager.default
         var parts = [bundle.id]
-        for url in bundle.fileURLs.sorted(by: { $0.path < $1.path }) {
+        for url in bundle.allFileURLs.sorted(by: { $0.path < $1.path }) {
             let attrs = try? fm.attributesOfItem(atPath: url.path)
             let size = (attrs?[.size] as? NSNumber)?.intValue ?? -1
             let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1

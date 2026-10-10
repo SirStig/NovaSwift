@@ -108,7 +108,7 @@ struct PluginsView: View {
         if model.data.manualPluginOrder {
             return "Total conversions replace the base scenario; small plug-ins can stack. When two plug-ins define the same thing, the one lower in this list wins — use the arrows to reorder. Changes apply next time you start a game."
         }
-        return "As in the original, every installed plug-in loads, in alphabetical order, and when two define the same thing the later one wins. To choose which load and reorder them, turn on Settings ▸ Enhancements ▸ Manual plug-in order."
+        return "As in the original, every installed plug-in loads, ordered by file name, and when two define the same thing the later one wins. A total conversion runs instead of the stock scenario: switch it on to play it. To choose which load and reorder them, turn on Settings ▸ Enhancements ▸ Manual plug-in order."
     }
 
     private func row(_ plugin: PluginBundle, index: Int, count: Int) -> some View {
@@ -153,7 +153,7 @@ struct PluginsView: View {
                 }
                 .buttonStyle(.novaPlain)
             }
-            if model.data.manualPluginOrder {
+            if model.data.manualPluginOrder || plugin.isTotalConversion {
                 Toggle("", isOn: Binding(
                     get: { plugin.isEnabled },
                     set: { model.data.setPlugin(plugin.id, enabled: $0) }

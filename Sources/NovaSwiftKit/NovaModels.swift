@@ -1212,6 +1212,9 @@ private final class NovaGameCache {
 /// on demand and resolves cross-references (e.g. a ship → its sprite).
 public struct NovaGame {
     public let resources: ResourceCollection
+    /// `EVNova.ini` `[<STR# id>] S<n>` overrides (see `IniStringOverrides`),
+    /// consulted before every STR# lookup as the original does. Empty by default.
+    public var iniStringOverrides: [Int: [Int: String]] = [:]
     private let cache = NovaGameCache()
     public init(_ resources: ResourceCollection, spriteCache: SpriteDiskCache? = nil) {
         self.resources = resources
@@ -1571,7 +1574,11 @@ public struct NovaGame {
     public func roid(_ id: Int) -> RoidRes? { resources.resource(NovaType.roid, id).map(RoidRes.init) }
     public func roids() -> [RoidRes] { resources.resources(of: NovaType.roid).map(RoidRes.init) }
     public func desc(_ id: Int) -> DescRes? { resources.resource(NovaType.desc, id).map(DescRes.init) }
-    public func stringList(_ id: Int) -> StringListRes? { resources.resource(NovaType.strList, id).map(StringListRes.init) }
+    public func stringList(_ id: Int) -> StringListRes? {
+        guard let list = resources.resource(NovaType.strList, id).map(StringListRes.init) else { return nil }
+        guard let ini = iniStringOverrides[id] else { return list }
+        return list.applying(ini)
+    }
     /// The buoy text for a `sÿst.Message` value (`System_ShowSystemEventMessage`
     /// 0x00467cf0): `STR ` message+999 if present, else `STR# 1000` entry
     /// `message`, which is 1-based. Nil for Message ≤ 0 or an empty string.
@@ -1591,7 +1598,12 @@ public struct NovaGame {
     /// the player's control bits and gender through `context` when they're known.
     public func descText(_ id: Int, context: NovaTextContext = .init()) -> String {
         guard let raw = desc(id)?.text else { return "" }
-        return NovaDescFormatter.render(raw, context: context)
+        let text = NovaDescFormatter.render(raw, context: context)
+        // Any loaded `l33t` resource switches the easter egg on (0x004c6d50).
+        if !resources.resources(of: FourCharCode("l33t")!).isEmpty {
+            return NovaDescFormatter.leetSpeak(text) { Int.random(in: 0..<3) }
+        }
+        return text
     }
 
     /// Resolve a ship's base hull sprite: shïp id → shän (same id) → rlëD.

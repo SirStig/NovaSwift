@@ -262,7 +262,7 @@ final class GameDataController: ObservableObject {
     func reload() {
         guard let (baseDir, baseFiles) = prepareReload() else { return }
         do {
-            applyMerged(try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins),
+            applyMerged(try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins, flatPluginOrder: !pluginsAreManual),
                         baseDir: baseDir, baseFiles: baseFiles)
         } catch {
             applyMergeFailure(String(describing: error), baseDir: baseDir)
@@ -275,9 +275,10 @@ final class GameDataController: ObservableObject {
     func reloadAsync() async {
         guard let (baseDir, baseFiles) = prepareReload() else { return }
         let pluginsSnapshot = plugins
+        let flat = !pluginsAreManual
         let (merged, errorText): (ResourceCollection?, String?) =
             await Task.detached(priority: .userInitiated) {
-                do { return (try GameLibrary.merge(baseFiles: baseFiles, plugins: pluginsSnapshot), nil) }
+                do { return (try GameLibrary.merge(baseFiles: baseFiles, plugins: pluginsSnapshot, flatPluginOrder: flat), nil) }
                 catch { return (nil, String(describing: error)) }
             }.value
         if let merged {
@@ -315,9 +316,17 @@ final class GameDataController: ObservableObject {
         discovered.sort { a, b in
             switch (persistedOrder[a.id], persistedOrder[b.id]) {
             case let (ai?, bi?): return ai < bi
-            case (nil, nil): return a.id < b.id
+            case (nil, nil): return (a.id.uppercased(), a.id) < (b.id.uppercased(), b.id)
             case (nil, _): return false
             case (_, nil): return true
+            }
+        }
+        if manualPluginOrder {
+            // A total conversion replaces the base scenario, so at most one is selected.
+            var seenTC = false
+            for i in discovered.indices.reversed() where discovered[i].isTotalConversion && discovered[i].isEnabled {
+                if seenTC { discovered[i].isEnabled = false }
+                seenTC = true
             }
         }
         plugins = manualPluginOrder ? discovered : GameLibrary.originalPluginOrder(discovered)
@@ -337,12 +346,27 @@ final class GameDataController: ObservableObject {
         return (baseDir, GameLibrary.discoverResourceFiles(in: baseDir))
     }
 
+    /// `EVNova.ini` string overrides (`[<STR# id>] S<n>`), from the data folder
+    /// or the one above it (the install root in an unflattened layout).
+    nonisolated static func loadIniOverrides(near baseDir: URL) -> [Int: [Int: String]] {
+        for dir in [baseDir, baseDir.deletingLastPathComponent()] {
+            let hit = (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?
+                .first { $0.caseInsensitiveCompare("EVNova.ini") == .orderedSame }
+            if let hit, let data = try? Data(contentsOf: dir.appendingPathComponent(hit)) {
+                return IniStringOverrides.parse(data)
+            }
+        }
+        return [:]
+    }
+
     /// Publish a successfully merged data set, attaching a cross-launch decoded-
     /// sprite cache keyed by the data set's fingerprint (see `SpriteDiskCache`).
     private func applyMerged(_ merged: ResourceCollection, baseDir: URL, baseFiles: [URL]) {
-        let fingerprint = GameLibrary.fingerprint(baseFiles: baseFiles, plugins: plugins)
+        let fingerprint = GameLibrary.fingerprint(baseFiles: baseFiles, plugins: plugins, flatPluginOrder: !pluginsAreManual)
         let spriteCache = SpriteDiskCache(fingerprint: fingerprint)
-        game = NovaGame(merged, spriteCache: spriteCache)
+        var newGame = NovaGame(merged, spriteCache: spriteCache)
+        newGame.iniStringOverrides = Self.loadIniOverrides(near: baseDir)
+        game = newGame
         if let game { CreditsFormatting.refresh(from: game) }
         storylineTagCache = StorylineTagCache(fingerprint: fingerprint)
         storylineTags = [:]   // stale from any previous data set until `prewarm()` recomputes
@@ -401,8 +425,15 @@ final class GameDataController: ObservableObject {
     }
 
     func setPlugin(_ id: String, enabled: Bool) {
-        guard manualPluginOrder, let i = plugins.firstIndex(where: { $0.id == id }) else { return }
+        // The enable switch is the manual-order enhancement, except for total
+        // conversions: choosing one to play is always the player's call.
+        guard let i = plugins.firstIndex(where: { $0.id == id }),
+              manualPluginOrder || plugins[i].isTotalConversion else { return }
         plugins[i].isEnabled = enabled
+        if enabled && plugins[i].isTotalConversion {
+            // One total conversion at a time.
+            for j in plugins.indices where j != i && plugins[j].isTotalConversion { plugins[j].isEnabled = false }
+        }
         Self.savePluginState(plugins)
         reload()
     }
@@ -451,7 +482,7 @@ final class GameDataController: ObservableObject {
     /// or the store installed it (deletable). Prebundled plugins have no
     /// delete affordance in the Plug-in Manager.
     func isPrebundled(_ plugin: PluginBundle) -> Bool {
-        guard let bundled = bundledPluginsDir, let first = plugin.fileURLs.first else { return false }
+        guard let bundled = bundledPluginsDir, let first = plugin.allFileURLs.first else { return false }
         return first.path.hasPrefix(bundled.path)
     }
 
