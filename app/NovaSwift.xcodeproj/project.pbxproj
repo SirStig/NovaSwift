@@ -264,7 +264,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 374;
+				CURRENT_PROJECT_VERSION = 420;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -285,7 +285,9 @@
 				INFOPLIST_FILE = NovaSwift/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
 				INFOPLIST_KEY_GCSupportsGameMode = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.action-games";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -324,7 +326,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvos*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletvsimulator*]" = "NovaSwift/NovaSwift-tvOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 374;
+				CURRENT_PROJECT_VERSION = 420;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -345,7 +347,9 @@
 				INFOPLIST_FILE = NovaSwift/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Nova Swift";
 				INFOPLIST_KEY_GCSupportsGameMode = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.action-games";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect with nearby players for local co-op multiplayer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
