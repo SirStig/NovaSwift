@@ -1,68 +1,128 @@
 import Foundation
 import NovaSwiftKit
 
-/// Where a catalog entry's installable file is actually hosted. Purely
-/// informational (shown to the user before they download); the store never
-/// mirrors these files itself — see docs/MOBILE_AND_PLUGINS.md §3.
-public enum PluginSourceHost: String, Codable, Sendable {
-    case evstuff        // andrews05/evstuff, via the GitHub LFS media endpoint
-    case evDownload      // download.escape-velocity.games
-    case other
+/// The catalog file format (schema version 1). The master copy lives in the
+/// NovaSwift-Plugins repo (`catalog.json`); a copy of it ships in the app so
+/// the Plugins screen works offline. Keep `schema/catalog.schema.json` in that
+/// repo in step with this file.
+public struct PluginCatalogDocument: Codable, Equatable, Sendable {
+    /// Highest `schemaVersion` this build understands.
+    public static let supportedSchemaVersion = 1
 
-    public var displayName: String {
-        switch self {
-        case .evstuff: return "andrews05's EV Stuff"
-        case .evDownload: return "download.escape-velocity.games"
-        case .other: return "an external host"
-        }
+    public var schemaVersion: Int
+    public var updated: String?
+    public var plugins: [PluginCatalogEntry]
+
+    public init(schemaVersion: Int = PluginCatalogDocument.supportedSchemaVersion,
+                updated: String? = nil, plugins: [PluginCatalogEntry]) {
+        self.schemaVersion = schemaVersion
+        self.updated = updated
+        self.plugins = plugins
     }
 }
 
-/// One entry in the browsable plug-in store: metadata about a plug-in or total
-/// conversion, independent of whether it's installed. Reuses `PluginKind` from
-/// `NovaSwiftKit` so a catalog entry and its installed `PluginBundle` agree on kind.
+/// One plug-in or total conversion in the catalog. Every entry must have a
+/// direct download link (a file, not a web page) that the app can fetch and
+/// unpack by itself.
 public struct PluginCatalogEntry: Codable, Identifiable, Hashable, Sendable {
-    /// Stable identity. Also the folder name the installer extracts this entry
-    /// into under the plug-ins directory, so an installed `PluginBundle.id`
-    /// always equals this id (see `PluginInstaller`).
+    /// Stable identity, also the folder the installer extracts into, so an
+    /// installed `PluginBundle.id` equals this id.
     public let id: String
     public let name: String
     public let author: String
-    public let kind: PluginKind
+    /// Free-form version string ("1.0.7", "1.3-beta"). Compared numerically.
+    public let version: String
+    /// One or two sentences for the card.
     public let summary: String
+    /// Long description, Markdown.
     public let description: String
     public let tags: [String]
-    public let requiresBase: Bool
-    /// True for plug-ins shipped inside the app bundle (never downloaded, can't
-    /// be deleted — only enabled/disabled). False for anything the store must
-    /// fetch on demand.
-    public let prebundled: Bool
-    public let sourceHost: PluginSourceHost
+    public let isTotalConversion: Bool
+    public let iconURL: URL?
+    public let screenshotURLs: [URL]
+    /// Direct file URLs, tried in order (mirrors/fallbacks).
+    public let downloadURLs: [URL]
+    /// Hex SHA-256 of the downloaded file, when known. Checked after download.
+    public let sha256: String?
+    public let sizeBytes: Int64?
+    public let homepageURL: URL?
     public let sourceURL: URL?
-    public let approxSizeMB: Double?
-    /// File names under `Resources/Screenshots/<id>/`, in display order.
-    public let screenshotNames: [String]
-    public let videoURL: URL?
+    /// License / redistribution note shown on the detail page.
+    public let license: String?
+    public let minNovaSwiftVersion: String?
+    /// Ids of other catalog entries this one needs.
+    public let dependencies: [String]
+    public let addedDate: String?
+    public let updatedDate: String?
+    /// Higher is more popular (download count or a manual rank).
+    public let popularity: Int
 
-    public init(id: String, name: String, author: String, kind: PluginKind,
-                summary: String, description: String, tags: [String] = [],
-                requiresBase: Bool = true, prebundled: Bool = false,
-                sourceHost: PluginSourceHost = .other, sourceURL: URL? = nil,
-                approxSizeMB: Double? = nil, screenshotNames: [String] = [],
-                videoURL: URL? = nil) {
-        self.id = id
-        self.name = name
-        self.author = author
-        self.kind = kind
-        self.summary = summary
-        self.description = description
-        self.tags = tags
-        self.requiresBase = requiresBase
-        self.prebundled = prebundled
-        self.sourceHost = sourceHost
-        self.sourceURL = sourceURL
-        self.approxSizeMB = approxSizeMB
-        self.screenshotNames = screenshotNames
-        self.videoURL = videoURL
+    public init(id: String, name: String, author: String, version: String = "1.0",
+                summary: String, description: String = "", tags: [String] = [],
+                isTotalConversion: Bool = false, iconURL: URL? = nil,
+                screenshotURLs: [URL] = [], downloadURLs: [URL] = [], sha256: String? = nil,
+                sizeBytes: Int64? = nil, homepageURL: URL? = nil, sourceURL: URL? = nil,
+                license: String? = nil, minNovaSwiftVersion: String? = nil,
+                dependencies: [String] = [], addedDate: String? = nil,
+                updatedDate: String? = nil, popularity: Int = 0) {
+        self.id = id; self.name = name; self.author = author; self.version = version
+        self.summary = summary; self.description = description; self.tags = tags
+        self.isTotalConversion = isTotalConversion; self.iconURL = iconURL
+        self.screenshotURLs = screenshotURLs; self.downloadURLs = downloadURLs
+        self.sha256 = sha256; self.sizeBytes = sizeBytes; self.homepageURL = homepageURL
+        self.sourceURL = sourceURL; self.license = license
+        self.minNovaSwiftVersion = minNovaSwiftVersion; self.dependencies = dependencies
+        self.addedDate = addedDate; self.updatedDate = updatedDate; self.popularity = popularity
+    }
+
+    // Optional fields may be missing; lists default to empty.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        author = try c.decode(String.self, forKey: .author)
+        version = try c.decodeIfPresent(String.self, forKey: .version) ?? "1.0"
+        summary = try c.decode(String.self, forKey: .summary)
+        description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        isTotalConversion = try c.decodeIfPresent(Bool.self, forKey: .isTotalConversion) ?? false
+        iconURL = try c.decodeIfPresent(URL.self, forKey: .iconURL)
+        screenshotURLs = try c.decodeIfPresent([URL].self, forKey: .screenshotURLs) ?? []
+        downloadURLs = try c.decodeIfPresent([URL].self, forKey: .downloadURLs) ?? []
+        sha256 = try c.decodeIfPresent(String.self, forKey: .sha256)
+        sizeBytes = try c.decodeIfPresent(Int64.self, forKey: .sizeBytes)
+        homepageURL = try c.decodeIfPresent(URL.self, forKey: .homepageURL)
+        sourceURL = try c.decodeIfPresent(URL.self, forKey: .sourceURL)
+        license = try c.decodeIfPresent(String.self, forKey: .license)
+        minNovaSwiftVersion = try c.decodeIfPresent(String.self, forKey: .minNovaSwiftVersion)
+        dependencies = try c.decodeIfPresent([String].self, forKey: .dependencies) ?? []
+        addedDate = try c.decodeIfPresent(String.self, forKey: .addedDate)
+        updatedDate = try c.decodeIfPresent(String.self, forKey: .updatedDate)
+        popularity = try c.decodeIfPresent(Int.self, forKey: .popularity) ?? 0
+    }
+
+    /// Category, derived from the flags and tags; used for the placeholder icon.
+    public var kind: PluginKind {
+        if isTotalConversion { return .totalConversion }
+        if tags.contains(where: { $0.lowercased() == "patch" }) { return .patch }
+        return .gameplay
+    }
+
+    public func hasTag(_ tag: String) -> Bool {
+        tags.contains { $0.lowercased() == tag.lowercased() }
+    }
+
+    /// Where the file comes from, for "Downloaded from ..." text.
+    public var downloadHost: String {
+        downloadURLs.first?.host ?? "the author's site"
+    }
+
+    /// Date used for "Recent" sorting: last update, else when it was added.
+    public var recencyDate: String { updatedDate ?? addedDate ?? "" }
+
+    /// True when `installedVersion` is older than the catalog version.
+    public func isUpdate(over installedVersion: String?) -> Bool {
+        guard let installedVersion else { return false }
+        return version.compare(installedVersion, options: .numeric) == .orderedDescending
     }
 }

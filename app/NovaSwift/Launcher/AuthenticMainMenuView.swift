@@ -534,7 +534,7 @@ struct AuthenticMainMenuView: View {
             HStack(spacing: 12) {
                 // Flight Training and Import Data moved into Settings (this menu
                 // only appears once base data is present).
-                extraButton("Plug-ins", "puzzlepiece.extension.fill") { sheet = .plugins }
+                extraButton("Plugins", "puzzlepiece.extension.fill") { sheet = .plugins }
                 Spacer()
             }
             .padding(.leading, 20)

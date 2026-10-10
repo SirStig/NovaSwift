@@ -73,7 +73,7 @@ struct ModernMainMenuView: View {
                 HStack(spacing: 10) {
                     // Flight Training and Import Data moved into Settings (this menu
                     // only appears once base data is present).
-                    smallButton("Plug-ins", "puzzlepiece.extension.fill", scale: scale) { sheet = .plugins }
+                    smallButton("Plugins", "puzzlepiece.extension.fill", scale: scale) { sheet = .plugins }
                     #if os(macOS)
                     smallButton("Quit", "power", scale: scale) { NSApplication.shared.terminate(nil) }
                     #endif

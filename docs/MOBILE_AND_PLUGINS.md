@@ -57,7 +57,7 @@ the filesystem, so we can't rely on that as the primary mechanism.
    descriptions, screenshots — works fully offline. Every entry currently has
    `prebundled: false` (`PluginCatalogEntry.prebundled`): no plug-in's actual
    game data ships in the bundle, only its catalog listing.
-2. **On-demand streamed install.** Tapping Install (`PluginStoreView.swift`)
+2. **On-demand streamed install.** Tapping Install (`app/NovaSwift/Plugins/`)
    streams the archive directly from the original third-party host —
    `andrews05`'s EV Stuff mirror or `download.escape-velocity.games` — via
    `PluginDownloader`, straight into the app's plug-ins directory

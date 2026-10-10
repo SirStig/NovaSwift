@@ -36,6 +36,26 @@ public enum PluginKind: String, Codable, Sendable {
     }
 }
 
+/// A plug-in file the game could not read, with the reason.
+public struct PluginLoadFailure: Identifiable, Hashable, Sendable {
+    public var id: String { pluginID + "|" + fileName }
+    public let pluginID: String
+    public let fileName: String
+    public let message: String
+    public init(pluginID: String, fileName: String, message: String) {
+        self.pluginID = pluginID; self.fileName = fileName; self.message = message
+    }
+}
+
+/// Collects plug-in files that failed to parse during a merge.
+public final class PluginLoadFailureSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [PluginLoadFailure] = []
+    public init() {}
+    func add(_ f: PluginLoadFailure) { lock.lock(); items.append(f); lock.unlock() }
+    public var failures: [PluginLoadFailure] { lock.lock(); defer { lock.unlock() }; return items }
+}
+
 /// One installable unit of content: the base game, a total conversion, or a
 /// gameplay plug-in. `fileURLs` are the resource containers it contributes.
 public struct PluginBundle: Identifiable, Codable, Hashable, Sendable {
@@ -312,7 +332,8 @@ public enum GameLibrary {
     /// `isEnabled == false` bundles are skipped. The result is normalised the
     /// way the original loader sees it (`normalizeScenarioRecords`).
     public static func merge(baseFiles: [URL], plugins: [PluginBundle] = [],
-                             flatPluginOrder: Bool = true) throws -> ResourceCollection {
+                             flatPluginOrder: Bool = true,
+                             failures: PluginLoadFailureSink? = nil) throws -> ResourceCollection {
         var collection = ResourceCollection()
         let layers = resolveLayers(baseFiles: baseFiles, plugins: plugins, flat: flatPluginOrder)
         // Reading + parsing a container is independent per file and CPU/IO-bound,
@@ -323,7 +344,11 @@ public enum GameLibrary {
         }
         Log.data.debug("merge: base layer = \(collection.totalCount, privacy: .public) resource(s), \(collection.types.count, privacy: .public) type(s) from \(layers.base.count, privacy: .public) file(s)")
         // Like nv_LoadFilesInFolder, a plug-in file that fails to open is logged and skipped.
-        let parsed = try parseConcurrently(layers.plugins.map(\.url), context: "plug-in file", strict: false)
+        let parsed = try parseConcurrently(layers.plugins.map(\.url), context: "plug-in file", strict: false) { i, error in
+            failures?.add(PluginLoadFailure(pluginID: layers.plugins[i].id,
+                                            fileName: layers.plugins[i].url.lastPathComponent,
+                                            message: String(describing: error)))
+        }
         for (i, col) in parsed.enumerated() {
             guard let col else { continue }
             collection.overlay(col, tag: layers.plugins[i].id)
@@ -336,7 +361,8 @@ public enum GameLibrary {
     /// Parse `urls` in parallel, preserving input order in the result (so the
     /// caller's override chain is unaffected). When `strict`, throws the first parse
     /// error; otherwise a failed file yields nil and the rest still load.
-    private static func parseConcurrently(_ urls: [URL], context: String, strict: Bool) throws -> [ResourceCollection?] {
+    private static func parseConcurrently(_ urls: [URL], context: String, strict: Bool,
+                                          onFailure: ((Int, Error) -> Void)? = nil) throws -> [ResourceCollection?] {
         guard !urls.isEmpty else { return [] }
         var results = [ResourceCollection?](repeating: nil, count: urls.count)
         var firstError: Error?
@@ -348,6 +374,7 @@ public enum GameLibrary {
             } catch {
                 Log.data.error("merge: failed to load \(context, privacy: .public) \(urls[i].path, privacy: .public): \(String(describing: error), privacy: .public)")
                 lock.lock(); if firstError == nil { firstError = error }; lock.unlock()
+                onFailure?(i, error)
             }
         }
         if strict, let firstError { throw firstError }

@@ -17,6 +17,8 @@ import NovaSwiftPluginStore
 final class GameDataController: ObservableObject {
     @Published private(set) var hasBaseData = false
     @Published private(set) var plugins: [PluginBundle] = []
+    /// Plug-in files the last load could not read (shown in Plugins ▸ Load order).
+    @Published private(set) var failedPluginFiles: [PluginLoadFailure] = []
     @Published private(set) var status: String = "No game data imported yet."
 
     /// What a *partial* import is still missing (empty when the data set is
@@ -262,8 +264,11 @@ final class GameDataController: ObservableObject {
     func reload() {
         guard let (baseDir, baseFiles) = prepareReload() else { return }
         do {
-            applyMerged(try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins, flatPluginOrder: !pluginsAreManual),
-                        baseDir: baseDir, baseFiles: baseFiles)
+            let sink = PluginLoadFailureSink()
+            let merged = try GameLibrary.merge(baseFiles: baseFiles, plugins: plugins,
+                                               flatPluginOrder: !pluginsAreManual, failures: sink)
+            failedPluginFiles = sink.failures
+            applyMerged(merged, baseDir: baseDir, baseFiles: baseFiles)
         } catch {
             applyMergeFailure(String(describing: error), baseDir: baseDir)
         }
@@ -276,11 +281,13 @@ final class GameDataController: ObservableObject {
         guard let (baseDir, baseFiles) = prepareReload() else { return }
         let pluginsSnapshot = plugins
         let flat = !pluginsAreManual
+        let sink = PluginLoadFailureSink()
         let (merged, errorText): (ResourceCollection?, String?) =
             await Task.detached(priority: .userInitiated) {
-                do { return (try GameLibrary.merge(baseFiles: baseFiles, plugins: pluginsSnapshot, flatPluginOrder: flat), nil) }
+                do { return (try GameLibrary.merge(baseFiles: baseFiles, plugins: pluginsSnapshot, flatPluginOrder: flat, failures: sink), nil) }
                 catch { return (nil, String(describing: error)) }
             }.value
+        failedPluginFiles = sink.failures
         if let merged {
             applyMerged(merged, baseDir: baseDir, baseFiles: baseFiles)
         } else {
@@ -532,10 +539,15 @@ final class GameDataController: ObservableObject {
         } else {
             var isDir: ObjCBool = false
             fm.fileExists(atPath: src.path, isDirectory: &isDir)
-            guard isDir.boolValue || GameLibrary.resourceExtensions.contains(ext) else {
+            // A classic Mac resource file often has no extension (or .rsrc/.bin):
+            // accept it when it parses, and store it as a .rez.
+            let looksLikeResourceFile = !isDir.boolValue && !GameLibrary.resourceExtensions.contains(ext)
+                && ["", "rsrc", "res"].contains(ext) && (try? ResourceFile.read(contentsOf: src)) != nil
+            guard isDir.boolValue || GameLibrary.resourceExtensions.contains(ext) || looksLikeResourceFile else {
                 throw PluginInstallError.unsupportedArchive
             }
-            id = src.lastPathComponent
+            id = looksLikeResourceFile
+                ? src.deletingPathExtension().lastPathComponent + ".rez" : src.lastPathComponent
             let dest = importedPluginsDir.appendingPathComponent(id, isDirectory: isDir.boolValue)
             if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
             try fm.copyItem(at: src, to: dest)

@@ -1,4 +1,5 @@
 import Foundation
+import Crypto
 // URLSession and friends live in a separate module in corelibs-Foundation, so a
 // bare `import Foundation` leaves them undeclared on Linux/Windows — which is
 // what took the full-package CI job down with a wall of "'URLSession' is
@@ -11,12 +12,16 @@ public enum PluginDownloadError: Error, LocalizedError {
     case badStatus(Int)
     case tooSmall(Int)
     case noLocalFile
+    case notAFile
+    case noURL
 
     public var errorDescription: String? {
         switch self {
         case .badStatus(let code): return "Download failed (HTTP \(code))."
         case .tooSmall(let bytes): return "Downloaded file was only \(bytes) bytes — likely a broken link, not the real plug-in."
         case .noLocalFile: return "Download finished but no file was produced."
+        case .notAFile: return "The link returned a web page instead of the plug-in file."
+        case .noURL: return "This catalog entry has no download link."
         }
     }
 }
@@ -69,14 +74,21 @@ public enum PluginDownloader {
                 continuation.resume(throwing: PluginDownloadError.badStatus(http.statusCode))
                 return
             }
+            if let http = downloadTask.response as? HTTPURLResponse,
+               (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().hasPrefix("text/html") {
+                continuation.resume(throwing: PluginDownloadError.notAFile)
+                return
+            }
             let size = (try? FileManager.default.attributesOfItem(atPath: location.path)[.size] as? Int) ?? nil
             guard let size, size >= PluginDownloader.minimumValidBytes else {
                 continuation.resume(throwing: PluginDownloadError.tooSmall(size ?? 0))
                 return
             }
             // `location` is deleted as soon as this method returns — move it now.
+            let ext = downloadTask.response?.url?.pathExtension ?? ""
             let dest = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString).appendingPathExtension("zip")
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(ext.isEmpty ? "zip" : ext)
             do {
                 try FileManager.default.moveItem(at: location, to: dest)
                 continuation.resume(returning: dest)
@@ -90,5 +102,40 @@ public enum PluginDownloader {
             self.continuation = nil
             continuation.resume(throwing: error)
         }
+    }
+
+    /// Hex SHA-256 of a file, streamed.
+    public static func sha256Hex(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Downloads the first working URL of `urls`, and checks `sha256` if given.
+    public static func download(
+        from urls: [URL], sha256: String?,
+        onProgress: @escaping @Sendable (Double?) -> Void = { _ in }
+    ) async throws -> (file: URL, name: String) {
+        guard !urls.isEmpty else { throw PluginDownloadError.noURL }
+        var lastError: Error = PluginDownloadError.noURL
+        for url in urls {
+            do {
+                let file = try await download(from: url, onProgress: onProgress)
+                if let sha256, try sha256Hex(of: file).lowercased() != sha256.lowercased() {
+                    try? FileManager.default.removeItem(at: file)
+                    throw PluginInstallError.checksumMismatch
+                }
+                return (file, url.lastPathComponent.removingPercentEncoding ?? url.lastPathComponent)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
     }
 }
