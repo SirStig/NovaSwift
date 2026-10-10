@@ -122,6 +122,27 @@ public enum LandedServices {
             .map(\.name)
     }
 
+    /// The trade window's disaster sentence (0x0048d6f0): "<name> has raised /
+    /// lowered the price of <commodity>." for the first active disaster here.
+    public static func disasterSentence(at spobID: Int, state: PlayerState, game: NovaGame) -> String? {
+        let text = OriginalText(game: game)
+        for id in (state.activeDisasters ?? [:]).keys.sorted() {
+            guard let o = game.oops(id), disasterStellar(o, state: state) == spobID else { continue }
+            let commodity = o.commodityEnum.map(game.commodityName) ?? ""
+            return "\(o.name) \(text.misc(192)) \(text.misc(o.priceDelta > 0 ? 193 : 194)) \(text.misc(181)) \(commodity)."
+        }
+        return nil
+    }
+
+    /// Whether the disaster at `spobID` raised (true) or lowered (false) the
+    /// price of trade row `cargoID`; nil without one (STR# 2002 #204 / #205).
+    public static func disasterRaised(cargoID: Int, at spobID: Int, state: PlayerState, game: NovaGame) -> Bool? {
+        for (c, delta) in activeDisasterDeltas(at: spobID, state: state, game: game) where c.cargoID == cargoID {
+            return delta > 0
+        }
+        return nil
+    }
+
     /// The stellar an active disaster affects: its own `Stellar`, or for
     /// `Stellar = −1` the one picked when it activated.
     public static func disasterStellar(_ o: OopsRes, state: PlayerState) -> Int? {

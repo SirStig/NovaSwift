@@ -53,6 +53,7 @@ private struct TradeRow: Identifiable {
     let name: String
     let level: PriceLevel
     let price: Int
+    var disaster = false
     /// The two junk rows can name the same junk, so rows are keyed by
     /// commodity and level.
     var id: Int { cargoID * 8 + level.rawValue }
@@ -86,7 +87,7 @@ struct TradeCenterView: View {
         LandedServices.tradeRows(at: spob, state: pilot.state, game: game).map { row in
             let name = Commodity.standard(cargoID: row.cargoID).map(game.commodityName)
                 ?? game.junk(row.cargoID)?.name ?? "\(row.cargoID)"
-            return TradeRow(cargoID: row.cargoID, name: name, level: row.level, price: row.price)
+            return TradeRow(cargoID: row.cargoID, name: name, level: row.level, price: row.price, disaster: row.disaster)
         }
     }
 
@@ -237,30 +238,47 @@ struct TradeCenterView: View {
     }
 
     /// The status strip (`NovaUi_RedrawTradeCenterWindow` 0x0048d6f0): the
-    /// carried mission cargo and junk, then the ship's free cargo space.
-    /// Escort free space needs fleet holds, which this port does not model.
+    /// carried mission cargo and other junk, then the ship's free cargo space
+    /// and, when escort freighters add holds, the fleet's. Separators are the
+    /// exe's own (space, ". " none, CR, ": ").
     private var statusText: String {
-        let missionTons = StoryEngine(game: game, player: pilot.state).carriedMissionCargo().values.reduce(0, +)
-        let junkTons = pilot.state.cargo.filter { $0.key >= 6 && $0.value > 0 }.values.reduce(0, +)
-        func tons(_ n: Int) -> String { "\(n) \(n == 1 ? "ton" : "tons")" }
-        var parts: [String] = []
-        let other = missionTons + junkTons
-        if other > 0 {
-            var kinds = ""
-            if missionTons > 0 { kinds += text(367) }
-            if missionTons > 0, junkTons > 0 { kinds += " \(text(392)) " }
-            if junkTons > 0 { kinds += text(368) }
-            parts.append("\(text(363)) \(tons(other)) \(text(391)) \(kinds).")
+        let missionCargo = StoryEngine(game: game, player: pilot.state).carriedMissionCargo().filter { $0.value > 0 }
+        let missionTons = missionCargo.values.reduce(0, +)
+        let shown = Set(market.map(\.cargoID))
+        let junk = pilot.state.cargo.filter { $0.key >= 6 && $0.value > 0 && !shown.contains($0.key) }
+        let junkTons = junk.values.reduce(0, +)
+        func tons(_ n: Int) -> String { "\(n) \(text(n == 1 ? 1 : 2))" }
+        var out = ""
+        if missionCargo.count + junk.count > 0 {
+            out = text(363) + " "
+            let other = missionTons + junkTons
+            if other > 0 { out += "\(tons(other)) \(text(391)) " }
+            if !missionCargo.isEmpty {
+                out += text(367)
+                if !junk.isEmpty { out += " \(text(392)) " }
+            }
+            if !junk.isEmpty { out += text(368) }
+            out += "\r\r"
         }
-        parts.append("\(text(364)): \(tons(max(0, pilot.cargoFree(galaxy: galaxy)))).")
-        return parts.joined(separator: " ")
+        let own = max(0, PilotEconomy.loadout(pilot.state, galaxy: galaxy)?.cargoCapacity
+                      ?? game.ship(pilot.state.shipType)?.cargoSpace ?? 0)
+        let fleet = PilotEconomy.cargoCapacity(pilot.state, galaxy: galaxy)
+        let total = pilot.state.usedCargoSpace
+        var shipUsed = total
+        if own < fleet { shipUsed = max(0, total - missionTons - (fleet - own)) + missionTons }
+        out += text(364)
+        if own < fleet { out += " " + text(365) }
+        out += ": " + tons(max(0, own - shipUsed))
+        if own < fleet {
+            out += "\r\(text(364)) \(text(366)): \(tons(max(0, fleet - total)))"
+        }
+        return out.replacingOccurrences(of: "\r", with: "\n")
     }
 
     /// Active `öops` disaster names for this stellar, joined for display, or
     /// `nil` when none are active here right now.
     private var disasterBanner: String? {
-        let names = LandedServices.activeDisasterNames(at: spob.id, state: pilot.state, game: game)
-        return names.isEmpty ? nil : names.joined(separator: ", ")
+        LandedServices.disasterSentence(at: spob.id, state: pilot.state, game: game)
     }
 
     private var current: TradeRow? {
@@ -303,7 +321,12 @@ struct TradeCenterView: View {
         }
     }
     /// Middle "level" column text for a row: Low/Med/High.
-    private func rowLabel(_ row: TradeRow) -> String { row.level.label }
+    private func rowLabel(_ row: TradeRow) -> String {
+        if row.disaster, let up = LandedServices.disasterRaised(cargoID: row.cargoID, at: spob.id, state: pilot.state, game: game) {
+            return text(up ? 204 : 205)
+        }
+        return row.level.label
+    }
     private func rowLabelColor(_ row: TradeRow) -> Color { levelColor(row.level) }
     private func levelColor(_ l: PriceLevel) -> Color {
         switch l {
