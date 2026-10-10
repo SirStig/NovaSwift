@@ -266,7 +266,6 @@ struct AuthenticMainMenuView: View {
         .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { appeared = true }
             startSlideAnimation()               // cölr Slide1-3 shutter flourish
-            model.audio.play(.uiSelect)         // menu appears
             model.prepareAudioAndData()         // ensure main-menu background music is playing
         }
     }
@@ -425,10 +424,14 @@ struct AuthenticMainMenuView: View {
         let last = assets.slides.map(\.frames.count).max().map { $0 - 1 } ?? 0
         guard last > 0 else { return }
         slideFrame = 0
+        // Each strip plays snd 602 as it starts and 603 as it lands (`FUN_0048bfb0`).
+        let landings = assets.slides.map { $0.frames.count - 1 }
+        for _ in landings { model.audio.playMenuSlide(landed: false) }
         slideTimer = Timer.scheduledTimer(withTimeInterval: Self.slideFrameInterval,
                                           repeats: true) { timer in
             Task { @MainActor in
                 slideFrame += 1
+                for landing in landings where landing == slideFrame { model.audio.playMenuSlide(landed: true) }
                 if slideFrame >= last {
                     slideFrame = last
                     timer.invalidate()
@@ -510,7 +513,6 @@ struct AuthenticMainMenuView: View {
             MenuSpriteButton(art: art,
                              onHoverChange: { isHovering in
                                  if isHovering {
-                                     if hoveredAction != art.action { model.audio.play(.uiSelect) }
                                      hoveredAction = art.action
                                  } else if hoveredAction == art.action {
                                      hoveredAction = nil
@@ -525,8 +527,13 @@ struct AuthenticMainMenuView: View {
         }
     }
 
+    /// A menu command plays snd 600, waits for it, plays snd 601, then acts
+    /// (`FUN_0048bc20`).
     private func activate(_ action: MainMenuAction) {
-        model.audio.play(.uiSelect)
+        model.audio.playMenuTransition { perform(action) }
+    }
+
+    private func perform(_ action: MainMenuAction) {
         switch action {
         case .newPilot: sheet = .newPilot
         case .openPilot: sheet = .openPilot
