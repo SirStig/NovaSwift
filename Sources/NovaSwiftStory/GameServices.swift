@@ -21,6 +21,11 @@ public protocol GameServices: AnyObject {
     /// Show narrative text (mission completion, cron news, dialog).
     func showStoryText(_ text: String, title: String)
 
+    /// Show the resolved text of `dësc` `descID` — the original's generic
+    /// description dialog, which also draws that `dësc`'s graphic. Defaults to
+    /// `showStoryText(_:title:)`.
+    func showStoryText(_ text: String, title: String, descID: Int)
+
     /// Play a `snd ` resource (audio system).
     func playSound(id: Int)
 
@@ -155,5 +160,11 @@ open class LoggingGameServices: GameServices {
     open func notify(_ event: StoryNotification) { record("notify \(event)") }
     open func showNews(text: String, govt: Int?) {
         record("news[\(govt.map(String.init) ?? "independent")]: \(text.prefix(60))")
+    }
+}
+
+public extension GameServices {
+    func showStoryText(_ text: String, title: String, descID: Int) {
+        showStoryText(text, title: title)
     }
 }

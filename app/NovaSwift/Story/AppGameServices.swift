@@ -16,6 +16,9 @@ final class AppGameServices: GameServices, ObservableObject {
     /// The most recent narrative text the engine wants shown (mission
     /// completion, cron news), if any.
     @Published var storyText: (title: String, text: String)?
+    /// The `dësc` the current `storyText` came from (nil = plain text), so the
+    /// dialog can draw that `dësc`'s graphic.
+    var storyDescID: Int?
 
     var audio: GameAudio?
 
@@ -51,7 +54,11 @@ final class AppGameServices: GameServices, ObservableObject {
     }
 
     nonisolated func showStoryText(_ text: String, title: String) {
-        MainActor.assumeIsolated { storyText = (title, text) }
+        MainActor.assumeIsolated { storyDescID = nil; storyText = (title, text) }
+    }
+
+    nonisolated func showStoryText(_ text: String, title: String, descID: Int) {
+        MainActor.assumeIsolated { storyDescID = descID; storyText = (title, text) }
     }
 
     nonisolated func playSound(id: Int) {
@@ -98,6 +105,7 @@ final class AppGameServices: GameServices, ObservableObject {
                 onLeaveStellar(message)
             } else if let message {
                 // No takeoff hook wired here — at least surface the message.
+                storyDescID = nil
                 storyText = ("", message)
             }
         }

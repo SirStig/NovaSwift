@@ -1008,15 +1008,10 @@ struct GameContainerView: View {
                 // in flight (a crön advances the clock). A single OK dismisses it.
                 if let story = flightMissionServices.storyText {
                     Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
-                    NovaDialog(title: story.title.isEmpty ? "Mission" : story.title,
-                               width: 480,
-                               buttons: [NovaDialogButton(title: "OK", isDefault: true) {
-                                   flightMissionServices.storyText = nil
-                               }]) {
-                        Text(story.text)
-                            .novaFont(.body)
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
+                    DescTextDialog(title: story.title, text: story.text,
+                                   graphicID: flightMissionServices.storyDescID
+                                       .flatMap { host.game?.desc($0)?.pictureID }) {
+                        flightMissionServices.storyText = nil
                     }
                     .transition(.opacity)
                 }

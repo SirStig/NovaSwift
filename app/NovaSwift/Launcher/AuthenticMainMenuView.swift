@@ -285,7 +285,16 @@ struct AuthenticMainMenuView: View {
                 case .newPilot:   NewPilotView(onClose: { sheet = nil })
                 case .openPilot:  PilotListView(onClose: { sheet = nil })
                 case .settings:   SettingsView(onClose: { sheet = nil })
-                case .about:      AboutView(onClose: { sheet = nil })
+                case .about:
+                    // About Nova (`Menu_RunAboutNovaDialog` 0x00486120): the
+                    // data's own dësc 32767 in the generic dësc dialog. The
+                    // port's About is under Settings > Support.
+                    if let game = model.data.game, let desc = game.desc(32767) {
+                        DescTextDialog(title: "", text: game.descText(32767),
+                                       graphicID: desc.pictureID, onClose: { sheet = nil })
+                    } else {
+                        AboutView(onClose: { sheet = nil })
+                    }
                 case .plugins:    PluginsView(onClose: { sheet = nil })
                 case .importData: DataSetupWizard(onClose: { sheet = nil }, startAtImport: true)
                 }
