@@ -96,6 +96,26 @@ extension World {
     /// B-6 (`Ship_HandleShip` 0x00433050): a destroyed ship with an
     /// ejectable bay rolls once its death timer is down to half the hull's
     /// DeathDelay.
+    /// A9 (0x00433050): in the second half of its death delay a hull with a
+    /// PodCount throws that many debris puffs, one every
+    /// `max(10, trunc(DeathDelay / PodCount × 0.4))` ticks, the first at once.
+    /// Each lives `Rand(100) + 150` ticks, carries the hull's velocity plus
+    /// `(Rand(10) + 10) × 0.1` px/tick on a random heading.
+    func tickDeathDebris(_ ship: Ship, timerTicks: Double) {
+        guard ship.debrisLeft > 0, ship.deathDelayTicks > 0, ship.debrisPodCount > 0,
+              timerTicks <= ship.deathDelayTicks * 0.5 else { return }
+        let interval = max(10, Int(ship.deathDelayTicks / Double(ship.debrisPodCount) * 0.4))
+        let tick = Int(timerTicks)
+        guard tick != ship.lastDebrisTick, tick % interval == 0 || ship.debrisLeft == ship.debrisPodCount
+        else { return }
+        ship.lastDebrisTick = tick
+        ship.debrisLeft -= 1
+        let heading = Double(rng.range(360)) * .pi / 180
+        let speed = Double(rng.range(10) + 10) * 0.1
+        let velocity = ship.velocity + Vec2.heading(heading) * OriginalClock.perSecond(speed)
+        emit(.debrisPuff(at: ship.position, velocity: velocity, lifeTicks: rng.range(100) + 150))
+    }
+
     func dyingCarrierEscapeDue(_ ship: Ship, timerTicks: Double) -> Bool {
         guard !ship.dyingBaysCleared, ship.deathDelayTicks > 0, ejectableBay(of: ship) != nil else { return false }
         return timerTicks <= ship.deathDelayTicks * 0.5

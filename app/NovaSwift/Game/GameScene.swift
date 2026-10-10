@@ -318,6 +318,8 @@ final class GameScene: SKScene {
     /// sequence. Entries are removed once `.shipDestroyed` retires the entityID.
     private var npcDeathSequenceStarted: Set<Int> = []
     private var shipSprite: SKSpriteNode?
+    private var debrisPodFrames: [SKTexture]?
+    private var debrisPuffCount = 0
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
     private var thruster: SKNode!
@@ -1774,7 +1776,7 @@ final class GameScene: SKScene {
             alt.texture = altTextures[hullAnim.frameIndex(set: set, heading: heading, count: altTextures.count)]
         }
         if let wg = weaponGlowNode, !weaponGlowTextures.isEmpty {
-            weaponGlowFlare *= hullAnim.weaponGlowDecay(dt: dt)
+            weaponGlowFlare = hullAnim.weaponGlowAfter(weaponGlowFlare, dt: dt)
             wg.texture = weaponGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: weaponGlowTextures.count)]
             wg.isHidden = weaponGlowFlare <= 0.02
             wg.alpha = weaponGlowFlare
@@ -2382,6 +2384,10 @@ final class GameScene: SKScene {
         guard let world else { return }
         for event in world.drainEvents() {
             switch event {
+            case let .areaBlast(at, blastRadius):
+                spawnAreaBlast(at: CGPoint(x: at.x, y: at.y), blastRadius: blastRadius)
+            case let .debrisPuff(at, velocity, lifeTicks):
+                spawnDebrisPuff(at: CGPoint(x: at.x, y: at.y), velocity: velocity, lifeTicks: lifeTicks)
             case let .playerCloakChanged(engaging):
                 audio?.playSound(engaging ? 381 : 380)
             case let .combatChatter(soundID):
@@ -2752,6 +2758,12 @@ final class GameScene: SKScene {
     /// The crew-scuttle roll after a successful capture: one in ten, drawn
     /// from the world's generator (0x00482940).
     func rollCaptureScuttle() -> Bool { world.rng.range(10) == 0 }
+
+    /// The persistent roster record of a live player escort, if it is one.
+    func escortRecordID(forEntity id: Int) -> Int? { world?.ship(id: id)?.escortRecordID }
+
+    /// The three digits (1-9 each) of the default captured-ship name.
+    func rollCaptureNameDigits() -> String { (0..<3).map { _ in String(world.rng.range(9) + 1) }.joined() }
 
     /// The player's hull crew; a captain with none sends the prize straight
     /// into the wing without the take-command question.
@@ -3763,7 +3775,7 @@ final class GameScene: SKScene {
                 alt.texture = node.altTextures[node.hullAnim.frameIndex(set: altSet, heading: heading, count: node.altTextures.count)]
             }
             if let wg = node.weaponGlow, !node.weaponGlowTextures.isEmpty {
-                node.weaponGlowFlare *= node.hullAnim.weaponGlowDecay(dt: frameDT)
+                node.weaponGlowFlare = node.hullAnim.weaponGlowAfter(node.weaponGlowFlare, dt: frameDT)
                 wg.texture = node.weaponGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.weaponGlowTextures.count)]
                 wg.isHidden = node.weaponGlowFlare <= 0.02
                 wg.alpha = node.weaponGlowFlare
@@ -5238,6 +5250,50 @@ final class GameScene: SKScene {
                              : SKColor(red: 1.0, green: 0.7, blue: 0.35, alpha: 1)
         spawnParticles(at: point, count: onShield ? 5 : 7, color: color,
                        speed: 90, life: 0.3, size: 3, additive: true, grow: false)
+    }
+
+    /// `Shot_SpawnAreaImpactEffects` (0x004211d0): trunc(B × 0.04) bööm-1 sprites
+    /// at `Rand(trunc(B × 0.5)) − B × 0.25` per axis, each starting
+    /// `Rand(8) + 4` ticks late, then trunc(B × 0.16) bööm-0 sprites at
+    /// `Rand(B) − B × 0.5` starting `Rand(16) + 8` ticks late.
+    private func spawnAreaBlast(at point: CGPoint, blastRadius b: Int) {
+        let bd = Double(b)
+        func puff(boom: Int, spread: Int, shift: Double, delayRange: Int, delayBase: Int) {
+            guard let tex = boomTextures(boom) else { return }
+            let dx = Double(world.rng.range(max(1, spread))) - shift
+            let dy = Double(world.rng.range(max(1, spread))) - shift
+            let delay = Double(world.rng.range(delayRange) + delayBase) / OriginalClock.ticksPerSecond
+            let p = CGPoint(x: point.x + CGFloat(dx), y: point.y + CGFloat(dy))
+            run(.sequence([.wait(forDuration: delay),
+                           .run { [weak self] in
+                               self?.spawnSpriteAnim(frames: tex.frames, frameDuration: tex.frameDuration,
+                                                     at: p, diameter: max(bd * 0.3, 5))
+                           }]))
+        }
+        for _ in 0..<Int(bd * 0.04) { puff(boom: 129, spread: Int(bd * 0.5), shift: bd * 0.25, delayRange: 8, delayBase: 4) }
+        for _ in 0..<Int(bd * 0.16) { puff(boom: 128, spread: b, shift: bd * 0.5, delayRange: 16, delayBase: 8) }
+    }
+
+    /// One death-debris puff (A9): the escape-pod sprite, its frame taken from
+    /// the bearing of its velocity, drifting for `lifeTicks` ticks. The
+    /// original's pool holds 32 at a time.
+    private func spawnDebrisPuff(at point: CGPoint, velocity: Vec2, lifeTicks: Int) {
+        if debrisPodFrames == nil {
+            debrisPodFrames = galaxy?.game.shipSprite(Ship.escapePodShipID).map { SpriteTextures.allFrames(from: $0) } ?? []
+        }
+        guard let frames = debrisPodFrames, !frames.isEmpty, debrisPuffCount < 32 else { return }
+        let bearing = OriginalMath.bearingRadians(of: velocity) * 180 / .pi
+        let frame = max(0, min(frames.count - 1, Int(Double(frames.count) * bearing / 360)))
+        let node = SKSpriteNode(texture: frames[frame])
+        node.zPosition = 13
+        node.position = point
+        effectsLayer.addChild(node)
+        debrisPuffCount += 1
+        let life = Double(lifeTicks) / OriginalClock.ticksPerSecond
+        node.run(.sequence([
+            .moveBy(x: CGFloat(velocity.x * life), y: CGFloat(velocity.y * life), duration: life),
+            .removeFromParent()
+        ])) { [weak self] in self?.debrisPuffCount -= 1 }
     }
 
     /// Decoded, cached explosion frames + per-frame duration for a `bööm` id.

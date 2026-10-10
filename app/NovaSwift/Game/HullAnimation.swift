@@ -139,13 +139,12 @@ struct HullAnim {
         }
     }
 
-    /// Per-frame decay factor applied to a weapon-glow flare (0…1): the flare is
-    /// set to 1 on firing and multiplied by this each frame. `weapDecay` is the
-    /// Bible rate — lower = slower fade (50 ≈ a ~0.4 s tail).
-    func weaponGlowDecay(dt: TimeInterval) -> CGFloat {
-        let perTick = Double(max(1, weapDecay)) / 100.0   // fraction lost per 1/30 s tick
-        let ticks = dt * 30.0
-        return CGFloat(pow(max(0.0, 1.0 - perTick), ticks))
+    /// A weapon-glow flare (1 = the value 32 set on firing) after `dt` seconds:
+    /// it loses `WeapDecay × 0.333` of its 0…32 value every 30 Hz tick, linearly,
+    /// and is off at or below zero (`Ship_UpdateVisualState` 0x00428340, C-4).
+    func weaponGlowAfter(_ flare: CGFloat, dt: TimeInterval) -> CGFloat {
+        let perTick = Double(max(0, weapDecay)) * 0.333 / 32.0
+        return CGFloat(max(0.0, Double(flare) - perTick * dt * 30.0))
     }
 }
 

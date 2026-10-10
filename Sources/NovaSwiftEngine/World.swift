@@ -933,6 +933,8 @@ public final class Ship {
         hullFlags = Int(res.flags)
         hullFlags2 = Int(res.flags2)
         deathDelayTicks = Double(max(0, res.deathDelay))
+        debrisPodCount = max(0, res.podCount)
+        debrisLeft = debrisPodCount
     }
 
     /// Raw `shïp.Flags` / `Flags2`, for the rules that read single bits
@@ -942,6 +944,11 @@ public final class Ship {
     /// `shïp.DeathDelay` in ticks: how long the death sequence runs (× 3 for
     /// the player) before the hull is gone (WP-13).
     public var deathDelayTicks: Double = 0
+    /// Death-debris puffs this hull throws (`shïp.PodCount`, slot +0xc908's
+    /// start value) and how many are still to come (A9, 0x00433050).
+    var debrisPodCount = 0
+    var debrisLeft = 0
+    var lastDebrisTick = -1
 
     /// The sprite frame index (0..<rotationFrames) for the current heading:
     /// `trunc(heading° × frames / 360)`, as the original picks it.
@@ -2649,6 +2656,7 @@ public final class World {
             playerDeathElapsed += dt
             let timerTicks = player.deathDelayTicks * 3 - playerDeathElapsed / OriginalClock.rawCallSeconds
             if dyingCarrierEscapeDue(player, timerTicks: timerTicks) { dyingCarrierEscape(player) }
+            tickDeathDebris(player, timerTicks: timerTicks)
             if playerDeathElapsed >= player.deathSequenceDuration {
                 // The finale: the hull blows (WP-13) and, with no eject, the
                 // pilot is lost.
@@ -3192,6 +3200,7 @@ public final class World {
         p.turnDegreesPerTick = spec.turnDegreesPerTick
         p.hitsAnyShip = spec.hitsAnyShip
         p.subsOnExpire = !spec.noSubmunitionsOnExpire
+        p.bigExplosion = spec.explosionIsBig
         p.expiryBlast = spec.detonateOnExpire && spec.blastRadius > 0 && !spec.isPlanetTypeWeapon
         // The shot's target slot: the shooter's primary target, a
         // submunition's own target.
@@ -4123,6 +4132,7 @@ public final class World {
         let radius = p.blastRadius > 0 ? p.blastRadius : 12
         events.append(.explosion(at: pos, radius: max(8, radius), soundID: boomSound,
                                  boomID: p.explosionBoomID))
+        if p.bigExplosion, p.blastRadius > 0 { events.append(.areaBlast(at: pos, blastRadius: Int(p.blastRadius))) }
     }
 
     /// `Shot_SpawnLinkedShotsOnImpact` (0x00420d30): `SubCount` children of
@@ -4356,6 +4366,7 @@ public final class World {
             // and credits the kill from these flags.
             ship.killedByPlayer = ownerID == World.playerEntityID
             ship.killCredited = credited && !isDerelictGovernment(ship.government)
+            originalAI.escortsSawKill(of: ship, world: self)
             return
         }
         if !wasDisabled, ship.disabled { didBecomeDisabled(ship, ownerID: ownerID) }
@@ -4551,6 +4562,7 @@ public final class World {
                 npc.deathTimer! += dt
                 let timerTicks = npc.deathDelayTicks - npc.deathTimer! / OriginalClock.rawCallSeconds
                 if dyingCarrierEscapeDue(npc, timerTicks: timerTicks) { dyingCarriers.append(npc) }
+                tickDeathDebris(npc, timerTicks: timerTicks)
                 if npc.deathTimer! < npc.deathSequenceDuration, !npc.diesInstantly {
                     // Still mid-explosion — keep the wreck around so its sprite
                     // stays on screen for the sequence to play over.

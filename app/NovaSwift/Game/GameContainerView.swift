@@ -718,6 +718,9 @@ struct GameContainerView: View {
     @State private var boardRefresh = 0
     /// A hulk that just rolled a successful capture, awaiting the player's
     /// "use as escort" vs. "take command of it" choice (nil = no pending choice).
+    /// The captured-ship name prompt (`nv_ShowPrompt`, STR# 2002 #119): the
+    /// prize and the text being edited.
+    @State private var captureNamePrompt: (cap: (entityID: Int, shipType: Int, name: String), text: String)?
     @State private var pendingCaptureChoice: (entityID: Int, shipType: Int, name: String)?
     /// Credit cost of "Request Assistance" by how the hailed crew feels about
     /// the player (`GameScene.AssistanceTier`) — allies help for free; a
@@ -1254,19 +1257,37 @@ struct GameContainerView: View {
                             isPresented: Binding(get: { pendingCaptureChoice != nil },
                                                  set: { if !$0 { pendingCaptureChoice = nil } }),
                             presenting: pendingCaptureChoice) { cap in
-            Button("Take Command") { takeCommandOfCapturedShip(cap) }
+            Button("Take Command") { openCaptureNamePrompt(cap) }
             // Only offered under the escort-wing cap — a full wing can still
             // take command of the captured hull, just not add it as an escort.
             if model.pilot.canAddEscort() {
                 Button("Use as Escort") { recruitCapturedShipAsEscort(cap) }
             }
         } message: { cap in
-            Text("\(cap.name.isEmpty ? "The ship" : cap.name) is yours. Fly it yourself, or add it to your escort wing?")
+            Text(model.data.game?.stringList(2002)?.string(at: 118)
+                 ?? "Do you want to use this ship as an escort, or would you rather trade places with its captain and use it as your own ship?")
         }
     }
 
     var body: some View {
         gameStackWithMidLifecycle
+        .alert(model.data.game?.stringList(2002)?.string(at: 119) ?? "Name your new ship.",
+               isPresented: Binding(get: { captureNamePrompt != nil },
+                                    set: { if !$0 { captureNamePrompt = nil } })) {
+            TextField("Ship name", text: Binding(get: { captureNamePrompt?.text ?? "" },
+                                                 set: { captureNamePrompt?.text = String($0.prefix(63)) }))
+            Button("OK") {
+                if let p = captureNamePrompt {
+                    captureNamePrompt = nil
+                    takeCommandOfCapturedShip(p.cap, name: p.text)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                captureNamePrompt = nil
+                pendingCaptureChoice = nil
+                host?.hud.post(model.data.game?.stringList(2002)?.string(at: 122) ?? "Cancelled.")
+            }
+        }
         // Leaving the game unsuppresses the UI cursor so it works on the menus.
         .onDisappear { CursorTargets.shared.suppressed = false }
         // Keep cursor suppression tracking who owns the screen. `wirePadController`
@@ -3057,12 +3078,22 @@ struct GameContainerView: View {
     /// .captured` — just applied to the ship being stepped out of). Mirrors
     /// the mission `C/E/H` ship-swap path: the hull change lands in
     /// `PlayerState` first, then `rebuildFlightHost` picks it up.
-    private func takeCommandOfCapturedShip(_ cap: (entityID: Int, shipType: Int, name: String)) {
+    /// Ask for the new ship's name; the default is the hull's class name and
+    /// three digits from 1 to 9 (0x00482940).
+    private func openCaptureNamePrompt(_ cap: (entityID: Int, shipType: Int, name: String)) {
+        let cls = model.data.game?.ship(cap.shipType)?.name ?? cap.name
+        let digits = host?.scene.rollCaptureNameDigits() ?? "111"
+        pendingCaptureChoice = nil
+        captureNamePrompt = (cap, String("\(cls) \(digits)".prefix(63)))
+    }
+
+    private func takeCommandOfCapturedShip(_ cap: (entityID: Int, shipType: Int, name: String), name: String? = nil) {
         guard let game = model.data.game else { return }
         // The old hull joins the wing when there is room (STR# 2002 #304/#305).
         let kept = PilotEconomy.takeCommandOfCapturedHull(&model.pilot.state, hull: cap.shipType, game: game)
         host?.hud.post(game.stringList(2002)?.string(at: kept ? 304 : 305)
                        ?? (kept ? "You retained your old ship as an escort." : "You were unable to retain your old ship as an escort."))
+        if let name, !name.isEmpty { model.pilot.state.shipName = name }
         model.pilot.save()
         pendingCaptureChoice = nil
         rebuildFlightHost(reason: "captured-ship command swap")
@@ -3401,10 +3432,29 @@ struct GameContainerView: View {
                     model.pilot.state.markPersQuoteShown(pid); model.pilot.save()
                 }
             }
+            // The window's two identifier lines (0x0047fb70): "Class: <hull>
+            // (<subtitle>)" and, below it, "Status:" with Hostile while the
+            // ship keeps pressing the player, else Escort / Hired Escort for
+            // the player's own wing (STR# 2002 #195, #196, #174, #168, #166).
+            let strs = host?.game?.stringList(2002)
+            var classLine = (strs?.string(at: 195) ?? "Class:") + " "
+            if let hull = host?.game?.ship(shipTypeID) {
+                classLine += hull.name
+                if !hull.subtitle.isEmpty { classLine += " (\(hull.subtitle))" }
+            }
             var shipState = HailDialogState(
                 kind: .ship(entityID: entityID, shipTypeID: shipTypeID),
-                name: displayName, govtLabel: govt?.targetCode ?? "", hostile: hostile,
+                name: displayName, govtLabel: classLine, hostile: hostile,
                 responseText: response, customPictID: customPictID)
+            let statusLabel = strs?.string(at: 196) ?? "Status:"
+            if scene.originalKeepsPressingPlayer(entityID: entityID) {
+                shipState.statusText = statusLabel + " " + (strs?.string(at: 174) ?? "Hostile")
+                shipState.statusHostile = true
+            } else if let recordID = scene.escortRecordID(forEntity: entityID) {
+                let hired = model.pilot.state.escort(id: recordID)?.origin == .hired
+                shipState.statusText = statusLabel + " " + (hired ? (strs?.string(at: 166) ?? "Hired Escort")
+                                                                  : (strs?.string(at: 168) ?? "Escort"))
+            }
             // The original AI's comm window (AI-42/43): one session of rolls
             // per hail; the opening line and the Greetings text come from it,
             // and the middle button begs for mercy while the ship presses on.

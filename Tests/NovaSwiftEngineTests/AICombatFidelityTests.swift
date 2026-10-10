@@ -146,6 +146,23 @@ final class AICombatFidelityTests: XCTestCase {
         XCTAssertEqual(shan.upCompress.x, 100)
     }
 
+    /// B-7: a miner aims ahead of a moving rock by dist / raw Speed ticks of
+    /// relative velocity, and straight at it with no active bank.
+    func testMinerLeadsAMovingRock() {
+        let miner = npc("Miner", govt: 128, at: Vec2(0, 0))
+        var spec = gun()
+        spec = WeaponSpec(id: 128, name: "Slow", shieldDamage: 1, armorDamage: 1, reloadSeconds: 0.5,
+                          projectileSpeed: 90, range: 2000, accuracyRadians: 0, isBeam: false,
+                          isGuided: false, turnRate: 0, blastRadius: 0, ammoPerShot: 0)
+        miner.weapons = [WeaponMount(spec: spec)]
+        let rock = (position: Vec2(0, 1000), velocity: Vec2(600, 0))   // 20 px/tick sideways
+        let straight = OriginalAI.rockLeadBearingDeg(ship: miner, rock: rock, bank: nil)
+        let led = OriginalAI.rockLeadBearingDeg(ship: miner, rock: rock, bank: 0)
+        XCTAssertEqual(straight, 0, accuracy: 0.5)
+        XCTAssertGreaterThan(led, 2)
+        XCTAssertLessThan(led, 5)
+    }
+
     // MARK: Disable-only fire (A1)
 
     /// 0x004192d0: a boarder's hit on its own target leaves armor at 1; the

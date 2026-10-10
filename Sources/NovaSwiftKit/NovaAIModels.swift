@@ -708,6 +708,8 @@ public struct WeapRes {
     /// `bööm` id detonated on impact/expiry (drives the hit/explosion sound and
     /// sprite), or nil if this weapon has no explosion.
     public let explosionBoomID: Int?
+    /// `ExplodType` ≥ 1000: the impact also scatters small bööm sprites.
+    public let explosionIsBig: Bool
     /// Continuous-fire weapons (typically beams) loop their fire sound instead of
     /// retriggering it every simulation frame while held.
     public let loopSound: Bool
@@ -1025,6 +1027,7 @@ public struct WeapRes {
         fireSoundID = rawSound == -1 ? nil : rawSound + 200
         impact = ai16(d, 20)
         explosionBoomID = boomID(raw: ai16(d, 22))
+        explosionIsBig = ai16(d, 22) >= 1000
         let flags = au16(d, 28)
         loopSound = flags & 0x0010 != 0
         flagsRaw = flags

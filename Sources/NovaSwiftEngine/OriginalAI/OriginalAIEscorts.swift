@@ -147,6 +147,21 @@ extension OriginalAI {
         return text
     }
 
+    /// Chatter category 2 (0x00437780): a player escort (behavior above 2) in
+    /// the attack state whose target was just destroyed calls it out, unless
+    /// its hull mutes chatter (Flags2 0x10).
+    func escortsSawKill(of victim: Ship, world: World) {
+        let host = WorldAIHost(world: world, ai: self)
+        for ship in world.npcs where ship.isAlive && ship.entityID != victim.entityID
+            && leader(of: ship) == World.playerEntityID {
+            guard let rec = records[ship.entityID], rec.primary == victim.entityID,
+                  rec.behavior > 2, rec.state == OriginalAIState.attack else { continue }
+            let hull = host.hull(of: ship)
+            guard hull.flags2 & 0x0010 == 0 else { continue }
+            world.queueCombatChatter(category: 2, govt: hull.attributesGovt, voice: rec.voice)
+        }
+    }
+
     // MARK: NPC-fleet orders (Ship_IssueEscortOrders 0x004152e0)
 
     /// Orders per follower category [fighter, medium, warship, freighter],

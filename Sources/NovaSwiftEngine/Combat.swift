@@ -242,6 +242,8 @@ public struct WeaponSpec {
     public let fireSoundID: Int?
     /// `bööm` id detonated on impact/expiry, or nil if this weapon has no explosion.
     public let explosionBoomID: Int?
+    /// `ExplodType` ≥ 1000: the impact also scatters small bööm sprites (A9).
+    public var explosionIsBig = false
     /// Continuous-fire weapons (typically beams) trigger their sound once per
     /// firing burst rather than once per simulation frame.
     public let loopSound: Bool
@@ -569,6 +571,7 @@ public struct WeaponSpec {
         ammoTypeRaw = w.ammoType
         fireSoundID = w.fireSoundID
         explosionBoomID = w.explosionBoomID
+        explosionIsBig = w.explosionIsBig
         loopSound = w.loopSound
         isPointDefense = w.isPointDefense
         vulnerableToPD = w.vulnerableToPD
@@ -831,6 +834,8 @@ public final class Projectile {
     /// Flags 0x8000 (WP-07, WP-08).
     public var subsOnExpire = true
     public var expiryBlast = false
+    /// The shot's weapon has `ExplodType` ≥ 1000 (A9).
+    public var bigExplosion = false
     /// A point-defense (mode 9) round: it collides only with homing shots,
     /// and with ships only through its proximity fuse (WP-14).
     public var isPointDefenseRound = false
@@ -1018,6 +1023,12 @@ public enum WorldEvent {
     /// 0x004311f0): play `soundID` unpositioned, and keep
     /// `World.combatChatterPlaying` set until it ends.
     case combatChatter(soundID: Int)
+    /// An `ExplodType` ≥ 1000 impact (`Shot_SpawnAreaImpactEffects` 0x004211d0):
+    /// scatter small bööm sprites around `at` over the weapon's `blastRadius`.
+    case areaBlast(at: Vec2, blastRadius: Int)
+    /// A dying hull throws a pod-sprite debris puff (`Shot_SpawnShipDestructionDebrisPuff`
+    /// 0x00428090): drifts at `velocity` (px/s) for `lifeTicks` 30 Hz ticks.
+    case debrisPuff(at: Vec2, velocity: Vec2, lifeTicks: Int)
     /// The player's cloak started engaging (snd 381) or clearing (snd 380),
     /// from any cause (0x004680d0 / 0x00468190, D-4).
     case playerCloakChanged(engaging: Bool)

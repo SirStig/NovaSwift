@@ -53,6 +53,18 @@ struct HailDialogView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { onClose() }
 
+            // The comm window's key shortcuts (0x0047fa40): Return, E and Esc
+            // close the channel, R requests assistance, G says greetings.
+            Group {
+                Button("") { onClose() }.keyboardShortcut(.defaultAction)
+                Button("") { onClose() }.keyboardShortcut(.cancelAction)
+                Button("") { onClose() }.keyboardShortcut("e", modifiers: [])
+                Button("") { if !isPlanet, showAssistButton, assistEnabled { onRequestAssistance() } }
+                    .keyboardShortcut("r", modifiers: [])
+                Button("") { onGreetings() }.keyboardShortcut("g", modifiers: [])
+            }
+            .opacity(0).frame(width: 0, height: 0).allowsHitTesting(false)
+
             if let graphics, let frameImage {
                 // NovaMenu does its own GeometryReader-based scaling against the
                 // shared 1024×768 reference space (matching the spaceport
@@ -159,7 +171,7 @@ struct HailDialogView: View {
             NovaText(state.name, size: 12, color: novaAmber, width: width, weight: .bold)
             if !state.govtLabel.isEmpty {
                 NovaText(state.govtLabel, size: 10,
-                         color: state.hostile ? .red : Color(white: 0.75), width: width)
+                         color: Color(white: 0.75), width: width)
             }
             if let status = state.statusText {
                 NovaText(status, size: 10, color: state.statusHostile ? .red : Color(white: 0.75), width: width)
