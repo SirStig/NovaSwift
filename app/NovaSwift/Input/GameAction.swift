@@ -57,6 +57,10 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
     case hailStellar
     /// Alt-−: self-destruct — held for five seconds, released to abort (UI-15).
     case selfDestruct
+    /// C: escorts return to formation (order 0, slot 0x33).
+    case commandEscortFormation
+    /// Alt-C: carried fighters return to their hangar (order 3).
+    case commandEscortReturnHangar
 
     var id: String { rawValue }
 
@@ -81,7 +85,7 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .accelerate, .decelerate, .turnLeft, .turnRight, .afterburner: return .flight
         case .firePrimary, .fireSecondary, .selectSecondaryPrev, .selectSecondaryNext, .toggleCloak,
              .recallFighters, .eject, .selfDestruct, .commandEscortAggressive, .commandEscortDefensive, .commandEscortEvasive,
-             .commandEscortHold: return .combat
+             .commandEscortHold, .commandEscortFormation, .commandEscortReturnHangar: return .combat
         case .targetNearest, .targetNext, .nearestHostile, .clearTarget,
              .targetPrevious, .targetEscortNext, .clearShipTarget,
              .selectNav1, .selectNav2, .selectNav3, .selectNav4: return .targeting
@@ -138,6 +142,8 @@ enum GameAction: String, CaseIterable, Codable, Identifiable {
         case .clearSecondary: return "Clear Secondary Weapon"
         case .hailStellar: return "Hail Planet"
         case .selfDestruct: return "Self-Destruct"
+        case .commandEscortFormation: return "Escorts: Formation"
+        case .commandEscortReturnHangar: return "Escorts: Return to Hangar"
         }
     }
 

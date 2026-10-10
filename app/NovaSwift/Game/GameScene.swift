@@ -308,6 +308,8 @@ final class GameScene: SKScene {
     // threshold has played, reset only after recovering with a little hysteresis
     // so crossing back and forth right at the line doesn't retrigger every frame.
     private var redAlert = RedAlertCue()
+    /// The in-flight Escort Commands panel (input A / HUD M3).
+    private(set) var escortPanel = EscortCommandPanel()
     private var rawCallAccumulator: Double = 0
     private var klaxxonOn = false
     private var redAlertBlink: SKSpriteNode?
@@ -1879,6 +1881,7 @@ final class GameScene: SKScene {
         rawCallAccumulator += dt * OriginalClock.rawCallsPerSecond
         let calls = Int(rawCallAccumulator)
         rawCallAccumulator -= Double(calls)
+        tickEscortPanel(frames: calls)
         let volume = settings.muteAll ? 0 : settings.masterVolume * settings.sfxVolume
         guard let world = self.world else { return }
         if redAlert.advance(rawCalls: calls, lowVolume: volume * 7 < 2, inEscapePod: world.playerInEscapePod,
@@ -1893,6 +1896,85 @@ final class GameScene: SKScene {
         }
         klaxxonOn = world.isPlayerDeathTimerRunning
         updateRedAlertBlink()
+    }
+
+    // MARK: Escort Commands panel
+
+    /// `TickCount` now, in 60 Hz ticks.
+    private var tickCount60: Double { effectClock * 60 }
+
+    /// E: show the panel (beep), or "no escorts" (#51), or hide it.
+    func escortPanelPressE() {
+        guard let world else { return }
+        switch escortPanel.pressE(hasEscorts: world.playerEscortRoster().any, now: tickCount60) {
+        case .opened:
+            audio?.play(.uiSelect)
+        case .noEscorts:
+            if let line = galaxy?.game.stringList(2002)?.string(at: 51) { hud?.post(line) }
+            audio?.play(.uiError)
+        case .closed:
+            audio?.play(.uiSelect)
+        }
+        publishEscortPanel()
+    }
+
+    /// A number key while the panel is up: pick a group. Returns false (key
+    /// not consumed) while the panel is hidden.
+    func escortGroupKey(_ k: Int) -> Bool {
+        guard escortPanel.isOpen, let world else { return false }
+        let roster = world.playerEscortRoster()
+        if escortPanel.pressGroupKey(k, hasCategory: { roster.perCategory[$0] > 0 }, now: tickCount60) {
+            audio?.play(.targetLock)
+        }
+        publishEscortPanel()
+        return true
+    }
+
+    /// F / D / V / C / Alt-C: the order goes to the selected group while the
+    /// panel is up, to every escort otherwise.
+    func escortOrder(_ code: Int) {
+        let category = escortPanel.order(code)
+        commandEscortGroup(category: category, command: code)
+        if world?.lastEscortOrderChanged == true { escortPanel.orderTaken(now: tickCount60) }
+        publishEscortPanel()
+    }
+
+    private func tickEscortPanel(frames: Int) {
+        guard let world else { return }
+        let roster = world.playerEscortRoster()
+        let was = escortPanel
+        escortPanel.tick(frames: frames, now: tickCount60, liveEscorts: roster.live,
+                         fighterOut: { roster.fighterOut[$0] })
+        if escortPanel != was || escortPanel.isOpen { publishEscortPanel(roster) }
+    }
+
+    private func publishEscortPanel(_ roster: World.EscortRoster? = nil) {
+        guard let hud else { return }
+        guard escortPanel.isOpen, let world else {
+            if hud.escortPanel != nil { hud.escortPanel = nil }
+            return
+        }
+        let roster = roster ?? world.playerEscortRoster()
+        let list = galaxy?.game.stringList(2002)
+        func s(_ i: Int) -> String { list?.string(at: i) ?? "" }
+        func orderText(_ o: Int) -> String {
+            switch o {
+            case 1: return s(145)
+            case 2: return s(146)
+            case 3: return s(148)
+            case 4: return s(147)
+            default: return s(149)
+            }
+        }
+        var rows = [EscortPanelDisplay.Row(label: s(144), order: "", enabled: roster.any,
+                                           selected: escortPanel.group == -1)]
+        for c in 0..<4 {
+            let live = roster.perCategory[c] > 0
+            rows.append(.init(label: s(140 + c), order: live ? orderText(escortPanel.orders[c]) : "",
+                              enabled: live, selected: escortPanel.group == c))
+        }
+        let display = EscortPanelDisplay(title: s(133), rows: rows, level: escortPanel.level)
+        if hud.escortPanel != display { hud.escortPanel = display }
     }
 
     /// The low-volume Red Alert blink (`FUN_0042cc30`): cicn 18000 + parity
@@ -2202,7 +2284,8 @@ final class GameScene: SKScene {
     /// AI-35: an order to one EscortType group of the player's escorts.
     func commandEscortGroup(category: Int?, command: Int) {
         guard let world else { return }
-        world.originalAI.commandPlayerEscortGroup(category: category, command: command, world: world)
+        world.lastEscortOrderChanged =
+            world.originalAI.commandPlayerEscortGroup(category: category, command: command, world: world) != nil
     }
 
     // MARK: Persistent escort roster ↔ live wing

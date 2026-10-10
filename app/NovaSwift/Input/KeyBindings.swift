@@ -15,8 +15,10 @@ struct KeyBindings: Codable, Equatable {
     /// hostile (Alt the nearest ship), N clears the travel selection (Alt the
     /// ship target), 1–4 pick nav destinations; Y hails (Alt-Y the planet),
     /// L lands, M is the map, H arms the route, J jumps, B boards; Return
-    /// dismisses a message, P opens Player Info, I mission info, E escorts and
-    /// F / D / V order them.
+    /// dismisses a message, P opens Player Info, I mission info, E shows the
+    /// Escort Commands panel and F / D / V / C (Alt-C) order them; U toggles
+    /// the cloak (slot 0x29, DIK 0x16 — C is the escort Formation key in the
+    /// original table, 0x004b4400).
     ///
     /// Known clash: every Control-arrow chord is a reserved macOS shortcut
     /// (Mission Control / move a Space), which the WindowServer takes before
@@ -32,7 +34,7 @@ struct KeyBindings: Codable, Equatable {
             .afterburner: "z",
             .firePrimary: "space", .fireSecondary: "control",
             .selectSecondaryNext: "w", .selectSecondaryPrev: "opt+w", .clearSecondary: "s",
-            .toggleCloak: "c", .recallFighters: "g",
+            .toggleCloak: "u", .recallFighters: "",
             .eject: "opt+x", .selfDestruct: "opt+-",
             .targetNext: "`", .targetPrevious: "~", .targetEscortNext: "opt+`",
             .nearestHostile: "r", .targetNearest: "opt+r",
@@ -43,6 +45,7 @@ struct KeyBindings: Codable, Equatable {
             .dismissMessage: "return", .playerInfo: "p", .missionInfo: "i",
             .openEscorts: "e",
             .commandEscortAggressive: "f", .commandEscortDefensive: "d", .commandEscortHold: "v",
+            .commandEscortFormation: "c", .commandEscortReturnHangar: "opt+c",
             .commandEscortEvasive: "", .shipInfo: "", .pauseGame: "",
             .openMenu: "escape",
         ]
@@ -85,6 +88,7 @@ struct KeyBindings: Codable, Equatable {
         .selectNav1: "1", .selectNav2: "2", .selectNav3: "3", .selectNav4: "4",
         .hyperspaceArm: "h", .dismissMessage: "", .playerInfo: "", .missionInfo: "",
         .clearSecondary: "s", .hailStellar: "opt+y", .selfDestruct: "opt+-",
+        .commandEscortFormation: "", .commandEscortReturnHangar: "",
     ]
 
     func token(for action: GameAction) -> String { map[action] ?? "" }

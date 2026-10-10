@@ -838,6 +838,10 @@ struct GameContainerView: View {
 
                 MessageLogView(hud: host.hud)
 
+                EscortCommandPanelView(hud: host.hud)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, 60).padding(.leading, 12)
+
                 // Multiplayer session chat — only rendered while a session is
                 // live (started from the in-game menu). Passive cluster; empty
                 // regions don't block fly-to-tap. It sits bottom-leading, but
@@ -1361,6 +1365,10 @@ struct GameContainerView: View {
     /// Logs every attempt/outcome (subsystem com.novaswift.app, category Input) so
     /// the failure mode is visible in Console without attaching a debugger.
     private func grabSceneFocus(reason: String, attempt: Int = 0) {
+        // Entering spaceflight and leaving a dialog flush the key state
+        // (`NovaInputQueue_FlushAllCommands` 0x004b68d0): a key held through
+        // the dialog reads as up until it is pressed again.
+        if attempt == 0 { host?.input.flushKeyboard() }
         reclaimingSceneFocus = true
         DispatchQueue.main.async {
             isSceneFocused = true
@@ -2642,10 +2650,12 @@ struct GameContainerView: View {
         // close it. The monitor already covers every binding onKeyPress did.
         .background(FlightKeyboardMonitor(input: host.input, bindings: model.bindings,
                                           isActive: { flightControlsVisible },
-                                          onDiscrete: handleDiscrete))
+                                          onDiscrete: handleDiscrete,
+                                          onRawKey: escortGroupKey))
         #else
         .modifier(KeyboardControls(input: host.input, bindings: model.bindings,
-                                   onDiscrete: handleDiscrete))
+                                   onDiscrete: handleDiscrete,
+                                   onRawKey: escortGroupKey))
         #endif
     }
 
@@ -3298,17 +3308,27 @@ struct GameContainerView: View {
             host?.scene.recallPlayerFighters()
         case .eject:
             host?.scene.requestEject()
+        // F / D / V / C / Alt-C (slots 0x30–0x33): to the group picked in the
+        // Escort Commands panel while it is up, else to every escort.
         case .commandEscortAggressive:
-            host?.scene.commandEscorts(.aggressive)
+            host?.scene.escortOrder(OriginalEscortCommand.attack)
         case .commandEscortDefensive:
-            host?.scene.commandEscorts(.defensive)
-        case .commandEscortEvasive:
-            host?.scene.commandEscorts(.evasive)
+            host?.scene.escortOrder(OriginalEscortCommand.defend)
+        case .commandEscortEvasive, .commandEscortFormation:
+            host?.scene.escortOrder(OriginalEscortCommand.formation)
         case .commandEscortHold:
-            host?.scene.commandEscorts(.hold)
+            host?.scene.escortOrder(OriginalEscortCommand.hold)
+        case .commandEscortReturnHangar:
+            host?.scene.escortOrder(OriginalEscortCommand.returnToHangar)
         case .openEscorts:
-            model.audio.play(.uiSelect)
-            showEscortsPanel = true
+            if model.settings.enhancements.modernKeyBindings {
+                // The port's layout: E opens the Escorts window.
+                model.audio.play(.uiSelect)
+                showEscortsPanel = true
+            } else {
+                // The original: E shows the in-flight Escort Commands panel.
+                host?.scene.escortPanelPressE()
+            }
         case .shipInfo:
             model.audio.play(.uiSelect)
             showShipInfoPanel = true
@@ -3323,6 +3343,14 @@ struct GameContainerView: View {
         default:
             break
         }
+    }
+
+    /// Keys 1–5 while the Escort Commands panel is up pick a group, and no
+    /// command bound to them fires (0x00469ca0 / 0x00469cf0). Returns whether
+    /// the key was consumed.
+    private func escortGroupKey(_ token: String) -> Bool {
+        guard let k = ["1", "2", "3", "4", "5"].firstIndex(of: token), let scene = host?.scene else { return false }
+        return scene.escortGroupKey(k)
     }
 
     /// Hail whatever `GameScene.attemptHail()` resolves to — the current
@@ -4325,11 +4353,13 @@ struct KeyboardControls: ViewModifier {
     let input: InputController
     let bindings: KeyBindings
     var onDiscrete: (GameAction) -> Void = { _ in }
+    var onRawKey: (String) -> Bool = { _ in false }
 
     func body(content: Content) -> some View {
         content.onKeyPress(phases: [.down, .up]) { press in
             let pressed = press.phase == .down
             let token = KeyToken.from(press)
+            if pressed, onRawKey(token) { return .handled }
             // If keys reach the scene at all but nothing binds, or nothing ever
             // logs here on press, it confirms the ship-won't-move failure is
             // upstream of this view (focus never grabbed — see grabSceneFocus)

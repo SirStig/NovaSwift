@@ -184,6 +184,8 @@ final class GameHUDModel: ObservableObject {
     @Published var navJumpArmed = false
     /// Travel mode 3 with no armed link (H with no linked route head).
     @Published var navHyperspaceMode = false
+    /// The in-flight Escort Commands panel, nil while hidden.
+    @Published var escortPanel: EscortPanelDisplay?
     /// True when the player is clear of the system's no-jump zone and could
     /// actually engage hyperspace right now — updated every frame from
     /// `GameScene.isClearOfNoJumpZone`. Grays the destination name in the nav
@@ -201,6 +203,23 @@ final class GameHUDModel: ObservableObject {
     @Published var blips: [RadarContact] = []
     /// Stellar-object contacts (planets/stations) in normalized radar space.
     @Published var planetBlips: [RadarContact] = []
+}
+
+/// What the Escort Commands panel shows (0x0049e430): the title (STR# 2002
+/// #133), a row for All (#144) and each EscortType (#140–#143) with that
+/// group's order (#145 defend, #146 attack, #147 hold, #148 return to
+/// hangar, #149 formation), empty groups greyed, the selected row lit, and
+/// the fade level (0…32).
+struct EscortPanelDisplay: Equatable {
+    struct Row: Equatable {
+        var label: String
+        var order: String
+        var enabled: Bool
+        var selected: Bool
+    }
+    var title: String
+    var rows: [Row]
+    var level: Int
 }
 
 /// One transient entry in the bottom-left message log.

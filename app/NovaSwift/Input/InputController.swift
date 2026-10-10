@@ -19,6 +19,11 @@ final class InputController {
         ControlIntent.combined(keyboard, touch, controller, mouse, tilt)
     }
 
+    /// Drop every held keyboard key (`NovaInputQueue_FlushAllCommands`
+    /// 0x004b68d0 clears the 128-byte key table): a key still physically
+    /// down reads as up until its next key-down.
+    func flushKeyboard() { keyboard = ControlIntent() }
+
     func reset() {
         keyboard = ControlIntent(); touch = ControlIntent()
         controller = ControlIntent(); mouse = ControlIntent(); tilt = ControlIntent()
