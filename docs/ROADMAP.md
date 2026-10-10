@@ -28,6 +28,26 @@ a diagnostics bundle from Settings ▸ Support ▸ Report a Bug.
 
 ## Next
 
+### Pilot converter
+
+Import pilots from the original game and turn them into NovaSwift saves, so
+nobody has to start over.
+
+- Windows EV Nova CE `.plt` files. The format is known from the decompiled
+  loader and writer: the data is stored in blocks XORed with a fixed key.
+- Classic Mac EV Nova pilots, which keep the same data in the resource fork.
+  Accept them as plain files, MacBinary or AppleDouble.
+- Every saved field mapped across: date, credits, ship and name, outfits and
+  ammo, cargo, escorts, active missions, control bits, explored systems, the
+  per-system legal record, ranks, combat rating, crön, stellar and përs state,
+  nickname and Strict Play. Anything without a counterpart is reported.
+- Pilots that use plug-in content load with a warning if that plug-in isn't
+  installed.
+- An "Import EV Nova Pilot" button on the Pilots screen that shows what will be
+  imported before creating the pilot. The original file is never changed.
+- Tested by round-tripping synthetic pilots through the original's own save
+  code in the emulator.
+
 ### Godot frontend for Linux and Windows
 
 Sound, the galaxy map, outfitter, shipyard, bar and mission board, saving, the
