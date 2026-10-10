@@ -974,11 +974,6 @@ final class GameScene: SKScene {
     private var npcNodes: [Int: NPCNode] = [:]
     private var asteroidNodes: [Int: AsteroidNode] = [:]
     private var asteroidTextureCache: [Int: [SKTexture]] = [:]
-    /// Active `loopSound` beam voices, keyed by "`shooterID`:`mountIndex`" —
-    /// repositioned every frame in `update(_:)` so a firing ship's continuous
-    /// beam loop pans/attenuates as it (or the player) moves, and stopped when
-    /// the world emits `.beamLoopStop` or the shooter no longer resolves.
-    private var activeBeamLoops: [String: (shooterID: Int, soundID: Int)] = [:]
     private var npcTextureCache: [Int: [SKTexture]] = [:]
     private var npcEngineGlowCache: [Int: [SKTexture]] = [:]
     private var npcShieldCache: [Int: [SKTexture]] = [:]
@@ -1718,7 +1713,6 @@ final class GameScene: SKScene {
         if intent.firePrimary, !wasFiring { onPlayerFired?() }
         wasFiring = intent.firePrimary
         effectClock += dt
-        updateBeamLoopPositions(listener: scenePos)
         updateFlashes(dt)
         updateParticles(dt)
         updateSpriteAnims(dt)
@@ -2378,7 +2372,8 @@ final class GameScene: SKScene {
                 // right at the listener (near-zero distance = full volume), NPC
                 // fire attenuates/pans naturally by distance.
                 if let soundID {
-                    audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                    audio?.playWeaponFire(soundID: soundID, weaponID: weaponID, isPlayer: shooterID == 0,
+                                          at: CGPoint(x: at.x, y: at.y), listener: scenePos)
                 }
                 // Flash the shooter's weapon-glow overlay (shän weapon layer), if
                 // its hull has one — but only for a weapon that actually declares
@@ -2402,7 +2397,8 @@ final class GameScene: SKScene {
                 // plays unconditionally every shot — so a held trigger should
                 // click on every shot here too, not just the first.
                 if let soundID {
-                    audio?.play(soundID, at: CGPoint(x: from.x, y: from.y), listener: scenePos)
+                    audio?.playWeaponFire(soundID: soundID, weaponID: weaponID, isPlayer: shooterID == 0,
+                                          at: CGPoint(x: from.x, y: from.y), listener: scenePos)
                 }
                 // Beams fire every reload tick same as bullets, so mirror
                 // .weaponFired's ship-weapon-sprite flash here — beam guidance
@@ -2416,20 +2412,14 @@ final class GameScene: SKScene {
                         node.weaponGlowFlare = 1
                     }
                 }
-            case let .beamLoopStart(shooterID, mountIndex, soundID):
-                // Beam geometry is now drawn from `world.activeBeams` in
-                // `syncBeams()`; this event only drives the continuous audio loop.
-                let key = "\(shooterID):\(mountIndex)"
-                if let soundID {
-                    activeBeamLoops[key] = (shooterID, soundID)
-                }
-            case let .beamLoopStop(shooterID, mountIndex):
-                let key = "\(shooterID):\(mountIndex)"
-                activeBeamLoops.removeValue(forKey: key)
-                audio?.stopLoop(key: key)
+            case .beamLoopStart, .beamLoopStop:
+                // Continuous beams are drawn from `world.activeBeams`; their
+                // sound is the per-shot `.beam` one (wëap Flags 0x0010 =
+                // retrigger only when that snd has ended), not a loop.
+                break
             case let .explosion(at, radius, soundID, boomID):
                 spawnExplosion(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius), boomID: boomID)
-                audio?.play(soundID ?? 303, at: CGPoint(x: at.x, y: at.y), listener: scenePos)
+                if let soundID { audio?.play(soundID, at: CGPoint(x: at.x, y: at.y), listener: scenePos) }
                 addShake(at: CGPoint(x: at.x, y: at.y), radius: CGFloat(radius))
             case let .shieldHit(at, weaponID):
                 spawnHitSpray(at: CGPoint(x: at.x, y: at.y), weaponID: weaponID, onShield: true)
@@ -2588,8 +2578,9 @@ final class GameScene: SKScene {
                 let point = CGPoint(x: at.x, y: at.y)
                 let radius = CGFloat(world.systemContext.bodies.first { $0.id == spobID }?.radius ?? 64)
                 spawnExplosion(at: point, radius: max(48, radius), boomID: boomID)
-                audio?.play(boomID.flatMap { galaxy?.game.boom($0)?.soundID } ?? 303,
-                            at: point, listener: scenePos)
+                if let sound = boomID.flatMap({ galaxy?.game.boom($0)?.soundID }) {
+                    audio?.play(sound, at: point, listener: scenePos)
+                }
                 addShake(at: point, radius: max(48, radius))
                 // `Explosion` in the 1000-1063 band means "Explosion + Sparks".
                 if sparks {
@@ -4048,10 +4039,10 @@ final class GameScene: SKScene {
             // off the instant the jump commits.
             audio?.startHyperspaceCharge()
         } else {
-            if hyperspaceCueTicks60 == nil { hyperspaceCueTicks60 = galaxy?.hyperspaceCueTicks60 }
+            if hyperspaceCueTicks60 == nil { hyperspaceCueTicks60 = galaxy?.hyperspaceWarpUpSoundTicks60 }
             let multiplier = galaxy?.jumpDurationMultiplier(hull: world.player.shipTypeID ?? -1) ?? 1.3
             world.playerJump = PlayerHyperjump(bearing: outboundHeading, fastJump: fastJump,
-                                               cueTicks60: hyperspaceCueTicks60 ?? PlayerHyperjump.defaultCueTicks60,
+                                               soundTicks60: hyperspaceCueTicks60 ?? 0,
                                                multiplier: multiplier)
             jumpPhase = .engaged
             jumpSpinUpStarted = false
@@ -4103,7 +4094,8 @@ final class GameScene: SKScene {
         jumpClock = 0
         world.player.velocity = Vec2()      // you're sitting on the gate — no run-up
         jumpPhase = .flash                   // straight to the white-out; no maneuver
-        audio?.startHyperspaceCharge()
+        // Gate travel has no Warp up; the original plays only Warp out
+        // (Stellar_EnterHypergate 0x00456480), which the arrival does.
         Log.scene.debug("beginGateJump -> system \(systemID), emerge at gate \(destGateID)")
     }
 
@@ -4124,7 +4116,10 @@ final class GameScene: SKScene {
             clearCannotJumpOverlays()                  // every tick the jump timer runs (FL-23)
             if jump.phase == .spinUp, !jumpSpinUpStarted {
                 jumpSpinUpStarted = true
-                audio?.startHyperspaceCharge()         // the Warp up cue starts with the spin-up
+                audio?.startWarpUp(multiplier: jump.multiplier)   // played at the hull's multiplier
+            }
+            if jump.phase == .spinUp, jump.warpUpCut {
+                audio?.stopWarpUp()                    // cut at 350 / multiplier (FL-04)
             }
             if jump.phase == .spinUp, jump.progress > 0 {
                 let ramp = min(jump.progress, 50) / 50
@@ -4139,7 +4134,7 @@ final class GameScene: SKScene {
             switch jump.phase {
             case .fired:
                 jumpCommitted = true
-                audio?.stopHyperspaceCharge()
+                audio?.stopWarpUp()
                 // The abandoned fighters ride on the arrival line (UI-11).
                 lastJumpAbandonedFighters = world.returnJumpingFighters()
                 jumpCommit?()                          // app model: fuel, route, days, pilot
@@ -4153,7 +4148,7 @@ final class GameScene: SKScene {
                 // Ship disabled - hyperspace field collapsed (STR# 2002 #35): the
                 // boom flash and Warp out, no system change.
                 world.playerJump = nil
-                audio?.stopHyperspaceCharge()
+                audio?.stopWarpUp()
                 audio?.play(.hyperspaceArrive)
                 hud?.post(galaxy?.game.stringList(2002)?.string(at: 35)
                           ?? "Ship disabled - hyperspace field collapsed.")
@@ -4515,8 +4510,6 @@ final class GameScene: SKScene {
         asteroidNodes.removeAll()
         for (_, n) in freeflightNodes { n.container.removeFromParent() }
         freeflightNodes.removeAll()
-        for (key, _) in activeBeamLoops { audio?.stopLoop(key: key) }
-        activeBeamLoops.removeAll()
         // Beam + flash sprites live on effectsLayer, cleared just below; drop our
         // handles so the pools rebuild for the new system.
         effectsLayer.removeAllChildren()
@@ -5136,24 +5129,6 @@ final class GameScene: SKScene {
 
     // MARK: Combat effects
 
-    /// Reposition every active beam loop against the shooter's current
-    /// position each frame (positional volume/pan), and clean up any whose
-    /// shooter no longer resolves — a defensive fallback for the normal case
-    /// of the world sending an explicit `.beamLoopStop`.
-    private func updateBeamLoopPositions(listener: CGPoint) {
-        guard !activeBeamLoops.isEmpty else { return }
-        for (key, loop) in activeBeamLoops {
-            guard let shooter = world.ship(id: loop.shooterID) else {
-                activeBeamLoops.removeValue(forKey: key)
-                audio?.stopLoop(key: key)
-                continue
-            }
-            audio?.startOrUpdateLoop(key: key, soundID: loop.soundID,
-                                     at: CGPoint(x: shooter.position.x, y: shooter.position.y),
-                                     listener: listener)
-        }
-    }
-
     /// An explosion effect: plays the real `bööm` sprite animation when `boomID`
     /// resolves to authored art, always with a short spark accent and a soft
     /// under-glow flash. Falls back to just the orange flash for events with no
@@ -5371,7 +5346,7 @@ final class GameScene: SKScene {
                     let at = CGPoint(x: CGFloat(p.x) + .random(in: -22...22),
                                      y: CGFloat(p.y) + .random(in: -22...22))
                     self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4, boomID: deathBoom)
-                    self.audio?.play(303, at: at, listener: at)
+                    self.playBoomSound(deathBoom, at: at)
                     self.addShake(at: at, radius: 60)
                 }
             ]))
@@ -5384,7 +5359,7 @@ final class GameScene: SKScene {
                 if let p = hull?.position {
                     let at = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))
                     self.spawnExplosion(at: at, radius: 96, boomID: deathBoom)
-                    self.audio?.play(303, at: at, listener: at)
+                    self.playBoomSound(deathBoom, at: at)
                     self.addShake(at: at, radius: 110)
                 }
                 if self.playerShip === hull { self.shipNode?.isHidden = true }
@@ -5399,6 +5374,14 @@ final class GameScene: SKScene {
     /// the wreck in `npcs` for the same duration — `syncNPCs` naturally tears
     /// its node down the instant `.shipDestroyed` finally drops it, which lands
     /// right as this sequence's last burst fires.
+    /// A death burst's sound: the bööm's own snd (none when it has none),
+    /// heard from the player's position like every other explosion.
+    private func playBoomSound(_ boomID: Int?, at point: CGPoint) {
+        guard let sound = boomID.flatMap({ galaxy?.game.boom($0)?.soundID }) else { return }
+        let p = world.player.position
+        audio?.play(sound, at: point, listener: CGPoint(x: p.x, y: p.y))
+    }
+
     private func beginNPCDeathSequence(entityID: Int, at point: CGPoint, boomID: Int?) {
         guard npcDeathSequenceStarted.insert(entityID).inserted else { return }
         let bursts = 9
@@ -5411,7 +5394,7 @@ final class GameScene: SKScene {
                     let at = CGPoint(x: point.x + .random(in: -22...22),
                                      y: point.y + .random(in: -22...22))
                     self.spawnExplosion(at: at, radius: 32 + CGFloat(i) * 4, boomID: boomID)
-                    self.audio?.play(303, at: at, listener: at)
+                    self.playBoomSound(boomID, at: at)
                     self.addShake(at: at, radius: 60)
                 }
             ]))
@@ -5421,7 +5404,7 @@ final class GameScene: SKScene {
             .run { [weak self] in
                 guard let self else { return }
                 self.spawnExplosion(at: point, radius: 96, boomID: boomID)
-                self.audio?.play(303, at: point, listener: point)
+                self.playBoomSound(boomID, at: point)
                 self.addShake(at: point, radius: 110)
             }
         ]))
