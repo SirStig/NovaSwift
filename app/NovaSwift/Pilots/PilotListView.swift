@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import NovaSwiftKit
 import NovaSwiftStory
 
@@ -15,6 +16,9 @@ struct PilotListView: View {
     @State private var showNewPilot = false
     @State private var openGroupID: UUID?
     @State private var pendingDeleteGroup: PilotRoster.PilotGroup?
+    @State private var showImporter = false
+    @State private var importResult: EVNovaPilotImportResult?
+    @State private var importError: String?
 
     var body: some View {
         ZStack {
@@ -26,11 +30,31 @@ struct PilotListView: View {
                 NewPilotView(onClose: { showNewPilot = false })
                     .transition(.opacity)
             }
+            if let importResult {
+                PilotImportView(result: importResult, onClose: { self.importResult = nil })
+                    .transition(.opacity)
+            }
             if let openGroupID, let group = model.roster.groups.first(where: { $0.id == openGroupID }) {
                 PilotGroupDetailView(group: group, onClose: { self.openGroupID = nil }, onPlay: onClose)
                     .transition(.opacity)
             }
         }
+        .novaFileImporter(isPresented: $showImporter, allowedContentTypes: [.item]) { picked in
+            guard case .success(let urls) = picked, let url = urls.first else { return }
+            model.prepareAudioAndData()
+            guard let game = model.data.game else {
+                importError = "Import your EV Nova game data first; a pilot can only be converted against the game's data."
+                return
+            }
+            switch PilotImportLoader.load(url, game: game) {
+            case .success(let r): importResult = r
+            case .failure(let e): importError = e.localizedDescription
+            }
+        }
+        .alert("Import failed", isPresented: Binding(get: { importError != nil },
+                                                    set: { if !$0 { importError = nil } })) {
+            Button("OK") { importError = nil }
+        } message: { Text(importError ?? "") }
         .alert("Delete pilot?", isPresented: Binding(get: { pendingDeleteGroup != nil },
                                                      set: { if !$0 { pendingDeleteGroup = nil } })) {
             Button("Delete", role: .destructive) {
@@ -57,6 +81,10 @@ struct PilotListView: View {
             NovaDialogButton(title: "New Pilot", isDefault: model.roster.isEmpty) {
                 Log.pilot.debug("PilotListView: opening New Pilot sheet")
                 showNewPilot = true
+            },
+            NovaDialogButton(title: "Import EV Nova Pilot…") {
+                Log.pilot.debug("PilotListView: opening EV Nova pilot importer")
+                showImporter = true
             },
             NovaDialogButton(title: "Close") { onClose() },
         ]

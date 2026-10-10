@@ -692,33 +692,33 @@
    "tasks": [
     {
      "name": "Read Windows EV Nova CE .plt pilots (decrypt the XOR blocks)",
-     "status": "planned",
-     "where": "not started"
+     "status": "done",
+     "where": "Sources/NovaSwiftStory/EVNovaPilotFile.swift"
     },
     {
      "name": "Read classic Mac EV Nova pilots (resource fork, MacBinary/AppleDouble)",
-     "status": "planned",
-     "where": "not started"
+     "status": "partial",
+     "where": "Sources/NovaSwiftStory/EVNovaPilotFile.swift (layout not yet checked against a real Mac pilot)"
     },
     {
      "name": "Map every saved field to a NovaSwift pilot",
-     "status": "planned",
-     "where": "not started"
+     "status": "partial",
+     "where": "Sources/NovaSwiftStory/EVNovaPilotImport.swift (a few fields have no counterpart and are listed in the import summary)"
     },
     {
      "name": "Warn about plug-in content that isn't installed",
-     "status": "planned",
-     "where": "not started"
+     "status": "done",
+     "where": "Sources/NovaSwiftStory/EVNovaPilotImport.swift"
     },
     {
      "name": "Import screen with a preview before creating the pilot",
-     "status": "planned",
-     "where": "not started"
+     "status": "done",
+     "where": "app/NovaSwift/Pilots/PilotImportView.swift"
     },
     {
      "name": "Round-trip tests against the original's own save code",
-     "status": "planned",
-     "where": "not started"
+     "status": "partial",
+     "where": "Tests/NovaSwiftStoryTests/EVNovaPilotImportTests.swift (the cipher is checked against the original executable; the saver itself isn't emulated)"
     }
    ]
   },
