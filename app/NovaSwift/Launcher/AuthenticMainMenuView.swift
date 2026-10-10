@@ -75,7 +75,7 @@ struct MainMenuAssets {
         }
         func pict(_ id: Int) -> CGImage? {
             guard let d = game.resources.resource(NovaType.pict, id)?.data,
-                  let s = try? PICT.decode(d) else { return nil }
+                  let s = PICT.decodeLogged(d, id: id) else { return nil }
             return s.makeCGImage()
         }
 

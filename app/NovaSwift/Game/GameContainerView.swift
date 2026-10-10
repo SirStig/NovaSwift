@@ -582,7 +582,7 @@ final class GameHost {
             Log.hud.error("makeHUDStyle: backdrop PICT #\(intf.backgroundPictID) missing — falling back to GameHUDView")
             return nil
         }
-        guard let sheet = try? PICT.decode(pictData) else {
+        guard let sheet = PICT.decodeLogged(pictData, id: intf.backgroundPictID) else {
             Log.hud.error("makeHUDStyle: PICT #\(intf.backgroundPictID) failed to decode — falling back to GameHUDView")
             return nil
         }

@@ -38,7 +38,7 @@ final class SpaceportGraphics {
             Log.spaceport.error("PICT \(id, privacy: .public) not found in loaded data — falling back to placeholder")
             missed.insert(id); return nil
         }
-        guard let sheet = try? PICT.decode(data), let cg = sheet.makeCGImage() else {
+        guard let sheet = PICT.decodeLogged(data, id: id), let cg = sheet.makeCGImage() else {
             Log.spaceport.error("PICT \(id, privacy: .public) found (\(data.count, privacy: .public) bytes) but failed to decode — falling back to placeholder")
             missed.insert(id); return nil
         }
