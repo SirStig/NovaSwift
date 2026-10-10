@@ -13,7 +13,7 @@ public enum MacArchiveError: Error, LocalizedError, Equatable {
         case .unrecognized: return "This isn't a StuffIt, BinHex or MacBinary file."
         case .stuffItX: return "This is a StuffIt X (.sitx) archive, a proprietary format that can't be opened here. Ask the plug-in's author for a .zip or classic .sit."
         case .encrypted: return "This archive is password-protected."
-        case .unsupportedMethod(let m): return "This StuffIt archive uses compression method \(m), which isn't supported yet. Re-pack it as a .zip."
+        case .unsupportedMethod(let m): return "This archive uses a StuffIt compression (method \(m)) NovaSwift can't unpack yet; convert it to .zip."
         case .corrupt(let why): return "The archive is damaged (\(why))."
         }
     }

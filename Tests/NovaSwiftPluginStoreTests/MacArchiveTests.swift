@@ -111,6 +111,28 @@ final class MacArchiveTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Nova Files/Read Me").path))
     }
 
+    func testStuffIt5ContainerWithFolderAndForks() throws {
+        let sit = StuffIt.buildV5(folder: "Nova Files", files: [
+            (name: "Plug", data: sampleData, rsrc: sampleRsrc),
+            (name: "Notes", data: Array("read me".utf8), rsrc: []),
+        ])
+        let files = try MacArchive.extract(Data(sit), name: "p.sit")
+        XCTAssertEqual(files.count, 3)
+        XCTAssertTrue(files[0].isFolder)
+        XCTAssertEqual(files[1].folders, ["Nova Files"])
+        XCTAssertEqual(files[1].rsrc, sampleRsrc)
+        XCTAssertEqual(files[1].data, sampleData)
+        XCTAssertEqual(files[2].data, Array("read me".utf8))
+    }
+
+    /// Optional: point NOVASWIFT_TEST_ARCHIVE at a real .sit/.hqx/.bin to check it unpacks.
+    func testRealArchiveFromEnvironment() throws {
+        guard let path = ProcessInfo.processInfo.environment["NOVASWIFT_TEST_ARCHIVE"] else { throw XCTSkip("NOVASWIFT_TEST_ARCHIVE not set") }
+        let url = URL(fileURLWithPath: path)
+        let files = try MacArchive.extract(try Data(contentsOf: url), name: url.lastPathComponent)
+        XCTAssertFalse(files.isEmpty)
+    }
+
     func testSitXAndUnsupportedMethodsFailClearly() throws {
         let sitx = Array("StuffIt!".utf8) + [UInt8](repeating: 0, count: 64)
         XCTAssertThrowsError(try MacArchive.extract(Data(sitx))) { XCTAssertEqual($0 as? MacArchiveError, .stuffItX) }
