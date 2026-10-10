@@ -95,6 +95,9 @@ struct NovaDialog<Content: View>: View {
                     // internally; the pill via CursorButton) — no outer
                     // registration, or Ⓐ would have two overlapping targets.
                     footerButton(b)
+                        // Return presses the default button and Esc the
+                        // cancel one, as in every original dialog (0x004cfdd0).
+                        .novaDialogKey(isDefault: b.isDefault, isCancel: b.isCancel)
                 }
             }
             .padding(.horizontal, 16)
@@ -330,6 +333,22 @@ struct NovaDialogButton: Identifiable {
     var isDefault = false
     var enabled = true
     let action: () -> Void
+    /// The button Esc presses (the dialog's cancel item).
+    var isCancel: Bool { !isDefault && ["Cancel", "No"].contains(title) }
+}
+
+extension View {
+    /// Binds Return to a dialog's default button and Esc to its cancel button
+    /// (`UiWindow_RunInteractionLoop` 0x004cfdd0, items +0x24 / +0x28).
+    @ViewBuilder func novaDialogKey(isDefault: Bool, isCancel: Bool) -> some View {
+        #if os(macOS) || os(iOS)
+        if isDefault { keyboardShortcut(.defaultAction) }
+        else if isCancel { keyboardShortcut(.cancelAction) }
+        else { self }
+        #else
+        self
+        #endif
+    }
 }
 
 /// The EV Nova UI accent used for headings in the port's authentic screens.

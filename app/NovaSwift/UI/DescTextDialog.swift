@@ -73,6 +73,7 @@ struct DescTextDialog: View {
                 textItem(layout.text, height: layout.text.height - shrink)
                 NovaButton(graphics: graphics, title: "OK",
                            width: max(0, layout.ok.width - 26)) { onClose() }
+                    .novaDialogKey(isDefault: true, isCancel: false)
                     .offset(x: layout.ok.minX, y: layout.ok.minY - shrink)
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
