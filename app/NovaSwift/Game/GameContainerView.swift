@@ -1859,6 +1859,12 @@ struct GameContainerView: View {
         host?.scene.onTravelStellarSelected = { nav.disarmJump() }
         host?.scene.onLandingCleared = { id in postLandingClearance(id) }
         host?.scene.persGrudgeProvider = { id in model.pilot.state.persHoldsGrudge(id) }
+        host?.scene.persMissionAvailableProvider = { pers in
+            guard let game = host?.game else { return true }
+            let engine = StoryEngine(game: game, player: model.pilot.state, services: flightMissionServices)
+            return PersEncounter.offeredMission(pers, player: model.pilot.state, game: game, engine: engine,
+                                                boarding: pers.offerMissionOnBoard) != nil
+        }
         host?.scene.stellarIFFColorProvider = { id in
             guard let game = model.data.game, let spob = game.spob(id) else { return nil }
             let c = RadarIFF.stellarColor(spob, state: model.pilot.state, game: game, system: nav.currentSystemID)

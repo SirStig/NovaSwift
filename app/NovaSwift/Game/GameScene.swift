@@ -131,50 +131,22 @@ final class GameScene: SKScene {
     /// The IFF stellar colour of a stellar id (0x00466030, `RadarIFF`),
     /// supplied by the host from the pilot state.
     var stellarIFFColorProvider: ((Int) -> Color?)?
-    /// Sim time, and per ship the time of its last HailQuote and whether it
-    /// has quoted at all (the original's +0xac / +0xbc).
-    private var hailQuoteClock: Double = 0
-    private var lastHailQuote: [Int: Double] = [:]
-    private var hailQuoted: Set<Int> = []
+    /// Per-ship HailQuote latches and the original's rate gates (0x00433050).
+    private let quoteBroadcaster = PersQuoteBroadcaster()
+    /// Whether përs `id`'s LinkMission can be offered now (Flags 0x0400 gate),
+    /// supplied by the container from the pilot + story state.
+    var persMissionAvailableProvider: ((PersRes) -> Bool)?
 
-    /// The përs HailQuote broadcast over the status bar (0x00433050; UI-11):
-    /// for each visible përs with a quote whose Flags gates pass — disabled
-    /// only with 0x0020; 0x0010 waits until it threatens the player's squad
-    /// and then speaks at once; 0x0004 needs a grudge; 0x0008 needs it not to
-    /// be hostile; 0x0080 only once per ship — a 1-in-140 chance per raw sim
-    /// call, only while the bar is idle and 45 s after that ship's last quote.
-    /// The LinkMission (0x0400) and player-class (0x1000–0x4000) gates are not
-    /// modelled.
+    /// The përs HailQuote broadcast (UI-11) — see `PersQuoteBroadcaster`.
     private func broadcastHailQuotes(elapsed: Double) {
         guard let hud, let game = galaxy?.game else { return }
-        hailQuoteClock += elapsed
-        let calls = elapsed / OriginalClock.rawCallSeconds
-        let chance = 1 - pow(139.0 / 140.0, calls)
-        for npc in world.npcs where npc.isAlive {
-            guard let pid = npc.personID, let pers = game.pers(pid), pers.hailQuote >= 1,
-                  world.canTarget(npc, by: world.player), !world.player.isEffectivelyCloaked else { continue }
-            if npc.disabled != pers.hailQuoteWhenDisabled { continue }
-            // Flags 0x0800 stays silent while the ship is in AI state 2 (0x00433050).
-            if npc.personFlags & 0x0800 != 0, world.originalAI.record(for: npc.entityID)?.state == OriginalAIState.departJump { continue }
-            var forced = false
-            if pers.hailQuoteWhenAttacking, !npc.disabled {
-                guard !hailQuoted.contains(npc.entityID), world.isThreatToPlayerSquad(npc) else { continue }
-                forced = true
-            }
-            if pers.hailQuoteWhenGrudge, persGrudgeProvider?(pid) != true { continue }
-            if pers.hailQuoteWhenLikes, isEffectivelyHostileToPlayer(npc) { continue }
-            if pers.quoteOnce, hailQuoted.contains(npc.entityID) { continue }
-            let rested = hailQuoteClock > (lastHailQuote[npc.entityID] ?? -.infinity) + 45
-            guard forced || (hud.isMessageIdle && rested && Double.random(in: 0..<1) < chance) else { continue }
-            let quote = game.singleString(pers.hailQuote + 4999) ?? game.stringList(7101)?.string(at: pers.hailQuote)
-            guard let quote, !quote.isEmpty else { continue }
-            // `<OSN>` is the speaking përs (0x00426d10 → 0x004444f0); the
-            // HUD's own pass fills the player tags.
-            hud.post(quote.replacingOccurrences(of: "<OSN>", with: pers.name), rawCalls: 0x1a4)
-            audio?.play(.uiSelect)
-            hailQuoted.insert(npc.entityID)
-            lastHailQuote[npc.entityID] = hailQuoteClock
-        }
+        let posted = quoteBroadcaster.step(
+            world: world, game: game, elapsed: elapsed, barBusy: !hud.isMessageIdle,
+            grudge: { [weak self] in self?.persGrudgeProvider?($0) == true },
+            hostile: { [weak self] in self?.isEffectivelyHostileToPlayer($0) ?? false },
+            missionAvailable: { [weak self] in self?.persMissionAvailableProvider?($0) ?? true },
+            roll: { Double.random(in: 0..<1) })
+        if !posted.isEmpty { audio?.play(.uiSelect) }
     }
     /// The gate the last in-place system reload emerged from (nil for a
     /// hyperspace arrival) — picks the arrival line's wording (UI-11).
@@ -4822,8 +4794,7 @@ final class GameScene: SKScene {
     private func clearSystemNodes() {
         landingClearance.removeAll()
         landingRequestID = nil
-        hailQuoted.removeAll()
-        lastHailQuote.removeAll()
+        quoteBroadcaster.reset()
         for n in planetNodes { n.removeFromParent() }
         planetNodes.removeAll()
         planetNodeByID.removeAll()
