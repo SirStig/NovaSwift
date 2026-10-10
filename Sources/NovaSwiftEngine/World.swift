@@ -757,6 +757,9 @@ public final class Ship {
     /// instead of the usual ×2.0 (0x004640a0 / 0x004642e0 / 0x00463e70). Set
     /// by the AI that matches velocities.
     public var velocityMatchTargetID: Int?
+    /// Ticks left before a beam lock (`velocityMatchTargetID` set by a tractor
+    /// beam hit, +0xc8dc) lapses; refreshed on every hit (0x0042f270).
+    var beamLockTicksLeft: Double = 0
     /// True while the system holds any stellar with gravity; it stops the
     /// player's afterburner widening the speed caps (0x0043adb0).
     var inGravityPull = false
@@ -2382,6 +2385,9 @@ public final class World {
             } else if escapePodLanded {
                 player.velocity = Vec2()   // waiting for the host's respawn
             } else if player.isAlive, var jump = playerJump {
+                // Each spin-up tick pushes the leader's jump state to its
+                // escorts, before the timer advances (0x00422340).
+                if jump.phase == .spinUp { originalAI.syncSquadJump(world: self, leaderTimer: max(1, jump.timer)) }
                 jump.tick(player, dt: dt)
                 playerJump = jump
             } else if player.isAlive, player.disabled {
@@ -2396,6 +2402,7 @@ public final class World {
                 tickRepairSystem(player, dt: dt)
             } else if player.isAlive {
                 fireWeapons(from: player, intent: intent)
+                updateBeamLock(player, dt: dt)
                 player.step(dt, intent: intent, tuning: tuning, rawCalls: rawCalls)
             } else {
                 player.velocity = Vec2()
@@ -2445,6 +2452,7 @@ public final class World {
                     npcIntent = ControlIntent()
                 }
                 fireWeapons(from: npc, intent: npcIntent)
+                updateBeamLock(npc, dt: dt)
                 npc.step(dt, intent: npcIntent, tuning: tuning, rawCalls: rawCalls)
             }
         }
@@ -3365,6 +3373,7 @@ public final class World {
         if let body = cast.hitStellar {
             applyStellarHit(body, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID)
         } else if let h = cast.hitShip {
+            if spec.impact < 0, h.entityID != ship.entityID { applyBeamLock(owner: ship, victim: h) }
             applyHit(to: h, shield: spec.shieldDamage, armor: spec.armorDamage, ownerID: ship.entityID,
                      ionization: spec.ionization, ionizeColor: spec.ionizeColor,
                      piercing: spec.penetratesShields, weaponID: spec.id,
@@ -4320,6 +4329,49 @@ public final class World {
         let cap = ship.isPlayerControlled && ship.afterburnerActive && !ship.inGravityPull
             ? ship.effectiveMaxSpeed * 1.8 : ship.effectiveMaxSpeed
         ship.velocity = Vec2(max(-cap, min(cap, ship.velocity.x)), max(-cap, min(cap, ship.velocity.y)))
+    }
+
+    // MARK: Beam lock
+
+    /// A tractor beam's hold on a ship (`Ship_HandleShip` 0x00433050): the
+    /// lock lapses 30 ticks after the last hit, or at once when the locking
+    /// ship is gone or disabled; meanwhile the ship's velocity is dragged
+    /// toward the locker's (rest, for a self-lock) by a quarter of its thrust
+    /// per tick on each axis.
+    private func updateBeamLock(_ s: Ship, dt: Double) {
+        guard let lockID = s.velocityMatchTargetID else { return }
+        var target = Vec2()
+        if lockID != s.entityID {
+            guard let locker = ship(id: lockID), locker.isAlive, !locker.disabled else {
+                s.velocityMatchTargetID = nil; s.beamLockTicksLeft = 0; return
+            }
+            target = locker.velocity
+        }
+        let ticks = dt * OriginalClock.ticksPerSecond
+        s.beamLockTicksLeft -= ticks
+        if s.beamLockTicksLeft <= 0 { s.velocityMatchTargetID = nil; return }
+        if s.isPlayerControlled { return }
+        let t = s.effectiveAcceleration / OriginalClock.ticksPerSecond * 0.25 * ticks
+        func drag(_ v: Double, _ goal: Double) -> Double {
+            if goal + t < v { return v - t }
+            if v < goal - t { return v + t }
+            return v
+        }
+        s.velocity = Vec2(drag(s.velocity.x, target.x), drag(s.velocity.y, target.y))
+    }
+
+    /// A tractor-beam hit (impact < 0) from `owner` on `victim` (0x0042f270):
+    /// a victim whose three quarters mass fits the owner is held by the owner;
+    /// a much heavier one holds the owner to itself.
+    private func applyBeamLock(owner: Ship, victim: Ship) {
+        guard victim.massTons > 0, !victim.isPlanetTypeShip else { return }
+        if victim.massTons * 0.75 <= owner.massTons {
+            victim.velocityMatchTargetID = owner.entityID
+            victim.beamLockTicksLeft = 30
+        } else if owner.massTons > 0, !owner.isPlanetTypeShip {
+            if owner.velocityMatchTargetID == nil { owner.velocityMatchTargetID = owner.entityID }
+            owner.beamLockTicksLeft = 30
+        }
     }
 
     // MARK: Despawn

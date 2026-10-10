@@ -4986,6 +4986,8 @@ final class GameScene: SKScene {
         guard world?.playerInEscapePod != true else { return false } // nor does a drifting pod
         // A disabled ship can't engage — a silent refusal (0x0044c1a3; FL-04).
         guard world?.player.disabled != true else { return false }
+        // A tractor-beam lock on another ship holds it in place (0x00415b80).
+        if let p = world?.player, let lock = p.velocityMatchTargetID, lock != p.entityID { return false }
         if isClearOfNoJumpZone {
             clearCannotJumpOverlays()
             return true

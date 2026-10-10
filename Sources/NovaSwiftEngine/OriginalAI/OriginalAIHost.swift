@@ -214,7 +214,12 @@ struct WorldAIHost: OriginalAIHost {
         PlayerHyperjump.durationMultiplier(hullFlags: hull(of: ship).flags)
     }
 
-    func canJump(_ ship: Ship) -> Bool { ship.fuel >= ShipFuel.perJump }
+    /// Fuel for a jump, and no tractor-beam lock on another ship
+    /// (`Stellar_CanShipInitiateJumpSequence` 0x00415b80).
+    func canJump(_ ship: Ship) -> Bool {
+        ship.fuel >= ShipFuel.perJump
+            && (ship.velocityMatchTargetID == nil || ship.velocityMatchTargetID == ship.entityID)
+    }
 
     /// shïp Flags2 0x0020 or a ModType-37 outfit, the hull's DefaultItems
     /// included for an NPC (`ShipLoadout.instantJump`).

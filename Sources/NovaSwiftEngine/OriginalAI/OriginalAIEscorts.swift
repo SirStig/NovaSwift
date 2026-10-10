@@ -12,6 +12,23 @@ public enum OriginalEscortCommand {
 /// Squads: NPC-fleet escort orders, the escort supervisor, leadership
 /// succession, formation geometry and the cloak triggers.
 extension OriginalAI {
+    /// `Ship_SyncJumpStateToSquad` 0x00422340 / `Ship_EnterShipAiState0x0B_SquadJump`
+    /// 0x004106b0: every spin-up tick each of the player's escorts without a
+    /// defense home takes the leader's jump timer, enters the squad-jump state
+    /// with no target and its hostility cleared, and seeds its timer if empty.
+    func syncSquadJump(world: World, leaderTimer: Double) {
+        for npc in world.npcs where npc.isAlive {
+            guard let rec = records[npc.entityID], leader(of: npc) == World.playerEntityID,
+                  rec.defenseHome == nil else { continue }
+            rec.jumpTimer = leaderTimer
+            rec.modeStart60 = clock60
+            rec.primary = nil
+            rec.state = OriginalAIState.squadJump
+            rec.hostility = 0
+            if rec.jumpTimer <= 0 { rec.jumpTimer = 1; rec.modeStart60 = clock60 }
+        }
+    }
+
 
     // MARK: Player orders (Ship_CommandPlayerEscortGroup 0x0045c880)
 
