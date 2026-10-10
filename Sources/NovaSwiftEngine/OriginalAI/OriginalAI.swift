@@ -28,9 +28,10 @@ public final class OriginalAI {
     public private(set) var frame = 0
     /// The original's 60 Hz tick clock, for jump spin-up timing.
     public private(set) var clock60: Double = 0
-    /// `g_target_category_command`: the player's standing order per escort
-    /// category (fighter, medium, warship, freighter). −1 is the startup value
-    /// and reads as Formation.
+    /// `g_target_category_command` (`DAT_007354c4[4]`): the player's standing
+    /// order per escort category (fighter, medium, warship, freighter). −1 is
+    /// the startup value and reads as Formation.
+    public internal(set) var categoryCommand = [-1, -1, -1, -1]
 
     public init() {}
 
@@ -101,6 +102,7 @@ public final class OriginalAI {
         for ship in world.npcs where ship.brain != nil && ship.isAlive {
             _ = ensureRecord(ship, host: host)
         }
+        tickCategoryCommands(host)
         tickLeaderFlags(host)
         for leader in host.ships where leader.isPlayer || (records[leader.entityID]?.isSquadLeader ?? false) {
             updateEscortFormations(leader: leader, host: host)
@@ -297,6 +299,7 @@ public final class OriginalAI {
             h.inherentAI = res.inherentAI
             h.escortClass = res.escortClass
             h.inherentCombatGovt = res.inherentCombatGovt
+            h.attributesGovt = res.inherentAttributesGovt
             h.fuelCapacity = res.fuelCapacity
         } else {
             h.inherentAI = ship.brain?.aiType.rawValue ?? 1
@@ -332,10 +335,16 @@ public final class OriginalAI {
         return c
     }
 
-    /// wëap 0x81's reach + 32, the envelope `Ship_IssueEscortOrders` probes.
+    /// The envelope `Ship_IssueEscortOrders` probes: bank 1 (wëap 0x81)
+    /// through 0x00411600 — `BeamLength + 32` for a beam, else
+    /// `trunc(range + 32)`.
     func escortProbeRange(_ world: World) -> Double {
         if let p = cachedProbe { return p }
-        let p = (world.galaxy?.weaponSpec(0x81)?.range ?? 350) + 32
+        var p = 382.0
+        if let spec = world.galaxy?.weaponSpec(0x81) {
+            p = spec.guidance == .beam || spec.guidance == .beamTurret
+                ? spec.beamLength + 32 : (spec.range + 32).rounded(.towardZero)
+        }
         cachedProbe = p
         return p
     }
@@ -423,6 +432,80 @@ public final class OriginalAI {
         default:
             break
         }
+    }
+
+    // MARK: Player escorts
+
+    /// The per-tick upkeep of the category orders (0x0044b120): Return lapses
+    /// to Formation once no ordered fighter of that category is out, and any
+    /// order lapses once no escort of that category has been ordered.
+    func tickCategoryCommands(_ host: OriginalAIHost) {
+        let wing = host.ships.filter { !$0.isPlayer && $0.isAlive && leader(of: $0) == World.playerEntityID }
+        func ordered(_ s: Ship) -> Bool { records[s.entityID]?.escortCommandPending ?? false }
+        for c in 0..<4 where categoryCommand[c] == OriginalEscortCommand.returnToHangar {
+            let out = wing.contains { host.hull(of: $0).escortClass == c && records[$0.entityID]?.behavior == 5 && ordered($0) }
+            if !out { categoryCommand[c] = OriginalEscortCommand.formation }
+        }
+        for c in 0..<4 where categoryCommand[c] != OriginalEscortCommand.formation {
+            if !wing.contains(where: { host.hull(of: $0).escortClass == c && ordered($0) }) {
+                categoryCommand[c] = OriginalEscortCommand.formation
+            }
+        }
+    }
+
+    /// The chatter voice roll (0x004048a0 / 0x00415cb0): `Rand(2)`, unless the
+    /// hull's attribute government fixes it.
+    func rollVoice(_ rec: OriginalAIShipState, hull: OriginalAIHull, host: OriginalAIHost) {
+        rec.voice = host.random(2)
+        if let g = host.govt(hull.attributesGovt), g.fixedVoice >= 0 { rec.voice = g.fixedVoice }
+    }
+
+    /// A captured or recruited ship joins the player's wing (0x00482940):
+    /// behavior 6, its AI runtime fields reset
+    /// (`Ship_ResetShipAiBehaviorRuntimeFields` 0x00402810), and it and every
+    /// ship targeting it stand down
+    /// (`Boarding_ResetShipAndAttackersAfterBoarding` 0x00415cb0).
+    func adoptIntoPlayerWing(_ ship: Ship, world: World) {
+        let host = WorldAIHost(world: world, ai: self)
+        let rec = ensureRecord(ship, host: host)
+        rec.behavior = 6
+        rec.defenseHome = nil
+        resetRuntimeFields(rec)
+        for (id, other) in records where id != ship.entityID && other.primary == ship.entityID {
+            other.state = OriginalAIState.idle
+            other.mode = OriginalAIMode.idle
+            other.primary = nil
+            other.secondary = .none
+            other.hostility = 0
+            other.defenseHome = nil
+            if let s = world.ship(id: id) { mirror(other, s) }
+        }
+        rec.primary = nil
+        rec.secondary = .none
+        rec.hostility = 0
+        rollVoice(rec, hull: host.hull(of: ship), host: host)
+        mirror(rec, ship)
+    }
+
+    /// `Ship_ResetShipAiBehaviorRuntimeFields` (0x00402810).
+    func resetRuntimeFields(_ rec: OriginalAIShipState) {
+        rec.state = OriginalAIState.idle
+        rec.mode = OriginalAIMode.idle
+        rec.jumpDestination = -2
+        rec.cachedScanTarget = nil
+        rec.playerOrder = -1
+        rec.swarmMate = nil
+        rec.resolvedLeader = nil
+    }
+
+    /// A fighter just left a bay (0x0041e640): a player fighter-category
+    /// fighter that is the only ship under the player clears a standing
+    /// Return order for the category.
+    func noteFighterLaunched(_ fighter: Ship, world: World) {
+        let host = WorldAIHost(world: world, ai: self)
+        guard leader(of: fighter) == World.playerEntityID, host.hull(of: fighter).escortClass == 0 else { return }
+        let alone = !world.npcs.contains { $0 !== fighter && $0.isAlive && leader(of: $0) == World.playerEntityID }
+        if alone, categoryCommand[0] == OriginalEscortCommand.returnToHangar { categoryCommand[0] = -1 }
     }
 
     // MARK: Disable-only fire

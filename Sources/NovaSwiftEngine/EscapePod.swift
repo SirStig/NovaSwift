@@ -85,13 +85,50 @@ extension World {
         return player.isAlive ? player.disabled : !playerDeathSequenceOver
     }
 
-    /// The bay class the player would eject into: the carried class of the
-    /// first bay whose fighter has `shïp` Flags 0x8000.
+    /// The bay class the player would eject into
+    /// (`ShipClass_FindLaunchBayShipClassId` 0x00464590): the carried class
+    /// of the first bay, by weapon id, with a fighter docked whose `shïp` has
+    /// Flags 0x8000.
     func ejectableBayClass(of ship: Ship) -> Int? {
+        ejectableBay(of: ship)?.spec.fighterShipID
+    }
+
+    /// B-6 (`Ship_HandleShip` 0x00433050): a destroyed ship with an
+    /// ejectable bay rolls once its death timer is down to half the hull's
+    /// DeathDelay.
+    func dyingCarrierEscapeDue(_ ship: Ship, timerTicks: Double) -> Bool {
+        guard !ship.dyingBaysCleared, ship.deathDelayTicks > 0, ejectableBay(of: ship) != nil else { return false }
+        return timerTicks <= ship.deathDelayTicks * 0.5
+    }
+
+    /// The roll: one time in three one fighter escapes the bay. The original
+    /// then randomises the shield (`Rand(trunc(shield))` above 1.0) and halves
+    /// the velocity of the ship in slot *1* when the launch succeeded (the
+    /// spawn function returns 1, not the new slot) and of the player (slot 0)
+    /// when it failed — reproduced here with the first NPC in slot order
+    /// standing for slot 1. Every bank is emptied either way, so it is one
+    /// chance per death.
+    func dyingCarrierEscape(_ ship: Ship) {
+        guard !ship.dyingBaysCleared else { return }
+        ship.dyingBaysCleared = true
+        if rng.range(3) == 0, let bay = ejectableBay(of: ship) {
+            let launched = launchFighter(from: ship, bay: bay, formationSlot: 0)
+            let slot = launched != nil ? npcs.first : player
+            if let s = slot {
+                if s.shield > 1 { s.shield = Double(rng.range(Int(s.shield.rounded(.towardZero)))) }
+                s.velocity = s.velocity * 0.5
+            }
+        }
+        for b in ship.fighterBays { b.docked = 0 }
+        for m in ship.weapons { m.count = 0; m.ammo = 0 }
+    }
+
+    /// `Weapon_FindLaunchBayWeaponBank` (0x00464600): that bay.
+    func ejectableBay(of ship: Ship) -> Ship.FighterBay? {
         guard let game = galaxy?.game else { return nil }
-        return ship.fighterBays.first(where: {
-            (game.ship($0.spec.fighterShipID)?.flags ?? 0) & 0x8000 != 0
-        })?.spec.fighterShipID
+        return ship.fighterBays.sorted { $0.spec.bayWeaponID < $1.spec.bayWeaponID }.first {
+            $0.docked >= 1 && (game.ship($0.spec.fighterShipID)?.flags ?? 0) & 0x8000 != 0
+        }
     }
 
     /// Run the eject rules for this step; called by `step` after the player

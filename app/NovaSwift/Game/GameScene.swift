@@ -2280,6 +2280,13 @@ final class GameScene: SKScene {
                 world.addNPC(ship, arrival: .hyperspace)
             }
         } else {
+            // #21 (0x00422400 from a pilot load): around the player at
+            // `Rand(50) + 50` px on a `Rand(360)` bearing, on the player's
+            // heading.
+            let bearing = Double(world.rng.range(360)) * .pi / 180
+            let dist = Double(world.rng.range(50) + 50)
+            ship.position = player.position + Vec2.heading(bearing) * dist
+            ship.angle = player.angle
             world.addNPC(ship, arrival: .populate)
         }
         world.recruitEscort(ship)
@@ -5534,7 +5541,9 @@ final class GameScene: SKScene {
             // weapon had unlimited ammo, even while it's really being consumed.
             hud.weaponAmmo = mount.spec.hidesAmmoCount ? -1 : mount.ammo   // -1 = unlimited
         } else {
-            hud.weaponName = ""
+            // No secondary selected (`+0x72 == −1`): the panel reads STR#
+            // 2002 #350 (0x00460ec0).
+            hud.weaponName = galaxy?.game.stringList(2002)?.string(at: 350) ?? ""
             hud.weaponAmmo = -1
         }
         hud.hasSecondary = !p.secondaryWeaponIDs.isEmpty

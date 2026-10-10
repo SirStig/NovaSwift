@@ -47,10 +47,10 @@ final class ShipSystemTests: XCTestCase {
 
         var out = [UInt8](repeating: 0, count: 40)
         put16(&out, 2, 5)                     // mass 5
-        put16(&out, 6, 4);  put16(&out, 8, 50)    // shield +50
+        put16(&out, 26, 4); put16(&out, 28, 50)  // shield +50
         put16(&out, 18, 2); put16(&out, 20, 30)   // freeCargo +30
         put16(&out, 22, 15); put16(&out, 24, 37)  // afterburner (fuel 37)
-        put16(&out, 26, 1);  put16(&out, 28, 129) // grants weapon 129
+        put16(&out, 6, 1); put16(&out, 8, 129) // grants weapon 129
         col.add(Resource(type: NovaType.outfit, id: 200, name: "Combat Kit", data: Data(out)))
 
         col.add(weapon(128, name: "Blaster"))
@@ -179,7 +179,7 @@ final class ShipSystemTests: XCTestCase {
         col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
 
         var out = [UInt8](repeating: 0, count: 40)
-        put16(&out, 26, 1); put16(&out, 28, 400)     // grants weapon 400
+        put16(&out, 6, 1); put16(&out, 8, 400)     // grants weapon 400
         col.add(Resource(type: NovaType.outfit, id: 300, name: "Missile Launcher", data: Data(out)))
 
         var wep = [UInt8](repeating: 0, count: 130)
@@ -205,11 +205,11 @@ final class ShipSystemTests: XCTestCase {
         col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
 
         var launcher = [UInt8](repeating: 0, count: 40)
-        put16(&launcher, 26, 1); put16(&launcher, 28, 400)   // grants weapon 400
+        put16(&launcher, 6, 1); put16(&launcher, 8, 400)   // grants weapon 400
         col.add(Resource(type: NovaType.outfit, id: 300, name: "Missile Launcher", data: Data(launcher)))
 
         var ammo = [UInt8](repeating: 0, count: 40)
-        put16(&ammo, 26, 3); put16(&ammo, 28, 400)   // ammunition for weapon 400
+        put16(&ammo, 6, 3); put16(&ammo, 8, 400)   // ammunition for weapon 400
         col.add(Resource(type: NovaType.outfit, id: 301, name: "Missile", data: Data(ammo)))
 
         var wep = [UInt8](repeating: 0, count: 130)
@@ -240,7 +240,7 @@ final class ShipSystemTests: XCTestCase {
         col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
 
         var ammo = [UInt8](repeating: 0, count: 40)
-        put16(&ammo, 26, 3); put16(&ammo, 28, 400)   // ammunition for weapon 400
+        put16(&ammo, 6, 3); put16(&ammo, 8, 400)   // ammunition for weapon 400
         col.add(Resource(type: NovaType.outfit, id: 301, name: "Missile", data: Data(ammo)))
 
         var wep = [UInt8](repeating: 0, count: 130)
@@ -271,11 +271,11 @@ final class ShipSystemTests: XCTestCase {
         col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
 
         var launcher = [UInt8](repeating: 0, count: 40)
-        put16(&launcher, 26, 1); put16(&launcher, 28, 400)   // grants weapon 400
+        put16(&launcher, 6, 1); put16(&launcher, 8, 400)   // grants weapon 400
         col.add(Resource(type: NovaType.outfit, id: 300, name: "Missile Launcher", data: Data(launcher)))
 
         var ammo = [UInt8](repeating: 0, count: 40)
-        put16(&ammo, 26, 3); put16(&ammo, 28, 400)   // ammunition for weapon 400
+        put16(&ammo, 6, 3); put16(&ammo, 8, 400)   // ammunition for weapon 400
         col.add(Resource(type: NovaType.outfit, id: 301, name: "Missile", data: Data(ammo)))
 
         var wep = [UInt8](repeating: 0, count: 130)
@@ -331,11 +331,11 @@ final class ShipSystemTests: XCTestCase {
         col.add(Resource(type: NovaType.ship, id: 128, name: "Fighter", data: Data(ship)))
 
         var turretOutfit = [UInt8](repeating: 0, count: 40)
-        put16(&turretOutfit, 26, 1); put16(&turretOutfit, 28, 401)   // grants weapon 401 (turret variant)
+        put16(&turretOutfit, 6, 1); put16(&turretOutfit, 8, 401)   // grants weapon 401 (turret variant)
         col.add(Resource(type: NovaType.outfit, id: 300, name: "Raven Rocket Turret", data: Data(turretOutfit)))
 
         var ammoOutfit = [UInt8](repeating: 0, count: 40)
-        put16(&ammoOutfit, 26, 3); put16(&ammoOutfit, 28, 400)   // .ammunition names weapon 400 (the pod variant, unowned)
+        put16(&ammoOutfit, 6, 3); put16(&ammoOutfit, 8, 400)   // .ammunition names weapon 400 (the pod variant, unowned)
         col.add(Resource(type: NovaType.outfit, id: 301, name: "Raven Rocket", data: Data(ammoOutfit)))
 
         // Pod variant (400) — never owned/mounted, just the ammo's nominal target.

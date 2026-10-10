@@ -113,6 +113,9 @@ public struct WeaponBehaviorFlags: Sendable, Equatable {
     public var mayAttackParentIfJammed = false
     /// `SmokeSet` — `cicn` set index for the smoke trail, or -1 for none.
     public var smokeSet = -1
+    /// wëap Flags 0x0800 (persistent smoke), which the player's tick also
+    /// reads to drop a secondary selection that can't fire.
+    public var persistentSmoke = false
     /// `JamVuln1-4` — 0...100% vulnerability to each of the four jammer types.
     /// Always four entries.
     public var jamVulnerability: [Int] = [0, 0, 0, 0]
@@ -141,6 +144,7 @@ public struct WeaponBehaviorFlags: Sendable, Equatable {
         losesLockOffBoresight = w.losesLockOffBoresight
         mayAttackParentIfJammed = w.mayAttackParentIfJammed
         smokeSet = w.smokeSet
+        persistentSmoke = w.persistentSmoke
         jamVulnerability = w.jamVulnerability
     }
 
@@ -593,13 +597,29 @@ public struct WeaponSpec {
 /// group's cooldown. Multiple copies stagger — one barrel at a time at
 /// `reload / count`, cycling through the hull's exit points — unless the weapon
 /// has the "fire simultaneously" flag. See `World.fireWeapons`.
+/// One shared round count (B-3): the player's weapons read and spend
+/// `bank[AmmoType].ammo`, so every mount naming the same AmmoType draws from
+/// one pool (0x00463260, 0x00468990, 0x00455150).
+public final class AmmoPool {
+    public var rounds: Int
+    public init(rounds: Int) { self.rounds = rounds }
+}
+
 public final class WeaponMount {
     public let spec: WeaponSpec
     /// Number of copies of this weapon fitted (drives the staggered fire rate and
     /// how many exit points to cycle through).
     public var count: Int
     public var cooldown: Double = 0      // seconds until the group can fire again
-    public var ammo: Int                 // pooled across the group; -1 = unlimited
+    private var ownAmmo: Int
+    /// The shared pool this mount draws from (the player's ammo weapons), or
+    /// nil for a mount that keeps its own rounds (NPCs, bays).
+    public var pool: AmmoPool?
+    /// Rounds left: the shared pool's, else this mount's own; −1 = unlimited.
+    public var ammo: Int {
+        get { pool?.rounds ?? ownAmmo }
+        set { if let pool { pool.rounds = newValue } else { ownAmmo = newValue } }
+    }
     /// The next hull hardpoint (of `spec.exitType`) this group fires from,
     /// advanced each shot so successive shots leave successive barrels.
     public var exitCursor: Int = 0
@@ -607,6 +627,8 @@ public final class WeaponMount {
     /// `spec.burstCount > 0`); the group bursts `burstCount × count` before the
     /// long reload.
     public var burstShots: Int = 0
+    /// The volley counter (`+0x17c`) a Flags3 0x0001 weapon charges by.
+    public var volleyCounter: Int = 0
 
     /// Which blocked-fire reason we last logged, so a held-down fire button
     /// while reloading/dry doesn't spam the log every frame — only the frame
@@ -615,7 +637,7 @@ public final class WeaponMount {
 
     public init(spec: WeaponSpec, ammo: Int = -1, count: Int = 1) {
         self.spec = spec
-        self.ammo = ammo
+        self.ownAmmo = ammo
         self.count = max(1, count)
         // A burst weapon starts its first burst only after a full BurstReload
         // (`Weapon_InitShipWeaponBursts` 0x00413810, WP-20).
@@ -633,33 +655,39 @@ public final class WeaponMount {
         spec.fireSimultaneously ? spec.reloadSeconds : spec.reloadSeconds / Double(max(1, count))
     }
 
-    /// Record that the group fired `shots` shots this event: spend ammo, advance
-    /// the burst counter, and set the next cooldown (the long burst reload once
-    /// the burst is spent). `reloadScale` stretches the ordinary reload, not
-    /// the burst reload (the AI-03 rating ramp).
-    public func didFire(shots: Int, reloadScale: Double = 1) {
+    /// Record that the group fired one volley of `shots` shots: spend ammo,
+    /// advance the burst counter, and set the next cooldown (the long burst
+    /// reload once the burst is spent). `reloadScale` stretches the ordinary
+    /// reload, not the burst reload (the AI-03 rating ramp). Returns how many
+    /// shots' worth of ammo or fuel this volley costs.
+    @discardableResult
+    public func didFire(shots: Int, reloadScale: Double = 1) -> Int {
         let perShotReload = self.perShotReload * reloadScale
+        var charged = shots
         if spec.burstCount > 0 {
             burstShots += shots
-            // Normally ammo is spent per shot. `Flags3` 0x0001 (oneAmmoPerBurst)
-            // instead charges a single round for the whole burst, spent only when
-            // the burst completes (a multi-shot missile that costs one missile).
-            if !spec.oneAmmoPerBurst, ammo > 0, spec.ammoPerShot > 0 {
-                ammo = max(0, ammo - shots * spec.ammoPerShot)
+            // Normally ammo is spent per shot. `Flags3` 0x0001 instead charges
+            // every BurstCount-th volley, that volley's shots (0x00455150): a
+            // non-simultaneous weapon on N mounts pays N rounds per burst, a
+            // simultaneous one N once.
+            if spec.oneAmmoPerBurst {
+                volleyCounter += 1
+                charged = volleyCounter % spec.burstCount == 0 ? shots : 0
+            }
+            if ammo > 0, spec.ammoPerShot > 0 {
+                ammo = max(0, ammo - charged * spec.ammoPerShot)
             }
             if burstShots >= spec.burstCount * max(1, count) {
-                if spec.oneAmmoPerBurst, ammo > 0, spec.ammoPerShot > 0 {
-                    ammo = max(0, ammo - spec.ammoPerShot)
-                }
                 cooldown = spec.burstReloadSeconds > 0 ? spec.burstReloadSeconds : perShotReload
                 burstShots = 0
-                return
+                return charged
             }
             cooldown = perShotReload
-            return
+            return charged
         }
         if ammo > 0, spec.ammoPerShot > 0 { ammo = max(0, ammo - shots * spec.ammoPerShot) }
         cooldown = perShotReload
+        return charged
     }
 
     /// Called when something tried to fire this mount but it wasn't `ready` —
@@ -708,6 +736,9 @@ public final class Projectile {
     /// ticks instead of jumping. Seeded to the spawn position. Presentational only.
     public var renderPrevPosition: Vec2
     public var targetID: Int?            // for guided/homing munitions
+    /// The shot's target slot (`+0x2a`) whatever its guidance: the shooter's
+    /// primary target at launch (a submunition's own target).
+    public var shotTargetID: Int?
     public var alive = true
     /// Per-weapon ionization flash tint carried from the firing `WeaponSpec`, so
     /// an ion projectile's victim glows the same hue a beam's would. Nil → the
@@ -980,6 +1011,10 @@ public final class ActiveBeam {
 /// world appends them during `step`; the scene drains them after. Persistent
 /// entities (ships, projectiles) are read directly off the world instead.
 public enum WorldEvent {
+    /// An escort's combat chatter line (`Frame_UpdateCombatChatter`
+    /// 0x004311f0): play `soundID` unpositioned, and keep
+    /// `World.combatChatterPlaying` set until it ends.
+    case combatChatter(soundID: Int)
     case weaponFired(shooterID: Int, at: Vec2, heading: Double, soundID: Int?, weaponID: Int = -1)
     /// `mountIndex` lets the renderer correlate this shot with an active
     /// `beamLoopStart` on the same mount (continuous beams reposition one

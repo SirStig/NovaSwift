@@ -70,10 +70,10 @@ struct HullAnim {
     /// Folding / keyCarried aren't wired to their triggers yet, so they draw the
     /// level set (set 0) — no worse than today, and ready to extend.
     /// - Parameter carriesKeyShip: whether a `shïp.KeyCarried`-type ship is still
-    ///   aboard. Only consulted in `.keyCarried` mode, where the Bible has the
-    ///   second set shown precisely when none are.
+    ///   aboard. Only consulted in `.keyCarried` mode, where the original shows
+    ///   the second set while one is.
     func baseSet(turnSign: Int, animClock: Double, disabled: Bool,
-                 carriesKeyShip: Bool = true) -> Int {
+                 carriesKeyShip: Bool = false) -> Int {
         guard setCount > 1 else { return 0 }
         // A hulk has no attitude control, so it can't bank and its animation is
         // dead: it always draws the level set, whatever it seems to be doing.
@@ -86,9 +86,9 @@ struct HullAnim {
         case .animation:
             return Int(animClock / animDelaySec) % setCount
         case .keyCarried:
-            // Bible: the second set is shown "when not carrying key ships" — an
-            // empty carrier visibly reads as empty (open, dark bay doors).
-            return carriesKeyShip ? 0 : min(1, setCount - 1)
+            // The original (0x00428340) shows set 1 while a key-carried ship
+            // IS aboard (`Weapon_HasLoadedLaunchBayAmmo`), set 0 otherwise.
+            return carriesKeyShip ? min(1, setCount - 1) : 0
         case .none, .folding:
             return 0
         }
