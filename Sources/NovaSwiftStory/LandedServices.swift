@@ -32,7 +32,7 @@ public enum LandedServices {
     /// stellar is dominated (tested last, so it wins).
     public static func commodityScale(spob: SpobRes, state: PlayerState, game: NovaGame) -> Double {
         var scale = 1.25
-        if spob.government >= 128, let system = game.systemContaining(spob: spob.id),
+        if spob.government >= 128, let system = game.owningSystem(ofSpob: spob.id, state: state),
            systemReputation(state, system: system, game: game) < 0 {
             scale = 1.1
         }

@@ -44,9 +44,9 @@ enum MissionText {
         var deadline = errorText
         if let f = fields {
             destination = stellarName(f.travelSpob, game)
-            destinationSystem = systemName(ofSpob: f.travelSpob, game)
+            destinationSystem = systemName(ofSpob: f.travelSpob, player, game)
             returnName = stellarName(f.returnSpob, game)
-            returnSystem = systemName(ofSpob: f.returnSpob, game)
+            returnSystem = systemName(ofSpob: f.returnSpob, player, game)
             // An unresolvable destination borrows the return stellar's name.
             if destination == errorText, returnName != errorText { destination = returnName }
             if destinationSystem == errorText, returnSystem != errorText { destinationSystem = returnSystem }
@@ -101,8 +101,8 @@ enum MissionText {
         return spob.displayName
     }
 
-    private static func systemName(ofSpob spobID: Int?, _ game: NovaGame) -> String {
-        guard let spobID, let sys = game.systemContaining(spob: spobID).flatMap({ game.system($0) }) else {
+    private static func systemName(ofSpob spobID: Int?, _ player: PlayerState, _ game: NovaGame) -> String {
+        guard let spobID, let sys = game.owningSystem(ofSpob: spobID, state: player).flatMap({ game.system($0) }) else {
             return errorText
         }
         return sys.displayName

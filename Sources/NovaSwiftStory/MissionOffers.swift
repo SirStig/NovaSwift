@@ -390,7 +390,7 @@ extension StoryEngine {
         let active = player.activeMission(m.id)
         guard let spobID = active?.travelSpobID ?? offerTargets(for: m).travelSpob,
               let spob = game.spob(spobID),
-              let sysID = game.systemContaining(spob: spobID), let sys = game.system(sysID)
+              let sysID = owningSystem(ofSpob: spobID), let sys = game.system(sysID)
         else { return nil }
         return (spobID, sys.id, spob.displayName, sys.displayName)
     }

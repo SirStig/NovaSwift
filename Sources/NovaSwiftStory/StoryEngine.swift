@@ -99,6 +99,9 @@ public final class StoryEngine {
             Log.ncb.error("NCB apply: expression yielded no operations: \"\(expr, privacy: .public)\" (from \(source, privacy: .public))")
         }
         for op in ops { execute(op, source: source, logBits: logBits) }
+        if !ops.isEmpty, let moved = refreshSystemState() {
+            services?.movePlayer(toSystem: moved, keepPosition: true)
+        }
     }
 
     private func execute(_ op: NCBSetOp, source: String, logBits: Bool = true) {
@@ -312,17 +315,60 @@ public final class StoryEngine {
     /// Nova makes systems appear/disappear mid-game via control bits.
     public func isSystemVisible(_ systemID: Int) -> Bool {
         guard let test = game.system(systemID)?.visibility, !test.isEmpty else { return true }
-        return NCBTest(test).evaluate(player)
+        if NCBTest(test).evaluate(player) { return true }
+        return systemID == player.currentSystem && Self.isForcedVisible(systemID, state: player, game: game)
     }
 
     /// Every system currently hidden — those whose `visibility` NCB test is
     /// non-empty and evaluates false against the current pilot.
-    public func hiddenSystemIDs() -> Set<Int> {
-        var hidden = Set<Int>()
-        for s in game.systems() where !s.visibility.isEmpty {
-            if !NCBTest(s.visibility).evaluate(player) { hidden.insert(s.id) }
+    public func hiddenSystemIDs() -> Set<Int> { game.hiddenSystemIDs(for: player) }
+
+    /// The system that owns `spobID` with the pilot's current visibility
+    /// (0x00448090; see `NovaGame.systemContaining(spob:hidden:)`).
+    public func owningSystem(ofSpob spobID: Int) -> Int? {
+        game.systemContaining(spob: spobID, hidden: hiddenSystemIDs())
+    }
+
+    /// The tail of 0x00448090: when the pilot's system has gone hidden, the
+    /// pilot moves to the first visible member of its twin group; with none
+    /// visible, to the group's root, which is then forced visible (logged in
+    /// the original as "player is in inactive system … reactivating"). The
+    /// force lasts while the pilot is there: the original re-forces it at
+    /// every evaluation (`isForcedVisible`). Returns the new system, or nil
+    /// when nothing moved.
+    @discardableResult
+    public func resolveCurrentSystemVisibility() -> Int? {
+        let current = player.currentSystem
+        guard !isSystemVisible(current) else { return nil }
+        let hidden = game.hiddenSystemIDs(for: player)
+        let target = game.visibleTwin(of: current, hidden: hidden) ?? game.reputationMap().root(of: current)
+        guard target != current else { return nil }
+        Log.mission.notice("player is in inactive system \(current, privacy: .public); moving to system \(target, privacy: .public)")
+        player.currentSystem = target
+        return target
+    }
+
+    /// Whether a hidden `systemID` is still visible because the pilot is in it
+    /// and it is the root of a twin group with no visible member — the
+    /// "reactivating system" fallback of 0x00448090.
+    static func isForcedVisible(_ systemID: Int, state: PlayerState, game: NovaGame) -> Bool {
+        let map = game.reputationMap()
+        guard map.root(of: systemID) == systemID else { return false }
+        let gated = Dictionary(game.visibilityGatedSystems().map { ($0.id, $0.test) }, uniquingKeysWith: { a, _ in a })
+        return (map.groups[systemID] ?? [systemID]).allSatisfy { id in
+            guard let test = gated[id] else { return false }
+            return !NCBTest(test).evaluate(state)
         }
-        return hidden
+    }
+
+    /// The bookkeeping `System_UpdateSystemAndStellarDisplayState` 0x00432470
+    /// and 0x00448090 run after landing, launch, arrival and every control-bit
+    /// change: twins share one discovery level, and a pilot left in a hidden
+    /// system moves to its visible twin. Returns the system the pilot moved to.
+    @discardableResult
+    public func refreshSystemState() -> Int? {
+        player.shareTwinDiscovery(game.reputationMap())
+        return resolveCurrentSystemVisibility()
     }
 
     // MARK: - Contribute/Require pool
@@ -600,7 +646,7 @@ public final class StoryEngine {
             } else {
                 targetSpob = returnStellar(of: am, m) ?? am.travelSpobID
             }
-            let sys = targetSpob.flatMap { game.systemContaining(spob: $0) }.flatMap { game.system($0) }
+            let sys = targetSpob.flatMap { owningSystem(ofSpob: $0) }.flatMap { game.system($0) }
             return MissionSummary(
                 id: am.missionID,
                 name: resolveMissionText(m.displayName, for: m, active: am),

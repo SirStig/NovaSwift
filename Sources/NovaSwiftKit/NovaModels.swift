@@ -1299,6 +1299,49 @@ public struct NovaGame {
         return cache.spobSystemIndex?[spobID]
     }
 
+    /// The system that owns `spobID` while the systems in `hidden` are out of
+    /// the galaxy — `NovaResources_EvaluateAvailability` 0x00448090 step 3:
+    /// systems are walked in ascending index; a visible system not already
+    /// claimed claims its whole same-position twin group and then takes every
+    /// stellar it lists that has no owner yet. So a stellar belongs to the
+    /// lowest-index **visible** system that lists it, and only the first
+    /// visible member of a twin group claims stellars. When no visible system
+    /// owns it, the first system listing it at all (the second loop of
+    /// `System_FindSystemContainingStellar` 0x0046e790).
+    public func systemContaining(spob spobID: Int, hidden: Set<Int>) -> Int? {
+        let groups = reputationMap().groups
+        var claimed = Set<Int>()
+        for row in ownerTable() where !hidden.contains(row.id) && !claimed.contains(row.id) {
+            for member in groups[row.id] ?? [row.id] { claimed.insert(member) }
+            if row.spobs.contains(spobID) { return row.id }
+        }
+        return systemContaining(spob: spobID)
+    }
+
+    /// The first visible member of `systemID`'s twin group (lowest id first),
+    /// or nil — `System_ResolveVisibleSystemForTravel` 0x0046b920. It walks
+    /// the chain from its root, so a visible system with a lower visible twin
+    /// resolves to that twin.
+    public func visibleTwin(of systemID: Int, hidden: Set<Int>) -> Int? {
+        (reputationMap().groups[systemID] ?? [systemID]).first { !hidden.contains($0) }
+    }
+
+    /// Every system as (id, stellars), ascending — the walk order of the
+    /// ownership pass. Built once.
+    private func ownerTable() -> [(id: Int, spobs: [Int])] {
+        memo("NovaGame.ownerTable") {
+            systems().sorted { $0.id < $1.id }.map { (id: $0.id, spobs: $0.spobs) }
+        }
+    }
+
+    /// The systems whose `Visibility` NCB test is non-empty, as (id, test),
+    /// ascending. Every other system is always visible. Built once.
+    public func visibilityGatedSystems() -> [(id: Int, test: String)] {
+        memo("NovaGame.visibilityGatedSystems") {
+            systems().filter { !$0.visibility.isEmpty }.sorted { $0.id < $1.id }.map { (id: $0.id, test: $0.visibility) }
+        }
+    }
+
     /// A value derived from this data set, built once by `build` and kept for the
     /// life of the game data under `key`. Lets other modules cache their own
     /// lookup tables (e.g. the story engine's mission geography) without each
@@ -1400,12 +1443,14 @@ public struct NovaGame {
     /// linked gate's `spöb` and the system that holds it. Skips links that don't
     /// resolve to a real gate in a real system (bad/self data), deduped by
     /// destination system so the galaxy map draws one line per reachable system.
-    public func gateDestinations(from gate: SpobRes) -> [(gateSpobID: Int, systemID: Int)] {
+    /// `hidden` is the systems the story hides: a gate's system is found
+    /// visible-first (`System_FindSystemContainingStellar` 0x0046e790).
+    public func gateDestinations(from gate: SpobRes, hidden: Set<Int> = []) -> [(gateSpobID: Int, systemID: Int)] {
         var seenSystems = Set<Int>()
         var out: [(Int, Int)] = []
         for linkID in gate.hyperLinks {
             guard linkID != gate.id, let linked = spob(linkID), linked.isGate,
-                  let sysID = systemContaining(spob: linkID), seenSystems.insert(sysID).inserted
+                  let sysID = systemContaining(spob: linkID, hidden: hidden), seenSystems.insert(sysID).inserted
             else { continue }
             out.append((linkID, sysID))
         }
@@ -1421,12 +1466,13 @@ public struct NovaGame {
     /// Each candidate carries its own system.
     public func wormholeExitCandidates(from wormhole: SpobRes, currentSystem: Int? = nil,
                                        isVisible: (Int) -> Bool = { _ in true }) -> [(gateSpobID: Int, systemID: Int)] {
+        let hidden = Set(visibilityGatedSystems().map(\.id).filter { !isVisible($0) })
         if !wormhole.hyperLinks.isEmpty {
-            return gateDestinations(from: wormhole).filter { isVisible($0.systemID) }
+            return gateDestinations(from: wormhole, hidden: hidden).filter { isVisible($0.systemID) }
         }
         var out: [(Int, Int)] = []
         for s in spobs() where s.id != wormhole.id && s.isWormhole && s.hyperLinks.isEmpty {
-            guard let sys = systemContaining(spob: s.id), sys != currentSystem, isVisible(sys) else { continue }
+            guard let sys = systemContaining(spob: s.id, hidden: hidden), sys != currentSystem, isVisible(sys) else { continue }
             out.append((s.id, sys))
         }
         return out
