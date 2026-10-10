@@ -240,6 +240,8 @@ final class GameHost {
         // AI-13 / AI-15: reinforcement retrigger days and stellar garrisons
         // persist in the save; the scene seeds every world it builds from them
         // and hands back what each visit changed.
+        scene.escortOrdersProvider = { [weak seedPilot] in seedPilot?.state.escortCategoryOrders }
+        scene.onEscortOrdersChanged = { [weak seedPilot] in seedPilot?.state.escortCategoryOrders = $0 }
         scene.defenseStateProvider = { [weak seedPilot] in
             (seedPilot?.state.reinforcementRetriggerDays ?? [:], seedPilot?.state.stellarGarrisons ?? [:])
         }

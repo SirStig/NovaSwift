@@ -37,6 +37,8 @@ final class EVNovaPilotImportTests: XCTestCase {
         var rank: Int?
         var dominated: Int?
         var nick = "Ace"
+        var orders: [Int] = [-1, -1, -1, -1]
+        var jitter: [Int] = [0, 0, 0, 0]
         var prefix = ""
         var suffix = " NC"
         var strict = true
@@ -96,7 +98,7 @@ final class EVNovaPilotImportTests: XCTestCase {
         if let p = s.persGrudge { put16(&b2, 0x1806 + 2 * p, 1, big) }
         if let c = s.cron { put16(&b2, 0x3590 + 2 * c.idx, c.dur, big); put16(&b2, 0x3990 + 2 * c.idx, c.hold, big) }
         if let r = s.rank { put16(&b2, 0x5DDE + 2 * r, 1, big) }
-        for i in 0..<0x4 { put16(&b2, 0x5D90 + 2 * i, -1, big) }
+        for i in 0..<0x4 { put16(&b2, 0x5D90 + 2 * i, s.orders[i], big); put16(&b2, 0x3588 + 2 * i, s.jitter[i], big) }
         putText(&b2, 0x5D98, s.nick, pascal: pascal)
         putText(&b2, 0x5EDE, s.prefix, pascal: pascal); putText(&b2, 0x5EEE, s.suffix, pascal: pascal)
         return (b1, b2)
@@ -344,5 +346,26 @@ final class EVNovaPilotImportTests: XCTestCase {
         let back = try JSONDecoder().decode(PilotSave.self, from: JSONEncoder().encode(save))
         XCTAssertEqual(back.player.credits, 123_456)
         XCTAssertEqual(back.player.setBits, [0, 17, 9999])
+    }
+
+    func testEscortGroupOrdersImportAndSurviveSave() throws {
+        let game = try stockGame()
+        var (s, _) = try fullSpec(game)
+        s.orders = [-1, 2, 4, 1]
+        s.jitter = [100, 100, 100, 100]
+        let res = EVNovaPilotImporter.convert(try EVNovaPilotFile.decode(windowsFile(s)), pilotName: "Test Pilot", game: game)
+        XCTAssertEqual(res.player.escortCategoryOrders, [-1, 2, 4, 1])
+        XCTAssertFalse(res.summary.unmapped.contains { $0.contains("group-order") })
+        XCTAssertTrue(res.summary.unmapped.contains { $0.contains("stat-jitter") })
+        let save = PilotSave(displayName: "T", scenarioName: "I", player: res.player, game: game)
+        let back = try JSONDecoder().decode(PilotSave.self, from: JSONEncoder().encode(save))
+        XCTAssertEqual(back.player.escortCategoryOrders, [-1, 2, 4, 1])
+    }
+
+    func testNoEscortOrdersLeavesStateNil() throws {
+        let game = try stockGame()
+        let (s, _) = try fullSpec(game)
+        let res = EVNovaPilotImporter.convert(try EVNovaPilotFile.decode(windowsFile(s)), pilotName: "Test Pilot", game: game)
+        XCTAssertNil(res.player.escortCategoryOrders)
     }
 }

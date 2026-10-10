@@ -440,6 +440,11 @@ public struct PlayerState: Codable, Sendable {
     /// `StoryEngine.payDailyEscortFees`). Optional so pilots saved before the
     /// escort roster existed still decode (treated as empty), like `fuel`.
     public var escorts: [EscortRecord]?
+    /// The standing escort order per category (fighter, medium, warship,
+    /// freighter) as `OriginalEscortCommand` codes; -1 = never ordered
+    /// (Formation). Mirrors the original's `g_target_category_command`, which it
+    /// saves at block 2 +0x5d90. Optional for save-compat.
+    public var escortCategoryOrders: [Int]?
     /// Monotonic counter backing `EscortRecord.id`, so a released-then-rehired
     /// escort never collides with a live one. Optional for save-compat.
     public var nextEscortRecordID: Int?

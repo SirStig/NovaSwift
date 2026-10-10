@@ -323,6 +323,12 @@ public enum EVNovaPilotImporter {
             warnings.append("The original does not save when a mission was accepted; accept dates are set to the pilot's current date.")
         }
 
+        // MARK: escort group orders (g_target_category_command, block 2 +0x5d90)
+        let orders = (0..<4).map { Int(r.i16(2, 0x5D90 + 2 * $0)) }
+        if orders.contains(where: { $0 >= 0 }) {
+            p.escortCategoryOrders = orders.map { (0...4).contains($0) ? $0 : -1 }
+        }
+
         // MARK: not carried over
         func count(_ n: Int, _ f: (Int) -> Bool) -> Int { (0..<n).filter(f).count }
         if r.u16(1, 0x10) > 0 { unmapped.append("Shield points (the original ignores them too; ships load at full shield and armor)") }
@@ -333,9 +339,8 @@ public enum EVNovaPilotImporter {
         }
         if count(0x800, { r.u16(2, 0x2086 + 2 * $0) != 0 }) > 0 { unmapped.append("Per-planet domination-day counters") }
         if (0..<3).contains(where: { r.u16(2, 0x5DD8 + 2 * $0) != 0 }) { unmapped.append("Ship paint color") }
-        if count(4, { r.i16(2, 0x5D90 + 2 * $0) > 0 }) > 0 { unmapped.append("Escort group-order commands") }
         if r.b2[0x3086] != 0 { unmapped.append("The intro-seen latch") }
-        if count(4, { r.u16(2, 0x3588 + 2 * $0) != 0 }) > 0 { unmapped.append("Two unidentified counter pairs (block 2 +0x3588)") }
+        if count(4, { r.u16(2, 0x3588 + 2 * $0) != 0 }) > 0 { unmapped.append("Cosmetic stat-jitter values (the original never reads them)") }
         unmapped.append("Mission accept dates and per-mission random rolls (not saved by the original in a usable form)")
         if blocks.format == .classicMac {
             warnings.append("Classic Mac pilots are converted from their resource fork; the layout is derived from the Windows format and has not been checked against a real Mac pilot.")

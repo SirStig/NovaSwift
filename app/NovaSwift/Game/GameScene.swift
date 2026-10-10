@@ -95,6 +95,9 @@ final class GameScene: SKScene {
     var onMissionAuxShipsArrived: ((_ missionID: Int, _ count: Int) -> Void)?
     /// The outgoing world's garrison changes (nil = reseeded full), handed to
     /// the host just before a jump or takeoff replaces it.
+    /// Saved per-category escort orders in, and changes out.
+    var escortOrdersProvider: (() -> [Int]?)?
+    var onEscortOrdersChanged: (([Int]) -> Void)?
     var onGarrisonSnapshot: (([Int: Int?]) -> Void)?
 
     /// AI-32: the pilot's name and the ScanMask of the mission cargo aboard,
@@ -107,6 +110,8 @@ final class GameScene: SKScene {
             w.pilotName = ctx.pilotName
             w.missionCargoScanMask = ctx.missionCargoScanMask
         }
+        if let saved = escortOrdersProvider?() { w.originalAI.restoreCategoryCommand(saved) }
+        w.originalAI.onCategoryCommandChanged = { [weak self] in self?.onEscortOrdersChanged?($0) }
         guard let state = defenseStateProvider?() else { return }
         w.stellarGarrisons = state.garrisons
         w.spawner?.holdReinforcements(retriggerDaysLeft: state.reinforcementDays[systemID] ?? 0)

@@ -34,7 +34,18 @@ public final class OriginalAI {
     /// `g_target_category_command` (`DAT_007354c4[4]`): the player's standing
     /// order per escort category (fighter, medium, warship, freighter). −1 is
     /// the startup value and reads as Formation.
-    public internal(set) var categoryCommand = [-1, -1, -1, -1]
+    public internal(set) var categoryCommand = [-1, -1, -1, -1] {
+        didSet { if categoryCommand != oldValue { onCategoryCommandChanged?(categoryCommand) } }
+    }
+    /// Fires when a standing order changes, so the host can persist it.
+    public var onCategoryCommandChanged: (([Int]) -> Void)?
+    /// Restore saved standing orders (no change callback).
+    public func restoreCategoryCommand(_ saved: [Int]) {
+        guard saved.count == 4 else { return }
+        let cb = onCategoryCommandChanged; onCategoryCommandChanged = nil
+        categoryCommand = saved
+        onCategoryCommandChanged = cb
+    }
 
     public init() {}
 

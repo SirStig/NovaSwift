@@ -129,7 +129,7 @@ dates become the pilot's current date.
 | 0x3590 / 0x3990 | i16 x0x200 | crön duration / holdoff counters, -1/-1 = inactive | `cronRuntime` with `active`, `duration`, `holdoff` |
 | 0x3d90 | u16 x0x800 | per-system reinforcement cooldown | `reinforcementRetriggerDays` |
 | 0x4d90 | u16 x0x800 | per-stellar regeneration countdown (1 or more = destroyed) | `destroyedStellars`, `stellarDestroyedOnDay` (backdated from the stellar's DeadTime) |
-| 0x5d90 | i16 x4 | escort group-order commands | not carried over |
+| 0x5d90 | i16 x4 | escort group-order commands (`g_target_category_command`, -1 = none; 0 formation, 1 defend, 2 attack, 3 return, 4 hold) | `escortCategoryOrders` (restored into `OriginalAI.categoryCommand`, saved with the pilot) |
 | 0x5d98 | 0x40 | nickname | `nickname` |
 | 0x5dd8 | u16 x3 | ship paint color | not carried over |
 | 0x5dde | u16 x0x80 | active ranks | `activeRanks` |
@@ -137,8 +137,13 @@ dates become the pilot's current date.
 
 Strings are C strings on Windows and Pascal strings on classic Mac; the importer
 treats a field as Pascal when its first byte is a plausible length and the text
-holds no NUL. Two further word pairs at 0x3588/0x358c are loaded by the
-original into globals nobody has identified; they are reported if nonzero.
+holds no NUL. The four words at 0x3588/0x358a/0x358c/0x358e are the
+original's player stat-modifier globals (DAT_007353f6/f8/fa/fc; init 100). The
+first pair is jittered +-1 within 85..115 and the second re-rolled to 90..110 on
+each hyperjump (`Frame_JitterPlayerStatModifiers` 0x00431480,
+`Frame_RerollPlayerStatModifiers` 0x00431500). Nothing in the decompile reads
+them besides the save/load code, so they have no gameplay effect; they are not
+imported and only noted in the summary if nonzero.
 
 ## What the importer does about missing content
 
