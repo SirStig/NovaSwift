@@ -1254,6 +1254,18 @@ public struct NovaGame {
         return nil
     }
 
+    /// A stellar's collision mask, resolved like `spobSprite`.
+    public func spobCollisionMask(_ spobID: Int) -> SpriteMaskSet? {
+        guard let spob = spob(spobID) else { return nil }
+        if let spin = spin(spob.graphicSpinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {
+            return collisionMask(rleID: spin.spriteID)
+        }
+        if resources.resource(NovaType.rleD, spob.graphicSpinID) != nil {
+            return collisionMask(rleID: spob.graphicSpinID)
+        }
+        return nil
+    }
+
     /// A shot graphic's collision mask, resolved like `weaponSprite(spinID:)`.
     public func weaponCollisionMask(spinID: Int) -> SpriteMaskSet? {
         if let spin = spin(spinID), resources.resource(NovaType.rleD, spin.spriteID) != nil {

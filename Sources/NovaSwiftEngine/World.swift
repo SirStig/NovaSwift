@@ -2561,7 +2561,7 @@ public final class World {
         // Disabled hulks included, and the kill is instant (WP-25).
         for ship in allShips where ship.isAlive {
             if ship.hullShieldsStellars || (ship.isPlayerControlled && ship.hasStellarResistOutfit) { continue }
-            for body in deadly where (ship.position - body.position).length < body.radius + ship.radius {
+            for body in deadly where touchesDeadlyStellar(ship, body) {
                 ship.shield = 0
                 ship.armor = 0
                 ship.diesInstantly = true
@@ -2569,6 +2569,19 @@ public final class World {
                 break
             }
         }
+    }
+
+    /// `Stellar_ApplyDeadlyCollision` (0x0043aed0): the hull's and the stellar's
+    /// sprite masks overlap (frame 0 for the stellar). Falls back to the
+    /// bounding circles when either art is missing.
+    private func touchesDeadlyStellar(_ ship: Ship, _ body: StellarBody) -> Bool {
+        guard let galaxy, let hull = galaxy.hullCollisionMask(ship.shipTypeID),
+              let stellar = galaxy.stellarCollisionMask(body.id) else {
+            return (ship.position - body.position).length < body.radius + ship.radius
+        }
+        let a = ContactSprite.hull(hull.mask, frame: hull.frame(angle: ship.angle), at: ship.position)
+        let b = ContactSprite.hull(stellar, frame: 0, at: body.position)
+        return SpriteContact.boundsOverlap(a, b) && SpriteContact.masksOverlap(a, b)
     }
 
     /// The player's own death is otherwise invisible to `despawnDepartedAndDead`

@@ -85,6 +85,33 @@ public struct SpriteMaskSet: Sendable {
             }
             y += 1
         }
+        return abutsAsOriginal(frame: frame, left: left, top: top, other, otherFrame: otherFrame,
+                               otherLeft: otherLeft, otherTop: otherTop, x0: x0, x1: x1, y0: y0, y1: y1)
+    }
+
+    /// The original's run-walk quirk (`SpriteRleCommandStream_SkipToRowCount`
+    /// 0x00472190, confirmed with the oracle): where this sprite's opaque run
+    /// ends exactly where the other's next opaque run starts on the same row,
+    /// the walk reports a hit although the pixels only abut. The reverse
+    /// order is not a hit.
+    private func abutsAsOriginal(frame: Int, left: Int, top: Int,
+                                 _ other: SpriteMaskSet, otherFrame: Int, otherLeft: Int, otherTop: Int,
+                                 x0: Int, x1: Int, y0: Int, y1: Int) -> Bool {
+        var y = y0
+        while y < y1 {
+            var xs = x0
+            while xs < x1 {
+                // Bit k of both windows is pixel xs - 1 + k.
+                let wa = window(frame: frame, y: y - top, x: xs - 1 - left)
+                let wb = other.window(frame: otherFrame, y: y - otherTop, x: xs - 1 - otherLeft)
+                let n = min(x1 - xs, 63)
+                let keep: UInt64 = n >= 64 ? ~0 : (UInt64(1) << UInt64(n)) - 1
+                // A opaque at k and clear at k + 1; B clear at k and opaque at k + 1.
+                if (wa & ~(wa >> 1)) & ~wb & (wb >> 1) & keep != 0 { return true }
+                xs += 63
+            }
+            y += 1
+        }
         return false
     }
 }
