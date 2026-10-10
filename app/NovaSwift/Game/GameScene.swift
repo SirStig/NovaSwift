@@ -3009,8 +3009,9 @@ final class GameScene: SKScene {
 
     /// The original nav panel (0x0045e400; UI-10): "Hyperspace" (#345) with
     /// the armed next hop (dimmed until clear of the no-jump zone with a jump
-    /// of fuel), else "Stellar Navigation" (#343) with the selected stellar,
-    /// else "Nav System Off" (#342).
+    /// of fuel), or "Hyperspace" / "No Destination" (#344) in travel mode 3
+    /// with nothing armed, else "Stellar Navigation" (#343) with the selected
+    /// stellar, else "Nav System Off" (#342).
     private func updateOriginalNavText() {
         guard let hud else { return }
         hud.noTargetText = misc(349)
@@ -3018,6 +3019,10 @@ final class GameScene: SKScene {
             hud.navTitle = misc(345)
             hud.navName = hud.navNextHopName
             hud.navNameDim = !(isClearOfNoJumpZone && world.player.fuel >= ShipFuel.perJump) && !isJumping
+        } else if hud.navHyperspaceMode, selectedPlanetID == nil {
+            hud.navTitle = misc(345)
+            hud.navName = misc(344)
+            hud.navNameDim = false
         } else if let id = selectedPlanetID {
             hud.navTitle = misc(343)
             hud.navName = planetVisuals.first { $0.id == id }?.name ?? misc(344)
@@ -4012,7 +4017,7 @@ final class GameScene: SKScene {
     private func updateMurkFog() {
         applySystemBackdrop()   // re-tints after an in-place jump world swap
         let murk = world.effectiveMurk(for: world.player)
-        for layer in starLayers { layer.container.isHidden = murk < 0 }
+        for layer in starLayers { layer.container.isHidden = world.systemMurk < 0 }
         guard let murkFog else { return }
         let alpha = CGFloat(max(0, min(100, murk))) / 100 * 0.85
         murkFog.alpha = alpha

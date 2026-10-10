@@ -18,24 +18,28 @@ public enum EscapePodRespawn {
     public static func driftDays(roll30: Int) -> Int { roll30 + 15 }
 
     /// `Stellar_FindValidRespawnStellar` (0x00467710): a depth-first flood out
-    /// of the death system over visible, explored neighbours — at each system
-    /// it checks every unvisited neighbour's stellars before recursing — for a
-    /// stellar that is standing, landable, has a shipyard (spöb Flags 0x0008)
-    /// and whose `MinStatus` the player's standing there meets (`-32767`
-    /// always does, `32767` never). The death system itself is never chosen.
+    /// of the death system over visible neighbours with a discovery level
+    /// above 0 (visited **or charted by a map**) — at each system it checks
+    /// every unvisited neighbour's stellars before recursing — for a stellar
+    /// usable for travel (`usableForTravel`: landable, not a gate, destroyed
+    /// exactly when its Flags 0x0080 asks), with a shipyard (spöb Flags
+    /// 0x0008) and whose `MinStatus` the player's standing there meets
+    /// (`-32767` always does, `32767` never). The death system itself is
+    /// never chosen.
     /// Returns the stellar and its system, or nil (the host then uses the
     /// first system).
     public static func respawnStellar(from deathSystem: Int, state: PlayerState, game: NovaGame,
                                       isVisible: (Int) -> Bool) -> (spob: Int, system: Int)? {
         var visited: Set<Int> = [deathSystem]
         func eligible(_ id: Int) -> Bool {
-            !visited.contains(id) && state.exploredSystems.contains(id) && isVisible(id)
+            !visited.contains(id) && state.isSystemExplored(id) && isVisible(id)
         }
         func scan(_ systemID: Int) -> Int? {
             guard let sys = game.system(systemID) else { return nil }
             for spobID in sys.spobs {
-                guard let spob = game.spob(spobID), !state.isStellarDestroyed(spobID),
-                      spob.canLand, spob.hasShipyard, spob.minStatus != 32767 else { continue }
+                guard let spob = game.spob(spobID),
+                      spob.usableForTravel(destroyed: state.isStellarDestroyed(spobID)),
+                      spob.hasShipyard, spob.minStatus != 32767 else { continue }
                 let standing = state.reputation(atSystem: systemID)
                 if spob.minStatus <= standing || spob.minStatus == -32767 { return spobID }
             }

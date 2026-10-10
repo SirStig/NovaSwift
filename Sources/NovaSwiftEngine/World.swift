@@ -4649,12 +4649,13 @@ public final class World {
         max(0, min(100, systemInterference - max(-100, min(100, observer.interferenceReduction))))
     }
 
-    /// `systemMurk` net of `observer`'s ModType-28 murk outfits, capped at the
-    /// documented 100 max. Not clamped below 0: per the Bible, a negative
-    /// value is "equivalent to zero murk but also hides the starfield" — a
-    /// distinct visual state from 0, not just an extra-clear one.
+    /// `System_GetEffectiveMurkPercent` 0x0046c250: the system's murk (a
+    /// negative one counts as 0) **plus** every owned ModType-28 outfit's
+    /// ModVal × count, clamped to 0…100. A negative `systemMurk` also hides
+    /// the starfield ("equivalent to zero murk but also hides the starfield");
+    /// that reads the raw `systemMurk`, not this value.
     public func effectiveMurk(for observer: Ship) -> Int {
-        min(100, systemMurk - observer.murkModifier)
+        max(0, min(100, max(systemMurk, 0) + observer.murkModifier))
     }
 
     /// Whether `observer` can detect (and therefore target) `target` through
