@@ -528,6 +528,8 @@ final class GameScene: SKScene {
     /// System murk (`sÿst.Murk`) fog overlay — a camera-space dark veil whose
     /// opacity tracks `World.effectiveMurk(for:)`.
     private var murkFog: SKSpriteNode?
+    private var currentMurk = 0
+    private var murkOrigin = CGPoint.zero
     /// Space backdrop for systems with no `sÿst.BkgndColor` (near-black blue).
     private static let defaultBackdrop = SKColor(red: 0.02, green: 0.02, blue: 0.06, alpha: 1)
     /// Last applied `World.systemBackgroundColor`, so the backdrop/fog only
@@ -3213,6 +3215,7 @@ final class GameScene: SKScene {
                 node.size = node.texture?.size() ?? CGSize(width: 12, height: 12)
                 node.colorBlendFactor = 0
                 node.blendMode = .alpha
+                applyMurk(to: node, at: node.position)
             } else {
                 // Generic glowing bolt.
                 node.texture = projectileTexture
@@ -3740,6 +3743,7 @@ final class GameScene: SKScene {
                 tri.zRotation = -CGFloat(renderHeading(npc))
             }
             updateIonizeTint(node.ionizeTint, hullTexture: node.sprite?.texture, ship: npc)
+            if let hull = node.sprite { applyMurk(to: hull, at: node.container.position) }
             if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {
                 glow.texture = node.engineGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.engineGlowTextures.count)]
             }
@@ -4028,17 +4032,37 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Fog opacity tracks `World.effectiveMurk(for:)` (0 = clear, 100 = the
-    /// Bible's own "question your glasses prescription"); a negative value
-    /// hides the starfield entirely instead of thickening the fog.
+    /// Murk is a per-sprite distance fog (0x00438db0), not a veil: each
+    /// ship, stellar and shot is mixed toward the system's background colour
+    /// by `MurkFog.level / 32`. A negative murk hides the starfield instead.
     private func updateMurkFog() {
         applySystemBackdrop()   // re-tints after an in-place jump world swap
         let murk = world.effectiveMurk(for: world.player)
+        currentMurk = murk
+        murkOrigin = renderPoint(world.player)
         for layer in starLayers { layer.container.isHidden = murk < 0 }
-        guard let murkFog else { return }
-        let alpha = CGFloat(max(0, min(100, murk))) / 100 * 0.85
-        murkFog.alpha = alpha
-        murkFog.isHidden = alpha <= 0.001
+        murkFog?.isHidden = true
+        for node in planetNodes {
+            if let sprite = node as? SKSpriteNode { applyMurk(to: sprite, at: node.position) }
+        }
+    }
+
+    /// Mixes `sprite` toward the background colour for its distance from the
+    /// player; a sprite whose tint is in use for something else is left alone.
+    private func applyMurk(to sprite: SKSpriteNode, at point: CGPoint) {
+        let level = MurkFog.level(murk: currentMurk, dx: Double(point.x - murkOrigin.x),
+                                  dy: Double(point.y - murkOrigin.y))
+        if level == 0 {
+            if sprite.userData?["murk"] != nil { sprite.colorBlendFactor = 0; sprite.userData?["murk"] = nil }
+            return
+        }
+        guard sprite.colorBlendFactor == 0 || sprite.userData?["murk"] != nil else { return }
+        let c = world.systemBackgroundColor
+        sprite.color = SKColor(red: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
+                               blue: CGFloat(c.b) / 255, alpha: 1)
+        sprite.colorBlendFactor = CGFloat(level) / 32
+        if sprite.userData == nil { sprite.userData = NSMutableDictionary() }
+        sprite.userData?["murk"] = true
     }
 
     /// Begin the player's hyperspace jump to `destSystemID` along the map

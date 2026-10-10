@@ -215,9 +215,12 @@ extension Spawner {
         ship.position = Vec2(Double(world.rng.range(span) - OriginalSpawnRules.initialScatter),
                              Double(world.rng.range(span) - OriginalSpawnRules.initialScatter))
         world.addNPC(ship, arrival: .populate)
-        if let pers = galaxy.game.pers(revengeID), pers.hailQuote > 0,
-           let quotes = galaxy.game.stringList(7101)?.strings, pers.hailQuote <= quotes.count {
-            world.postOverlayMessage(quotes[pers.hailQuote - 1], frames: 360)
+        // 0x00426d10: a 'STR ' resource at HailQuote + 4999 overrides STR# 7101.
+        if let pers = galaxy.game.pers(revengeID), pers.hailQuote > 0 {
+            let quotes = galaxy.game.stringList(7101)?.strings ?? []
+            let quote = galaxy.game.singleString(pers.hailQuote + 4999)
+                ?? (pers.hailQuote <= quotes.count ? quotes[pers.hailQuote - 1] : nil)
+            if let quote, !quote.isEmpty { world.postOverlayMessage(quote, frames: 0x1a4) }
         }
     }
 

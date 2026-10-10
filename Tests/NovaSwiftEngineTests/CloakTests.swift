@@ -245,3 +245,12 @@ final class CloakTests: XCTestCase {
         XCTAssertEqual(world.effectiveMurk(for: observer), -10, "can still go negative — a distinct \"hides the starfield\" state")
     }
 }
+
+final class MurkFogTests: XCTestCase {
+    func testLevelFollowsSquaredDistance() {
+        XCTAssertEqual(MurkFog.level(murk: 100, dx: 100, dy: 100), 24)
+        XCTAssertEqual(MurkFog.level(murk: 100, dx: 200, dy: 0), 31)
+        XCTAssertEqual(MurkFog.level(murk: 0, dx: 500, dy: 500), 0)
+        XCTAssertEqual(MurkFog.level(murk: 30, dx: 0, dy: 0), 0)
+    }
+}
