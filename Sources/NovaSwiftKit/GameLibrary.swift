@@ -9,6 +9,8 @@ public enum PluginKind: String, Codable, Sendable {
     case totalConversion
     case gameplay
     case patch
+    /// HD graphics only (`.nsx` packs, no game data).
+    case graphics
     case unknown
 
     /// Display label shared by the launcher's Installed list and the plug-in
@@ -19,6 +21,7 @@ public enum PluginKind: String, Codable, Sendable {
         case .totalConversion: return "Total conversion"
         case .patch: return "Content patch"
         case .gameplay: return "Gameplay tweak"
+        case .graphics: return "HD graphics"
         case .unknown: return "Plug-in"
         }
     }
@@ -31,6 +34,7 @@ public enum PluginKind: String, Codable, Sendable {
         case .totalConversion: return "sparkles"
         case .patch: return "paintbrush.fill"
         case .gameplay: return "slider.horizontal.3"
+        case .graphics: return "photo.stack"
         case .unknown: return "puzzlepiece.extension.fill"
         }
     }
@@ -74,6 +78,9 @@ public struct PluginBundle: Identifiable, Codable, Hashable, Sendable {
     /// A subfolder of a plug-in folder. The original never loads subfolders,
     /// so these are inert unless the user opts in (manual plug-in order).
     public var isOptional: Bool = false
+    /// The plug-in's folder, for a graphics-only plug-in (it has no files to
+    /// locate it by): its HD packs load only while it's switched on.
+    public var folderURL: URL?
 
     public var isTotalConversion: Bool { !novaFilesURLs.isEmpty }
     /// Every container the bundle owns (TC base files first).
@@ -177,12 +184,21 @@ public enum GameLibrary {
     private static func bundles(forFolder folder: URL, id: String, name: String) -> [PluginBundle] {
         if let tc = totalConversion(at: folder, id: id) { return [tc] }
         let files = topLevelResourceFiles(in: folder)
-        let subs = subdirectories(of: folder)
-        if files.isEmpty, subs.count == 1 {
+        let isPack = { (u: URL) in u.pathExtension.lowercased() == GraphicsPackManifest.folderExtension }
+        let packs = subdirectories(of: folder).filter(isPack)
+        let subs = subdirectories(of: folder).filter { !isPack($0) }
+        if files.isEmpty, packs.isEmpty, subs.count == 1 {
             return bundles(forFolder: subs[0], id: id, name: name)
         }
         var out: [PluginBundle] = []
         if !files.isEmpty { out.append(PluginBundle(id: id, name: name, fileURLs: files)) }
+        else if !packs.isEmpty {
+            // HD graphics only: still a plug-in, listed and switched like any other.
+            var b = PluginBundle(id: id, name: packs.count == 1 ? packs[0].deletingPathExtension().lastPathComponent : name,
+                                 kind: .graphics, fileURLs: [])
+            b.folderURL = folder
+            out.append(b)
+        }
         for sub in subs {
             let inner = bundles(forFolder: sub, id: id + "/" + sub.lastPathComponent,
                                 name: name + " – " + sub.lastPathComponent)

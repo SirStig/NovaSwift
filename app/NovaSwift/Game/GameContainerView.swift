@@ -59,6 +59,7 @@ final class GameHost {
         let released = game?.flushSpriteSheets() ?? 0
         scene.evictTextureCaches()
         targetSpriteCache.removeAll()
+        PerfMonitor.shared.noteEviction("memory pressure (\(reason)): \(released) sprite sheet(s)")
         Log.scene.notice("memory pressure (\(reason, privacy: .public)): flushed \(released, privacy: .public) sprite sheet(s) + scene texture caches")
     }
 

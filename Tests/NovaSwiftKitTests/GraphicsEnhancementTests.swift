@@ -207,6 +207,31 @@ final class GraphicsEnhancementTests: XCTestCase {
         XCTAssertEqual(cat2[21]?.origin, "delta-id")
     }
 
+    /// A graphics-only folder (installed or imported) is a plug-in like any
+    /// other: discovered, listed as HD graphics, and its pack follows its switch.
+    func testGraphicsOnlyPluginIsListedAndSwitched() throws {
+        let plugins = root.appendingPathComponent("Plug-ins")
+        _ = try write(RezWriter.write(ResourceCollection()), "Plug-ins/Gamma/Gamma.rez")
+        _ = try pack("Plug-ins/reimagined-id/Nova Reimagined/Nova Reimagined.nsx",
+                     [GraphicsEnhancement(kind: .sprite, sprite: 22, file: "r.png")], files: ["r.png": png])
+
+        var bundles = GameLibrary.discoverPlugins(in: plugins)
+        let hd = try XCTUnwrap(bundles.first { $0.id == "reimagined-id" })
+        XCTAssertEqual(hd.kind, .graphics)
+        XCTAssertEqual(hd.name, "Nova Reimagined")
+        XCTAssertTrue(hd.fileURLs.isEmpty)
+        XCTAssertEqual(bundles.count, 2)
+
+        let packs = GameLibrary.discoverGraphicsPacks(in: [plugins])
+        XCTAssertNil(GameLibrary.graphicsCatalog(resources: ResourceCollection(), plugins: bundles, graphicsPacks: packs)[22],
+                     "switched off, like every plug-in starts")
+        for i in bundles.indices { bundles[i].isEnabled = true }
+        let cat = GameLibrary.graphicsCatalog(resources: ResourceCollection(), plugins: bundles, graphicsPacks: packs)
+        XCTAssertEqual(cat[22]?.origin, "reimagined-id")
+        // Loading game data with it on is harmless: it has no resource files.
+        XCTAssertNoThrow(try GameLibrary.merge(baseFiles: [], plugins: bundles))
+    }
+
     /// A mod author repacks an existing plug-in with HD art inside it: the
     /// original resources are untouched, the catalog reads the embedded art
     /// through the normal in-file path, a shared file is stored once, and

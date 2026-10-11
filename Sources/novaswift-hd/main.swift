@@ -188,7 +188,8 @@ case "hulls":
     }
 
 case "portrait":
-    // portrait <model.usdz> <out.png> [yaw°] — the UI portrait render.
+    // portrait <model.usdz> <out.png> [yaw°] [orientation] [classic.png] — the UI portrait render,
+    // over the classic shipyard picture's backdrop when one is given.
     guard args.count >= 3 else { usage() }
     let model: SCNNode
     do { model = try ModelLoader.load(.file(URL(fileURLWithPath: args[1]))) } catch { fail("\(error)") }
@@ -199,7 +200,11 @@ case "portrait":
         if vals.count == 9 { pb.orientation = vals } else { pb.rotate = vals }
     }
     let d = GraphicsEnhancement(kind: .model, bake: pb)
-    guard let img = baker.portrait(model: model, descriptor: d, size: 512) else { fail("render failed") }
+    guard var img = baker.portrait(model: model, descriptor: d, size: 512) else { fail("render failed") }
+    // An optional 6th argument: a classic shipyard picture whose backdrop goes behind it.
+    if args.count > 5, let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[5]) as CFURL, nil),
+       let classic = CGImageSourceCreateImageAtIndex(src, 0, nil),
+       let shown = PortraitBackdrop.composite(img, over: classic) { img = shown }
     try? HDAtlas.encodePNG(img)?.write(to: URL(fileURLWithPath: args[2]))
 
 case "refsheet":
@@ -459,6 +464,20 @@ case "planet":
     let scene = SCNScene(); scene.rootNode.addChildNode(SCNNode(geometry: sphere))
     guard exportUSDZ(scene, to: URL(fileURLWithPath: args[2])) else { fail("export failed") }
     print("wrote \(args[2])")
+
+case "pict":
+    // pict <Nova Files> <out dir> <first id> [last id] — export PICT resources as PNG
+    // (e.g. 5000–5054, the shipyard renders: far more detailed than flight sprites).
+    guard args.count == 4 || args.count == 5, let first = Int(args[3]) else { usage() }
+    let last = args.count == 5 ? Int(args[4]) ?? first : first
+    let game = loadGame(args[1])
+    let outDir = URL(fileURLWithPath: args[2]); try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+    for id in first...last {
+        guard let r = game.resources.resource(NovaType.pict, id), let sheet = PICT.decodeLogged(r.data, id: id),
+              let img = sheet.makeCGImage() else { continue }
+        Preview.write(img, to: outDir.appendingPathComponent("pict_\(id).png"))
+        print("pict \(id): \(img.width)×\(img.height)")
+    }
 
 case "factions":
     // factions <Nova Files> — which governments field each ship (from the

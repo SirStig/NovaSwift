@@ -117,8 +117,13 @@ public final class ModelStage {
     public var pitchDegrees: Double { settings.pitch ?? 38 }
     public var bankDegrees: Double { settings.bankRoll ?? 30 }
 
-    public init(model: SCNNode, settings: GraphicsEnhancement.BakeSettings) {
+    /// Brighter, softer lighting for UI portraits: the shipyard pictures were
+    /// lit like studio shots, with the shadow side still well lit.
+    public let studio: Bool
+
+    public init(model: SCNNode, settings: GraphicsEnhancement.BakeSettings, studio: Bool = false) {
         self.settings = settings
+        self.studio = studio
         scene.background.contents = ModelStage.color(0, 0, 0, alpha: 0)
         scene.rootNode.addChildNode(pivot)
         pivot.addChildNode(roll)
@@ -230,11 +235,12 @@ public final class ModelStage {
             return
         }
         directional(keyDir, intensity: 2100, 1.0, 0.97, 0.92)              // key: warm white, upper left
-        directional(SIMD3(0.8, -0.4, 0.4), intensity: 160, 0.55, 0.65, 0.85) // fill: cool, lower right
+        directional(SIMD3(0.8, -0.4, 0.4), intensity: studio ? 900 : 160, 0.55, 0.65, 0.85) // fill: cool, lower right
         directional(SIMD3(0.2, 0.6, -1.0), intensity: 650, 0.85, 0.9, 1.0)   // rim: from behind
+        if studio { directional(SIMD3(0.1, 0.2, 1.0), intensity: 700, 1.0, 1.0, 1.0) }  // front: lifts the shadow side
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = CGFloat(25 * exposure)
+        ambient.intensity = CGFloat((studio ? 220 : 25) * exposure)
         ambient.color = ModelStage.color(0.6, 0.65, 0.8)
         let an = SCNNode(); an.light = ambient
         scene.rootNode.addChildNode(an)

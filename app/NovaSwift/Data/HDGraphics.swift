@@ -43,6 +43,8 @@ final class HDGraphics: @unchecked Sendable {
     /// UI portraits of model hulls (front three-quarter), transparent and on black.
     private var portraits: [Int: CGImage] = [:]
     private var portraitsOnBlack: [Int: CGImage] = [:]
+    /// Portraits over their classic shipyard picture's government-coloured backdrop.
+    private var portraitsOnBackdrop: [String: CGImage] = [:]
     private var tintedPortraits: [Int: CGImage] = [:]
     private let hdTextures = NSHashTable<SKTexture>.weakObjects()
     private let bakeCache = HDBakeCache()
@@ -62,7 +64,7 @@ final class HDGraphics: @unchecked Sendable {
         self.game = game
         layouts = nil
         generation += 1
-        atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]; portraits = [:]; portraitsOnBlack = [:]; tintedPortraits = [:]
+        atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]; portraits = [:]; portraitsOnBlack = [:]; portraitsOnBackdrop = [:]; tintedPortraits = [:]
         shieldAtlases = [:]; shieldTextures = [:]
         apply(settings)
         for p in catalog.problems { NovaSwiftKit.Log.graphics.error("HD pack: \(p, privacy: .public)") }
@@ -90,27 +92,65 @@ final class HDGraphics: @unchecked Sendable {
     }
 
     /// Prepare every enhancement whose classic sprite is an `rlëD` (the
-    /// sheets the loader can open by id alone). PICT-sheet sprites are
-    /// prepared on first sight instead. Call off the main thread.
+    /// sheets the loader can open by id alone) all the way to GPU textures,
+    /// so the game opens with everything in place — nothing pops in later.
+    /// PICT-sheet sprites are prepared on first sight instead (logged as
+    /// "built on demand"). Call off the main thread.
     func prewarm(progress: (_ done: Int, _ total: Int) -> Void) {
         lock.lock()
         guard enabled, let game else { lock.unlock(); return }
         let entries = catalog.bySprite.values.sorted { $0.spriteID < $1.spriteID }
         let gen = generation
         lock.unlock()
+        let start = Date()
         progress(0, entries.count)
+        var uploads: [SKTexture] = []
         for (i, e) in entries.enumerated() {
             if game.resources.resource(NovaType.rleD, e.spriteID) != nil,
                let sheet = game.spriteSheet(spriteID: e.spriteID, maskID: 0, frameWidth: 0, frameHeight: 0, frameCount: 0) {
                 prepare(e, classic: sheet, generation: gen)
+                uploads += texturesIfReady(id: e.spriteID, frameCount: sheet.frameCount)
+                if let shield = shieldFrames(baseSpriteID: e.spriteID) { uploads += shield.prefix(1) }
             }
             progress(i + 1, entries.count)
         }
+        // Push them to the GPU now rather than on the first frame that draws them.
+        if !uploads.isEmpty {
+            let done = DispatchSemaphore(value: 0)
+            SKTexture.preload(uploads) { done.signal() }
+            done.wait()
+        }
+        let s = stats()
+        NovaSwiftKit.Log.graphics.notice("HD: ready — \(s.sheets, privacy: .public) sheet(s), \(s.atlasMB, privacy: .public) MB, \(s.textureSheets, privacy: .public) on GPU, in \(Int(Date().timeIntervalSince(start) * 1000), privacy: .public) ms")
+    }
+
+    /// Build (once) the GPU textures for a prepared sheet; the first frame
+    /// stands for the whole sheet, which shares one texture.
+    private func texturesIfReady(id: Int, frameCount: Int) -> [SKTexture] {
+        lock.lock()
+        if let built = textures[id] { lock.unlock(); return Array(built.prefix(1)) }
+        guard let atlas = atlases[id], atlas.frameCount == frameCount else { lock.unlock(); return [] }
+        lock.unlock()
+        let built = makeTextures(atlas)
+        lock.lock()
+        textures[id] = built
+        for t in built { hdTextures.add(t) }
+        lock.unlock()
+        return Array(built.prefix(1))
+    }
+
+    /// For the performance log.
+    func stats() -> (enabled: Bool, sheets: Int, atlasMB: Int, textureSheets: Int) {
+        lock.lock(); defer { lock.unlock() }
+        let bytes = atlases.values.reduce(0) { $0 + $1.byteCount } + shieldAtlases.values.reduce(0) { $0 + $1.byteCount }
+        return (enabled && !catalog.isEmpty, atlases.count, bytes / 1_048_576, textures.count)
     }
 
     private func prepare(_ e: ResolvedGraphicsEnhancement, classic: SpriteSheet, generation gen: Int) {
         lock.lock()
         if atlases[e.spriteID] != nil || failed.contains(e.spriteID) { lock.unlock(); return }
+        let signpost = PerfMonitor.signposter.beginInterval("HD prepare", id: PerfMonitor.signposter.makeSignpostID(), "sprite \(e.spriteID)")
+        defer { PerfMonitor.signposter.endInterval("HD prepare", signpost) }
         if layouts == nil, let game { layouts = SpriteLayouts(game: game) }
         let layout = layouts?.layout(for: classic)
         let scale = maxScale
@@ -181,8 +221,11 @@ final class HDGraphics: @unchecked Sendable {
             // sprite with no enhancement of its own is otherwise classic.
             guard let entry = catalog[id] else { lock.unlock(); return nil }
             // Not prewarmed (e.g. a PICT-sheet sprite): prepare in the background.
+            // The classic art shows until then — a visible pop-in, so log it.
             if !pending.contains(id) {
                 pending.insert(id)
+                NovaSwiftKit.Log.graphics.warning("HD: sprite \(id, privacy: .public) wasn't prepared on the loading screen — building it now (classic art shows until it's ready)")
+                PerfMonitor.shared.noteHDOnDemand(spriteID: id)
                 let gen = generation
                 DispatchQueue.global(qos: .utility).async { [weak self] in
                     self?.prepare(entry, classic: sheet, generation: gen)
@@ -331,6 +374,21 @@ final class HDGraphics: @unchecked Sendable {
         return out
     }
 
+    /// The HD portrait on the coloured gradient behind `classic` (the hull's
+    /// original shipyard picture), so factions still read at a glance.
+    /// `key` names the classic picture (e.g. its PICT id) for caching.
+    func portrait(baseSpriteID: Int, over classic: CGImage, key: Int) -> CGImage? {
+        let cacheKey = "\(baseSpriteID)-\(key)"
+        lock.lock()
+        let cached = portraitsOnBackdrop[cacheKey]
+        lock.unlock()
+        if let cached { return cached }
+        guard let p = portrait(baseSpriteID: baseSpriteID, onBlack: false),
+              let out = PortraitBackdrop.composite(p, over: classic) else { return nil }
+        lock.lock(); portraitsOnBackdrop[cacheKey] = out; lock.unlock()
+        return out
+    }
+
     /// The HD portrait recoloured like a classic pre-tinted picture (the main
     /// menu's targeting PICT): its brightness, in the classic picture's
     /// average lit colour, on black — so it composites additively the same way.
@@ -393,6 +451,7 @@ final class HDGraphics: @unchecked Sendable {
     /// so they rebuild instantly on next use.
     func evictTextures() {
         lock.lock(); defer { lock.unlock() }
+        if !textures.isEmpty { PerfMonitor.shared.noteEviction("HD textures (\(textures.count) sheets)") }
         textures = [:]; shieldTextures = [:]
     }
 }

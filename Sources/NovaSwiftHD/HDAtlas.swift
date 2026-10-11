@@ -151,6 +151,11 @@ public enum ClassicFootprint {
     /// The same measurement on a rendered image (alpha > ~4%), in that
     /// image's pixels.
     public static func extent(of image: CGImage) -> Double? {
+        bounds(of: image).map { Double(max($0.width, $0.height)) }
+    }
+
+    /// The visible part's bounding box, in the image's pixels (y down from the top).
+    public static func bounds(of image: CGImage) -> CGRect? {
         let w = image.width, h = image.height
         guard let ctx = HDAtlas.makeContext(width: w, height: h), let data = ctx.data else { return nil }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
@@ -162,7 +167,7 @@ public enum ClassicFootprint {
                 minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
             }
         }
-        return maxX >= 0 ? Double(max(maxX - minX + 1, maxY - minY + 1)) : nil
+        return maxX >= 0 ? CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1) : nil
     }
 }
 #endif

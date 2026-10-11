@@ -176,15 +176,19 @@ final class SpaceportGraphics {
     /// the base hull's picture, found by display name — a used Valkyrie (#371)
     /// borrows the Valkyrie's (#137 → PICT 5009).
     func shipPicture(_ ship: ShipRes) -> CGImage? {
-        // A graphics pack's model hull: its portrait on black, in place of the
-        // classic shipyard art (same framing role, HD).
-        if let base = game.shan(ship.id)?.baseSpriteID,
-           let portrait = HDGraphics.shared.portrait(baseSpriteID: base, onBlack: true) {
-            return portrait
+        let pictID: Int? = pict(ship.id - 128 + 5000) != nil ? ship.id - 128 + 5000
+            : baseHull(for: ship).map { $0 - 128 + 5000 }
+        let classic = pictID.flatMap { pict($0) }
+        // A graphics pack's model hull: its portrait in place of the classic
+        // art, on that art's government-coloured backdrop (on black without one).
+        if let base = game.shan(ship.id)?.baseSpriteID {
+            if let classic, let pictID,
+               let shown = HDGraphics.shared.portrait(baseSpriteID: base, over: classic, key: pictID) {
+                return shown
+            }
+            if let portrait = HDGraphics.shared.portrait(baseSpriteID: base, onBlack: true) { return portrait }
         }
-        if let own = pict(ship.id - 128 + 5000) { return own }
-        guard let base = baseHull(for: ship) else { return nil }
-        return pict(base - 128 + 5000)
+        return classic
     }
 
     /// The id of the lowest-numbered ship sharing `ship`'s display name that owns

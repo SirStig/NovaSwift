@@ -46,3 +46,8 @@ __pycache__/
 venv/
 .playwright-mcp/
 .swiftpm/
+
+# --- Local-only tooling and editor state ---
+# Branding generator (rebuilds the icon/logo/loading art; outputs are committed, the tool isn't).
+scripts/branding/
+.vscode/

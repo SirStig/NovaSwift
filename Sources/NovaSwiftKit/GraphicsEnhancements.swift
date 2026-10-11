@@ -355,6 +355,10 @@ extension GameLibrary {
         // innermost folder wins, so an opt-in sub-item owns its own packs.
         var best: (bundle: PluginBundle, depth: Int)?
         for p in plugins {
+            if let folder = p.folderURL?.standardizedFileURL.path, packPath.hasPrefix(folder + "/"),
+               folder.count > (best?.depth ?? -1) {
+                best = (p, folder.count)   // a graphics-only plug-in owns the packs in its folder
+            }
             // A total conversion's files sit in its `Nova Files/`; its packs may
             // sit beside that folder, at the conversion's root.
             let tcRoots = p.novaFilesURLs.map { $0.deletingLastPathComponent().deletingLastPathComponent() }
@@ -387,6 +391,13 @@ extension GameLibrary {
         let layers = resolveLayers(baseFiles: [], plugins: plugins, flat: flatPluginOrder)
         var rank: [String: Int] = [:]
         for (i, layer) in layers.plugins.enumerated() { rank[layer.id] = i }
+        // Graphics-only plug-ins have no files to rank; they layer after the
+        // file plug-ins while switched on (and, like other plug-ins, not under
+        // a total conversion, whose sprite ids mean different art).
+        if !plugins.contains(where: { $0.isEnabled && $0.isTotalConversion }) {
+            var next = layers.plugins.count
+            for p in plugins where p.isEnabled && p.folderURL != nil { rank[p.id] = next; next += 1 }
+        }
 
         var owned: [(rank: Int, pack: URL, origin: String)] = []
         var standalone: [URL] = []

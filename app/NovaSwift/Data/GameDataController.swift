@@ -255,7 +255,21 @@ final class GameDataController: ObservableObject {
         await prewarmHDGraphics()
     }
 
+    /// The warm-up in flight, so the data load and the loading screen share
+    /// one pass instead of preparing the same art twice.
+    private var hdPrewarmTask: Task<Void, Never>?
+
     func prewarmHDGraphics() async {
+        // A second caller waits for the running pass, then runs its own, which
+        // finds everything ready (or picks up a pack reload) and costs little.
+        while let running = hdPrewarmTask { await running.value }
+        let task = Task { await runHDPrewarm() }
+        hdPrewarmTask = task
+        await task.value
+        hdPrewarmTask = nil
+    }
+
+    private func runHDPrewarm() async {
         HDGraphics.shared.update(settings: GameSettings.load())
         guard HDGraphics.shared.isActive else { return }
         let phase = "Preparing HD graphics"

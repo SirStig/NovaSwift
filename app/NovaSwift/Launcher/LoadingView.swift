@@ -20,10 +20,11 @@ struct LoadingView: View {
     /// everything from `prewarmShare` on is driven by real counts.
     @State private var openingProgress = 0.03
 
-    /// Rolled once, when the view is created. Rolling inside `body` would
-    /// re-roll on every published progress update — roughly thirty times a
-    /// second — leaving the line unreadable.
-    @State private var tip = LoadingView.tips.randomElement() ?? ""
+    /// Which tip is showing. Starts random, then steps on every few seconds;
+    /// kept in state so the ~30 progress updates a second don't re-roll it.
+    @State private var tipIndex = Int.random(in: 0..<LoadingView.tips.count)
+    @State private var logoShown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The fraction of the bar the (unmeasurable) data-set merge occupies.
     private let prewarmShare = 0.12
@@ -63,22 +64,34 @@ struct LoadingView: View {
 
     var body: some View {
         ZStack {
-            StarfieldBackground()
+            LoadingScene(animated: !reduceMotion)
 
-            // The key art, sitting on the starfield. It already carries the
-            // NOVA branding, so there's no separate logo or title over it — the
-            // progress and tip are layered onto the art's lower edge instead.
-            Image("LaunchBanner")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: 1100)
-                .overlay(alignment: .bottom) { statusOverlay }
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .shadow(color: novaAmber.opacity(0.22), radius: 44)
-                .shadow(color: .black.opacity(0.6), radius: 24, y: 10)
-                .padding(.horizontal, 28)
+            VStack(spacing: 0) {
+                Spacer(minLength: 24)
+                BurningWordmark(animated: !reduceMotion)
+                    .frame(maxWidth: 620)
+                    .padding(.horizontal, 40)
+                    .opacity(logoShown ? 1 : 0)
+                    .scaleEffect(logoShown ? 1 : 0.94)
+                Spacer(minLength: 24)
+                statusPanel
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 34)
+            }
+            HUDBrackets()
+                .padding(18)
+                .allowsHitTesting(false)
         }
         .novaResponsive()
+        .onAppear { withAnimation(.easeOut(duration: reduceMotion ? 0.2 : 1.1)) { logoShown = true } }
+        .task {
+            // Step through the tips while loading lasts.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(7))
+                if Task.isCancelled { return }
+                withAnimation(.easeInOut(duration: 0.5)) { tipIndex = (tipIndex + 1) % Self.tips.count }
+            }
+        }
         .task {
             withAnimation(.easeOut(duration: 0.5)) { openingProgress = prewarmShare }
             // Load/merge the data set (base + enabled plug-ins) off the main
@@ -100,108 +113,197 @@ struct LoadingView: View {
         }
     }
 
-    /// Progress bar + tip, welded to the bottom edge of the key art. A scrim
-    /// fades the busy lower band of the image into darkness so the text and bar
-    /// stay legible over it.
-    private var statusOverlay: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 9) {
+    /// The ship's-computer readout: what's loading, how far along, and a tip.
+    private var statusPanel: some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 8) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(phaseLabel)
-                        .novaFont(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(phaseLabel.uppercased())
+                        .novaFont(.caption, weight: .semibold)
+                        .tracking(2.2)
+                        .foregroundStyle(novaAmber.opacity(0.9))
                     Spacer(minLength: 12)
-                    // Monospaced digits + a reserved trailing slot: the count
-                    // changes every few frames and would otherwise shimmy the
-                    // phase label around as digits grow.
+                    // Monospaced digits + a reserved slot: the count changes
+                    // every few frames and would otherwise shimmy the label.
                     Text(countLabel ?? " ")
                         .novaFont(.caption)
                         .monospacedDigit()
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .novaFont(.caption, weight: .semibold)
+                        .monospacedDigit()
+                        .foregroundStyle(novaAmber.opacity(0.9))
+                        .frame(minWidth: 40, alignment: .trailing)
                 }
                 if model.settings.modernMainMenu {
-                    NovaProgressBar(value: progress)
+                    SegmentedProgressBar(value: progress)
                 } else {
                     ClassicProgressBar(value: progress, rect: model.data.game?.colr()?.progressBar)
                 }
             }
-            .frame(maxWidth: 380)
-            // The phase label swaps between stages; crossfade it rather than
-            // letting it pop.
+            .frame(maxWidth: 520)
             .animation(.easeOut(duration: 0.25), value: progress)
 
-            tipBlock
+            VStack(spacing: 6) {
+                Text("TIP")
+                    .novaFont(.caption, weight: .semibold)
+                    .tracking(3)
+                    .foregroundStyle(novaAmber.opacity(0.7))
+                Text(Self.tips[tipIndex])
+                    .novaFont(.caption)
+                    .italic()
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .id(tipIndex)
+                    .transition(.opacity)
+            }
+            .frame(maxWidth: 460)
+            // Reserve two lines so a short tip doesn't jump the bar up.
+            .frame(minHeight: 52, alignment: .top)
         }
-        .padding(.horizontal, 30)
-        .padding(.top, 60)
-        .padding(.bottom, 22)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 26)
+        .padding(.vertical, 18)
         .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.35),
-                                    .black.opacity(0.82)],
-                           startPoint: .top, endPoint: .bottom)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.black.opacity(0.55))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(novaAmber.opacity(0.22), lineWidth: 1))
         )
-    }
-
-    private var tipBlock: some View {
-        VStack(spacing: 7) {
-            Text("TIP")
-                .novaFont(.caption, weight: .semibold)
-                .tracking(3)
-                .foregroundStyle(novaAmber.opacity(0.7))
-            Text(tip)
-                .novaFont(.caption)
-                .italic()
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                // Let the tip wrap to as many lines as it needs and report its
-                // full height, so a longer line is never clipped by the block.
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        // Wider so most tips fit in two lines, and centred on the art.
-        .frame(maxWidth: 420)
-        // Reserve the two-line case (so a short tip doesn't jump the bar up) but
-        // allow growth — the block is bottom-anchored, so a taller tip expands
-        // upward rather than spilling past the art's clipped bottom edge.
-        .frame(minHeight: 52, alignment: .top)
     }
 }
 
-/// EV Nova's beveled, inset progress well: a dark recess lit by an amber fill
-/// with a specular highlight along its top edge.
-private struct NovaProgressBar: View {
+/// The key art, alive: the scene drifts slowly (a long, gentle push-in and
+/// sway) while three depths of stars slide past in front of it.
+private struct LoadingScene: View {
+    var animated: Bool
+
+    var body: some View {
+        TimelineView(.animation(paused: !animated)) { context in
+            let t = animated ? context.date.timeIntervalSinceReferenceDate : 0
+            GeometryReader { geo in
+                ZStack {
+                    Image("LaunchBanner")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .scaleEffect(1.06 + 0.03 * sin(t / 23))
+                        .offset(x: 14 * sin(t / 31), y: 8 * cos(t / 37))
+                        .clipped()
+                    Canvas { ctx, size in
+                        for star in StarField.stars {
+                            // Nearer stars move faster and shine brighter (parallax).
+                            let x = (star.x - t * star.speed).truncatingRemainder(dividingBy: 1)
+                            let px = (x < 0 ? x + 1 : x) * size.width
+                            let r = star.size
+                            ctx.fill(Path(ellipseIn: CGRect(x: px - r / 2, y: star.y * size.height - r / 2, width: r, height: r)),
+                                     with: .color(.white.opacity(star.alpha)))
+                        }
+                    }
+                    // Darken toward the bottom so the readout stays legible.
+                    LinearGradient(colors: [.clear, .clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+/// A fixed, seeded field of drifting stars at three depths.
+private enum StarField {
+    struct Star { let x, y, speed, size, alpha: Double }
+    static let stars: [Star] = {
+        var g = SeededGenerator(seed: 7)
+        return (0..<170).map { _ in
+            let depth = Double.random(in: 0...1, using: &g)
+            return Star(x: .random(in: 0...1, using: &g), y: .random(in: 0...1, using: &g),
+                        speed: 0.002 + depth * depth * 0.014, size: 0.8 + depth * 1.8,
+                        alpha: 0.25 + depth * 0.6)
+        }
+    }()
+
+    /// SplitMix64 — deterministic, so the field is the same every launch.
+    struct SeededGenerator: RandomNumberGenerator {
+        var state: UInt64
+        init(seed: UInt64) { state = seed }
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+}
+
+/// The NOVA SWIFT wordmark with its fire alive: the flames layer (drawn
+/// behind the gunmetal letters) flickers in height and brightness.
+private struct BurningWordmark: View {
+    var animated: Bool
+
+    var body: some View {
+        TimelineView(.animation(paused: !animated)) { context in
+            let t = animated ? context.date.timeIntervalSinceReferenceDate : 0
+            // A few unrelated sines read as irregular flicker, not a pulse.
+            let lift = 1 + 0.035 * sin(t * 7.1) + 0.022 * sin(t * 12.7 + 1.3) + 0.012 * sin(t * 23.3 + 0.4)
+            let glow = 0.86 + 0.08 * sin(t * 9.3 + 2.1) + 0.06 * sin(t * 15.9)
+            ZStack {
+                Image("WordmarkFlames")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(x: 1 + 0.01 * sin(t * 5.3), y: lift, anchor: .bottom)
+                    .opacity(glow)
+                Image("Wordmark")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            }
+            .shadow(color: Color(red: 1, green: 0.45, blue: 0.1).opacity(0.25 * glow), radius: 30)
+        }
+        .accessibilityElement()
+        .accessibilityLabel("NovaSwift")
+    }
+}
+
+/// Amber targeting brackets in the corners — the cockpit framing.
+private struct HUDBrackets: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let l: CGFloat = min(56, size.width * 0.06), w: CGFloat = 2
+            var p = Path()
+            let corners: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [(0, 0, 1, 1), (size.width, 0, -1, 1),
+                                                                  (0, size.height, 1, -1), (size.width, size.height, -1, -1)]
+            for (x, y, sx, sy) in corners {
+                p.move(to: CGPoint(x: x + sx * l, y: y)); p.addLine(to: CGPoint(x: x, y: y)); p.addLine(to: CGPoint(x: x, y: y + sy * l))
+            }
+            ctx.stroke(p, with: .color(novaAmber.opacity(0.7)), lineWidth: w)
+        }
+    }
+}
+
+/// The loading bar as a row of amber cells, like a cockpit gauge: lit cells
+/// glow, the leading one brightest; unlit cells stay as dim outlines.
+private struct SegmentedProgressBar: View {
     var value: Double
-    @Environment(\.novaTheme) private var theme
+    private let cells = 36
 
     var body: some View {
         GeometryReader { geo in
-            let filled = geo.size.width * min(max(value, 0), 1)
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(theme.progDim)
-                    .overlay(
-                        Capsule().strokeBorder(theme.progOutline, lineWidth: 1)
-                    )
-
-                Capsule()
-                    .fill(LinearGradient(colors: [theme.progBright, theme.progBright.opacity(0.72)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .overlay(alignment: .top) {
-                        Capsule()
-                            .fill(.white.opacity(0.3))
-                            .frame(height: 1.5)
-                            .padding(.horizontal, 4)
-                            .padding(.top, 1.5)
-                    }
-                    .frame(width: filled)
-                    .shadow(color: theme.progBright.opacity(0.45), radius: 7)
-                    // Zero-width capsules still paint a sliver of glow; hide the
-                    // fill entirely until there's something to show.
-                    .opacity(filled > 0.5 ? 1 : 0)
+            let gap: CGFloat = 3
+            let w = (geo.size.width - gap * CGFloat(cells - 1)) / CGFloat(cells)
+            let lit = Int((min(max(value, 0), 1) * Double(cells)).rounded(.down))
+            HStack(spacing: gap) {
+                ForEach(0..<cells, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(i < lit ? novaAmber.opacity(i == lit - 1 ? 1 : 0.82) : novaAmber.opacity(0.08))
+                        .overlay(RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .strokeBorder(novaAmber.opacity(i < lit ? 0 : 0.28), lineWidth: 1))
+                        .shadow(color: novaAmber.opacity(i < lit ? 0.55 : 0), radius: 4)
+                        .frame(width: max(1, w))
+                }
             }
         }
-        .frame(height: 10)
-        .animation(.easeOut(duration: 0.28), value: value)
+        .frame(height: 12)
+        .animation(.easeOut(duration: 0.2), value: value)
     }
 }
 

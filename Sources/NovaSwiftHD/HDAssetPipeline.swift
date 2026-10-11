@@ -229,19 +229,28 @@ public final class ModelBaker {
     /// For the shipyard, hail and target-display pictures.
     public func portrait(model: SCNNode, descriptor: GraphicsEnhancement, size: Int) -> CGImage? {
         var settings = descriptor.bake ?? .init()
-        settings.pitch = 24
-        let stage = ModelStage(model: model, settings: settings)
+        settings.pitch = 35   // the shipyard pictures look down a little more steeply than flight
+        let stage = ModelStage(model: model, settings: settings, studio: true)
         stage.prepareEffects(for: descriptor)
         stage.setPass(.hull(baked: stage.layersPresent.subtracting([.engine])))
         renderer.scene = stage.scene
         renderer.pointOfView = stage.camera
         defer { renderer.scene = nil }
-        stage.pose(heading: 215 * .pi / 180, bank: 0)
+        stage.pose(heading: 225 * .pi / 180, bank: 0)
+        return framed(stage, size: size)
+    }
+
+    /// Centre the model and scale it to span 85% of a `size`² image, then
+    /// render. Starts zoomed out so the first measurement isn't clipped.
+    private func framed(_ stage: ModelStage, size: Int) -> CGImage? {
         let px = CGSize(width: size, height: size)
-        stage.orthographicScale = 1.2
-        for _ in 0..<2 {   // fit: scale so the ship spans 85% of the image
-            guard let img = snapshot(px), let e = ClassicFootprint.extent(of: img), e > 0 else { break }
-            stage.orthographicScale *= e / (Double(size) * 0.85)
+        stage.orthographicScale = 3
+        for _ in 0..<2 {
+            guard let img = snapshot(px), let b = ClassicFootprint.bounds(of: img) else { break }
+            let unit = 2 * stage.orthographicScale / Double(size)   // world units per pixel
+            let dx = Float((b.midX - Double(size) / 2) * unit), dy = Float((Double(size) / 2 - b.midY) * unit)
+            stage.camera.simdWorldPosition += stage.camera.simdWorldRight * dx + stage.camera.simdWorldUp * dy
+            stage.orthographicScale *= Double(max(b.width, b.height)) / (Double(size) * 0.85)
         }
         return snapshot(px)
     }
@@ -258,13 +267,7 @@ public final class ModelBaker {
         renderer.pointOfView = stage.camera
         defer { renderer.scene = nil }
         stage.pose(heading: heading * .pi / 180, bank: 0)
-        let px = CGSize(width: size, height: size)
-        stage.orthographicScale = 1.2
-        for _ in 0..<2 {
-            guard let img = snapshot(px), let e = ClassicFootprint.extent(of: img), e > 0 else { break }
-            stage.orthographicScale *= e / (Double(size) * 0.85)
-        }
-        return snapshot(px)
+        return framed(stage, size: size)
     }
 
     /// Hull only, no effect layers (tools and simple models).
@@ -414,7 +417,7 @@ public enum HDAssetPipeline {
         guard e.descriptor.kind == .model else { return nil }
         guard let content = e.source.contentKey() else { throw PipelineError.unreadable }
         let layout = BakeLayout(frameWidth: size, frameHeight: size, frameCount: 1, framesPerSet: 1, sets: [.level])
-        let key = HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "portrait")
+        let key = HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "portrait-v2")   // v2: studio light, centred, 225°/35°
         if let hit = cache?.load(key, layout: layout, scale: 1) { return hit.image }
         let model = try ModelLoader.load(e.source)
         bakeLock.lock(); defer { bakeLock.unlock() }

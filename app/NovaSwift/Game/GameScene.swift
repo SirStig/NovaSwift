@@ -498,6 +498,8 @@ final class GameScene: SKScene {
     /// opacity tracks `World.effectiveMurk(for:)`.
     private var murkFog: SKSpriteNode?
     private var currentMurk = 0
+    /// How many projectile pool nodes were showing shots last frame.
+    private var projectileVisibleCount = 0
     private var debrisPuffNodes: [SKSpriteNode] = []
     private var murkOrigin = CGPoint.zero
     /// Space backdrop for systems with no `sÿst.BkgndColor` (near-black blue).
@@ -1568,8 +1570,15 @@ final class GameScene: SKScene {
 
     // MARK: Loop
 
+    /// End of SpriteKit's per-frame work (after actions, physics and
+    /// constraints): closes the CPU-work timing `update` opened.
+    override func didFinishUpdate() {
+        PerfMonitor.shared.endWork()
+    }
+
     override func update(_ currentTime: TimeInterval) {
         guard world != nil else { return }
+        PerfMonitor.shared.beginWork()
         // Raw, un-clamped frame delta — the true measure of render/sim cost per
         // frame, before `dt` is capped below for physics stability. Feeds the
         // debug performance readout only.
@@ -1577,6 +1586,7 @@ final class GameScene: SKScene {
         let dt = lastUpdate == 0 ? 1.0 / 60.0 : min(currentTime - lastUpdate, 1.0 / 20.0)
         lastUpdate = currentTime
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
+        PerfMonitor.shared.frame(seconds: rawFrame, at: currentTime)
 
         // Game-speed option: scale the *simulation* timestep (not the real frame
         // delta used for perf/diagnostics above). `x1` is exactly real-time —
@@ -3445,6 +3455,12 @@ final class GameScene: SKScene {
         }
     }
 
+    /// The generic glowing bolt's tint (weapons with no shot art).
+    private static let boltColor = SKColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1)
+
+    /// Every SKNode setter dirties the node even when the value is the same,
+    /// so each property is written only when it actually changes — hundreds of
+    /// shots a frame otherwise cost thousands of redundant writes.
     private func syncProjectiles() {
         let shots = world.projectiles
         while projectileNodes.count < shots.count {
@@ -3452,11 +3468,16 @@ final class GameScene: SKScene {
             projectileLayer.addChild(dot)
             projectileNodes.append(dot)
         }
-        for (i, node) in projectileNodes.enumerated() {
-            guard i < shots.count else { node.isHidden = true; continue }
+        // Hide only the pool slots that were showing shots last frame.
+        if projectileVisibleCount > shots.count {
+            for i in shots.count..<projectileVisibleCount { projectileNodes[i].isHidden = true }
+        }
+        projectileVisibleCount = shots.count
+        for i in 0..<shots.count {
+            let node = projectileNodes[i]
             let s = shots[i]
             node.position = renderLerp(s.renderPrevPosition, s.position)
-            node.isHidden = false
+            if node.isHidden { node.isHidden = false }
 
             let frames = s.graphicSpinID.map { weaponGraphicTextures($0) } ?? []
             if !frames.isEmpty {
@@ -3466,35 +3487,33 @@ final class GameScene: SKScene {
                 // Frames come from the engine's selection so the sprite drawn
                 // is the one shots collide with (WP-17).
                 let asRotation = frames.count >= 16 && !s.spinShots
-                if asRotation {
-                    node.texture = frames[SpriteFrames.headingFrame(degrees: s.headingDegrees, frames: frames.count)]
-                    node.zRotation = 0
-                } else {
-                    let idx = s.spinShots ? s.animFrame % frames.count : 0
-                    node.texture = frames[idx]
-                    node.zRotation = -CGFloat(s.facing)
-                }
-                node.size = node.texture?.size() ?? CGSize(width: 12, height: 12)
-                node.colorBlendFactor = 0
-                node.blendMode = .alpha
+                let texture = asRotation
+                    ? frames[SpriteFrames.headingFrame(degrees: s.headingDegrees, frames: frames.count)]
+                    : frames[s.spinShots ? s.animFrame % frames.count : 0]
+                if node.texture !== texture { node.texture = texture; node.size = texture.size() }
+                let rotation: CGFloat = asRotation ? 0 : -CGFloat(s.facing)
+                if node.zRotation != rotation { node.zRotation = rotation }
+                if node.blendMode != .alpha { node.blendMode = .alpha }
+                // Untinted unless the murk fog tints it (applyMurk owns that).
+                if node.colorBlendFactor != 0, node.userData?["murk"] == nil { node.colorBlendFactor = 0 }
                 applyMurk(to: node, at: node.position)
-            } else {
-                // Generic glowing bolt.
+            } else if node.texture !== projectileTexture || node.blendMode != .add {
+                // Generic glowing bolt (set up once; nothing about it varies).
                 node.texture = projectileTexture
                 node.size = CGSize(width: 9, height: 9)
-                node.color = SKColor(red: 1.0, green: 0.85, blue: 0.4, alpha: 1)
+                node.color = Self.boltColor
                 node.colorBlendFactor = 1
                 node.blendMode = .add
                 node.zRotation = 0
             }
             // wëap.Flags3 0x0002: translucent shots draw at reduced opacity.
-            node.alpha = s.translucentShots ? 0.45 : 1.0
+            let alpha: CGFloat = s.translucentShots ? 0.45 : 1.0
+            if node.alpha != alpha { node.alpha = alpha }
 
             // Smoke / spark trail: drop a puff at the shot's tail each frame for
             // weapons that carry a Trail or the smoke flags. Cached per weapon so
             // this stays a dictionary lookup, not a re-decode.
-            if s.weaponID >= 128, settings.smokeTrails || !(trailInfo(for: s.weaponID)?.smoke ?? false),
-               let trail = trailInfo(for: s.weaponID) {
+            if s.weaponID >= 128, let trail = trailInfo(for: s.weaponID), settings.smokeTrails || !trail.smoke {
                 let tail = CGPoint(x: node.position.x - CGFloat(cos(s.facing)) * 4,
                                    y: node.position.y - CGFloat(sin(s.facing)) * 4)
                 if trail.smoke, !settings.modernHUD,

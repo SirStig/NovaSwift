@@ -1,10 +1,11 @@
 import SwiftUI
 import NovaSwiftKit
 
-/// The app's real mark: the commissioned ship + "NOVA" wordmark illustration
-/// also used as the App Icon (`Assets.xcassets/AppLogo.imageset`, same source
-/// image as `AppIcon.appiconset`). Used everywhere the app shows its own
-/// branding (launcher, loading screen, About, in-game pause menu header).
+/// The app's mark: the planetary-sunrise art of the App Icon
+/// (`Assets.xcassets/AppLogo.imageset`, drawn by `scripts/branding/make_branding.py`
+/// along with the icon, the loading screen's layers and the README banner).
+/// Used wherever the app shows its own badge (launcher, About, data setup,
+/// in-game pause menu header).
 struct AppLogo: View {
     var body: some View {
         Image("AppLogo")
