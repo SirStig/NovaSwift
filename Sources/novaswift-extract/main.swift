@@ -883,6 +883,10 @@ case "ai":
     world.systemContext = galaxy.systemContext(for: sys.id)
     world.spawner = Spawner(galaxy: galaxy, table: SpawnTable(system: sys))
     world.spawner?.populate(world)
+    // NOVASWIFT_SIM_CROWD=N: N more ambient ships for a stress benchmark.
+    if let crowd = ProcessInfo.processInfo.environment["NOVASWIFT_SIM_CROWD"].flatMap(Int.init), crowd > 0 {
+        world.spawner?.stressFill(world, count: crowd)
+    }
     print("populated with \(world.npcs.count) NPC(s); jumpRadius \(Int(world.systemContext.jumpRadius))")
 
     var arrivals = 0, departures = 0, kills = 0, shots = 0, beams = 0, hullHits = 0

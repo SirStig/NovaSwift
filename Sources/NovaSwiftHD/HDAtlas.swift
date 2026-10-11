@@ -38,10 +38,20 @@ public struct HDAtlas: @unchecked Sendable {
     /// supported Apple GPU handles (A9/A10 top out there; later ones at 16384).
     public static let maxTextureDimension = 8192
 
-    /// The highest scale ≤ `wanted` whose atlas fits `maxTextureDimension`.
+    /// Most pixels one atlas may hold: 4 megapixels, 16 MB — one 2048² texture.
+    /// Every sheet is kept twice (CPU image + GPU texture, the same RAM on
+    /// Apple silicon), and big hulls at 4× ran to 100–170 MB each, enough to
+    /// get the game killed for memory. A ship that large still gets 2–3×,
+    /// sharp on a Retina screen.
+    public static let maxAtlasPixels = 4_194_304
+
+    /// The highest whole scale ≤ `wanted` whose atlas fits both
+    /// `maxTextureDimension` and `maxAtlasPixels`.
     public static func clampScale(_ wanted: Double, logicalWidth: Int, logicalHeight: Int) -> Double {
-        let limit = Double(maxTextureDimension) / Double(max(1, max(logicalWidth, logicalHeight)))
-        return max(1, min(wanted, limit.rounded(.down)))
+        let w = Double(max(1, logicalWidth)), h = Double(max(1, logicalHeight))
+        let bySide = Double(maxTextureDimension) / max(w, h)
+        let byArea = (Double(maxAtlasPixels) / (w * h)).squareRoot()
+        return max(1, min(wanted, min(bySide, byArea).rounded(.down)))
     }
 
     public enum LoadError: Error, CustomStringConvertible {
@@ -130,6 +140,63 @@ public struct HDAtlas: @unchecked Sendable {
 /// rendered frames cover the same extent — the HD hull lines up with the
 /// classic collision mask.
 public enum ClassicFootprint {
+    /// The middle and upper-middle brightness (luminance 0…1 at the 50th and
+    /// 75th percentile) of a classic sheet's opaque pixels in `frames` — what
+    /// an HD model's lighting is matched to.
+    public static func tones(of sheet: SpriteSheet, frames: [Int]) -> (mid: Double, high: Double)? {
+        var hist = [Int](repeating: 0, count: 256)
+        let stride = sheet.surfaceWidth * 4
+        for f in frames where f >= 0 && f < sheet.frameCount {
+            let ox = (f % SpriteSheet.framesPerRow) * sheet.frameWidth
+            let oy = (f / SpriteSheet.framesPerRow) * sheet.frameHeight
+            for y in 0..<sheet.frameHeight {
+                let row = (oy + y) * stride
+                for x in 0..<sheet.frameWidth {
+                    let i = row + (ox + x) * 4
+                    guard sheet.rgba[i + 3] > 200 else { continue }
+                    hist[luma(sheet.rgba[i], sheet.rgba[i + 1], sheet.rgba[i + 2])] += 1
+                }
+            }
+        }
+        return percentiles(hist)
+    }
+
+    /// The same measure over rendered (premultiplied) images.
+    public static func tones(of images: [CGImage]) -> (mid: Double, high: Double)? {
+        var hist = [Int](repeating: 0, count: 256)
+        for image in images {
+            let w = image.width, h = image.height
+            guard let ctx = HDAtlas.makeContext(width: w, height: h), let data = ctx.data else { continue }
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            let p = data.bindMemory(to: UInt8.self, capacity: ctx.bytesPerRow * h)
+            for y in 0..<h {
+                for x in 0..<w {
+                    let i = y * ctx.bytesPerRow + x * 4
+                    let a = Int(p[i + 3])
+                    guard a > 200 else { continue }
+                    func un(_ v: UInt8) -> UInt8 { UInt8(min(255, Int(v) * 255 / a)) }
+                    hist[luma(un(p[i]), un(p[i + 1]), un(p[i + 2]))] += 1
+                }
+            }
+        }
+        return percentiles(hist)
+    }
+
+    @inline(__always) private static func luma(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> Int {
+        (Int(r) * 54 + Int(g) * 183 + Int(b) * 19) >> 8
+    }
+
+    private static func percentiles(_ hist: [Int]) -> (mid: Double, high: Double)? {
+        let total = hist.reduce(0, +)
+        guard total > 0 else { return nil }
+        func at(_ q: Double) -> Double {
+            var seen = 0
+            for (v, c) in hist.enumerated() { seen += c; if Double(seen) >= q * Double(total) { return Double(v) / 255 } }
+            return 1
+        }
+        return (at(0.5), at(0.75))
+    }
+
     public static func extents(of sheet: SpriteSheet, frames: [Int]) -> [Int: Double] {
         var out: [Int: Double] = [:]
         let stride = sheet.surfaceWidth * 4

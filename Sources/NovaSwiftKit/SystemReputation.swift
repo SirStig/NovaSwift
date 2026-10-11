@@ -47,7 +47,16 @@ public enum GovtRelations {
         if a == b { return true }
         guard let ga = govts[a], let gb = govts[b] else { return false }
         if ga.startsDisabled || gb.startsDisabled { return false }
-        return !Set(ga.classes).isDisjoint(with: gb.allies) || !Set(gb.classes).isDisjoint(with: ga.allies)
+        return overlap(ga.classes, gb.allies) || overlap(gb.classes, ga.allies)
+    }
+
+    /// Whether two of these tiny (≤4-slot) lists share an element. Allocation
+    /// free — the AI asks these questions thousands of times a tick, and
+    /// building `Set`s for them was most of its cost.
+    @inline(__always)
+    static func overlap(_ a: [Int], _ b: [Int]) -> Bool {
+        for x in a where b.contains(x) { return true }
+        return false
     }
 
     /// `Government_AreGovtsHostileOrXenophobic` 0x0046bdf0: either one lists
@@ -59,7 +68,7 @@ public enum GovtRelations {
         let ga = govts[a], gb = govts[b]
         if let ga, let gb {
             if ga.startsDisabled || gb.startsDisabled { return false }
-            if !Set(ga.classes).isDisjoint(with: gb.enemies) || !Set(gb.classes).isDisjoint(with: ga.enemies) {
+            if overlap(ga.classes, gb.enemies) || overlap(gb.classes, ga.enemies) {
                 return true
             }
         }

@@ -210,6 +210,12 @@ public struct GraphicsPackManifest: Codable, Hashable, Sendable {
     }
 }
 
+/// Content keys already computed this run (see `GraphicsAssetSource.contentKey`).
+private enum ContentKeyMemo {
+    static let lock = NSLock()
+    nonisolated(unsafe) static var keys: [String: String] = [:]
+}
+
 /// Where an enhancement's asset bytes live.
 public enum GraphicsAssetSource: Hashable, Sendable {
     case blob(Data)
@@ -226,8 +232,25 @@ public enum GraphicsAssetSource: Hashable, Sendable {
     /// derived from this asset — bakes are reused across launches and data
     /// sets as long as the asset itself is unchanged.
     public func contentKey() -> String? {
+        // A file's hash is remembered by path, size and modification date, so
+        // a multi-megabyte model isn't re-hashed for every bake, portrait and
+        // shield of every launch.
+        var memoKey: String?
+        if case .file(let url) = self,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int, let date = attrs[.modificationDate] as? Date {
+            memoKey = "\(url.path)|\(size)|\(date.timeIntervalSinceReferenceDate)"
+            ContentKeyMemo.lock.lock()
+            let known = ContentKeyMemo.keys[memoKey!]
+            ContentKeyMemo.lock.unlock()
+            if let known { return known }
+        }
         guard let data = loadData() else { return nil }
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let key = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        if let memoKey {
+            ContentKeyMemo.lock.lock(); ContentKeyMemo.keys[memoKey] = key; ContentKeyMemo.lock.unlock()
+        }
+        return key
     }
 
     /// File extension hint ("png", "usdz") for loaders that need one.

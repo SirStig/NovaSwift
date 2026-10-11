@@ -262,11 +262,17 @@ final class GameDataController: ObservableObject {
     func prewarmHDGraphics() async {
         // A second caller waits for the running pass, then runs its own, which
         // finds everything ready (or picks up a pack reload) and costs little.
-        while let running = hdPrewarmTask { await running.value }
+        // Whoever sees a finished task in the slot clears it: awaiting a task
+        // that has already finished doesn't suspend, so spinning until the
+        // owner clears it would never yield the main actor.
+        while let running = hdPrewarmTask {
+            await running.value
+            if hdPrewarmTask == running { hdPrewarmTask = nil }
+        }
         let task = Task { await runHDPrewarm() }
         hdPrewarmTask = task
         await task.value
-        hdPrewarmTask = nil
+        if hdPrewarmTask == task { hdPrewarmTask = nil }
     }
 
     private func runHDPrewarm() async {

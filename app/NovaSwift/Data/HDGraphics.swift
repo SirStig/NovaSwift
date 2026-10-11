@@ -104,21 +104,44 @@ final class HDGraphics: @unchecked Sendable {
         lock.unlock()
         let start = Date()
         progress(0, entries.count)
+        // Across the cores (one left for the UI): cached bakes decode in
+        // parallel; a model that has to be baked waits its turn for the renderer.
         var uploads: [SKTexture] = []
-        for (i, e) in entries.enumerated() {
-            if game.resources.resource(NovaType.rleD, e.spriteID) != nil,
-               let sheet = game.spriteSheet(spriteID: e.spriteID, maskID: 0, frameWidth: 0, frameHeight: 0, frameCount: 0) {
-                prepare(e, classic: sheet, generation: gen)
-                uploads += texturesIfReady(id: e.spriteID, frameCount: sheet.frameCount)
-                if let shield = shieldFrames(baseSpriteID: e.spriteID) { uploads += shield.prefix(1) }
+        var done = 0
+        let gather = NSLock()
+        let workers = max(1, ProcessInfo.processInfo.activeProcessorCount - 1)
+        DispatchQueue.concurrentPerform(iterations: workers) { w in
+            for i in stride(from: w, to: entries.count, by: workers) {
+                let e = entries[i]
+                var mine: [SKTexture] = []
+                if game.resources.resource(NovaType.rleD, e.spriteID) != nil,
+                   let sheet = game.spriteSheet(spriteID: e.spriteID, maskID: 0, frameWidth: 0, frameHeight: 0, frameCount: 0) {
+                    prepare(e, classic: sheet, generation: gen)
+                    mine += texturesIfReady(id: e.spriteID, frameCount: sheet.frameCount)
+                    if let shield = shieldFrames(baseSpriteID: e.spriteID) { mine += shield.prefix(1) }
+                }
+                gather.lock()
+                uploads += mine; done += 1
+                progress(done, entries.count)
+                gather.unlock()
             }
-            progress(i + 1, entries.count)
         }
+        // The effect layers baked with each hull (engine glows, lights) are
+        // sheets of their own: build them too, or the first ship of a type to
+        // appear builds them mid-frame (the 30–140 ms `sync.npcs` spikes).
+        lock.lock()
+        let layerSheets = atlases.filter { textures[$0.key] == nil }
+        lock.unlock()
+        for (id, atlas) in layerSheets { uploads += texturesIfReady(id: id, frameCount: atlas.frameCount) }
         // Push them to the GPU now rather than on the first frame that draws them.
         if !uploads.isEmpty {
             let done = DispatchSemaphore(value: 0)
             SKTexture.preload(uploads) { done.signal() }
-            done.wait()
+            // Never let the upload hold the loading screen hostage: if SpriteKit
+            // doesn't call back, the textures still upload on first use.
+            if done.wait(timeout: .now() + 10) == .timedOut {
+                NovaSwiftKit.Log.graphics.error("HD: GPU preload didn't report back in 10 s — continuing")
+            }
         }
         let s = stats()
         NovaSwiftKit.Log.graphics.notice("HD: ready — \(s.sheets, privacy: .public) sheet(s), \(s.atlasMB, privacy: .public) MB, \(s.textureSheets, privacy: .public) on GPU, in \(Int(Date().timeIntervalSince(start) * 1000), privacy: .public) ms")
@@ -169,7 +192,7 @@ final class HDGraphics: @unchecked Sendable {
             lock.unlock()
             // A shield bubble when the pack asks for one, one frame per heading.
             if let color = e.descriptor.shield, let base = made[e.spriteID],
-               let shield = HDShield.make(from: base, frames: layout.framesPerSet, color: color) {
+               let shield = HDAssetPipeline.shield(for: e, hull: base, frames: layout.framesPerSet, color: color, cache: bakeCache) {
                 lock.lock()
                 if gen == generation { shieldAtlases[e.spriteID] = shield }
                 lock.unlock()

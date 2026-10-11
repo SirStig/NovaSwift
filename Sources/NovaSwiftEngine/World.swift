@@ -2852,20 +2852,11 @@ public final class World {
                 }
                 if bestShot == nil {
                     for other in allShips where other.entityID != ship.entityID && other.entityID != leader
-                        && other.isAlive && !other.disabled && other.hullFlags2 & 0x0008 != 0
-                        && canDetect(other, by: ship) {
-                        // "Attacking" in the original's sense (0x0040faa0): a ship
-                        // closing in to scan, parking or escorting is not.
-                        // Reading the bare target made a Fed destroyer's PD
-                        // open fire on a Fed scout that merely scanned it.
-                        let attacking: Bool
-                        if other.isPlayer {
-                            attacking = other.currentTargetID == ship.entityID
-                                || (leader != nil && other.currentTargetID == leader)
-                        } else {
-                            attacking = originalAI.isEngagedAgainst(other, ship, leader: leader, world: self)
-                        }
-                        guard attacking else { continue }
+                        && other.isAlive && !other.disabled && other.hullFlags2 & 0x0008 != 0 {
+                        // Never the bare target: the player locking onto a Fed
+                        // ship made its PD turrets open fire on a peaceful pilot,
+                        // and a scanning NPC set off a Fed destroyer's PD.
+                        guard originalAI.pointDefenseMayEngage(other, defender: ship, world: self) else { continue }
                         let d = (other.position - ship.position).length
                         guard d <= reach, d < bestD,
                               !turretBlind(ship, spec: spec, bearing: OriginalMath.bearingRadians(from: ship.position, to: other.position)) else { continue }
@@ -4180,7 +4171,8 @@ public final class World {
                  ionization: p.ionization, ionizeColor: p.ionizeColor,
                  piercing: p.penetratesShields, weaponID: p.weaponID,
                  disablesOnly: p.nonLethal || p.flags.disablesOnly,
-                 impact: p.impact, impactFrom: p.position, hitPoint: p.position)
+                 impact: p.impact, impactFrom: p.position, hitPoint: p.position,
+                 shotTargetID: .some(p.shotTargetID))
         blast(p, at: p.position, sparing: victim, expiry: false)
         explode(p, at: p.position)
         if linkedShots { spawnSubmunitions(p, at: p.position, spawned: &spawned) }
@@ -4351,7 +4343,8 @@ public final class World {
                   ionization: Double = 0, ionizeColor: (r: Double, g: Double, b: Double)? = nil,
                   piercing: Bool = false, weaponID: Int = -1,
                   disablesOnly: Bool = false, impact: Double = 0, impactFrom: Vec2? = nil,
-                  keepsAboveDisable: Bool = false, hitPoint: Vec2? = nil) {
+                  keepsAboveDisable: Bool = false, hitPoint: Vec2? = nil,
+                  shotTargetID: Int?? = nil) {
         var shield = shield, armor = armor
         // Difficulty (an enhancement-type setting): scale only the damage the
         // *player* takes; 1.0, the default, is the original.
@@ -4436,8 +4429,11 @@ public final class World {
             }
             // AI-06: the player's own shot on the ship it was aimed at calls
             // the victim's friends in (`Government_PropagateHostilityFromAttack`
-            // 0x004102e0).
-            if ownerID == World.playerEntityID, player.currentTargetID == ship.entityID {
+            // 0x004102e0). A shot answers for the target stored when it was
+            // fired (0x00437780), not whatever the player has selected now;
+            // beams read the shooter's target at the hit (0x0042f270).
+            let aimedAt = shotTargetID ?? player.currentTargetID
+            if ownerID == World.playerEntityID, aimedAt == ship.entityID {
                 propagateHostilityFromPlayerAttack(on: ship)
             }
         }

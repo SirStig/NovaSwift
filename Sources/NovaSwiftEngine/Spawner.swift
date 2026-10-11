@@ -343,6 +343,13 @@ public final class Spawner {
 
     // MARK: Spawning
 
+    /// Benchmarks only: add `count` more ambient ships through the normal
+    /// spawn path (same rules, same RNG), packing the system well past its
+    /// usual population to stress the simulation.
+    public func stressFill(_ world: World, count: Int) {
+        for _ in 0..<count { spawnOne(into: world, origin: .interior) }
+    }
+
     func spawnOne(into world: World, origin: SpawnOrigin) {
         // The ambient trickle is dudes only — the per-system `DudeTypes`/`%Prob`
         // background traffic (traders and lone patrols coming and going). Fleets

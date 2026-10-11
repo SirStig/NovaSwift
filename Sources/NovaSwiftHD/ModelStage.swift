@@ -213,6 +213,7 @@ public final class ModelStage {
             ?? SIMD3(-0.75, 0.85, 0.65)
         func directional(_ toward: SIMD3<Double>, intensity: Double, _ r: Double, _ g: Double, _ b: Double) {
             let l = SCNLight()
+            lights.append(l)
             l.type = .directional
             l.intensity = CGFloat(intensity * exposure)
             l.color = ModelStage.color(r, g, b)
@@ -228,6 +229,7 @@ public final class ModelStage {
             // the classic stellar look. No fill, rim or reflections.
             directional(keyDir, intensity: 2600, 1.0, 0.98, 0.94)
             let ambient = SCNLight()
+            lights.append(ambient)
             ambient.type = .ambient
             ambient.intensity = CGFloat(6 * exposure)
             let an = SCNNode(); an.light = ambient
@@ -239,6 +241,7 @@ public final class ModelStage {
         directional(SIMD3(0.2, 0.6, -1.0), intensity: 650, 0.85, 0.9, 1.0)   // rim: from behind
         if studio { directional(SIMD3(0.1, 0.2, 1.0), intensity: 700, 1.0, 1.0, 1.0) }  // front: lifts the shadow side
         let ambient = SCNLight()
+        lights.append(ambient)
         ambient.type = .ambient
         ambient.intensity = CGFloat((studio ? 220 : 25) * exposure)
         ambient.color = ModelStage.color(0.6, 0.65, 0.8)
@@ -251,6 +254,15 @@ public final class ModelStage {
 
     /// The hull pass's reflection strength (0 for planets).
     private var environmentIntensity: CGFloat = 0
+    private var lights: [SCNLight] = []
+
+    /// Brighten or dim the whole rig (every light and the reflections) by `k`
+    /// — how a model is matched to its classic art's brightness.
+    public func scaleLights(by k: Double) {
+        for l in lights { l.intensity *= CGFloat(k) }
+        environmentIntensity *= CGFloat(k)
+        if scene.lightingEnvironment.intensity > 0 { scene.lightingEnvironment.intensity = environmentIntensity }
+    }
 
     static func color(_ r: Double, _ g: Double, _ b: Double, alpha: Double = 1) -> Any {
         #if canImport(AppKit)

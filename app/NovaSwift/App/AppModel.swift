@@ -116,6 +116,7 @@ final class AppModel: ObservableObject {
     private var dataObserver: AnyCancellable?
     private var rosterObserver: AnyCancellable?
     private var sessionObserver: AnyCancellable?
+    private var dataSetObserver: AnyCancellable?
     #if canImport(CloudKit)
     private var gameDataSyncObserver: AnyCancellable?
     #endif
@@ -133,14 +134,21 @@ final class AppModel: ObservableObject {
         roster = PilotRoster(preferICloud: GameSettings.load().iCloudSaves)
         // Re-publish when the data controller changes so views observing AppModel refresh.
         dataObserver = data.objectWillChange.sink { [weak self] _ in
-            guard let self else { return }
-            _uiGraphics = nil                // rebuild authentic-UI art against new data
-            _uiTheme = nil                   // and the cölr interface theme
-            store.refresh(data: data)
-            objectWillChange.send()
-            // HD packs found by a load (e.g. copied into the plug-ins folder by hand).
-            offerHDGraphics(packs: HDGraphics.shared.lastSearch?.packs ?? [], force: false)
+            self?.objectWillChange.send()
         }
+        // Only a new data set (or plug-in list) invalidates what's built from it.
+        // `objectWillChange` also fires for every loading-progress tick, dozens
+        // of times a second — rebuilding the spaceport art, re-scanning the
+        // plug-in folders and re-checking HD packs on each one was a real cost.
+        dataSetObserver = Publishers.Merge(data.$dataStamp.map { _ in () }, data.$plugins.map { _ in () })
+            .sink { [weak self] in
+                guard let self else { return }
+                _uiGraphics = nil                // rebuild authentic-UI art against new data
+                _uiTheme = nil                   // and the cölr interface theme
+                store.refresh(data: data)
+                // HD packs found by a load (e.g. copied into the plug-ins folder by hand).
+                offerHDGraphics(packs: HDGraphics.shared.lastSearch?.packs ?? [], force: false)
+            }
         store.onHDContentInstalled = { [weak self] packs in self?.offerHDGraphics(packs: packs, force: true) }
         // The roster is a nested ObservableObject reached through `model.roster`;
         // SwiftUI only re-renders on the *observed* object's change, so forward

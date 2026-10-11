@@ -86,6 +86,31 @@ public final class ModelBaker {
         }
     }
 
+    /// Scale the lighting so the model's mid and upper-mid tones match the
+    /// classic frames at the same headings: remastered textures come out
+    /// darker or lighter than the original renders, and a ship should read
+    /// as bright as the one it replaces.
+    private func matchBrightness(stage: ModelStage, layout: BakeLayout, classic: SpriteSheet, scale s: Double) {
+        let n = layout.framesPerSet
+        let samples = Array(Set((0..<8).map { $0 * n / 8 })).filter { $0 < layout.frameCount && $0 < classic.frameCount }.sorted()
+        guard let target = ClassicFootprint.tones(of: classic, frames: samples), target.mid > 0.02 else { return }
+        let size = CGSize(width: Double(layout.frameWidth) * s, height: Double(layout.frameHeight) * s)
+        var total = 1.0
+        for _ in 0..<2 {   // lighting isn't linear through the tone curve; a second pass settles it
+            let frames = samples.compactMap { f -> CGImage? in
+                let pose = layout.pose(frame: f)
+                stage.pose(pose.set, heading: pose.heading)
+                return snapshot(size)
+            }
+            guard let got = ClassicFootprint.tones(of: frames), got.mid > 0.01 else { return }
+            let ratio = (target.mid / got.mid + target.high / max(got.high, 0.01)) / 2
+            let k = min(3.0, max(0.6, total * ratio)) / total
+            if abs(k - 1) < 0.04 { return }
+            stage.scaleLights(by: k)
+            total *= k
+        }
+    }
+
     /// An effect layer to render: the hull's classic overlay it replaces.
     public struct LayerTarget {
         public let layer: GraphicsEnhancement.EffectLayer
@@ -119,6 +144,11 @@ public final class ModelBaker {
         let s = HDAtlas.clampScale(scale, logicalWidth: layout.columns * layout.frameWidth,
                                    logicalHeight: layout.rows * layout.frameHeight)
         fit(stage: stage, layout: layout, classic: classic, scale: s)
+        // As bright as the art it replaces, unless the pack sets its own exposure
+        // (planets keep their single-sun look).
+        if let classic, descriptor.bake?.exposure == nil, descriptor.bake?.atmosphere == nil {
+            matchBrightness(stage: stage, layout: layout, classic: classic, scale: s)
+        }
         // Layers the model says nothing about glow where the classic overlay
         // glows (now that the fit fixes how big a classic pixel is).
         for t in overlays where !stage.layersPresent.contains(t.layer) {
@@ -313,7 +343,7 @@ public final class ModelBaker {
 public final class HDBakeCache: @unchecked Sendable {
     public let directory: URL
     /// Bump to invalidate every bake when the renderer's output changes.
-    public static let version = 9
+    public static let version = 10   // 10: lighting matched to the classic art's brightness
 
     public convenience init?(subdirectory: String = "NovaSwift/HDBakes") {
         guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
@@ -438,6 +468,27 @@ public enum HDAssetPipeline {
 
     /// The enhancement's atlas plus, for a model with effect layers, an atlas
     /// for each classic overlay it replaces — keyed by sprite id.
+    /// The shield bubble for a hull's prepared atlas (see `HDShield.make`),
+    /// cached with the bakes: it's a per-pixel pass over every frame, too slow
+    /// to repeat on every launch.
+    public static func shield(for e: ResolvedGraphicsEnhancement, hull: HDAtlas, frames: Int,
+                              color: [Double], cache: HDBakeCache?) -> HDAtlas? {
+        let n = min(frames, hull.frameCount)
+        guard n > 0, color.count == 3 else { return nil }
+        let fw = Int((Double(hull.frameWidth) * HDShield.frameGrowth).rounded())
+        let fh = Int((Double(hull.frameHeight) * HDShield.frameGrowth).rounded())
+        let layout = BakeLayout(frameWidth: fw, frameHeight: fh, frameCount: n, framesPerSet: n, sets: [.level])
+        let content = e.source.contentKey()
+        let key = content.map {
+            HDBakeCache.key(contentKey: $0, descriptor: e.descriptor, layout: layout, scale: hull.pixelScale,
+                            part: "shield-v1-" + color.map { String(format: "%.3f", $0) }.joined(separator: ","))
+        }
+        if let cache, let key, let hit = cache.load(key, layout: layout, scale: hull.pixelScale) { return hit }
+        guard let made = HDShield.make(from: hull, frames: n, color: color) else { return nil }
+        if let cache, let key { cache.store(key, made) }
+        return made
+    }
+
     public static func atlases(for e: ResolvedGraphicsEnhancement, classic: SpriteSheet, layout: BakeLayout,
                                overlays: [OverlayTarget], maxScale: Double,
                                cache: HDBakeCache?) throws -> [Int: HDAtlas] {

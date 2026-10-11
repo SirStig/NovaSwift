@@ -37,9 +37,11 @@ let package = Package(
         .target(
             name: "NovaSwiftKit",
             dependencies: [.product(name: "Crypto", package: "swift-crypto")],
-            path: "Sources/NovaSwiftKit"
+            path: "Sources/NovaSwiftKit",
+            swiftSettings: optimizedInDebug
         ),
-        .target(name: "NovaSwiftEngine", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftEngine"),
+        .target(name: "NovaSwiftEngine", dependencies: ["NovaSwiftKit"], path: "Sources/NovaSwiftEngine",
+                swiftSettings: optimizedInDebug),
         .target(name: "NovaSwiftStory", dependencies: ["NovaSwiftKit", "NovaSwiftEngine"], path: "Sources/NovaSwiftStory"),
         .target(name: "NovaSwiftNet", path: "Sources/NovaSwiftNet"),
         .target(
@@ -67,7 +69,8 @@ let package = Package(
         .target(
             name: "NovaSwiftHD",
             dependencies: ["NovaSwiftKit", .product(name: "Crypto", package: "swift-crypto")],
-            path: "Sources/NovaSwiftHD"
+            path: "Sources/NovaSwiftHD",
+            swiftSettings: optimizedInDebug
         ),
         .executableTarget(
             name: "novaswift-hd",
@@ -106,3 +109,9 @@ let package = Package(
         ),
     ]
 )
+
+/// The data decoder, the simulation and the HD image work are hot loops that
+/// run 10-50x slower unoptimised, which made Debug runs from Xcode load and
+/// play nothing like the real thing. They're optimised in every build; the
+/// app target stays debuggable. Release is unchanged.
+var optimizedInDebug: [SwiftSetting] { [.unsafeFlags(["-O"], .when(configuration: .debug))] }

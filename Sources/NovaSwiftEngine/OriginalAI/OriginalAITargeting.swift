@@ -72,14 +72,22 @@ extension OriginalAI {
         return host.ship(target).map { leader(of: $0) == candidate.entityID && $0.isAlive } ?? false
     }
 
-    /// Whether NPC `attacker` is actually attacking `victim` or the squad
-    /// leader `leader` (`Ship_IsShipAcquirableAsTarget`): its AI state must be
-    /// an engaged one, so a scanning approach never counts.
-    func isEngagedAgainst(_ attacker: Ship, _ victim: Ship, leader: Int?, world: World) -> Bool {
+    /// The ship arm of point defense (`Weapon_SelectTurretTargetWithinArc`
+    /// 0x0043a310): whether `defender`'s PD may fire on `candidate`. The
+    /// player qualifies only while `defender` itself keeps pressing the
+    /// player's squad (0x0040f780(defender)); the player merely targeting it
+    /// does not count. An NPC qualifies when its primary is `defender` (or
+    /// `defender`'s leader) and its AI state is 0x04 attack
+    /// (`Ship_IsShipLockedOnAttackerInAiState0x04` 0x004102b0). Either way it
+    /// must be engageable under the cloak / gate-emergence rules (0x00464a90).
+    func pointDefenseMayEngage(_ candidate: Ship, defender: Ship, world: World) -> Bool {
         let host = WorldAIHost(world: world, ai: self)
-        if isAttacking(attacker, victim, host: host) { return true }
-        guard let leader, let lead = host.ship(leader) else { return false }
-        return isAttacking(attacker, lead, host: host)
+        guard canEngage(candidate, by: defender, host: host) else { return false }
+        if candidate.isPlayer { return keepsPressing(defender, host: host) }
+        guard let rec = records[candidate.entityID], rec.state == OriginalAIState.attack,
+              let target = rec.primary else { return false }
+        if target == defender.entityID { return true }
+        return defender.brain?.leaderID.map { $0 == target } ?? false
     }
 
     /// `Ship_ShouldShipKeepPressingTarget` (0x0040f780).
