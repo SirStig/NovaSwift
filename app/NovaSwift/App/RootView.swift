@@ -108,6 +108,15 @@ struct RootView: View {
                     .zIndex(12)
             }
 
+            // HD/3D art turned up while HD graphics are off: ask before using it.
+            if let packs = model.hdPromptPacks {
+                HDGraphicsPromptView(packNames: packs,
+                                     onEnable: { model.enableHDGraphics() },
+                                     onDecline: { model.declineHDGraphics() })
+                    .transition(.opacity)
+                    .zIndex(13)
+            }
+
             // UI debug (measurement) overlay controls: an on-screen badge to
             // exit and a ⇧⌘D hotkey to toggle. The grid itself is drawn by each
             // coordinate-space container (see NovaDebug.swift) from the ambient

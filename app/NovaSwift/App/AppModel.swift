@@ -138,7 +138,10 @@ final class AppModel: ObservableObject {
             _uiTheme = nil                   // and the cölr interface theme
             store.refresh(data: data)
             objectWillChange.send()
+            // HD packs found by a load (e.g. copied into the plug-ins folder by hand).
+            offerHDGraphics(packs: HDGraphics.shared.lastSearch?.packs ?? [], force: false)
         }
+        store.onHDContentInstalled = { [weak self] packs in self?.offerHDGraphics(packs: packs, force: true) }
         // The roster is a nested ObservableObject reached through `model.roster`;
         // SwiftUI only re-renders on the *observed* object's change, so forward
         // its changes (pilot list, selection, iCloud/local state) up to AppModel
@@ -221,6 +224,35 @@ final class AppModel: ObservableObject {
         audio.apply(settings: settings)
         store.refresh(data: data)
     }
+
+    // MARK: HD graphics prompt
+
+    /// Pack names to ask about ("Enable HD Graphics?"), or nil when no prompt is up.
+    @Published var hdPromptPacks: [String]?
+    private static let hdPromptSeenKey = "com.novaswift.hdPromptSeen"
+
+    /// Ask once per new pack while HD is off. `force` asks even if every pack
+    /// was seen before (the player just installed HD content on purpose).
+    func offerHDGraphics(packs: [URL], force: Bool) {
+        guard !settings.hdGraphics, hdPromptPacks == nil else { return }
+        let names = packs.map { $0.deletingPathExtension().lastPathComponent }
+        var seen = Set(UserDefaults.standard.stringArray(forKey: Self.hdPromptSeenKey) ?? [])
+        let fresh = names.filter { !seen.contains($0) }
+        guard force || !fresh.isEmpty else { return }
+        seen.formUnion(names)
+        UserDefaults.standard.set(Array(seen).sorted(), forKey: Self.hdPromptSeenKey)
+        hdPromptPacks = fresh.isEmpty ? names : fresh
+    }
+
+    func enableHDGraphics() {
+        hdPromptPacks = nil
+        settings.hdGraphics = true
+        commitSettings()
+        HDGraphics.shared.update(settings: settings)
+        Task { await data.prewarmHDGraphics() }
+    }
+
+    func declineHDGraphics() { hdPromptPacks = nil }
 
     /// Persist settings whenever they change materially, and push audio changes live.
     func commitSettings() {

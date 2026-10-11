@@ -76,19 +76,30 @@ host drops. See [MULTIPLAYER.md](MULTIPLAYER.md).
 
 ### Plug-in toolkit
 
-A full plug-in editor and HD extensions, so the community can build things the
-original tools never allowed:
+The goal: anything in the game can be changed or added by a plug-in, and
+building one is easy. Classic plug-ins keep working in the original game; the
+new abilities sit on top of them.
 
-- An editor for every resource type, with ship, galaxy and mission editors,
-  validation against the original's rules, "test in engine", and export to
-  Windows and Mac plug-in formats.
-- An optional HD layer beside any plug-in. **Working now:** high-resolution
-  sprites and 3D models rendered into classic sprite frames, with effects, HD
-  planets and HD ship pictures ([HD_PIPELINE.md](HD_PIPELINE.md)). **Next:**
-  live 3D with real-time lighting, glTF import, better audio and music, and HD
-  landing art. Gameplay never changes, and plain plug-ins still work in the
-  original game.
-- Publishing to the plug-in store, a command-line tool, templates and guides.
+- **A plug-in editor**, a modern Mission Computer: every classic resource type,
+  ship, galaxy and mission editors, validation against the original's rules,
+  "test in engine", and export to Windows and Mac plug-in formats. It also
+  handles the new HD art and 3D models: add them, preview them as the game
+  will draw them, and pack them into the plug-in file.
+- **HD art and 3D models.** Working now: high-resolution sprites and 3D models
+  drawn into the classic sprite frames, with engine glow, lights and weapon
+  flash, HD planets and HD ship pictures. Packs can sit beside a plug-in or
+  inside its `.rez`, so an existing plug-in such as Arpia 2 can be repacked
+  with HD art and still load in the original game. See
+  [HD_PIPELINE.md](HD_PIPELINE.md). Nova Reimagined, a full graphics overhaul
+  of the base game, is being built with it.
+- **Live 3D.** Models drawn in real time with real lighting (nearby stars,
+  weapon fire) instead of pre-rendered frames, for players who want it.
+- **Expanded plug-ins.** New abilities the original format never had: changing
+  the game's fixed rules and limits, scripted events and mission logic, new
+  interface screens and HUD layouts, and custom effects and shaders. Each one
+  is optional and ignored by the original game.
+- Publishing to the plug-in store, a command-line tool, templates, example
+  plug-ins and guides.
 
 The plan is in [PLUGIN_TOOLKIT.md](PLUGIN_TOOLKIT.md).
 

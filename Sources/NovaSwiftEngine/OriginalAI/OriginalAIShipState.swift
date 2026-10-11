@@ -193,6 +193,23 @@ public final class OriginalAIShipState {
     /// The `AIBrain.state` last written by the mirror, to notice outside writes.
     var mirroredState: AIState?
 
+    /// The gate fade `Ship_UpdateVisualState` (0x00428340) draws from the
+    /// maneuver timer, in ticks: a ship emerging from a gate (state 0x15, timer
+    /// from 60) is hidden until the timer reaches 16, then loses its white wash
+    /// over those 16 ticks; a ship entering one (control mode 0x17, timer from
+    /// 16) washes out to full white by the time it is deactivated. `white` is
+    /// the original's fog level / 32. Nil when neither applies.
+    public var gateFade: (hidden: Bool, white: Double)? {
+        if mode == OriginalAIMode.gateHandoff {
+            let level = min(max((32 - 2 * maneuverTimer).rounded(), 0), 32)
+            return (false, level / 32)
+        }
+        guard state == OriginalAIState.gateEmerge else { return nil }
+        if maneuverTimer > 16 { return (true, 1) }
+        let elapsed = min(max((16 - maneuverTimer).rounded(), 0), 16)
+        return (false, 1 - elapsed / 16)
+    }
+
     init(entityID: Int, behavior: Int, cadence: Int) {
         self.entityID = entityID
         self.behavior = behavior

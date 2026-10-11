@@ -51,6 +51,10 @@ public struct GameplayEnhancements: Codable, Equatable, Sendable {
     /// bindings are reset to defaults.
     public var modernKeyBindings = false
 
+    /// Camera shake on nearby explosions and impacts. The original never
+    /// shakes the view; still suppressed by "Reduce flashing & motion".
+    public var screenShake = false
+
     public init() {}
 
     /// One toggle as the Settings screen lists it.
@@ -88,6 +92,9 @@ public struct GameplayEnhancements: Codable, Equatable, Sendable {
         Entry(key: "modernKeyBindings", keyPath: \.modernKeyBindings,
               title: "Modern key layout",
               replaces: "Return fires secondaries, Shift is the afterburner and P pauses, applied when you reset the keys. The original layout uses Control, Z and P for Player Info."),
+        Entry(key: "screenShake", keyPath: \.screenShake,
+              title: "Screen shake",
+              replaces: "The view shakes when something blows up nearby. The original never moves the camera."),
     ]
 
     public var enabledCount: Int { Self.catalog.filter { self[keyPath: $0.keyPath] }.count }

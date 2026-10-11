@@ -170,7 +170,7 @@ was re-read in the Ghidra export, with constants read from the executable.
 | ~~Fighter bays and ammo rebuilt full on every takeoff~~ | Now the `freeMunitionsRefill` enhancement | OS-03, UI-02 |
 | ~~Hull PodCount alone grants a survivable escape pod~~ | Now the `forgivingEscapePod` enhancement | OS-02 |
 | ~~Plug-ins start disabled; discovered recursively; case-sensitive order~~ | Now the `manualPluginOrder` enhancement (UI-16) | UI-16 |
-| Presentation defaults `screenShake = true`, `shipBarPosition = .above`, `sidebarPauseMenu = true`, `showMissionStorylineTags = true` | `App/App/GameSettings.swift:279–282` | Decision 2 |
+| Presentation defaults (`screenShake` has since moved to the Enhancements list, off) `screenShake = true`, `shipBarPosition = .above`, `sidebarPauseMenu = true`, `showMissionStorylineTags = true` | `App/App/GameSettings.swift:279–282` | Decision 2 |
 
 **Strict Play — settled (user).** The original asks for Strict Play at pilot creation and stores
 it in the pilot file. NovaSwift has no such field (no `strictPlay` anywhere in `Sources/` or
@@ -702,8 +702,16 @@ models, so later batches can rely on them.
   engaged jump (it survives only inside `quickHyperjump`'s own phases), NPC hyperspace
   arrivals/departures have no pop, scale or streak (the node just appears or is dropped), and
   "no hyperspace effects" paints the boom frame black with no Mac fade instead of hiding it.
-  **Unresolved.** Gate emergence/entry still use the port's ring flourish and grow/shrink instead of
-  the white-fade above (timer units per tick not pinned). The star dust uses the port's infinite
+  **Gate emergence/entry (done 2026-10-10).** The maneuver timer (float at ship +0x4c, in 30 Hz
+  ticks) drives it in `Ship_UpdateVisualState` 0x00428340: control mode 0x17 (gate entry, timer
+  16 -> 0) washes the hull toward white by level `32 - 2 x timer` (of 32), then the ship is
+  deactivated; otherwise AI state 0x15 (emerge, timer 60 -> 0) hides the ship until the timer is
+  <= 16, then the white level falls 32 -> 0 over those 16 ticks. No ring, no scale change, no
+  delay beyond the hold. NovaSwift now matches: `OriginalAIShipState.gateFade` computes it and
+  `GameScene.applyGateFade` tints/hides the NPC node (escorts and NPCs); the ring flourish and
+  grow/shrink are gone. Not confirmed: the draw branch is gated on a display-mode word equal to 16
+  (any other value keeps the emerging ship hidden for the whole state), and the player's own gate
+  arrival has no state-0x15 record, so it gets no fade. The star dust uses the port's infinite
   tile wrap and is not re-seeded on arrival. Escorts don't run the original's spin-up sync (state
   0x0B; Batch 6). x2 mode is not modelled.
 - **Original** (decomp `travel.cpp`, `docs/player_hyperspace.md`):
@@ -3775,3 +3783,15 @@ Left: hail-quote wildcard expansion (rides on main's `expandStatusText`).
 
 Done from `ai_spawn_comm.md` and `weapons_flight.md`: A1, A2, A3, A4, A5/A6/B-13, A7, A8, B-1 to B-6, B-8 to B-12, B-14, C-1, C-2, D-1 to D-4, and ai_spawn_comm #2, #4, #6, #9 to #19 and #20 (hull availability, gate hold). Pinned by `AICombatFidelityTests`, `BoardingTests`, `ShipSystemTests`.
 Also done: chatter categories 0 and 2, the capture name prompt (#119), comm and capture window text and keys (#22), A9 (area blasts, pod debris), C-3, C-4, and the B-7 test. Not done: #20's RNG draw shapes (they change only the random stream), the pod-debris sound (DAT_00591a80, id unknown) and the pers-flag debris arm at 0x00433050 l.904.
+
+### Fidelity gap pass (radar IFF, chatter, Escort Commands panel, input flush) — FIXED
+- Radar IFF: ship/stellar colours follow 0x00465f00 / 0x00466030; with IFF the player dot is cyan and the target dot alternates its IFF colour with BrightRadar (0x0045d600), no extra ring.
+- Combat chatter: `queueCombatChatter` / `updateCombatChatter` play the snd 1000+ voice banks on order acks, target picks and kills (0x00426ce0/0x004311f0); it is audio only, not a message line.
+- Escort Commands panel: E / 1–5 / F D V C(Alt-C) with number-key suppression while open (0x0049e430, 0x00469ca0); touch builds tap rows and order buttons on the panel.
+- Input flush: held keyboard state is cleared whenever flight controls hand over to or back from a dialog (0x004b68d0).
+
+### Presentation fidelity fixes (ionization look, screen shake, cloak sound, hull blast)
+- **Ionization look: FIXED.** The hull now takes a flat colour blend of the weapon's IonizeColor (no halo, scale, additive or pulse), as `Ship_UpdateVisualState` 0x00428340 does through the shared fog slot. It shows from intensity 0.33; blend = (clamp(round(intensity x 0.24), 16, 24) + Random(5) - 2) / 32, re-rolled every frame. It overrides murk only where its level is higher (or murk is under 8); the gate fade is applied last. `GameScene.applyIonize`. The 0.24 factor is read from the exe constants (24.0 x 0.01), so in practice the level is 16 +/- 2.
+- **Screen shake: FIXED.** The original never moves the camera. It is now the `screenShake` Enhancement (off), no longer a Graphics toggle, and no presentation preset touches it.
+- **Cloak sounds 380/381: FIXED.** Already wired (player only, plain `nv_PlaySound`); now played at the original's priority 8 instead of 1.
+- **Hull blast on death: already DONE** (WP-13, `World.deathBlast`); the audit's MISSING row was stale. Debris puffs (`syncDebrisPuffs`) also exist.

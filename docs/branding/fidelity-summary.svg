@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="500" viewBox="0 0 640 500" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="520" viewBox="0 0 640 520" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.hl{font-size:22px;font-weight:700;fill:#f0e6da}.sb{font-size:12px;fill:#a89a95}.nm{font-size:13px;fill:#f0e6da}.pc{font-size:13px;font-weight:600;fill:#f0e6da}</style>
-<rect width="640" height="500" rx="10" fill="#0d0a0e"/>
-<text x="20" y="34" class="hl">Original code compared: 100%</text>
+<rect width="640" height="520" rx="10" fill="#0d0a0e"/>
+<text x="20" y="34" class="hl">Original code compared: 96%</text>
 <text x="20" y="56" class="sb">How much of the original's code has been compared with NovaSwift. Still in beta: bugs remain.</text>
 <text x="20" y="90" class="nm">Flight &amp; collision</text>
 <rect x="230" y="78" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -45,8 +45,8 @@
 <rect x="502" y="102" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="102" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="102" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="102" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="114" class="pc">100%</text>
+<rect x="553" y="102" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="114" class="pc">93%</text>
 <text x="20" y="138" class="nm">NPC AI</text>
 <rect x="230" y="126" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="126" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -67,8 +67,8 @@
 <rect x="502" y="126" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="126" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="126" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="126" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="138" class="pc">100%</text>
+<rect x="553" y="126" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="138" class="pc">97%</text>
 <text x="20" y="162" class="nm">Spawning</text>
 <rect x="230" y="150" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="150" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -89,8 +89,8 @@
 <rect x="502" y="150" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="150" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="150" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="150" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="162" class="pc">100%</text>
+<rect x="553" y="150" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="162" class="pc">95%</text>
 <text x="20" y="186" class="nm">Missions &amp; scripts</text>
 <rect x="230" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -110,9 +110,9 @@
 <rect x="485" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="502" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="536" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="174" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="186" class="pc">100%</text>
+<rect x="536" y="174" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="553" y="174" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="186" class="pc">94%</text>
 <text x="20" y="210" class="nm">Economy &amp; spaceport</text>
 <rect x="230" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -133,8 +133,8 @@
 <rect x="502" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="198" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="210" class="pc">100%</text>
+<rect x="553" y="198" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="210" class="pc">96%</text>
 <text x="20" y="234" class="nm">Boarding &amp; hails</text>
 <rect x="230" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -154,9 +154,9 @@
 <rect x="485" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="502" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="536" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="222" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="234" class="pc">100%</text>
+<rect x="536" y="222" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="553" y="222" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="234" class="pc">95%</text>
 <text x="20" y="258" class="nm">Outfits &amp; ships</text>
 <rect x="230" y="246" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="246" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -222,7 +222,7 @@
 <rect x="519" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="294" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="553" y="294" width="14" height="14" rx="2" fill="#3aa6b9"/>
-<text x="580" y="306" class="pc">100%</text>
+<text x="580" y="306" class="pc">98%</text>
 <text x="20" y="330" class="nm">HUD &amp; input</text>
 <rect x="230" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -240,11 +240,11 @@
 <rect x="451" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="468" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="485" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="502" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="519" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="536" y="318" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="318" width="14" height="14" rx="2" fill="#3aa6b9"/>
-<text x="580" y="330" class="pc">100%</text>
+<rect x="502" y="318" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="519" y="318" width="14" height="14" rx="2" fill="#d1495b"/>
+<rect x="536" y="318" width="14" height="14" rx="2" fill="#d1495b"/>
+<rect x="553" y="318" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="330" class="pc">83%</text>
 <text x="20" y="354" class="nm">Saving &amp; game loop</text>
 <rect x="230" y="342" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="342" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -261,12 +261,12 @@
 <rect x="434" y="342" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="451" y="342" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="468" y="342" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="485" y="342" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="502" y="342" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="485" y="342" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="502" y="342" width="14" height="14" rx="2" fill="#3aa6b9"/>
 <rect x="519" y="342" width="14" height="14" rx="2" fill="#3aa6b9"/>
-<rect x="536" y="342" width="14" height="14" rx="2" fill="#3aa6b9"/>
-<rect x="553" y="342" width="14" height="14" rx="2" fill="#3aa6b9"/>
-<text x="580" y="354" class="pc">100%</text>
+<rect x="536" y="342" width="14" height="14" rx="2" fill="#d1495b"/>
+<rect x="553" y="342" width="14" height="14" rx="2" fill="#2b2730"/>
+<text x="580" y="354" class="pc">91%</text>
 <text x="20" y="378" class="nm">Data &amp; plug-in loading</text>
 <rect x="230" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="366" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -309,8 +309,8 @@
 <rect x="502" y="390" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="519" y="390" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="536" y="390" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="390" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="402" class="pc">100%</text>
+<rect x="553" y="390" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="402" class="pc">96%</text>
 <text x="20" y="426" class="nm">Rendering</text>
 <rect x="230" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -329,10 +329,10 @@
 <rect x="468" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="485" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="502" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="519" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="536" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="414" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="426" class="pc">100%</text>
+<rect x="519" y="414" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="536" y="414" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="553" y="414" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="426" class="pc">94%</text>
 <text x="20" y="450" class="nm">Sound &amp; music</text>
 <rect x="230" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -351,10 +351,11 @@
 <rect x="468" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="485" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="502" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="519" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="536" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="553" y="438" width="14" height="14" rx="2" fill="#3fb950"/>
-<text x="580" y="450" class="pc">100%</text>
+<rect x="519" y="438" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="536" y="438" width="14" height="14" rx="2" fill="#3aa6b9"/>
+<rect x="553" y="438" width="14" height="14" rx="2" fill="#d1495b"/>
+<text x="580" y="450" class="pc">95%</text>
 <rect x="20" y="470" width="12" height="12" rx="2" fill="#3fb950"/><text x="38" y="481" class="sb">done</text><rect x="90" y="470" width="12" height="12" rx="2" fill="#e3a52b"/><text x="108" y="481" class="sb">in progress</text><rect x="200" y="470" width="12" height="12" rx="2" fill="#2b2730"/><text x="218" y="481" class="sb">to do</text>
 <rect x="270" y="470" width="12" height="12" rx="2" fill="#3aa6b9"/><text x="288" y="481" class="sb">done differently by design</text>
+<rect x="20" y="490" width="12" height="12" rx="2" fill="#d1495b"/><text x="38" y="501" class="sb">differs from the original, not fixed yet</text>
 </svg>

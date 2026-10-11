@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="596" viewBox="0 0 640 596" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="620" viewBox="0 0 640 620" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.hl{font-size:22px;font-weight:700;fill:#f0e6da}.sb{font-size:12px;fill:#a89a95}.nm{font-size:13px;fill:#f0e6da}.pc{font-size:13px;font-weight:600;fill:#f0e6da}</style>
-<rect width="640" height="596" rx="10" fill="#0d0a0e"/>
-<text x="20" y="34" class="hl">NovaSwift's own features: 73% done</text>
+<rect width="640" height="620" rx="10" fill="#0d0a0e"/>
+<text x="20" y="34" class="hl">NovaSwift's own features: 71% done</text>
 <text x="20" y="56" class="sb">Things the original never had. Partly done tasks count as half.</text>
 <text x="20" y="90" class="nm">Multiplayer co-op</text>
 <rect x="230" y="78" width="14" height="14" rx="2" fill="#3fb950"/>
@@ -420,20 +420,20 @@
 <rect x="519" y="510" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="536" y="510" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="553" y="510" width="14" height="14" rx="2" fill="#2b2730"/>
-<text x="580" y="522" class="pc">7%</text>
-<text x="20" y="546" class="nm">HD graphics and 3D models</text>
+<text x="580" y="522" class="pc">6%</text>
+<text x="20" y="546" class="nm">Expanded plug-ins</text>
 <rect x="230" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="247" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
 <rect x="264" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="281" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="298" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="315" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="332" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="349" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="366" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="383" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="400" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
-<rect x="417" y="534" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="281" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="298" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="315" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="332" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="349" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="366" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="383" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="400" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="417" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="434" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="451" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="468" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
@@ -442,6 +442,28 @@
 <rect x="519" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="536" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="553" y="534" width="14" height="14" rx="2" fill="#2b2730"/>
-<text x="580" y="546" class="pc">60%</text>
-<rect x="20" y="566" width="12" height="12" rx="2" fill="#3fb950"/><text x="38" y="577" class="sb">done</text><rect x="90" y="566" width="12" height="12" rx="2" fill="#e3a52b"/><text x="108" y="577" class="sb">in progress</text><rect x="200" y="566" width="12" height="12" rx="2" fill="#2b2730"/><text x="218" y="577" class="sb">to do</text>
+<text x="580" y="546" class="pc">17%</text>
+<text x="20" y="570" class="nm">HD graphics and 3D models</text>
+<rect x="230" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="247" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="264" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="281" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="298" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="315" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="332" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="349" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="366" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="383" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="400" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="417" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="434" y="558" width="14" height="14" rx="2" fill="#3fb950"/>
+<rect x="451" y="558" width="14" height="14" rx="2" fill="#e3a52b"/>
+<rect x="468" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="485" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="502" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="519" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="536" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
+<rect x="553" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
+<text x="580" y="570" class="pc">63%</text>
+<rect x="20" y="590" width="12" height="12" rx="2" fill="#3fb950"/><text x="38" y="601" class="sb">done</text><rect x="90" y="590" width="12" height="12" rx="2" fill="#e3a52b"/><text x="108" y="601" class="sb">in progress</text><rect x="200" y="590" width="12" height="12" rx="2" fill="#2b2730"/><text x="218" y="601" class="sb">to do</text>
 </svg>

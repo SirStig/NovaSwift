@@ -26,7 +26,7 @@ Original behaviour is the default. The decompiled code is not in this repo; only
 written specs with function addresses are, in
 [docs/reverse-engineering/](docs/reverse-engineering/README.md).
 
-![How much of the original game's code has been compared with NovaSwift](docs/branding/fidelity-summary.svg?v=f55beacc)
+![How much of the original game's code has been compared with NovaSwift](docs/branding/fidelity-summary.svg?v=4065c51b)
 
 Each row is one part of the game. A filled block is roughly 5% of that part's
 original code that has been compared with NovaSwift: it matched, it was fixed to
@@ -41,7 +41,7 @@ in ways a code comparison doesn't catch. If something plays differently, please
 
 ### Beyond the original
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=032de3ba)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=d00e1936)
 
 ### Not needed
 

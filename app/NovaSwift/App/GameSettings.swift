@@ -285,9 +285,6 @@ struct GameSettings: Codable, Equatable {
     var frameRateCap: FrameRateCap = .platformDefault
     /// Engine exhaust / weapon glow effects.
     var engineGlow: Bool = true
-    /// Camera shake on impacts / explosions. Off by default (the original
-    /// never shook the view); a saved choice is kept.
-    var screenShake: Bool = false
     /// Hyperspace presentation. Off (default): the Mac build's ~1.5 s white fade
     /// in and out of a jump. On: the Windows CE build's look, whose fade is a
     /// no-op (0x00467e60), leaving only the one-frame boom flash. The jump's
@@ -530,7 +527,6 @@ struct GameSettings: Codable, Equatable {
         hdDetail              = v(.hdDetail, d.hdDetail)
         frameRateCap          = v(.frameRateCap, d.frameRateCap)
         engineGlow            = v(.engineGlow, d.engineGlow)
-        screenShake           = v(.screenShake, d.screenShake)
         ceHyperspaceLook      = v(.ceHyperspaceLook, d.ceHyperspaceLook)
         shipBarPosition       = v(.shipBarPosition, d.shipBarPosition)
         showPlanetLabels      = v(.showPlanetLabels, d.showPlanetLabels)

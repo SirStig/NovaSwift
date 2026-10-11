@@ -435,6 +435,10 @@ struct EscortsView: View {
 /// with its group's current order; empty groups dim, the selected row lit.
 struct EscortCommandPanelView: View {
     @ObservedObject var hud: GameHUDModel
+    /// Touch / controller-pointer path (no keys 1–5 / F D V C there): tap a row
+    /// to pick the group, tap an order to issue it to that group.
+    var onGroup: ((Int) -> Void)? = nil
+    var onOrder: ((Int) -> Void)? = nil
 
     var body: some View {
         if let panel = hud.escortPanel {
@@ -450,6 +454,20 @@ struct EscortCommandPanelView: View {
                     }
                     .novaFont(.hud, weight: row.selected ? .bold : .regular, size: 10)
                     .foregroundStyle(row.enabled ? (row.selected ? Color.green : Color.white) : Color(white: 0.25))
+                    .contentShape(Rectangle())
+                    .onTapGesture { if row.enabled { onGroup?(index) } }
+                }
+                if onOrder != nil {
+                    HStack(spacing: 4) {
+                        ForEach([("Attack", OriginalEscortCommand.attack), ("Defend", OriginalEscortCommand.defend),
+                                 ("Form", OriginalEscortCommand.formation), ("Hold", OriginalEscortCommand.hold),
+                                 ("Hangar", OriginalEscortCommand.returnToHangar)], id: \.1) { item in
+                            Button(item.0) { onOrder?(item.1) }
+                                .buttonStyle(.bordered)
+                                .novaFont(.hud, weight: .regular, size: 9)
+                        }
+                    }
+                    .padding(.top, 3)
                 }
             }
             .padding(6)
@@ -457,7 +475,7 @@ struct EscortCommandPanelView: View {
             .background(Color.black.opacity(0.85))
             .border(Color(white: 0.4), width: 1)
             .opacity(Double(panel.level) / 32)
-            .allowsHitTesting(false)
+            .allowsHitTesting(onOrder != nil)
         }
     }
 }

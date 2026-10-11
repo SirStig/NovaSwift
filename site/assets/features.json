@@ -776,6 +776,11 @@
      "status": "planned"
     },
     {
+     "name": "HD art and 3D models: pack, embed, preview",
+     "status": "planned",
+     "where": ""
+    },
+    {
      "name": "Test in engine",
      "status": "planned"
     },
@@ -808,6 +813,41 @@
     {
      "name": "Pilot editor",
      "status": "planned"
+    }
+   ]
+  },
+  {
+   "name": "Expanded plug-ins",
+   "tasks": [
+    {
+     "name": "HD art and 3D models in plug-ins",
+     "status": "done",
+     "where": "docs/HD_PIPELINE.md"
+    },
+    {
+     "name": "Change the game's fixed rules and limits from a plug-in",
+     "status": "planned",
+     "where": ""
+    },
+    {
+     "name": "Scripted events and mission logic",
+     "status": "planned",
+     "where": ""
+    },
+    {
+     "name": "New interface screens and HUD layouts",
+     "status": "planned",
+     "where": ""
+    },
+    {
+     "name": "Custom effects and shaders",
+     "status": "planned",
+     "where": ""
+    },
+    {
+     "name": "Docs, templates and example plug-ins",
+     "status": "planned",
+     "where": ""
     }
    ]
   },
@@ -858,6 +898,26 @@
      "name": "Pack tools: viewer, overlay, console commands, novaswift-hd CLI",
      "status": "done",
      "where": "Debug/HDViewerView.swift, Sources/novaswift-hd"
+    },
+    {
+     "name": "HD art inside a plug-in file, with embed and unembed tools",
+     "status": "done",
+     "where": "Sources/NovaSwiftKit/GraphicsPackEmbedding.swift"
+    },
+    {
+     "name": "Packs found anywhere in a plug-in, switched with it",
+     "status": "done",
+     "where": "GameLibrary.discoverGraphicsPacks, owner(ofGraphicsPack:)"
+    },
+    {
+     "name": "Asks to turn on HD when new HD art is installed",
+     "status": "done",
+     "where": "app/NovaSwift/UI/HDGraphicsPromptView.swift"
+    },
+    {
+     "name": "Nova Reimagined overhaul pack",
+     "status": "partial",
+     "where": "planets, stations, asteroids, shots and effects done; ships 10 of 65"
     },
     {
      "name": "glTF import",

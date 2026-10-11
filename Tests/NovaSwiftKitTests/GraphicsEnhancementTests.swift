@@ -169,6 +169,90 @@ final class GraphicsEnhancementTests: XCTestCase {
         XCTAssertEqual(cat2[10]?.descriptor.kind, .sprite)
     }
 
+    /// The layouts a plug-in author or the plug-in manager produce: a pack in
+    /// a subfolder of its plug-in (it follows the plug-in's switch), a pack
+    /// inside a download's wrapper folder, and a graphics-only plug-in (a
+    /// standalone pack). Folders inside a pack are never searched.
+    func testPackPlacementsAndOwnership() throws {
+        let plugins = root.appendingPathComponent("Plug-ins")
+        let gamma = try write(RezWriter.write(ResourceCollection()), "Plug-ins/Gamma/Gamma.rez")
+        _ = try pack("Plug-ins/Gamma/Graphics/Gamma HD.nsx", [GraphicsEnhancement(kind: .sprite, sprite: 20, file: "g.png")],
+                     files: ["g.png": png])
+        // The plug-in manager unpacks a zip into <id>/, keeping its wrapper folder.
+        let delta = try write(RezWriter.write(ResourceCollection()), "Plug-ins/delta-id/Delta/Delta.rez")
+        _ = try pack("Plug-ins/delta-id/Delta/Delta.nsx", [GraphicsEnhancement(kind: .sprite, sprite: 21, file: "d.png")],
+                     files: ["d.png": png])
+        _ = try pack("Plug-ins/reimagined-id/Nova Reimagined/Nova Reimagined.nsx",
+                     [GraphicsEnhancement(kind: .sprite, sprite: 22, file: "r.png")], files: ["r.png": png])
+        // A folder that happens to end in .nsx inside a pack is pack content, not a pack.
+        _ = try pack("Plug-ins/reimagined-id/Nova Reimagined/Nova Reimagined.nsx/extra/Inner.nsx",
+                     [GraphicsEnhancement(kind: .sprite, sprite: 23, file: "i.png")], files: ["i.png": png])
+
+        let packs = GameLibrary.discoverGraphicsPacks(in: [plugins])
+        XCTAssertEqual(Set(packs.map(\.lastPathComponent)), ["Gamma HD.nsx", "Delta.nsx", "Nova Reimagined.nsx"])
+
+        let bundles = [
+            PluginBundle(id: "Gamma", name: "Gamma", fileURLs: [gamma], isEnabled: true),
+            PluginBundle(id: "delta-id", name: "Delta", fileURLs: [delta], isEnabled: true),
+        ]
+        let cat = GameLibrary.graphicsCatalog(resources: ResourceCollection(), plugins: bundles, graphicsPacks: packs)
+        XCTAssertEqual(cat[20]?.origin, "Gamma")
+        XCTAssertEqual(cat[21]?.origin, "delta-id")
+        XCTAssertEqual(cat[22]?.origin, "Nova Reimagined.nsx")   // graphics-only: standalone
+        XCTAssertNil(cat[23])
+
+        var off = bundles; off[0].isEnabled = false
+        let cat2 = GameLibrary.graphicsCatalog(resources: ResourceCollection(), plugins: off, graphicsPacks: packs)
+        XCTAssertNil(cat2[20], "a disabled plug-in's pack must not apply, wherever it sits in the folder")
+        XCTAssertEqual(cat2[21]?.origin, "delta-id")
+    }
+
+    /// A mod author repacks an existing plug-in with HD art inside it: the
+    /// original resources are untouched, the catalog reads the embedded art
+    /// through the normal in-file path, a shared file is stored once, and
+    /// `extract` gives back an editable pack.
+    func testEmbedPackIntoPluginAndBack() throws {
+        var plugin = ResourceCollection()
+        plugin.add(Resource(type: NovaType.ship, id: 128, name: "Arpia hull", data: Data(repeating: 7, count: 32)))
+        let usdz = Data([0x50, 0x4B, 0x03, 0x04, 9, 9])
+        let packURL = try pack("Arpia HD.nsx", [
+            GraphicsEnhancement(kind: .model, sprite: 1000, file: "hull.usdz"),
+            GraphicsEnhancement(kind: .model, sprite: 1002, file: "hull.usdz"),
+            GraphicsEnhancement(kind: .sprite, sprite: 2002, file: "planet@4x.png", scale: 4),
+        ], files: ["hull.usdz": usdz, "planet@4x.png": png])
+
+        let merged = try GraphicsPackEmbedding.embed(pack: packURL, into: plugin)
+        XCTAssertEqual(merged.resource(NovaType.ship, 128)?.data, Data(repeating: 7, count: 32))
+        XCTAssertEqual(merged.resources(of: GraphicsEnhancementType.descriptor).count, 3)
+        XCTAssertEqual(merged.resources(of: GraphicsEnhancementType.blob).count, 2, "shared file stored once")
+
+        // Through a real .rez round trip, then the catalog's in-file reader.
+        let reread = try ResourceFile.read(RezWriter.write(merged))
+        var cat = GraphicsEnhancementCatalog()
+        cat.addInFile(from: reread)
+        XCTAssertEqual(cat[1000]?.descriptor.kind, .model)
+        XCTAssertEqual(cat[2002]?.descriptor.scale, 4)
+        XCTAssertTrue(cat.problems.isEmpty, "\(cat.problems)")
+
+        // Embedding again replaces rather than duplicates.
+        let again = try GraphicsPackEmbedding.embed(pack: packURL, into: reread)
+        XCTAssertEqual(again.resources(of: GraphicsEnhancementType.descriptor).count, 3)
+        XCTAssertEqual(again.resources(of: GraphicsEnhancementType.blob).count, 2)
+
+        let out = root.appendingPathComponent("Extracted.nsx")
+        XCTAssertEqual(try GraphicsPackEmbedding.extract(from: reread, to: out), 3)
+        var cat2 = GraphicsEnhancementCatalog()
+        cat2.addSidecar(out, origin: "x")
+        XCTAssertEqual(cat2[1002]?.descriptor.kind, .model)
+        XCTAssertTrue(cat2.problems.isEmpty, "\(cat2.problems)")
+    }
+
+    func testEmbedRejectsFormatsThatCantLiveInFile() throws {
+        let packURL = try pack("Bad.nsx", [GraphicsEnhancement(kind: .model, sprite: 1000, file: "hull.glb")],
+                               files: ["hull.glb": Data([0x67, 0x6C, 0x54, 0x46])])
+        XCTAssertThrowsError(try GraphicsPackEmbedding.embed(pack: packURL, into: ResourceCollection()))
+    }
+
     /// The original never descends into folders and only loads resource
     /// files, so a `.nsx` pack never shows up as (or inside) a plug-in.
     func testPacksAreNotPlugins() throws {

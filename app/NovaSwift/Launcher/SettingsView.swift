@@ -339,13 +339,18 @@ struct SettingsView: View {
                            options: GameSettings.FrameRateCap.allCases) { $0.label }
             Toggle("Smooth sprite scaling", isOn: binding(\.smoothSprites))
             Toggle("HD graphics from plug-ins", isOn: binding(\.hdGraphics))
+            // HD is opt-in, so say when installed packs are waiting on it.
+            if !model.settings.hdGraphics, let n = HDGraphics.shared.lastSearch?.packs.count, n > 0 {
+                Text(n == 1 ? "1 HD graphics pack is installed. Turn this on to use it."
+                            : "\(n) HD graphics packs are installed. Turn this on to use them.")
+                    .novaFont(.caption).foregroundStyle(.secondary)
+            }
             if model.settings.hdGraphics {
                 Toggle("Extra-sharp HD (uses more memory)",
                        isOn: Binding(get: { model.settings.hdDetail >= 4 },
                                      set: { model.settings.hdDetail = $0 ? 4 : 2 }))
             }
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
-            Toggle("Screen shake", isOn: binding(\.screenShake))
             Toggle("Windows hyperspace look", isOn: binding(\.ceHyperspaceLook))
             Toggle("Hyperspace effects", isOn: Binding(get: { !model.settings.noHyperspaceEffects },
                                                        set: { model.settings.noHyperspaceEffects = !$0 }))

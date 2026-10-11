@@ -12,7 +12,7 @@
   // under red-green colour blindness; "partly" squares are also drawn
   // half-filled in styles.css so status never relies on colour alone.
   var PALETTE = {
-    done: "#2fc39a", partly: "#f2b33d", partial: "#f2b33d",
+    done: "#2fc39a", partly: "#f2b33d", partial: "#f2b33d", gap: "#e8603c",
     deferred: "#d17fb5", mapped: "#4d78b8", library: "#3b3a40"
   };
   function paint(node, key, color) {

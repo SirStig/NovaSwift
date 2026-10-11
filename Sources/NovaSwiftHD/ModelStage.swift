@@ -37,10 +37,13 @@ public enum SetPose: String, Sendable, Hashable, Codable {
 public enum ModelLoader {
     public enum LoadError: Error, CustomStringConvertible {
         case unreadable(String)
+        case unsupportedFormat(String)
         case empty
         public var description: String {
             switch self {
             case .unreadable(let s): return "model could not be opened (\(s))"
+            case .unsupportedFormat(let ext):
+                return ".\(ext) models aren't supported; export USDZ instead (Blender: File → Export → Universal Scene Description, or Apple's Reality Converter)"
             case .empty: return "model has no geometry"
             }
         }
@@ -66,6 +69,10 @@ public enum ModelLoader {
             url = dir.appendingPathComponent("\(key).\(source.fileExtension ?? "usdz")")
             if !FileManager.default.fileExists(atPath: url.path) { try data.write(to: url, options: .atomic) }
         }
+        // SceneKit reads USD(Z/A/C), SCN, DAE and OBJ; name the common
+        // formats it can't, rather than failing with a vague error.
+        let ext = url.pathExtension.lowercased()
+        if ["glb", "gltf", "fbx", "blend", "3ds", "stl"].contains(ext) { throw LoadError.unsupportedFormat(ext) }
         let scene: SCNScene
         do { scene = try SCNScene(url: url, options: [.checkConsistency: false]) } catch {
             throw LoadError.unreadable(String(describing: error))
@@ -116,7 +123,30 @@ public final class ModelStage {
         scene.rootNode.addChildNode(pivot)
         pivot.addChildNode(roll)
         roll.addChildNode(model)
-        model.eulerAngles.y = SCNScalar((settings.yaw ?? 0) * .pi / 180)
+        // Orientation fix first (its own node, so it composes with the yaw):
+        // an exact 3×3 (`orientation`), Euler degrees (`rotate`), or a tilt.
+        let upright = SCNNode()
+        if let m = settings.orientation, m.count == 9 {
+            // Rows map model axes onto (x, y, z); SceneKit stores columns.
+            upright.transform = SCNMatrix4(
+                m11: SCNScalar(m[0]), m12: SCNScalar(m[3]), m13: SCNScalar(m[6]), m14: 0,
+                m21: SCNScalar(m[1]), m22: SCNScalar(m[4]), m23: SCNScalar(m[7]), m24: 0,
+                m31: SCNScalar(m[2]), m32: SCNScalar(m[5]), m33: SCNScalar(m[8]), m34: 0,
+                m41: 0, m42: 0, m43: 0, m44: 1)
+        } else if let r = settings.rotate, r.count == 3 {
+            let rx = SCNMatrix4MakeRotation(SCNScalar(r[0] * .pi / 180), 1, 0, 0)
+            let ry = SCNMatrix4MakeRotation(SCNScalar(r[1] * .pi / 180), 0, 1, 0)
+            let rz = SCNMatrix4MakeRotation(SCNScalar(r[2] * .pi / 180), 0, 0, 1)
+            upright.transform = SCNMatrix4Mult(SCNMatrix4Mult(rx, ry), rz)
+        } else {
+            upright.eulerAngles.x = SCNScalar((settings.tilt ?? 0) * .pi / 180)
+        }
+        model.removeFromParentNode()
+        upright.addChildNode(model)
+        let yawed = SCNNode()
+        yawed.addChildNode(upright)
+        yawed.eulerAngles.y = SCNScalar((settings.yaw ?? 0) * .pi / 180)
+        roll.addChildNode(yawed)
 
         let cam = SCNCamera()
         cam.usesOrthographicProjection = true

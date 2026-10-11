@@ -110,11 +110,17 @@ case "preview":
     // discover packs, build the catalog, resolve every entry through
     // HDAssetPipeline with a bake cache, twice (cold, then warm).
     guard args.count >= 4 else { usage() }
-    let game = loadGame(args[1])
     let pluginsDir = URL(fileURLWithPath: args[2])
+    // Load the plug-ins the way the original does (all of them, by name), so
+    // HD art embedded in a plug-in file (NSgx/NSbl) is found too.
+    let plugins = GameLibrary.originalPluginOrder(GameLibrary.discoverPlugins(in: pluginsDir))
+    let game: NovaGame = {
+        let files = GameLibrary.discoverResourceFiles(in: URL(fileURLWithPath: args[1]))
+        guard !files.isEmpty else { fail("no resource files under \(args[1])") }
+        do { return NovaGame(try GameLibrary.merge(baseFiles: files, plugins: plugins)) } catch { fail("\(error)") }
+    }()
     let out = URL(fileURLWithPath: args[3]); try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
     let scale = args.count > 4 ? Double(args[4]) ?? 2 : 2
-    let plugins = GameLibrary.discoverPlugins(in: pluginsDir)
     let packs = GameLibrary.discoverGraphicsPacks(in: [pluginsDir])
     let catalog = GameLibrary.graphicsCatalog(resources: game.resources, plugins: plugins, graphicsPacks: packs)
     print("packs: \(packs.map(\.lastPathComponent)), \(catalog.bySprite.count) enhanced sprite(s)")
@@ -167,10 +173,31 @@ case "preview":
                     if let cmp = Preview.compareLayers(classic: classic, hd: atlas, layers: layerAtlases, frames: frames, displayScale: 3) {
                         Preview.write(cmp, to: out.appendingPathComponent("sprite_\(e.spriteID).png"))
                     }
+                    // A requested shield bubble, as its own sheet beside the hull's.
+                    if let color = e.descriptor.shield, let sh = HDShield.make(from: atlas, frames: n, color: color) {
+                        Preview.write(sh.image, to: out.appendingPathComponent("shield_\(e.spriteID).png"))
+                        Preview.write(atlas.image, to: out.appendingPathComponent("hull_\(e.spriteID).png"))
+                        print("  sprite \(e.spriteID): shield \(sh.frameCount) frames \(sh.frameWidth)×\(sh.frameHeight)")
+                    }
                 }
             } catch { print("  sprite \(e.spriteID): \(error)") }
         }
         print("  \(pass) total: \(totalMS) ms, texture memory \(totalBytes / 1024 / 1024) MB")
+    }
+
+case "stellars":
+    // stellars <Nova Files> — each stellar sprite and the spöbs that use it
+    // (flags: H = hypergate, W = wormhole, S = station-like / uninhabited).
+    guard args.count == 2 else { usage() }
+    let game = loadGame(args[1])
+    var bySprite: [Int: [SpobRes]] = [:]
+    for sp in game.spobs() { if let id = game.spin(sp.graphicSpinID)?.spriteID { bySprite[id, default: []].append(sp) } }
+    for id in bySprite.keys.sorted() {
+        let list = bySprite[id]!
+        let sheet = game.spriteSheet(spriteID: id, maskID: 0, frameWidth: 0, frameHeight: 0, frameCount: 0)
+        let names = list.prefix(4).map { sp in sp.name + (sp.isHypergate ? " [H]" : "") + (sp.isWormhole ? " [W]" : "") }
+        print(String(format: "sprite %5d  %3dx%-3d %2d fr  x%-3d  %@", id, sheet?.frameWidth ?? 0, sheet?.frameHeight ?? 0,
+                     sheet?.frameCount ?? 0, list.count, names.joined(separator: ", ") as NSString))
     }
 
 case "hulls":
@@ -196,7 +223,12 @@ case "portrait":
     let model: SCNNode
     do { model = try ModelLoader.load(.file(URL(fileURLWithPath: args[1]))) } catch { fail("\(error)") }
     guard let baker = ModelBaker() else { fail("no Metal device") }
-    let d = GraphicsEnhancement(kind: .model, bake: .init(yaw: args.count > 3 ? Double(args[3]) : nil))
+    var pb = GraphicsEnhancement.BakeSettings(yaw: args.count > 3 ? Double(args[3]) : nil)
+    if args.count > 4 {
+        let vals = args[4].split(separator: ",").compactMap { Double($0) }
+        if vals.count == 9 { pb.orientation = vals } else { pb.rotate = vals }
+    }
+    let d = GraphicsEnhancement(kind: .model, bake: pb)
     guard let img = baker.portrait(model: model, descriptor: d, size: 512) else { fail("render failed") }
     try? HDAtlas.encodePNG(img)?.write(to: URL(fileURLWithPath: args[2]))
 
@@ -249,12 +281,67 @@ case "orient":
         }
     }
     let classicCG = Preview.classicCGImage(classic)
-    var best = (yaw: 0.0, score: -1.0)
-    for yaw in [0.0, 90, 180, 270] {
+    // Principal axes: TRELLIS-style generators keep the input picture's
+    // angle, so a ship can come out diagonal. Align the model's own longest
+    // direction to the nose (z), shortest to height (y), middle to the wings
+    // (x), then score the four rotations that can still be flipped.
+    let probeModel: SCNNode
+    do { probeModel = try ModelLoader.load(.file(URL(fileURLWithPath: args[2]))) } catch { fail("\(error)") }
+    var pts: [SIMD3<Double>] = []
+    probeModel.enumerateHierarchy { node, _ in
+        guard let g = node.geometry, let src = g.sources(for: .vertex).first else { return }
+        let stride = max(1, src.vectorCount / 20000)
+        src.data.withUnsafeBytes { raw in
+            for i in Swift.stride(from: 0, to: src.vectorCount, by: stride) {
+                let o = src.dataOffset + i * src.dataStride
+                let v = SIMD3<Float>(raw.load(fromByteOffset: o, as: Float.self),
+                                     raw.load(fromByteOffset: o + 4, as: Float.self),
+                                     raw.load(fromByteOffset: o + 8, as: Float.self))
+                let w = node.simdConvertPosition(v, to: probeModel)
+                pts.append(SIMD3(Double(w.x), Double(w.y), Double(w.z)))
+            }
+        }
+    }
+    guard pts.count > 10 else { fail("no vertices") }
+    let mean = pts.reduce(SIMD3<Double>(0, 0, 0), +) / Double(pts.count)
+    var cov = [[Double]](repeating: [0, 0, 0], count: 3)
+    for p in pts { let d = p - mean; for r in 0..<3 { for c in 0..<3 { cov[r][c] += d[r] * d[c] } } }
+    // Jacobi eigen-decomposition of the symmetric 3×3.
+    var a = cov, v: [[Double]] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    for _ in 0..<50 {
+        var (pI, qI, big) = (0, 1, 0.0)
+        for r in 0..<3 { for c in (r + 1)..<3 where abs(a[r][c]) > big { (pI, qI, big) = (r, c, abs(a[r][c])) } }
+        if big < 1e-12 { break }
+        let theta = 0.5 * atan2(2 * a[pI][qI], a[qI][qI] - a[pI][pI])
+        let (cs, sn) = (cos(theta), sin(theta))
+        for k in 0..<3 {
+            let (akp, akq) = (a[k][pI], a[k][qI])
+            a[k][pI] = cs * akp - sn * akq; a[k][qI] = sn * akp + cs * akq
+        }
+        for k in 0..<3 {
+            let (apk, aqk) = (a[pI][k], a[qI][k])
+            a[pI][k] = cs * apk - sn * aqk; a[qI][k] = sn * apk + cs * aqk
+        }
+        for k in 0..<3 {
+            let (vkp, vkq) = (v[k][pI], v[k][qI])
+            v[k][pI] = cs * vkp - sn * vkq; v[k][qI] = sn * vkp + cs * vkq
+        }
+    }
+    let order = [0, 1, 2].sorted { a[$0][$0] < a[$1][$1] }        // smallest … largest variance
+    func axis(_ i: Int) -> SIMD3<Double> { SIMD3(v[0][i], v[1][i], v[2][i]) }
+    var ex = axis(order[1]), ey = axis(order[0]), ez = axis(order[2])
+    if simd_dot(simd_cross(ex, ey), ez) < 0 { ex = -ex }          // keep it a rotation
+    print(String(format: "variances %.4f %.4f %.4f", a[order[0]][order[0]], a[order[1]][order[1]], a[order[2]][order[2]]))
+    var best = (m: [Double](), score: -1.0)
+    for (fx, fy, fz) in [(1.0, 1.0, 1.0), (-1.0, 1.0, -1.0), (-1.0, -1.0, 1.0), (1.0, -1.0, -1.0)] {
+        let rx = ex * fx, ry = ey * fy, rz = ez * fz
+        let m = [rx.x, rx.y, rx.z, ry.x, ry.y, ry.z, rz.x, rz.y, rz.z]
         let model: SCNNode
         do { model = try ModelLoader.load(.file(URL(fileURLWithPath: args[2]))) } catch { fail("\(error)") }
         var stats = ModelBaker.Stats()
-        guard let atlas = baker.bake(model: model, settings: .init(yaw: yaw), layout: full, classic: classic, scale: 1, stats: &stats)
+        var orientSettings = GraphicsEnhancement.BakeSettings()
+        orientSettings.orientation = m
+        guard let atlas = baker.bake(model: model, settings: orientSettings, layout: full, classic: classic, scale: 1, stats: &stats)
         else { continue }
         var inter = 0, union = 0, colourDiff = 0.0
         for f in probe {
@@ -273,10 +360,10 @@ case "orient":
         let overlap = union > 0 ? Double(inter) / Double(union) : 0
         let colour = inter > 0 ? max(0, 1 - colourDiff / Double(inter)) : 0
         let score = overlap * (0.5 + 0.5 * colour)
-        print(String(format: "  yaw %3.0f: overlap %.3f colour %.3f → %.3f", yaw, overlap, colour, score))
-        if score > best.score { best = (yaw, score) }
+        print(String(format: "  flip (%+.0f %+.0f %+.0f): overlap %.3f colour %.3f → %.3f", fx, fy, fz, overlap, colour, score))
+        if score > best.score { best = (m, score) }
     }
-    print("best yaw \(Int(best.yaw))")
+    print("best orientation " + best.m.map { String(format: "%.5f", $0) }.joined(separator: ","))
 
 case "planet":
     // planet <surface map.png (equirectangular)> <out.usdz> — a textured sphere.
@@ -311,6 +398,74 @@ case "planet":
     let scene = SCNScene(); scene.rootNode.addChildNode(SCNNode(geometry: sphere))
     guard exportUSDZ(scene, to: URL(fileURLWithPath: args[2])) else { fail("export failed") }
     print("wrote \(args[2])")
+
+case "projectile":
+    // projectile <missile|rocket|torpedo|hellhound> <body r,g,b> <accent r,g,b> <out.usdz>
+    guard args.count == 5, let style = ProjectileMaker.Style(rawValue: args[1]) else { usage() }
+    func rgb(_ s: String) -> SIMD3<Double>? {
+        let v = s.split(separator: ",").compactMap { Double($0) }
+        return v.count == 3 ? SIMD3(v[0], v[1], v[2]) : nil
+    }
+    guard let body = rgb(args[2]), let accent = rgb(args[3]) else { usage() }
+    let out = URL(fileURLWithPath: args[4])
+    let kit = MaterialKit(textureDir: out.deletingLastPathComponent().appendingPathComponent(".textures"))
+    guard exportUSDZ(ProjectileMaker.make(style, body: body, accent: accent, kit: kit), to: out) else { fail("export failed") }
+    print("wrote \(args[4])")
+
+case "shields":
+    // shields <Nova Files> — hulls whose shän has a shield layer.
+    guard args.count == 2 else { usage() }
+    let game = loadGame(args[1])
+    let withShield = game.resources.resources(of: NovaType.shan).map(ShanRes.init).filter { $0.shieldSpriteID > 0 }
+    print("\(withShield.count) of \(game.resources.resources(of: NovaType.shan).count) hulls have a shield layer")
+    for s in withShield.prefix(20) { print("  shän \(s.id): shield sprite \(s.shieldSpriteID)") }
+
+case "sheetinfo":
+    // sheetinfo <Nova Files> <sprite id>... — frame size and count of classic sheets.
+    guard args.count >= 3 else { usage() }
+    let game = loadGame(args[1])
+    for a in args.dropFirst(2) {
+        guard let id = Int(a), let s = game.spriteSheet(spriteID: id, maskID: 0, frameWidth: 0, frameHeight: 0, frameCount: 0)
+        else { print("\(a) none"); continue }
+        print("\(id) \(s.frameWidth) \(s.frameHeight) \(s.frameCount)")
+    }
+
+case "embed":
+    // embed <plug-in .rez/.ndat> <pack.nsx> <out.rez> — repack a plug-in with
+    // an HD pack inside it (NSgx/NSbl, ignored by the original game).
+    guard args.count == 4 else { usage() }
+    do {
+        let base = try ResourceFile.read(contentsOf: URL(fileURLWithPath: args[1]))
+        let merged = try GraphicsPackEmbedding.embed(pack: URL(fileURLWithPath: args[2]), into: base)
+        try RezWriter.write(merged).write(to: URL(fileURLWithPath: args[3]), options: .atomic)
+        let added = merged.resources(of: GraphicsEnhancementType.descriptor).count
+        print("wrote \(args[3]): \(base.totalCount) original resources + \(added) HD descriptor(s), " +
+              "\(merged.resources(of: GraphicsEnhancementType.blob).count) asset blob(s)")
+    } catch { fail(String(describing: error)) }
+
+case "unembed":
+    // unembed <plug-in .rez/.ndat> <out.nsx> — pull a plug-in's in-file HD art
+    // out into an editable pack folder.
+    guard args.count == 3 else { usage() }
+    do {
+        let col = try ResourceFile.read(contentsOf: URL(fileURLWithPath: args[1]))
+        let n = try GraphicsPackEmbedding.extract(from: col, to: URL(fileURLWithPath: args[2]),
+                                                  name: URL(fileURLWithPath: args[1]).deletingPathExtension().lastPathComponent)
+        print("wrote \(args[2]): \(n) enhancement(s)")
+    } catch { fail(String(describing: error)) }
+
+case "asteroid":
+    // asteroid <seed> <r,g,b 0-1 tint> <out.usdz> [rock|ice|pitted] — a procedural cratered rock.
+    guard args.count == 4 || args.count == 5 else { usage() }
+    let style = args.count == 5 ? AsteroidMaker.Style(rawValue: args[4]) ?? .rock : .rock
+    let tint = args[2].split(separator: ",").compactMap { Double($0) }
+    guard let seed = UInt64(args[1]), tint.count == 3 else { usage() }
+    let out = URL(fileURLWithPath: args[3])
+    let texURL = out.deletingPathExtension().appendingPathExtension("png")
+    guard let scene = AsteroidMaker.make(seed: seed, tint: SIMD3(tint[0], tint[1], tint[2]), style: style, textureURL: texURL)
+    else { fail("could not build the asteroid") }
+    guard exportUSDZ(scene, to: out) else { fail("export failed") }
+    print("wrote \(args[3])")
 
 case "model":
     // model <Nova Files> <model.usdz> <ship id | s<sprite id>> <out dir> [yaw°] [pitch°] [r,g,b atmosphere]

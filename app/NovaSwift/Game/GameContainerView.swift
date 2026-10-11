@@ -904,7 +904,9 @@ struct GameContainerView: View {
                     MessageLogView(hud: host.hud, rightInset: touchRightInset(host, in: geo.size))
                 }
 
-                EscortCommandPanelView(hud: host.hud)
+                EscortCommandPanelView(hud: host.hud,
+                                       onGroup: touchEscortPanel ? { _ = host.scene.escortGroupKey($0) } : nil,
+                                       onOrder: touchEscortPanel ? { host.scene.escortOrder($0) } : nil)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.top, 60).padding(.leading, 12)
 
@@ -1370,6 +1372,10 @@ struct GameContainerView: View {
         // controller/tvOS player couldn't click anything in it.
         .onChange(of: flightControlsVisible) { _, flying in
             CursorTargets.shared.suppressed = flying
+            // Dialog open or close: flush held keys so nothing leaks through
+            // either way (`NovaInputQueue_FlushAllCommands` 0x004b68d0, run
+            // around the original's modal windows).
+            host?.input.flushKeyboard()
         }
         // Commands read `debug`/`model` live at call time (they close over
         // `self`), so registering once per session is enough — a jump
@@ -3558,6 +3564,16 @@ struct GameContainerView: View {
         default:
             break
         }
+    }
+
+    /// Touch builds have no keys to drive the Escort Commands panel, so it
+    /// takes taps there.
+    private var touchEscortPanel: Bool {
+        #if os(iOS) || os(tvOS)
+        true
+        #else
+        false
+        #endif
     }
 
     /// Keys 1–5 while the Escort Commands panel is up pick a group, and no

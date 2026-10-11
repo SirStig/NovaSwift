@@ -289,7 +289,7 @@ public final class ModelBaker {
 public final class HDBakeCache: @unchecked Sendable {
     public let directory: URL
     /// Bump to invalidate every bake when the renderer's output changes.
-    public static let version = 8
+    public static let version = 9
 
     public convenience init?(subdirectory: String = "NovaSwift/HDBakes") {
         guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,

@@ -93,7 +93,7 @@ final class DefaultItemCapabilityTests: XCTestCase {
         XCTAssertTrue(Set(removed).isDisjoint(with: GameplayEnhancements.catalog.map(\.key)))
         XCTAssertEqual(GameplayEnhancements.catalog.map(\.key).sorted(),
                        ["autoRoutePlotting", "forgivingLanding", "formationFlying", "frequentAutosave",
-                        "manualPluginOrder", "modernKeyBindings", "nearestFirstTargeting", "quickHyperjump"])
+                        "manualPluginOrder", "modernKeyBindings", "nearestFirstTargeting", "quickHyperjump", "screenShake"])
         var blob: [String: Bool] = Dictionary(uniqueKeysWithValues: removed.map { ($0, true) })
         blob["frequentAutosave"] = true
         blob["quickHyperjump"] = false

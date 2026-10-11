@@ -80,6 +80,10 @@ public struct GraphicsEnhancement: Codable, Hashable, Sendable {
     /// Model kind: glowing emitters placed on the model — for models that
     /// have no separate glowing parts (e.g. a single scanned/generated mesh).
     public var effects: [Effect]?
+    /// Hulls: a shield bubble in this colour `[r, g, b]` (0…1), fitted to the
+    /// ship's outline in every heading and flashed on hits. Only used when the
+    /// hull has no classic shield layer of its own. Omit for no shield.
+    public var shield: [Double]?
 
     public init(kind: Kind, sprite: Int? = nil, file: String? = nil, blob: Int? = nil,
                 scale: Double? = nil, columns: Int? = nil, frameCount: Int? = nil,
@@ -146,6 +150,17 @@ public struct GraphicsEnhancement: Codable, Hashable, Sendable {
         /// Extra rotation (degrees, about +Y) applied to the model before
         /// posing — for models whose nose isn't +Z.
         public var yaw: Double?
+        /// Rotation about the model's X axis, degrees, applied before `yaw` —
+        /// for models whose up axis isn't +Y (e.g. Z-up exports): ±90.
+        public var tilt: Double?
+        /// Full up-axis fix: rotation [x, y, z] in degrees (applied in that
+        /// order, before `yaw`). Overrides `tilt`. For models exported lying
+        /// on their side or upside down.
+        public var rotate: [Double]?
+        /// Exact orientation fix: a 3×3 rotation, row-major, mapping the
+        /// model's axes onto (wingspan, height, nose). Overrides `rotate`/`tilt`.
+        /// Written by `novaswift-hd orient` for models generated at an angle.
+        public var orientation: [Double]?
         /// Roll applied to the banking sets, degrees.
         public var bankRoll: Double?
         /// Fraction of the classic sprite's opaque extent the model fills (1 =
@@ -315,13 +330,16 @@ extension GameLibrary {
                 .sorted(by: nameOrder)
         }
         func isPack(_ url: URL) -> Bool { url.pathExtension.lowercased() == GraphicsPackManifest.folderExtension }
+        // A pack sits in a plug-ins folder, inside a plug-in's folder, or — as
+        // unpacked by the plug-in manager — inside the download's own wrapper
+        // folder under that. Search a few levels, never inside a pack.
         var out: [URL] = []
-        for dir in directories {
+        func search(_ dir: URL, depth: Int) {
             for child in subfolders(dir) {
-                if isPack(child) { out.append(child); continue }
-                out += subfolders(child).filter(isPack)
+                if isPack(child) { out.append(child) } else if depth > 1 { search(child, depth: depth - 1) }
             }
         }
+        for dir in directories { search(dir, depth: 4) }
         return out
     }
 
@@ -329,15 +347,31 @@ extension GameLibrary {
     /// inside it; a loose plug-in file owns the pack beside it with the same
     /// base name. nil = a standalone HD pack.
     static func owner(ofGraphicsPack pack: URL, in plugins: [PluginBundle]) -> PluginBundle? {
+        let packPath = pack.standardizedFileURL.path
         let parent = pack.deletingLastPathComponent().standardizedFileURL.path
         let base = pack.deletingPathExtension().lastPathComponent.uppercased()
-        return plugins.first { p in
-            p.allFileURLs.contains { f in
-                guard f.deletingLastPathComponent().standardizedFileURL.path == parent else { return false }
-                let isLooseFile = p.id == f.lastPathComponent
-                return !isLooseFile || f.deletingPathExtension().lastPathComponent.uppercased() == base
+        // A folder plug-in owns every pack anywhere inside its folder (e.g. a
+        // `Graphics/` subfolder, or the download's wrapper folder); the
+        // innermost folder wins, so an opt-in sub-item owns its own packs.
+        var best: (bundle: PluginBundle, depth: Int)?
+        for p in plugins {
+            // A total conversion's files sit in its `Nova Files/`; its packs may
+            // sit beside that folder, at the conversion's root.
+            let tcRoots = p.novaFilesURLs.map { $0.deletingLastPathComponent().deletingLastPathComponent() }
+            for f in p.allFileURLs + tcRoots.map({ $0.appendingPathComponent(".tc-root") }) {
+                let folder = f.deletingLastPathComponent().standardizedFileURL.path
+                if p.id == f.lastPathComponent {
+                    // A loose plug-in file owns only the same-named pack beside it.
+                    if folder == parent, f.deletingPathExtension().lastPathComponent.uppercased() == base {
+                        return p
+                    }
+                } else if packPath.hasPrefix(folder + "/") {
+                    let depth = folder.count
+                    if depth > (best?.depth ?? -1) { best = (p, depth) }
+                }
             }
         }
+        return best?.bundle
     }
 
     /// Build the graphics catalog for a merged data set. In-file descriptors

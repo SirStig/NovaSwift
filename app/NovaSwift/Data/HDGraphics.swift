@@ -32,6 +32,9 @@ final class HDGraphics: @unchecked Sendable {
     private var generation = 0
     private var atlases: [Int: HDAtlas] = [:]
     private var textures: [Int: [SKTexture]] = [:]
+    /// Shield bubbles for hulls whose pack asks for one (`shield`), by base sprite id.
+    private var shieldAtlases: [Int: HDAtlas] = [:]
+    private var shieldTextures: [Int: [SKTexture]] = [:]
     private var pending: Set<Int> = []
     private var failed: Set<Int> = []
     /// Base sprite id of each hull drawn by a model → whether it replaces the
@@ -60,6 +63,7 @@ final class HDGraphics: @unchecked Sendable {
         layouts = nil
         generation += 1
         atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]; portraits = [:]; portraitsOnBlack = [:]; tintedPortraits = [:]
+        shieldAtlases = [:]; shieldTextures = [:]
         apply(settings)
         for p in catalog.problems { NovaSwiftKit.Log.graphics.error("HD pack: \(p, privacy: .public)") }
         if !catalog.isEmpty {
@@ -72,7 +76,7 @@ final class HDGraphics: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let oldScale = maxScale
         apply(settings)
-        if oldScale != maxScale { atlases = [:]; textures = [:]; failed = []; modelHulls = [:]; generation += 1 }
+        if oldScale != maxScale { atlases = [:]; textures = [:]; failed = []; modelHulls = [:]; shieldAtlases = [:]; shieldTextures = [:]; generation += 1 }
     }
 
     private func apply(_ s: GameSettings) {
@@ -123,6 +127,13 @@ final class HDGraphics: @unchecked Sendable {
                 modelHulls[e.spriteID] = e.descriptor.kind == .model ? e.descriptor.hidesClassicOverlays : nil
             }
             lock.unlock()
+            // A shield bubble when the pack asks for one, one frame per heading.
+            if let color = e.descriptor.shield, let base = made[e.spriteID],
+               let shield = HDShield.make(from: base, frames: layout.framesPerSet, color: color) {
+                lock.lock()
+                if gen == generation { shieldAtlases[e.spriteID] = shield }
+                lock.unlock()
+            }
             // Hull models also get a UI portrait (shipyard, hail, target display).
             let isHull = layouts?.isHull(e.spriteID) ?? false
             if isHull, let portrait = try? HDAssetPipeline.portrait(for: e, cache: bakeCache) {
@@ -186,6 +197,22 @@ final class HDGraphics: @unchecked Sendable {
         let built = makeTextures(atlas)
         lock.lock()
         textures[id] = built
+        for t in built { hdTextures.add(t) }
+        lock.unlock()
+        return built
+    }
+
+    /// The HD shield bubble of the hull drawn with `baseSpriteID`, one frame
+    /// per heading, or nil (HD off, no shield asked for, not ready yet).
+    func shieldFrames(baseSpriteID id: Int) -> [SKTexture]? {
+        lock.lock()
+        guard enabled else { lock.unlock(); return nil }
+        if let built = shieldTextures[id] { lock.unlock(); return built }
+        guard let atlas = shieldAtlases[id] else { lock.unlock(); return nil }
+        lock.unlock()
+        let built = makeTextures(atlas)
+        lock.lock()
+        shieldTextures[id] = built
         for t in built { hdTextures.add(t) }
         lock.unlock()
         return built
@@ -357,7 +384,7 @@ final class HDGraphics: @unchecked Sendable {
     /// cache) so the next prewarm re-reads and re-renders everything.
     func reset(clearDiskCache disk: Bool) {
         lock.lock()
-        atlases = [:]; textures = [:]; failed = []; pending = []; modelHulls = [:]; generation += 1
+        atlases = [:]; textures = [:]; failed = []; pending = []; modelHulls = [:]; shieldAtlases = [:]; shieldTextures = [:]; generation += 1
         lock.unlock()
         if disk { bakeCache?.removeAll() }
     }
@@ -366,6 +393,6 @@ final class HDGraphics: @unchecked Sendable {
     /// so they rebuild instantly on next use.
     func evictTextures() {
         lock.lock(); defer { lock.unlock() }
-        textures = [:]
+        textures = [:]; shieldTextures = [:]
     }
 }

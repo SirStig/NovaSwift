@@ -326,9 +326,6 @@ final class GameScene: SKScene {
     private var weaponGlowTextures: [SKTexture] = []
     private var weaponGlowNode: SKSpriteNode?
     private var weaponGlowFlare: CGFloat = 0
-    /// Additive overlay tinting the player hull toward its ionization colour as
-    /// ion charge builds (mirrors `NPCNode.ionizeTint`).
-    private var shipIonizeTint: SKSpriteNode?
     /// Base-image multi-set animation config (banking / animation / frames-per-
     /// rotation) for the player hull, plus the per-ship clocks that drive it.
     private var hullAnim = HullAnim()
@@ -1031,9 +1028,6 @@ final class GameScene: SKScene {
         /// The shän alternating-sprite overlay (empty for stock hulls).
         var alt: SKSpriteNode?
         var altTextures: [SKTexture] = []
-        /// Additive overlay that tints the hull toward its ionization colour as
-        /// ion charge builds — the Bible's "the ship will appear [IonizeColor]".
-        var ionizeTint: SKSpriteNode?
         var hullAnim = HullAnim()
         var animClock: Double = 0
         var blinkClock: Double = 0
@@ -1465,9 +1459,6 @@ final class GameScene: SKScene {
             node.addChild(sprite)
             shipSprite = sprite
             shipRadius = max(first.size().width, first.size().height) / 2
-            let tint = makeIonizeTint(texture: first)
-            node.addChild(tint)
-            shipIonizeTint = tint
         } else {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 0, y: 16))
@@ -1802,13 +1793,13 @@ final class GameScene: SKScene {
         let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false,
                                        carriesKeyShip: p.carriesKeyShip)
         let spin = hdSpin(renderHeading(p), framesPerSet: hullAnim.framesPerSet, texture: rotationTextures.first)
-        for n in [shipSprite, engineGlowSprite, lightNode, altNode, weaponGlowNode, shipIonizeTint] { n?.zRotation = spin }
+        for n in [shipSprite, engineGlowSprite, lightNode, altNode, weaponGlowNode] { n?.zRotation = spin }
         if let sprite = shipSprite, !rotationTextures.isEmpty {
             sprite.texture = rotationTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: rotationTextures.count)]
         } else if let tri = placeholder {
             tri.zRotation = -CGFloat(renderHeading(p))
         }
-        updateIonizeTint(shipIonizeTint, hullTexture: shipSprite?.texture, ship: p)
+        if let hull = shipSprite { releaseIonize(hull); applyIonize(to: hull, ship: p) }
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
             glow.texture = engineGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: engineGlowTextures.count)]
         }
@@ -1835,6 +1826,10 @@ final class GameScene: SKScene {
                                                   shieldWas: lastPlayerShield,
                                                   maxShield: p.maxShield, dt: dt)
             applyShieldFlare(shieldFlare, to: shield)
+            // The bubble has one frame per heading; keep it turned with the hull.
+            if !shield.isHidden, shieldTextures.count > 1 {
+                shield.texture = shieldTextures[hullAnim.frameIndex(set: 0, heading: heading, count: shieldTextures.count)]
+            }
         }
         lastPlayerShield = p.shield
 
@@ -2179,7 +2174,8 @@ final class GameScene: SKScene {
         lightTextures = !settings.runningLights ? [] : game.lightSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         weaponGlowTextures = !settings.weaponEffects ? [] : game.weaponGlowSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
         altTextures = game.altSprite(id).map { SpriteTextures.allFrames(from: $0) } ?? []
-        shieldTextures = game.shieldSprite(id).map { SpriteTextures.rotationFrames(from: $0) } ?? []
+        shieldTextures = game.shieldSprite(id).map { SpriteTextures.rotationFrames(from: $0) }
+            ?? game.shan(id).flatMap { HDGraphics.shared.shieldFrames(baseSpriteID: $0.baseSpriteID) } ?? []
         hullAnim = game.shan(id).map(HullAnim.init) ?? HullAnim()
         lastPlayerShield = -1
         playerBank = BankTracker()
@@ -2585,7 +2581,8 @@ final class GameScene: SKScene {
             case let .areaBlast(at, blastRadius):
                 spawnAreaBlast(at: CGPoint(x: at.x, y: at.y), blastRadius: blastRadius)
             case let .playerCloakChanged(engaging):
-                audio?.playSound(engaging ? 381 : 380)
+                // Plain nv_PlaySound at priority 8 (0x004680d0 / 0x00468190), player only.
+                audio?.playSound(engaging ? 381 : 380, priority: OriginalAudio.Priority.airlock)
             case let .combatChatter(soundID):
                 let length = audio?.playChatter(soundID) ?? 0
                 if length > 0 {
@@ -2674,18 +2671,16 @@ final class GameScene: SKScene {
                 // (the old snd 390 "Airlock" cue on the player's own launch read as
                 // a weird "escape hatch" noise). NPC launches were already silent.
                 pendingEntrance[entityID] = .launch
-            case let .shipEmergedFromGate(entityID, gateSpobID, _):
-                // A gate flashes open, the ship grows out of it, then it closes.
-                pendingEntrance[entityID] = .launch
-                playGateArrivalFlourish(gateSpobID)
+            case .shipEmergedFromGate:
+                // Nothing to spawn: the hold-then-white-fade-in is drawn every
+                // frame from the ship's AI record (`applyGateFade`).
+                break
             case let .shipDeparted(entityID, at, heading):
                 warpOutNode(id: entityID, at: CGPoint(x: at.x, y: at.y), heading: heading)
-            case let .shipDepartedViaGate(entityID, gateSpobID, at):
-                // The AI-departure counterpart to `.shipEmergedFromGate`: the
-                // gate flashes open and the ship shrinks into it, instead of
-                // streaking off toward the edge.
-                playGateArrivalFlourish(gateSpobID)
-                gateDepartNode(id: entityID, gateSpobID: gateSpobID, at: CGPoint(x: at.x, y: at.y))
+            case let .shipDepartedViaGate(entityID, _, _):
+                // The 16-tick wash to white already played (`applyGateFade`);
+                // the original then just deactivates the ship.
+                detachNPCNode(entityID)?.removeFromParent()
             case let .shipLanded(entityID, spobID, at):
                 landNode(id: entityID, spobID: spobID, at: CGPoint(x: at.x, y: at.y))
                 if entityID == 0 { audio?.play(.docking); Haptics.play(.medium) }
@@ -3325,7 +3320,7 @@ final class GameScene: SKScene {
         guard falloff > 0 else { return }
         // Haptics are independent of the visual-shake preference.
         if falloff > 0.35 { Haptics.play(.light) }
-        guard settings.screenShake, !settings.reduceFlashing else { return }
+        guard settings.enhancements.screenShake, !settings.reduceFlashing else { return }
         // Most explosions (even a modest missile) were slamming into the 20pt cap,
         // making every hit shake the screen by the same jarring amount regardless
         // of size — toned down and re-capped so only the biggest blasts (a ship
@@ -4029,14 +4024,20 @@ final class GameScene: SKScene {
             let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock,
                                             disabled: npc.disabled, carriesKeyShip: npc.carriesKeyShip)
             let spin = hdSpin(renderHeading(npc), framesPerSet: node.hullAnim.framesPerSet, texture: node.textures.first)
-            for n in [node.sprite, node.engineGlow, node.light, node.alt, node.weaponGlow, node.ionizeTint] { n?.zRotation = spin }
+            for n in [node.sprite, node.engineGlow, node.light, node.alt, node.weaponGlow] { n?.zRotation = spin }
             if let sprite = node.sprite, !node.textures.isEmpty {
                 sprite.texture = node.textures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.textures.count)]
             } else if let tri = node.placeholder {
                 tri.zRotation = -CGFloat(renderHeading(npc))
             }
-            updateIonizeTint(node.ionizeTint, hullTexture: node.sprite?.texture, ship: npc)
-            if let hull = node.sprite { applyMurk(to: hull, at: node.container.position) }
+            // One fog slot per sprite (0x00428340): murk writes it, then ionization
+            // overwrites it only where its level is higher (or murk is under 8).
+            if let hull = node.sprite {
+                releaseIonize(hull)
+                applyMurk(to: hull, at: node.container.position)
+                applyIonize(to: hull, ship: npc)
+            }
+            applyGateFade(to: node, entityID: npc.entityID)
             if let glow = node.engineGlow, !node.engineGlowTextures.isEmpty {
                 glow.texture = node.engineGlowTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.engineGlowTextures.count)]
             }
@@ -4069,6 +4070,9 @@ final class GameScene: SKScene {
                                                                shieldWas: node.lastShield,
                                                                maxShield: npc.maxShield, dt: frameDT)
                     applyShieldFlare(node.shieldFlare, to: shield)
+                    if !shield.isHidden, node.shieldTextures.count > 1 {
+                        shield.texture = node.shieldTextures[node.hullAnim.frameIndex(set: 0, heading: heading, count: node.shieldTextures.count)]
+                    }
                 }
             }
             node.lastShield = npc.shield
@@ -4118,9 +4122,6 @@ final class GameScene: SKScene {
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
-            let tint = makeIonizeTint(texture: first)
-            n.container.addChild(tint)
-            n.ionizeTint = tint
         } else {
             // Faction-tinted arrowhead when we can't resolve the hull sprite.
             let path = CGMutablePath()
@@ -4672,11 +4673,11 @@ final class GameScene: SKScene {
         self.planetVisuals = makePlanetVisuals(systemID: systemID, game: game)
         clearSystemNodes()
         // Mark the arrival gate open *before* building nodes so it glows as we
-        // pop out of it (buildPlanets reads `openGateIDs`); the flourish closes
+        // pop out of it (buildPlanets reads `openGateIDs`); the timer below closes
         // it again shortly after (unless it's a wormhole, which stays live).
         if let arrivalGate { openGateIDs.insert(arrivalGate.id) }
         buildPlanets()
-        if let arrivalGate { playGateArrivalFlourish(arrivalGate.id) }
+        if let arrivalGate { closeGateAfterArrival(arrivalGate.id) }
 
         // Recentre camera + ship node on the arrival point immediately (don't
         // wait a frame — the flash is covering this) and refresh the HUD name.
@@ -4691,24 +4692,13 @@ final class GameScene: SKScene {
         onSystemReloaded?(systemID)
     }
 
-    /// The destination gate opens with a bright ring as the player pops out, then
-    /// (for a hypergate) closes again a moment later. A wormhole stays shimmering.
-    private func playGateArrivalFlourish(_ gateID: Int) {
+    /// A hypergate the player pops out of closes its glow again a moment later;
+    /// a wormhole stays shimmering. (The emerging ship's own white fade-in is
+    /// `applyGateFade`; the original draws no ring.)
+    private func closeGateAfterArrival(_ gateID: Int) {
         guard let node = planetNodeByID[gateID] else { return }
-        let radius = planetVisuals.first { $0.id == gateID }?.radius ?? 40
-        let ring = SKShapeNode(circleOfRadius: max(20, radius) * 1.4)
-        ring.strokeColor = SKColor(red: 0.65, green: 0.95, blue: 1.0, alpha: 1)
-        ring.lineWidth = 4
-        ring.glowWidth = 12
-        ring.blendMode = .add
-        ring.zPosition = 6
-        ring.setScale(0.5)
-        node.addChild(ring)
-        ring.run(.sequence([.group([.scale(to: 1.4, duration: 0.45), .fadeOut(withDuration: 0.55)]),
-                            .removeFromParent()]))
         let isWormhole = planetVisuals.first { $0.id == gateID }?.isWormhole ?? false
         if !isWormhole {
-            // Hypergate: closes behind you after the emerge.
             node.run(.sequence([.wait(forDuration: 1.5), .run { [weak self] in
                 self?.openGateIDs.remove(gateID)
                 self?.clearGateGlow(gateID)
@@ -4994,17 +4984,24 @@ final class GameScene: SKScene {
                                  .removeFromParent()]))
     }
 
-    /// A ship transiting out through a hypergate: detach its node and shrink +
-    /// fade it into the gate, mirroring `landNode` — faster than a landing dive
-    /// since a gate transit is meant to read as quick, not a slow port approach.
-    private func gateDepartNode(id: Int, gateSpobID: Int, at point: CGPoint) {
-        guard let container = detachNPCNode(id) else { return }
-        let target = planetVisuals.first { $0.id == gateSpobID }.map { $0.position } ?? point
-        effectsLayer.addChild(container)
-        container.run(.sequence([.group([.move(to: target, duration: 0.3),
-                                         .scale(to: 0.05, duration: 0.3),
-                                         .fadeOut(withDuration: 0.3)]),
-                                 .removeFromParent()]))
+    /// Gate emergence / entry as `Ship_UpdateVisualState` (0x00428340) draws it:
+    /// an emerging AI ship (state 0x15) is invisible until its 60-tick timer
+    /// reaches 16, then the white wash falls to nothing over 16 ticks; a ship
+    /// entering a gate (mode 0x17) washes to full white over its 16-tick timer
+    /// and is then dropped. The record exposes the ticks, so this is
+    /// frame-rate independent. Runs after `applyMurk`, whose marker lets the
+    /// next frame clear the tint once the ship is back to normal.
+    private func applyGateFade(to n: NPCNode, entityID: Int) {
+        guard let fade = world.originalAI.record(for: entityID)?.gateFade else {
+            if n.container.isHidden { n.container.isHidden = false }
+            return
+        }
+        n.container.isHidden = fade.hidden
+        guard !fade.hidden, fade.white > 0, let hull = n.sprite else { return }
+        hull.color = .white
+        hull.colorBlendFactor = CGFloat(fade.white)
+        if hull.userData == nil { hull.userData = NSMutableDictionary() }
+        hull.userData?["murk"] = true
     }
 
     /// A brief electric crackle where a ship was disabled.
@@ -5319,6 +5316,10 @@ final class GameScene: SKScene {
         var textures: [SKTexture] = []
         if shipTypeID >= 128, let sheet = galaxy?.game.shieldSprite(shipTypeID) {
             textures = SpriteTextures.rotationFrames(from: sheet)
+        } else if shipTypeID >= 128, let base = galaxy?.game.shan(shipTypeID)?.baseSpriteID,
+                  let hd = HDGraphics.shared.shieldFrames(baseSpriteID: base) {
+            // No classic shield layer: an HD pack's bubble, when it asks for one.
+            textures = hd
         }
         npcShieldCache[shipTypeID] = textures
         return textures
@@ -5414,47 +5415,34 @@ final class GameScene: SKScene {
         sprite.colorBlendFactor = 0.3
     }
 
-    /// An additive, texture-shaped overlay used to glow a hull its ionization
-    /// colour. `colorBlendFactor = 1` renders it as a solid-colour silhouette of
-    /// whatever hull texture it wears; `.add` blends that glow over the ship.
-    private func makeIonizeTint(texture: SKTexture) -> SKSpriteNode {
-        let t = SKSpriteNode(texture: texture)
-        t.texture?.filteringMode = filterMode(for: t.texture)
-        t.blendMode = .add
-        t.colorBlendFactor = 1
-        t.zPosition = 0.7   // above the hull + running lights, below the shield bubble
-        t.isHidden = true
-        return t
+    /// Undo last frame's ionization blend so murk / the paint tint are recomputed
+    /// from their own state (the two share one colour slot on the node).
+    private func releaseIonize(_ sprite: SKSpriteNode) {
+        guard let saved = sprite.userData?["ionSaved"] as? [Any],
+              let color = saved[0] as? SKColor, let factor = saved[1] as? CGFloat else { return }
+        sprite.color = color
+        sprite.colorBlendFactor = factor
+        sprite.userData?["ionSaved"] = nil
     }
 
-    /// Tint a hull toward its ionization colour as ion charge builds, wearing the
-    /// same texture as the hull this frame so the whole silhouette glows. Ramps
-    /// with charge and adds a slow pulse once fully ionized — EV Nova's "the ship
-    /// will appear [IonizeColor] after being sufficiently ionized" (Bible).
-    private func updateIonizeTint(_ tint: SKSpriteNode?, hullTexture: SKTexture?, ship: Ship) {
-        guard let tint else { return }
-        let frac = ship.ionizeMax > 0 ? min(1, ship.ionCharge / ship.ionizeMax) : 0
-        guard frac > 0.02 else { tint.isHidden = true; return }
-        if let tex = hullTexture { tint.texture = tex; tint.size = tex.size() }
-        // The weapon's own IonizeColor, or the Bible's default bluish when it
-        // specified none (`IonizeColor == 0`). Brighten it so even a dim colour
-        // reads vividly under additive blending — push the strongest channel to
-        // full so the hull clearly takes on the hue instead of a muddy wash.
-        var c = ship.ionizeColor ?? (r: 0.4, g: 0.6, b: 1.0)
-        let peak = max(c.r, c.g, c.b, 0.001)
-        c = (c.r / peak, c.g / peak, c.b / peak)
-        tint.color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)
-        // Strong glow that ramps with charge and pulses hard once fully ionized.
-        let base = 0.6 + 0.4 * CGFloat(frac)
-        let pulse = ship.isIonized ? 0.25 * CGFloat(sin(effectClock * 7)) : 0
-        tint.alpha = max(0, min(1, base + pulse))
-        // Over-scale the additive silhouette so its glow bleeds past the hull as
-        // a coloured rim halo — an ionized ship visibly lights up, not just
-        // re-tints. Grows with charge, breathes a little once fully ionized.
-        let halo: CGFloat = ship.isIonized ? 1.22 + 0.05 * CGFloat(sin(effectClock * 7))
-                                           : 1.06 + 0.12 * CGFloat(frac)
-        tint.setScale(halo)
-        tint.isHidden = false
+    /// Ionized hull look as `Ship_UpdateVisualState` (0x00428340) draws it: once
+    /// charge/capacity reaches 0.33 the hull takes a flat blend of the weapon's
+    /// IonizeColor, level = clamp(round(intensity * 0.24), 16, 24) + Random(5) - 2
+    /// re-rolled every frame (so a 14-18/32 flicker), blend factor = level / 32.
+    /// It takes the fog slot only if murk's level here is below it (or under 8).
+    private func applyIonize(to sprite: SKSpriteNode, ship: Ship) {
+        guard ship.ionizeMax > 0 else { return }
+        let intensity = ship.ionCharge / ship.ionizeMax
+        guard intensity >= 0.33 else { return }
+        let level = min(24, max(16, Int((intensity * 0.24).rounded()))) + Int.random(in: 0..<5) - 2
+        let murkLevel = sprite.userData?["murk"] != nil ? Int((sprite.colorBlendFactor * 32).rounded()) : 0
+        guard murkLevel < level || murkLevel < 8 else { return }
+        if sprite.userData == nil { sprite.userData = NSMutableDictionary() }
+        sprite.userData?["ionSaved"] = [sprite.color, sprite.colorBlendFactor] as [Any]
+        // The weapon's own IonizeColor, or the Bible's bluish default when none.
+        let c = ship.ionizeColor ?? (r: 0.4, g: 0.6, b: 1.0)
+        sprite.color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)
+        sprite.colorBlendFactor = CGFloat(level) / 32
     }
 
     private func factionColor(for npc: Ship) -> SKColor {

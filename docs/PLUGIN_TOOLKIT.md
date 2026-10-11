@@ -62,6 +62,12 @@ fly it" is one click.
 - **Test in engine:** launch the current unsaved document straight into a
   chosen system with a chosen ship, plus a weapons test range.
 
+- **HD art and 3D models:** add an HD sprite or model to any resource, see it
+  side by side with the classic art exactly as the game will draw it, and pack
+  it into the plug-in file or a `.nsx` folder. The embed, extract and
+  validation code already exists in NovaSwiftKit (`GraphicsPackEmbedding`,
+  `GraphicsEnhancementCatalog`) for the editor to use.
+
 ### Export and sharing
 
 - Export as Windows `.rez` (EV Nova CE) or as a classic Mac resource-fork
@@ -82,8 +88,8 @@ to the classic resource when it's missing or turned off.
   pack can upgrade base data or any plug-in.
 - **HD sprites:** higher resolution, any frame count, smooth rotation, and
   optional normal maps so ships pick up light from nearby stars.
-- **3D models:** import glTF or USDZ ships, stations and planets. Two ways to
-  use them:
+- **3D models:** USDZ ships, stations and planets today; glTF import is
+  planned. Two ways to use them:
   - render them live in 3D in the Enhanced and Nova Swift presentations, or
   - bake them into classic sprite sheets with a built-in renderer: set the
     lighting and camera once, get correctly framed `rlëD`/`spïn` output with
@@ -93,11 +99,28 @@ to the classic resource when it's missing or turned off.
   music per system or per government, and optional positional audio in the
   modern presentations.
 - **Landing and planet art:** high-resolution landscapes and animated planets.
-- **Packaging:** an extension ships as its own file next to the plug-in, so the
-  plain plug-in still works on the original game and in NovaSwift's Classic
-  presentation.
+- **Packaging:** an extension ships as a `.nsx` folder next to the plug-in, or
+  inside the plug-in file itself as resources the original game ignores
+  (`novaswift-hd embed`). Either way the plug-in still works on the original
+  game and in NovaSwift's Classic presentation.
 
-## Part 3: help for the community
+## Part 3: expanded plug-ins
+
+The long-term aim is that a plug-in can change anything in the game, not just
+the data the original format covers. Each ability is opt-in, stored in a way
+the original game ignores, and falls back cleanly when missing:
+
+- **Rules and limits:** override values the original hard-codes (fleet sizes,
+  jump timing, ranks and the like) from a plug-in.
+- **Scripted events:** mission logic and events beyond what control bits can
+  express.
+- **Interface:** new screens and HUD layouts.
+- **Effects:** custom particle effects and shaders.
+
+Each needs a format, a loader with fallback, editor support and docs before it
+ships; none is started yet.
+
+## Part 4: help for the community
 
 - Starter templates: a new ship, a new outfit, a new system, a short mission
   chain.
@@ -118,6 +141,8 @@ to the classic resource when it's missing or turned off.
 | 6 | HD extension format and loader, with fallback (**built**: [HD_PIPELINE.md](HD_PIPELINE.md)) | 1 |
 | 7 | HD sprites, audio, landing art | 6 |
 | 8 | 3D model import and sprite baking (**built**), live 3D view | 6 |
+| 9 | HD art in the editor: add, preview, pack into the plug-in | 3, 6 |
+| 10 | Expanded plug-ins: rules, scripted events, interface, effects | 1, 2 |
 
 The pilot converter on the [roadmap](ROADMAP.md) shares the write path and is
 planned separately.

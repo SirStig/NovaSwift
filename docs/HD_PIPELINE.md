@@ -10,7 +10,9 @@ What it changes and what it doesn't:
   hit-boxes (the classic collision masks), weapon exit points and all gameplay
   stay exactly the original's.
 - **Opt-in.** Settings → Graphics → *HD graphics from plug-ins* (off by
-  default). *Extra-sharp HD* switches from 2× to 4× detail.
+  default). *Extra-sharp HD* switches from 2× to 4× detail. When HD art turns
+  up while it's off (a plug-in installed from the Plugins screen, or a pack
+  found on load), the game asks once: *Enable HD Graphics?*
 - **Falls back cleanly.** Anything missing, invalid or not ready yet draws the
   classic sprite, and the reason is logged.
 
@@ -20,11 +22,21 @@ Every enhancement is keyed to a **sprite id**: the id the original sprite
 loader resolves (`Sprite_CreateFromSpriteSheetResources` 0x00474ab0). That is
 the `rlëD` with that id, or the PICT sprite sheet with that id. For example:
 
-| To upgrade | Use the sprite id from |
-|---|---|
-| a ship's hull | its `shän` base image (`BaseImage`) |
-| a planet or station | its `spïn` sprite id (`spöb` Graphic → `spïn` → sprite id) |
-| an asteroid, shot or explosion | its `spïn` sprite id |
+| To upgrade | Use the sprite id from | Frames are | Use |
+|---|---|---|---|
+| a ship's hull | its `shän` base image (`BaseImage`) | headings (+ banking/lit sets) | `model` or `sprite` |
+| a hull's engine, light or weapon glow | its `shän` overlay images | match the hull | usually derived from the hull's model (see Effects) |
+| a planet or station | `spöb` Graphic → `spïn` → sprite id | one still frame | `model` or `sprite` |
+| an animated stellar (hypergate, wormhole) | the same | an animation loop | `sprite` only |
+| an asteroid | `röid` → `spïn` (röid id + 672) → sprite id | headings (a tumble) | `model` or `sprite` |
+| a shot (missile, bolt) | `wëap` Graphic → `spïn` → sprite id | headings, or an animation for spinning shots | `model` for headings, else `sprite` |
+| an explosion | `bööm` Graphic → `spïn` → sprite id | an animation | `sprite` only |
+| the starfield | `spïn` #700 → sprite id | star variants | `sprite` only |
+
+A `model` is always rendered as a turn: frame *n* is heading *n* × 360° /
+frames. So any sheet whose frames are an animation rather than headings
+(explosions, animated stellars, the starfield) has to ship as a pre-rendered
+`sprite` atlas.
 
 Wherever the game draws that sprite, the enhancement draws instead. Every ship
 that shares the art (variants, for example) gets the upgrade too.
@@ -42,6 +54,11 @@ underneath. It renders every heading, plus the bank-left and bank-right sets
 for banking hulls. The model is sized automatically so it covers the classic
 sprite's footprint. Renders are cached per device, so each model is rendered
 once.
+
+Model files: USDZ is the standard (also `.usd`/`.usda`/`.usdc`, `.scn`, `.dae`
+and `.obj`). glTF, FBX and `.blend` aren't read directly: export USDZ from
+Blender (File → Export → Universal Scene Description) or convert with Apple's
+Reality Converter. A rejected format is named in the log and in `preview`.
 
 Model conventions: Y up, nose toward +Z (glTF/USD), any units. Use `bake.yaw`
 for models that face another way. Physically based materials (base colour,
@@ -103,17 +120,36 @@ there unchanged:
   to it with `"blob": <id>`.
 
 They follow the normal plug-in override order, so a later plug-in can replace
-an earlier one's upgrade. This form suits small assets. Large models belong in
-a sidecar folder instead (this form keeps every byte in memory).
+an earlier one's upgrade. In-file assets must be PNG or USDZ.
+
+To put a pack inside an existing plug-in (say, HD art for Arpia 2) and ship it
+as one file:
+
+```
+novaswift-hd embed "Arpia 2.rez" "Arpia HD.nsx" "Arpia 2 HD.rez"
+novaswift-hd unembed "Arpia 2 HD.rez" "Arpia HD.nsx"   # back to an editable folder
+```
+
+The repacked file still loads unchanged in the original game. Embedding again
+replaces the art for the same sprites rather than duplicating it. The whole file
+is read into memory, so very large packs are better as a sidecar.
 
 ### As a sidecar folder (`.nsx`)
 
 A folder named `<anything>.nsx` holding `manifest.json` and the asset files.
 The original game never looks inside folders.
 
-- **Inside a plug-in's folder, or beside a loose `Name.rez` with the same base
-  name:** it belongs to that plug-in and turns on and off with it.
-- **On its own in the plug-ins folder:** it's a standalone HD pack.
+- **Anywhere inside a plug-in's folder** (for example `My Plug-in/Graphics/My HD.nsx`),
+  **or beside a loose `Name.rez` with the same base name:** it belongs to that
+  plug-in and turns on and off with it. With nested plug-in folders, the
+  innermost one owns the pack.
+- **On its own, or in a folder with no plug-in files** (a graphics-only
+  download such as Nova Reimagined): a standalone HD pack. It applies whenever
+  HD graphics are on; remove the folder to remove it.
+
+Packs are found up to four folders deep below a plug-ins folder, which covers
+the plug-in manager's layout (`<plug-in id>/<the zip's own folder>/My.nsx`).
+Folders inside a pack are never searched.
 
 Sidecars apply after in-file descriptors, in plug-in load order; standalone
 packs apply last, by name. A later layer wins the same sprite id.
@@ -150,13 +186,38 @@ File paths are relative to the `.nsx` folder and must stay inside it.
 | `layers` | model | effect layer → part-name substrings (see Effects) |
 | `effects` | model | emitters: `layer`, `at` [x, y, z], `radius` (default 0.06), `color` [r, g, b] |
 | `bake.pitch` | model | camera elevation in degrees (default 38; 12 suits planets) |
-| `bake.yaw` | model | extra turn about +Y, degrees |
+| `bake.yaw` | model | extra turn about +Y, degrees, for models whose nose isn't +Z |
+| `bake.tilt` | model | turn about X before `yaw`, degrees: ±90 fixes Z-up exports. On a non-hull rotation sheet (asteroids) a partial tilt makes the turn read as a tumble |
+| `bake.rotate` | model | full up-axis fix `[x, y, z]` degrees, applied in that order before `yaw`. Overrides `tilt` |
+| `bake.orientation` | model | exact 3×3 rotation, row-major, mapping the model's axes onto (wingspan, height, nose). Overrides `rotate` and `tilt`. Written by `novaswift-hd orient` |
 | `bake.bankRoll` | model | roll for the banking sets, degrees (default 30) |
 | `bake.fit` | model | fraction of the classic footprint to fill (default 1) |
 | `bake.light` | model | key-light direction `[x, y, z]` (screen: right, up, toward viewer) |
 | `bake.exposure` | model | light multiplier |
 | `bake.scale` | model | cap on render detail |
 | `bake.atmosphere` | model | planets: rim-glow colour `[r, g, b]`. Also switches to a single-sun light |
+| `bake.spin` | model | reserved for live 3D drawing (degrees per second); ignored for now |
+
+## Making a pack
+
+1. Find the sprite id (see the table above). `novaswift-extract ship <Nova Files> <id>`
+   and `novaswift-extract list <file> spïn` help.
+2. Make the art: a USDZ model (Y up, nose +Z), or a PNG atlas at 2× or 4× in
+   the classic sheet's layout.
+3. Put it in `<Name>.nsx/` with a `manifest.json`, inside your plug-in's
+   folder (or on its own for a graphics-only pack).
+4. Check it: `novaswift-hd preview <Nova Files> <your plug-ins folder> <out>`
+   resolves the pack exactly as the game does, reports anything it rejects,
+   and writes classic-vs-HD comparison sheets.
+5. In the game, turn on Settings → Graphics → *HD graphics from plug-ins*.
+   The developer console's `hd` command shows what was found and loaded.
+
+Zip the plug-in folder as usual; the plug-in manager installs it as is.
+
+When listing it in the plug-in catalog, add the tag `HD Graphics` (shown as a
+badge and searchable) and set `minNovaSwiftVersion`, since the original game
+ignores the pack. An HD pack for someone else's plug-in should list that
+plug-in under `dependencies`.
 
 ## Performance
 
@@ -185,6 +246,17 @@ needed.
 - `model <Nova Files> <model.usdz> <ship id | s<sprite id>> <out> [yaw] [pitch] [r,g,b]`:
   render one model against the sprite it replaces.
 - `planet <surface map.png> <out.usdz>`: wrap an equirectangular map on a sphere.
+- `asteroid <seed> <r,g,b> <out.usdz> [rock|ice|pitted]`: a procedural rock tinted to a colour.
+- `refsheet <Nova Files> <ship id> <out.png>`: the classic hull from several angles, as a
+  reference for artists or image models.
+- `orient <Nova Files> <model.usdz> <ship id>`: find the rotation that best matches a
+  generated model to the classic sprite; prints `best orientation a,b,…` for `bake.orientation`.
+- `portrait <model.usdz> <out.png> [yaw]`: the three-quarter UI portrait the game makes
+  for hull models (shipyard, hail, target display).
+- `embed` / `unembed`: move a pack into or out of a plug-in file (see above).
+- `projectile <missile|rocket|torpedo|hellhound> <body r,g,b> <trim r,g,b> <out.usdz>`:
+  a procedural shot model.
+- `sheetinfo <Nova Files> <sprite id>…`: frame size and count of classic sheets.
 - `probe`: an orientation test model.
 
 `RezWriter` (NovaSwiftKit) writes `.rez` files for the in-file form.
@@ -205,5 +277,8 @@ needed.
 - Live 3D presentation (smooth rotation and real lighting via `SK3DNode`) for
   models marked `live`.
 - HD for interface art, landing pictures and the shipyard/outfitter images.
+- A plug-in editor (a modern Mission Computer) covering the classic resource
+  types and these HD/3D additions. The embed, extract and validation code lives
+  in NovaSwiftKit so the editor can use it directly.
 - A Godot-side loader. The catalog is portable; the CLI can pre-render models
   into `sprite` atlases for frontends without a 3D renderer.

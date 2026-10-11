@@ -24,6 +24,10 @@ final class PluginsModel: ObservableObject {
     @Published private(set) var installedVersions: [String: String] = [:]
 
     private var tasks: [String: Task<Void, Never>] = [:]
+    /// Called when an install brings HD graphics (a `.nsx` pack, or a catalog
+    /// entry tagged "HD Graphics"), before the game data reloads, so the app
+    /// can switch HD on: installing such a plug-in is the player's opt-in.
+    var onHDContentInstalled: (([URL]) -> Void)?
     private let provider = PluginCatalogProvider()
     private var didLoad = false
 
@@ -78,6 +82,10 @@ final class PluginsModel: ObservableObject {
                 }
                 self.transfers[entry.id] = nil
                 self.refresh(data: data)
+                let installed = root.appendingPathComponent(entry.id, isDirectory: true)
+                let packs = GameLibrary.discoverGraphicsPacks(in: [installed])
+                let tagged = entry.tags.contains { $0.caseInsensitiveCompare("HD Graphics") == .orderedSame }
+                if tagged || !packs.isEmpty { self.onHDContentInstalled?(packs) }
                 data.reload()
             } catch is CancellationError {
                 self.transfers[entry.id] = nil

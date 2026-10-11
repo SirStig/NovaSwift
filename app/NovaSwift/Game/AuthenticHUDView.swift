@@ -362,7 +362,11 @@ private struct RadarContactsView: View {
     let brightRadar: NovaColor
     let dimRadar: NovaColor
 
-    private var playerMarker: Color { novaSwiftUIColor(brightRadar) }
+    /// The player's own dot: BrightRadar, or IFF cyan (0,FFFF,FFFF) once an IFF
+    /// is fitted — slot 0 goes through 0x00465f00 first (0x0045d600).
+    private var playerMarker: Color {
+        model.hasIFF ? Color(red: 0, green: 1, blue: 1) : novaSwiftUIColor(brightRadar)
+    }
 
     /// Map a contact's relationship onto a colour. Without an IFF decoder the
     /// scope is the interface's own two-tone display: the alert colour for
@@ -468,11 +472,11 @@ private struct RadarContactsView: View {
                                 ctx.fill(Path(r), with: .color(novaSwiftUIColor(blinkOn ? brightRadar : dimRadar)))
                                 continue
                             }
-                            ctx.fill(b.large ? Path(r) : Path(ellipseIn: r), with: .color(radarColor(b.relationship, iff: b.iffColor)))
-                            if b.isTarget && blinkOn {
-                                let ring = r.insetBy(dx: -2.5, dy: -2.5)
-                                ctx.stroke(Path(ellipseIn: ring), with: .color(.white), lineWidth: 1.4)
-                            }
+                            // With an IFF the target's dot alternates its IFF colour
+                            // with BrightRadar (0x0045d600); no extra ring.
+                            let dot: Color = (b.isTarget && blinkOn) ? novaSwiftUIColor(brightRadar)
+                                                                     : radarColor(b.relationship, iff: b.iffColor)
+                            ctx.fill(b.large ? Path(r) : Path(ellipseIn: r), with: .color(dot))
                         }
                     }
                 }

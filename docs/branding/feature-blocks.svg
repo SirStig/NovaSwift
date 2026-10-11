@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="592" height="654" viewBox="0 0 592 654" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="592" height="681" viewBox="0 0 592 681" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.h1{font-size:14px;font-weight:600;fill:#f0e6da}.gh{font-size:12px;font-weight:600;fill:#f0e6da}.gn{font-size:11px;fill:#a89a95}.lg{font-size:11px;fill:#c6bab5}</style>
-<rect width="592" height="654" rx="10" fill="#0d0a0e"/>
+<rect width="592" height="681" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (114)</text>
+<text x="30" y="55" class="lg">Done (118)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
-<text x="124" y="55" class="lg">Partly done (14)</text>
+<text x="124" y="55" class="lg">Partly done (15)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
-<text x="255" y="55" class="lg">Planned (38)</text>
+<text x="255" y="55" class="lg">Planned (44)</text>
 <text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">9 of 14 done</text>
 <rect x="216" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Local Wi-Fi lobbies — Done</title></rect>
 <rect x="231" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Game Center matches and invites — Done</title></rect>
@@ -162,7 +162,7 @@
 <rect x="261" y="539" width="12" height="12" fill="#3fb950"><title>Pilot converter: Warn about plug-in content that isn't installed — Done</title></rect>
 <rect x="276" y="539" width="12" height="12" fill="#3fb950"><title>Pilot converter: Import screen with a preview before creating the pilot — Done</title></rect>
 <rect x="291" y="539" width="12" height="12" fill="#e3a52b"><title>Pilot converter: Round-trip tests against the original's own save code — Partly done</title></rect>
-<text x="16" y="578" class="gh">Plug-in editor</text><text x="576" y="578" class="gn" text-anchor="end">1 of 15 done</text>
+<text x="16" y="578" class="gh">Plug-in editor</text><text x="576" y="578" class="gn" text-anchor="end">1 of 16 done</text>
 <rect x="216.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Resource write path and round-trip tests — Planned</title></rect>
 <rect x="231.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Schemas for every resource type — Planned</title></rect>
 <rect x="246.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Browser, hex editor and previews — Planned</title></rect>
@@ -170,28 +170,40 @@
 <rect x="276.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Galaxy editor — Planned</title></rect>
 <rect x="291.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Mission and control-bit editor — Planned</title></rect>
 <rect x="306.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Validation against the original's rules — Planned</title></rect>
-<rect x="321.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Test in engine — Planned</title></rect>
-<rect x="336.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Export to Windows and Mac plug-in formats — Planned</title></rect>
-<rect x="351.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Publish to the plug-in store — Planned</title></rect>
-<rect x="366.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Command-line tool — Planned</title></rect>
-<rect x="381.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Templates and guides — Planned</title></rect>
-<rect x="396" y="566" width="12" height="12" fill="#3fb950"><title>Plug-in editor: Editable native pilot saves — Done</title></rect>
-<rect x="411" y="566" width="12" height="12" fill="#e3a52b"><title>Plug-in editor: Pilot edits from the debug console — Partly done</title></rect>
-<rect x="216.5" y="581.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Pilot editor — Planned</title></rect>
-<text x="16" y="620" class="gh">HD graphics and 3D models</text><text x="576" y="620" class="gn" text-anchor="end">9 of 15 done</text>
-<rect x="216" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Pack format keyed to original sprite ids (in-file or .nsx folder) — Done</title></rect>
-<rect x="231" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Falls back to the classic art — Done</title></rect>
-<rect x="246" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD sprite sheets at 2× and 4× detail — Done</title></rect>
-<rect x="261" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: 3D models (USDZ) rendered into every heading and bank frame — Done</title></rect>
-<rect x="276" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Engine glow, running lights and weapon flash from the model — Done</title></rect>
-<rect x="291" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD planets and stations — Done</title></rect>
-<rect x="306" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Smooth rotation for HD ships — Done</title></rect>
-<rect x="321" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD ship pictures in the shipyard, target display and menus — Done</title></rect>
-<rect x="336" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Pack tools: viewer, overlay, console commands, novaswift-hd CLI — Done</title></rect>
-<rect x="351.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: glTF import — Planned</title></rect>
-<rect x="366.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Live 3D with real-time lighting — Planned</title></rect>
-<rect x="381.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Lighting from nearby stars — Planned</title></rect>
-<rect x="396.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD landing pictures and interface art — Planned</title></rect>
-<rect x="411.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: High-quality sound and music packs — Planned</title></rect>
-<rect x="216.5" y="623.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD on Linux and Windows — Planned</title></rect>
+<rect x="321.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: HD art and 3D models: pack, embed, preview — Planned</title></rect>
+<rect x="336.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Test in engine — Planned</title></rect>
+<rect x="351.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Export to Windows and Mac plug-in formats — Planned</title></rect>
+<rect x="366.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Publish to the plug-in store — Planned</title></rect>
+<rect x="381.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Command-line tool — Planned</title></rect>
+<rect x="396.5" y="566.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Templates and guides — Planned</title></rect>
+<rect x="411" y="566" width="12" height="12" fill="#3fb950"><title>Plug-in editor: Editable native pilot saves — Done</title></rect>
+<rect x="216" y="581" width="12" height="12" fill="#e3a52b"><title>Plug-in editor: Pilot edits from the debug console — Partly done</title></rect>
+<rect x="231.5" y="581.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Pilot editor — Planned</title></rect>
+<text x="16" y="620" class="gh">Expanded plug-ins</text><text x="576" y="620" class="gn" text-anchor="end">1 of 6 done</text>
+<rect x="216" y="608" width="12" height="12" fill="#3fb950"><title>Expanded plug-ins: HD art and 3D models in plug-ins — Done</title></rect>
+<rect x="231.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: Change the game's fixed rules and limits from a plug-in — Planned</title></rect>
+<rect x="246.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: Scripted events and mission logic — Planned</title></rect>
+<rect x="261.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: New interface screens and HUD layouts — Planned</title></rect>
+<rect x="276.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: Custom effects and shaders — Planned</title></rect>
+<rect x="291.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: Docs, templates and example plug-ins — Planned</title></rect>
+<text x="16" y="647" class="gh">HD graphics and 3D models</text><text x="576" y="647" class="gn" text-anchor="end">12 of 19 done</text>
+<rect x="216" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Pack format keyed to original sprite ids (in-file or .nsx folder) — Done</title></rect>
+<rect x="231" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Falls back to the classic art — Done</title></rect>
+<rect x="246" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD sprite sheets at 2× and 4× detail — Done</title></rect>
+<rect x="261" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: 3D models (USDZ) rendered into every heading and bank frame — Done</title></rect>
+<rect x="276" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Engine glow, running lights and weapon flash from the model — Done</title></rect>
+<rect x="291" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD planets and stations — Done</title></rect>
+<rect x="306" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Smooth rotation for HD ships — Done</title></rect>
+<rect x="321" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD ship pictures in the shipyard, target display and menus — Done</title></rect>
+<rect x="336" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Pack tools: viewer, overlay, console commands, novaswift-hd CLI — Done</title></rect>
+<rect x="351" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD art inside a plug-in file, with embed and unembed tools — Done</title></rect>
+<rect x="366" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Packs found anywhere in a plug-in, switched with it — Done</title></rect>
+<rect x="381" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Asks to turn on HD when new HD art is installed — Done</title></rect>
+<rect x="396" y="635" width="12" height="12" fill="#e3a52b"><title>HD graphics and 3D models: Nova Reimagined overhaul pack — Partly done</title></rect>
+<rect x="411.5" y="635.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: glTF import — Planned</title></rect>
+<rect x="216.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Live 3D with real-time lighting — Planned</title></rect>
+<rect x="231.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Lighting from nearby stars — Planned</title></rect>
+<rect x="246.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD landing pictures and interface art — Planned</title></rect>
+<rect x="261.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: High-quality sound and music packs — Planned</title></rect>
+<rect x="276.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD on Linux and Windows — Planned</title></rect>
 </svg>
