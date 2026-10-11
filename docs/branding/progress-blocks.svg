@@ -3,22 +3,22 @@
 <rect width="432" height="1321" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">EV Nova CE executable: 3199 functions, one square each</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Checked: matches the original (661)</text>
+<text x="30" y="55" class="lg">Checked: matches the original (662)</text>
 <rect x="16" y="64" width="9" height="9" fill="#3aa6b9"/>
-<text x="30" y="73" class="lg">Done differently by design (22)</text>
+<text x="30" y="73" class="lg">Done differently by design (21)</text>
 <rect x="16" y="82" width="9" height="9" fill="#3a3236"/>
 <text x="30" y="91" class="lg">Not gameplay, nothing to port (2516)</text>
 <text x="16" y="116" class="gh">Flight &amp; collision</text><text x="416" y="116" class="gn" text-anchor="end">23 functions · 19 matched</text>
 <rect x="16" y="123" width="7" height="7" fill="#3a3236"><title>Ship_ClearShipState0x09Or0x0FToIdle @ 0x004115c0 (61 B) — Not gameplay, nothing to port</title></rect>
 <rect x="24" y="123" width="7" height="7" fill="#3fb950"><title>Ship_ApplyDamageToShip @ 0x004192d0 (6681 B) — Checked: matches the original — WP-12, AI-38</title></rect>
-<rect x="32" y="123" width="7" height="7" fill="#3fb950"><title>Ship_HandleShip @ 0x00433050 (9993 B) — Checked: matches the original — FL-17, AI-20, AI-22, AI-41, UI-11</title></rect>
+<rect x="32" y="123" width="7" height="7" fill="#3fb950"><title>Ship_HandleShip @ 0x00433050 (9993 B) — Checked: matches the original — FL-17, AI-20, AI-22, AI-41, UI-11, UI-15</title></rect>
 <rect x="40" y="123" width="7" height="7" fill="#3fb950"><title>Ship_HandleSpritePairCollision @ 0x004374f0 (634 B) — Checked: matches the original — OS-11, AI-31</title></rect>
 <rect x="48" y="123" width="7" height="7" fill="#3fb950"><title>Ship_SteerVelocityTowardShipHeading @ 0x0043b020 (319 B) — Checked: matches the original — FL-11</title></rect>
 <rect x="56" y="123" width="7" height="7" fill="#3fb950"><title>Math_AddPolarVelocity @ 0x0043b4a0 (64 B) — Checked: matches the original</title></rect>
 <rect x="64" y="123" width="7" height="7" fill="#3fb950"><title>Math_AddPolarVelocityWithClamp @ 0x0043b4e0 (400 B) — Checked: matches the original — FL-18, WP-16</title></rect>
 <rect x="72" y="123" width="7" height="7" fill="#3fb950"><title>Math_ClampVelocityComponents @ 0x0043b6a0 (93 B) — Checked: matches the original</title></rect>
 <rect x="80" y="123" width="7" height="7" fill="#3fb950"><title>Ship_HandlePlayerShipCore @ 0x0044aa70 (1660 B) — Checked: matches the original — FL-03, FL-04, FL-09, FL-23, WP-03, WP-27, EC-24, UI-04, UI-15</title></rect>
-<rect x="88" y="123" width="7" height="7" fill="#3fb950"><title>PlayerTick_ManualFlightAndRegeneration @ 0x0044c8d0 (2710 B) — Checked: matches the original — FL-04, FL-10, FL-18</title></rect>
+<rect x="88" y="123" width="7" height="7" fill="#3fb950"><title>PlayerTick_ManualFlightAndRegeneration @ 0x0044c8d0 (2710 B) — Checked: matches the original — FL-04, FL-10, FL-18, UI-15</title></rect>
 <rect x="96" y="123" width="7" height="7" fill="#3fb950"><title>PlayerTick_MouseTargetAndControlCommands @ 0x0044e019 (2658 B) — Checked: matches the original — FL-23</title></rect>
 <rect x="104" y="123" width="7" height="7" fill="#3fb950"><title>PlayerTick_ReverseCommand @ 0x0044fff0 (18418 B) — Checked: matches the original — FL-08, FL-09, OS-02, EC-24, EC-24, AI-35, UI-15</title></rect>
 <rect x="112" y="123" width="7" height="7" fill="#3fb950"><title>Ship_HandlePlayerTargetActionCommand @ 0x00454910 (2071 B) — Checked: matches the original — UI-17, AI-44, UI-09, AI-39, UI-06</title></rect>
@@ -56,7 +56,7 @@
 <rect x="176" y="160" width="7" height="7" fill="#3fb950"><title>Shot_SpawnShipDestructionDebrisPuff @ 0x00428090 (459 B) — Checked: matches the original</title></rect>
 <rect x="184" y="160" width="7" height="7" fill="#3a3236"><title>Shot_UpdateWeaponSmokePuffs @ 0x0042c660 (1323 B) — Not gameplay, nothing to port</title></rect>
 <rect x="192" y="160" width="7" height="7" fill="#3fb950"><title>Shot_UpdateImpactEffectSprites @ 0x0042e160 (1048 B) — Checked: matches the original</title></rect>
-<rect x="200" y="160" width="7" height="7" fill="#3fb950"><title>Shot_UpdateBeamHitQueue @ 0x0042f270 (7982 B) — Checked: matches the original — WP-01</title></rect>
+<rect x="200" y="160" width="7" height="7" fill="#3fb950"><title>Shot_UpdateBeamHitQueue @ 0x0042f270 (7982 B) — Checked: matches the original — WP-01, UI-15</title></rect>
 <rect x="208" y="160" width="7" height="7" fill="#3fb950"><title>Shot_UpdateShotGuidance @ 0x00431530 (3816 B) — Checked: matches the original — WP-05, WP-09</title></rect>
 <rect x="216" y="160" width="7" height="7" fill="#3fb950"><title>Shot_HandleShot @ 0x00435830 (4207 B) — Checked: matches the original — WP-07</title></rect>
 <rect x="224" y="160" width="7" height="7" fill="#3fb950"><title>NovaUi_ResolveWeaponSplashImpact @ 0x00436ff0 (1247 B) — Checked: matches the original</title></rect>
@@ -469,7 +469,7 @@
 <rect x="232" y="488" width="7" height="7" fill="#3fb950"><title>FUN_0044c2e0 @ 0x0044c2e0 (1322 B) — Checked: matches the original — FL-04, FL-04, FL-23</title></rect>
 <rect x="240" y="488" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceProgressBranch @ 0x0044d371 (2974 B) — Checked: matches the original — UI-01, UI-01, FL-05, FL-05, OS-02, OS-02, OS-02, OS-08</title></rect>
 <rect x="248" y="488" width="7" height="7" fill="#3fb950"><title>FUN_0044eed5 @ 0x0044eed5 (1261 B) — Checked: matches the original — FL-04, FL-04, FL-23</title></rect>
-<rect x="256" y="488" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceSequenceAnchor @ 0x0044f3d0 (3067 B) — Checked: matches the original — FL-04, FL-04, FL-06, FL-13, FL-13, UI-11</title></rect>
+<rect x="256" y="488" width="7" height="7" fill="#3fb950"><title>PlayerTick_HyperspaceSequenceAnchor @ 0x0044f3d0 (3067 B) — Checked: matches the original — FL-04, FL-04, FL-06, FL-13, FL-13, UI-11, UI-15</title></rect>
 <rect x="264" y="488" width="7" height="7" fill="#3fb950"><title>Stellar_RunDockAndLaunchSequence @ 0x00455e10 (1627 B) — Checked: matches the original — UI-01, FL-05, FL-20, EC-06, EC-06, UI-04, UI-11</title></rect>
 <rect x="272" y="488" width="7" height="7" fill="#3fb950"><title>Stellar_EnterHypergate @ 0x00456480 (2053 B) — Checked: matches the original — OS-06</title></rect>
 <rect x="280" y="488" width="7" height="7" fill="#3fb950"><title>Stellar_EnterWormhole @ 0x00456ca0 (2259 B) — Checked: matches the original — OS-06</title></rect>
@@ -640,9 +640,9 @@
 <rect x="128" y="549" width="7" height="7" fill="#3a3236"><title>thunk_NovaUi_SetTargetPanelBottomStatusCursor @ 0x00875094 (127 B) — Not gameplay, nothing to port</title></rect>
 <rect x="136" y="549" width="7" height="7" fill="#3a3236"><title>NovaUi_SetTargetPanelBottomRightFooterCursor @ 0x00875113 (127 B) — Not gameplay, nothing to port</title></rect>
 <rect x="144" y="549" width="7" height="7" fill="#3a3236"><title>thunk_NovaUi_SetTargetPanelBottomRightFooterCursor @ 0x00875192 (127 B) — Not gameplay, nothing to port</title></rect>
-<text x="16" y="579" class="gh">Saving &amp; game loop</text><text x="416" y="579" class="gn" text-anchor="end">76 functions · 28 matched</text>
+<text x="16" y="579" class="gh">Saving &amp; game loop</text><text x="416" y="579" class="gn" text-anchor="end">76 functions · 29 matched</text>
 <rect x="16" y="586" width="7" height="7" fill="#3fb950"><title>NovaGameSession_Run @ 0x00416100 (5317 B) — Checked: matches the original</title></rect>
-<rect x="24" y="586" width="7" height="7" fill="#3aa6b9"><title>Frame_SpaceflightLoop @ 0x00417600 (4213 B) — Done differently by design</title></rect>
+<rect x="24" y="586" width="7" height="7" fill="#3fb950"><title>Frame_SpaceflightLoop @ 0x00417600 (4213 B) — Checked: matches the original — UI-15</title></rect>
 <rect x="32" y="586" width="7" height="7" fill="#3fb950"><title>Frame_TickSystems @ 0x004186b0 (2897 B) — Checked: matches the original</title></rect>
 <rect x="40" y="586" width="7" height="7" fill="#3a3236"><title>Frame_RefreshTransitionFrameAuxVisuals @ 0x00419210 (190 B) — Not gameplay, nothing to port</title></rect>
 <rect x="48" y="586" width="7" height="7" fill="#3fb950"><title>Frame_UpdateFreeflightObjectSprites @ 0x0042c1b0 (1173 B) — Checked: matches the original — FL-16</title></rect>

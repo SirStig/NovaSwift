@@ -1669,13 +1669,15 @@ struct GameContainerView: View {
         if spob.isWormhole {
             beginWormholeTransport(from: spob)
         } else if scene.playerMayUseGate(spob.id) {
-            guard !(host?.game?.gateDestinations(from: spob) ?? []).isEmpty else {
-                host?.hud.post("This hypergate leads nowhere."); return
-            }
+            // A gate with no links does nothing: `Stellar_EnterHypergate`
+            // 0x00456480 returns -1 with no message or beep.
+            guard !(host?.game?.gateDestinations(from: spob) ?? []).isEmpty else { return }
             scene.activateGate(spob.id)     // light it even if the player never clicked it
             gateMapOrigin = spob.id
         } else {
-            host?.hud.post("You are not cleared to use this hypergate.")
+            // Refused: snd 151 + STR# 2002 #81 (hypergate), 0x00457580.
+            model.audio.play(.beep2)
+            if let line = host?.game?.stringList(2002)?.string(at: 81) { host?.hud.post(line) }
         }
     }
 
@@ -1687,8 +1689,14 @@ struct GameContainerView: View {
         let exits = game.wormholeExitCandidates(from: wormhole, currentSystem: nav.currentSystemID,
                                                 isVisible: { story.isSystemVisible($0) })
         guard let dest = exits.randomElement() else {
-            model.audio.play(.beep4)   // Stellar_EnterWormhole 0x00456ca0: no exit, snd 153
-            host?.hud.post("Unable to use this wormhole."); return
+            // Stellar_EnterWormhole 0x00456ca0: no exit — STR# 2002 #84 + " " +
+            // #86, and snd 153.
+            model.audio.play(.beep4)
+            let list = game.stringList(2002)
+            if let a = list?.string(at: 84), let b = list?.string(at: 86) {
+                host?.hud.post(a + " " + b)
+            }
+            return
         }
         performGateJump(toSystem: dest.systemID, arriveAtGate: dest.gateSpobID)
     }
@@ -1952,6 +1960,7 @@ struct GameContainerView: View {
             scene.debugSyncCredits(model.pilot.state.credits)
             if let line = playerBoardedLine(tons: loss.cargo.values.reduce(0, +), credits: loss.credits) {
                 host?.hud.post(line)
+                model.audio.play(.beep2)   // Boarding_BoardShipAndTransferCargo 0x00412550, snd 151
             }
         }
         // Demand-Tribute domination feedback. Each defense wave announces itself

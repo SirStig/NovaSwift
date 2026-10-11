@@ -2736,6 +2736,7 @@ final class GameScene: SKScene {
                 if let stolenLine, let list = galaxy?.game.stringList(2002),
                    let what = list.string(at: stolenLine), let tail = list.string(at: 374) {
                     hud?.post(what + " " + tail)
+                    audio?.play(.beep2)   // Boarding_BoardShipAndTransferCargo 0x00412550, snd 151
                 }
             case let .reinforcementsCalled(systemID, days):
                 onReinforcementsCalled?(systemID, days)
@@ -3137,8 +3138,8 @@ final class GameScene: SKScene {
             }
         } else {
             audio?.play(.beep2)   // landing refused: Stellar_HandleStellarEntryAndExit 0x00457580, snd 151
-            let owner = galaxy?.game.govt(spob.government)?.displayName ?? "controlling"
-            hud?.post("You are not cleared to use the \(owner) hypergate.")
+            // The refusal is STR# 2002 #81 for a hypergate (0x00457580).
+            if let line = galaxy?.game.stringList(2002)?.string(at: 81) { hud?.post(line) }
         }
     }
 
@@ -4403,7 +4404,7 @@ final class GameScene: SKScene {
                                                multiplier: multiplier)
             jumpPhase = .engaged
             jumpSpinUpStarted = false
-            jumpArriveFade = settings.ceHyperspaceLook ? 0.1 : 1.5
+            jumpArriveFade = (settings.ceHyperspaceLook || settings.noHyperspaceEffects) ? 0.1 : 1.5
             warnStrandedFighters()
         }
         Log.scene.debug("beginJump -> system \(destSystemID) heading \(outboundHeading, format: .fixed(precision: 2)) fastJump=\(fastJump)")
@@ -4462,7 +4463,8 @@ final class GameScene: SKScene {
         defer {
             // "No hyperspace effects" (g_nv_noHyperspaceEffects): the flash colour
             // goes black and the brighten ramp is never set (0x00872384).
-            if settings.noHyperspaceEffects { jumpFlash?.isHidden = true; jumpFlash?.alpha = 0 }
+            // The boom fill is still painted, in black (0x00872384 zeroes the colour).
+            jumpFlash?.color = settings.noHyperspaceEffects ? .black : .white
         }
         jumpClock += dt
         let p = world.player
@@ -4483,12 +4485,12 @@ final class GameScene: SKScene {
             if jump.phase == .spinUp, jump.warpUpCut {
                 audio?.stopWarpUp()                    // cut at 350 / multiplier (FL-04)
             }
-            if jump.phase == .spinUp, jump.progress > 0 {
-                let ramp = min(jump.progress, 50) / 50
-                showJumpStreaks(intensity: CGFloat(ramp), stretch: CGFloat(1 + ramp * 8))
-            }
+            // No streak pass: the original draws none. The tunnel is only the
+            // ship's own position step (min(progress, 50) px/tick, 0x0044d371) and
+            // the 20 parallax dust sprites following the camera (0x0042e590,
+            // 0x0046ee50), which the starfield already reproduces (FL-04).
             // The Mac's 1.5 s fade to white, triggered once progress passes 55.
-            if !settings.ceHyperspaceLook, jump.fadeTriggered {
+            if !settings.ceHyperspaceLook, !settings.noHyperspaceEffects, jump.fadeTriggered {
                 jumpFlash?.isHidden = false
                 let cap: CGFloat = settings.reduceFlashing ? 0.45 : 1.0
                 jumpFlash?.alpha = min(cap, (jumpFlash?.alpha ?? 0) + CGFloat(dt / 1.5) * cap)
@@ -4960,12 +4962,10 @@ final class GameScene: SKScene {
     private func applyEntrance(_ fx: EntranceFX, to container: SKNode, at point: CGPoint, heading: Double) {
         switch fx {
         case .warpIn:
-            container.alpha = 0
-            container.setScale(0.6)
-            container.run(.group([.fadeIn(withDuration: 0.18),
-                                  .sequence([.scale(to: 1.12, duration: 0.14),
-                                             .scale(to: 1.0, duration: 0.1)])]))
-            spawnWarpStreak(at: point, heading: heading)
+            // The original draws nothing for a hyperspace arrival: the ship is
+            // simply there, carried in on its velocity (0x0041c710; the sprite
+            // fade in Ship_UpdateVisualState 0x00428340 is gate emergence only).
+            break
         case .launch:
             container.alpha = 0
             container.setScale(0.08)
@@ -4974,39 +4974,12 @@ final class GameScene: SKScene {
         }
     }
 
-    /// A bright hyperspace streak: a stretched additive flash along `heading`
-    /// (random if nil, e.g. an inbound jump whose facing we don't stress about).
-    private func spawnWarpStreak(at point: CGPoint, heading: Double?) {
-        let ang = heading ?? Double.random(in: 0..<(2 * .pi))
-        let len: CGFloat = 220
-        let dir = CGPoint(x: sin(ang), y: cos(ang))
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: -dir.x * len, y: -dir.y * len))
-        path.addLine(to: CGPoint(x: dir.x * len, y: dir.y * len))
-        let streak = SKShapeNode(path: path)
-        streak.position = point
-        streak.strokeColor = SKColor(red: 0.7, green: 0.85, blue: 1.0, alpha: 0.9)
-        streak.lineWidth = 3
-        streak.blendMode = .add
-        streak.zPosition = 12
-        streak.xScale = 0.2
-        effectsLayer.addChild(streak)
-        streak.run(.sequence([.group([.scaleX(to: 1.0, y: 0.2, duration: 0.18),
-                                      .fadeOut(withDuration: 0.22)]),
-                              .removeFromParent()]))
-    }
-
-    /// Streak a departing ship out to hyperspace: detach its node, zip it forward
-    /// along `heading`, and flash out. (The world already removed the ship.)
+    /// A ship leaving for hyperspace just vanishes: the original deactivates it
+    /// when its jump timer runs out, with no streak, flash or fade on the sprite
+    /// (Ship_HandleShip 0x00433050, AI mode 0x04). The world already removed
+    /// the ship, so only its node is dropped.
     private func warpOutNode(id: Int, at point: CGPoint, heading: Double) {
-        let streak = { self.spawnWarpStreak(at: point, heading: heading) }
-        guard let container = detachNPCNode(id) else { streak(); return }
-        let dir = CGVector(dx: sin(heading) * 1600, dy: cos(heading) * 1600)
-        effectsLayer.addChild(container)
-        container.run(.sequence([.group([.move(by: dir, duration: 0.24),
-                                         .fadeOut(withDuration: 0.24)]),
-                                 .removeFromParent()]))
-        streak()
+        detachNPCNode(id)?.removeFromParent()
     }
 
     /// Set a landing ship down into its spaceport: detach its node and shrink +

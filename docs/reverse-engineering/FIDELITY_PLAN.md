@@ -679,8 +679,33 @@ models, so later batches can rely on them.
   The Warp up voice is a one-shot at the multiplier's speed (pitch rises with it), priority 32000,
   started only when no Warp up voice sounds, stopped at the cut (`GameAudio.startWarpUp` /
   `stopWarpUp`).
-- **Not reproduced.** Streak intensity follows `min(progress, 50)` (the original's streak pass is unresolved).
-  Escorts don't run the original's spin-up sync (state 0x0B; Batch 6). x2 mode is not modelled.
+- **Jump visuals (traced 2026-10-10).** The original has **no streak pass**: nothing draws lines
+  from jump progress. The tunnel is only the ship's own position step (`min(progress, 50)` px per
+  tick, 0x0044d371 / 0x0044f3d0 and the NPC copy in `Ship_HandleShip` 0x00433050) plus the **20
+  ambient dust sprites** (`NovaEffects_QueuedAmbientStarParticles` 0x0046ebf0 seeds them: count
+  `trunc(width / 600 * 20)`, random frame, random spot in the viewport, parallax depth
+  `rand(35) × 0.01`, or 0 with the parallax pref off; `UpdateAmbientStarParticles` 0x0046ee50 shifts
+  each by the camera delta × depth, 0x00417600; `FUN_0042e590` wraps and draws them, haze level
+  `trunc(murk × 0.9)` clamped 2..29). Fast camera motion therefore only slides point sprites. The
+  boom at the fire (0x0044f3d0 / 0x0044d371, the `DrawContext_SetHyperspaceFlashColor` 0x00872384
+  site) fills the viewport once with the flash colour (white), re-seeds the 20 stars and starts the
+  arrival. `g_nv_noHyperspaceEffects` (the "Hyperspace Effects" pref, prefs +0x78) zeroes that
+  colour (a **black** fill, not no fill), skips the tunnel scalar `FLOAT_007354a0` and so the
+  Mac fade-in/out, and skips the per-frame fade function (0x00467d60 / 0x00467e60 is the Windows
+  stub). NPCs jumping out are simply deactivated when their 350-tick timer ends; NPCs jumping in
+  are spawned with a velocity (0x0041c710): neither has a flash, streak or sprite fade. The only
+  jump-related sprite fade is gate emergence/entry (`Ship_UpdateVisualState` 0x00428340): an
+  emerging ship (AI state 0x15, timer from 60) is hidden until the timer is <= 16, then its
+  fog-to-white level falls 32 -> 0 over those 16 ticks; a ship entering a gate (control mode 0x17)
+  runs level = clamp(32 - 2 × timer, 0, 32) toward white and is deactivated at timer < 1.
+- **NovaSwift (visuals, 2026-10-10).** `GameScene` no longer draws the invented streak fan during the
+  engaged jump (it survives only inside `quickHyperjump`'s own phases), NPC hyperspace
+  arrivals/departures have no pop, scale or streak (the node just appears or is dropped), and
+  "no hyperspace effects" paints the boom frame black with no Mac fade instead of hiding it.
+  **Unresolved.** Gate emergence/entry still use the port's ring flourish and grow/shrink instead of
+  the white-fade above (timer units per tick not pinned). The star dust uses the port's infinite
+  tile wrap and is not re-seeded on arrival. Escorts don't run the original's spin-up sync (state
+  0x0B; Batch 6). x2 mode is not modelled.
 - **Original** (decomp `travel.cpp`, `docs/player_hyperspace.md`):
   1. **Brake** (0x0044F127 / 0x0044F275): turn to face opposite the velocity, damp 0.99203847 per
      tick (`0x005755f0`), and within `max(turn+1, 20)°` apply 1.0 × thrust backward. Ends when

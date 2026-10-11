@@ -110,7 +110,10 @@ struct SpaceportView: View {
             // is open; its message waits for the launch.
             services.onCloseSpaceportScreen = { screen = .hub }
             rollLandingOffer()
-            autoRecharge()
+            // Stellar_RunDockAndLaunchSequence 0x00455e10: at a stellar whose
+            // runtime flag 0x20 is set (uninhabited) the auto-refuel is skipped
+            // and snd 151 plays instead.
+            if spob.isUninhabited { appModel.audio.play(.beep2) } else { autoRecharge() }
         }
         .onChange(of: screen) { oldValue, newValue in
             Log.spaceport.debug("Spaceport screen -> \(String(describing: newValue), privacy: .public) at spöb \(spob.id, privacy: .public)")
