@@ -338,8 +338,13 @@ struct AuthenticMainMenuView: View {
                                 x: cx + CGFloat(line.dx), baseline: cy + CGFloat(line.baselineDY), layout)
                 }
                 if let pict = targetingPict(shipType: save.player.shipType) {
-                    Image(decorative: pict, scale: 1)
-                        .resizable().interpolation(.none)
+                    // A graphics pack's model: its portrait, tinted like the
+                    // classic picture and drawn in the classic picture's box.
+                    let hd = game.flatMap { $0.shan(save.player.shipType)?.baseSpriteID }
+                        .flatMap { HDGraphics.shared.tintedPortrait(baseSpriteID: $0, like: pict) }
+                    Image(decorative: hd ?? pict, scale: 1)
+                        .resizable().interpolation(hd == nil ? .none : .high)
+                        .aspectRatio(contentMode: .fit)
                         // Transfer mode 0x22 (addOver): the black ground adds nothing.
                         .blendMode(.plusLighter)
                         .novaPlace(layout, x: cx - CGFloat(pict.width / 2),

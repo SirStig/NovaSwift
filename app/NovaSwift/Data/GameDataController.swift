@@ -414,6 +414,9 @@ final class GameDataController: ObservableObject {
                                                    graphicsPacks: graphicsPacks, flatPluginOrder: !pluginsAreManual)
         HDGraphics.shared.noteSearch(dirs: graphicsDirs, packs: graphicsPacks)
         HDGraphics.shared.install(catalog: graphics, game: newGame, settings: GameSettings.load())
+        // Prepare HD art now (cached bakes make this quick) so the main menu's
+        // pilot picture and the shipyard have it before the first flight.
+        Task { await prewarmHDGraphics() }
         if let game { CreditsFormatting.refresh(from: game) }
         storylineTagCache = StorylineTagCache(fingerprint: fingerprint)
         storylineTags = [:]   // stale from any previous data set until `prewarm()` recomputes

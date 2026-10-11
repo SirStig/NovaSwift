@@ -40,6 +40,7 @@ final class HDGraphics: @unchecked Sendable {
     /// UI portraits of model hulls (front three-quarter), transparent and on black.
     private var portraits: [Int: CGImage] = [:]
     private var portraitsOnBlack: [Int: CGImage] = [:]
+    private var tintedPortraits: [Int: CGImage] = [:]
     private let hdTextures = NSHashTable<SKTexture>.weakObjects()
     private let bakeCache = HDBakeCache()
 
@@ -58,7 +59,7 @@ final class HDGraphics: @unchecked Sendable {
         self.game = game
         layouts = nil
         generation += 1
-        atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]; portraits = [:]; portraitsOnBlack = [:]
+        atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]; portraits = [:]; portraitsOnBlack = [:]; tintedPortraits = [:]
         apply(settings)
         for p in catalog.problems { NovaSwiftKit.Log.graphics.error("HD pack: \(p, privacy: .public)") }
         if !catalog.isEmpty {
@@ -300,6 +301,48 @@ final class HDGraphics: @unchecked Sendable {
         ctx.draw(p, in: CGRect(x: 0, y: 0, width: p.width, height: p.height))
         let out = ctx.makeImage() ?? p
         portraitsOnBlack[baseSpriteID] = out
+        return out
+    }
+
+    /// The HD portrait recoloured like a classic pre-tinted picture (the main
+    /// menu's targeting PICT): its brightness, in the classic picture's
+    /// average lit colour, on black — so it composites additively the same way.
+    func tintedPortrait(baseSpriteID: Int, like classic: CGImage) -> CGImage? {
+        lock.lock()
+        let cached = tintedPortraits[baseSpriteID]
+        lock.unlock()
+        if let cached { return cached }
+        guard let p = portrait(baseSpriteID: baseSpriteID, onBlack: false) else { return nil }
+        // The classic picture's lit colour.
+        func pixels(_ img: CGImage) -> (CGContext, UnsafeMutablePointer<UInt8>)? {
+            guard let ctx = HDAtlas.makeContext(width: img.width, height: img.height), let d = ctx.data else { return nil }
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+            return (ctx, d.bindMemory(to: UInt8.self, capacity: ctx.bytesPerRow * img.height))
+        }
+        guard let (cctx, cp) = pixels(classic), let (pctx, pp) = pixels(p) else { return nil }
+        var sum = SIMD3<Double>(0, 0, 0), n = 0.0
+        for y in 0..<classic.height {
+            for x in 0..<classic.width {
+                let i = y * cctx.bytesPerRow + x * 4
+                let c = SIMD3(Double(cp[i]), Double(cp[i + 1]), Double(cp[i + 2])) / 255
+                let l = max(c.x, c.y, c.z)
+                if l > 0.2 { sum += c; n += 1 }
+            }
+        }
+        var tint = n > 0 ? sum / n : SIMD3(1, 0.25, 0.2)
+        tint /= max(tint.x, tint.y, tint.z, 0.01)
+        for y in 0..<p.height {
+            for x in 0..<p.width {
+                let i = y * pctx.bytesPerRow + x * 4
+                // Premultiplied: luminance already carries coverage → on black.
+                let l = (0.3 * Double(pp[i]) + 0.59 * Double(pp[i + 1]) + 0.11 * Double(pp[i + 2])) / 255
+                let v = min(1, l * 1.35)
+                pp[i] = UInt8(v * tint.x * 255); pp[i + 1] = UInt8(v * tint.y * 255)
+                pp[i + 2] = UInt8(v * tint.z * 255); pp[i + 3] = 255
+            }
+        }
+        guard let out = pctx.makeImage() else { return nil }
+        lock.lock(); tintedPortraits[baseSpriteID] = out; lock.unlock()
         return out
     }
 
