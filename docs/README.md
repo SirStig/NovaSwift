@@ -46,6 +46,7 @@ Platforms and features
 - [ICLOUD_SYNC.md](ICLOUD_SYNC.md): syncing imported game data.
 - [MULTIPLAYER.md](MULTIPLAYER.md): host-authoritative co-op.
 - [GODOT_LAYER.md](GODOT_LAYER.md): the Linux/Windows frontend.
+- [HD_PIPELINE.md](HD_PIPELINE.md): HD sprites and 3D models from plug-ins.
 
 Plans
 

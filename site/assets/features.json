@@ -181,6 +181,16 @@
      "name": "UI measurement overlay",
      "status": "done",
      "where": "UI/NovaDebug.swift"
+    },
+    {
+     "name": "Tap a log line to copy, re-run or filter it",
+     "status": "done",
+     "where": "Debug/DevConsoleView.swift ConsolePane"
+    },
+    {
+     "name": "Log search, timestamps, command suggestions",
+     "status": "done",
+     "where": "Debug/DevConsoleView.swift"
     }
    ]
   },
@@ -694,7 +704,8 @@
     },
     {
      "name": "Smooth rotation, frame interpolation",
-     "status": "planned"
+     "status": "partial",
+     "where": "HD ships only (GameScene)"
     }
    ]
   },
@@ -801,34 +812,67 @@
    ]
   },
   {
-   "name": "HD plug-in extensions",
+   "name": "HD graphics and 3D models",
    "tasks": [
     {
-     "name": "Extension format keyed to original resources",
+     "name": "Pack format keyed to original sprite ids (in-file or .nsx folder)",
+     "status": "done",
+     "where": "docs/HD_PIPELINE.md"
+    },
+    {
+     "name": "Falls back to the classic art",
+     "status": "done",
+     "where": "app/NovaSwift/Data/HDGraphics.swift"
+    },
+    {
+     "name": "HD sprite sheets at 2× and 4× detail",
+     "status": "done",
+     "where": "Sources/NovaSwiftHD/HDAtlas"
+    },
+    {
+     "name": "3D models (USDZ) rendered into every heading and bank frame",
+     "status": "done",
+     "where": "Sources/NovaSwiftHD/ModelBaker"
+    },
+    {
+     "name": "Engine glow, running lights and weapon flash from the model",
+     "status": "done",
+     "where": "HDAssetPipeline effect layers"
+    },
+    {
+     "name": "HD planets and stations",
+     "status": "done",
+     "where": "ModelStage atmosphere"
+    },
+    {
+     "name": "Smooth rotation for HD ships",
+     "status": "done",
+     "where": "GameScene HD heading remainder"
+    },
+    {
+     "name": "HD ship pictures in the shipyard, target display and menus",
+     "status": "done",
+     "where": "ModelBaker.portrait"
+    },
+    {
+     "name": "Pack tools: viewer, overlay, console commands, novaswift-hd CLI",
+     "status": "done",
+     "where": "Debug/HDViewerView.swift, Sources/novaswift-hd"
+    },
+    {
+     "name": "glTF import",
      "status": "planned"
     },
     {
-     "name": "Fallback to classic resources",
+     "name": "Live 3D with real-time lighting",
      "status": "planned"
     },
     {
-     "name": "HD sprites with smooth rotation",
+     "name": "Lighting from nearby stars",
      "status": "planned"
     },
     {
-     "name": "Normal-mapped lighting",
-     "status": "planned"
-    },
-    {
-     "name": "3D model import (glTF, USDZ)",
-     "status": "planned"
-    },
-    {
-     "name": "Live 3D in modern presentations",
-     "status": "planned"
-    },
-    {
-     "name": "Bake 3D models into classic sprite sheets",
+     "name": "HD landing pictures and interface art",
      "status": "planned"
     },
     {
@@ -836,7 +880,7 @@
      "status": "planned"
     },
     {
-     "name": "HD landing and planet art",
+     "name": "HD on Linux and Windows",
      "status": "planned"
     }
    ]

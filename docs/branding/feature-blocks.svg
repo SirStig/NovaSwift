@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="592" height="639" viewBox="0 0 592 639" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="592" height="654" viewBox="0 0 592 654" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
 <style>.h1{font-size:14px;font-weight:600;fill:#f0e6da}.gh{font-size:12px;font-weight:600;fill:#f0e6da}.gn{font-size:11px;fill:#a89a95}.lg{font-size:11px;fill:#c6bab5}</style>
-<rect width="592" height="639" rx="10" fill="#0d0a0e"/>
+<rect width="592" height="654" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (103)</text>
+<text x="30" y="55" class="lg">Done (114)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
-<text x="124" y="55" class="lg">Partly done (13)</text>
+<text x="124" y="55" class="lg">Partly done (14)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
-<text x="255" y="55" class="lg">Planned (42)</text>
+<text x="255" y="55" class="lg">Planned (38)</text>
 <text x="16" y="92" class="gh">Multiplayer co-op</text><text x="576" y="92" class="gn" text-anchor="end">9 of 14 done</text>
 <rect x="216" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Local Wi-Fi lobbies — Done</title></rect>
 <rect x="231" y="80" width="12" height="12" fill="#3fb950"><title>Multiplayer co-op: Game Center matches and invites — Done</title></rect>
@@ -36,7 +36,7 @@
 <rect x="231" y="134" width="12" height="12" fill="#3fb950"><title>Storyline tags: Badges on mission board and offers — Done</title></rect>
 <rect x="246" y="134" width="12" height="12" fill="#3fb950"><title>Storyline tags: Tap a badge to open the Story Guide — Done</title></rect>
 <rect x="261" y="134" width="12" height="12" fill="#3fb950"><title>Storyline tags: Settings toggle — Done</title></rect>
-<text x="16" y="173" class="gh">Debug suite</text><text x="576" y="173" class="gn" text-anchor="end">8 of 8 done</text>
+<text x="16" y="173" class="gh">Debug suite</text><text x="576" y="173" class="gn" text-anchor="end">10 of 10 done</text>
 <rect x="216" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Debug mode switch — Done</title></rect>
 <rect x="231" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Console with commands — Done</title></rect>
 <rect x="246" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Filtered log viewer — Done</title></rect>
@@ -45,6 +45,8 @@
 <rect x="291" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Bit, ship, outfit, government browsers — Done</title></rect>
 <rect x="306" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Game state and self-test views — Done</title></rect>
 <rect x="321" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: UI measurement overlay — Done</title></rect>
+<rect x="336" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Tap a log line to copy, re-run or filter it — Done</title></rect>
+<rect x="351" y="161" width="12" height="12" fill="#3fb950"><title>Debug suite: Log search, timestamps, command suggestions — Done</title></rect>
 <text x="16" y="200" class="gh">Bug reports</text><text x="576" y="200" class="gn" text-anchor="end">5 of 5 done</text>
 <rect x="216" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Settings &gt; Support &gt; Report a Bug — Done</title></rect>
 <rect x="231" y="188" width="12" height="12" fill="#3fb950"><title>Bug reports: Bundle with pilot, log and self-test — Done</title></rect>
@@ -152,7 +154,7 @@
 <rect x="246.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Smarter optional AI — Planned</title></rect>
 <rect x="261.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Particles, bloom, post effects — Planned</title></rect>
 <rect x="276.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Performance tiers — Planned</title></rect>
-<rect x="291.5" y="512.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Optional graphics, audio and AI: Smooth rotation, frame interpolation — Planned</title></rect>
+<rect x="291" y="512" width="12" height="12" fill="#e3a52b"><title>Optional graphics, audio and AI: Smooth rotation, frame interpolation — Partly done</title></rect>
 <text x="16" y="551" class="gh">Pilot converter</text><text x="576" y="551" class="gn" text-anchor="end">4 of 6 done</text>
 <rect x="216" y="539" width="12" height="12" fill="#3fb950"><title>Pilot converter: Read Windows EV Nova CE .plt pilots (decrypt the XOR blocks) — Done</title></rect>
 <rect x="231" y="539" width="12" height="12" fill="#e3a52b"><title>Pilot converter: Read classic Mac EV Nova pilots (resource fork, MacBinary/AppleDouble) — Partly done</title></rect>
@@ -176,14 +178,20 @@
 <rect x="396" y="566" width="12" height="12" fill="#3fb950"><title>Plug-in editor: Editable native pilot saves — Done</title></rect>
 <rect x="411" y="566" width="12" height="12" fill="#e3a52b"><title>Plug-in editor: Pilot edits from the debug console — Partly done</title></rect>
 <rect x="216.5" y="581.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Plug-in editor: Pilot editor — Planned</title></rect>
-<text x="16" y="620" class="gh">HD plug-in extensions</text><text x="576" y="620" class="gn" text-anchor="end">0 of 9 done</text>
-<rect x="216.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Extension format keyed to original resources — Planned</title></rect>
-<rect x="231.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Fallback to classic resources — Planned</title></rect>
-<rect x="246.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: HD sprites with smooth rotation — Planned</title></rect>
-<rect x="261.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Normal-mapped lighting — Planned</title></rect>
-<rect x="276.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: 3D model import (glTF, USDZ) — Planned</title></rect>
-<rect x="291.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Live 3D in modern presentations — Planned</title></rect>
-<rect x="306.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: Bake 3D models into classic sprite sheets — Planned</title></rect>
-<rect x="321.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: High-quality sound and music packs — Planned</title></rect>
-<rect x="336.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD plug-in extensions: HD landing and planet art — Planned</title></rect>
+<text x="16" y="620" class="gh">HD graphics and 3D models</text><text x="576" y="620" class="gn" text-anchor="end">9 of 15 done</text>
+<rect x="216" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Pack format keyed to original sprite ids (in-file or .nsx folder) — Done</title></rect>
+<rect x="231" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Falls back to the classic art — Done</title></rect>
+<rect x="246" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD sprite sheets at 2× and 4× detail — Done</title></rect>
+<rect x="261" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: 3D models (USDZ) rendered into every heading and bank frame — Done</title></rect>
+<rect x="276" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Engine glow, running lights and weapon flash from the model — Done</title></rect>
+<rect x="291" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD planets and stations — Done</title></rect>
+<rect x="306" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Smooth rotation for HD ships — Done</title></rect>
+<rect x="321" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD ship pictures in the shipyard, target display and menus — Done</title></rect>
+<rect x="336" y="608" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Pack tools: viewer, overlay, console commands, novaswift-hd CLI — Done</title></rect>
+<rect x="351.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: glTF import — Planned</title></rect>
+<rect x="366.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Live 3D with real-time lighting — Planned</title></rect>
+<rect x="381.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Lighting from nearby stars — Planned</title></rect>
+<rect x="396.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD landing pictures and interface art — Planned</title></rect>
+<rect x="411.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: High-quality sound and music packs — Planned</title></rect>
+<rect x="216.5" y="623.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD on Linux and Windows — Planned</title></rect>
 </svg>

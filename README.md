@@ -41,7 +41,7 @@ in ways a code comparison doesn't catch. If something plays differently, please
 
 ### Beyond the original
 
-![NovaSwift's own features](docs/branding/features-summary.svg?v=26284f78)
+![NovaSwift's own features](docs/branding/features-summary.svg?v=032de3ba)
 
 ### Not needed
 
@@ -111,7 +111,11 @@ Settings ▸ Enhancements. All are off by default:
 - Co-op multiplayer over local Wi-Fi or Game Center ([MULTIPLAYER.md](docs/MULTIPLAYER.md))
 - iCloud sync of imported game data ([ICLOUD_SYNC.md](docs/ICLOUD_SYNC.md))
 - Apple TV with a 10-foot UI ([TVOS.md](docs/TVOS.md))
-- A debug suite: logs, profiler, inspector, console
+- HD graphics and 3D models: plug-ins can add high-resolution art or 3D ship and
+  planet models, drawn in place of the original sprites with the same hit-boxes
+  and gameplay. Off by default ([HD_PIPELINE.md](docs/HD_PIPELINE.md))
+- A debug suite: searchable logs you can tap to copy or re-run, profiler,
+  inspector, console
 
 ## Linux and Windows
 

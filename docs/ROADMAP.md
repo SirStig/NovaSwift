@@ -82,10 +82,12 @@ original tools never allowed:
 - An editor for every resource type, with ship, galaxy and mission editors,
   validation against the original's rules, "test in engine", and export to
   Windows and Mac plug-in formats.
-- An optional HD layer beside any plug-in: high-resolution sprites, 3D models
-  (shown in 3D or baked into classic sprite sheets), better audio and music,
-  and HD landing art. Gameplay never changes, and plain plug-ins still work in
-  the original game.
+- An optional HD layer beside any plug-in. **Working now:** high-resolution
+  sprites and 3D models rendered into classic sprite frames, with effects, HD
+  planets and HD ship pictures ([HD_PIPELINE.md](HD_PIPELINE.md)). **Next:**
+  live 3D with real-time lighting, glTF import, better audio and music, and HD
+  landing art. Gameplay never changes, and plain plug-ins still work in the
+  original game.
 - Publishing to the plug-in store, a command-line tool, templates and guides.
 
 The plan is in [PLUGIN_TOOLKIT.md](PLUGIN_TOOLKIT.md).

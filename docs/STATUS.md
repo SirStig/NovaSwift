@@ -120,12 +120,12 @@ costing a day.
 
 ## Beyond the original
 
-![NovaSwift's own features](branding/feature-blocks.svg?v=fbb8665e)
+![NovaSwift's own features](branding/feature-blocks.svg?v=665a0aee)
 
 NovaSwift's own features, one square per task: green done, amber partly done,
-outline planned. Currently 98 done, 9 partly done, 26 planned. The list is kept
+outline planned. Currently 114 done, 14 partly done, 38 planned. The list is kept
 by hand in `site/assets/features.json`, with a pointer to the code for each
-task, and the same script renders [feature-blocks.svg](branding/feature-blocks.svg?v=fbb8665e)
+task, and the same script renders [feature-blocks.svg](branding/feature-blocks.svg?v=665a0aee)
 from it. Update the JSON when a feature changes.
 
 Partly done, in short: the public online lobby list and iCloud game-data upload
@@ -133,7 +133,17 @@ need the CloudKit schema promoted to Production; multiplayer host migration
 rebuilds the world rather than handing over; the `carryEncounter` session rule
 is not used yet; no plug-ins ship inside the app; the Godot trade center has a
 placeholder screen, and its Linux and Windows builds are not verified yet. Multiplayer has not yet
-been played end to end on two real devices.
+been played end to end on two real devices. The plug-in importer can't open
+StuffIt archives that use the newer compression methods, and most catalog
+entries have no icon yet. Classic Mac pilot import still needs testing against
+more real pilots. Smooth rotation only applies to HD ships.
+
+HD graphics and 3D models work in game: HD sprite sheets, 3D models rendered
+into every frame (with engine glow, running lights and weapon flash), HD
+planets, and HD ship pictures in the shipyard and target display. Still to do:
+glTF import, live 3D with real-time lighting, lighting from nearby stars, HD
+landing pictures and interface art, sound and music packs, and HD in the Linux
+and Windows build.
 
 None of these change the game's rules:
 
@@ -146,7 +156,11 @@ None of these change the game's rules:
 - Plug-in store and manager.
 - Co-op multiplayer over local Wi-Fi or Game Center, with host-set rules
   ([MULTIPLAYER.md](MULTIPLAYER.md)).
-- Debug suite: filtered logs, frame-time breakdown, inspector, console.
+- HD graphics and 3D models from plug-ins, drawn in place of the original
+  sprites with the original hit-boxes, frames and exit points
+  ([HD_PIPELINE.md](HD_PIPELINE.md)). Off by default.
+- Debug suite: searchable logs (tap a line to copy, re-run or filter it),
+  frame-time breakdown, inspector, console.
 - Bug reports: Settings ▸ Support ▸ Report a Bug collects the pilot, a log and
   a self-test.
 
