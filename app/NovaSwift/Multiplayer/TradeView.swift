@@ -49,6 +49,9 @@ struct TradeView: View {
             }
             .onAppear { offer = trade.myOffer }
             .onChange(of: offer) { _, new in session.updateMyOffer(new) }
+            // The scrim covers the flight HUD: only the trade card is live, Ⓑ cancels.
+            .cursorCancel { session.cancelTrade() }
+            .cursorModal()
         }
     }
 
@@ -119,6 +122,7 @@ struct TradeView: View {
             }
             .padding(16)
         }
+        .cursorScrollable()
     }
 
     // MARK: Their side (read-only)
@@ -150,6 +154,7 @@ struct TradeView: View {
             }
             .padding(16)
         }
+        .cursorScrollable()
     }
 
     // MARK: Accept bar
@@ -318,5 +323,7 @@ struct TradeInvitePromptView: View {
         .background(RoundedRectangle(cornerRadius: 18).fill(Color(red: 0.05, green: 0.06, blue: 0.1)))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(amber.opacity(0.3)))
         .shadow(radius: 20)
+        .cursorCancel { model.session.declineTradeInvite() }
+        .cursorDefault { model.session.acceptTradeInvite() }
     }
 }

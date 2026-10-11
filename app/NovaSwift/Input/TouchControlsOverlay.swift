@@ -106,6 +106,8 @@ struct TouchControlsOverlay: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Ⓑ closes the open actions grid (same as tapping the scrim).
+        .cursorCancel(menuOpen ? { withAnimation(.easeOut(duration: 0.15)) { menuOpen = false } } : nil)
     }
 
     // MARK: Steering (bottom-left)
@@ -300,6 +302,7 @@ struct TouchControlsOverlay: View {
                 }
             }
         }
+        .cursorScrollable()
         .frame(width: m.tile * CGFloat(columns) + 9 * m.s * CGFloat(columns - 1),
                height: min(contentH, maxH))
         .padding(11 * m.s)

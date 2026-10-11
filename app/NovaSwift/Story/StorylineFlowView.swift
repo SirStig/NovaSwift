@@ -44,6 +44,7 @@ struct StorylineFlowView: View {
                 .frame(maxWidth: 760, alignment: .leading)   // don't stretch to full ultrawide
                 .frame(maxWidth: .infinity, alignment: .center)
             }
+            .cursorScrollable()
             .onChange(of: storylineKey) { _, _ in expandedID = nil; scrollToCurrent(proxy) }
             .onAppear { scrollToCurrent(proxy) }
         }
@@ -172,6 +173,7 @@ private struct StoryFlowRowView: View {
                               lineWidth: isExpanded || row.isCurrent ? 2 : 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+        .cursorClickable(onTap)
         .padding(.bottom, 10)
     }
 

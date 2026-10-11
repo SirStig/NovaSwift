@@ -33,11 +33,14 @@ struct ShipInfoView: View {
     private var game: NovaGame { graphics.game }
 
     var body: some View {
-        if model.settings.modernDialogs {
-            modernCard
-        } else {
-            authentic
+        Group {
+            if model.settings.modernDialogs {
+                modernCard
+            } else {
+                authentic
+            }
         }
+        .cursorCancel(onDone)
     }
 
     // MARK: - Authentic dialog (Classic / Enhanced)

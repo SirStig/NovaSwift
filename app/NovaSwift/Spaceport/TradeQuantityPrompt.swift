@@ -45,7 +45,12 @@ struct TradeQuantityPrompt: View {
     }
 
     var body: some View {
-        if classic { classicBody } else { modernBody }
+        Group {
+            if classic { classicBody } else { modernBody }
+        }
+        // Return is OK and Esc is Cancel, so Menu / Ⓑ are too.
+        .cursorDefault(confirm)
+        .cursorCancel(onCancel)
     }
 
     /// DITL #1003 "qty" (172×72): the prompt (item 2) at (6,8) 102×16, the
@@ -79,10 +84,12 @@ struct TradeQuantityPrompt: View {
                     #if !os(tvOS)
                     .onKeyPress(.escape) { onCancel(); return .handled }
                     #endif
+                    .padTextEntry(title, text: $text, onCommit: confirm)
                     .offset(x: 112, y: 8)
                 Button("OK", action: confirm)
                     .buttonStyle(ClassicUiButtonStyle(isFocused: true))
                     .frame(width: 70, height: 20)
+                    .cursorClickable(confirm)
                     #if os(macOS) || os(iOS)
                     .keyboardShortcut(.defaultAction)
                     #endif
@@ -90,6 +97,7 @@ struct TradeQuantityPrompt: View {
                 Button("Cancel", action: onCancel)
                     .buttonStyle(ClassicUiButtonStyle())
                     .frame(width: 70, height: 20)
+                    .cursorClickable(onCancel)
                     #if os(macOS) || os(iOS)
                     .keyboardShortcut(.cancelAction)
                     #endif

@@ -132,6 +132,9 @@ struct TradeCenterView: View {
                 fallback
             }
         }
+        // Return and Escape both close (tradeKey below), so Menu / Ⓑ do too.
+        .cursorDefault(onDone)
+        .cursorCancel(onDone)
         .sheet(isPresented: Binding(get: { qtyMode != nil }, set: { if !$0 { qtyMode = nil } })) {
             if let mode = qtyMode {
                 // Prefilled with the maximum; one transaction on OK.
@@ -142,6 +145,7 @@ struct TradeCenterView: View {
                                         if mode == .buy { buy(qty) } else { sell(qty) }
                                     },
                                     onCancel: { qtyMode = nil })
+                    .cursorHost()
             }
         }
         .focusable()
@@ -240,6 +244,7 @@ struct TradeCenterView: View {
                 }
             }
         }
+        .cursorScrollable()
         .frame(width: 346, height: 24)
     }
 
@@ -311,8 +316,31 @@ struct TradeCenterView: View {
                 Text("\(r.name)  \(rowLabel(r))  \(r.price)cr")
                     .foregroundStyle(.white)
             }
-            Button("Done", action: onDone)
+            PadFallbackButton("Done", action: onDone)
         }.padding()
+    }
+}
+
+/// A visible, cursor-pressable button for the text-only fallbacks that stand
+/// in when the game's own button art isn't loaded.
+struct PadFallbackButton: View {
+    let title: String
+    let action: () -> Void
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 5)
+                .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.novaPlain)
     }
 }
 
@@ -408,6 +436,7 @@ struct OutfitterView: View {
     var body: some View {
         outfitterBody
             .onAppear { if ownedAtOpen == nil { ownedAtOpen = pilot.state.outfits } }
+            .cursorCancel(onDone)
             .focusable().focusEffectDisabled().focused($gridFocused)
             .onAppear { gridFocused = true }
             .onKeyPress(phases: .down) { press in
@@ -427,6 +456,7 @@ struct OutfitterView: View {
                                          range: 1...max(1, qtyUpperBound(mode, o)), initial: max(1, qtyUpperBound(mode, o)), unitLabel: "items",
                                          onConfirm: { qty in transact(mode, o, qty); qtyPromptMode = nil },
                                          onCancel: { qtyPromptMode = nil })
+                        .cursorHost()
                 }
             }
     }
@@ -544,6 +574,7 @@ struct OutfitterView: View {
             }
         }
         .cursorScrollable()
+        .cursorScrollable()
     }
 
     private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {
@@ -637,7 +668,7 @@ struct OutfitterView: View {
     }
 
     private var fallback: some View {
-        VStack { Text("Outfitter").foregroundStyle(.white); Button("Done", action: onDone) }.padding()
+        VStack { Text("Outfitter").foregroundStyle(.white); PadFallbackButton("Done", action: onDone) }.padding()
     }
 }
 
@@ -691,18 +722,24 @@ struct ShipyardView: View {
             // Full Ship Info card over the shipyard (its own dimmed dialog, the
             // Bar sub-panel pattern) — tap-out or Done to dismiss.
             if showInfo {
-                Color.black.opacity(0.6).ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { showInfo = false }
-                    .transition(.opacity)
-                ShipInfoView(graphics: graphics, ship: selected,
-                             priceText: selected.map {
-                                 netPrice($0).creditsAbbreviated
-                             },
-                             onDone: { showInfo = false })
-                    .transition(.opacity)
+                ZStack {
+                    Color.black.opacity(0.6).ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { showInfo = false }
+                        .transition(.opacity)
+                    ShipInfoView(graphics: graphics, ship: selected,
+                                 priceText: selected.map {
+                                     netPrice($0).creditsAbbreviated
+                                 },
+                                 onDone: { showInfo = false })
+                        .transition(.opacity)
+                }
+                // Covers the shipyard: only the card is live, Ⓑ closes it.
+                .cursorCancel { showInfo = false }
+                .cursorModal()
             }
         }
+        .cursorCancel(onDone)
         .animation(.easeOut(duration: 0.15), value: showInfo)
         .focusable().focusEffectDisabled().focused($gridFocused)
         .onAppear { gridFocused = true }
@@ -904,7 +941,7 @@ struct ShipyardView: View {
     }
 
     private var fallback: some View {
-        VStack { Text("Shipyard").foregroundStyle(.white); Button("Done", action: onDone) }.padding()
+        VStack { Text("Shipyard").foregroundStyle(.white); PadFallbackButton("Done", action: onDone) }.padding()
     }
 }
 
@@ -992,52 +1029,71 @@ struct BarView: View {
                     VStack {
                         Text(barText).foregroundStyle(.white).padding()
                         HStack {
-                            Button("Gamble") { openGambling() }
-                            Button("Leave", action: onDone)
+                            PadFallbackButton("Gamble") { openGambling() }
+                            PadFallbackButton("Leave", action: onDone)
                         }
                     }
                 }
             }
 
             if let offer = services.pendingOffer {
-                Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
-                MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
-                                    onPage: { _ in },
-                                    onAccept: { accept(offer) }, onDecline: { decline(offer) },
-                                    storylineTag: storylineTag(for: offer.mission.id),
-                                    onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
+                ZStack {
+                    Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                    MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
+                                        onPage: { _ in },
+                                        onAccept: { accept(offer) }, onDecline: { decline(offer) },
+                                        storylineTag: storylineTag(for: offer.mission.id),
+                                        onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
+                }
+                // Covers the bar: only the offer is live, Ⓑ declines it.
+                .cursorCancel { decline(offer) }
+                .cursorModal()
             }
 
             if showGambling {
-                Color.black.opacity(0.5).ignoresSafeArea()
-                    .onTapGesture { showGambling = false }
-                    .transition(.opacity)
-                GamblingView(graphics: graphics, pilot: pilot, onDone: { showGambling = false })
+                ZStack {
+                    Color.black.opacity(0.5).ignoresSafeArea()
+                        .onTapGesture { showGambling = false }
+                        .transition(.opacity)
+                    GamblingView(graphics: graphics, pilot: pilot, onDone: { showGambling = false })
+                }
+                .cursorCancel { showGambling = false }
+                .cursorModal()
             }
 
             if showHire {
-                Color.black.opacity(0.5).ignoresSafeArea()
-                    .onTapGesture { showHire = false }
-                    .transition(.opacity)
-                HireEscortView(graphics: graphics, spob: spob, pilot: pilot, galaxy: galaxy,
-                               onDone: { showHire = false })
+                ZStack {
+                    Color.black.opacity(0.5).ignoresSafeArea()
+                        .onTapGesture { showHire = false }
+                        .transition(.opacity)
+                    HireEscortView(graphics: graphics, spob: spob, pilot: pilot, galaxy: galaxy,
+                                   onDone: { showHire = false })
+                }
+                .cursorCancel { showHire = false }
+                .cursorModal()
             }
 
             if showHolovid {
-                Color.black.opacity(0.5).ignoresSafeArea()
-                    .onTapGesture { showHolovid = false }
-                    .transition(.opacity)
-                HolovidView(graphics: graphics, spob: spob, pilot: pilot,
-                            onDone: { showHolovid = false })
+                ZStack {
+                    Color.black.opacity(0.5).ignoresSafeArea()
+                        .onTapGesture { showHolovid = false }
+                        .transition(.opacity)
+                    HolovidView(graphics: graphics, spob: spob, pilot: pilot,
+                                onDone: { showHolovid = false })
+                }
+                .cursorCancel { showHolovid = false }
+                .cursorModal()
             }
         }
+        // Ⓑ = Leave the bar (the sub-panels above take it first while open).
+        .cursorCancel(onDone)
         .overlay { StoryTextOverlay(services: services) }
         .onAppear { services.onCloseSpaceportScreen = onDone }   // a `Q` from an accept leaves the bar
         .task(id: nextOffer) { await offerPatron(after: nextOffer == 0 ? 15 : 30 + Int.random(in: 0..<30)) }
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
-        .alert(game.stringList(2002)?.string(at: 361) ?? "You have no money to gamble with.",
-               isPresented: $showBrokeAlert) { Button("OK", role: .cancel) {} }
+        .novaAlert(game.stringList(2002)?.string(at: 361) ?? "You have no money to gamble with.",
+                   isPresented: $showBrokeAlert, buttons: [.cancel("OK")])
     }
 
     private func openGambling() {
@@ -1151,7 +1207,9 @@ struct HolovidView: View {
     }
 
     var body: some View {
-        holovidBody.onAppear { appModel.audio.play(.beep2) }
+        holovidBody
+            .onAppear { appModel.audio.play(.beep2) }
+            .cursorCancel(leave)
     }
 
     @ViewBuilder private var holovidBody: some View {

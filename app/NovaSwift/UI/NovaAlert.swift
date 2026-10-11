@@ -84,8 +84,8 @@ private struct NovaAlertModifier: ViewModifier {
 }
 
 extension View {
-    /// A controller-operable alert (see `NovaAlertButton`). Every button
-    /// dismisses it before running its action, like a system alert. With no
+    /// A controller-operable alert (see `NovaAlertButton`). Every button runs
+    /// its action and then dismisses the alert, like a system alert. With no
     /// buttons it shows a single OK.
     func novaAlert(_ title: String, isPresented: Binding<Bool>, message: String? = nil,
                    text: Binding<String>? = nil, buttons: [NovaAlertButton] = []) -> some View {
@@ -132,9 +132,12 @@ struct NovaAlertLayer: View {
         return ordered.enumerated().map { i, b in
             NovaDialogButton(title: b.title, isDefault: i == defaultIndex,
                              cancelRole: b.role == .cancel) {
+                // Action first, then dismiss — the order SwiftUI's own alerts
+                // use, so `Binding(get: { item != nil } …)` callers still see
+                // their item inside the action.
+                b.action()
                 request.dismiss()
                 NovaAlertCenter.shared.remove(request.id)
-                b.action()
             }
         }
     }

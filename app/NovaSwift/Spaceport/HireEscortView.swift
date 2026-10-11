@@ -71,6 +71,13 @@ struct HireEscortView: View {
     }
 
     var body: some View {
+        Group {
+            content
+        }
+        .cursorCancel(onDone)
+    }
+
+    @ViewBuilder private var content: some View {
         if let frame = graphics.frame(.shipyard) {
             // DITL #1004 item positions, matched to the Shipyard exactly, and
             // following a plug-in's replacement DITL the same way.
@@ -169,6 +176,7 @@ struct HireEscortView: View {
             .padding(.top, 3).padding(.leading, 3)
             .frame(width: 190, alignment: .leading)
         }
+        .cursorScrollable()
     }
 
     private func info(_ space: NovaSpace, _ d: DITLPlacement) -> some View {

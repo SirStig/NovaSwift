@@ -84,9 +84,11 @@ struct MissionBoardView: View {
                           onClose: { mapPreview = nil },
                           fullscreen: appModel.settings.fullscreenGalaxyMap,
                           destinationPreview: .init(systemID: target.systemID, label: target.label))
+                .cursorHost()
         }
         .sheet(isPresented: Binding(get: { services.pendingOffer != nil },
                                     set: { if !$0 { services.pendingOffer = nil } })) {
+            Group {
             if let offer = services.pendingOffer, let graphics {
                 let tag = storylineTags[offer.mission.id]
                 switch location {
@@ -116,6 +118,8 @@ struct MissionBoardView: View {
                                       onShowDestination: showDestinationAction(for: offer))
                 }
             }
+            }
+            .cursorHost()
         }
     }
 
@@ -349,6 +353,8 @@ private struct MissionInfoSheet: View {
                 fallback
             }
         }
+        // Ⓑ refuses, when the offer can be refused.
+        .cursorCancel(offer.canRefuse ? onDecline : nil)
     }
 
     private func offersList(_ size: CGSize) -> some View {
@@ -383,7 +389,7 @@ private struct MissionInfoSheet: View {
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
                 .cursorScrollable()
             HStack {
-                if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
+                if offer.canRefuse { PadFallbackButton(offer.refuseButton, action: onDecline) }
                 Spacer()
                 Button(offer.acceptButton, action: onAccept).novaProminentButton()
             }
@@ -483,6 +489,8 @@ struct MissionSingleDialog: View {
                 .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
         .overlay { if moviePlayer != nil { moviePlayerOverlay } }
+        // Ⓑ refuses, when the offer can be refused.
+        .cursorCancel(offer.canRefuse ? { finish(onDecline) } : nil)
         // The offer's dësc movie plays by itself before the text, unless its
         // Flags put it after (0x00442510).
         .onAppear { if !movieAfterText { playMovie() } }
@@ -637,7 +645,7 @@ struct MissionSingleDialog: View {
             ScrollView { Text(offer.briefingText).novaFont(.body).frame(maxWidth: .infinity, alignment: .leading) }
                 .cursorScrollable()
             HStack {
-                if offer.canRefuse { Button(offer.refuseButton, action: onDecline) }
+                if offer.canRefuse { PadFallbackButton(offer.refuseButton, action: onDecline) }
                 Spacer()
                 Button(offer.acceptButton, action: onAccept).novaProminentButton()
             }

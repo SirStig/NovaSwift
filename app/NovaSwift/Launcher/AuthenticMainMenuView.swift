@@ -312,6 +312,10 @@ struct AuthenticMainMenuView: View {
             }
             .transition(.opacity)
             .preferredColorScheme(.dark)
+            // The dialog covers the menu: only it is pressable, and Ⓑ closes it
+            // (dialogs with their own Ⓑ register later and win).
+            .cursorCancel { sheet = nil }
+            .cursorModal()
         }
     }
 
@@ -623,6 +627,7 @@ struct AuthenticMainMenuView: View {
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .cursorScrollable()
                 .frame(maxHeight: 360)
             }
         }

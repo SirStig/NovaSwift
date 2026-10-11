@@ -81,13 +81,15 @@ private struct ClassicPromptModifier: ViewModifier {
             }
         } else {
             // In-app rather than a system alert, so a controller can answer it.
-            // `ok` re-checks the 64-byte limit; on failure it re-presents.
+            // OK re-checks the 64-byte limit; on failure it re-presents.
             content.novaAlert(prompt, isPresented: $isPresented, text: text, buttons: [
                 .cancel(cancelTitle ?? "Cancel") { onCancel() },
                 NovaAlertButton(title: okTitle ?? "OK") {
                     if let text, text.wrappedValue.utf8.count > 64 {
                         model.audio.play(.uiError)
-                        isPresented = true
+                        // Over the limit: beep and stay open (re-present after
+                        // the alert's own dismiss lands).
+                        DispatchQueue.main.async { isPresented = true }
                     } else {
                         onOK(text.map { classicPromptAnswer($0.wrappedValue) })
                     }

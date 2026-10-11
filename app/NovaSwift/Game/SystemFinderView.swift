@@ -60,7 +60,9 @@ struct SystemFinderView: View {
             VStack(spacing: 0) {
             // In-view field (not `.searchable`) so Ⓐ can open the pad keyboard.
             TextField("System name", text: $query)
+                #if !os(tvOS)
                 .textFieldStyle(.roundedBorder)
+                #endif
                 .onSubmit { submit() }
                 .padTextEntry("System name", text: $query, onCommit: submit)
                 .padding(.horizontal).padding(.vertical, 8)

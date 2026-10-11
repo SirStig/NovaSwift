@@ -63,6 +63,7 @@ struct StoryGuideView: View {
         .background(EVTheme.panel)
         .foregroundStyle(EVTheme.text)
         .novaResponsive()
+        .cursorCancel(onClose)
         .onAppear(perform: selectDefaultLane)
         .onChange(of: lanes.map(\.key)) { _, keys in
             guard !keys.isEmpty else { selectedKey = nil; return }
@@ -139,7 +140,7 @@ struct StoryGuideView: View {
         HStack(spacing: 10) {
             if let lane = selectedLane {
                 Circle().fill(model.governmentColor(lane.governmentID)).frame(width: 10, height: 10)
-                Menu {
+                PadCycleMenu(cycle: cycleLane) {
                     laneMenu
                 } label: {
                     HStack(spacing: 6) {
@@ -150,7 +151,7 @@ struct StoryGuideView: View {
                         Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
-                .buttonStyle(.novaPlain).foregroundStyle(EVTheme.text)
+                .foregroundStyle(EVTheme.text)
             } else {
                 Text("Story Guide").novaFont(.heading, weight: .bold)
             }
@@ -158,6 +159,14 @@ struct StoryGuideView: View {
             closeButton
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    /// Ⓐ on the lane switcher steps to the next storyline (the system menu
+    /// isn't cursor-operable).
+    private func cycleLane() {
+        guard !lanes.isEmpty else { return }
+        let i = lanes.firstIndex { $0.key == selectedKey } ?? -1
+        selectedKey = lanes[(i + 1) % lanes.count].key
     }
 
     @ViewBuilder private var laneMenu: some View {
@@ -317,6 +326,7 @@ private struct StorylineSidebar: View {
                 }
                 .padding(10)
             }
+            .cursorScrollable()
         }
         .frame(width: 250)
         .background(Color.white.opacity(0.03))
@@ -330,7 +340,7 @@ private struct StorylineSidebar: View {
             }
             .padding(10)
         } else {
-            Menu {
+            PadCycleMenu(cycle: cycleFilter) {
                 Button("All sources") { pluginFilter = nil }
                 ForEach(pluginIDs, id: \.self) { id in Button(pluginLabel(id)) { pluginFilter = id } }
             } label: {
@@ -342,8 +352,17 @@ private struct StorylineSidebar: View {
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.06)))
             }
-            .buttonStyle(.novaPlain).padding(10)
+            .padding(10)
         }
+    }
+
+    /// Ⓐ steps All → each source → All (the system menu isn't cursor-operable).
+    private func cycleFilter() {
+        guard let current = pluginFilter, let i = pluginIDs.firstIndex(of: current) else {
+            pluginFilter = pluginIDs.first
+            return
+        }
+        pluginFilter = i + 1 < pluginIDs.count ? pluginIDs[i + 1] : nil
     }
 
     private func row(_ lane: StoryMapLane) -> some View {
@@ -369,6 +388,25 @@ private struct StorylineSidebar: View {
                 .fill(lane.key == selectedKey ? EVTheme.accent.opacity(0.18) : Color.clear))
         }
         .buttonStyle(.novaPlain)
+    }
+}
+
+/// A `Menu` for touch/mouse that a controller can still drive: system menus
+/// aren't cursor targets, so Ⓐ runs `cycle` (step to the next option) instead.
+/// tvOS has no usable `Menu` under the cursor, so it's just the label there.
+private struct PadCycleMenu<Items: View, Label: View>: View {
+    let cycle: () -> Void
+    @ViewBuilder let items: () -> Items
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        #if os(tvOS)
+        label().contentShape(Rectangle()).cursorClickable(cycle)
+        #else
+        Menu(content: items, label: label)
+            .buttonStyle(.plain)
+            .cursorClickable(cycle)
+        #endif
     }
 }
 

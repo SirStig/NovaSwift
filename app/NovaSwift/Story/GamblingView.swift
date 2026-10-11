@@ -87,7 +87,9 @@ struct GamblingView: View {
             case .result:   resultView
             }
         }
-        .sheet(isPresented: $showAmountPrompt) { amountPrompt }
+        // Ⓑ = Leave, except mid-race (the race can't be walked out of).
+        .cursorCancel(phase == .racing ? nil : onDone)
+        .sheet(isPresented: $showAmountPrompt) { amountPrompt.cursorHost() }
     }
 
     // MARK: Choosing — DITL #1023 "Race" against the real 470×230 PICT 8529 frame

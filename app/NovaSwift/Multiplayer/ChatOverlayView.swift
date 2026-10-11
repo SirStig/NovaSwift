@@ -95,6 +95,7 @@ struct ChatOverlayView: View {
         .frame(width: 320, height: 260)
         .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15)))
+        .cursorCancel { isPresented = false }
         .onAppear { session.chatVisible = true }
         .onDisappear { session.chatVisible = false }
     }
@@ -137,6 +138,7 @@ struct ChatOverlayView: View {
                 }
             }
             .onAppear { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+            .cursorScrollable()
         }
     }
 
@@ -168,6 +170,7 @@ struct ChatOverlayView: View {
                 .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                 .focused($inputFocused)
                 .onSubmit(send)
+                .padTextEntry("Message", text: $draft, onCommit: send)
             #endif
             Button(action: send) {
                 Image(systemName: "paperplane.fill")

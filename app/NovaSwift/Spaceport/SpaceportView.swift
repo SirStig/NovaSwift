@@ -53,6 +53,7 @@ struct SpaceportView: View {
             hub
 
             if screen != .hub {
+              ZStack {
                 Color.black.opacity(0.5).ignoresSafeArea()
                     .onTapGesture { screen = .hub }
                     .transition(.opacity)
@@ -76,24 +77,35 @@ struct SpaceportView: View {
                     }
                 }
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
+              }
+              // Covers the hub: only the open service window is live, Ⓑ closes it.
+              .cursorCancel { screen = .hub }
+              .cursorModal()
             }
 
             // A location-triggered mission offer (landing / trade / shipyard /
             // outfitter) stacks over everything, as its own authentic dialog.
             if let offer = services.pendingOffer {
-                Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
-                MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
-                                    onPage: { _ in },
-                                    onAccept: { acceptOffer(offer) }, onDecline: { declineOffer(offer) },
-                                    storylineTag: storylineTag(for: offer.mission.id),
-                                    onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
-                    .transition(.opacity)
+                ZStack {
+                    Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                    MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
+                                        onPage: { _ in },
+                                        onAccept: { acceptOffer(offer) }, onDecline: { declineOffer(offer) },
+                                        storylineTag: storylineTag(for: offer.mission.id),
+                                        onOpenStoryline: storylineTag(for: offer.mission.id).map { t in { openStoryline(t.key) } })
+                        .transition(.opacity)
+                }
+                // Stacks over everything: only the offer is live, Ⓑ declines it.
+                .cursorCancel { declineOffer(offer) }
+                .cursorModal()
             }
 
             // Briefings, refusals and other story texts raised here, one
             // dialog each, in order.
             StoryTextOverlay(services: services)
         }
+        // Ⓑ on the hub is Leave; an open window or offer above takes it first.
+        .cursorCancel(depart)
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
         // First landing: a quiet banner pointing the player at the Mission BBS,
@@ -286,6 +298,7 @@ struct SpaceportView: View {
                 ScrollView(showsIndicators: false) {
                     NovaText(game.descText(spob.id), size: 10, width: 301 + desc.dw, align: .leading)
                 }
+                .cursorScrollable()
                 .frame(width: 301 + desc.dw, height: 175 + desc.dh)
                 .novaPlace(space, -149 + desc.dx, 70 + desc.dy)
                 // Service buttons flank the description panel left and right
@@ -456,13 +469,14 @@ struct SpaceportView: View {
         VStack(spacing: 16) {
             Text(spob.name).novaFont(.title, weight: .bold).foregroundStyle(.white)
             ScrollView { Text(game.descText(spob.id)).novaFont(.body).foregroundStyle(.white.opacity(0.85)) }
+                .cursorScrollable()
                 .frame(maxHeight: 300)
             HStack {
-                if spob.hasShipyard { Button("Shipyard") { screen = .shipyard } }
-                if spob.hasOutfitter { Button("Outfitter") { screen = .outfit } }
-                if spob.hasCommodityExchange { Button("Trade Center") { screen = .trade } }
-                if spob.hasBar { Button("Bar") { screen = .bar } }
-                if !spob.isUninhabited { Button("Mission BBS") { openMissionBBS() } }
+                if spob.hasShipyard { PadFallbackButton("Shipyard") { screen = .shipyard } }
+                if spob.hasOutfitter { PadFallbackButton("Outfitter") { screen = .outfit } }
+                if spob.hasCommodityExchange { PadFallbackButton("Trade Center") { screen = .trade } }
+                if spob.hasBar { PadFallbackButton("Bar") { screen = .bar } }
+                if !spob.isUninhabited { PadFallbackButton("Mission BBS") { openMissionBBS() } }
                 Button("Leave", action: depart).novaProminentButton()
             }
         }
@@ -538,6 +552,7 @@ struct MissionBBSView: View {
                         ScrollView(showsIndicators: false) {
                             NovaText(offer.briefingText, size: 10, width: brief.width, align: .leading)
                         }
+                        .cursorScrollable()
                         .frame(width: brief.width, height: brief.height)
                         .clipped()
                         .ditlPlace(space, d, brief)
@@ -558,11 +573,12 @@ struct MissionBBSView: View {
                 VStack {
                     Text("Mission BBS").foregroundStyle(.white)
                     MissionBoardView(game: game, pilot: pilot, spob: spob, location: .missionComputer)
-                    Button("Leave", action: onDone)
+                    PadFallbackButton("Leave", action: onDone)
                 }.padding()
             }
         }
         .overlay { StoryTextOverlay(services: services) }
+        .cursorCancel(onDone)
         .gameHint(GameHints.missionBBS, active: showHints, dismissed: $hintDismissed)
         .animation(.easeInOut(duration: 0.25), value: hintDismissed)
         .onAppear(perform: buildEngine)
@@ -595,6 +611,7 @@ struct MissionBBSView: View {
                 }
             }
         }
+        .cursorScrollable()
     }
 
     private func buildEngine() {
