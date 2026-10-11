@@ -294,7 +294,11 @@ struct HDViewerView: View {
                 HStack {
                     Button { stage.step(-1) } label: { Image(systemName: "chevron.left") }
                     Button { stage.step(1) } label: { Image(systemName: "chevron.right") }
-                    Toggle(stage.isShip ? "Spin" : "Play", isOn: $stage.spinning).toggleStyle(.switch).fixedSize()
+                    Toggle(stage.isShip ? "Spin" : "Play", isOn: $stage.spinning)
+                        #if !os(tvOS)
+                        .toggleStyle(.switch)
+                        #endif
+                        .fixedSize()
                     Slider(value: Binding(get: { Double(stage.heading) },
                                           set: { stage.spinning = false; stage.heading = Int($0) }),
                            in: 0...Double(max(1, stage.framesPerSet - 1)), step: 1)
