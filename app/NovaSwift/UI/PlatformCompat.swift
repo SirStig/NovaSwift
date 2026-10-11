@@ -117,6 +117,17 @@ struct Slider: View {
         self.onEditingChanged = onEditingChanged
     }
 
+    /// Stepped variant: values written back snap to multiples of `step`.
+    init(value: Binding<Double>, in range: ClosedRange<Double>, step: Double,
+         onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.init(value: Binding(get: { value.wrappedValue },
+                                 set: { v in
+                                     let snapped = range.lowerBound + ((v - range.lowerBound) / step).rounded() * step
+                                     value.wrappedValue = min(max(snapped, range.lowerBound), range.upperBound)
+                                 }),
+                  in: range, onEditingChanged: onEditingChanged)
+    }
+
     var body: some View {
         NovaSlider(value: $value, range: range)
             .onChange(of: value) { onEditingChanged(false) }

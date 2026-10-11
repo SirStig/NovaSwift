@@ -1226,7 +1226,6 @@ struct GalaxyMapView: View {
                 let text = OriginalText(game: game)
                 let explored = pilot.state.exploredSystems
                 let charted = pilot.chartedSystems
-                let adjacent = nav.adjacentToKnown(explored: explored, charted: charted)
                 // Discovery level > 0 (visited, revealed or charted, shared by
                 // twins); below it the panel shows only "<Unknown>" (#310).
                 let known = pilot.state.isSystemExplored(infoID)

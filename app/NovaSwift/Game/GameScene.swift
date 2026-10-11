@@ -2995,7 +2995,6 @@ final class GameScene: SKScene {
     /// "don't act on this" flag through the tap-select path.
     func entity(at scenePoint: CGPoint) -> DevEntityRef? {
         let p = Vec2(Double(scenePoint.x), Double(scenePoint.y))
-        let hitTolerance = 24.0
         if let ship = pickableShip(at: p) {
             return .ship(id: ship.entityID, name: ship.name)
         }
@@ -4398,7 +4397,7 @@ final class GameScene: SKScene {
             audio?.startHyperspaceCharge()
         } else {
             if hyperspaceCueTicks60 == nil { hyperspaceCueTicks60 = galaxy?.hyperspaceWarpUpSoundTicks60 }
-            let multiplier = galaxy?.jumpDurationMultiplier(hull: world.player.shipTypeID ?? -1) ?? 1.3
+            let multiplier = galaxy?.jumpDurationMultiplier(hull: world.player.shipTypeID) ?? 1.3
             world.playerJump = PlayerHyperjump(bearing: outboundHeading, fastJump: fastJump,
                                                soundTicks60: hyperspaceCueTicks60 ?? 0,
                                                soundTicks60X2: galaxy?.hyperspaceWarpUp2xSoundTicks60,
@@ -4425,12 +4424,12 @@ final class GameScene: SKScene {
         let stranded = world.npcs.filter { f in
             guard f.carrierID == World.playerEntityID, f.isAlive, !f.disabled,
                   f.fuel < ShipFuel.perJump else { return false }
-            return (game.ship(f.shipTypeID ?? -1)?.flags2 ?? 0) & 0x0010 == 0
+            return (game.ship(f.shipTypeID)?.flags2 ?? 0) & 0x0010 == 0
         }
         guard let last = stranded.last else { return }
         let entry = (stranded.count == 1 ? 160 : 162) + world.rng.range(2)
         guard let line = game.stringList(2002)?.string(at: entry) else { return }
-        let name = game.ship(last.shipTypeID ?? -1)?.displayName ?? last.name
+        let name = game.ship(last.shipTypeID)?.displayName ?? last.name
         hud?.post("\(name): \(line)")
     }
 
@@ -5588,7 +5587,6 @@ final class GameScene: SKScene {
             }
         }
         if newTarget { reticleZoom = 256 } else { reticleZoom = max(0, reticleZoom - 1800 * CGFloat(frameDT)) }
-        let rel = relationship(for: ship)
         let base: Int
         switch world.reticleClass(of: ship) {   // squad / threat / disabled as in 0x0042ede0
         case .threat: base = 0
@@ -5977,7 +5975,7 @@ final class GameScene: SKScene {
         // explosion sprite instead of the generic flash. The bursts follow this
         // hull even if the pilot ejects from it meanwhile (OS-02).
         let deathBoom = playerShip?.explosionBoomID
-        weak var hull = playerShip
+        weak let hull = playerShip
 
         let bursts = 9
         let step = 0.2

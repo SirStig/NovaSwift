@@ -110,7 +110,7 @@ final class GameCenterManager: NSObject, ObservableObject {
     /// list having never been sent anything.
     @discardableResult
     func invite(playerID: String, into match: GKMatch?) async -> Bool {
-        let players = await Self.loadPlayers(ids: [playerID])
+        let players = await (LegacyPlayerLoader() as PlayerLoading).loadPlayers(ids: [playerID])
         guard !players.isEmpty else {
             lastError = "Couldn't find that player on Game Center."
             return false
@@ -132,24 +132,6 @@ final class GameCenterManager: NSObject, ObservableObject {
         }
         present(vc, role: .hosting)
         return true
-    }
-
-    /// `GKPlayer.loadPlayers(forIdentifiers:withCompletionHandler:)` is
-    /// `NS_SWIFT_DISABLE_ASYNC` — Swift never bridges it to an `async`
-    /// overload — and deprecated in favor of `GKLocalPlayer.loadFriends`,
-    /// which isn't a real substitute here: it only returns the local player's
-    /// *friends*, not an arbitrary Game Center id, which breaks inviting
-    /// anyone who isn't already a friend. There's no general replacement, so
-    /// this stays on the completion-handler API; marking this wrapper itself
-    /// `deprecated` is what silences the warning at its one call site above
-    /// without also silencing genuinely-new deprecated-API usage elsewhere.
-    @available(*, deprecated, message: "GameKit has no async, non-friends-only replacement for loadPlayers(forIdentifiers:)")
-    private static func loadPlayers(ids: [String]) async -> [GKPlayer] {
-        await withCheckedContinuation { continuation in
-            GKPlayer.loadPlayers(forIdentifiers: ids) { players, _ in
-                continuation.resume(returning: players ?? [])
-            }
-        }
     }
 
     /// Present the matchmaker for an accepted invite and hand back the match. The
@@ -344,4 +326,29 @@ struct GameCenterMatchmakerView: NSViewControllerRepresentable {
     }
 }
 #endif
+
+/// `GKPlayer.loadPlayers(forIdentifiers:withCompletionHandler:)` is
+/// `NS_SWIFT_DISABLE_ASYNC` — Swift never bridges it to an `async`
+/// overload — and deprecated in favor of `GKLocalPlayer.loadFriends`,
+/// which isn't a real substitute here: it only returns the local player's
+/// *friends*, not an arbitrary Game Center id, which breaks inviting
+/// anyone who isn't already a friend. There's no general replacement, so
+/// this stays on the completion-handler API. The deprecated witness keeps
+/// the warning out of its body, and calling it through the (non-deprecated)
+/// protocol requirement keeps it out of the call site, without silencing
+/// genuinely-new deprecated-API usage elsewhere.
+private protocol PlayerLoading {
+    func loadPlayers(ids: [String]) async -> [GKPlayer]
+}
+
+private struct LegacyPlayerLoader: PlayerLoading {
+    @available(*, deprecated, message: "GameKit has no async, non-friends-only replacement for loadPlayers(forIdentifiers:)")
+    func loadPlayers(ids: [String]) async -> [GKPlayer] {
+        await withCheckedContinuation { continuation in
+            GKPlayer.loadPlayers(forIdentifiers: ids) { players, _ in
+                continuation.resume(returning: players ?? [])
+            }
+        }
+    }
+}
 #endif

@@ -68,11 +68,7 @@ final class ConsoleController: ObservableObject {
             ncbStamp = stamp
             return
         }
-        let built = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: NCBIndex.build(from: game))
-            }
-        }
+        let built = await Task.detached(priority: .userInitiated) { NCBIndex.build(from: game) }.value
         ncbIndex = built
         ncbStamp = stamp
     }

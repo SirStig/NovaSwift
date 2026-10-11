@@ -73,8 +73,10 @@ struct HDViewerView: View {
         #if os(macOS)
         .frame(minWidth: 760, minHeight: 540)
         #endif
+        #if !os(tvOS)
         .fileExporter(isPresented: $exporting, document: exportDoc, contentType: .png,
                       defaultFilename: exportName) { _ in }
+        #endif
         .task { await buildIndex() }
         .onAppear {
             refresh()
@@ -240,6 +242,7 @@ struct HDViewerView: View {
             VStack(spacing: 0) {
                 ZStack {
                     SpriteView(scene: stage.scene)
+                    #if !os(tvOS)
                     // Drag horizontally to rotate; the overlay keeps the gesture off SpriteView's own event handling.
                     Color.clear.contentShape(Rectangle())
                         .gesture(DragGesture(minimumDistance: 2)
@@ -248,15 +251,18 @@ struct HDViewerView: View {
                                 stage.scrub(from: dragStart ?? 0, dx: v.translation.width)
                             }
                             .onEnded { _ in dragStart = nil })
+                    #endif
                 }
                 .frame(maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
                 .focusable()
                 .focusEffectDisabled()
-                .onKeyPress(.leftArrow) { stage.step(-1); return .handled }
-                .onKeyPress(.rightArrow) { stage.step(1); return .handled }
-                .onKeyPress(.upArrow) { stage.stepSet(1); return .handled }
-                .onKeyPress(.downArrow) { stage.stepSet(-1); return .handled }
-                .onKeyPress(.space) { stage.togglePlay(); return .handled }
+                // Key handlers run inside a view update; defer the @Published
+                // writes to the next main-actor turn.
+                .onKeyPress(.leftArrow) { deferred { stage.step(-1) } }
+                .onKeyPress(.rightArrow) { deferred { stage.step(1) } }
+                .onKeyPress(.upArrow) { deferred { stage.stepSet(1) } }
+                .onKeyPress(.downArrow) { deferred { stage.stepSet(-1) } }
+                .onKeyPress(.space) { deferred { stage.togglePlay() } }
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
@@ -271,7 +277,9 @@ struct HDViewerView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     if let entry, !entry.shipIDs.isEmpty { spawnMenu(entry) }
+                    #if !os(tvOS)
                     exportMenu(id: id, entry: entry)
+                    #endif
                 }
             }
         } else {
@@ -379,16 +387,28 @@ struct HDViewerView: View {
                     LabeledContent("Systems", value: entry.systems.prefix(8).map(\.name).joined(separator: ", ")
                                    + (entry.systems.count > 8 ? " (+\(entry.systems.count - 8) more)" : ""))
                 }
-                DisclosureGroup("Owners (\(entry.owners.count))") {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(entry.owners.enumerated()), id: \.offset) { _, o in
-                            Text(ownerLine(o)).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                #if os(tvOS)
+                Text("Owners (\(entry.owners.count))")
+                ownerList(entry)
+                #else
+                DisclosureGroup("Owners (\(entry.owners.count))") { ownerList(entry) }
+                #endif
             }
         }
+    }
+
+    private func ownerList(_ entry: SpriteOwnerIndex.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(entry.owners.enumerated()), id: \.offset) { _, o in
+                Text(ownerLine(o)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func deferred(_ action: @escaping @MainActor () -> Void) -> KeyPress.Result {
+        Task { @MainActor in action() }
+        return .handled
     }
 
     private func ownerLine(_ o: SpriteOwnerIndex.Owner) -> String {
@@ -456,7 +476,13 @@ enum HDViewerIndexCache {
     }
 }
 
-/// A PNG for `fileExporter` (save panel on macOS, Files on iOS).
+/// A PNG for `fileExporter` (save panel on macOS, Files on iOS; tvOS has no
+/// document export, so there it is just the bytes).
+#if os(tvOS)
+struct PNGDocument {
+    var data: Data
+}
+#else
 struct PNGDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.png] }
     var data: Data
@@ -464,6 +490,7 @@ struct PNGDocument: FileDocument {
     init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
+#endif
 
 private final class ViewerScene: SKScene {
     var onResize: (() -> Void)?

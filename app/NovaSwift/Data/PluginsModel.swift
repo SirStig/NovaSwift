@@ -73,13 +73,13 @@ final class PluginsModel: ObservableObject {
             do {
                 for depID in self.browser.missingDependencies(of: entry) {
                     guard let dep = self.entry(id: depID) else { continue }
-                    try await PluginInstallPipeline.install(dep, into: root) { p in
+                    try await PluginInstallPipeline.install(dep, into: root, progress: { p in
                         Task { @MainActor in self.transfers[entry.id] = .working(p) }
-                    }
+                    })
                 }
-                try await PluginInstallPipeline.install(entry, into: root) { p in
+                try await PluginInstallPipeline.install(entry, into: root, progress: { p in
                     Task { @MainActor in self.transfers[entry.id] = .working(p) }
-                }
+                })
                 self.transfers[entry.id] = nil
                 self.refresh(data: data)
                 let installed = root.appendingPathComponent(entry.id, isDirectory: true)
