@@ -1803,7 +1803,8 @@ final class GameScene: SKScene {
         let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false,
                                        carriesKeyShip: p.carriesKeyShip)
         let spin = hdSpin(renderHeading(p), framesPerSet: hullAnim.framesPerSet, texture: rotationTextures.first)
-        for n in [shipSprite, engineGlowSprite, lightNode, altNode, weaponGlowNode] { n?.zRotation = spin }
+        shipSprite?.zRotation = spin; engineGlowSprite?.zRotation = spin; lightNode?.zRotation = spin
+        altNode?.zRotation = spin; weaponGlowNode?.zRotation = spin
         if let sprite = shipSprite, !rotationTextures.isEmpty {
             sprite.texture = rotationTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: rotationTextures.count)]
         } else if let tri = placeholder {
@@ -4042,7 +4043,9 @@ final class GameScene: SKScene {
             let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock,
                                             disabled: npc.disabled, carriesKeyShip: npc.carriesKeyShip)
             let spin = hdSpin(renderHeading(npc), framesPerSet: node.hullAnim.framesPerSet, texture: node.textures.first)
-            for n in [node.sprite, node.engineGlow, node.light, node.alt, node.weaponGlow] { n?.zRotation = spin }
+            // Five direct writes, not a five-element array built per ship per frame.
+            node.sprite?.zRotation = spin; node.engineGlow?.zRotation = spin; node.light?.zRotation = spin
+            node.alt?.zRotation = spin; node.weaponGlow?.zRotation = spin
             if let sprite = node.sprite, !node.textures.isEmpty {
                 sprite.texture = node.textures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.textures.count)]
             } else if let tri = node.placeholder {
@@ -5837,7 +5840,7 @@ final class GameScene: SKScene {
             if idx >= a.frames.count {
                 a.node.isHidden = true
                 animPool.append(a.node)
-                activeAnims.remove(at: i)
+                activeAnims.swapAt(i, activeAnims.count - 1); activeAnims.removeLast()
                 continue
             }
             a.node.texture = a.frames[idx]
@@ -5936,7 +5939,7 @@ final class GameScene: SKScene {
         while i < smokePuffs.count {
             smokePuffs[i].age += dt
             let p = smokePuffs[i]
-            if p.age >= p.life { p.node.removeFromParent(); smokePuffs.remove(at: i); continue }
+            if p.age >= p.life { p.node.removeFromParent(); smokePuffs.swapAt(i, smokePuffs.count - 1); smokePuffs.removeLast(); continue }
             let idx = min(7, Int(p.age / p.life * 8))
             if p.node.texture !== p.frames[idx] { p.node.texture = p.frames[idx]; p.node.size = p.frames[idx].size() }
             i += 1
@@ -5945,6 +5948,9 @@ final class GameScene: SKScene {
 
     /// Advance every live particle: integrate with light drag, lerp size, fade
     /// alpha to zero over its life, then recycle the node into the pool.
+    /// Finished entries here and in the other effect lists are swap-removed
+    /// (O(1)): with hundreds dying a frame, shifting the array each time was
+    /// quadratic. Order doesn't matter — drawing follows the node tree.
     private func updateParticles(_ dt: Double) {
         guard !activeParticles.isEmpty else { return }
         let fdt = CGFloat(dt)
@@ -5956,7 +5962,7 @@ final class GameScene: SKScene {
             if t >= 1 {
                 p.node.isHidden = true
                 particlePool.append(p.node)
-                activeParticles.remove(at: i)
+                activeParticles.swapAt(i, activeParticles.count - 1); activeParticles.removeLast()
                 continue
             }
             if p.classic {
@@ -6102,7 +6108,7 @@ final class GameScene: SKScene {
             if t >= 1 {
                 f.node.isHidden = true
                 flashPool.append(f.node)
-                activeFlashes.remove(at: i)
+                activeFlashes.swapAt(i, activeFlashes.count - 1); activeFlashes.removeLast()
                 continue
             }
             let d = f.startDiameter + (f.endDiameter - f.startDiameter) * CGFloat(t)

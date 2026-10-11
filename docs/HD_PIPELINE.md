@@ -143,9 +143,13 @@ The original game never looks inside folders.
   **or beside a loose `Name.rez` with the same base name:** it belongs to that
   plug-in and turns on and off with it. With nested plug-in folders, the
   innermost one owns the pack.
-- **On its own, or in a folder with no plug-in files** (a graphics-only
-  download such as Nova Reimagined): a standalone HD pack. It applies whenever
-  HD graphics are on; remove the folder to remove it.
+- **In a folder with no plug-in files** (a graphics-only download such as
+  Nova Reimagined): a graphics-only plug-in. It's listed under Plugins ▸
+  Installed as "HD graphics", loads like any other plug-in (on in the normal
+  order, switchable in manual load order, never under a total conversion,
+  whose sprite ids mean different art) and is deleted like one.
+- **Loose in a plug-ins folder:** a standalone HD pack, on whenever HD
+  graphics are on.
 
 Packs are found up to four folders deep below a plug-ins folder, which covers
 the plug-in manager's layout (`<plug-in id>/<the zip's own folder>/My.nsx`).
@@ -230,12 +234,33 @@ an M-series Mac, via `novaswift-hd preview`:
 | 2× | 0.88 s | 18 ms | 5 MB |
 | 4× | 0.74 s | 48 ms | 21 MB |
 
-All preparation happens on the loading screen ("Preparing HD graphics"). In
-flight, each upgraded sheet is a single GPU texture whose frames are
-sub-rectangles, so ships of one hull still batch. A sprite that isn't ready
-draws classic and is prepared in the background. Atlases are capped at
-8192 px a side (the floor for every supported GPU), lowering the scale if
-needed.
+All preparation happens on the loading screen ("Preparing HD graphics"),
+across the CPU cores, through to GPU textures (hull sheets and their effect
+layers), so the game opens with everything in place. One warm-up runs at a
+time; the data load and the loading screen share it. In flight, each upgraded
+sheet is a single GPU texture whose frames are sub-rectangles, so ships of one
+hull still batch. A sprite that still isn't ready draws classic, is prepared
+in the background and is logged as built on demand (see below).
+
+- **Memory.** Atlases are capped at 8192 px a side and 4 megapixels (16 MB):
+  every sheet lives twice (CPU image and GPU texture, the same RAM on Apple
+  silicon), and uncapped 4× hulls once took the game past 12 GB. A large hull
+  bakes at 2–3× instead of 4×.
+- **Caching.** Bakes, portraits and shield bubbles are cached by the model's
+  content hash (remembered per file path, size and date, so a model isn't
+  re-hashed for each). The cache version is part of every key.
+- **Brightness.** A model is lit to match its classic art: a few headings are
+  rendered and the lights scaled so the mid and upper-mid tones match the
+  classic frames (planets keep their single-sun look; a descriptor's
+  `bake.exposure` overrides it).
+- **Shipyard portraits** of model hulls are drawn over the gradient of the
+  hull's original shipyard picture, so the government colours still read.
+- **Watching it.** Every five seconds of play the app logs one `Perf` line
+  (Xcode console, or `log stream --predicate 'subsystem == "com.novaswift.app"
+  && category == "Perf"'`): frame rate, CPU work per frame against the frame,
+  hitches, memory, threads, HD sheet count and size, HD art built on demand
+  and cache evictions. HD preparation and evictions are also signposted for
+  Instruments.
 
 ## Tools
 
@@ -277,6 +302,19 @@ art for one pack rather than tools every pack needs.
 
 ## Not done yet
 
+- **Hulls in Nova Reimagined.** The image-to-3D hulls (shipyard picture →
+  Qwen remaster → TRELLIS.2) were too often wrong: misoriented, missing or
+  merged parts, invented colours, blurry, fixed parts that should move,
+  misplaced thrusters. They're out of the pack; hulls stay classic. The
+  promising route is 2D: `nova-reimagined/tools/remaster_sprites.py` redraws
+  each frame from the classic sprite (pose) plus the shipyard picture
+  (detail) as a chain round the turn, cuts it to the classic outline and takes
+  colour pixel by pixel from the classic frame. The Valkyrie, Shuttle and
+  Pegasus came out well; the full set (≈2,600 level frames, ≈6,500 with the
+  banked sets) is paused until there's a free or budgeted way to run it.
+- **Ship packs as finished sheets.** Shipping hulls as pre-rendered `sprite`
+  atlases (as the 2D route does) makes a pack load like any other mod; models
+  stay supported for creators and are rendered on first run.
 - Live 3D presentation (smooth rotation and real lighting via `SK3DNode`) for
   models marked `live`.
 - HD for interface art, landing pictures and the shipyard/outfitter images.
