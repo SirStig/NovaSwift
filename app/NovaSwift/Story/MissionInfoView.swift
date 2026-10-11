@@ -75,6 +75,9 @@ struct MissionInfoView: View {
             }
         }
         .novaResponsive()
+        // Covers whatever it opened over: only the dialog is live, Ⓑ closes it.
+        .cursorCancel(close)
+        .cursorModal()
         .onAppear(perform: rebuild)
         .storylineGuideSheet(isPresented: $showStoryGuide, game: game, player: { pilot.state },
                              storylineKey: storyGuideFocusKey)
@@ -187,6 +190,7 @@ struct MissionInfoView: View {
                     }
                 }
             }
+            .cursorScrollable()
         }
     }
 
@@ -199,6 +203,7 @@ struct MissionInfoView: View {
                 NovaText(m.payload, size: 10, color: Color(white: 0.82),
                          width: CGFloat(items.desc.w), align: .leading)
             }
+            .cursorScrollable()
         }
     }
 }

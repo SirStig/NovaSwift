@@ -52,13 +52,14 @@ struct SettingsView: View {
             if model.data.hasBaseData || model.data.game != nil { model.prepareAudioAndData() }
             if let first = model.audio.availableSoundIDs().first { previewSoundID = first }
         }
-        .confirmationDialog("Reset every setting to its default?", isPresented: $showResetConfirm, titleVisibility: .visible) {
-            Button("Reset All", role: .destructive) {
+        // `.novaAlert`, not `.confirmationDialog`: the controller can't operate system dialogs.
+        .novaAlert("Reset every setting to its default?", isPresented: $showResetConfirm, buttons: [
+            .destructive("Reset All") {
                 model.settings.resetToDefaults()
                 model.commitSettings()
-            }
-            Button("Cancel", role: .cancel) {}
-        }
+            },
+            .cancel("Cancel") {}
+        ])
         // Data import now lives here (moved off the main menu once data is present).
         // Presented as a full-screen overlay over the settings card, matching how
         // the menus present their own dialogs.
@@ -80,6 +81,7 @@ struct SettingsView: View {
             NavigationStack { ControlsView() }
                 .frame(minWidth: 480, minHeight: 560)
                 .preferredColorScheme(.dark)
+                .cursorHost()
         }
         .sheet(isPresented: $showBugReport) {
             // No `debug:` here — Settings can be opened from the launcher, where
@@ -88,6 +90,7 @@ struct SettingsView: View {
             BugReportView()
                 .environmentObject(model)
                 .environmentObject(model.pilot)
+                .cursorHost()
         }
         .overlay {
             if showAbout { AboutView(onClose: { showAbout = false }) }
@@ -203,6 +206,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Original Preferences Window…", systemImage: "macwindow")
                 }
+                .novaFormButton()
             }
         } header: {
             sectionHeader("Presentation", icon: "sparkles.tv")
@@ -244,6 +248,7 @@ struct SettingsView: View {
                     // spaceport/BBS/outfitter banners all clear together.
                     UserDefaults.standard.removeObject(forKey: "novaswift.seenFlightHints")
                 }
+                .novaFormButton()
             }
             // Replayable flight-training run, moved here off the main menu. Needs
             // decoded ship/outfit data to fly, so it's gated on base data; close
@@ -256,6 +261,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Flight Training", systemImage: "graduationcap.fill")
                 }
+                .novaFormButton()
             }
             Toggle("Pause when app loses focus", isOn: binding(\.pauseOnFocusLoss))
         } header: {
@@ -312,6 +318,7 @@ struct SettingsView: View {
             } label: {
                 Label("Keyboard & Controller Bindings", systemImage: "keyboard")
             }
+            .novaFormButton()
             NovaMenuPicker(title: "Touch flying", selection: binding(\.controlScheme),
                            options: GameSettings.ControlScheme.allCases) { $0.label }
             if model.settings.controlScheme == .tilt {
@@ -455,6 +462,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Import Data", systemImage: "square.and.arrow.down.fill")
                 }
+                .novaFormButton()
             }
         } header: {
             sectionHeader("Saved Games", icon: "externaldrive.badge.icloud")
@@ -486,6 +494,7 @@ struct SettingsView: View {
             } label: {
                 Label("Report a Bug", systemImage: "ladybug")
             }
+            .novaFormButton()
             // The authentic main menu's About button shows the data's own
             // dësc 32767, as the original does; the port's About lives here.
             Button {
@@ -494,6 +503,7 @@ struct SettingsView: View {
             } label: {
                 Label("About NovaSwift", systemImage: "info.circle")
             }
+            .novaFormButton()
         } header: {
             sectionHeader("Support", icon: "lifepreserver")
         } footer: {
@@ -511,6 +521,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Preview Setup Wizard", systemImage: "sparkles.rectangle.stack")
                 }
+                .novaFormButton()
             }
         } header: {
             sectionHeader("Developer", icon: "hammer")

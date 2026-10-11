@@ -102,10 +102,7 @@ struct PadKeyboardView: View {
 
                 HStack(spacing: 12) {
                     footer("Cancel", prominent: false) { cancel() }
-                    footer("Done", prominent: true) {
-                        request.onCommit(text)
-                        model.padKeyboard = nil
-                    }
+                    footer("Done", prominent: true) { commit() }
                 }
                 .padding(.top, 2)
             }
@@ -117,6 +114,15 @@ struct PadKeyboardView: View {
             // Its own scale container: keys register where they're drawn.
             .cursorScaleEffect(keyboardScale)
         }
+        // Ⓑ backs out, Menu commits; nothing behind the keyboard is live.
+        .cursorCancel { cancel() }
+        .cursorDefault { commit() }
+        .cursorModal()
+    }
+
+    private func commit() {
+        request.onCommit(text)
+        model.padKeyboard = nil
     }
 
     private var keyboardScale: CGFloat {
@@ -171,5 +177,50 @@ struct PadKeyboardView: View {
                                                      : AnyShapeStyle(Color.white.opacity(0.12))))
         }
         .buttonStyle(.novaPlain)
+    }
+}
+
+/// Makes any text-entry chrome controller-typable: Ⓐ on it opens the pad
+/// keyboard (iOS/iPadOS/macOS) or the system fullscreen keyboard (tvOS),
+/// pre-filled with `text`, writing the result back. Touch, mouse and hardware
+/// keyboards keep editing the underlying field inline as before. Use on stock
+/// `TextField`s and search fields that aren't a `NovaTextField`.
+struct PadTextEntry: ViewModifier {
+    let title: String
+    @Binding var text: String
+    var suggestions: (() -> [String])?
+    var onCommit: () -> Void = {}
+    #if os(tvOS)
+    @State private var editing = false
+    #else
+    @EnvironmentObject private var model: AppModel
+    #endif
+
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        content
+            .allowsHitTesting(false)
+            .cursorClickable { editing = true }
+            .tvTextEntry(text: $text, editing: $editing, placeholder: title, onCommit: onCommit)
+        #else
+        content.cursorClickable { [weak model] in
+            guard let model else { return }
+            let binding = $text
+            model.padKeyboard = PadKeyboardRequest(
+                title: title, text: text, suggestions: suggestions) {
+                binding.wrappedValue = $0
+                onCommit()
+            }
+        }
+        #endif
+    }
+}
+
+extension View {
+    /// See `PadTextEntry`.
+    func padTextEntry(_ title: String, text: Binding<String>,
+                      suggestions: (() -> [String])? = nil,
+                      onCommit: @escaping () -> Void = {}) -> some View {
+        modifier(PadTextEntry(title: title, text: text, suggestions: suggestions, onCommit: onCommit))
     }
 }

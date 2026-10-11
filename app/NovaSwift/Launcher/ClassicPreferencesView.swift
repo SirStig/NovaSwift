@@ -67,7 +67,7 @@ struct ClassicPreferencesView: View {
             VStack {
                 Spacer()
                 Button("Back to Settings", action: onPortOptions)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                     .font(.footnote).foregroundStyle(.white.opacity(0.7))
                     .padding(.bottom, 12)
             }
@@ -83,6 +83,7 @@ struct ClassicPreferencesView: View {
             NavigationStack { ControlsView() }
                 .frame(minWidth: 480, minHeight: 560)
                 .preferredColorScheme(.dark)
+                .cursorHost()
         }
     }
 }

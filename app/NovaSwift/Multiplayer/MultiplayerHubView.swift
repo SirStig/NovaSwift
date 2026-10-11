@@ -37,6 +37,7 @@ struct MultiplayerHubView: View {
             if let mismatch = model.session.pluginMismatch {
                 PluginMismatchView(lobbyName: model.session.pluginMismatchLobbyName,
                                    mismatch: mismatch)
+                    .cursorHost()
             }
         }
         .novaResponsive()
@@ -70,11 +71,21 @@ struct MultiplayerHubView: View {
                 case .local:  LocalLobbySection(onEnterFlight: onEnterFlight)
                 case .online: OnlineLobbySection(onEnterFlight: onEnterFlight)
                 }
+
+                CursorButton(action: onClose) {
+                    Text("Close").novaFont(.button).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                }
+                .padding(.horizontal)
             }
             .padding(.vertical)
             .frame(maxWidth: .infinity)
         }
+        .cursorScrollable()
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close", action: onClose) } }
+        // Toolbar items are system chrome the cursor can't press: Ⓑ closes, and
+        // the in-view Close below is the pressable equivalent.
+        .cursorCancel(onClose)
     }
 
     private var header: some View {
@@ -146,6 +157,7 @@ private struct LocalLobbySection: View {
                     shipTypeID: model.pilot.state.shipType, rules: rules)
                 onEnterFlight()
             }
+            .cursorHost()
         }
     }
 
@@ -274,6 +286,7 @@ private struct OnlineLobbySection: View {
                 showHostSetup = false
                 beginHosting(name: name, rules: rules, listPublicly: listPublicly)
             }
+            .cursorHost()
         }
         .sheet(isPresented: $showMatchmaker) {
             GameCenterMatchmakerView(
@@ -288,6 +301,7 @@ private struct OnlineLobbySection: View {
                 #if os(macOS)
                 .frame(minWidth: 520, minHeight: 620)   // the matchmaker needs real height
                 #endif
+                .cursorHost()
         }
         #endif
     }
@@ -557,6 +571,7 @@ private struct PluginMismatchView: View {
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity)
             }
+            .cursorScrollable()
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("Can't Join")
             #if os(iOS)
@@ -564,6 +579,8 @@ private struct PluginMismatchView: View {
             #endif
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("OK") { dismiss() } } }
         }
+        .cursorCancel { dismiss() }
+        .cursorDefault { dismiss() }
         .novaResponsive()
         .preferredColorScheme(.dark)
         #if os(iOS)

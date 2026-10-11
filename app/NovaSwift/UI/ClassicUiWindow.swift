@@ -91,7 +91,7 @@ struct ClassicUiCheckBox: View {
                 Text(title).font(ClassicUiWindow.font).foregroundStyle(.black)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.novaPlain)
     }
 }
 

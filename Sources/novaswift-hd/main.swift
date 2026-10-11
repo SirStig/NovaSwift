@@ -460,6 +460,21 @@ case "planet":
     guard exportUSDZ(scene, to: URL(fileURLWithPath: args[2])) else { fail("export failed") }
     print("wrote \(args[2])")
 
+case "factions":
+    // factions <Nova Files> — which governments field each ship (from the
+    // fleets that use it, weighted by their odds), for faction art styles.
+    guard args.count == 2 else { usage() }
+    let game = loadGame(args[1])
+    var use: [Int: [Int: Int]] = [:]   // ship → govt → weight
+    for d in game.dudes() {
+        for s in d.ships where s.prob > 0 { use[s.shipID, default: [:]][d.govt, default: 0] += s.prob }
+    }
+    for ship in game.ships().sorted(by: { $0.id < $1.id }) {
+        let govts = (use[ship.id] ?? [:]).sorted { $0.value > $1.value }.prefix(3)
+            .map { "\(game.govt($0.key)?.name ?? "independent(\($0.key))") \($0.value)" }
+        print("\(ship.id)|\(ship.name)|\(govts.joined(separator: ", "))")
+    }
+
 case "shields":
     // shields <Nova Files> — hulls whose shän has a shield layer.
     guard args.count == 2 else { usage() }

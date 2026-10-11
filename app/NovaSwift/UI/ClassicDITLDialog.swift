@@ -83,6 +83,7 @@ struct ClassicDITLDialog: View {
             Button(title) { actions[item.index]?() }
                 .buttonStyle(ClassicUiButtonStyle(isFocused: item.index == defaultItem))
                 .frame(width: r.width, height: r.height)
+                .cursorClickable { actions[item.index]?() }
                 .offset(x: r.minX, y: r.minY)
         case .checkbox:
             if let b = checks[item.index] {
@@ -105,6 +106,7 @@ struct ClassicDITLDialog: View {
                     .background(Color.white)
                     .overlay(ClassicBevel(topLeft: true).stroke(ClassicUiWindow.buttonDark, lineWidth: 1))
                     .overlay(ClassicBevel(topLeft: false).stroke(ClassicUiWindow.buttonLight, lineWidth: 1))
+                    .padTextEntry(texts[item.index] ?? "", text: b)
                     .offset(x: r.minX, y: r.minY)
             }
         case .picture, .icon:
@@ -115,12 +117,19 @@ struct ClassicDITLDialog: View {
                     .frame(width: r.width, height: r.height)
                     .contentShape(Rectangle())
                     .onTapGesture { tap?() }
+                    .modifier(OptionalCursorClick(action: tap))
                     .offset(x: r.minX, y: r.minY)
             }
         case .resControl:
             if let p = popups[item.index] {
                 ClassicPopup(labels: p.labels, selection: p.selection)
                     .frame(width: r.width, height: r.height)
+                    // A native pop-up menu can't be opened by the cursor —
+                    // Ⓐ steps through the choices instead (as `NovaMenuPicker`).
+                    .cursorClickable {
+                        guard !p.labels.isEmpty else { return }
+                        p.selection.wrappedValue = (p.selection.wrappedValue + 1) % p.labels.count
+                    }
                     .offset(x: r.minX, y: r.minY)
             }
         case .userItem, .unknown:
@@ -160,5 +169,14 @@ struct ClassicPopup: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+    }
+}
+
+/// `.cursorClickable` only when there is something to do — a decorative
+/// picture item must not swallow the cursor's hover.
+private struct OptionalCursorClick: ViewModifier {
+    let action: (() -> Void)?
+    func body(content: Content) -> some View {
+        if let action { content.cursorClickable(action) } else { content }
     }
 }

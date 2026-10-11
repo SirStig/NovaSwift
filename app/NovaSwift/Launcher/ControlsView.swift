@@ -62,8 +62,25 @@ struct ControlsView: View {
                 } label: {
                     Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
                 }
+                .buttonStyle(.novaPlain)
+                .foregroundStyle(.red)
+            }
+            if pad != nil {
+                // The toolbar's Cancel/Done are system chrome the controller
+                // cursor can't press — mirror them in the list for pad players
+                // (Ⓑ = Cancel and Menu = Done work anywhere on this screen too).
+                Section {
+                    HStack(spacing: 12) {
+                        Spacer()
+                        CursorButton { draft = nil; dismiss() } label: { bindingChip("Cancel", highlighted: false) }
+                        CursorButton { commitKeys() } label: { bindingChip("Done", highlighted: true) }
+                    }
+                }
             }
         }
+        .cursorScrollable()
+        .cursorCancel(padCapturing == nil ? { draft = nil; dismiss() } : nil)
+        .cursorDefault(padCapturing == nil ? { commitKeys() } : nil)
         .novaResponsive()
         .navigationTitle("Controls")
         .toolbar {
@@ -169,7 +186,7 @@ struct ControlsView: View {
 
     private var padHint: String {
         if let name = GCController.current?.vendorName, pad != nil {
-            return "\(name) connected. Tap a binding, then press the new button on the controller (tap again to cancel). Left stick steers, right stick aims — those can't be rebound."
+            return "\(name) connected. Select a binding, then press the new button on the controller (it cancels itself after a few seconds; ✕ unbinds). Left stick steers, right stick aims — those can't be rebound. In menus: left stick moves the cursor, right stick scrolls, d-pad jumps between buttons, Ⓐ selects, Ⓑ goes back."
         }
         return "No controller connected — connect one to rebind. Bindings persist and apply as soon as a controller is paired."
     }
@@ -196,6 +213,20 @@ struct ControlsView: View {
                     model.commitPadBindings()
                 }
             }
+            // Unbind without a context menu (which the cursor can't open).
+            if pad != nil, padCapturing != action, model.padBindings.button(for: action) != nil {
+                CursorButton {
+                    model.padBindings.unbind(action)
+                    model.commitPadBindings()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                        .padding(4)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Unbind \(action.title)")
+            }
         }
     }
 
@@ -212,6 +243,15 @@ struct ControlsView: View {
         guard let pad else { return }
         capturing = nil
         padCapturing = action
+        // The pad belongs to the capture now: park the UI cursor so the
+        // pressed button (Ⓐ, the d-pad, Ⓑ…) doesn't also click, snap or
+        // back out. It resumes after release (see the overlay's held-button
+        // guard). No answer in 6 s cancels, so a pad-only player can't get
+        // stuck waiting.
+        CursorTargets.shared.suspend("pad-capture")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            if padCapturing == action { endPadCapture() }
+        }
         pad.valueChangedHandler = { pad, element in
             guard let button = PadButton.match(element, on: pad) else { return }
             DispatchQueue.main.async {
@@ -224,6 +264,7 @@ struct ControlsView: View {
     }
 
     private func endPadCapture() {
+        CursorTargets.shared.resume("pad-capture")
         padCapturing = nil
         GCController.current?.extendedGamepad?.valueChangedHandler = nil
     }

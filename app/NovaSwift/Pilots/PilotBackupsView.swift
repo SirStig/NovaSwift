@@ -33,6 +33,7 @@ struct PilotBackupsView: View {
                         ForEach(entries) { row($0) }
                     }
                 }
+                .cursorScrollable()
                 .frame(maxHeight: 320)
             }
         }

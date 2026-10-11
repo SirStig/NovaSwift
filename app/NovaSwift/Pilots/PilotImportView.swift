@@ -43,6 +43,7 @@ struct PilotImportView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .cursorScrollable()
             .frame(maxHeight: 360)
         }
     }

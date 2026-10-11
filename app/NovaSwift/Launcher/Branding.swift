@@ -232,6 +232,7 @@ enum AboutNovaText {
 struct AboutView: View {
     /// Closes this dialog (injected by the full-screen overlay presenter).
     var onClose: () -> Void = {}
+    @Environment(\.openURL) private var openURL
 
     private var appVersion: String {
         let info = Bundle.main.infoDictionary
@@ -261,12 +262,15 @@ struct AboutView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Created by Joshua Kac (SirStig)").novaFont(.body, weight: .semibold)
-                    Link(destination: NovaLinks.repo) {
+                    // CursorButton, not Link: the controller cursor can't press a Link.
+                    CursorButton { openURL(NovaLinks.repo) } label: {
                         Label("github.com/SirStig", systemImage: "chevron.left.forwardslash.chevron.right")
+                            .foregroundStyle(.tint)
                     }
                     .novaFont(.body)
-                    Link(destination: NovaLinks.reportIssueURL()) {
+                    CursorButton { openURL(NovaLinks.reportIssueURL()) } label: {
                         Label("Report a Bug", systemImage: "ladybug")
+                            .foregroundStyle(.tint)
                     }
                     .novaFont(.body)
                 }

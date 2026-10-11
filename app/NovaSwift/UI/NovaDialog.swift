@@ -76,6 +76,18 @@ struct NovaDialog<Content: View>: View {
         // Return presses the default button, as the original's native dialogs
         // do (0x004cfdd0 → item 1). They set no cancel item, so Esc does nothing.
         .novaDialogKeys(onDefault: defaultAction)
+        // A controller has no Esc to be faithful to: Ⓑ backs out through the
+        // dialog's own back-type button (Cancel / Close / Back / Skip …), or
+        // acknowledges a single-button notice. Keyboard Esc is unchanged.
+        .cursorCancel(backAction)
+        .cursorModal()
+    }
+
+    private var backAction: (() -> Void)? {
+        let back = buttons.first { !$0.isDefault && ($0.isCancel || novaDialogBackTitles.contains($0.title)) }
+            ?? (buttons.count == 1 ? buttons.first : nil)
+        guard let b = back, b.enabled else { return nil }
+        return { model.audio.play(.uiSelect); b.action() }
     }
 
     private var defaultAction: (() -> Void)? {
@@ -198,6 +210,9 @@ struct DialogChrome<Content: View>: View {
                     .frame(width: geo.size.width, height: geo.size.height)
             }
         }
+        // Ⓑ = Done; nothing behind the card is live while it's up.
+        .cursorCancel(onClose)
+        .cursorModal()
     }
 
     /// The dialog's fixed-size body — header, scrollable content, Done strip.
@@ -335,15 +350,24 @@ struct ModernDialogPanel: View {
     }
 }
 
+/// Footer titles Ⓑ treats as "back" in a `NovaDialog` (a controller has no
+/// original Esc behaviour to stay faithful to).
+private let novaDialogBackTitles: Set<String> = [
+    "Cancel", "No", "Close", "Back", "Skip", "Not Now", "Done", "Leave", "Decline", "Refuse",
+]
+
 /// A dialog footer button (authentic three-slice when data is present).
 struct NovaDialogButton: Identifiable {
     let id = UUID()
     let title: String
     var isDefault = false
     var enabled = true
+    /// Explicitly the cancel item (a `NovaAlert` cancel-role button), whatever
+    /// its title.
+    var cancelRole = false
     let action: () -> Void
     /// The button Esc presses (the dialog's cancel item).
-    var isCancel: Bool { !isDefault && ["Cancel", "No"].contains(title) }
+    var isCancel: Bool { !isDefault && (cancelRole || ["Cancel", "No"].contains(title)) }
 }
 
 extension View {
@@ -412,12 +436,7 @@ struct NovaTextField: View {
             // A controller player can't reach the touch/hardware keyboard —
             // Ⓐ on the field opens the pad-drivable overlay instead. Touch
             // and mouse still edit inline exactly as before.
-            .cursorClickable { [weak model] in
-                guard let model else { return }
-                model.padKeyboard = PadKeyboardRequest(
-                    title: placeholder, text: text,
-                    suggestions: padSuggestions) { text = $0 }
-            }
+            .padTextEntry(placeholder, text: $text, suggestions: padSuggestions)
         #endif
     }
 }

@@ -135,6 +135,40 @@ struct Slider: View {
 }
 #endif
 
+/// A form row's default-look `Button` that is also a controller cursor target
+/// (a bare Form button is invisible to the cursor). tvOS gets the compact chrome.
+struct CursorAutomaticButtonStyle: PrimitiveButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        #if os(tvOS)
+        Button(configuration).buttonStyle(TVCompactButtonStyle())
+        #else
+        Button(configuration).buttonStyle(.automatic)
+            .cursorClickable { if isEnabled { configuration.trigger() } }
+        #endif
+    }
+}
+
+#if !os(tvOS)
+/// The stock bordered / prominent chrome, plus a controller-cursor target so
+/// Ⓐ can press it (a bare `.buttonStyle(.bordered)` is invisible to the cursor).
+struct CursorStockButtonStyle: PrimitiveButtonStyle {
+    var prominent: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    @ViewBuilder
+    func makeBody(configuration: Configuration) -> some View {
+        if prominent {
+            Button(configuration).buttonStyle(.borderedProminent)
+                .cursorClickable { if isEnabled { configuration.trigger() } }
+        } else {
+            Button(configuration).buttonStyle(.bordered)
+                .cursorClickable { if isEnabled { configuration.trigger() } }
+        }
+    }
+}
+#endif
+
 extension View {
     /// `.buttonStyle(.bordered)` where the system style is reasonably sized;
     /// on tvOS, the compact cursor-clickable chrome instead (system bordered
@@ -144,8 +178,13 @@ extension View {
         #if os(tvOS)
         self.buttonStyle(TVCompactButtonStyle())
         #else
-        self.buttonStyle(.bordered)
+        self.buttonStyle(CursorStockButtonStyle(prominent: false))
         #endif
+    }
+
+    /// Default button look, registered as a controller cursor target.
+    func novaFormButton() -> some View {
+        self.buttonStyle(CursorAutomaticButtonStyle())
     }
 
     /// `.buttonStyle(.borderedProminent)` — same tvOS substitution as
@@ -155,7 +194,7 @@ extension View {
         #if os(tvOS)
         self.buttonStyle(TVCompactButtonStyle(prominent: true))
         #else
-        self.buttonStyle(.borderedProminent)
+        self.buttonStyle(CursorStockButtonStyle(prominent: true))
         #endif
     }
 

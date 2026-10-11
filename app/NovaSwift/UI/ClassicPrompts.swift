@@ -5,7 +5,7 @@ import NovaSwiftKit
 /// DLOG/DITL 3001 "Text Input" (prompt text, edit field, OK / Cancel; the
 /// answer is limited to 64 characters and a leading "the " is dropped,
 /// `nv_ShowPrompt` 0x00497900) and 3002 "YesNo" (prompt text, OK / Cancel).
-/// With modern dialog chrome they fall back to the system alert.
+/// With modern dialog chrome they fall back to an in-app `novaAlert`.
 extension View {
     func classicTextPrompt(isPresented: Binding<Bool>, prompt: String, text: Binding<String>,
                            onOK: @escaping (String) -> Void, onCancel: @escaping () -> Void) -> some View {
@@ -75,15 +75,24 @@ private struct ClassicPromptModifier: ViewModifier {
                                 .compactMapValues { $0 },
                             defaultItem: 0, cancelItem: text == nil ? 4 : 5)
                     }
+                    .cursorModal()
                     .transition(.opacity)
                 }
             }
         } else {
-            content.alert(prompt, isPresented: $isPresented) {
-                if let text { TextField("", text: text) }
-                Button(okTitle ?? "OK", action: ok)
-                Button(cancelTitle ?? "Cancel", role: .cancel, action: cancel)
-            }
+            // In-app rather than a system alert, so a controller can answer it.
+            // `ok` re-checks the 64-byte limit; on failure it re-presents.
+            content.novaAlert(prompt, isPresented: $isPresented, text: text, buttons: [
+                .cancel(cancelTitle ?? "Cancel") { onCancel() },
+                NovaAlertButton(title: okTitle ?? "OK") {
+                    if let text, text.wrappedValue.utf8.count > 64 {
+                        model.audio.play(.uiError)
+                        isPresented = true
+                    } else {
+                        onOK(text.map { classicPromptAnswer($0.wrappedValue) })
+                    }
+                },
+            ])
         }
     }
 }

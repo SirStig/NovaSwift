@@ -94,6 +94,9 @@ struct HailDialogView: View {
                     .novaResponsive()
             }
         }
+        // Covers the flight HUD: only the comm window is live, Ⓑ closes the channel.
+        .cursorCancel(onClose)
+        .cursorModal()
     }
 
     // MARK: - Ship hail (DITL #1007, frame 423×215)

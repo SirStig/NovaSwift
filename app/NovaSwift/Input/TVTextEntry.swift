@@ -39,11 +39,11 @@ struct TVTextEntryBridge: UIViewRepresentable {
         DispatchQueue.main.async {
             // Park the cursor: while the system keyboard owns the screen, the
             // controller's Ⓐ must not fire the hit targets underneath it.
-            CursorTargets.shared.suppressed = true
+            CursorTargets.shared.suspend("tv-keyboard")
             if !field.becomeFirstResponder() {
                 // Couldn't present (shouldn't happen) — never leave the UI
                 // soft-locked behind a suppressed cursor and editing == true.
-                CursorTargets.shared.suppressed = false
+                CursorTargets.shared.resume("tv-keyboard")
                 coordinator.presenting = false
                 coordinator.parent.editing = false
             }
@@ -63,7 +63,7 @@ struct TVTextEntryBridge: UIViewRepresentable {
         func textFieldDidEndEditing(_ field: UITextField,
                                     reason: UITextField.DidEndEditingReason) {
             presenting = false
-            CursorTargets.shared.suppressed = false
+            CursorTargets.shared.resume("tv-keyboard")
             let committed = reason == .committed
             if committed { parent.text = field.text ?? "" }
             parent.editing = false

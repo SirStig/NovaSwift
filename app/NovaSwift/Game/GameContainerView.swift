@@ -857,6 +857,8 @@ struct GameContainerView: View {
                                   fullscreen: model.settings.fullscreenGalaxyMap,
                                   playerMarkers: galaxyPlayerMarkers)
                         .transition(.opacity)
+                        // Covers the flight HUD: only the chart's controls are live.
+                        .cursorModal()
                 }
 
                 // Gate map: landing on a hypergate opens the galaxy map in
@@ -873,6 +875,7 @@ struct GameContainerView: View {
                                         performGateJump(toSystem: destSystem, arriveAtGate: destGate)
                                     }))
                         .transition(.opacity)
+                        .cursorModal()
                 }
 
                 if let shown = routeMapShownAt, !nav.showingMap {
@@ -930,13 +933,14 @@ struct GameContainerView: View {
                 // Trade / item hand-off — a live trade window, or an incoming
                 // invite prompt. Modal overlays, only while in a session.
                 if model.session.trade != nil {
-                    TradeView().transition(.opacity)
+                    TradeView().transition(.opacity).cursorModal()
                 } else if let invite = model.session.incomingTradeInvite {
                     ZStack {
                         Color.black.opacity(0.55).ignoresSafeArea()
                         TradeInvitePromptView(invite: invite)
                     }
                     .transition(.opacity)
+                    .cursorModal()
                 }
 
                 if showFlightHints && landedSpobID == nil && !showMenu && !nav.showingMap {
@@ -1033,14 +1037,19 @@ struct GameContainerView: View {
                 // stacks over the hail dialog exactly as the bar stacks its
                 // offer over the spaceport hub.
                 if let offer = flightMissionServices.pendingOffer, let graphics = host.graphics {
-                    Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
-                    MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
-                                        onPage: { _ in },
-                                        onAccept: { acceptFlightMissionOffer(offer) },
-                                        onDecline: { declineFlightMissionOffer(offer) },
-                                        storylineTag: storylineTag(for: offer.mission.id, game: host.game),
-                                        onOpenStoryline: storylineTag(for: offer.mission.id, game: host.game).map { t in { openStoryline(t.key) } })
-                        .transition(.opacity)
+                    ZStack {
+                        Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                        MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
+                                            onPage: { _ in },
+                                            onAccept: { acceptFlightMissionOffer(offer) },
+                                            onDecline: { declineFlightMissionOffer(offer) },
+                                            storylineTag: storylineTag(for: offer.mission.id, game: host.game),
+                                            onOpenStoryline: storylineTag(for: offer.mission.id, game: host.game).map { t in { openStoryline(t.key) } })
+                            .transition(.opacity)
+                    }
+                    // Covers the hail/flight HUD: Ⓑ = Decline, like closing the dialog.
+                    .cursorCancel { declineFlightMissionOffer(offer) }
+                    .cursorModal()
                 }
 
                 if let game = host.game {
@@ -1081,6 +1090,8 @@ struct GameContainerView: View {
                             case let .spob(id, _): console.submit("select spob \(id)")
                             }
                         })
+                        .cursorCancel { console.setPresented(false) }
+                        .cursorModal()
                         .zIndex(35)
                     }
                     // Right-click (macOS) / long-press (iOS/tvOS) context menu
@@ -1125,13 +1136,18 @@ struct GameContainerView: View {
                 // the spaceport: it can fire on landing (a delivery completes) or
                 // in flight (a crön advances the clock). A single OK dismisses it.
                 if let story = flightMissionServices.storyText {
-                    Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
-                    DescTextDialog(title: story.title, text: story.text,
-                                   graphicID: flightMissionServices.storyDescID
-                                       .flatMap { host.game?.desc($0)?.pictureID }) {
-                        flightMissionServices.storyText = nil
+                    ZStack {
+                        Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                        DescTextDialog(title: story.title, text: story.text,
+                                       graphicID: flightMissionServices.storyDescID
+                                           .flatMap { host.game?.desc($0)?.pictureID }) {
+                            flightMissionServices.storyText = nil
+                        }
+                        .transition(.opacity)
                     }
-                    .transition(.opacity)
+                    // Floats above everything: only its OK is live; Ⓑ = OK.
+                    .cursorCancel { flightMissionServices.storyText = nil }
+                    .cursorModal()
                 }
             } else {
                 GameLoadingView()
@@ -1318,30 +1334,18 @@ struct GameContainerView: View {
                 }
             }
         }
-        .confirmationDialog("Land here?",
-                            isPresented: Binding(get: { landConfirmID != nil },
-                                                 set: { if !$0 { landConfirmID = nil } }),
-                            titleVisibility: .visible) {
-            Button("Land") { if let id = landConfirmID { landConfirmID = nil; landedSpobID = id } }
-            Button("Cancel", role: .cancel) { landConfirmID = nil }
-        }
+        .novaAlert("Land here?",
+                   isPresented: Binding(get: { landConfirmID != nil },
+                                        set: { if !$0 { landConfirmID = nil } }),
+                   buttons: landConfirmButtons)
         // A successful capture offers a choice, same as the real game: fly
         // the captured hull yourself, or send it into the wing as an escort.
-        .confirmationDialog("Ship captured!",
-                            isPresented: Binding(get: { pendingCaptureChoice != nil },
-                                                 set: { if !$0 { pendingCaptureChoice = nil } }),
-                            presenting: pendingCaptureChoice) { cap in
-            // Both choices sound snd 151 (NovaUi_ShowCaptureDecisionDialog 0x00497eb0).
-            Button("Take Command") { model.audio.play(.beep2); openCaptureNamePrompt(cap) }
-            // Only offered under the escort-wing cap — a full wing can still
-            // take command of the captured hull, just not add it as an escort.
-            if model.pilot.canAddEscort() {
-                Button("Use as Escort") { model.audio.play(.beep2); recruitCapturedShipAsEscort(cap) }
-            }
-        } message: { cap in
-            Text(model.data.game?.stringList(2002)?.string(at: 118)
-                 ?? "Do you want to use this ship as an escort, or would you rather trade places with its captain and use it as your own ship?")
-        }
+        .novaAlert("Ship captured!",
+                   isPresented: Binding(get: { pendingCaptureChoice != nil },
+                                        set: { if !$0 { pendingCaptureChoice = nil } }),
+                   message: model.data.game?.stringList(2002)?.string(at: 118)
+                       ?? "Do you want to use this ship as an escort, or would you rather trade places with its captain and use it as your own ship?",
+                   buttons: captureChoiceButtons)
     }
 
     var body: some View {
@@ -2847,6 +2851,31 @@ struct GameContainerView: View {
         host?.scene.tapToFlyEnabled = (model.settings.controlScheme == .tapToTurn)
     }
 
+    /// "Land here?" — the id is captured now because a NovaAlert button
+    /// dismisses (clearing `landConfirmID`) before its action runs.
+    private var landConfirmButtons: [NovaAlertButton] {
+        guard let id = landConfirmID else { return [] }
+        return [NovaAlertButton(title: "Land") { landConfirmID = nil; landedSpobID = id },
+                .cancel { landConfirmID = nil }]
+    }
+
+    /// The "Ship captured!" choices. Both sound snd 151
+    /// (NovaUi_ShowCaptureDecisionDialog 0x00497eb0). Use as Escort is only
+    /// offered under the escort-wing cap — a full wing can still take command
+    /// of the captured hull, just not add it as an escort.
+    private var captureChoiceButtons: [NovaAlertButton] {
+        guard let cap = pendingCaptureChoice else { return [] }
+        var buttons = [NovaAlertButton(title: "Take Command") {
+            model.audio.play(.beep2); openCaptureNamePrompt(cap)
+        }]
+        if model.pilot.canAddEscort() {
+            buttons.append(NovaAlertButton(title: "Use as Escort") {
+                model.audio.play(.beep2); recruitCapturedShipAsEscort(cap)
+            })
+        }
+        return buttons
+    }
+
     /// The mobile action-menu panels (missions / pilot info / escorts), reusing
     /// the same authentic dialogs the in-game menu hosts. Extracted from `body`
     /// to keep that expression inside the type-checker's budget.
@@ -2857,20 +2886,26 @@ struct GameContainerView: View {
                 .transition(.opacity)
         }
         if showPilotInfoPanel, let graphics = model.uiGraphics {
-            Color.black.opacity(0.5).ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { showPilotInfoPanel = false }
-            PlayerInfoView(graphics: graphics, pilot: model.pilot,
-                           shipFigures: playerInfoFigures(),
-                           onJettison: { jettisonHold() },
-                           onDone: { showPilotInfoPanel = false })
-                .transition(.opacity)
+            ZStack {
+                Color.black.opacity(0.5).ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { showPilotInfoPanel = false }
+                PlayerInfoView(graphics: graphics, pilot: model.pilot,
+                               shipFigures: playerInfoFigures(),
+                               onJettison: { jettisonHold() },
+                               onDone: { showPilotInfoPanel = false })
+                    .transition(.opacity)
+            }
+            // Covers the flight HUD: only the dialog is live, Ⓑ closes it.
+            .cursorCancel { showPilotInfoPanel = false }
+            .cursorModal()
         }
         if showEscortsPanel, let scene = host?.scene {
+            let _ = escortRefresh   // re-read the roster after each order
+            ZStack {
             Color.black.opacity(0.55).ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { showEscortsPanel = false }
-            let _ = escortRefresh   // re-read the roster after each order
             EscortsView(graphics: model.uiGraphics,
                         escorts: scene.escortRoster(),
                         records: model.pilot.state.escortWing,
@@ -2891,17 +2926,24 @@ struct GameContainerView: View {
                         onClose: { showEscortsPanel = false })
                 .shrinkToFitViewport()
                 .transition(.opacity)
+            }
+            .cursorCancel { showEscortsPanel = false }
+            .cursorModal()
         }
         if showShipInfoPanel, let graphics = model.uiGraphics, let game = model.data.game {
-            Color.black.opacity(0.5).ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { showShipInfoPanel = false }
             // Describe the targeted ship if one is locked, otherwise the player's
             // own hull — the same "target, falling back to self" the HUD uses.
             let shipID = host?.hud.targetShipTypeID ?? model.pilot.state.shipType
-            ShipInfoView(graphics: graphics, ship: game.ship(shipID),
-                         onDone: { showShipInfoPanel = false })
-                .transition(.opacity)
+            ZStack {
+                Color.black.opacity(0.5).ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { showShipInfoPanel = false }
+                ShipInfoView(graphics: graphics, ship: game.ship(shipID),
+                             onDone: { showShipInfoPanel = false })
+                    .transition(.opacity)
+            }
+            .cursorCancel { showShipInfoPanel = false }
+            .cursorModal()
         }
         if let m = boardManifest, let scene = host?.scene {
             let _ = boardRefresh   // re-read after taking loot

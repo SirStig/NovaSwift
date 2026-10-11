@@ -293,6 +293,31 @@
      "where": "Input/ControllerCursor.swift"
     },
     {
+     "name": "Cursor in sheets, dialogs and alerts",
+     "status": "done",
+     "where": "Input/ControllerCursor.swift cursorHost/cursorModal, UI/NovaAlert.swift"
+    },
+    {
+     "name": "B to go back, Menu to confirm",
+     "status": "done",
+     "where": "Input/ControllerCursor.swift cursorCancel/cursorDefault"
+    },
+    {
+     "name": "D-pad snaps between buttons",
+     "status": "done",
+     "where": "CursorTargets.neighbor"
+    },
+    {
+     "name": "Right stick scrolls lists, grids and the map",
+     "status": "done",
+     "where": "Input/CursorScroll.swift"
+    },
+    {
+     "name": "Cursor works at any resolution",
+     "status": "done",
+     "where": "ControllerCursorOverlay (drawn-space frames, diagonal-scaled speed)"
+    },
+    {
      "name": "Button remapping",
      "status": "done",
      "where": "Input/PadBindings.swift"
@@ -316,6 +341,11 @@
      "name": "Rumble",
      "status": "done",
      "where": "Game/Haptics.swift"
+    },
+    {
+     "name": "DualSense adaptive triggers",
+     "status": "done",
+     "where": "Input/GameControllerInput.swift"
     },
     {
      "name": "Keyboard remapping",

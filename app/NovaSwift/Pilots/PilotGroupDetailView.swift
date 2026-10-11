@@ -17,7 +17,8 @@ struct PilotGroupDetailView: View {
     var onPlay: () -> Void = {}
 
     @State private var showBackups = false
-    @State private var renamingText: String?
+    @State private var renameDraft = ""
+    @State private var showRename = false
     @State private var pendingDeleteSlot: PilotSave?
 
     private var pilotName: String { group.mostRecent.displayName }
@@ -43,27 +44,28 @@ struct PilotGroupDetailView: View {
                     .transition(.opacity)
             }
         }
-        .alert("Rename Pilot", isPresented: Binding(get: { renamingText != nil },
-                                                    set: { if !$0 { renamingText = nil } })) {
-            TextField("Pilot name", text: Binding(get: { renamingText ?? "" }, set: { renamingText = $0 }))
-            Button("Save") {
-                if let text = renamingText, !text.isEmpty {
-                    model.roster.renameGroup(group.id, to: text, game: model.data.game)
+        .novaAlert("Rename Pilot", isPresented: $showRename, text: $renameDraft, buttons: [
+            .cancel("Cancel") {},
+            NovaAlertButton(title: "Save") {
+                if !renameDraft.isEmpty {
+                    model.roster.renameGroup(group.id, to: renameDraft, game: model.data.game)
                 }
-                renamingText = nil
             }
-            Button("Cancel", role: .cancel) { renamingText = nil }
-        }
-        .alert("Delete this save slot?", isPresented: Binding(get: { pendingDeleteSlot != nil },
-                                                              set: { if !$0 { pendingDeleteSlot = nil } })) {
-            Button("Delete", role: .destructive) {
-                if let s = pendingDeleteSlot { model.roster.delete(s.id) }
-                pendingDeleteSlot = nil
-            }
-            Button("Cancel", role: .cancel) { pendingDeleteSlot = nil }
-        } message: {
-            Text("This slot and its backups will be removed. This can't be undone.")
-        }
+        ])
+        .novaAlert("Delete this save slot?", isPresented: Binding(get: { pendingDeleteSlot != nil },
+                                                                  set: { if !$0 { pendingDeleteSlot = nil } }),
+                   message: "This slot and its backups will be removed. This can't be undone.",
+                   buttons: deleteSlotButtons)
+    }
+
+    /// Captures the slot now: the alert clears `pendingDeleteSlot` (via its
+    /// binding) before a button's action runs.
+    private var deleteSlotButtons: [NovaAlertButton] {
+        let slot = pendingDeleteSlot
+        return [
+            .destructive("Delete") { if let s = slot { model.roster.delete(s.id) } },
+            .cancel("Cancel") {}
+        ]
     }
 
     private var header: some View {
@@ -72,7 +74,7 @@ struct PilotGroupDetailView: View {
                 NovaText(scenarioName.isEmpty ? "Pilot" : scenarioName, size: 11, color: .secondary)
             }
             Spacer()
-            Button { renamingText = pilotName } label: {
+            Button { renameDraft = pilotName; showRename = true } label: {
                 Label("Rename", systemImage: "pencil").font(.caption)
             }
             .buttonStyle(.novaPlain)

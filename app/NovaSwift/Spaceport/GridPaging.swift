@@ -1,5 +1,4 @@
 import SwiftUI
-import GameController
 import NovaSwiftKit
 #if os(macOS)
 import AppKit
@@ -8,7 +7,8 @@ import AppKit
 /// Scrolls the Outfitter/Shipyard item grid through every input method a
 /// player actually has, not just the on-screen arrow buttons: mouse wheel /
 /// trackpad scroll and arrow keys on macOS, touch swipe on iOS/iPadOS, and a
-/// connected game controller's d-pad/left-stick on both. Each step is one
+/// connected game controller's right stick (plus the d-pad past the grid's
+/// edge) via the cursor's scroll registry everywhere. Each step is one
 /// unit of whatever the caller passes — the grids pass top-row indices, so
 /// every input scrolls one ROW at a time like the real game's arrows.
 struct GridPagingModifier: ViewModifier {
@@ -20,8 +20,11 @@ struct GridPagingModifier: ViewModifier {
     /// and Space presses the buy button.
     var keyboard: GridKeyboardSelection? = nil
 
-    @State private var controllerWasUp = false
-    @State private var controllerWasDown = false
+    /// Controller scroll distance not yet worth a whole row.
+    @State private var padAccumulated: CGFloat = 0
+    /// Points of controller scroll per grid row: the d-pad's 80 pt nudge is
+    /// exactly one row; the right stick runs smoothly through several.
+    private static let padPointsPerRow: CGFloat = 80
 
     func body(content: Content) -> some View {
         content
@@ -57,7 +60,21 @@ struct GridPagingModifier: ViewModifier {
                 keyboard.onSpace()
                 return .handled
             }
-            .task(id: "grid-controller-poll") { await pollController() }
+            // The right stick (and the d-pad once the cursor can't snap any
+            // further that way) pages the grid. Not the left stick: that
+            // moves the cursor over the tiles.
+            .cursorPannable { delta in
+                padAccumulated += delta.dy
+                var rows = 0
+                while padAccumulated >= Self.padPointsPerRow { rows += 1; padAccumulated -= Self.padPointsPerRow }
+                while padAccumulated <= -Self.padPointsPerRow { rows -= 1; padAccumulated += Self.padPointsPerRow }
+                if rows != 0 { step(rows) }
+                // Pinned at either end: drop the remainder so reversing
+                // direction responds at once.
+                if (rows > 0 && currentPage >= pageCount - 1) || (rows < 0 && currentPage <= 0) {
+                    padAccumulated = 0
+                }
+            }
     }
 
     private func arrow(_ key: GridKeyboardNav.Key) {
@@ -81,23 +98,6 @@ struct GridPagingModifier: ViewModifier {
         if next != currentPage { onChange(next) }
     }
 
-    /// Discrete-press d-pad/left-stick polling, independent of the paused
-    /// flight scene's own per-frame `GameControllerInput.poll()` (which never
-    /// runs while landed) — this view has its own lifetime-scoped loop so a
-    /// controller works for menu paging even with the scene frozen.
-    private func pollController() async {
-        while !Task.isCancelled {
-            if let pad = GCController.current?.extendedGamepad {
-                let up = pad.dpad.up.isPressed || pad.leftThumbstick.yAxis.value > 0.5
-                let down = pad.dpad.down.isPressed || pad.leftThumbstick.yAxis.value < -0.5
-                if up, !controllerWasUp { step(-1) }
-                if down, !controllerWasDown { step(1) }
-                controllerWasUp = up
-                controllerWasDown = down
-            }
-            try? await Task.sleep(nanoseconds: 130_000_000)   // ~7-8 polls/sec: snappy, not spammy
-        }
-    }
 }
 
 /// The selection the grid's arrow keys drive (see `GridPagingModifier.keyboard`).

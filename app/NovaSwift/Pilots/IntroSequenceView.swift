@@ -42,6 +42,9 @@ struct IntroSequenceView: View {
         .novaResponsive()
         .contentShape(Rectangle())
         .onTapGesture { advance() }
+        // Menu advances like a tap; Ⓑ skips like the Skip button.
+        .cursorDefault { advance() }
+        .cursorCancel { model.audio.play(.uiSelect); onFinish() }
         .animation(.easeInOut(duration: 0.4), value: index)
         // Auto-advance picture pages after their delay; text waits for a tap.
         .task(id: index) {
@@ -70,6 +73,7 @@ struct IntroSequenceView: View {
                     .padding(32)
                     .frame(maxWidth: 640)
             }
+            .cursorScrollable()
         }
     }
 

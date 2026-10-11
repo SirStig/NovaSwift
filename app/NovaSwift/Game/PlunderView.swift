@@ -112,6 +112,9 @@ struct PlunderView: View {
             }
         }
         .novaResponsive()
+        // Covers the flight HUD: only the plunder window is live, Ⓑ = Abort.
+        .cursorCancel(onDismiss)
+        .cursorModal()
     }
 
     /// A three-slice button filling DITL rect `rect` (the caps are 13 px each,

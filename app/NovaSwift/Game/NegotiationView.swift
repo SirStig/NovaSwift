@@ -80,6 +80,9 @@ struct NegotiationView: View {
             }
         }
         .novaResponsive()
+        // Covers what's beneath: only the haggle is live, Ⓑ dismisses.
+        .cursorCancel(onDismiss)
+        .cursorModal()
     }
 
     // MARK: Fallback (no loaded PICT/button art — demo/no-data path)

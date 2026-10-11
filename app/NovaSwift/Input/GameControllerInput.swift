@@ -27,13 +27,19 @@ final class GameControllerInput {
     /// from within view updates" reason the keyboard paths defer.
     var onDiscrete: (GameAction) -> Void = { _ in }
     /// True only while the flight scene should own the controller (no menu,
-    /// map, dialog or panel open, and not landed). Discrete actions only fire
-    /// while active; continuous state always applies (and releases) so a held
-    /// button can never stick on across an overlay opening.
+    /// map, dialog or panel open, and not landed). While inactive the pad
+    /// produces an empty intent — the UI cursor owns the sticks and buttons —
+    /// so nothing held can stick on across an overlay opening.
     var isActive: () -> Bool = { true }
 
     /// Buttons currently down, for edge-triggering discrete actions.
     private var held: Set<PadButton> = []
+    /// Buttons that were already down when flight took the pad back (Ⓐ that
+    /// just pressed a dialog's OK, Ⓑ that just backed out of a menu). They
+    /// count for nothing until released — otherwise closing a dialog with Ⓐ
+    /// would fire the guns the instant flight resumes.
+    private var blocked: Set<PadButton> = []
+    private var wasActive = true
 
     init(input: InputController) {
         self.input = input
@@ -51,6 +57,9 @@ final class GameControllerInput {
         let current = GCController.current
         isConnected = current?.extendedGamepad != nil
         controllerName = isConnected ? current?.vendorName : nil
+        // A newly paired pad re-runs the "flight took the pad" setup on the
+        // next active poll (adaptive triggers, held-button guard).
+        wasActive = false
         if !isConnected {
             input?.controller = ControlIntent()
             held.removeAll()
@@ -62,6 +71,16 @@ final class GameControllerInput {
     func poll() {
         guard let pad = GCController.current?.extendedGamepad else { return }
         var c = ControlIntent()
+
+        // A menu/dialog owns the pad: the sticks drive the UI cursor, not the
+        // ship. An empty intent also releases anything that was held.
+        guard isActive() else {
+            if wasActive { setAdaptiveTriggers(flying: false) }
+            wasActive = false
+            held.removeAll()
+            input?.controller = c
+            return
+        }
 
         // Left stick (fixed): horizontal = turn, up = thrust, down = reverse.
         let lx = pad.leftThumbstick.xAxis.value
@@ -83,11 +102,20 @@ final class GameControllerInput {
         // Bindable buttons: continuous actions drive the intent while held;
         // discrete actions fire once on the press edge (release just clears).
         let active = isActive()
+        if active, !wasActive {
+            blocked = Set(PadButton.allCases.filter { $0.isPressed(on: pad) })
+            setAdaptiveTriggers(flying: true)
+        }
+        wasActive = active
         for button in PadButton.allCases {
             let pressed = button.isPressed(on: pad)
             let wasHeld = held.contains(button)
             if pressed { held.insert(button) } else { held.remove(button) }
-            guard let action = bindings.action(for: button) else { continue }
+            if !pressed { blocked.remove(button) }
+            // While a menu/dialog owns the pad (the UI cursor is driving it),
+            // no button flies the ship; held ones release cleanly.
+            guard active, !blocked.contains(button),
+                  let action = bindings.action(for: button) else { continue }
 
             switch action.flightEffect {
             case .turnLeft: if pressed { c.turnLeft = true }
@@ -99,7 +127,7 @@ final class GameControllerInput {
             case .fireSecondary: if pressed { c.fireSecondary = true }
             case .selfDestruct: if pressed { c.selfDestruct = true }
             case .none:
-                if pressed, !wasHeld, active {
+                if pressed, !wasHeld {
                     let onDiscrete = onDiscrete
                     DispatchQueue.main.async { onDiscrete(action) }
                 }
@@ -109,5 +137,23 @@ final class GameControllerInput {
         input?.controller = c
     }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    /// DualSense adaptive triggers: a light, even resistance on both triggers
+    /// while flying (they're the throttle by default — the pull reads as an
+    /// engine to push against), released to a free pull whenever a menu owns
+    /// the pad so clicking through UI feels normal. No-op on other pads.
+    private func setAdaptiveTriggers(flying: Bool) {
+        guard let dualSense = GCController.current?.extendedGamepad as? GCDualSenseGamepad else { return }
+        for trigger in [dualSense.leftTrigger, dualSense.rightTrigger] {
+            if flying {
+                trigger.setModeFeedbackWithStartPosition(0.15, resistiveStrength: 0.35)
+            } else {
+                trigger.setModeOff()
+            }
+        }
+    }
+
+    deinit {
+        setAdaptiveTriggers(flying: false)
+        NotificationCenter.default.removeObserver(self)
+    }
 }

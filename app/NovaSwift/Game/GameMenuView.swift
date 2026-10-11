@@ -54,14 +54,19 @@ struct GameMenuView: View {
             // The authentic 4-tab player-info dialog (DITL #1017), stacked over
             // the menu like the game's own dialogs.
             if showPlayerInfo, let graphics = model.uiGraphics {
-                Color.black.opacity(0.5).ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { showPlayerInfo = false }
-                    .transition(.opacity)
-                PlayerInfoView(graphics: graphics, pilot: model.pilot,
-                               onJettison: { jettisonCargo() },
-                               onDone: { showPlayerInfo = false })
-                    .transition(.opacity)
+                ZStack {
+                    Color.black.opacity(0.5).ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { showPlayerInfo = false }
+                        .transition(.opacity)
+                    PlayerInfoView(graphics: graphics, pilot: model.pilot,
+                                   onJettison: { jettisonCargo() },
+                                   onDone: { showPlayerInfo = false })
+                        .transition(.opacity)
+                }
+                // Covers the menu: only the dialog is live, Ⓑ closes it.
+                .cursorCancel { showPlayerInfo = false }
+                .cursorModal()
             }
 
             // The authentic Mission Info dialog (DITL #1012 / PICT #8517):
@@ -73,30 +78,34 @@ struct GameMenuView: View {
             }
         }
         .novaResponsive()
+        // The menu covers the flight HUD: only it is live, Ⓑ resumes.
+        .cursorCancel(onResume)
+        .cursorModal()
         .sheet(isPresented: $showSettings) {
             SettingsView(onClose: { showSettings = false })
                 .frame(minWidth: 640, minHeight: 580)
                 .preferredColorScheme(.dark)
+                .cursorHost()
         }
         // The Story Map / Pilot Log wants the whole screen to breathe. On iPhone
         // a `.sheet` is only a partial card (and the 900pt macOS width floor
         // overflows it), so present it as a true full-screen cover there; on Mac
         // keep the comfortable centred sheet.
         #if os(iOS)
-        .fullScreenCover(isPresented: storyGuidePresented) { storyGuideContent }
+        .fullScreenCover(isPresented: storyGuidePresented) { storyGuideContent.cursorHost() }
         #else
         .sheet(isPresented: storyGuidePresented) {
-            storyGuideContent.frame(minWidth: 900, minHeight: 620)
+            storyGuideContent.frame(minWidth: 900, minHeight: 620).cursorHost()
         }
         #endif
-        .alert("Notice", isPresented: Binding(get: { info != nil },
-                                                   set: { if !$0 { info = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(info ?? "") }
+        .novaAlert("Notice", isPresented: Binding(get: { info != nil },
+                                                   set: { if !$0 { info = nil } }),
+                   message: info ?? "", buttons: [.cancel("OK")])
         .sheet(isPresented: $showMultiplayer) {
             MultiplayerHubView(
                 onEnterFlight: { showMultiplayer = false; onResume() },
                 onClose: { showMultiplayer = false })
+                .cursorHost()
         }
     }
 

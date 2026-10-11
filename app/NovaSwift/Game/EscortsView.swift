@@ -110,6 +110,7 @@ struct EscortsView: View {
         }
         .frame(width: Self.frameW, alignment: .top)
         .background(Color(white: 0.06))
+        .cursorCancel(onClose)
     }
 
     // MARK: - The authentic frame + placed items
@@ -186,6 +187,7 @@ struct EscortsView: View {
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .cursorScrollable()
         } else {
             NovaText("No escorts under your command.", size: 11, color: Color(white: 0.55),
                      width: 168, align: .center)
@@ -215,12 +217,15 @@ struct EscortsView: View {
         .background(selected ? theme.escortHilite : Color.clear)
         .overlay(Rectangle().strokeBorder(selected ? theme.escortHilite : Color.clear, lineWidth: 1))
         .contentShape(Rectangle())
-        .onTapGesture {
-            // "Hail" the escort — select it to reveal its status/actions. Fighters
-            // are selectable too (to show their status), but the action strip
-            // below gates Upgrade/Sell/Release off for them explicitly.
-            selectedEntityID = (selectedEntityID == e.id) ? nil : e.id
-        }
+        .onTapGesture { toggleSelect(e) }
+        .cursorClickable { toggleSelect(e) }
+    }
+
+    /// "Hail" the escort — select it to reveal its status/actions. Fighters
+    /// are selectable too (to show their status), but the action strip
+    /// below gates Upgrade/Sell/Release off for them explicitly.
+    private func toggleSelect(_ e: GameScene.EscortInfo) {
+        selectedEntityID = (selectedEntityID == e.id) ? nil : e.id
     }
 
     /// How the escort was acquired and, for a hired one, its daily upkeep — plain
@@ -456,15 +461,23 @@ struct EscortCommandPanelView: View {
                     .foregroundStyle(row.enabled ? (row.selected ? Color.green : Color.white) : Color(white: 0.25))
                     .contentShape(Rectangle())
                     .onTapGesture { if row.enabled { onGroup?(index) } }
+                    .cursorClickable { if row.enabled { onGroup?(index) } }
+                    // Only live while the panel is interactive and the row is usable.
+                    .disabled(!row.enabled || onOrder == nil)
                 }
                 if onOrder != nil {
                     HStack(spacing: 4) {
                         ForEach([("Attack", OriginalEscortCommand.attack), ("Defend", OriginalEscortCommand.defend),
                                  ("Form", OriginalEscortCommand.formation), ("Hold", OriginalEscortCommand.hold),
                                  ("Hangar", OriginalEscortCommand.returnToHangar)], id: \.1) { item in
-                            Button(item.0) { onOrder?(item.1) }
-                                .buttonStyle(.bordered)
-                                .novaFont(.hud, weight: .regular, size: 9)
+                            Button { onOrder?(item.1) } label: {
+                                Text(item.0)
+                                    .novaFont(.hud, weight: .regular, size: 9)
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6).padding(.vertical, 3)
+                                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                            }
+                            .buttonStyle(.novaPlain)
                         }
                     }
                     .padding(.top, 3)

@@ -46,12 +46,14 @@ extension View {
             StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false },
                           initialStorylineKey: initialStorylineKey)
                 .preferredColorScheme(.dark)
+                .cursorHost()
         }
         #else
         return sheet(isPresented: isPresented) {
             StoryGuideView(model: model, onClose: { isPresented.wrappedValue = false },
                           initialStorylineKey: initialStorylineKey)
                 .frame(minWidth: 900, minHeight: 620)
+                .cursorHost()
         }
         #endif
     }

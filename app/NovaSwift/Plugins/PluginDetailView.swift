@@ -31,15 +31,16 @@ struct PluginDetailView: View {
             .frame(maxWidth: 900, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+        .cursorScrollable()
         .sheet(isPresented: $showFiles) {
-            PluginFilesView(entry: entry).environmentObject(model)
+            PluginFilesView(entry: entry).environmentObject(model).cursorHost()
         }
-        .alert("Delete \(entry.name)?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) { model.store.delete(entry, data: model.data) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The plug-in's files are removed from this device. You can install it again later.")
-        }
+        .novaAlert("Delete \(entry.name)?", isPresented: $confirmDelete,
+                   message: "The plug-in's files are removed from this device. You can install it again later.",
+                   buttons: [
+                    .destructive("Delete") { model.store.delete(entry, data: model.data) },
+                    .cancel("Cancel") {}
+                   ])
     }
 
     // MARK: Sections
@@ -148,6 +149,7 @@ struct PluginDetailView: View {
                 }
             }
         }
+        .cursorScrollable()
     }
 
     private var about: some View {
@@ -251,7 +253,9 @@ struct PluginFilesView: View {
                 }
             }
             .novaHiddenScrollContentBackground()
+            .cursorScrollable()
         }
+        .cursorCancel { dismiss() }
         #if os(macOS)
         .frame(minWidth: 480, minHeight: 360)
         #endif

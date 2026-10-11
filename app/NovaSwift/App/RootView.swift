@@ -7,6 +7,8 @@ struct RootView: View {
     /// Data is loaded but the authentic menu's art wouldn't decode — show the
     /// modern menu rather than an endless loading screen.
     @State private var menuArtFailed = false
+    /// Which cursor host is on top (root vs. a presented sheet).
+    @ObservedObject private var cursorRegistry = CursorTargets.shared
     #if os(tvOS)
     /// Drives the controller-required gate: shows/hides live with pairing.
     @ObservedObject private var padState = PadState.shared
@@ -126,7 +128,13 @@ struct RootView: View {
             // A controller player clicked a text field on a device with no
             // fullscreen system keyboard — the pad-drivable keyboard overlay.
             // `.id` so each request starts with its own text/suggestions.
-            if let request = model.padKeyboard {
+            // Port-own alerts (`novaAlert`) raised outside any sheet.
+            NovaAlertLayer(host: CursorTargets.rootHost)
+                .zIndex(47)
+
+            // Only while no sheet is up — a sheet's `.cursorHost()` shows the
+            // keyboard inside itself, where its text field is.
+            if let request = model.padKeyboard, cursorRegistry.activeHost == CursorTargets.rootHost {
                 PadKeyboardView(request: request)
                     .id(request.id)
                     .zIndex(48)
@@ -134,7 +142,8 @@ struct RootView: View {
             }
 
             // The controller-driven UI cursor, above everything so it can
-            // click into any screen. Inert on tvOS / without a pad.
+            // click into any screen. Inert without a pad, during flight, and
+            // while a sheet (with its own `.cursorHost()` cursor) is up.
             ControllerCursorOverlay()
                 .zIndex(50)
 

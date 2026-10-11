@@ -17,8 +17,10 @@ automatically the instant one connects — no restart needed. This matches the
 controller.
 
 Once a pad is connected, the controller-driven cursor overlay
-(`ControllerCursor.swift`) drives every menu and screen, and flight uses the
-same twin-stick mapping as every other platform.
+(`ControllerCursor.swift`) drives every menu and screen — left stick moves it,
+the d-pad snaps between buttons, the right stick scrolls lists/grids and pans
+the star map, Ⓐ presses, Ⓑ backs out — and flight uses the same twin-stick
+mapping as every other platform. Full details in [CONTROLS.md](CONTROLS.md).
 
 ## 10-foot UI
 

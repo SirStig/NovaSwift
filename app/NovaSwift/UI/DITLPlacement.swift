@@ -120,8 +120,13 @@ extension View {
     /// default item and Esc to its cancel item. Pass the action of each (nil
     /// when the dialog has none, or when that item is currently disabled —
     /// the original ignores the key then too).
+    ///
+    /// On a controller the same two items answer Menu (default) and Ⓑ
+    /// (cancel) — see `cursorDefault` / `cursorCancel`.
     func novaDialogKeys(onDefault: (() -> Void)? = nil, onCancel: (() -> Void)? = nil) -> some View {
         background(NovaDialogKeyButtons(onDefault: onDefault, onCancel: onCancel))
+            .cursorDefault(onDefault)
+            .cursorCancel(onCancel)
     }
 }
 
@@ -132,7 +137,10 @@ private struct NovaDialogKeyButtons: View {
 
     var body: some View {
         #if os(tvOS)
-        Color.clear.onExitCommand { onCancel?() }
+        // No keyboard on tvOS: Ⓑ/Menu reach these items through the cursor's
+        // `cursorCancel`/`cursorDefault` registrations instead (the root view
+        // swallows the system exit command, so it never arrived here anyway).
+        Color.clear
         #else
         ZStack {
             if let onDefault {

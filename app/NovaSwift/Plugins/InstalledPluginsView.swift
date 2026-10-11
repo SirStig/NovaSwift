@@ -75,15 +75,26 @@ struct InstalledPluginsView: View {
             }
             .padding(.horizontal, 20).padding(.bottom, 24)
         }
-        .alert("Delete \(pendingDelete?.name ?? "plug-in")?",
-               isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-               presenting: pendingDelete) { bundle in
-            Button("Delete", role: .destructive) {
-                model.data.deletePlugin(bundle)
-                model.store.refresh(data: model.data)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in Text("The plug-in's files are removed from this device.") }
+        .cursorScrollable()
+        .novaAlert("Delete \(pendingDelete?.name ?? "plug-in")?",
+                   isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                   message: "The plug-in's files are removed from this device.",
+                   buttons: deleteButtons)
+    }
+
+    /// Captures the bundle now: the alert clears `pendingDelete` (via its
+    /// binding) before a button's action runs.
+    private var deleteButtons: [NovaAlertButton] {
+        let bundle = pendingDelete
+        return [
+            .destructive("Delete") {
+                if let bundle {
+                    model.data.deletePlugin(bundle)
+                    model.store.refresh(data: model.data)
+                }
+            },
+            .cancel("Cancel") {}
+        ]
     }
 
     private func catalogEntry(for bundle: PluginBundle) -> PluginCatalogEntry? {
@@ -190,6 +201,7 @@ struct LoadOrderView: View {
             }
             .padding(.horizontal, 20).padding(.bottom, 24)
         }
+        .cursorScrollable()
     }
 }
 

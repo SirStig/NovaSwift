@@ -3,7 +3,7 @@
 <rect width="592" height="681" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (119)</text>
+<text x="30" y="55" class="lg">Done (125)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
 <text x="124" y="55" class="lg">Partly done (15)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
@@ -64,15 +64,21 @@
 <rect x="321" y="215" width="12" height="12" fill="#e3a52b"><title>Plugins (mod manager): Icons and screenshots for catalog entries — Partly done</title></rect>
 <rect x="336" y="215" width="12" height="12" fill="#3fb950"><title>Plugins (mod manager): Rehost plug-ins whose authors allow it — Done</title></rect>
 <rect x="351" y="215" width="12" height="12" fill="#e3a52b"><title>Plugins (mod manager): Plug-ins bundled with the app — Partly done</title></rect>
-<text x="16" y="254" class="gh">Controller support</text><text x="576" y="254" class="gn" text-anchor="end">8 of 8 done</text>
+<text x="16" y="254" class="gh">Controller support</text><text x="576" y="254" class="gn" text-anchor="end">14 of 14 done</text>
 <rect x="216" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Gamepad flight — Done</title></rect>
 <rect x="231" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Controller cursor for all menus — Done</title></rect>
-<rect x="246" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Button remapping — Done</title></rect>
-<rect x="261" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: On-screen keyboard for pads — Done</title></rect>
-<rect x="276" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Button glyph prompts — Done</title></rect>
-<rect x="291" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Dead zone and cursor speed — Done</title></rect>
-<rect x="306" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Rumble — Done</title></rect>
-<rect x="321" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Keyboard remapping — Done</title></rect>
+<rect x="246" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Cursor in sheets, dialogs and alerts — Done</title></rect>
+<rect x="261" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: B to go back, Menu to confirm — Done</title></rect>
+<rect x="276" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: D-pad snaps between buttons — Done</title></rect>
+<rect x="291" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Right stick scrolls lists, grids and the map — Done</title></rect>
+<rect x="306" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Cursor works at any resolution — Done</title></rect>
+<rect x="321" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Button remapping — Done</title></rect>
+<rect x="336" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: On-screen keyboard for pads — Done</title></rect>
+<rect x="351" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Button glyph prompts — Done</title></rect>
+<rect x="366" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Dead zone and cursor speed — Done</title></rect>
+<rect x="381" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Rumble — Done</title></rect>
+<rect x="396" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: DualSense adaptive triggers — Done</title></rect>
+<rect x="411" y="242" width="12" height="12" fill="#3fb950"><title>Controller support: Keyboard remapping — Done</title></rect>
 <text x="16" y="281" class="gh">Apple TV</text><text x="576" y="281" class="gn" text-anchor="end">5 of 6 done</text>
 <rect x="216" y="269" width="12" height="12" fill="#3fb950"><title>Apple TV: tvOS target — Done</title></rect>
 <rect x="231" y="269" width="12" height="12" fill="#3fb950"><title>Apple TV: Controller-required screen — Done</title></rect>

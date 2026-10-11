@@ -46,6 +46,7 @@ struct HostSetupView: View {
                             .padding(12)
                             .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.08)))
                             .foregroundStyle(.white)
+                            .padTextEntry("Lobby Name", text: $lobbyName)
                         #endif
                     }
 
@@ -111,11 +112,17 @@ struct HostSetupView: View {
                     }
                     .buttonStyle(.novaPlain)
                     .padding(.top, 4)
+
+                    CursorButton { dismiss() } label: {
+                        Text("Cancel").novaFont(.button).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
                 .padding()
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity)
             }
+            .cursorScrollable()
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("Host Lobby")
             #if os(iOS)
@@ -123,6 +130,8 @@ struct HostSetupView: View {
             #endif
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
+        // Toolbar items are system chrome the cursor can't press: Ⓑ cancels instead.
+        .cursorCancel { dismiss() }
         .novaResponsive()
         .preferredColorScheme(.dark)
         #if os(iOS)
@@ -227,6 +236,11 @@ struct LobbyRosterView: View {
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.novaPlain)
+
+                    CursorButton(action: onClose) {
+                        Text("Close").novaFont(.button).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
                 .padding(.horizontal)
             }
@@ -234,7 +248,10 @@ struct LobbyRosterView: View {
             .frame(maxWidth: 520)
             .frame(maxWidth: .infinity)
         }
+        .cursorScrollable()
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close", action: onClose) } }
+        // Toolbar items are system chrome the cursor can't press: Ⓑ closes instead.
+        .cursorCancel(onClose)
     }
 
     private var rulesCard: some View {
@@ -364,14 +381,15 @@ private struct PlayerRosterRow: View {
                 .buttonStyle(.novaPlain)
             }
             if canModerate {
-                Menu {
-                    Button(role: .destructive, action: onKick) { Label("Kick", systemImage: "boot") }
-                    Button(role: .destructive, action: onBan) { Label("Ban", systemImage: "nosign") }
-                } label: {
-                    Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
+                // Two plain buttons, not a `Menu`: the cursor can't open a popup.
+                CursorButton(action: onKick) {
+                    Image(systemName: "boot").font(.title3).foregroundStyle(.red.opacity(0.85))
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                .accessibilityLabel("Kick")
+                CursorButton(action: onBan) {
+                    Image(systemName: "nosign").font(.title3).foregroundStyle(.red.opacity(0.85))
+                }
+                .accessibilityLabel("Ban")
             }
         }
         .padding(.vertical, 8).padding(.horizontal, 10)

@@ -194,8 +194,11 @@ struct GalaxyMapView: View {
                 centerOn(sys)
             }
         }
+        // Ⓑ = Done, same as the chart's close button.
+        .cursorCancel(onClose)
         .sheet(isPresented: $showingFinder) {
             SystemFinderView(nav: nav, pilot: pilot) { system in centerOn(system) }
+                .cursorHost()
         }
     }
 
@@ -211,12 +214,19 @@ struct GalaxyMapView: View {
                 }
             }
             .contentShape(Rectangle())
-            #if os(tvOS)
-            // No touch/pointer gestures on tvOS: the connected controller's
-            // left stick pans the chart and the triggers zoom, via a
-            // lifetime-scoped poll (same pattern as `GridPagingModifier`).
-            .task(id: "map-controller-pan") { await pollControllerPan() }
-            #else
+            // Controller, every platform: Ⓐ under the cursor picks a system
+            // exactly like a tap (one pick per press — no drag-plotting),
+            // the right stick pans the chart, and the triggers zoom (poll
+            // below). The left stick stays the cursor.
+            .cursorClickable(drags: false, at: { location in
+                handleTap(at: location, viewSize: geo.size)
+            })
+            .cursorPannable { delta in
+                pan.width -= delta.dx
+                pan.height -= delta.dy
+            }
+            .task(id: "map-controller-zoom") { await pollControllerZoom() }
+            #if !os(tvOS)
             .gesture(
                 DragGesture()
                     .onChanged { g in
@@ -243,18 +253,12 @@ struct GalaxyMapView: View {
         }
     }
 
-    #if os(tvOS)
-    /// Controller-driven chart navigation for tvOS: left stick pans, the
-    /// triggers zoom out/in. ~30 Hz for smooth motion while the map is up.
-    private func pollControllerPan() async {
+    /// Controller zoom: the triggers zoom out/in (~30 Hz while the map is up
+    /// and a pad is connected). Panning and picking go through the cursor.
+    private func pollControllerZoom() async {
         while !Task.isCancelled {
-            if let padDevice = GCController.current?.extendedGamepad {
-                let x = Double(padDevice.leftThumbstick.xAxis.value)
-                let y = Double(padDevice.leftThumbstick.yAxis.value)
-                if abs(x) > 0.15 || abs(y) > 0.15 {
-                    pan.width -= CGFloat(x * 14)
-                    pan.height += CGFloat(y * 14)   // stick up moves the view up
-                }
+            if let padDevice = GCController.current?.extendedGamepad,
+               !CursorTargets.shared.suppressed, CursorTargets.shared.suspensions.isEmpty {
                 let zoomIn = Double(padDevice.rightTrigger.value)
                 let zoomOut = Double(padDevice.leftTrigger.value)
                 if zoomIn > 0.1 || zoomOut > 0.1 {
@@ -264,7 +268,6 @@ struct GalaxyMapView: View {
             try? await Task.sleep(nanoseconds: 33_000_000)
         }
     }
-    #endif
 
     /// Build the shared government color palette for the loaded game.
     private func rebuildGovtColors() {
@@ -1267,6 +1270,7 @@ struct GalaxyMapView: View {
                     }
                     .padding(8)
                 }
+                .cursorScrollable()
             }
         }
     }

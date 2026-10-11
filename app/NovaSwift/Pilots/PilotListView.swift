@@ -51,29 +51,39 @@ struct PilotListView: View {
             case .failure(let e): importError = e.localizedDescription
             }
         }
-        .alert("Import failed", isPresented: Binding(get: { importError != nil },
-                                                    set: { if !$0 { importError = nil } })) {
-            Button("OK") { importError = nil }
-        } message: { Text(importError ?? "") }
-        .alert("Delete pilot?", isPresented: Binding(get: { pendingDeleteGroup != nil },
-                                                     set: { if !$0 { pendingDeleteGroup = nil } })) {
-            Button("Delete", role: .destructive) {
-                if let g = pendingDeleteGroup {
-                    Log.pilot.notice("PilotListView: deleting pilot group \(g.id, privacy: .public) \"\(g.mostRecent.displayName, privacy: .public)\"")
-                    model.roster.deleteGroup(g.id)
-                }
-                pendingDeleteGroup = nil
-            }
-            Button("Cancel", role: .cancel) { pendingDeleteGroup = nil }
-        } message: {
-            let g = pendingDeleteGroup
-            let slotWord = (g?.slots.count ?? 1) > 1 ? "\(g?.slots.count ?? 1) save slots" : "save"
-            Text("“\(g?.mostRecent.displayName ?? "")” — its \(slotWord) and all backups will be removed. This can't be undone.")
-        }
+        .novaAlert("Import failed", isPresented: Binding(get: { importError != nil },
+                                                        set: { if !$0 { importError = nil } }),
+                   message: importError ?? "",
+                   buttons: [NovaAlertButton(title: "OK") { importError = nil }])
+        .novaAlert("Delete pilot?", isPresented: Binding(get: { pendingDeleteGroup != nil },
+                                                         set: { if !$0 { pendingDeleteGroup = nil } }),
+                   message: deleteMessage,
+                   buttons: deleteButtons)
         .onAppear {
             model.roster.refresh()
             Log.pilot.debug("PilotListView: appeared with \(model.roster.groups.count) pilot(s)")
         }
+    }
+
+    /// Captures the group now: the alert clears `pendingDeleteGroup` (via its
+    /// binding) before a button's action runs.
+    private var deleteButtons: [NovaAlertButton] {
+        let group = pendingDeleteGroup
+        return [
+            .destructive("Delete") {
+                if let g = group {
+                    Log.pilot.notice("PilotListView: deleting pilot group \(g.id, privacy: .public) \"\(g.mostRecent.displayName, privacy: .public)\"")
+                    model.roster.deleteGroup(g.id)
+                }
+            },
+            .cancel("Cancel") {}
+        ]
+    }
+
+    private var deleteMessage: String {
+        let g = pendingDeleteGroup
+        let slotWord = (g?.slots.count ?? 1) > 1 ? "\(g?.slots.count ?? 1) save slots" : "save"
+        return "“\(g?.mostRecent.displayName ?? "")” — its \(slotWord) and all backups will be removed. This can't be undone."
     }
 
     private var buttons: [NovaDialogButton] {
@@ -103,7 +113,7 @@ struct PilotListView: View {
 
     private func pilotRow(_ group: PilotRoster.PilotGroup) -> some View {
         let save = group.mostRecent
-        return CursorButton {
+        let open = CursorButton {
             Log.pilot.debug("PilotListView: open pilot group \(group.id, privacy: .public) \"\(save.displayName, privacy: .public)\"")
             model.audio.play(.uiSelect); openGroupID = group.id
         } label: {
@@ -137,6 +147,24 @@ struct PilotListView: View {
                 model.roster.duplicate(save.id)
             } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
             Button(role: .destructive) { pendingDeleteGroup = group } label: { Label("Delete", systemImage: "trash") }
+        }
+        // The context menu isn't reachable with a controller, so the same two
+        // actions also sit on the row as icon buttons.
+        return HStack(spacing: 6) {
+            open
+            CursorButton {
+                Log.pilot.debug("PilotListView: duplicate pilot \(save.id, privacy: .public)")
+                model.roster.duplicate(save.id)
+            } label: {
+                Image(systemName: "plus.square.on.square").font(.callout).foregroundStyle(novaAmber)
+                    .frame(width: 30, height: 30)
+            }
+            .accessibilityLabel("Duplicate")
+            CursorButton { pendingDeleteGroup = group } label: {
+                Image(systemName: "trash").font(.callout).foregroundStyle(.red)
+                    .frame(width: 30, height: 30)
+            }
+            .accessibilityLabel("Delete")
         }
     }
 

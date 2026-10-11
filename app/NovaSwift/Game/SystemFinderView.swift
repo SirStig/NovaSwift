@@ -57,6 +57,13 @@ struct SystemFinderView: View {
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+            // In-view field (not `.searchable`) so Ⓐ can open the pad keyboard.
+            TextField("System name", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { submit() }
+                .padTextEntry("System name", text: $query, onCommit: submit)
+                .padding(.horizontal).padding(.vertical, 8)
             List(filtered, id: \.id) { system in
                 Button {
                     pick(system)
@@ -71,14 +78,14 @@ struct SystemFinderView: View {
                 }
                 .buttonStyle(.novaPlain)
             }
+            .cursorScrollable()
             .overlay {
                 if filtered.isEmpty {
                     Text(known.isEmpty ? "No charted systems yet." : "No systems match “\(query)”.")
                         .novaFont(.body).foregroundStyle(.secondary)
                 }
             }
-            .searchable(text: $query, prompt: "System name")
-            .onSubmit(of: .search) { submit() }
+            }
             .navigationTitle("Named System")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -86,9 +93,11 @@ struct SystemFinderView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .buttonStyle(.novaPlain)
                 }
             }
         }
+        .cursorCancel { dismiss() }
         .presentationDetents([.medium, .large])
     }
 }

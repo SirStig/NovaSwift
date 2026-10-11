@@ -90,6 +90,7 @@ struct PlayerInfoView: View {
                 .ditlPlace(space, d, done)
         }
         .frame(width: frameSize.width, height: frameSize.height, alignment: .topLeading)
+        .cursorCancel(onDone)
         .classicConfirm(isPresented: $confirmingJettison,
                                 prompt: game.stringList(2002)?.string(at: 291) ?? "",
                                 okTitle: graphics.buttonLabel(50, fallback: "Yes"),

@@ -43,11 +43,13 @@ struct PluginsView: View {
                           allowedContentTypes: [.zip, .folder, .data, .item],
                           allowsMultipleSelection: true,
                           onCompletion: handleImport)
-        .alert("Import", isPresented: Binding(get: { importMessage != nil },
-                                              set: { if !$0 { importMessage = nil } }),
-               presenting: importMessage) { _ in
-            Button("OK") { importMessage = nil }
-        } message: { Text($0) }
+        .novaAlert("Import", isPresented: Binding(get: { importMessage != nil },
+                                                  set: { if !$0 { importMessage = nil } }),
+                   message: importMessage,
+                   buttons: [NovaAlertButton(title: "OK") { importMessage = nil }])
+        // Ⓑ steps back out of a plug-in's detail page first, then closes the screen.
+        .cursorCancel { if selected != nil { selected = nil } else { onClose() } }
+        .cursorModal()
     }
 
     // MARK: Chrome
@@ -76,11 +78,8 @@ struct PluginsView: View {
 
     private var tabBar: some View {
         HStack {
-            Picker("Section", selection: $tab) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 460)
+            NovaSegmentedPicker(selection: $tab, options: Tab.allCases) { $0.rawValue }
+                .frame(maxWidth: 460)
             Spacer()
         }
         .padding(.horizontal, 20).padding(.bottom, 8)
@@ -132,6 +131,7 @@ struct PluginsView: View {
             }
             .padding(.horizontal, 20).padding(.bottom, 24)
         }
+        .cursorScrollable()
     }
 
     private var gridMinimum: CGFloat {
@@ -157,6 +157,7 @@ struct PluginsView: View {
             TextField("Search plug-ins, authors, tags", text: $query)
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
+                .padTextEntry("Search plug-ins", text: $query)
             if !query.isEmpty {
                 Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.novaPlain).foregroundStyle(.secondary)
@@ -183,6 +184,7 @@ struct PluginsView: View {
                 }
             }
         }
+        .cursorScrollable()
     }
 
     private var emptyState: some View {

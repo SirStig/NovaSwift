@@ -156,7 +156,7 @@ None of these change the game's rules:
 - Presentation presets: Classic, Enhanced, Nova Swift, with per-item overrides.
 - Story Guide and storyline map, storyline tags on missions, tutorial hints,
   a flight-training range.
-- Touch controls; controller support with remapping and an on-screen cursor.
+- Touch controls; complete controller support — remapping, an on-screen cursor that reaches every screen, sheet, dialog and alert (Ⓑ back, d-pad snapping, right-stick scrolling), DualSense adaptive triggers ([CONTROLS.md](CONTROLS.md)).
 - Apple TV build with a 10-foot UI ([TVOS.md](TVOS.md)).
 - iCloud sync of imported game data ([ICLOUD_SYNC.md](ICLOUD_SYNC.md)).
 - Plug-in store and manager.

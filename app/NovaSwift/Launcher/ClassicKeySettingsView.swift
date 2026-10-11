@@ -82,7 +82,8 @@ struct ClassicKeySettingsView: View {
                     .background(selected == c ? Color.black : Color.clear)
                     .overlay(Rectangle().stroke(conflict == c ? Color.red : .clear, lineWidth: 2))
                     .contentShape(Rectangle())
-                    .onTapGesture { selected = c; conflict = nil })
+                    .onTapGesture { selected = c; conflict = nil }
+                    .cursorClickable { selected = c; conflict = nil })
         }
         return ZStack {
             Color.black.opacity(0.55).ignoresSafeArea()
@@ -101,7 +102,7 @@ struct ClassicKeySettingsView: View {
             VStack {
                 Spacer()
                 Button("More keys…", action: onMoreKeys)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.novaPlain)
                     .font(.footnote).foregroundStyle(.white.opacity(0.7))
                     .padding(.bottom, 12)
             }
