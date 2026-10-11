@@ -1,6 +1,6 @@
 # NOVA Swift
 
-![NOVA Swift](docs/branding/logo-banner.png)
+![NOVA Swift](docs/branding/logo-banner.png?v=brand2)
 
 A fan rebuild of EV Nova (Ambrosia Software / ATMOS, 2002), written from scratch
 in Swift. It runs natively on macOS, iPadOS, iOS and tvOS. A Godot frontend for

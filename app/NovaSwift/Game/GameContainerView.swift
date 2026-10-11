@@ -181,7 +181,9 @@ final class GameHost {
                         sprite = ws
                         wreck = true
                     }
-                    let tex = sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
+                    // Through SpriteTextures, like the scene's own system loads, so an
+                    // HD planet shows from the first frame (not only after landing).
+                    let tex = sprite.flatMap { SpriteTextures.rotationFrames(from: $0, rotationCount: 1).first }
                     let radius = CGFloat(sprite?.frameWidth ?? 48) / 2
                     // `spöb.X/Y` is authored +y-down (same convention as `sÿst.X/Y`);
                     // flip to this engine/SpriteKit's +y-up world.
@@ -458,7 +460,7 @@ final class GameHost {
             systemID = system.id
             planets = game.stellarObjects(in: system.id).compactMap { entry in
                 let spob = entry.spob
-                let tex = entry.sprite.flatMap { $0.frameCGImage(0) }.map { SKTexture(cgImage: $0) }
+                let tex = entry.sprite.flatMap { SpriteTextures.rotationFrames(from: $0, rotationCount: 1).first }
                 let radius = CGFloat(entry.sprite?.frameWidth ?? 48) / 2
                 return PlanetVisual(id: spob.id, name: spob.name,
                                     position: CGPoint(x: spob.x, y: -spob.y),
