@@ -116,16 +116,17 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
-    /// Overall simulation speed. `x1` is real time — the original ran a fixed
+    /// Overall simulation speed. `x1` (labelled "Authentic") is real time — the
+    /// original ran a fixed
     /// 30fps sim and read acceleration/top-speed/weapon-reload straight off
     /// `shïp`/`wëap` data with no global time dilation, so real time *is* the
     /// faithful pace; the original's slow cruise feel comes entirely from those
     /// low stat values, not from an artificial slow-motion multiplier. The
-    /// original also let you toggle Caps-Lock for a ~2× "fast" mode that sped
-    /// the whole engine up uniformly (including combat); `x2`/`x4`/`x8` here
-    /// generalise that into a proper option, and `x0_5` extends it the other
-    /// way into slow motion for players who want more reaction time in a
-    /// dogfight. Applied as a multiplier on the physics timestep, so it
+    /// original also let you toggle Caps-Lock for a 2× "fast" mode that ticked
+    /// the whole world twice per frame (including combat) and compensated the
+    /// per-frame / wall-clock rules for it; `x0_5`…`x8` here apply those same
+    /// rules at their own multiplier (`GameSpeedRules`), and Caps Lock doubles
+    /// whichever is chosen. Applied as a multiplier on the physics timestep, so it
     /// uniformly scales acceleration, top speed, turning, travel time, weapon
     /// reload and shield/armor regen — leave it at `x1` for combat and travel
     /// pacing that matches the documented Bible formulas exactly.
@@ -135,7 +136,7 @@ struct GameSettings: Codable, Equatable {
         var label: String {
             switch self {
             case .x0_5: return "0.5×"
-            case .x1: return "1×"
+            case .x1: return "Authentic"
             case .x1_5: return "1.5×"
             case .x2: return "2×"
             case .x4: return "4×"
@@ -231,7 +232,7 @@ struct GameSettings: Codable, Equatable {
     /// Defaults to the closest to the original until an exact `.original`
     /// population model lands (FIDELITY_PLAN AI-09/AI-10).
     var systemAliveness: SystemAliveness = .original
-    /// Overall simulation speed (see `GameSpeed`). Default `x1` — real time,
+    /// Overall simulation speed (see `GameSpeed`). Default `x1` ("Authentic") — real time,
     /// the faithful pace.
     var gameSpeed: GameSpeed = .x1
     /// After firing, auto-select the nearest hostile if nothing is targeted.

@@ -45,13 +45,26 @@ public struct PlayerHyperjump: Sendable {
     /// rate, or 0 when there is none (no voice to wait for). Only decides when
     /// the voice stops on its own before the 350-tick cut.
     public let soundTicks60: Double
+    /// The same for the 2x cue (snd 129, played instead of snd 128 while the
+    /// x2 flag is on; `Stellar_GetJumpSequenceDuration60Hz` 0x0046efb0).
+    public let soundTicks60X2: Double
     /// The hull's jump-duration multiplier (`durationMultiplier(hullFlags:)`).
     public let multiplier: Double
 
     /// The jump timer, in 30 Hz ticks since spin-up began (seeded at 2).
     public private(set) var timer: Double = 0
-    /// The spin-up's 60 Hz clock.
+    /// The spin-up's 60 Hz clock. This is the original's wall clock (`TickCount`),
+    /// not game time: with the world ticking `timeScale` times faster it advances
+    /// `1 / timeScale` per sim tick, so the cue and the tunnel ramp last the same
+    /// real time at any speed.
     public private(set) var elapsed60: Double = 0
+    /// The simulation-speed multiplier N the jump last ticked at
+    /// (`GameSpeedRules.effectiveMultiplier`); 1 is the original's normal speed.
+    public private(set) var timeScale: Double = 1
+    /// Whether spin-up began with the x2 flag on (snd 129 cue) or off (snd 128);
+    /// nil until spin-up starts. `GameSpeedRules.x2Flag` reads it as "which cue
+    /// is sounding".
+    public private(set) var cueX2: Bool?
     /// Latched once progress passes 55: the Mac build starts its 1.5 s white
     /// fade-in here (`(progress − 55) × 5 > 0`). Presentation only.
     public private(set) var fadeTriggered = false
@@ -66,11 +79,13 @@ public struct PlayerHyperjump: Sendable {
     static let stoppedVelocity = 2.0                 // px/tick, per axis
 
     public init(bearing: Double, fastJump: Bool,
-                soundTicks60: Double = PlayerHyperjump.defaultCueTicks60, multiplier: Double = 1.3) {
+                soundTicks60: Double = PlayerHyperjump.defaultCueTicks60,
+                soundTicks60X2: Double? = nil, multiplier: Double = 1.3) {
         let deg = (Int((bearing * 180 / .pi).rounded()) % 360 + 360) % 360
         self.bearing = Double(deg) * .pi / 180
         self.fastJump = fastJump
         self.soundTicks60 = max(0, soundTicks60)
+        self.soundTicks60X2 = max(0, soundTicks60X2 ?? soundTicks60)
         self.multiplier = max(0.5, multiplier)
     }
 
@@ -91,12 +106,19 @@ public struct PlayerHyperjump: Sendable {
 
     /// The tunnel ramp's progress.
     public var progress: Double {
-        elapsed60 * multiplier / (cueTicks60 * 0.01) - Self.progressOffset / multiplier
+        elapsed60 * multiplier / (cueTicks60 * 0.01)
+            - GameSpeedRules.jumpProgressOffsetFactor(multiplier: timeScale) * Self.progressOffset / multiplier
     }
 
     /// Whether the warp-up voice has stopped: it ends by itself after
     /// `soundTicks60 / multiplier`, or is cut at `350 / multiplier` (0x0044f3d0).
-    var cueDone: Bool { elapsed60 >= min(soundTicks60, cueTicks60) / multiplier }
+    var cueDone: Bool {
+        elapsed60 >= min(cueX2 == true ? soundTicks60X2 : soundTicks60, cueTicks60) / multiplier
+    }
+
+    /// Whether the Warp up voice (snd 128, or snd 129 when `cueX2`) is still
+    /// sounding: spin-up has begun and its voice has neither ended nor been cut.
+    public var cueSounding: Bool { phase == .spinUp && !cueDone && !warpUpCut }
 
     /// Whether the original has cut the warp-up voice by now (`elapsed60 >
     /// 350 / multiplier`); the app stops the sound when this turns true.
@@ -104,7 +126,8 @@ public struct PlayerHyperjump: Sendable {
 
     /// Fly one step of the engaged jump. The caller skips the normal flight
     /// model for the player while this runs.
-    mutating func tick(_ player: Ship, dt: Double) {
+    mutating func tick(_ player: Ship, dt: Double, timeScale scale: Double = 1, x2Mode: Bool = false) {
+        timeScale = max(scale, GameSpeedRules.minimumMultiplier)
         let ticks = dt * OriginalClock.ticksPerSecond
         let turnDeg = Double(max(1, player.stats.playerTurnDegPerTick))
         let thrust = player.effectiveAcceleration
@@ -129,6 +152,7 @@ public struct PlayerHyperjump: Sendable {
                 phase = .spinUp
                 timer = Self.spinUpSeed
                 elapsed60 = 0
+                cueX2 = x2Mode      // snd 129 at 2x, snd 128 otherwise (0x0044c4e9)
                 return
             }
             if player.inertialess {
@@ -154,7 +178,7 @@ public struct PlayerHyperjump: Sendable {
             player.position += player.velocity * dt
 
             timer += ticks
-            elapsed60 += dt * 60
+            elapsed60 += dt * 60 / timeScale   // wall clock, not game time
             if progress > 55 { fadeTriggered = true }
             if timer >= Self.minSpinUpTicks, cueDone {
                 phase = .fired
@@ -271,6 +295,9 @@ extension Galaxy {
     /// The "Warp up" sound (snd 128) in 60 Hz ticks, 0 when missing. The
     /// jump sequence itself is always 350 ticks (`PlayerHyperjump.cueTicks60`).
     public var hyperspaceWarpUpSoundTicks60: Double { PlayerHyperjump.soundTicks60(of: game.sound(128)) }
+
+    /// The 2x "Warp up" sound (snd 129) in 60 Hz ticks, 0 when missing.
+    public var hyperspaceWarpUp2xSoundTicks60: Double { PlayerHyperjump.soundTicks60(of: game.sound(129)) }
 
     /// The hull's jump-duration multiplier (`PlayerHyperjump.durationMultiplier`).
     public func jumpDurationMultiplier(hull shipID: Int) -> Double {

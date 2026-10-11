@@ -506,7 +506,7 @@ final class AppModel: ObservableObject {
         // The loaded pilot was killed: Enter Ship only beeps until the pilot
         // is opened again (0x00486ed0 action 3).
         if save.id == killedPilotID {
-            audio.play(.uiError)
+            audio.play(.beep4)
             return true
         }
         play(save)

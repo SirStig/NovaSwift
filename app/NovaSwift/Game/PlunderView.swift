@@ -65,6 +65,9 @@ struct PlunderView: View {
     var onTakeAmmo: () -> Void
     var onTakeEnergy: () -> Void
     var onCaptureShip: () -> Void
+    /// A greyed button was pressed: the original sounds snd 153
+    /// (NovaUi_RunBoardingPlunderWindow 0x00482940).
+    var onRefused: () -> Void = {}
     var onDismiss: () -> Void
 
     /// PICT #8515 "Plunder" (`Nova Graphics 3.rez`) — not added to
@@ -117,7 +120,7 @@ struct PlunderView: View {
                             _ rect: CGRect, _ title: String,
                             enabled: Bool, action: @escaping () -> Void) -> some View {
         NovaButton(graphics: graphics, title: title, width: max(0, rect.width - 26),
-                   enabled: enabled, action: action)
+                   enabled: enabled, onRefused: onRefused, action: action)
             .ditlPlace(space, d, rect)
     }
 
@@ -195,14 +198,14 @@ struct PlunderView: View {
     }
 
     private func fallbackButton(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: enabled ? action : onRefused) {
             Text(title).novaFont(.button).foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 25)
                 .background(Color(white: 0.25), in: RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.novaPlain)
-        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
     }
 }
 

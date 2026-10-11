@@ -55,8 +55,10 @@ struct ClassicPreferencesView: View {
                          17: flag(\.parallaxStarfield), 19: flag(\.ambientSounds),
                          20: hyperspace, 21: flag(\.checkForUpdates)],
                 actions: [0: onClose, 15: { showKeys = true },
-                          5: { step(\.soundVolumeStep, by: -1, max: 8) },
-                          6: { step(\.soundVolumeStep, by: 1, max: 8) },
+                          // Menu_RunSettingsDialog 0x00488650: each volume arrow
+                          // sounds snd 154 once the new level applies.
+                          5: { step(\.soundVolumeStep, by: -1, max: 8); model.audio.play(.beep5) },
+                          6: { step(\.soundVolumeStep, by: 1, max: 8); model.audio.play(.beep5) },
                           24: { step(\.brightnessStep, by: -1, max: 6) },
                           25: { step(\.brightnessStep, by: 1, max: 6) }],
                 // "Run in a window" has no meaning outside the Windows build.

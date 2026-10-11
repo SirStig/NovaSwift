@@ -147,7 +147,7 @@ was re-read in the Ghidra export, with constants read from the executable.
 |---|---|---|---|
 | `difficulty` (`playerDamageScale` 0.3 / 0.6 / 1.0 / 1.5, applied at `Engine/World.swift:2773`) | `.normal` = ×1.0 | Default is faithful; the other values are invented | Move under Enhancements (Batch 0: the Settings picker now sits there). The original's own difficulty curve is the rating-based NPC fire ramp (AI-03) plus Strict Play (FL-03); neither exists today. |
 | `systemAliveness` (`populationScale`, `passThroughChance`) | `.authentic` (was `.normal`; changed in Batch 0) | **No.** `.normal` is the engine's invented population (floor 3, cap 18, 6 s refill, guaranteed fleet, 26 s fleet timer). Even `.authentic` (×0.55 plus 55 % pass-through) is not the original. | Add `.original` (exactly `AvgShips`, original refill and fleet rates; AI-09/10) and make it the default. The existing values become Enhancement presets. |
-| `gameSpeed` | `.x1` | Default faithful | Keep. Non-×1 values are an enhancement. The comment's claim of a Caps-Lock ~2× mode in the original is unverified. |
+| `gameSpeed` | `.x1` (label "Authentic") | Default faithful | Keep. Non-×1 values are an enhancement, but run the original's Caps Lock 2× rules at their own multiplier (UI-15, `GameSpeedRules`). The original's Caps-Lock 2× mode is verified in the decomp (`DAT_00596d34`). |
 | `controlSensitivity` (→ `ControlTuning.turnScale`, `Engine/World.swift:23`) | 1.0 | ×1.0 is neutral, but the player's turn rate is not quantized today (FL-10) | After FL-10, values other than 1.0 are an enhancement that bypasses quantization. |
 | `autoLanding` | off | Port-only autopilot (`App/Game/GameScene.swift:608` `stepAutoLand`; the decomp's `flight_automation.cpp` is clean-room too) | Already compliant: an Enhancement, default off. |
 | `autoTargetAfterFiring`, `confirmLanding`, `mouseAiming` | off | Input conveniences | Compliant (off). |
@@ -3502,7 +3502,7 @@ resources have no effect. Every string fix below reads the resource, never a cop
 - **Class.** FIX (needs EC-02). **Impact** high. **Confidence** high.
 - **Test.** With CrimeTol 10, R = −50 reads "Offender" and R = −200 "Criminal".
 
-#### UI-15 · Default key bindings and missing commands — ui_rules A11, C10 — **DONE** (map cycles, Caps Lock deferred)
+#### UI-15 · Default key bindings and missing commands — ui_rules A11, C10 — **DONE** (map cycles; Caps Lock 2× mode done)
 - **Done (cleanup 1).** The original table gains Alt-X eject (OS-02's `requestEject`; only the
   modern table had it, and touch already offers it) and Alt-− self-destruct, a held command
   (`ControlIntent.selfDestruct` → `World.stepSelfDestruct`, the 0x00451954 block of 0x0044aa70):
@@ -3518,8 +3518,20 @@ resources have no effect. Every string fix below reads the resource, never a cop
   saved settings but no saved bindings is pinned to the old table; actions added since a map was
   saved only take a default key nothing else holds. iOS/tvOS cannot see a bare Control, so there the
   secondary stays on Return. **Clash:** Control-arrow is a reserved macOS Spaces shortcut (decision 3).
-  **Deferred:** the map's Tab/backslash adjacent cycle and in-flight backslash destination cycle,
-  Caps Lock 2× mode.
+  **Deferred:** the map's Tab/backslash adjacent cycle and in-flight backslash destination cycle.
+- **Done (Caps Lock 2× mode, 2026-10-10).** The Caps Lock toggle state (`CapsLockState`: macOS
+  `NSEvent.modifierFlags`, iOS the `KeyPress` modifiers of the last hardware-keyboard event) sets the
+  original's x2 flag (`DAT_00596d34`, 0x00417600 ~11248) through `GameSpeedRules.x2Flag`, including the
+  hold-off for a jump that began at 1× (snd 128 sounding, nose within 10° of the jump heading). The
+  effective speed N = Settings speed × (x2 ? 2 : 1) (co-op: the lobby's speed only) drives the existing
+  fixed-step loop, so the extra world ticks are the original's second `Frame_TickSystems(0)`. The
+  compensations are generalised from 2 to N: the player's jump-progress constant factor 1.5 →
+  (1 + N) / 2 (0x0044c8d0 / 0x0044f3d0), the departing ship's wall-clock scale 0.667 / 0.5 →
+  1 / that factor (follower of the player) or 1 / N (0x00433050), the jump clocks (`elapsed60`, the AI's
+  `clock60`) run on the wall clock (÷ N per tick), snd 129 replaces snd 128 under the x2 flag. Not
+  needed in the port: beam damage ×2 (0x0042f270; beam records already run per raw call per sim tick)
+  and the star-field ×2 and `FUN_00439d40` double loop (the field is placed from the camera each
+  frame). The "x2" sprite is cicn 20000, drawn top-left while N = 2.
 - **Original.** Defaults from 0x004b4400 (DIK set-1 codes; meanings from the decomp labels):
   L-Ctrl fire secondary, W next secondary (Shift back), S clear secondary, Y hail, L land, Return
   dismiss message, A face target, N clear target/nav, M map, backquote target cycle (Shift back),

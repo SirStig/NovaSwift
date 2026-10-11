@@ -1079,6 +1079,10 @@ public enum WorldEvent {
     /// fleet's `flët` Quote as it arrives (360 frames), or the reinforcement
     /// warning (240 frames). AI-10, AI-13.
     case overlayMessage(text: String, frames: Int)
+    /// One of the original's interface beeps (snd 150-154) the player hears
+    /// with a HUD line or key command the engine resolved
+    /// (`nv_PlaySound(g_nv_beep1 / DAT_00591564…70, 1, …)`); the host plays it.
+    case interfaceBeep(soundID: Int)
     /// A ship transited out through a hypergate (the AI-departure counterpart
     /// to `shipEmergedFromGate`): the renderer should flash the gate open,
     /// shrink the ship into it, then close — instead of the plain edge-departure

@@ -306,6 +306,7 @@ final class GameHost {
                     for id in scanFailIDs { engine.failMission(id) }
                     pilotStore.state = engine.player
                     hud?.post("Your illicit cargo was detected — mission failed.")
+                    model.audio.play(.beep2)   // Ship_ScanPlayerForContraband 0x00401800, snd 151
                     pilotStore.save()
                 }
                 guard let result = ContrabandScan.enforce(on: &pilotStore.state, game: scanGame,
@@ -314,6 +315,7 @@ final class GameHost {
                 // The smuggling flood goes to the live per-system record (EC-02).
                 if result.smugglingPenalty > 0 { scene?.recordSmuggling(against: scannerGovt) }
                 let name = scanGame.govt(scannerGovt)?.displayName ?? "Patrol"
+                model.audio.play(.beep5)   // the scan result line sounds snd 154 (0x00401800)
                 if result.warningOnly {
                     hud?.post("\(name): contraband detected — you are let off with a warning.")
                 } else if result.fine > 0 {
@@ -1327,11 +1329,12 @@ struct GameContainerView: View {
                             isPresented: Binding(get: { pendingCaptureChoice != nil },
                                                  set: { if !$0 { pendingCaptureChoice = nil } }),
                             presenting: pendingCaptureChoice) { cap in
-            Button("Take Command") { openCaptureNamePrompt(cap) }
+            // Both choices sound snd 151 (NovaUi_ShowCaptureDecisionDialog 0x00497eb0).
+            Button("Take Command") { model.audio.play(.beep2); openCaptureNamePrompt(cap) }
             // Only offered under the escort-wing cap — a full wing can still
             // take command of the captured hull, just not add it as an escort.
             if model.pilot.canAddEscort() {
-                Button("Use as Escort") { recruitCapturedShipAsEscort(cap) }
+                Button("Use as Escort") { model.audio.play(.beep2); recruitCapturedShipAsEscort(cap) }
             }
         } message: { cap in
             Text(model.data.game?.stringList(2002)?.string(at: 118)
@@ -1555,19 +1558,23 @@ struct GameContainerView: View {
         guard let game = host?.game, let id = scene.selectedPlanetID, let spob = game.spob(id) else { return }
         let text = OriginalText(game: game)
         let body = OriginalText.Body(spob)
+        // Beeps (0x00457580): snd 153 for a refusal the ship cannot fix
+        // (destroyed stellar, cloaked, too fast, too far), snd 151 for the
+        // clearance exchange (request, denial).
         if model.pilot.state.destroyedStellars?.contains(id) == true, !spob.landableOnlyWhenDestroyed {
-            model.audio.play(.uiSelect)
+            model.audio.play(.beep4)
             host?.hud.post(text.unableToLand(body: body, stellar: spob.displayName), rawCalls: OriginalText.Duration.landing)
             return
         }
         if scene.landingProblem(id) == .cloaked {
-            model.audio.play(.uiSelect)
+            model.audio.play(.beep4)
             host?.hud.post(text.misc(73), rawCalls: OriginalText.Duration.landing)
             return
         }
         guard scene.landingRequestID == id else {
             // First press: the request.
             if spob.isUninhabited && !spob.isGate {
+                model.audio.play(.beep1)   // 0x00459950: the "No response." line sounds snd 150
                 host?.hud.post(text.misc(53), rawCalls: OriginalText.Duration.landing)
                 scene.requestLandingClearance(id, clearedNow: true)
                 if let land = scene.attemptLand() { requestLanding(land) }
@@ -1579,7 +1586,7 @@ struct GameContainerView: View {
             let refusal = spob.isGate ? nil : landingRefusalReason(spob: spob)
             let denied = spob.isGate ? !(spob.isWormhole || scene.playerMayUseGate(id)) : refusal != nil
             if denied {
-                model.audio.play(.uiSelect)
+                model.audio.play(.beep2)
                 // An unpayable fee says so (#61–64); otherwise #81–83.
                 host?.hud.post(refusal ?? text.landingDenied(body: body), rawCalls: OriginalText.Duration.landing)
                 scene.clearTravelSelection()
@@ -1589,7 +1596,7 @@ struct GameContainerView: View {
                 scene.requestLandingClearance(id)        // the clearance line follows next frame
                 return
             }
-            model.audio.play(.uiSelect)
+            model.audio.play(.beep2)
             host?.hud.post(text.landingRequest(body: body, stellar: spob.displayName,
                                                pilot: model.pilot.state.pilotName) { Int.random(in: 0..<$0) },
                            rawCalls: OriginalText.Duration.landing)
@@ -1601,7 +1608,7 @@ struct GameContainerView: View {
             requestLanding(land)
             return
         }
-        model.audio.play(.uiSelect)
+        model.audio.play(.beep4)
         switch scene.landingProblem(id) {
         case .tooFast?:
             host?.hud.post(text.tooFast(body: body), rawCalls: OriginalText.Duration.approach)
@@ -1619,7 +1626,7 @@ struct GameContainerView: View {
     private func postLandingClearance(_ id: Int) {
         guard let game = host?.game, let spob = game.spob(id), !spob.isUninhabited || spob.isGate else { return }
         let fee = model.pilot.state.hasDominated(id) ? 0 : spob.landingFee
-        model.audio.play(.uiSelect)
+        model.audio.play(.beep2)   // NovaUi_UpdateTravelEngagementProgress 0x00459950
         host?.hud.post(OriginalText(game: game).landingClearance(
             body: OriginalText.Body(spob), stellar: spob.displayName,
             pilot: model.pilot.state.pilotName, fee: fee) { Int.random(in: 0..<$0) },
@@ -1680,6 +1687,7 @@ struct GameContainerView: View {
         let exits = game.wormholeExitCandidates(from: wormhole, currentSystem: nav.currentSystemID,
                                                 isVisible: { story.isSystemVisible($0) })
         guard let dest = exits.randomElement() else {
+            model.audio.play(.beep4)   // Stellar_EnterWormhole 0x00456ca0: no exit, snd 153
             host?.hud.post("Unable to use this wormhole."); return
         }
         performGateJump(toSystem: dest.systemID, arriveAtGate: dest.gateSpobID)
@@ -1831,7 +1839,10 @@ struct GameContainerView: View {
         guard let game = model.data.game else { return }
         if let quote = stagedLaunchQuote {
             stagedLaunchQuote = nil
-            if !quote.isEmpty { host?.hud.post(quote, rawCalls: OriginalText.Duration.missionQuote) }
+            if !quote.isEmpty {
+                model.audio.play(.beep5)   // Frame_SpaceflightLoop 0x00417600, snd 154
+                host?.hud.post(quote, rawCalls: OriginalText.Duration.missionQuote)
+            }
             return
         }
         let name = game.spob(spobID)?.displayName ?? ""
@@ -1974,6 +1985,14 @@ struct GameContainerView: View {
         // A `Q` fired in flight, and the "mission failed" notices: the
         // original's overlay line over the flight view.
         flightMissionServices.onOverlayMessage = { message in
+            // The mission-failed notices sound snd 151 for a lost mission ship
+            // (#284, 0x004192d0) and snd 153 for an expired time limit (#285,
+            // 0x00443c60); a `Q` message is the deferred line that
+            // Frame_SpaceflightLoop 0x00417600 sounds with snd 154.
+            let list = model.data.game?.stringList(2002)
+            if message == list?.string(at: 0x11c) { model.audio.play(.beep2) }
+            else if message == list?.string(at: 0x11d) { model.audio.play(.beep4) }
+            else { model.audio.play(.beep5) }
             host?.hud.post(message)
         }
         flightMissionServices.onSpawnMissionShips = { _, _ in spawnActiveMissionShips() }
@@ -2297,6 +2316,7 @@ struct GameContainerView: View {
         guard failedAny else { return }
         model.pilot.state = engine.player
         host?.hud.post(reason)
+        model.audio.play(.beep2)   // mission failed: Ship_ApplyDamageToShip 0x004192d0, snd 151
         saveGame(reason: .event)
     }
 
@@ -2884,9 +2904,11 @@ struct GameContainerView: View {
                 onTakeAmmo: { plunderPress(scene, m.shipID) { plunderTakeAmmo(scene, shipID: m.shipID) } },
                 onTakeEnergy: { plunderPress(scene, m.shipID) { plunderTakeFuel(scene, shipID: m.shipID) } },
                 onCaptureShip: { plunderPress(scene, m.shipID) { plunderCapture(scene, shipID: m.shipID) } },
+                onRefused: { model.audio.play(.beep4) },
                 onDismiss: {
                     // Leaving clears the panic; the hulk stays adrift,
-                    // disabled (EC-18).
+                    // disabled (EC-18). Abort sounds snd 152 as well.
+                    model.audio.play(.beep3)
                     scene.finishBoardingWithoutCapture(m.shipID)
                     plunderPanic = nil
                     boardManifest = nil
@@ -2979,6 +3001,8 @@ struct GameContainerView: View {
     /// A plunder button press: after a loot action the hulk may blow itself up
     /// first (`rand(100) ≤ panic`, STR# 2002 #113), ending the boarding.
     private func plunderPress(_ scene: GameScene, _ shipID: Int, _ action: () -> Void) {
+        // Every plunder button sounds snd 152 (NovaUi_RunBoardingPlunderWindow 0x00482940).
+        model.audio.play(.beep3)
         if var panic = plunderPanic {
             let blows = panic.rollsSelfDestruct(rand: { Int.random(in: 0..<$0) })
             plunderPanic = panic
@@ -3098,6 +3122,8 @@ struct GameContainerView: View {
             model.pilot.save()
             flightMissionEngine = nil
             flightMissionPersonID = nil
+        } else {
+            model.audio.play(.beep5)   // Ship_HandlePlayerTargetActionCommand 0x00454910: the offer sounds snd 154
         }
     }
 
@@ -3393,6 +3419,8 @@ struct GameContainerView: View {
         case .galaxyMap:
             nav.autoRoutePlotting = model.settings.enhancements.autoRoutePlotting
             nav.showingMap.toggle()
+            // The map window opens with snd 152 and returns with snd 150 (0x0044b120).
+            model.audio.play(nav.showingMap ? .beep3 : .beep1)
         case .hyperjump:
             // With a jump armed, J engages the hyperdrive along the route. With
             // none the original says so (STR# 2002 #29), and without the fuel
@@ -3403,6 +3431,7 @@ struct GameContainerView: View {
                     nav.showingMap = true
                 } else if let game = model.data.game {
                     let text = OriginalText(game: game)
+                    model.audio.play(.beep4)   // 0x0044b120: the refused jump sounds snd 153
                     host?.hud.post(text.misc(nav.nextJumpHopCount > 0 ? 10 : 29))
                 }
             }
@@ -3417,6 +3446,7 @@ struct GameContainerView: View {
         case .targetEscortNext:
             host?.scene.cycleTarget(squad: true)
         case .clearTarget:
+            model.audio.play(.beep1)   // 0x0044b120: N sounds snd 150
             if model.settings.enhancements.modernKeyBindings {
                 host?.scene.clearTarget()
             } else {
@@ -3437,9 +3467,12 @@ struct GameContainerView: View {
             else if action == .routeMapZoomIn, routeMapUnitsPerPixel > 0.5 { routeMapUnitsPerPixel *= 0.75 }
             else { return }
             routeMapShownAt = Date()
-            model.audio.play(.uiSelect)
+            model.audio.play(.beep1)   // 0x0044b120, snd 150
         case .cycleHyperspaceLink:
-            if nav.cycleHyperspaceLink() { routeMapShownAt = Date() }
+            if nav.cycleHyperspaceLink() {
+                routeMapShownAt = Date()
+                model.audio.play(.beep3)   // 0x0044b120: a link was stepped, snd 152
+            }
         case .hyperspaceArm:
             // H: the travel channel goes back to hyperspace, re-arming the
             // plotted route's next hop.
@@ -3449,13 +3482,23 @@ struct GameContainerView: View {
         case .dismissMessage:
             host?.hud.dismissMessage()
         case .playerInfo:
-            model.audio.play(.uiSelect)
+            // Blocked mid-jump the original sounds snd 153 (0x0044b120); its
+            // window opens silently.
+            if host?.scene.isJumping == true && !showPilotInfoPanel { model.audio.play(.beep4) }
             syncCombatStanding()
             showPilotInfoPanel.toggle()
         case .missionInfo:
-            model.audio.play(.uiSelect)
-            showMissionsPanel.toggle()
+            // With no mission the original refuses with snd 153 and STR# 2002 #354
+            // (0x0044b120) and opens nothing; the window sounds its own beeps.
+            if showMissionsPanel { showMissionsPanel = false }
+            else if model.pilot.state.activeMissions.isEmpty {
+                model.audio.play(.beep4)
+                host?.hud.post(model.data.game?.stringList(2002)?.string(at: 354) ?? "")
+            } else { showMissionsPanel = true }
         case .clearSecondary:
+            if host?.scene.playerShip?.selectedSecondaryID != nil {
+                model.audio.play(.beep3)   // 0x0044b120, snd 152
+            }
             host?.scene.playerShip?.clearSecondary()
         case .hailTarget:
             hail()
@@ -3485,18 +3528,18 @@ struct GameContainerView: View {
             host?.scene.escortOrder(OriginalEscortCommand.returnToHangar)
         case .openEscorts:
             if model.settings.enhancements.modernKeyBindings {
-                // The port's layout: E opens the Escorts window.
-                model.audio.play(.uiSelect)
+                // The port's layout: E opens the Escorts window (no original
+                // counterpart, so silent).
                 showEscortsPanel = true
             } else {
                 // The original: E shows the in-flight Escort Commands panel.
                 host?.scene.escortPanelPressE()
             }
         case .shipInfo:
-            model.audio.play(.uiSelect)
-            showShipInfoPanel = true
+            showShipInfoPanel = true   // port-only card, silent
         case .board:
-            // Board the targeted hulk if it's disabled and in reach.
+            // Board the targeted hulk if it's disabled and in reach (a refusal
+            // sounds snd 153 from `attemptBoard`).
             if let m = host?.scene.attemptBoard() {
                 boardManifest = m
                 plunderPanic = World.PlunderPanic(rand: { Int.random(in: 0..<$0) })
@@ -3533,7 +3576,7 @@ struct GameContainerView: View {
             let isEscort = scene.isPlayerEscort(entityID)
             Log.input.debug("hail() -> ship entityID=\(entityID, privacy: .public) name=\(name, privacy: .public) isPlayerEscort=\(isEscort, privacy: .public)")
             if isEscort {
-                model.audio.play(.uiSelect)
+                model.audio.play(.beep5)   // NovaUi_RunEscortShipManagementWindow 0x004853a0
                 showEscortsPanel = true
                 return
             }
@@ -3545,14 +3588,14 @@ struct GameContainerView: View {
             let originalCheck = scene.originalHailCheck(entityID: entityID)
             switch originalCheck {
             case .beep?:
-                model.audio.play(.uiSelect)
+                model.audio.play(.beep4)   // Ship_HandlePlayerTargetActionCommand 0x00454910
                 return
             case let .message(index)?:
-                model.audio.play(.uiSelect)
+                model.audio.play(.beep4)
                 host?.hud.post(host?.game?.stringList(2002)?.string(at: index) ?? "")
                 return
             case .escortWindow?:
-                model.audio.play(.uiSelect)
+                model.audio.play(.beep5)
                 showEscortsPanel = true
                 return
             case .open?, nil:
@@ -3564,7 +3607,7 @@ struct GameContainerView: View {
             // No `govt` at all (Independent, `GalaxyMapView`'s own fallback for
             // the same case) always gives a response — nothing to gate on.
             if originalCheck == nil, personID == nil, govt?.cantBeHailed == true {
-                model.audio.play(.uiSelect)
+                model.audio.play(.beep4)
                 host?.hud.post(host?.game?.stringList(2002)?.string(at: 53) ?? "")   // "No response."
                 return
             }
@@ -3647,6 +3690,7 @@ struct GameContainerView: View {
                     shipState.assistTitle = host?.game?.stringList(150)?.string(at: 25) ?? "Beg For Mercy"
                 }
             }
+            model.audio.play(.beep5)   // NovaUi_RunTargetShipCommWindow 0x0047e470 opens with snd 154
             hailDialogState = shipState
         case let .planet(spobID, name, _, landable):
             // The stellar comm window (UI-09, 0x00480030): an uninhabited
@@ -3659,7 +3703,7 @@ struct GameContainerView: View {
             guard let comm = StellarComm.open(spob: spob, system: nav.currentSystemID, state: model.pilot.state,
                                               game: game, diplomacy: host?.galaxy?.makeDiplomacy(),
                                               bribeLatch: &latch, rand: { Int.random(in: 0..<max(1, $0)) }) else {
-                model.audio.play(.uiSelect)
+                model.audio.play(.beep4)   // 0x00454910 / 0x00480030: no window, snd 153
                 host?.hud.post(game.stringList(2002)?.string(at: 53) ?? "No response.")
                 return
             }
@@ -3672,6 +3716,7 @@ struct GameContainerView: View {
                 responseText: comm.openingText(spob: spob, state: model.pilot.state, game: game))
             state.comm = comm
             refreshPlanetHail(&state, spob: spob, game: game)
+            model.audio.play(.beep5)   // NovaUi_RunTravelDestinationInteractionWindow 0x00480030 opens with snd 154
             hailDialogState = state
         }
     }
@@ -4635,6 +4680,9 @@ struct KeyboardControls: ViewModifier {
     func body(content: Content) -> some View {
         content.onKeyPress(phases: [.down, .up]) { press in
             let pressed = press.phase == .down
+            #if !os(macOS)
+            CapsLockState.note(press.modifiers.contains(.capsLock))   // 2x mode reads the toggle state
+            #endif
             let token = KeyToken.from(press)
             if pressed, onRawKey(token) { return .handled }
             // If keys reach the scene at all but nothing binds, or nothing ever

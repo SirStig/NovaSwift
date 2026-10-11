@@ -329,6 +329,7 @@ struct OutfitterView: View {
     /// it's bought, not just look right in this dialog's own numbers.
     var onLiveSync: () -> Void = {}
     var onDone: () -> Void
+    @EnvironmentObject private var appModel: AppModel
 
     @State private var selectedID: Int?
     @State private var topRow = 0
@@ -623,6 +624,9 @@ struct OutfitterView: View {
                 Log.spaceport.debug("Sold outfit \(o.id, privacy: .public) (\(o.name, privacy: .public)) at spöb \(spob.id, privacy: .public) for \(o.cost, privacy: .public)cr")
                 onLiveSync()
             } else {
+                // NovaUi_RunOutfitterInteractionLoop 0x0048ea70: a sale that would
+                // leave free mass negative sounds snd 153.
+                appModel.audio.play(.beep4)
                 Log.spaceport.notice("Outfitter sell no-op at spöb \(spob.id, privacy: .public): outfit=\(o.id, privacy: .public) — none owned, unsellable, or free mass would go negative")
             }
         }
@@ -647,6 +651,7 @@ struct ShipyardView: View {
     /// Push the purchase into the live HUD immediately (see `SpaceportView.onLiveSync`).
     var onLiveSync: () -> Void = {}
     var onDone: () -> Void
+    @EnvironmentObject private var appModel: AppModel
 
     @State private var selectedID: Int?
     @State private var topRow = 0
@@ -876,7 +881,10 @@ struct ShipyardView: View {
                    width: 63, enabled: s != nil) { showInfo = true }
             .ditlPlace(space, d, 9, stock: CGRect(x: 253, y: 289, width: 89, height: 25), at: -129.5, 128)
         NovaButton(graphics: graphics, title: graphics.buttonLabel(SpaceportLabel.buyShip, fallback: "Buy Ship"),
-                   width: 83, enabled: canBuy) {
+                   width: 83, enabled: canBuy,
+                   // NovaUi_RunShipyardPurchaseLoop 0x00492f30: Buy with nothing
+                   // selected, or a hull that cannot be bought, sounds snd 153.
+                   onRefused: { appModel.audio.play(.beep4) }) {
             guard let s else {
                 Log.spaceport.error("Shipyard buy tapped with no ship selected at spöb \(spob.id, privacy: .public) — no-op")
                 return
@@ -1105,8 +1113,16 @@ struct HolovidView: View {
     let spob: SpobRes
     @ObservedObject var pilot: PilotStore
     var onDone: () -> Void
+    @EnvironmentObject private var appModel: AppModel
 
     private var game: NovaGame { graphics.game }
+
+    /// NovaUi_RunTravelNewsWindow 0x0047d180: the news window opens with snd 151
+    /// and closes with snd 152.
+    private func leave() {
+        appModel.audio.play(.beep3)
+        onDone()
+    }
 
     /// The station government's own news id (≥128), used both to pick its custom
     /// backdrop and to resolve which local news applies.
@@ -1135,6 +1151,10 @@ struct HolovidView: View {
     }
 
     var body: some View {
+        holovidBody.onAppear { appModel.audio.play(.beep2) }
+    }
+
+    @ViewBuilder private var holovidBody: some View {
         let items = news
         let storyText = items.isEmpty
             ? " " + OriginalText(game: game).misc(191)
@@ -1152,7 +1172,7 @@ struct HolovidView: View {
                 .novaPlace(space, -textW / 2, -fh / 2 + 20)
                 NovaButton(graphics: graphics,
                            title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
-                           width: 96, action: onDone)
+                           width: 96, action: leave)
                     .novaPlace(space, -48, fh / 2 - 40)
             }
         } else {
@@ -1166,7 +1186,7 @@ struct HolovidView: View {
                 .frame(width: 300, height: 200)
                 NovaButton(graphics: graphics,
                            title: graphics.buttonLabel(SpaceportLabel.leave, fallback: "Leave"),
-                           width: 96, action: onDone)
+                           width: 96, action: leave)
             }
             .padding(20)
             .frame(width: 360)

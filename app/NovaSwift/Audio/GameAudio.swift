@@ -25,20 +25,45 @@ final class GameAudio: ObservableObject {
     enum GameEvent {
         case hyperspaceCharge    // spinning up for a jump
         case hyperspaceArrive    // Warp out
-        case uiSelect            // menu/button click
-        case uiError             // rejected action
-        case targetLock          // acquired a target
+        // The original's five interface beeps, snd 150-154, loaded as
+        // g_nv_beep1 + DAT_00591564/68/6c/70 by NovaAudio_PreloadGameplayData
+        // 0x004b0740 and played at priority 1 at every call site. By use:
+        //   beep1 (150) confirm / dismiss: clear target or travel selection,
+        //          pick a nav stellar, map close, escort panel open/close
+        //   beep2 (151) notice / alarm: comm and news button presses, landing
+        //          request and clearance, disabled / destroyed / mission failed,
+        //          escort orders, self-destruct abort
+        //   beep3 (152) select / back: target cycling, map open, link cycle,
+        //          clear secondary, window close, plunder actions
+        //   beep4 (153) denied: a command that cannot be done right now
+        //   beep5 (154) incoming: a new message or window (hail open, escort
+        //          repaired, fleet quote)
+        case beep1, beep2, beep3, beep4, beep5
         case redAlert            // a ship starts threatening the player's squad
         case docking             // player set down on a spöb
         case launch              // player lifted off from a spöb
+
+        /// Port-only screens (launcher, settings, plug-ins, debug) have no
+        /// original counterpart and click with the first beep.
+        static let uiSelect = GameEvent.beep1
+        /// A port-only form rejecting input (new-pilot and import screens, the
+        /// text prompt's length cap) keeps the snd 152 it always had.
+        static let uiError = GameEvent.beep3
+
+        /// The beep for snd `soundID` (150-154), nil for any other id.
+        static func beep(soundID: Int) -> GameEvent? {
+            [GameEvent.beep1, .beep2, .beep3, .beep4, .beep5].first { $0.soundID == soundID }
+        }
 
         var soundID: Int {
             switch self {
             case .hyperspaceCharge:    return 128   // "Warp up"
             case .hyperspaceArrive:    return 130   // "Warp out"
-            case .uiSelect:            return 150   // "Beep1"
-            case .uiError:             return 152   // "Beep3"
-            case .targetLock:          return 151   // "Beep2"
+            case .beep1:               return 150   // "Beep1"
+            case .beep2:               return 151   // "Beep2"
+            case .beep3:               return 152   // "Beep3"
+            case .beep4:               return 153   // "Beep4"
+            case .beep5:               return 154   // "Beep5"
             case .redAlert:            return 370   // "Red Alert"
             case .docking, .launch:    return 390   // "Airlock"
             }
@@ -49,7 +74,7 @@ final class GameAudio: ObservableObject {
             switch self {
             case .hyperspaceCharge:    return P.warpUp
             case .hyperspaceArrive:    return P.warpOut
-            case .uiSelect, .uiError, .targetLock: return P.beep
+            case .beep1, .beep2, .beep3, .beep4, .beep5: return P.beep
             case .redAlert:            return P.redAlert
             case .docking, .launch:    return P.airlock
             }
@@ -165,7 +190,7 @@ final class GameAudio: ObservableObject {
     func play(_ event: GameEvent) {
         if event.playsOnlyWhenSilent, engine.isPlaying(soundID: event.soundID) { return }
         switch event {
-        case .uiSelect, .uiError, .targetLock:
+        case .beep1, .beep2, .beep3, .beep4, .beep5:
             playSound(event.soundID, priority: event.priority, gainScale: Float(settings.uiVolume))
         default:
             playSound(event.soundID, priority: event.priority)
@@ -293,20 +318,39 @@ final class GameAudio: ObservableObject {
 
     // MARK: The original jump cue
 
+    /// snd 129, the "Warp up" cue the original plays instead of snd 128 while its
+    /// Caps Lock 2x flag is on (`PlayerTick_ManualFlightAndRegeneration`
+    /// 0x0044c8d0 / `Stellar_GetJumpSequenceDuration60Hz` 0x0046efb0).
+    static let warpUp2xSoundID = 129
+
     /// The pre-staged Warp up voice (0x004b0740 / 0x0046ab00): snd 128 played
     /// once, `multiplier` times faster (voice rate `65536 / multiplier`… the
     /// descriptor's step), at priority 32000, and only when no Warp up voice
-    /// is sounding.
-    func startWarpUp(multiplier: Double) {
-        let id = GameEvent.hyperspaceCharge.soundID
-        guard !settings.muteAll, !engine.isPlaying(soundID: id),
-              let buffer = library.buffer(for: id, rate: multiplier) else { return }
+    /// is sounding. With `x2` (the Caps Lock flag) it is snd 129 instead, at the
+    /// same rate; if the data has no snd 129 the normal cue plays. Every other
+    /// game speed keeps snd 128: the jump's cue and tunnel ramp run on the wall
+    /// clock at any speed (`PlayerHyperjump.elapsed60`), so the cue plays as is.
+    func startWarpUp(multiplier: Double, x2: Bool = false) {
+        let normal = GameEvent.hyperspaceCharge.soundID
+        guard !settings.muteAll,
+              !engine.isPlaying(soundID: normal), !engine.isPlaying(soundID: Self.warpUp2xSoundID)
+        else { return }
+        var id = normal
+        var buffer = library.buffer(for: normal, rate: multiplier)
+        if x2, let x2Buffer = library.buffer(for: Self.warpUp2xSoundID, rate: multiplier) {
+            id = Self.warpUp2xSoundID
+            buffer = x2Buffer
+        }
+        guard let buffer else { return }
         engine.play(buffer, soundID: id, priority: OriginalAudio.Priority.warpUp,
                     volume: OriginalAudio.unityVolume)
     }
 
     /// The cut at `350 / multiplier` ticks (0x0044f3d0:368-381).
-    func stopWarpUp() { engine.stop(soundID: GameEvent.hyperspaceCharge.soundID) }
+    func stopWarpUp() {
+        engine.stop(soundID: GameEvent.hyperspaceCharge.soundID)
+        engine.stop(soundID: Self.warpUp2xSoundID)
+    }
 
     // MARK: Main menu
 
@@ -323,6 +367,13 @@ final class GameAudio: ObservableObject {
             action()
         }
         waitThenAct()
+    }
+
+    /// Mouse tracking on a main-menu button (`FUN_004861b0`): snd 600 as the
+    /// press lands on a button, snd 601 as it leaves every button or is
+    /// released on one.
+    func playMenuButton(down: Bool) {
+        playSound(down ? 600 : 601, priority: OriginalAudio.Priority.menuTransition)
     }
 
     /// A menu shutter strip starts (snd 602) or lands (snd 603) (`FUN_0048bfb0`).

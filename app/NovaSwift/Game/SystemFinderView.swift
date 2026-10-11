@@ -18,6 +18,7 @@ struct SystemFinderView: View {
     var onSelect: (SystRes) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var model: AppModel
     @State private var query = ""
 
     /// Discovery level > 0 (visited, revealed or charted), in system order.
@@ -37,7 +38,12 @@ struct SystemFinderView: View {
     /// prefix winner (0x004aab30), or a failure beep.
     private func submit() {
         if let id = StarMapFind.find(query, in: known.map { ($0.id, $0.displayName) }),
-           let system = nav.system(id) { pick(system) }
+           let system = nav.system(id) {
+            model.audio.play(.beep5)   // NovaUi_RunStarmapSearchDialog 0x004aab30: a match, snd 154
+            pick(system)
+        } else {
+            model.audio.play(.beep4)   // no match, snd 153
+        }
     }
 
     private func pick(_ system: SystRes) {

@@ -154,6 +154,10 @@ struct NovaButton: View {
     /// Declared before `action` so the trailing-closure call sites (`NovaButton(...) { ... }`)
     /// keep binding that closure to `action`, not this one.
     var onQuantity: (() -> Void)? = nil
+    /// Run when a greyed button is pressed — the original answers a press it
+    /// refuses with a beep (snd 153) rather than ignoring it. Also declared
+    /// before `action`.
+    var onRefused: (() -> Void)? = nil
     let action: () -> Void
     @Environment(\.novaTheme) private var theme
     @State private var longPressFired = false
@@ -168,10 +172,10 @@ struct NovaButton: View {
         NovaButtonFace(graphics: graphics, title: title, width: width,
                        state: enabled ? .normal : .grey, theme: theme)
             .contentShape(Rectangle())
-            .cursorClickable { if enabled { action() } }
+            .cursorClickable { if enabled { action() } else { onRefused?() } }
         #else
         Button(action: {
-            guard enabled else { return }
+            guard enabled else { onRefused?(); return }
             #if os(macOS)
             if let onQuantity, NSEvent.modifierFlags.contains(.option) { onQuantity(); return }
             #endif
@@ -180,7 +184,7 @@ struct NovaButton: View {
         }) { Color.clear }
             .buttonStyle(NovaButtonStyle(graphics: graphics, title: title, width: width,
                                          enabled: enabled, theme: theme))
-            .disabled(!enabled)
+            .disabled(!enabled && onRefused == nil)
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                     guard enabled, let onQuantity else { return }
@@ -189,7 +193,7 @@ struct NovaButton: View {
                 }
             )
             // Every authentic button is pressable by the controller cursor.
-            .cursorClickable { if enabled { action() } }
+            .cursorClickable { if enabled { action() } else { onRefused?() } }
         #endif
     }
 }

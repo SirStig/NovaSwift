@@ -1,4 +1,5 @@
 import SwiftUI
+import NovaSwiftKit
 
 /// The app's real mark: the commissioned ship + "NOVA" wordmark illustration
 /// also used as the App Icon (`Assets.xcassets/AppLogo.imageset`, same source
@@ -201,6 +202,28 @@ enum NovaLinks {
             URLQueryItem(name: "body", value: body),
         ]
         return components.url!
+    }
+}
+
+/// The text for the main menu's About Nova box (`Menu_RunAboutNovaDialog`
+/// 0x00486120): a short NovaSwift credit, then the data's own dësc 32767.
+/// The original runs that text through the mission-text filler first, which
+/// turns `<REG>` into the registered name, or "EV Nova Community" when there
+/// is none (`FUN_004d45a0`); NovaSwift has no registration, so it's always
+/// the latter.
+enum AboutNovaText {
+    static func text(game: NovaGame) -> String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? ""
+        let header = """
+        NovaSwift \(version)
+             A free, unofficial port by Joshua Kac (SirStig).
+             Not affiliated with or endorsed by Ambrosia Software or ATMOS.
+             \(NovaLinks.repo.host ?? "")\(NovaLinks.repo.path)
+
+
+        """
+        return header + game.descText(32767).replacingOccurrences(of: "<REG>", with: "EV Nova Community")
     }
 }
 

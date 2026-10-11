@@ -193,6 +193,11 @@ struct AuthenticMainMenuView: View {
     @State private var appeared = false
     @State private var sheet: Sheet?
     @State private var hoveredAction: MainMenuAction?
+    /// Global frames of the menu buttons, for mouse tracking across them.
+    @State private var buttonFrames: [MainMenuAction: CGRect] = [:]
+    /// The button the held pointer is over (drawn pressed), if any.
+    @State private var trackedButton: MainMenuAction?
+    @State private var pointerTracking = false
     @FocusState private var menuFocused: Bool
     /// How many frames of the shutter-strip run have played. Starts at 0 (the
     /// retracted state, pixel-identical to the backdrop) and counts up to each
@@ -295,7 +300,7 @@ struct AuthenticMainMenuView: View {
                     // data's own dësc 32767 in the generic dësc dialog. The
                     // port's About is under Settings > Support.
                     if let game = model.data.game, let desc = game.desc(32767) {
-                        DescTextDialog(title: "", text: game.descText(32767),
+                        DescTextDialog(title: "", text: AboutNovaText.text(game: game),
                                        graphicID: desc.pictureID, onClose: { sheet = nil })
                     } else {
                         AboutView(onClose: { sheet = nil })
@@ -565,6 +570,8 @@ struct AuthenticMainMenuView: View {
     private func buttons(layout: NovaLayout) -> some View {
         ForEach(Array(assets.buttons.enumerated()), id: \.offset) { i, art in
             MenuSpriteButton(art: art,
+                             pressed: trackedButton == art.action,
+                             pointerHeld: pointerTracking,
                              onHoverChange: { isHovering in
                                  if isHovering {
                                      hoveredAction = art.action
@@ -572,7 +579,10 @@ struct AuthenticMainMenuView: View {
                                      hoveredAction = nil
                                  }
                              },
-                             action: { activate(art.action) })
+                             onFrame: { buttonFrames[art.action] = $0 },
+                             action: { activate(art.action) },
+                             track: trackPointer(at:),
+                             release: releasePointer(at:))
                 .novaPlace(layout, origin: art.origin, size: art.size)
                 // The original blits each menu button only once the shutter
                 // strip of its row has finished sliding.
@@ -618,6 +628,41 @@ struct AuthenticMainMenuView: View {
         }
     }
 
+    /// The settled button under a point in global space, if any.
+    private func button(at point: CGPoint) -> MainMenuAction? {
+        for (i, art) in assets.buttons.enumerated()
+        where slideSettled(MainMenuReadout.slideIndex(forButton: i)) {
+            if buttonFrames[art.action]?.contains(point) == true { return art.action }
+        }
+        return nil
+    }
+
+    /// Mouse tracking across the menu buttons (`FUN_004861b0`): the press
+    /// lands on a button with snd 600; while held, moving onto another button
+    /// highlights it with 600, moving off every button plays 601.
+    private func trackPointer(at point: CGPoint) {
+        let hit = button(at: point)
+        if !pointerTracking {
+            pointerTracking = true
+            trackedButton = hit
+            if hit != nil { model.audio.playMenuButton(down: true) }
+        } else if hit != trackedButton {
+            model.audio.playMenuButton(down: hit != nil)
+            trackedButton = hit
+        }
+    }
+
+    /// Release: over a button, snd 601 and its command runs at once; off
+    /// every button, nothing.
+    private func releasePointer(at point: CGPoint) {
+        let hit = button(at: point)
+        pointerTracking = false
+        trackedButton = nil
+        guard let hit else { return }
+        model.audio.playMenuButton(down: false)
+        perform(hit)
+    }
+
     /// A menu command plays snd 600, waits for it, plays snd 601, then acts
     /// (`FUN_0048bc20`).
     private func activate(_ action: MainMenuAction) {
@@ -644,22 +689,38 @@ struct AuthenticMainMenuView: View {
 }
 
 /// A button whose face is a real EV Nova sprite: the up frame normally, the
-/// highlighted frame on hover (rollover) or press.
+/// highlighted frame on hover (rollover) or while the held pointer is over it.
 private struct MenuSpriteButton: View {
     let art: MainMenuAssets.ButtonArt
+    /// The menu's mouse tracking has the held pointer over this button.
+    let pressed: Bool
+    /// The pointer is held (on any button): hover no longer highlights.
+    let pointerHeld: Bool
     var onHoverChange: (Bool) -> Void = { _ in }
+    /// Reports this button's global frame for the menu's hit testing.
+    let onFrame: (CGRect) -> Void
+    /// The command path (controller cursor): snd 600, wait, snd 601, act.
     let action: () -> Void
+    /// Pointer moved / released, in global coordinates. The drag starts on
+    /// this button but keeps reporting wherever it goes, so the menu can
+    /// track it across all six buttons (`FUN_004861b0`).
+    let track: (CGPoint) -> Void
+    let release: (CGPoint) -> Void
     @State private var hovering = false
-    @State private var pressing = false
 
     // The button is sized/positioned by novaPlace; the resizable image fills it.
     var body: some View {
-        let highlighted = hovering || pressing
+        let highlighted = pressed || (hovering && !pointerHeld)
         Image(decorative: highlighted ? art.pressed : art.normal, scale: 1)
             .resizable().interpolation(.medium)
-            .scaleEffect(pressing ? 0.96 : 1)
+            .scaleEffect(pressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.1), value: highlighted)
             .contentShape(Rectangle())
+            .background(GeometryReader { geo in
+                Color.clear
+                    .onAppear { onFrame(geo.frame(in: .global)) }
+                    .onChange(of: geo.frame(in: .global)) { _, new in onFrame(new) }
+            })
             // Controller cursor presses these on every platform — on tvOS
             // it's the only pointer there is.
             .cursorClickable(action)
@@ -669,9 +730,9 @@ private struct MenuSpriteButton: View {
                 onHoverChange(h)
             }
             .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in pressing = true }
-                    .onEnded { _ in pressing = false; action() }
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .onChanged { track($0.location) }
+                    .onEnded { release($0.location) }
             )
             #endif
     }

@@ -48,7 +48,7 @@ A few done items leave a small piece for later:
 
 - UI-11: the original's new-pilot hint chain (overlaps NovaSwift's tutorial hints).
 - UI-13: Tab cycling in Player Info, and count words for junk cargo.
-- UI-15: map Tab/backslash cycling, Caps Lock.
+- UI-15: map Tab/backslash cycling. (Caps Lock 2× mode is done: `GameSpeedRules`, `CapsLockState`.)
 - AI-12: holding a mission ship at a gate.
 - FL-23: the jump-engage countdown and the cannot-jump message auto-clear.
 

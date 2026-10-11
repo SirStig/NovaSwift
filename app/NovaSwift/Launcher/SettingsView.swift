@@ -261,7 +261,7 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Gameplay", icon: "gamecontroller")
         } footer: {
-            Text("Game speed sets the overall pace — 1× is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Auto-target locks onto the nearest hostile the moment you open fire. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back. Difficulty, traffic and other options the original didn't have are under Enhancements.")
+            Text("Game speed sets the overall pace — Authentic is the faithful, unhurried EV Nova cruise; drop to 0.5× for more room to react in a dogfight, or step it up to 8× when you'd rather not wait. Every speed applies the rules of EV Nova's own Caps Lock 2× mode (jumps take the same real time, beams hit as often) at its own multiplier, and turning Caps Lock on in flight doubles whichever speed you pick, as in the original; a co-op session uses the host's speed and ignores Caps Lock. Auto-target locks onto the nearest hostile the moment you open fire. Tutorial hints show one-time tips as you play — “Show all hints again” brings them back. Difficulty, traffic and other options the original didn't have are under Enhancements.")
         }
     }
 

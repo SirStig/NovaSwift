@@ -55,10 +55,21 @@ struct MissionInfoView: View {
     private let amber = Color(red: 1.0, green: 0.7, blue: 0.28)
     private let missionOrange = Color(red: 1.0, green: 0.52, blue: 0.0)
 
+    /// NovaUi_RunMissionComputerWindow 0x00446150: opens with snd 151, closes
+    /// with snd 152, and Abort pressed with no mission picked sounds snd 153.
+    private func close() {
+        appModel.audio.play(.beep3)
+        onClose()
+    }
+
     var body: some View {
+        content.onAppear { appModel.audio.play(.beep2) }
+    }
+
+    private var content: some View {
         ZStack {
             Color.black.opacity(0.55).ignoresSafeArea()
-                .contentShape(Rectangle()).onTapGesture { onClose() }
+                .contentShape(Rectangle()).onTapGesture { close() }
             if let frame = graphics.pict(Self.frameID) {
                 chrome(frame: frame)
             }
@@ -129,12 +140,13 @@ struct MissionInfoView: View {
                            title: graphics.buttonLabel(SpaceportLabel.abort, fallback: "Abort"),
                            width: CGFloat(items.abort.w - 26),
                            enabled: selected?.canAbort ?? false,
+                           onRefused: { if selected == nil { appModel.audio.play(.beep4) } },
                            action: abortSelected)
                     .novaPlace(space, cx(items.abort, nw), cy(items.abort, nh))
 
                 NovaButton(graphics: graphics,
                            title: graphics.buttonLabel(SpaceportLabel.done, fallback: "Done"),
-                           width: CGFloat(items.done.w - 26), action: onClose)
+                           width: CGFloat(items.done.w - 26), action: close)
                     .novaPlace(space, cx(items.done, nw), cy(items.done, nh))
             }
             .frame(width: nw, height: nh, alignment: .topLeading)

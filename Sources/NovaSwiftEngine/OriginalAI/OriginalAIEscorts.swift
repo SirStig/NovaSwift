@@ -160,7 +160,8 @@ extension OriginalAI {
             action = jumping || ownTarget ? 154 : 159
         }
         let text = s(134) + group + " " + s(action)
-        world.postOverlayMessage(text, frames: 250)
+        // Ship_CommandPlayerEscortGroup 0x0045c880 sounds snd 151 with the line.
+        world.postOverlayMessage(text, frames: 250, beep: 151)
         return text
     }
 

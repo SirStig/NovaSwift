@@ -37,35 +37,36 @@ extension World {
     /// #385 #386, 0x28); letting go while armed aborts (#385 #387). While held,
     /// each whole-30-tick boundary at or under 120 posts "Self-destruct in N
     /// seconds." (#385 #395 N #389, 0x46), and at 1 tick or less the ship blows
-    /// up: shields 0, armor −1, target cleared ("Have a nice day.", #390). Not
-    /// modelled: the sound cues and the hulls docked to the player that
-    /// detonate with it.
+    /// up: shields 0, armor −1, target cleared ("Have a nice day.", #390). The beeps
+    /// are snd 153 on arming, 152 on each countdown line, 151 on the abort and
+    /// the blast. Not modelled: the hulls docked to the player that detonate
+    /// with it.
     func stepSelfDestruct(held: Bool, ticks: Double) {
-        func line(_ ids: [Int], _ count: String? = nil, frames: Int) {
+        func line(_ ids: [Int], _ count: String? = nil, frames: Int, beep: Int) {
             let misc = galaxy?.game.stringList(2002)
             var parts = ids.map { misc?.string(at: $0) ?? "" }
             if let count { parts.insert(count, at: 2) }
             var text = parts.filter { !$0.isEmpty }.joined(separator: " ")
             if count != nil { text += "." }
-            postOverlayMessage(text, frames: frames)
+            postOverlayMessage(text, frames: frames, beep: beep)
         }
         if held, selfDestructCountdown < 0, player.isAlive {
-            line([385, 386], frames: 0x28)
+            line([385, 386], frames: 0x28, beep: 153)
             selfDestructCountdown = 150
         }
         guard selfDestructCountdown > 0 else { return }
         guard held else {
-            line([385, 387], frames: 0x28)
+            line([385, 387], frames: 0x28, beep: 151)
             selfDestructCountdown = -1
             return
         }
         selfDestructCountdown -= ticks
         let whole = Int(selfDestructCountdown)
         if selfDestructCountdown <= 120, whole % 30 == 0 {
-            line([385, 395, 389], String(Int(selfDestructCountdown / 30)), frames: 0x46)
+            line([385, 395, 389], String(Int(selfDestructCountdown / 30)), frames: 0x46, beep: 152)
         }
         if selfDestructCountdown <= 1 {
-            postOverlayMessage(galaxy?.game.stringList(2002)?.string(at: 390) ?? "", frames: 0x28)
+            postOverlayMessage(galaxy?.game.stringList(2002)?.string(at: 390) ?? "", frames: 0x28, beep: 151)
             player.shield = 0
             player.armor = -1
             player.currentTargetID = nil

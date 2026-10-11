@@ -223,7 +223,8 @@ extension Spawner {
             let quote = galaxy.game.singleString(pers.hailQuote + 4999)
                 ?? (pers.hailQuote <= quotes.count ? quotes[pers.hailQuote - 1] : nil)
             if let quote, !quote.isEmpty {
-                world.postOverlayMessage(quote.replacingOccurrences(of: "<OSN>", with: pers.name), frames: 0x1a4)
+                world.postOverlayMessage(quote.replacingOccurrences(of: "<OSN>", with: pers.name), frames: 0x1a4,
+                                         beep: 154)
             }
         }
     }
@@ -508,7 +509,8 @@ extension Spawner {
         if showQuote, fleet.hailQuote > 0,
            let strings = galaxy.game.stringList(fleet.hailQuote)?.strings, !strings.isEmpty {
             let line = strings[world.rng.range(strings.count)]
-            world.postOverlayMessage(OriginalSpawnRules.fillQuote(line, rng: &world.rng), frames: 360)
+            // EncounterFleet_SpawnRandomEncounterFleet 0x004259b0 sounds snd 154 with the quote.
+            world.postOverlayMessage(OriginalSpawnRules.fillQuote(line, rng: &world.rng), frames: 360, beep: 154)
         }
     }
 

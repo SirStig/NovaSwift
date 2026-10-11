@@ -570,7 +570,8 @@ extension OriginalAI {
         guard likesPlayer(ship, host: host, world: world), !isAttacking(ship, host.player, host: host),
               host.player.isAlive, ship.cloakLevel <= 0 else { return }
         let line = game.stringList(5003)?.string(at: host.random(20) + 1) ?? ""
-        world.postOverlayMessage(Self.broadcastName(ship, game: game) + ":  " + line, frames: 240)
+        // The distress call sounds snd 154 (0x004112c0).
+        world.postOverlayMessage(Self.broadcastName(ship, game: game) + ":  " + line, frames: 240, beep: 154)
     }
 
     /// The interceptor's scan warning (0x00403de0): picking the player as its
@@ -584,8 +585,9 @@ extension OriginalAI {
               Contraband.matches(world.missionCargoScanMask, g.scanMask) else { return }
         let list = game.stringList(2002)
         let line = list?.string(at: 381 + host.random(3)) ?? ""
+        // The scan warning sounds snd 154 (0x00403de0).
         world.postOverlayMessage(Self.broadcastName(ship, game: game) + ":  " + world.pilotName + ", " + line + "!",
-                                 frames: 400)
+                                 frames: 400, beep: 154)
     }
 
     /// The class name a broadcast speaks with (shïp +0x6c), or a mission

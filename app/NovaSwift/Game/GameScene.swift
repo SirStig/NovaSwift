@@ -151,7 +151,7 @@ final class GameScene: SKScene {
             hostile: { [weak self] in self?.isEffectivelyHostileToPlayer($0) ?? false },
             missionAvailable: { [weak self] in self?.persMissionAvailableProvider?($0) ?? true },
             roll: { Double.random(in: 0..<1) })
-        if !posted.isEmpty { audio?.play(.uiSelect) }
+        _ = posted   // the përs quote broadcast is silent in the original (0x00433050)
     }
     /// The gate the last in-place system reload emerged from (nil for a
     /// hyperspace arrival) — picks the arrival line's wording (UI-11).
@@ -521,6 +521,14 @@ final class GameScene: SKScene {
     /// Most sim ticks to run in one frame — a spiral-of-death guard so a hitch or
     /// paused breakpoint drops the backlog instead of freezing to catch up.
     private static let simMaxCatchupTicks = 5
+    /// The original's x2 flag (`DAT_00596d34`): Caps Lock's 2x mode, evaluated each
+    /// frame by `GameSpeedRules.x2Flag`. Combined with the Settings game speed it
+    /// gives the effective multiplier N that drives the sim and its compensations.
+    private var x2Flag = false
+    /// The simulation-speed multiplier N used this frame (1 = the original's normal speed).
+    private var effectiveSpeed: Double = 1
+    /// The top-left "x2" cicn (#20000) shown while N is exactly 2 (`Frame_AnchorX2IndicatorSprite` 0x0042cbb0).
+    private var x2Indicator: SKSpriteNode?
     /// Fraction (0..<1) the current display frame sits into the next fixed sim
     /// tick — the blend factor for render interpolation. Set once per frame after
     /// the accumulator loop; read by the sprite-sync helpers below.
@@ -1589,7 +1597,17 @@ final class GameScene: SKScene {
         // session every device uses the host's shared multiplier instead of its
         // own local setting (see `gameSpeedMultiplierOverride`), so the lobby's
         // sims stay on one clock.
-        let gameSpeedMultiplier = gameSpeedMultiplierOverride?() ?? settings.gameSpeed.multiplier
+        // Caps Lock is the original's 2x mode (`GameSpeedRules`): the flag, times
+        // the Settings speed, is the multiplier N. A co-op lobby's shared
+        // multiplier replaces both so every device keeps one clock.
+        let coopSpeed = gameSpeedMultiplierOverride?()
+        x2Flag = coopSpeed != nil ? false : evaluateX2Flag()
+        let gameSpeedMultiplier = GameSpeedRules.effectiveMultiplier(
+            setting: settings.gameSpeed.multiplier, x2Flag: x2Flag, coopOverride: coopSpeed)
+        effectiveSpeed = gameSpeedMultiplier
+        world.timeScale = gameSpeedMultiplier
+        world.x2Mode = x2Flag
+        updateX2Indicator()
         let simDT = dt * gameSpeedMultiplier
         frameDT = simDT
 
@@ -1618,10 +1636,10 @@ final class GameScene: SKScene {
         if jumpPhase == .arrive {
             // Only the white fades out now; the original hands control straight
             // back on arrival.
-            _ = stepJump(simDT)
+            _ = stepJump(dt)   // presentation timers run on the wall clock, not sim time
             intent = playerIntent(input?.intent ?? .init())
         } else if jumpPhase != .none {
-            intent = stepJump(simDT)
+            intent = stepJump(dt)
         } else if autoLandTargetID != nil {
             intent = stepAutoLand()
         } else {
@@ -1666,7 +1684,7 @@ final class GameScene: SKScene {
         // each tick since `World.step` may consume one-shot intent flags.
         simAccumulator += simDT
         let fixedStep = Self.simFixedStep
-        let catchupCap = fixedStep * Double(Self.simMaxCatchupTicks)
+        let catchupCap = fixedStep * Double(GameSpeedRules.catchupTickCap(multiplier: gameSpeedMultiplier, base: Self.simMaxCatchupTicks))
         if simAccumulator > catchupCap { simAccumulator = catchupCap }
         // The asteroid field lives in the player's view (FL-16): tell the world
         // how much of space the window shows at the current zoom.
@@ -1935,12 +1953,12 @@ final class GameScene: SKScene {
         guard let world else { return }
         switch escortPanel.pressE(hasEscorts: world.playerEscortRoster().any, now: tickCount60) {
         case .opened:
-            audio?.play(.uiSelect)
+            audio?.play(.beep1)   // 0x0044b120: snd 150
         case .noEscorts:
             if let line = galaxy?.game.stringList(2002)?.string(at: 51) { hud?.post(line) }
-            audio?.play(.uiError)
+            audio?.play(.beep4)   // 0x0044b120: snd 153
         case .closed:
-            audio?.play(.uiSelect)
+            audio?.play(.beep1)
         }
         publishEscortPanel()
     }
@@ -1951,7 +1969,7 @@ final class GameScene: SKScene {
         guard escortPanel.isOpen, let world else { return false }
         let roster = world.playerEscortRoster()
         if escortPanel.pressGroupKey(k, hasCategory: { roster.perCategory[$0] > 0 }, now: tickCount60) {
-            audio?.play(.targetLock)
+            audio?.play(.beep3)   // 0x0044b120: snd 152
         }
         publishEscortPanel()
         return true
@@ -2121,16 +2139,28 @@ final class GameScene: SKScene {
     /// Alt-R in the original: the nearest ship outside the player's squad, with
     /// no range limit (0x00462850). The enhancement keeps the port's 3000 px
     /// nearest-ship lock.
+    ///
     func selectNearestTarget() {
-        if nearestFirstTargeting { world.selectNearestTarget(hostileOnly: false) }
-        else { world.selectNearestEngaged() }
+        let was = world.player.currentTargetID
+        let found = nearestFirstTargeting ? world.selectNearestTarget(hostileOnly: false)
+                                          : world.selectNearestEngaged()
+        beepForNearestTarget(found, was: was)
+    }
+
+    /// The nearest-target keys (0x0044b120): a new target sounds snd 152, none
+    /// found snd 153, and re-picking the current one is silent.
+    private func beepForNearestTarget(_ found: Ship?, was: Int?) {
+        if found == nil { audio?.play(.beep4) }
+        else if found?.entityID != was { audio?.play(.beep3) }
     }
 
     /// R in the original: the nearest ship attacking the player's squad, not
     /// disabled, with no range limit (0x00462bd0).
     func selectNearestHostile() {
-        if nearestFirstTargeting { world.selectNearestTarget(hostileOnly: true) }
-        else { world.selectNearestHostileThreat() }
+        let was = world.player.currentTargetID
+        let found = nearestFirstTargeting ? world.selectNearestTarget(hostileOnly: true)
+                                          : world.selectNearestHostileThreat()
+        beepForNearestTarget(found, was: was)
     }
 
     /// Toggle the player's cloaking device (oütf ModType 17). No-op if unfitted.
@@ -2160,6 +2190,8 @@ final class GameScene: SKScene {
     }
 
     func togglePlayerCloak() {
+        // No cloak to run: the refusal sounds snd 153 (0x0044b120).
+        if !world.player.hasCloak { audio?.play(.beep4) }
         world.togglePlayerCloak()
         if world.player.hasCloak {
             hud?.post(world.player.cloakEngaged ? "Cloaking device engaged." : "Cloaking device disengaged.")
@@ -2207,8 +2239,10 @@ final class GameScene: SKScene {
         guard nearestFirstTargeting else {
             let next = world.cyclePlayerTarget(forward: !reverse, squad: squad)
             debug?.selection = next.map { .ship(id: $0.entityID, name: $0.name) }
+            audio?.play(.beep3)   // the cycle sounds snd 152 whatever it lands on (0x0044b120)
             return
         }
+        audio?.play(.beep3)   // 0x0044b120
         let candidates = cycleCandidates()
         guard !candidates.isEmpty else { return }
         let currentIdx = candidates.firstIndex { $0 == world.player.currentTargetID }
@@ -2229,12 +2263,16 @@ final class GameScene: SKScene {
     /// stellar; the container disarms a hyperspace jump), or with Alt the ship
     /// target.
     func clearTravelSelection() { selectedPlanetID = nil }
-    func clearShipTarget() { world.clearPlayerTarget() }
+    func clearShipTarget() {
+        if world.player.currentTargetID != nil { audio?.play(.beep1) }   // Alt-N: 0x0044b120, snd 150
+        world.clearPlayerTarget()
+    }
 
     /// The number keys 1–4: the current system's first four nav stellars.
     func selectNavStellar(index: Int) {
         guard let ids = galaxy?.game.system(systemID)?.spobs,
               index < ids.count, planetVisuals.contains(where: { $0.id == ids[index] }) else { return }
+        audio?.play(.beep1)   // 0x0044b120: a nav stellar picked in this system, snd 150
         selectPlanet(ids[index])
     }
 
@@ -2624,7 +2662,8 @@ final class GameScene: SKScene {
                 // it to pilot cargo (clamped to free hold) and reports what stowed.
                 _ = onAsteroidMined?(cargoType, quantity)
             case .targetAcquired:
-                audio?.play(.targetLock)
+                // Silent: the original has no click-to-target, and its target
+                // keys sound their own beeps (see `cycleTarget`).
                 Haptics.play(.selection)
             case let .shipArrived(entityID, _, fromHyperspace):
                 // Only inbound hyperspace jumps get the warp effect (played when the
@@ -2655,6 +2694,7 @@ final class GameScene: SKScene {
                 if entityID == 0 {
                     // The "disabled" overlay (STR# 2002 #287, WP-03).
                     if let line = galaxy?.game.stringList(2002)?.string(at: 287) { hud?.post(line) }
+                    audio?.play(.beep2)   // Ship_ApplyDamageToShip 0x004192d0, snd 151
                     onPlayerDisabled?()
                 }
             case let .escortLeftWingDisabled(entityID, freighter):
@@ -2665,6 +2705,7 @@ final class GameScene: SKScene {
             case let .escortRejoined(entityID, fighter):
                 if let recordID = escortRecordByEntity[entityID] { droppedEscortRecords.remove(recordID) }
                 if let line = galaxy?.game.stringList(2002)?.string(at: fighter ? 128 : 127) { hud?.post(line) }
+                audio?.play(.beep5)   // Player_HandleBoardTargetCommand 0x0045a3d0, snd 154
             case let .fighterRecoveredToBay(entityID, captured):
                 if let recordID = escortRecordByEntity[entityID] {
                     escortRecordByEntity[entityID] = nil
@@ -2672,10 +2713,12 @@ final class GameScene: SKScene {
                     onEscortAbandoned?(recordID, false)
                 }
                 if let line = galaxy?.game.stringList(2002)?.string(at: captured ? 129 : 128) { hud?.post(line) }
+                audio?.play(.beep5)   // Player_HandleBoardTargetCommand 0x0045a3d0, snd 154
             case let .repairSystemEngaged(entityID):
                 // "Repair systems engaged" (STR# 2002 #37, OS-07).
                 if entityID == 0, let line = galaxy?.game.stringList(2002)?.string(at: 37) {
                     hud?.post(line)
+                    audio?.play(.beep5)   // Ship_HandlePlayerShip 0x0044b120, snd 154
                 }
             case let .shipDying(entityID, at, boomID):
                 beginNPCDeathSequence(entityID: entityID, at: CGPoint(x: at.x, y: at.y), boomID: boomID)
@@ -2713,6 +2756,7 @@ final class GameScene: SKScene {
             case let .assistanceDelivered(entityID):
                 let name = world.ship(id: entityID)?.name ?? "Ally"
                 hud?.post("\(name) transfers fuel and makes repairs.")
+                audio?.play(.beep2)   // Ship_ApplyShipAiControls 0x00408150, snd 151
                 audio?.play(.docking)
             case let .personGrudge(pid):
                 persGrudges.insert(pid)
@@ -2724,6 +2768,7 @@ final class GameScene: SKScene {
                 // the player may still eject (OS-02).
                 audio?.stopAllLoops()
                 if let line = galaxy?.game.stringList(2002)?.string(at: 288) { hud?.post(line) }
+                audio?.play(.beep2)   // Ship_ApplyDamageToShip 0x004192d0, snd 151
                 beginPlayerDeathSequence()
                 onPlayerDying?()
             case let .playerEjected(previous, newClass, intoPod, _):
@@ -2757,6 +2802,8 @@ final class GameScene: SKScene {
                 onMissionShipLost?(missionID, goal)
             case let .overlayMessage(text, frames):
                 hud?.post(text, rawCalls: frames)
+            case let .interfaceBeep(soundID):
+                if let beep = GameAudio.GameEvent.beep(soundID: soundID) { audio?.play(beep) }
             case let .stellarDefendersLaunched(spobID, count, remaining):
                 onStellarDefendersLaunched?(spobID, count, remaining)
             case let .stellarDominated(spobID):
@@ -2830,7 +2877,8 @@ final class GameScene: SKScene {
         }
         let nearest = w.npcs.filter(boardable)
             .min { ($0.position - pos).length < ($1.position - pos).length }
-        guard let hulk = nearest else { return nil }
+        // Nothing to board sounds snd 153 (Player_HandleBoardTargetCommand 0x0045a3d0).
+        guard let hulk = nearest else { audio?.play(.beep4); return nil }
         world?.selectTarget(id: hulk.entityID)   // lock it so the plunder targets it
         return board(hulk)
     }
@@ -3088,7 +3136,7 @@ final class GameScene: SKScene {
                 hud?.post("\(spob.name) hypergate is online.")
             }
         } else {
-            audio?.play(.uiError)
+            audio?.play(.beep2)   // landing refused: Stellar_HandleStellarEntryAndExit 0x00457580, snd 151
             let owner = galaxy?.game.govt(spob.government)?.displayName ?? "controlling"
             hud?.post("You are not cleared to use the \(owner) hypergate.")
         }
@@ -4351,6 +4399,7 @@ final class GameScene: SKScene {
             let multiplier = galaxy?.jumpDurationMultiplier(hull: world.player.shipTypeID ?? -1) ?? 1.3
             world.playerJump = PlayerHyperjump(bearing: outboundHeading, fastJump: fastJump,
                                                soundTicks60: hyperspaceCueTicks60 ?? 0,
+                                               soundTicks60X2: galaxy?.hyperspaceWarpUp2xSoundTicks60,
                                                multiplier: multiplier)
             jumpPhase = .engaged
             jumpSpinUpStarted = false
@@ -4429,7 +4478,7 @@ final class GameScene: SKScene {
             clearCannotJumpOverlays()                  // every tick the jump timer runs (FL-23)
             if jump.phase == .spinUp, !jumpSpinUpStarted {
                 jumpSpinUpStarted = true
-                audio?.startWarpUp(multiplier: jump.multiplier)   // played at the hull's multiplier
+                audio?.startWarpUp(multiplier: jump.multiplier, x2: jump.cueX2 == true)   // the hull's multiplier; snd 129 under the x2 flag
             }
             if jump.phase == .spinUp, jump.warpUpCut {
                 audio?.stopWarpUp()                    // cut at 350 / multiplier (FL-04)
@@ -5512,6 +5561,49 @@ final class GameScene: SKScene {
     private var reticleCorners: [SKSpriteNode] = []
     /// Zoom-in offset: 256 when a target is picked, shrinking ~60 per 30 Hz tick.
     private var reticleZoom: CGFloat = 0
+
+    /// `Frame_SpaceflightLoop` 0x00417600 (~11248): the x2 flag from the Caps Lock
+    /// toggle state, held off for a jump that began at normal speed.
+    private func evaluateX2Flag() -> Bool {
+        var withinTen = false
+        var x2Cue = false, normalCue = false
+        if let jump = world.playerJump {
+            let off = abs(angleDelta(from: world.player.angle, to: jump.bearing)) * 180 / .pi
+            withinTen = off < 11
+            x2Cue = jump.cueSounding && jump.cueX2 == true
+            normalCue = jump.cueSounding && jump.cueX2 == false
+        }
+        return GameSpeedRules.x2Flag(capsLockOn: CapsLockState.isOn, x2CueSounding: x2Cue,
+                                     normalCueSounding: normalCue, headingWithinTenOfJump: withinTen)
+    }
+
+    /// The original's "x2" sprite (cicn 20000, `Frame_AnchorX2IndicatorSprite`
+    /// 0x0042cbb0), anchored at the playfield's top-left. Its art says x2, so it
+    /// shows whenever the effective speed is exactly 2x (Caps Lock at the
+    /// authentic speed, or the 2x Settings option) and no other speed.
+    private func updateX2Indicator() {
+        let show = abs(effectiveSpeed - 2) < 1e-6
+        guard show, let tex = cicnTexture(20000) else {
+            x2Indicator?.isHidden = true
+            return
+        }
+        if x2Indicator == nil {
+            let n = SKSpriteNode()
+            n.zPosition = 50
+            cameraNode.addChild(n)
+            x2Indicator = n
+        }
+        guard let n = x2Indicator else { return }
+        n.texture = tex
+        n.size = tex.size()
+        n.setScale(1)
+        // Camera-space coordinates span the viewport times the camera zoom.
+        let z = cameraZoom
+        n.setScale(z)
+        n.position = CGPoint(x: -size.width * z / 2 + tex.size().width * z / 2,
+                             y: size.height * z / 2 - tex.size().height * z / 2)
+        n.isHidden = false
+    }
 
     /// A cicn as a texture (the original's interface sprites are cicn runs).
     private func cicnTexture(_ id: Int) -> SKTexture? {

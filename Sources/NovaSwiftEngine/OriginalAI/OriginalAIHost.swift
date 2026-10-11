@@ -98,6 +98,8 @@ protocol OriginalAIHost {
     /// Jump spin-up length in 60 Hz ticks, and the hull's duration multiplier
     /// (FL-04).
     var jumpCueTicks60: Double { get }
+    /// The world's simulation-speed multiplier N (1 = the original's normal speed).
+    var timeScale: Double { get }
     func jumpMultiplier(_ ship: Ship) -> Double
     func canJump(_ ship: Ship) -> Bool
     /// `Ship_CheckSpecialLoadoutCapability` (0x0046d080): skips the brake.
@@ -227,6 +229,7 @@ struct WorldAIHost: OriginalAIHost {
     var escortProbeRange: Double { ai.escortProbeRange(world) }
 
     var jumpCueTicks60: Double { ai.jumpCueTicks60(world) }
+    var timeScale: Double { world.timeScale }
 
     func jumpMultiplier(_ ship: Ship) -> Double {
         PlayerHyperjump.durationMultiplier(hullFlags: hull(of: ship).flags)

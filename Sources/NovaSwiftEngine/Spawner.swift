@@ -595,7 +595,8 @@ public final class Spawner {
               let strings = galaxy.game.stringList(2002)?.strings, strings.count >= 307 else { return }
         let govt = fleet.govt >= 128 ? fleet.govt : table.systemGovt
         let name = galaxy.game.govt(govt)?.mediumName ?? ""
-        world.postOverlayMessage(strings[305] + name + strings[306], frames: 240)
+        // System_UpdateRandomEncounterCountdown 0x0043a020 sounds snd 154 with the warning.
+        world.postOverlayMessage(strings[305] + name + strings[306], frames: 240, beep: 154)
     }
 
     /// `oütf` ModType 44 (reinforcement inhibitor), player-only per the Bible:

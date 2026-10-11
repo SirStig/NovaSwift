@@ -72,7 +72,9 @@ public final class OriginalAI {
     func beginStep(_ world: World, dt: Double) {
         let host = WorldAIHost(world: world, ai: self)
         frame &+= 1
-        clock60 += dt * 60
+        // The original's jump timers read the wall clock (`TickCount`), which
+        // does not speed up when the world ticks N times per frame.
+        clock60 += dt * 60 / max(world.timeScale, GameSpeedRules.minimumMultiplier)
         strengthCache.removeAll(keepingCapacity: true)
         pressingCache.removeAll(keepingCapacity: true)
         let live = Set(world.allShips.map(\.entityID))

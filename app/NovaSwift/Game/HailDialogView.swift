@@ -128,7 +128,7 @@ struct HailDialogView: View {
                 .ditlPlace(space, d, mid)
         }
         let bottom = d.rect(0, top: 181, left: 21, bottom: 207, right: 187)
-        responseButton("Close Channel", rect: bottom, action: onClose, graphics: graphics)
+        responseButton("Close Channel", rect: bottom, closes: true, action: onClose, graphics: graphics)
             .ditlPlace(space, d, bottom)
     }
 
@@ -172,7 +172,7 @@ struct HailDialogView: View {
                 .ditlPlace(space, d, mid)
         }
         responseButton(graphics.buttonLabel(SpaceportLabel.closeChannel, fallback: "Close Channel"),
-                       rect: bottom, action: onClose, graphics: graphics)
+                       rect: bottom, closes: true, action: onClose, graphics: graphics)
             .ditlPlace(space, d, bottom)
     }
 
@@ -200,10 +200,12 @@ struct HailDialogView: View {
     }
 
     @ViewBuilder
-    private func responseButton(_ title: String, rect: CGRect, enabled: Bool = true,
+    private func responseButton(_ title: String, rect: CGRect, enabled: Bool = true, closes: Bool = false,
                                  action: @escaping () -> Void, graphics: SpaceportGraphics) -> some View {
         NovaButton(graphics: graphics, title: title, ditl: rect, enabled: enabled) {
-            model.audio.play(.uiSelect)
+            // The comm windows sound snd 151 for their action buttons
+            // (0x0047e470, 0x00480030) and snd 152 as they close.
+            model.audio.play(closes ? .beep3 : .beep2)
             action()
         }
     }
@@ -237,17 +239,17 @@ struct HailDialogView: View {
                 if showAssistButton {
                     fallbackButton(state.assistTitle, width: 150, enabled: assistEnabled, action: onRequestAssistance)
                 }
-                fallbackButton("Close Channel", width: 106, action: onClose)
+                fallbackButton("Close Channel", width: 106, closes: true, action: onClose)
             }
         }
     }
 
     @ViewBuilder
-    private func fallbackButton(_ title: String, width: CGFloat, enabled: Bool = true,
+    private func fallbackButton(_ title: String, width: CGFloat, enabled: Bool = true, closes: Bool = false,
                                  action: @escaping () -> Void) -> some View {
         // No game data loaded — no button art to decode.
         Button {
-            model.audio.play(.uiSelect)
+            model.audio.play(closes ? .beep3 : .beep2)
             action()
         } label: {
             Text(title).novaFont(.button).foregroundStyle(.white)

@@ -607,7 +607,12 @@ extension OriginalAI {
             } else {
                 let mult = host.jumpMultiplier(ship)
                 let offset = leader(of: ship) == World.playerEntityID ? 45.0 : 35.0
-                let progress = (clock60 - rec.modeStart60) * mult / (host.jumpCueTicks60 * 0.01) - offset / mult
+                // Speed scale of the wall-clock term: 0.667 / 0.5 in the original's 2x mode
+                // (0x00433050 ~558 / ~585), generalised to N.
+                let followsPlayer = leader(of: ship) == World.playerEntityID
+                let speedScale = GameSpeedRules.departureProgressScale(multiplier: host.timeScale,
+                                                                        followsPlayer: followsPlayer)
+                let progress = (clock60 - rec.modeStart60) * speedScale * mult / (host.jumpCueTicks60 * 0.01) - offset / mult
                 let stepPx = min(max(progress, 0), 50)
                 if stepPx > 0 { ship.position += Vec2.heading(ship.angle) * (stepPx * ticks) }
             }

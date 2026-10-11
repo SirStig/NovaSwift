@@ -1364,6 +1364,13 @@ public final class World {
     /// it runs the jump flies the player and the weapons stay cold; once it
     /// reaches `.fired` the host swaps systems, and on `.collapsed` it clears it.
     public var playerJump: PlayerHyperjump?
+    /// The simulation-speed multiplier N the host runs this world at
+    /// (`GameSpeedRules.effectiveMultiplier`), 1 = the original's normal speed.
+    /// The original's wall-clock jump timers read it (the AI's `clock60` and the
+    /// player's jump clock advance `1 / timeScale` per tick).
+    public var timeScale: Double = 1
+    /// The original's x2 flag (`DAT_00596d34`, Caps Lock): picks the 2x jump cue.
+    public var x2Mode = false
     /// The original's raw 21 ms calls inside this step (see `RawCallCadence`):
     /// how many times a per-call rule runs.
     public private(set) var rawCallsThisStep = 0
@@ -1687,9 +1694,13 @@ public final class World {
 
     /// Flash `text` across the HUD for `frames` 30 Hz ticks (a fleet Quote, a
     /// reinforcement warning).
-    public func postOverlayMessage(_ text: String, frames: Int) {
+    ///
+    /// `beep` is the interface beep (snd 150-154) the original sounds with the
+    /// line; the host plays it from the `.interfaceBeep` event that follows.
+    public func postOverlayMessage(_ text: String, frames: Int, beep: Int? = nil) {
         overlayTicks = frames
         events.append(.overlayMessage(text: text, frames: frames))
+        if let beep { events.append(.interfaceBeep(soundID: beep)) }
     }
 
     /// `DAT_00597a12`: the overlay message's remaining frames (raw calls),
@@ -2503,7 +2514,7 @@ public final class World {
                 // Each spin-up tick pushes the leader's jump state to its
                 // escorts, before the timer advances (0x00422340).
                 if jump.phase == .spinUp { originalAI.syncSquadJump(world: self, leaderTimer: max(1, jump.timer)) }
-                jump.tick(player, dt: dt)
+                jump.tick(player, dt: dt, timeScale: timeScale, x2Mode: x2Mode)
                 playerJump = jump
             } else if player.isAlive, player.disabled {
                 // WP-03: a disabled player has no weapons, thrust or turn
