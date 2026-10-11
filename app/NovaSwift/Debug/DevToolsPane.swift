@@ -342,13 +342,39 @@ struct DevToolsPane: View {
         }
     }
 
+    /// Section titles the user has folded away, remembered between sessions.
+    @AppStorage("devTools.collapsedSections") private var collapsedSections = ""
+
+    private func isCollapsed(_ title: String) -> Bool {
+        collapsedSections.split(separator: "|").contains(Substring(title))
+    }
+
+    private func toggleCollapsed(_ title: String) {
+        var titles = collapsedSections.split(separator: "|").map(String.init)
+        if let index = titles.firstIndex(of: title) { titles.remove(at: index) } else { titles.append(title) }
+        collapsedSections = titles.joined(separator: "|")
+    }
+
     private func section<Content: View>(_ title: String, _ symbol: String,
                                         @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 10 * devFontScale, weight: .bold, design: .monospaced))
+        let collapsed = isCollapsed(title)
+        return VStack(alignment: .leading, spacing: 9) {
+            CursorButton { withAnimation(.easeOut(duration: 0.15)) { toggleCollapsed(title) } } label: {
+                HStack(spacing: 6) {
+                    Label(title, systemImage: symbol)
+                        .font(.system(size: 10 * devFontScale, weight: .bold, design: .monospaced))
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9 * devFontScale, weight: .bold))
+                        .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        .opacity(0.7)
+                }
                 .foregroundStyle(devConsoleGreen)
-            content()
+                .contentShape(Rectangle())
+            }
+            if !collapsed {
+                content()
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

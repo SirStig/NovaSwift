@@ -306,10 +306,15 @@ public final class ModelStage {
             parts.append(Part(node: node, original: g.materials, layer: layer))
             if let layer { layersPresent.insert(layer) }
         }
-        for e in descriptor.effects ?? [] where e.at.count == 3 {
+        addEmitters(descriptor.effects ?? [])
+    }
+
+    /// Add glowing emitters (descriptor ones, or ones derived from a classic overlay).
+    public func addEmitters(_ effects: [GraphicsEnhancement.Effect]) {
+        for e in effects where e.at.count == 3 {
             let r = e.radius ?? 0.06
             let c = e.color.flatMap { $0.count == 3 ? $0 : nil } ?? [0.55, 0.78, 1.0]
-            let plane = SCNPlane(width: CGFloat(r * 5), height: CGFloat(r * 5))
+            let plane = SCNPlane(width: CGFloat(r * 3.6), height: CGFloat(r * 3.6))
             let m = SCNMaterial()
             m.lightingModel = .constant
             m.diffuse.contents = ModelStage.glowImage
@@ -325,6 +330,59 @@ public final class ModelStage {
             emitters.append((node, e.layer))
             layersPresent.insert(e.layer)
         }
+    }
+
+    /// A bright blob of a classic overlay's frame 0, in hull-frame pixels
+    /// (origin top-left of the hull's frame; overlays are centred on it).
+    public struct GlowBlob {
+        public let x: Double, y: Double
+        public let radius: Double
+        /// Share of the overlay frame it covers (big blobs = lit panels, not lamps).
+        public let coverage: Double
+        public let color: [Double]
+    }
+
+    /// The bright regions of a classic overlay's frame 0 (heading up, level —
+    /// the hull seen from behind, so engines and tail lights are in view).
+    public static func glowBlobs(in overlay: SpriteSheet, hullFrameWidth: Int, hullFrameHeight: Int) -> [GlowBlob] {
+        let w = overlay.frameWidth, h = overlay.frameHeight
+        guard w > 0, h > 0 else { return [] }
+        var lum = [Double](repeating: 0, count: w * h)
+        var rgb = [SIMD3<Double>](repeating: .zero, count: w * h)
+        var peak = 0.0
+        for y in 0..<h {
+            for x in 0..<w {
+                let o = (y * overlay.surfaceWidth + x) * 4
+                guard overlay.rgba[o + 3] > 0 else { continue }
+                let c = SIMD3(Double(overlay.rgba[o]), Double(overlay.rgba[o + 1]), Double(overlay.rgba[o + 2])) / 255
+                let l = max(c.x, c.y, c.z)
+                lum[y * w + x] = l; rgb[y * w + x] = c; peak = max(peak, l)
+            }
+        }
+        guard peak > 0.05 else { return [] }
+        let dx = Double(w - hullFrameWidth) / 2, dy = Double(h - hullFrameHeight) / 2
+        var seen = [Bool](repeating: false, count: w * h)
+        var out: [GlowBlob] = []
+        for start in 0..<(w * h) where !seen[start] && lum[start] > peak * 0.3 {
+            var stack = [start], sum = 0.0, cx = 0.0, cy = 0.0, area = 0, colour = SIMD3<Double>.zero
+            seen[start] = true
+            while let i = stack.popLast() {
+                let x = i % w, y = i / w, l = lum[i]
+                sum += l; cx += Double(x) * l; cy += Double(y) * l; area += 1; colour += rgb[i] * l
+                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] where nx >= 0 && ny >= 0 && nx < w && ny < h {
+                    let j = ny * w + nx
+                    if !seen[j] && lum[j] > peak * 0.3 { seen[j] = true; stack.append(j) }
+                }
+            }
+            guard area >= 2, sum > 0 else { continue }
+            let c = colour / sum
+            let m = max(c.x, c.y, c.z, 0.01)
+            out.append(GlowBlob(x: cx / sum + 0.5 - dx, y: cy / sum + 0.5 - dy,
+                                radius: sqrt(Double(area) / .pi),
+                                coverage: Double(area) / Double(w * h),
+                                color: [c.x / m, c.y / m, c.z / m]))
+        }
+        return out
     }
 
     public func setPass(_ pass: Pass) {

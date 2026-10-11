@@ -143,7 +143,7 @@ case "preview":
             let overlays: [HDAssetPipeline.OverlayTarget] = layouts.overlays(forBase: e.spriteID).compactMap { layer, id in
                 guard let sh = game.spriteSheet(spriteID: id, maskID: 0, frameWidth: 0, frameHeight: 0, frameCount: 0) else { return nil }
                 return .init(spriteID: id, target: .init(layer: layer, frameWidth: sh.frameWidth,
-                                                         frameHeight: sh.frameHeight, frameCount: sh.frameCount))
+                                                         frameHeight: sh.frameHeight, frameCount: sh.frameCount, classic: sh))
             }.sorted { $0.spriteID < $1.spriteID }
             if pass == "cold", !overlays.isEmpty {
                 print("  sprite \(e.spriteID) classic overlays: " + overlays.map { "\($0.target.layer.rawValue)=\($0.spriteID) \($0.target.frameWidth)x\($0.target.frameHeight)" }.joined(separator: ", "))
@@ -171,6 +171,23 @@ case "preview":
             } catch { print("  sprite \(e.spriteID): \(error)") }
         }
         print("  \(pass) total: \(totalMS) ms, texture memory \(totalBytes / 1024 / 1024) MB")
+    }
+
+case "hulls":
+    // hulls <Nova Files> — every distinct hull sprite: its first ship, every
+    // ship that shares it, frame size and layout (what a remaster pass covers).
+    guard args.count == 2 else { usage() }
+    let game = loadGame(args[1])
+    var bySprite: [Int: [ShipRes]] = [:]
+    for s in game.ships() { if let id = game.shan(s.id)?.baseSpriteID { bySprite[id, default: []].append(s) } }
+    let layouts = SpriteLayouts(game: game)
+    for id in bySprite.keys.sorted() {
+        let ships = bySprite[id]!
+        let sheet = game.ship(ships[0].id).flatMap { _ in game.shipSprite(ships[0].id) }
+        let l = sheet.map { layouts.layout(for: $0) }
+        print(String(format: "sprite %5d  ship %4d  %-26@ %3dx%-3d %3d frames  %d sets  shared by %d",
+                     id, ships[0].id, ships[0].name as NSString, sheet?.frameWidth ?? 0, sheet?.frameHeight ?? 0,
+                     sheet?.frameCount ?? 0, l?.sets.count ?? 0, ships.count))
     }
 
 case "refsheet":

@@ -26,19 +26,11 @@ struct SettingsView: View {
     /// first. See `BugReportView`.
     @State private var showBugReport = false
     @State private var showAbout = false
-    /// Classic presentation opens the original's Preferences window first;
-    /// the port's full settings sit behind its "Port options…" link.
-    @State private var showPortOptions = false
+    /// The original's Preferences window (DLOG 4003), opened from the
+    /// Presentation section. Settings itself always opens on this screen.
+    @State private var showClassicPreferences = false
 
     var body: some View {
-        if !model.settings.modernDialogs && !showPortOptions && model.data.game != nil {
-            ClassicPreferencesView(onClose: onClose, onPortOptions: { showPortOptions = true })
-        } else {
-            portBody
-        }
-    }
-
-    private var portBody: some View {
         DialogChrome(title: "Settings", onClose: onClose) {
             HStack(spacing: 0) {
                 sidebar
@@ -99,6 +91,13 @@ struct SettingsView: View {
         }
         .overlay {
             if showAbout { AboutView(onClose: { showAbout = false }) }
+        }
+        .overlay {
+            if showClassicPreferences {
+                ClassicPreferencesView(onClose: { showClassicPreferences = false },
+                                       onPortOptions: { showClassicPreferences = false })
+                    .transition(.opacity)
+            }
         }
         // Debug: the full first-run wizard from the welcome step (no `startAtImport`),
         // so the whole guide can be reviewed even after data is imported.
@@ -198,6 +197,13 @@ struct SettingsView: View {
                                 options: GameSettings.UIMode.allCases.filter {
                                     $0 != .novaSwift || model.settings.matchedPreset == .novaSwift
                                 }) { $0.label }
+            if model.data.game != nil {
+                Button {
+                    showClassicPreferences = true
+                } label: {
+                    Label("Original Preferences Window…", systemImage: "macwindow")
+                }
+            }
         } header: {
             sectionHeader("Presentation", icon: "sparkles.tv")
         } footer: {

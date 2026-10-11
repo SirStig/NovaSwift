@@ -142,7 +142,8 @@ final class HDGraphics: @unchecked Sendable {
                   let sheet = game.spriteSheet(spriteID: id, maskID: 0, frameWidth: 0, frameHeight: 0, frameCount: 0)
             else { return nil }
             return HDAssetPipeline.OverlayTarget(spriteID: id, target: ModelBaker.LayerTarget(
-                layer: layer, frameWidth: sheet.frameWidth, frameHeight: sheet.frameHeight, frameCount: sheet.frameCount))
+                layer: layer, frameWidth: sheet.frameWidth, frameHeight: sheet.frameHeight, frameCount: sheet.frameCount,
+                classic: sheet))
         }.sorted { $0.spriteID < $1.spriteID }
     }
 

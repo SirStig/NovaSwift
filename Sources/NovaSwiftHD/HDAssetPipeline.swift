@@ -87,13 +87,18 @@ public final class ModelBaker {
     }
 
     /// An effect layer to render: the hull's classic overlay it replaces.
-    public struct LayerTarget: Hashable, Sendable {
+    public struct LayerTarget {
         public let layer: GraphicsEnhancement.EffectLayer
         public let frameWidth: Int
         public let frameHeight: Int
         public let frameCount: Int
-        public init(layer: GraphicsEnhancement.EffectLayer, frameWidth: Int, frameHeight: Int, frameCount: Int) {
+        /// The classic overlay itself: when the model has nothing for this
+        /// layer, its glows are derived from where this one glows.
+        public let classic: SpriteSheet?
+        public init(layer: GraphicsEnhancement.EffectLayer, frameWidth: Int, frameHeight: Int, frameCount: Int,
+                    classic: SpriteSheet? = nil) {
             self.layer = layer; self.frameWidth = frameWidth; self.frameHeight = frameHeight; self.frameCount = frameCount
+            self.classic = classic
         }
     }
 
@@ -110,11 +115,19 @@ public final class ModelBaker {
         let start = Date()
         let stage = ModelStage(model: model, settings: descriptor.bake ?? .init())
         stage.prepareEffects(for: descriptor)
-        let separate = Set(overlays.map(\.layer)).intersection(stage.layersPresent)
-        stage.setPass(.hull(baked: stage.layersPresent.subtracting(separate)))
+        stage.setPass(.hull(baked: []))
         let s = HDAtlas.clampScale(scale, logicalWidth: layout.columns * layout.frameWidth,
                                    logicalHeight: layout.rows * layout.frameHeight)
         fit(stage: stage, layout: layout, classic: classic, scale: s)
+        // Layers the model says nothing about glow where the classic overlay
+        // glows (now that the fit fixes how big a classic pixel is).
+        for t in overlays where !stage.layersPresent.contains(t.layer) {
+            if let sheet = t.classic {
+                stage.addEmitters(derivedEffects(stage: stage, layer: t.layer, overlay: sheet, layout: layout, scale: s))
+            }
+        }
+        let separate = Set(overlays.map(\.layer)).intersection(stage.layersPresent)
+        stage.setPass(.hull(baked: stage.layersPresent.subtracting(separate)))
         defer { renderer.scene = nil }
         guard let base = render(stage, layout: layout, scale: s, stats: &stats) else { return nil }
 
@@ -131,6 +144,53 @@ public final class ModelBaker {
         }
         stats.seconds += Date().timeIntervalSince(start)
         return Result(base: base, layers: layers)
+    }
+
+    /// Emitters where the classic overlay glows: each glow blob of its frame
+    /// 0 is ray-cast onto the model as rendered at heading 0, so the glow sits
+    /// on the model's own surface at that spot (the nearest part of the hull
+    /// when the blob falls just off it). Lamp-sized blobs keep their size;
+    /// big ones (lit panels, flame sprites) are capped and dimmed so they
+    /// don't wash over the hull.
+    private func derivedEffects(stage: ModelStage, layer: GraphicsEnhancement.EffectLayer, overlay: SpriteSheet,
+                                layout: BakeLayout, scale s: Double) -> [GraphicsEnhancement.Effect] {
+        let blobs = ModelStage.glowBlobs(in: overlay, hullFrameWidth: layout.frameWidth, hullFrameHeight: layout.frameHeight)
+        guard !blobs.isEmpty else { return [] }
+        stage.pose(.level, heading: 0)
+        let unit = 2 * stage.orthographicScale / Double(layout.frameHeight)   // world units per classic pixel
+        // Orthographic camera: every pixel's ray runs along the camera's front
+        // direction from its point on the image plane. World space throughout,
+        // so there's no screen-coordinate convention to get wrong.
+        let cam = stage.camera
+        let right = cam.simdWorldRight, up = cam.simdWorldUp, front = cam.simdWorldFront, eye = cam.simdWorldPosition
+        func ray(_ px: Double, _ py: Double) -> SCNVector3? {
+            let sx = Float((px - Double(layout.frameWidth) / 2) * unit)
+            let sy = Float((Double(layout.frameHeight) / 2 - py) * unit)
+            let from = eye + right * sx + up * sy, to = from + front * 400
+            let hits = stage.scene.rootNode.hitTestWithSegment(from: SCNVector3(from), to: SCNVector3(to),
+                                                               options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue])
+            return hits.filter { !($0.node.geometry is SCNPlane) }
+                .min { simd_distance(SIMD3<Float>($0.worldCoordinates), from) < simd_distance(SIMD3<Float>($1.worldCoordinates), from) }?
+                .worldCoordinates
+        }
+        var out: [GraphicsEnhancement.Effect] = []
+        for b in blobs {
+            // Search outward from the blob centre for the hull, up to a few pixels.
+            var hit: SCNVector3?
+            search: for r in [0.0, 1, 2, 3, 4, 6] {
+                for (ox, oy) in r == 0 ? [(0.0, 0.0)] : [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (-r, r), (r, -r), (-r, -r)] {
+                    if let h = ray(b.x + ox, b.y + oy) { hit = h; break search }
+                }
+            }
+            guard let world = hit else { continue }
+            let local = stage.roll.convertPosition(world, from: nil)
+            let big = b.coverage > 0.02
+            let radius = min(big ? 0.10 : 0.14, max(0.03, b.radius * unit * 1.2))
+            let k = big ? 0.6 : 1.0
+            out.append(.init(layer: layer, at: [Double(local.x), Double(local.y), Double(local.z)],
+                             radius: radius, color: b.color.map { $0 * k }))
+        }
+        return out
     }
 
     /// Hull only, no effect layers (tools and simple models).
@@ -176,7 +236,7 @@ public final class ModelBaker {
 public final class HDBakeCache: @unchecked Sendable {
     public let directory: URL
     /// Bump to invalidate every bake when the renderer's output changes.
-    public static let version = 2
+    public static let version = 5
 
     public convenience init?(subdirectory: String = "NovaSwift/HDBakes") {
         guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
@@ -267,7 +327,7 @@ public enum HDAssetPipeline {
     }
 
     /// The classic overlay a hull's effect layer replaces.
-    public struct OverlayTarget: Sendable {
+    public struct OverlayTarget {
         public let spriteID: Int
         public let target: ModelBaker.LayerTarget
         public init(spriteID: Int, target: ModelBaker.LayerTarget) { self.spriteID = spriteID; self.target = target }
