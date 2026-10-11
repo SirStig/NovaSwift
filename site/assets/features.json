@@ -915,6 +915,11 @@
      "where": "app/NovaSwift/UI/HDGraphicsPromptView.swift"
     },
     {
+     "name": "Shield bubbles for HD hulls",
+     "status": "done",
+     "where": "Sources/NovaSwiftHD/HDShield.swift"
+    },
+    {
      "name": "Nova Reimagined overhaul pack",
      "status": "partial",
      "where": "planets, stations, asteroids, shots and effects done; ships 10 of 65"

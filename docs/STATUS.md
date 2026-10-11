@@ -126,13 +126,13 @@ costing a day.
 
 ## Beyond the original
 
-![NovaSwift's own features](branding/feature-blocks.svg?v=a952b69e)
+![NovaSwift's own features](branding/feature-blocks.svg?v=29836617)
 
 NovaSwift's own features, one square per task: green done, amber partly done,
-outline planned. Currently 118 done, 15 partly done, 44 planned. The list is kept
+outline planned. Currently 119 done, 15 partly done, 44 planned. The list is kept
 by hand in `site/assets/features.json`, with a pointer to the code for each
 task. After editing it, run `python3 scripts/render-progress.py` to redraw
-[feature-blocks.svg](branding/feature-blocks.svg?v=a952b69e) and the summary graphic.
+[feature-blocks.svg](branding/feature-blocks.svg?v=29836617) and the summary graphic.
 
 Partly done, in short: the public online lobby list and iCloud game-data upload
 need the CloudKit schema promoted to Production; multiplayer host migration

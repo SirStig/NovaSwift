@@ -464,6 +464,6 @@
 <rect x="519" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="536" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
 <rect x="553" y="558" width="14" height="14" rx="2" fill="#2b2730"/>
-<text x="580" y="570" class="pc">63%</text>
+<text x="580" y="570" class="pc">65%</text>
 <rect x="20" y="590" width="12" height="12" rx="2" fill="#3fb950"/><text x="38" y="601" class="sb">done</text><rect x="90" y="590" width="12" height="12" rx="2" fill="#e3a52b"/><text x="108" y="601" class="sb">in progress</text><rect x="200" y="590" width="12" height="12" rx="2" fill="#2b2730"/><text x="218" y="601" class="sb">to do</text>
 </svg>

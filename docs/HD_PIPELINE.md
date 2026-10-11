@@ -185,6 +185,7 @@ File paths are relative to the `.nsx` folder and must stay inside it.
 | `live` | model | allow drawing live in 3D (planned presentation) |
 | `layers` | model | effect layer → part-name substrings (see Effects) |
 | `effects` | model | emitters: `layer`, `at` [x, y, z], `radius` (default 0.06), `color` [r, g, b] |
+| `shield` | hulls | a shield bubble `[r, g, b]`: fitted to the ship's outline in every heading, shown faintly when the shields take a hit. Used only when the hull has no classic shield layer (none of the stock hulls do) |
 | `bake.pitch` | model | camera elevation in degrees (default 38; 12 suits planets) |
 | `bake.yaw` | model | extra turn about +Y, degrees, for models whose nose isn't +Z |
 | `bake.tilt` | model | turn about X before `yaw`, degrees: ±90 fixes Z-up exports. On a non-hull rotation sheet (asteroids) a partial tilt makes the turn read as a tumble |
@@ -246,7 +247,6 @@ needed.
 - `model <Nova Files> <model.usdz> <ship id | s<sprite id>> <out> [yaw] [pitch] [r,g,b]`:
   render one model against the sprite it replaces.
 - `planet <surface map.png> <out.usdz>`: wrap an equirectangular map on a sphere.
-- `asteroid <seed> <r,g,b> <out.usdz> [rock|ice|pitted]`: a procedural rock tinted to a colour.
 - `refsheet <Nova Files> <ship id> <out.png>`: the classic hull from several angles, as a
   reference for artists or image models.
 - `orient <Nova Files> <model.usdz> <ship id>`: find the rotation that best matches a
@@ -254,12 +254,15 @@ needed.
 - `portrait <model.usdz> <out.png> [yaw]`: the three-quarter UI portrait the game makes
   for hull models (shipyard, hail, target display).
 - `embed` / `unembed`: move a pack into or out of a plug-in file (see above).
-- `projectile <missile|rocket|torpedo|hellhound> <body r,g,b> <trim r,g,b> <out.usdz>`:
-  a procedural shot model.
 - `sheetinfo <Nova Files> <sprite id>…`: frame size and count of classic sheets.
+- `shields <Nova Files>`: which hulls have a classic shield layer (an HD `shield` is only used where they don't).
 - `probe`: an orientation test model.
 
 `RezWriter` (NovaSwiftKit) writes `.rez` files for the in-file form.
+
+The procedural content generators used for Nova Reimagined (asteroids, shots,
+demo ships) live in that pack's own repo as `reimagined-gen`, since they make
+art for one pack rather than tools every pack needs.
 
 ## Code map
 

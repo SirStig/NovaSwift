@@ -14,8 +14,6 @@ func usage() -> Never {
     usage:
       novaswift-hd probe <Nova Files dir> <out dir>
           bake a test arrow model into the Shuttle's layout (orientation/fit check)
-      novaswift-hd demo-pack <out plug-ins dir>
-          generate the original demo models and planets as a plug-in + .nsx pack
       novaswift-hd preview <Nova Files dir> <plug-ins dir> <out dir> [--scale N]
           resolve every enhancement in the plug-ins, bake/load it, and write
           HD atlases, classic-vs-HD comparison sheets and a timing/memory report
@@ -75,34 +73,6 @@ case "probe":
     try? atlas.pngData()?.write(to: out.appendingPathComponent("probe_atlas.png"))
     if let cmp = Preview.compare(classic: classic, hd: atlas, frames: [0, 9, 18, 27, 36 + 9, 72 + 9], displayScale: 4) {
         Preview.write(cmp, to: out.appendingPathComponent("probe_compare.png"))
-    }
-
-case "ships":
-    guard args.count == 3 else { usage() }
-    let game = loadGame(args[1])
-    let out = URL(fileURLWithPath: args[2]); try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-    let kit = MaterialKit(textureDir: out.appendingPathComponent("textures"))
-    let layouts = SpriteLayouts(game: game)
-    guard let baker = ModelBaker() else { fail("no Metal device") }
-    for demo in DemoContent.ships {
-        guard let classic = game.shipSprite(demo.shipID) else { print("ship \(demo.shipID): no sprite"); continue }
-        let scene = SCNScene(); scene.rootNode.addChildNode(demo.build(kit))
-        let usdz = out.appendingPathComponent("\(demo.file).usdz")
-        guard exportUSDZ(scene, to: usdz) else { fail("export \(demo.file) failed") }
-        let model: SCNNode
-        do { model = try ModelLoader.load(.file(usdz)) } catch { fail("\(error)") }
-        let layout = layouts.layout(for: classic)
-        var stats = ModelBaker.Stats()
-        guard let atlas = baker.bake(model: model, settings: demo.bake, layout: layout, classic: classic,
-                                     scale: 4, stats: &stats) else { fail("bake failed") }
-        let size = (try? FileManager.default.attributesOfItem(atPath: usdz.path)[.size] as? Int) ?? 0
-        print("\(demo.file): ship \(demo.shipID) sprite \(classic.sourceSpriteID ?? -1), \(layout.frameCount) frames → \(atlas.image.width)×\(atlas.image.height) in \(Int(stats.seconds * 1000)) ms, USDZ \(size / 1024) KB")
-        let n = layout.framesPerSet
-        var frames = [0, n / 8, n / 4, 3 * n / 8, n / 2, 3 * n / 4]
-        if layout.sets.count > 2 { frames += [n + n / 4, 2 * n + n / 4] }
-        if let cmp = Preview.compare(classic: classic, hd: atlas, frames: frames, displayScale: 4) {
-            Preview.write(cmp, to: out.appendingPathComponent("\(demo.file)_compare.png"))
-        }
     }
 
 case "preview":
@@ -399,19 +369,6 @@ case "planet":
     guard exportUSDZ(scene, to: URL(fileURLWithPath: args[2])) else { fail("export failed") }
     print("wrote \(args[2])")
 
-case "projectile":
-    // projectile <missile|rocket|torpedo|hellhound> <body r,g,b> <accent r,g,b> <out.usdz>
-    guard args.count == 5, let style = ProjectileMaker.Style(rawValue: args[1]) else { usage() }
-    func rgb(_ s: String) -> SIMD3<Double>? {
-        let v = s.split(separator: ",").compactMap { Double($0) }
-        return v.count == 3 ? SIMD3(v[0], v[1], v[2]) : nil
-    }
-    guard let body = rgb(args[2]), let accent = rgb(args[3]) else { usage() }
-    let out = URL(fileURLWithPath: args[4])
-    let kit = MaterialKit(textureDir: out.deletingLastPathComponent().appendingPathComponent(".textures"))
-    guard exportUSDZ(ProjectileMaker.make(style, body: body, accent: accent, kit: kit), to: out) else { fail("export failed") }
-    print("wrote \(args[4])")
-
 case "shields":
     // shields <Nova Files> — hulls whose shän has a shield layer.
     guard args.count == 2 else { usage() }
@@ -453,19 +410,6 @@ case "unembed":
                                                   name: URL(fileURLWithPath: args[1]).deletingPathExtension().lastPathComponent)
         print("wrote \(args[2]): \(n) enhancement(s)")
     } catch { fail(String(describing: error)) }
-
-case "asteroid":
-    // asteroid <seed> <r,g,b 0-1 tint> <out.usdz> [rock|ice|pitted] — a procedural cratered rock.
-    guard args.count == 4 || args.count == 5 else { usage() }
-    let style = args.count == 5 ? AsteroidMaker.Style(rawValue: args[4]) ?? .rock : .rock
-    let tint = args[2].split(separator: ",").compactMap { Double($0) }
-    guard let seed = UInt64(args[1]), tint.count == 3 else { usage() }
-    let out = URL(fileURLWithPath: args[3])
-    let texURL = out.deletingPathExtension().appendingPathExtension("png")
-    guard let scene = AsteroidMaker.make(seed: seed, tint: SIMD3(tint[0], tint[1], tint[2]), style: style, textureURL: texURL)
-    else { fail("could not build the asteroid") }
-    guard exportUSDZ(scene, to: out) else { fail("export failed") }
-    print("wrote \(args[3])")
 
 case "model":
     // model <Nova Files> <model.usdz> <ship id | s<sprite id>> <out dir> [yaw°] [pitch°] [r,g,b atmosphere]

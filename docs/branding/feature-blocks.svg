@@ -3,7 +3,7 @@
 <rect width="592" height="681" rx="10" fill="#0d0a0e"/>
 <text x="16" y="32" class="h1">Beyond the original: NovaSwift's own features, one square per task</text>
 <rect x="16" y="46" width="9" height="9" fill="#3fb950"/>
-<text x="30" y="55" class="lg">Done (118)</text>
+<text x="30" y="55" class="lg">Done (119)</text>
 <rect x="110" y="46" width="9" height="9" fill="#e3a52b"/>
 <text x="124" y="55" class="lg">Partly done (15)</text>
 <rect x="241" y="46" width="9" height="9" fill="none" stroke="#8d807c"/>
@@ -186,7 +186,7 @@
 <rect x="261.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: New interface screens and HUD layouts — Planned</title></rect>
 <rect x="276.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: Custom effects and shaders — Planned</title></rect>
 <rect x="291.5" y="608.5" width="11" height="11" fill="none" stroke="#8d807c"><title>Expanded plug-ins: Docs, templates and example plug-ins — Planned</title></rect>
-<text x="16" y="647" class="gh">HD graphics and 3D models</text><text x="576" y="647" class="gn" text-anchor="end">12 of 19 done</text>
+<text x="16" y="647" class="gh">HD graphics and 3D models</text><text x="576" y="647" class="gn" text-anchor="end">13 of 20 done</text>
 <rect x="216" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Pack format keyed to original sprite ids (in-file or .nsx folder) — Done</title></rect>
 <rect x="231" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Falls back to the classic art — Done</title></rect>
 <rect x="246" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD sprite sheets at 2× and 4× detail — Done</title></rect>
@@ -199,11 +199,12 @@
 <rect x="351" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: HD art inside a plug-in file, with embed and unembed tools — Done</title></rect>
 <rect x="366" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Packs found anywhere in a plug-in, switched with it — Done</title></rect>
 <rect x="381" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Asks to turn on HD when new HD art is installed — Done</title></rect>
-<rect x="396" y="635" width="12" height="12" fill="#e3a52b"><title>HD graphics and 3D models: Nova Reimagined overhaul pack — Partly done</title></rect>
-<rect x="411.5" y="635.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: glTF import — Planned</title></rect>
-<rect x="216.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Live 3D with real-time lighting — Planned</title></rect>
-<rect x="231.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Lighting from nearby stars — Planned</title></rect>
-<rect x="246.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD landing pictures and interface art — Planned</title></rect>
-<rect x="261.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: High-quality sound and music packs — Planned</title></rect>
-<rect x="276.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD on Linux and Windows — Planned</title></rect>
+<rect x="396" y="635" width="12" height="12" fill="#3fb950"><title>HD graphics and 3D models: Shield bubbles for HD hulls — Done</title></rect>
+<rect x="411" y="635" width="12" height="12" fill="#e3a52b"><title>HD graphics and 3D models: Nova Reimagined overhaul pack — Partly done</title></rect>
+<rect x="216.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: glTF import — Planned</title></rect>
+<rect x="231.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Live 3D with real-time lighting — Planned</title></rect>
+<rect x="246.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: Lighting from nearby stars — Planned</title></rect>
+<rect x="261.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD landing pictures and interface art — Planned</title></rect>
+<rect x="276.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: High-quality sound and music packs — Planned</title></rect>
+<rect x="291.5" y="650.5" width="11" height="11" fill="none" stroke="#8d807c"><title>HD graphics and 3D models: HD on Linux and Windows — Planned</title></rect>
 </svg>
