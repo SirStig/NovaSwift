@@ -14,7 +14,7 @@ import NovaSwiftKit
 struct ClassicPreferencesView: View {
     @EnvironmentObject private var model: AppModel
     var onClose: () -> Void
-    /// Opens the port's own settings (everything the original never had).
+    /// Returns to the NovaSwift settings it was opened from.
     var onPortOptions: () -> Void
 
     @State private var showKeys = false
@@ -64,7 +64,7 @@ struct ClassicPreferencesView: View {
                 defaultItem: 0, cancelItem: 0)
             VStack {
                 Spacer()
-                Button("Port options…", action: onPortOptions)
+                Button("Back to Settings", action: onPortOptions)
                     .buttonStyle(.plain)
                     .font(.footnote).foregroundStyle(.white.opacity(0.7))
                     .padding(.bottom, 12)
