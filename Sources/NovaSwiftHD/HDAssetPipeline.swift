@@ -246,6 +246,27 @@ public final class ModelBaker {
         return snapshot(px)
     }
 
+    /// The model alone from any heading and elevation, scaled to fill 85% of
+    /// a square image (tools: matching a model's pose to a reference picture).
+    public func view(model: SCNNode, settings base: GraphicsEnhancement.BakeSettings,
+                     heading: Double, pitch: Double, size: Int) -> CGImage? {
+        var settings = base
+        settings.pitch = pitch
+        let stage = ModelStage(model: model, settings: settings)
+        stage.setPass(.hull(baked: []))
+        renderer.scene = stage.scene
+        renderer.pointOfView = stage.camera
+        defer { renderer.scene = nil }
+        stage.pose(heading: heading * .pi / 180, bank: 0)
+        let px = CGSize(width: size, height: size)
+        stage.orthographicScale = 1.2
+        for _ in 0..<2 {
+            guard let img = snapshot(px), let e = ClassicFootprint.extent(of: img), e > 0 else { break }
+            stage.orthographicScale *= e / (Double(size) * 0.85)
+        }
+        return snapshot(px)
+    }
+
     /// Hull only, no effect layers (tools and simple models).
     public func bake(model: SCNNode, settings: GraphicsEnhancement.BakeSettings, layout: BakeLayout,
                      classic: SpriteSheet?, scale: Double, stats: inout Stats) -> HDAtlas? {

@@ -223,10 +223,12 @@ case "refsheet":
     print("ship \(shipID): sprite \(sheet.sourceSpriteID ?? -1) \(sheet.frameWidth)x\(sheet.frameHeight), \(n)/set")
 
 case "orient":
-    // orient <Nova Files> <model.usdz> <ship id> — the yaw (0/90/180/270) whose
-    // silhouettes best match the classic frames (mask overlap), for models
-    // whose nose doesn't face +Z.
-    guard args.count == 4, let shipID = Int(args[3]) else { usage() }
+    // orient <Nova Files> <model.usdz> <ship id> [concept.png] — the rotation
+    // whose top-down frames best match the classic sprite. A top view can't tell
+    // a ship from itself rolled or flipped, so when the concept picture the model
+    // was made from is given, near-ties are settled by matching three-quarter
+    // views against it (fixes portraits shown on their side or upside down).
+    guard args.count == 4 || args.count == 5, let shipID = Int(args[3]) else { usage() }
     let game = loadGame(args[1])
     guard let classic = game.shipSprite(shipID) else { fail("no sprite for ship \(shipID)") }
     guard let baker = ModelBaker() else { fail("no Metal device") }
@@ -302,36 +304,125 @@ case "orient":
     var ex = axis(order[1]), ey = axis(order[0]), ez = axis(order[2])
     if simd_dot(simd_cross(ex, ey), ez) < 0 { ex = -ex }          // keep it a rotation
     print(String(format: "variances %.4f %.4f %.4f", a[order[0]][order[0]], a[order[1]][order[1]], a[order[2]][order[2]]))
-    var best = (m: [Double](), score: -1.0)
-    for (fx, fy, fz) in [(1.0, 1.0, 1.0), (-1.0, 1.0, -1.0), (-1.0, -1.0, 1.0), (1.0, -1.0, -1.0)] {
-        let rx = ex * fx, ry = ey * fy, rz = ez * fz
-        let m = [rx.x, rx.y, rx.z, ry.x, ry.y, ry.z, rz.x, rz.y, rz.z]
+    // Every right-angle rotation of the principal frame (24), scored top-down.
+    let basis = [ex, ey, ez]
+    var candidates: [[Double]] = []
+    for perm in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+        for sx in [1.0, -1.0] { for sy in [1.0, -1.0] {
+            let rx = basis[perm[0]] * sx, ry = basis[perm[1]] * sy
+            let rz = simd_cross(rx, ry)   // right-handed by construction
+            candidates.append([rx.x, rx.y, rx.z, ry.x, ry.y, ry.z, rz.x, rz.y, rz.z])
+        } }
+    }
+    let probeLayout = BakeLayout(frameWidth: classic.frameWidth, frameHeight: classic.frameHeight,
+                                 frameCount: n, framesPerSet: n, sets: [.level])
+    var scored: [(m: [Double], score: Double)] = []
+    for m in candidates {
         let model: SCNNode
         do { model = try ModelLoader.load(.file(URL(fileURLWithPath: args[2]))) } catch { fail("\(error)") }
         var stats = ModelBaker.Stats()
         var orientSettings = GraphicsEnhancement.BakeSettings()
         orientSettings.orientation = m
-        guard let atlas = baker.bake(model: model, settings: orientSettings, layout: full, classic: classic, scale: 1, stats: &stats)
+        guard let atlas = baker.bake(model: model, settings: orientSettings, layout: probeLayout, classic: classic, scale: 1, stats: &stats)
         else { continue }
         var inter = 0, union = 0, colourDiff = 0.0
         for f in probe {
             let c = pixels(classicCG?.cropping(to: CGRect(x: (f % 6) * classic.frameWidth, y: (f / 6) * classic.frameHeight,
                                                           width: classic.frameWidth, height: classic.frameHeight)),
                            w: classic.frameWidth, h: classic.frameHeight)
-            let m = pixels(atlas.frameImage(f), w: classic.frameWidth, h: classic.frameHeight)
-            for i in 0..<min(c.count, m.count) {
-                if c[i].0 && m[i].0 {
+            let mm = pixels(atlas.frameImage(f), w: classic.frameWidth, h: classic.frameHeight)
+            for i in 0..<min(c.count, mm.count) {
+                if c[i].0 && mm[i].0 {
                     inter += 1
-                    colourDiff += (abs(c[i].1 - m[i].1) + abs(c[i].2 - m[i].2) + abs(c[i].3 - m[i].3)) / 3
+                    colourDiff += (abs(c[i].1 - mm[i].1) + abs(c[i].2 - mm[i].2) + abs(c[i].3 - mm[i].3)) / 3
                 }
-                if c[i].0 || m[i].0 { union += 1 }
+                if c[i].0 || mm[i].0 { union += 1 }
             }
         }
         let overlap = union > 0 ? Double(inter) / Double(union) : 0
         let colour = inter > 0 ? max(0, 1 - colourDiff / Double(inter)) : 0
-        let score = overlap * (0.5 + 0.5 * colour)
-        print(String(format: "  flip (%+.0f %+.0f %+.0f): overlap %.3f colour %.3f → %.3f", fx, fy, fz, overlap, colour, score))
-        if score > best.score { best = (m, score) }
+        scored.append((m, overlap * (0.5 + 0.5 * colour)))
+    }
+    scored.sort { $0.score > $1.score }
+    guard let top = scored.first else { fail("could not render the model") }
+    print(String(format: "top-down: best %.3f, %d of 24 within 8%%", top.score, scored.filter { $0.score >= top.score * 0.92 }.count))
+    var best = (m: top.m, score: top.score)
+
+    // Settle near-ties with the concept picture (a three-quarter view).
+    if args.count == 5, let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: args[4]) as CFURL, nil),
+       let concept = CGImageSourceCreateImageAtIndex(src, 0, nil) {
+        let N = 96
+        /// Object mask and brightness, cropped to the object and centred in an N×N square.
+        func signature(_ img: CGImage, alphaMask: Bool) -> [Double]? {
+            let w = img.width, h = img.height
+            guard let ctx = HDAtlas.makeContext(width: w, height: h), let d = ctx.data else { return nil }
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+            let p = d.bindMemory(to: UInt8.self, capacity: ctx.bytesPerRow * h)
+            func px(_ x: Int, _ y: Int) -> (Double, Double, Double, Double) {
+                let o = y * ctx.bytesPerRow + x * 4
+                return (Double(p[o]) / 255, Double(p[o + 1]) / 255, Double(p[o + 2]) / 255, Double(p[o + 3]) / 255)
+            }
+            // Background: the border's median colour (concepts sit on a plain studio backdrop).
+            var border: [(Double, Double, Double)] = []
+            for x in Swift.stride(from: 0, to: w, by: 4) { let a = px(x, 0), b = px(x, h - 1); border += [(a.0, a.1, a.2), (b.0, b.1, b.2)] }
+            func med(_ v: [Double]) -> Double { v.sorted()[v.count / 2] }
+            let bg = (med(border.map(\.0)), med(border.map(\.1)), med(border.map(\.2)))
+            var mask = [Bool](repeating: false, count: w * h)
+            var x0 = w, y0 = h, x1 = 0, y1 = 0
+            for y in 0..<h { for x in 0..<w {
+                let c = px(x, y)
+                let on = alphaMask ? c.3 > 0.3 : max(abs(c.0 - bg.0), abs(c.1 - bg.1), abs(c.2 - bg.2)) > 0.08
+                if on { mask[y * w + x] = true; x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x); y1 = max(y1, y) }
+            } }
+            guard x1 > x0, y1 > y0 else { return nil }
+            let side = Double(max(x1 - x0, y1 - y0) + 1)
+            let ox = Double(x0) - (side - Double(x1 - x0 + 1)) / 2, oy = Double(y0) - (side - Double(y1 - y0 + 1)) / 2
+            var out = [Double](repeating: -1, count: N * N)   // -1 = background, else brightness
+            for j in 0..<N { for i in 0..<N {
+                let sx = Int(ox + (Double(i) + 0.5) / Double(N) * side), sy = Int(oy + (Double(j) + 0.5) / Double(N) * side)
+                guard sx >= 0, sy >= 0, sx < w, sy < h, mask[sy * w + sx] else { continue }
+                let c = px(sx, sy)
+                let a = alphaMask ? max(c.3, 1e-3) : 1
+                out[j * N + i] = (c.0 + c.1 + c.2) / 3 / a
+            } }
+            return out
+        }
+        /// Silhouette overlap, plus how well light and dark areas line up.
+        func similarity(_ a: [Double], _ b: [Double]) -> Double {
+            var inter = 0, union = 0
+            var la: [Double] = [], lb: [Double] = []
+            for i in 0..<a.count {
+                let ia = a[i] >= 0, ib = b[i] >= 0
+                if ia || ib { union += 1 }
+                if ia && ib { inter += 1; la.append(a[i]); lb.append(b[i]) }
+            }
+            guard union > 0, la.count > 10 else { return 0 }
+            let ma = la.reduce(0, +) / Double(la.count), mb = lb.reduce(0, +) / Double(lb.count)
+            var num = 0.0, da = 0.0, db = 0.0
+            for k in 0..<la.count { num += (la[k] - ma) * (lb[k] - mb); da += (la[k] - ma) * (la[k] - ma); db += (lb[k] - mb) * (lb[k] - mb) }
+            let corr = da > 0 && db > 0 ? num / (da * db).squareRoot() : 0
+            return Double(inter) / Double(union) * 0.6 + max(0, corr) * 0.4
+        }
+        if let target = signature(concept, alphaMask: false) {
+            var bestCombined = -1.0
+            for cand in scored.prefix(while: { $0.score >= top.score * 0.92 }) {
+                let model: SCNNode
+                do { model = try ModelLoader.load(.file(URL(fileURLWithPath: args[2]))) } catch { continue }
+                var settings = GraphicsEnhancement.BakeSettings()
+                settings.orientation = cand.m
+                var match = 0.0
+                for pitch in [20.0, 35.0, 50.0] {
+                    for heading in Swift.stride(from: 0.0, to: 360.0, by: 15.0) {
+                        guard let img = baker.view(model: model, settings: settings, heading: heading, pitch: pitch, size: 160),
+                              let sig = signature(img, alphaMask: true) else { continue }
+                        match = max(match, similarity(sig, target))
+                    }
+                }
+                let combined = cand.score / top.score * (0.35 + 0.65 * match)
+                print(String(format: "  candidate top-down %.3f, concept match %.3f → %.3f", cand.score, match, combined))
+                if combined > bestCombined { bestCombined = combined; best = (cand.m, cand.score) }
+            }
+        }
     }
     print("best orientation " + best.m.map { String(format: "%.5f", $0) }.joined(separator: ","))
 
