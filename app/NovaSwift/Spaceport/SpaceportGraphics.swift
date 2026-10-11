@@ -176,6 +176,12 @@ final class SpaceportGraphics {
     /// the base hull's picture, found by display name — a used Valkyrie (#371)
     /// borrows the Valkyrie's (#137 → PICT 5009).
     func shipPicture(_ ship: ShipRes) -> CGImage? {
+        // A graphics pack's model hull: its portrait on black, in place of the
+        // classic shipyard art (same framing role, HD).
+        if let base = game.shan(ship.id)?.baseSpriteID,
+           let portrait = HDGraphics.shared.portrait(baseSpriteID: base, onBlack: true) {
+            return portrait
+        }
         if let own = pict(ship.id - 128 + 5000) { return own }
         guard let base = baseHull(for: ship) else { return nil }
         return pict(base - 128 + 5000)
@@ -204,6 +210,15 @@ final class SpaceportGraphics {
     /// sprite sheet's pixel buffer) on every call, and the Shipyard grid calls
     /// this once per visible tile, every render.
     func shipFallbackPicture(_ ship: ShipRes) -> CGImage? {
+        // A graphics pack's HD art, when HD is on and ready (not cached here:
+        // it's a crop of an atlas already in memory, and HD can be toggled).
+        if let base = game.shan(ship.id)?.baseSpriteID,
+           let portrait = HDGraphics.shared.portrait(baseSpriteID: base, onBlack: false) {
+            return portrait
+        }
+        if let sheet = game.shipSprite(ship.id), let hd = HDGraphics.shared.frameImage(for: sheet, frame: 0) {
+            return hd
+        }
         if let c = shipFallbackCache[ship.id] { return c }
         let image = game.shipSprite(ship.id)?.frameCGImage(0)
         shipFallbackCache[ship.id] = .some(image)

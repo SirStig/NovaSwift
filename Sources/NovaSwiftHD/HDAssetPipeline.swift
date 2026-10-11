@@ -173,8 +173,37 @@ public final class ModelBaker {
                 .min { simd_distance(SIMD3<Float>($0.worldCoordinates), from) < simd_distance(SIMD3<Float>($1.worldCoordinates), from) }?
                 .worldCoordinates
         }
+        /// The tail surface at sideways position `x` (roll space): rays cast
+        /// forward (+Z, toward the nose) from behind the ship at a few heights;
+        /// the rearmost hit is the nozzle face. Nil if nothing is there.
+        func tail(atX x: Float) -> SIMD3<Float>? {
+            var best: SIMD3<Float>?
+            for y in stride(from: Float(-0.35), through: 0.35, by: 0.05) {
+                let from = stage.roll.simdConvertPosition(SIMD3(x, y, -3), to: nil)
+                let to = stage.roll.simdConvertPosition(SIMD3(x, y, 3), to: nil)
+                let hits = stage.scene.rootNode.hitTestWithSegment(from: SCNVector3(from), to: SCNVector3(to),
+                                                                   options: [SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue])
+                for h in hits where !(h.node.geometry is SCNPlane) {
+                    let local = stage.roll.simdConvertPosition(SIMD3<Float>(h.worldCoordinates), from: nil)
+                    if best == nil || local.z < best!.z { best = local }
+                }
+            }
+            return best
+        }
         var out: [GraphicsEnhancement.Effect] = []
         for b in blobs {
+            if layer == .engine {
+                // Engines sit on the tail: the classic glow gives the sideways
+                // position (frame 0 faces up, so screen right = the ship's
+                // right = −x); the model's own tail gives the depth.
+                let x = -Float((b.x - Double(layout.frameWidth) / 2) * unit)
+                if let t = tail(atX: x) ?? tail(atX: x * 0.7) ?? tail(atX: 0) {
+                    let radius = min(0.12, max(0.07, b.radius * unit * 1.2))
+                    out.append(.init(layer: layer, at: [Double(t.x), Double(t.y), Double(t.z) - 0.02],
+                                     radius: radius, color: b.color))
+                }
+                continue
+            }
             // Search outward from the blob centre for the hull, up to a few pixels.
             var hit: SCNVector3?
             search: for r in [0.0, 1, 2, 3, 4, 6] {
@@ -185,12 +214,36 @@ public final class ModelBaker {
             guard let world = hit else { continue }
             let local = stage.roll.convertPosition(world, from: nil)
             let big = b.coverage > 0.02
-            let radius = min(big ? 0.10 : 0.14, max(0.03, b.radius * unit * 1.2))
+            let floor = layer == .engine ? 0.07 : 0.03     // an engine glow has to read as thrust
+            let radius = min(big ? 0.10 : 0.14, max(floor, b.radius * unit * 1.2))
             let k = big ? 0.6 : 1.0
             out.append(.init(layer: layer, at: [Double(local.x), Double(local.y), Double(local.z)],
                              radius: radius, color: b.color.map { $0 * k }))
         }
         return out
+    }
+
+    /// A UI portrait of the model: front three-quarter (nose toward the
+    /// viewer and to the left), seen from slightly above, same lighting rig,
+    /// transparent background, the ship filling ~85% of a `size`² image.
+    /// For the shipyard, hail and target-display pictures.
+    public func portrait(model: SCNNode, descriptor: GraphicsEnhancement, size: Int) -> CGImage? {
+        var settings = descriptor.bake ?? .init()
+        settings.pitch = 24
+        let stage = ModelStage(model: model, settings: settings)
+        stage.prepareEffects(for: descriptor)
+        stage.setPass(.hull(baked: stage.layersPresent.subtracting([.engine])))
+        renderer.scene = stage.scene
+        renderer.pointOfView = stage.camera
+        defer { renderer.scene = nil }
+        stage.pose(heading: 215 * .pi / 180, bank: 0)
+        let px = CGSize(width: size, height: size)
+        stage.orthographicScale = 1.2
+        for _ in 0..<2 {   // fit: scale so the ship spans 85% of the image
+            guard let img = snapshot(px), let e = ClassicFootprint.extent(of: img), e > 0 else { break }
+            stage.orthographicScale *= e / (Double(size) * 0.85)
+        }
+        return snapshot(px)
     }
 
     /// Hull only, no effect layers (tools and simple models).
@@ -236,7 +289,7 @@ public final class ModelBaker {
 public final class HDBakeCache: @unchecked Sendable {
     public let directory: URL
     /// Bump to invalidate every bake when the renderer's output changes.
-    public static let version = 5
+    public static let version = 8
 
     public convenience init?(subdirectory: String = "NovaSwift/HDBakes") {
         guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
@@ -331,6 +384,24 @@ public enum HDAssetPipeline {
         public let spriteID: Int
         public let target: ModelBaker.LayerTarget
         public init(spriteID: Int, target: ModelBaker.LayerTarget) { self.spriteID = spriteID; self.target = target }
+    }
+
+    /// A model's UI portrait (see `ModelBaker.portrait`), cached like bakes.
+    /// nil for sprite (non-model) enhancements.
+    public static func portrait(for e: ResolvedGraphicsEnhancement, size: Int = 512,
+                                cache: HDBakeCache?) throws -> CGImage? {
+        guard e.descriptor.kind == .model else { return nil }
+        guard let content = e.source.contentKey() else { throw PipelineError.unreadable }
+        let layout = BakeLayout(frameWidth: size, frameHeight: size, frameCount: 1, framesPerSet: 1, sets: [.level])
+        let key = HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "portrait")
+        if let hit = cache?.load(key, layout: layout, scale: 1) { return hit.image }
+        let model = try ModelLoader.load(e.source)
+        bakeLock.lock(); defer { bakeLock.unlock() }
+        if sharedBaker == nil { sharedBaker = ModelBaker() }
+        guard let baker = sharedBaker, let image = baker.portrait(model: model, descriptor: e.descriptor, size: size)
+        else { throw PipelineError.bakeFailed }
+        cache?.store(key, HDAtlas(image: image, frameWidth: size, frameHeight: size, frameCount: 1, columns: 1, pixelScale: 1))
+        return image
     }
 
     /// Just the hull/sprite atlas (no effect layers).

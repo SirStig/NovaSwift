@@ -31,6 +31,9 @@ public struct SpriteLayouts: Sendable {
         }
     }
 
+    /// Whether `spriteID` is drawn as some hull's base sprite.
+    public func isHull(_ spriteID: Int) -> Bool { overlayIDs[spriteID] != nil }
+
     /// The classic overlay sprite ids of the hull drawn with `baseSpriteID`
     /// (empty for non-hull sprites and hulls without overlays).
     public func overlays(forBase baseSpriteID: Int) -> [GraphicsEnhancement.EffectLayer: Int] {

@@ -1783,6 +1783,8 @@ final class GameScene: SKScene {
         blinkClock += dt
         let baseSet = hullAnim.baseSet(turnSign: turn, animClock: animClock, disabled: false,
                                        carriesKeyShip: p.carriesKeyShip)
+        let spin = hdSpin(renderHeading(p), framesPerSet: hullAnim.framesPerSet, texture: rotationTextures.first)
+        for n in [shipSprite, engineGlowSprite, lightNode, altNode, weaponGlowNode, shipIonizeTint] { n?.zRotation = spin }
         if let sprite = shipSprite, !rotationTextures.isEmpty {
             sprite.texture = rotationTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: rotationTextures.count)]
         } else if let tri = placeholder {
@@ -3933,6 +3935,22 @@ final class GameScene: SKScene {
     /// Render-interpolated world position for a ship. See `Ship.renderPrevPosition`.
     private func renderPoint(_ s: Ship) -> CGPoint { renderLerp(s.renderPrevPosition, s.position) }
     /// Render-interpolated heading (shortest-path), for smooth sprite-frame changes.
+    /// HD hulls only: the angle still to turn after the frame pick. The
+    /// original picks a hull frame by truncating the heading to its 36 (or so)
+    /// frames, so the sprite trails the true heading by up to one frame step —
+    /// invisible in coarse pixel art, an obvious stutter at HD detail. HD
+    /// sprites are rotated by that remainder so they track the real heading
+    /// smoothly; the frame (and so every hit-box) is still the original's.
+    /// Classic sprites return 0: they draw exactly as the original did.
+    private func hdSpin(_ angle: Double, framesPerSet: Int, texture: SKTexture?) -> CGFloat {
+        guard framesPerSet > 1, HDGraphics.shared.isHD(texture) else { return 0 }
+        var deg = (angle * 180 / .pi).truncatingRemainder(dividingBy: 360)
+        if deg < 0 { deg += 360 }
+        let step = 360 / Double(framesPerSet)
+        let frameDeg = Double(SpriteFrames.headingFrame(degrees: deg, frames: framesPerSet)) * step
+        return -CGFloat((deg - frameDeg) * .pi / 180)
+    }
+
     private func renderHeading(_ s: Ship) -> Double {
         var d = (s.angle - s.renderPrevAngle).truncatingRemainder(dividingBy: 2 * .pi)
         if d > .pi { d -= 2 * .pi }
@@ -3961,6 +3979,8 @@ final class GameScene: SKScene {
             let turn = node.bank.update(angle: npc.angle, dt: frameDT)
             let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock,
                                             disabled: npc.disabled, carriesKeyShip: npc.carriesKeyShip)
+            let spin = hdSpin(renderHeading(npc), framesPerSet: node.hullAnim.framesPerSet, texture: node.textures.first)
+            for n in [node.sprite, node.engineGlow, node.light, node.alt, node.weaponGlow, node.ionizeTint] { n?.zRotation = spin }
             if let sprite = node.sprite, !node.textures.isEmpty {
                 sprite.texture = node.textures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.textures.count)]
             } else if let tri = node.placeholder {

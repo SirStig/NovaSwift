@@ -37,6 +37,9 @@ final class HDGraphics: @unchecked Sendable {
     /// Base sprite id of each hull drawn by a model → whether it replaces the
     /// classic overlays (`overlays: hide`, the model default).
     private var modelHulls: [Int: Bool] = [:]
+    /// UI portraits of model hulls (front three-quarter), transparent and on black.
+    private var portraits: [Int: CGImage] = [:]
+    private var portraitsOnBlack: [Int: CGImage] = [:]
     private let hdTextures = NSHashTable<SKTexture>.weakObjects()
     private let bakeCache = HDBakeCache()
 
@@ -55,7 +58,7 @@ final class HDGraphics: @unchecked Sendable {
         self.game = game
         layouts = nil
         generation += 1
-        atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]
+        atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]; portraits = [:]; portraitsOnBlack = [:]
         apply(settings)
         for p in catalog.problems { NovaSwiftKit.Log.graphics.error("HD pack: \(p, privacy: .public)") }
         if !catalog.isEmpty {
@@ -119,6 +122,13 @@ final class HDGraphics: @unchecked Sendable {
                 modelHulls[e.spriteID] = e.descriptor.kind == .model ? e.descriptor.hidesClassicOverlays : nil
             }
             lock.unlock()
+            // Hull models also get a UI portrait (shipyard, hail, target display).
+            let isHull = layouts?.isHull(e.spriteID) ?? false
+            if isHull, let portrait = try? HDAssetPipeline.portrait(for: e, cache: bakeCache) {
+                lock.lock()
+                if gen == generation { portraits[e.spriteID] = portrait }
+                lock.unlock()
+            }
             let bytes = made.values.reduce(0) { $0 + $1.byteCount }
             NovaSwiftKit.Log.graphics.debug("HD: sprite \(e.spriteID, privacy: .public) ready (\(made.count, privacy: .public) sheet(s), \(bytes / 1024, privacy: .public) KB) in \(Int(Date().timeIntervalSince(start) * 1000), privacy: .public) ms")
         } catch {
@@ -263,6 +273,34 @@ final class HDGraphics: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if layouts == nil, let game { layouts = SpriteLayouts(game: game) }
         return layouts?.overlays(forBase: baseSpriteID) ?? [:]
+    }
+
+    /// One frame of a sheet's HD art as an image (for UI panels — the target
+    /// display, shipyard pictures), or nil when HD isn't on / ready for it.
+    /// Larger than the classic frame by `pixelScale`; callers scale to fit.
+    func frameImage(for sheet: SpriteSheet, frame: Int) -> CGImage? {
+        guard let id = sheet.sourceSpriteID else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        guard enabled, let atlas = atlases[id], frame >= 0, frame < atlas.frameCount else { return nil }
+        return atlas.frameImage(frame)
+    }
+
+    /// The HD UI portrait for a hull's base sprite: front three-quarter,
+    /// transparent (`onBlack: false`, for the red target silhouette) or on
+    /// black like the original shipyard art (`onBlack: true`). nil when HD is
+    /// off or the hull has no model.
+    func portrait(baseSpriteID: Int, onBlack: Bool) -> CGImage? {
+        lock.lock(); defer { lock.unlock() }
+        guard enabled, let p = portraits[baseSpriteID] else { return nil }
+        guard onBlack else { return p }
+        if let cached = portraitsOnBlack[baseSpriteID] { return cached }
+        guard let ctx = HDAtlas.makeContext(width: p.width, height: p.height) else { return p }
+        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: p.width, height: p.height))
+        ctx.draw(p, in: CGRect(x: 0, y: 0, width: p.width, height: p.height))
+        let out = ctx.makeImage() ?? p
+        portraitsOnBlack[baseSpriteID] = out
+        return out
     }
 
     /// Whether `spriteID` has HD art ready (its own enhancement or a model's

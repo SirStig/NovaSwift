@@ -190,6 +190,16 @@ case "hulls":
                      sheet?.frameCount ?? 0, l?.sets.count ?? 0, ships.count))
     }
 
+case "portrait":
+    // portrait <model.usdz> <out.png> [yaw°] — the UI portrait render.
+    guard args.count >= 3 else { usage() }
+    let model: SCNNode
+    do { model = try ModelLoader.load(.file(URL(fileURLWithPath: args[1]))) } catch { fail("\(error)") }
+    guard let baker = ModelBaker() else { fail("no Metal device") }
+    let d = GraphicsEnhancement(kind: .model, bake: .init(yaw: args.count > 3 ? Double(args[3]) : nil))
+    guard let img = baker.portrait(model: model, descriptor: d, size: 512) else { fail("render failed") }
+    try? HDAtlas.encodePNG(img)?.write(to: URL(fileURLWithPath: args[2]))
+
 case "refsheet":
     // refsheet <Nova Files> <ship id> <out.png> — four headings of the classic
     // hull (0°, 40°, 90°, 270°), hard-pixel enlarged on black: the visual

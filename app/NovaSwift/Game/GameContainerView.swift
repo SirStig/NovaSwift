@@ -35,6 +35,11 @@ final class GameHost {
     /// dedicated shipyard art (`shipPicture`) has a baked opaque background that
     /// would tint into a solid red rectangle. Nil when the data has no sprite.
     func targetSilhouette(shipType id: Int) -> CGImage? {
+        // HD art bypasses the cache: HD can be switched on and off mid-flight.
+        if HDGraphics.shared.isActive, let ship = game?.ship(id), let hd = graphics?.shipFallbackPicture(ship),
+           hd.width > (game?.shipSprite(id)?.frameWidth ?? .max) {
+            return hd   // the HD portrait (or HD frame), tinted red by the HUD like the original
+        }
         if let cached = targetSpriteCache[id] { return cached }
         let img = game?.ship(id).flatMap { graphics?.shipFallbackPicture($0) }
         targetSpriteCache[id] = img
@@ -4011,7 +4016,8 @@ struct GameContainerView: View {
             // sprite** (the sphere or station you see in-system), not the
             // ground-level landing landscape. Fall back to the landscape only if
             // the spob defines no sprite.
-            if let sprite = host?.game?.spobSprite(spobID)?.frameCGImage(0) { return sprite }
+            if let sheet = host?.game?.spobSprite(spobID),
+               let sprite = HDGraphics.shared.frameImage(for: sheet, frame: 0) ?? sheet.frameCGImage(0) { return sprite }
             guard let spob = host?.game?.spob(spobID) else { return nil }
             return host?.graphics?.landscape(for: spob)
         }

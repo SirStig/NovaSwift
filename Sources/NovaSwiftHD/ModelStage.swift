@@ -329,6 +329,25 @@ public final class ModelStage {
             roll.addChildNode(node)
             emitters.append((node, e.layer))
             layersPresent.insert(e.layer)
+            // Engines also get an exhaust plume: a flame streak lying flat
+            // behind the nozzle along the ship's tail (−Z), seen from above.
+            if e.layer == .engine {
+                let len = r * 9, wid = r * 2.2
+                let flame = SCNPlane(width: CGFloat(wid), height: CGFloat(len))
+                let fm = SCNMaterial()
+                fm.lightingModel = .constant
+                fm.diffuse.contents = ModelStage.plumeImage
+                fm.multiply.contents = ModelStage.color(c[0], c[1], c[2])
+                fm.blendMode = .add
+                fm.writesToDepthBuffer = false
+                fm.isDoubleSided = true
+                flame.materials = [fm]
+                let plume = SCNNode(geometry: flame)
+                plume.eulerAngles.x = -.pi / 2            // flat, facing up; its +Y now runs toward the tail
+                plume.position = SCNVector3(Float(e.at[0]), Float(e.at[1]), Float(e.at[2] - len / 2 + r * 0.4))
+                roll.addChildNode(plume)
+                emitters.append((plume, e.layer))
+            }
         }
     }
 
@@ -448,6 +467,28 @@ public final class ModelStage {
         m.lightingModel = .constant
         m.diffuse.contents = color(0, 0, 0)
         return m
+    }()
+
+    /// An exhaust flame: brightest at the nozzle end (bottom row), tapering
+    /// and fading toward the tail.
+    static let plumeImage: CGImage = {
+        let w = 32, h = 128
+        let ctx = HDAtlas.makeContext(width: w, height: h)!
+        let p = ctx.data!.bindMemory(to: UInt8.self, capacity: ctx.bytesPerRow * h)
+        for y in 0..<h {
+            let t = Double(y) / Double(h - 1)            // 0 = top row (tail) … 1 = bottom (nozzle)
+            let along = pow(t, 1.6)
+            let halfWidth = 0.18 + 0.32 * t
+            for x in 0..<w {
+                let u = abs((Double(x) + 0.5) / Double(w) * 2 - 1)
+                let across = max(0, 1 - pow(u / halfWidth, 2))
+                let v = min(1, along * across * 1.3)
+                let i = y * ctx.bytesPerRow + x * 4
+                let b = UInt8(v * 255)
+                p[i] = b; p[i + 1] = b; p[i + 2] = b; p[i + 3] = b
+            }
+        }
+        return ctx.makeImage()!
     }()
 
     /// A soft round glow (white, multiplied by the emitter colour).
