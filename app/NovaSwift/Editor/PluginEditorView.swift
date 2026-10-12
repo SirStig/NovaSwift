@@ -154,6 +154,8 @@ struct EditorToolArea: View {
                         SkeletonList(rows: 16).frame(minWidth: 260, idealWidth: 320, maxWidth: 460, maxHeight: .infinity, alignment: .top)
                         SkeletonForm(groups: 4).frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
+                case .changes:
+                    SkeletonList(rows: 18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 default:
                     Color(white: 0.11)
                 }
@@ -161,6 +163,10 @@ struct EditorToolArea: View {
             }
         } else {
             switch model.tool {
+            case .changes:
+                ChangesView(model: model)
+            case .bundleFiles:
+                BundleFilesView(model: model)
             case .resources:
                 HSplitView {
                     ResourceListView(model: model, store: store, ui: ui)

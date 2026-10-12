@@ -31,6 +31,8 @@ struct InspectorView: View {
         .background(Color(white: 0.13))
     }
 
+    private static func isDialog(_ t: NovaSwiftKit.FourCharCode) -> Bool { t == NovaType.ditl || t == NovaType.dlog }
+
     private func isHeavy(_ schema: ResourceSchema?) -> Bool {
         (schema?.fields.count ?? 0) >= Self.deferThreshold
     }
@@ -44,7 +46,7 @@ struct InspectorView: View {
             InspectorHeader(model: model, ui: ui, env: env, key: key, res: res)
                 .id(key)
             Divider()
-            if ui.rawMode || kind == .raw {
+            if ui.rawMode || (kind == .raw && !Self.isDialog(key.type)) {
                 HexEditorView(key: key, data: res.data, minimumSize: schema?.minimumSize ?? 0, model: model)
             } else {
                 ScrollViewReader { proxy in
@@ -59,6 +61,9 @@ struct InspectorView: View {
                                     }
                             } else {
                                 if !issues.isEmpty { IssueBox(issues: issues, onSelect: { _ in }) }
+                                if model.document.provenance(key.type, key.id) == .override {
+                                    OverrideDiffPanel(model: model, key: key).id(key)
+                                }
                                 SpecializedInspectorRouter(model: model, env: env, key: key) {
                                     editor(kind, key, res, schema, env, issues)
                                 }
@@ -97,6 +102,10 @@ struct InspectorView: View {
         case .graphic:
             if key.type == NovaType.rleD || key.type == NovaType.pict || key.type == NovaType.cicn {
                 GraphicEditor(key: key, data: res.data, model: model)
+            } else if key.type == NovaType.ppat || key.type == NovaType.ppatAlt {
+                PixPatPreview(key: key, data: res.data, model: model)
+            } else if key.type == NovaType.rle8 {
+                Rle8InfoView(data: res.data)
             } else {
                 EditorEmptyState(icon: "photo", title: "No preview for \(key.type.stringValue)", subtitle: "Switch to Raw to edit the bytes.")
                     .frame(minHeight: 200)
@@ -104,7 +113,7 @@ struct InspectorView: View {
         case .sound:
             SoundEditor(key: key, data: res.data, model: model)
         case .raw:
-            EmptyView()
+            if Self.isDialog(key.type) { DialogPreviewEditor(model: model, key: key) }
         }
     }
 }

@@ -140,6 +140,9 @@ public final class PluginDocument {
         var before: [ResourceKey: Slot]
         var after: [ResourceKey: Slot]
         var coalesce: String?
+        /// Source-file reassignments (`setSourceFile`); "" = no source.
+        var srcBefore: [ResourceKey: String] = [:]
+        var srcAfter: [ResourceKey: String] = [:]
     }
     private var undoStack: [Entry] = []
     private var redoStack: [Entry] = []
@@ -161,7 +164,11 @@ public final class PluginDocument {
         self.base = base; self.layer = layer
     }
 
-    private func metadataChanged() { changeCount += 1 }
+    private func metadataChanged() {
+        changeCount += 1
+        // The editor metadata lives in the primary file only, so that file needs rewriting.
+        if let p = primaryFile { modifiedSources.insert(p) }
+    }
 
     // MARK: Queries
 
@@ -351,7 +358,7 @@ public final class PluginDocument {
         guard groupDepth == 0 else { return }
         if let entry = groupEntry {
             groupEntry = nil
-            if !entry.before.isEmpty { pushUndo(entry) }
+            if !entry.before.isEmpty || !entry.srcBefore.isEmpty { pushUndo(entry) }
         }
         flushPendingGroupChange()
     }
@@ -374,7 +381,7 @@ public final class PluginDocument {
     @discardableResult
     public func undo() -> Bool {
         guard groupDepth == 0, let entry = undoStack.popLast() else { return false }
-        restore(entry.before)
+        restore(entry.before, sources: entry.srcBefore)
         redoStack.append(entry)
         return true
     }
@@ -382,21 +389,25 @@ public final class PluginDocument {
     @discardableResult
     public func redo() -> Bool {
         guard groupDepth == 0, let entry = redoStack.popLast() else { return false }
-        restore(entry.after)
+        restore(entry.after, sources: entry.srcAfter)
         undoStack.append(entry)
         return true
     }
 
     public func clearUndoHistory() { undoStack.removeAll(); redoStack.removeAll() }
 
-    private func restore(_ slots: [ResourceKey: Slot]) {
+    private func restore(_ slots: [ResourceKey: Slot], sources: [ResourceKey: String] = [:]) {
         for (k, slot) in slots {
             switch slot {
             case .absent: layer.remove(k.type, k.id)
             case let .present(r): layer.add(r)
             }
         }
-        changed(Set(slots.keys))
+        for (k, s) in sources {
+            if let old = sourceMap[k] { modifiedSources.insert(old) }
+            if s.isEmpty { sourceMap[k] = nil } else { sourceMap[k] = s; modifiedSources.insert(s) }
+        }
+        changed(Set(slots.keys).union(sources.keys))
     }
 
     // MARK: Core mutation
@@ -438,6 +449,7 @@ public final class PluginDocument {
 
     private func changed(_ keys: Set<ResourceKey>) {
         changeCount += 1
+        trackSources(keys)
         if cachedEffective != nil {
             for k in keys {
                 if let r = layer.resource(k.type, k.id) { cachedEffective!.add(r) }
@@ -455,6 +467,283 @@ public final class PluginDocument {
     private func updateReferences(_ keys: Set<ResourceKey>) {
         if cachedReferences != nil, let e = cachedEffective { cachedReferences!.update(keys, in: e) }
         else if cachedReferences != nil { cachedReferences = nil }
+    }
+
+    // MARK: Source files
+
+    /// Prefix of the source key of an `.nsx` graphics pack (`pack:<relative path>.nsx`).
+    public static let packPrefix = "pack:"
+    public static func isPackKey(_ key: String) -> Bool { key.hasPrefix(packPrefix) }
+
+    /// The files this plug-in was loaded from, in load order (later files win a clash). Each is a
+    /// stable key: the path relative to the plug-in's folder (`ARPIA2 3.rez`, `Nova Files/X.rez`),
+    /// or `pack:<relative path>.nsx` for a graphics pack. Empty for a new document and for ones
+    /// opened through the legacy single-file `open(url:)`.
+    public private(set) var sourceFiles: [String] = []
+    /// On-disk container format of each non-pack source file, so Save writes it back the same way.
+    public private(set) var fileFormats: [String: PluginFormat] = [:]
+    /// Where new resources go. nil = pick by type (see `defaultSource(for:)`).
+    public var targetFile: String?
+
+    private var sourceMap: [ResourceKey: String] = [:]
+    /// Resources a later file of the same plug-in overrides. They aren't visible in `layer`
+    /// (one resource per key) but are written back to their own file so Save loses nothing.
+    private var shadowed: [String: [Resource]] = [:]
+    /// Source files that changed since the last save (only these are rewritten).
+    private var modifiedSources: Set<String> = []
+
+    /// True when Save must write several files (or a `.nsx` pack) instead of one.
+    public var usesFolderLayout: Bool {
+        sourceFiles.count > 1 || sourceFiles.contains(where: Self.isPackKey)
+    }
+
+    private static func baseName(_ key: String) -> String { (key as NSString).lastPathComponent.lowercased() }
+
+    /// The data file that receives editor metadata and untyped new resources: the first
+    /// non-pack file that doesn't look like a dedicated graphics/sounds file.
+    public var primaryFile: String? {
+        let data = sourceFiles.filter { !Self.isPackKey($0) }
+        return data.first { !Self.baseName($0).contains("graphic") && !Self.baseName($0).contains("sound") } ?? data.first
+    }
+
+    /// The source file a new resource of `type` lands in (the explicit `targetFile`, else by type:
+    /// HD `NSgx`/`NSbl` to the first graphics pack, sprites/pictures to a "Graphics" file, sounds
+    /// to a "Sounds" file, everything else to the primary file).
+    public func defaultSource(for type: FourCharCode) -> String? {
+        if let t = targetFile, sourceFiles.contains(t) { return t }
+        let data = sourceFiles.filter { !Self.isPackKey($0) }
+        if type == GraphicsEnhancementType.descriptor || type == GraphicsEnhancementType.blob {
+            return sourceFiles.first(where: Self.isPackKey) ?? primaryFile
+        }
+        let graphics: Set<FourCharCode> = [NovaType.rleD, NovaType.rle8, NovaType.pict, NovaType.cicn,
+                                           NovaType.ppat, NovaType.ppatAlt]
+        if graphics.contains(type), let g = data.first(where: { Self.baseName($0).contains("graphic") }) { return g }
+        if type == NovaType.snd, let s = data.first(where: { Self.baseName($0).contains("sound") }) { return s }
+        return primaryFile
+    }
+
+    /// The file a plug-in resource is stored in (nil when it isn't in the layer or sources aren't tracked).
+    public func sourceFile(of key: ResourceKey) -> String? {
+        guard layer.resource(key.type, key.id) != nil else { return nil }
+        return sourceMap[key]
+    }
+
+    /// Move a plug-in resource to another source file. Undoable. False if `file` isn't a source
+    /// file, the resource isn't in the layer, or it's already there.
+    @discardableResult
+    public func setSourceFile(_ file: String, for key: ResourceKey) -> Bool {
+        guard sourceFiles.contains(file), layer.resource(key.type, key.id) != nil else { return false }
+        let old = sourceMap[key]
+        guard old != file else { return false }
+        sourceMap[key] = file
+        modifiedSources.insert(file)
+        if let old { modifiedSources.insert(old) }
+        if groupDepth > 0, var g = groupEntry {
+            if g.srcBefore[key] == nil { g.srcBefore[key] = old ?? "" }
+            g.srcAfter[key] = file
+            groupEntry = g
+        } else {
+            var e = Entry(label: "Move \(key) to \((file as NSString).lastPathComponent)",
+                          before: [:], after: [:], coalesce: nil)
+            e.srcBefore = [key: old ?? ""]
+            e.srcAfter = [key: file]
+            pushUndo(e)
+        }
+        if groupDepth > 0 { redoStack.removeAll() }
+        changed([key])
+        return true
+    }
+
+    /// Keep `sourceMap` / `modifiedSources` in step with a change to `keys`.
+    private func trackSources(_ keys: Set<ResourceKey>) {
+        guard !sourceFiles.isEmpty else { return }
+        for k in keys {
+            if layer.resource(k.type, k.id) != nil, sourceMap[k] == nil, let d = defaultSource(for: k.type) {
+                sourceMap[k] = d
+            }
+            if let s = sourceMap[k] { modifiedSources.insert(s) }
+        }
+    }
+
+    /// Fold every source file into one (after "merge into a single file" saves).
+    public func collapseSources(to name: String, format: PluginFormat) {
+        sourceFiles = [name]
+        fileFormats = [name: format]
+        sourceMap = [:]
+        for (type, rs) in layer.byType { for id in rs.keys { sourceMap[ResourceKey(type, id)] = name } }
+        shadowed = [:]
+        modifiedSources = [name]
+        targetFile = nil
+    }
+
+    /// A plug-in resource that wasn't loaded into a single file: used to size the Save plan and
+    /// by tests.
+    var shadowedResourceCount: Int { shadowed.values.reduce(0) { $0 + $1.count } }
+
+    // MARK: Multi-file save
+
+    /// Snapshot what Save would write, as plain values that can be encoded and written off the
+    /// main actor (`PluginSavePlan.write(to:)`). Call `didSave(_:)` once it succeeded.
+    ///
+    /// Only files that changed since the last save are included (`rewriteAll` forces every file,
+    /// for "Save As" to a new folder), so untouched files stay byte-identical. `.nsx` packs are
+    /// written back as `.nsx` folders unless `embedPacksInFile`, which folds their `NSgx`/`NSbl`
+    /// into the primary data file instead.
+    public func makeSavePlan(rewriteAll: Bool = false, embedPacksInFile: Bool = false,
+                             embedMetadata: Bool = true) -> PluginSavePlan {
+        let packs = sourceFiles.filter(Self.isPackKey)
+        let dataKeys = sourceFiles.filter { !Self.isPackKey($0) }
+        // A graphics-only plug-in has no data file; one is created only if something needs it.
+        let synthName = Self.safeFileName(name) + ".rez"
+        let dataTarget = primaryFile ?? synthName
+        func isHD(_ t: FourCharCode) -> Bool { t == GraphicsEnhancementType.descriptor || t == GraphicsEnhancementType.blob }
+
+        var perFile: [String: ResourceCollection] = [:]
+        for (type, rs) in layer.byType {
+            for (id, r) in rs {
+                var target = sourceMap[ResourceKey(type, id)]
+                if target == nil || !sourceFiles.contains(target!) { target = defaultSource(for: type) ?? dataTarget }
+                var t = target ?? dataTarget
+                if Self.isPackKey(t), embedPacksInFile || !isHD(type) { t = dataTarget }
+                perFile[t, default: ResourceCollection()].add(r)
+            }
+        }
+        for (file, rs) in shadowed where !Self.isPackKey(file) {
+            for r in rs where perFile[file]?.resource(r.type, r.id) == nil { perFile[file, default: ResourceCollection()].add(r) }
+        }
+        // A descriptor's asset must travel with it.
+        for (file, col) in perFile {
+            var out = col
+            for d in col.resources(of: GraphicsEnhancementType.descriptor) {
+                guard let blob = (try? JSONDecoder().decode(GraphicsEnhancement.self, from: d.data))?.blob,
+                      out.resource(GraphicsEnhancementType.blob, blob) == nil,
+                      let b = layer.resource(GraphicsEnhancementType.blob, blob) else { continue }
+                out.add(b)
+            }
+            perFile[file] = out
+        }
+        let usesSynth = primaryFile == nil && perFile[synthName] != nil
+        if embedMetadata, primaryFile != nil || usesSynth,
+           let json = try? JSONEncoder().encode(Metadata(name: name, author: author, version: version, notes: notes)) {
+            perFile[dataTarget, default: ResourceCollection()].add(
+                Resource(type: Self.metadataType, id: Self.metadataID, name: "Editor metadata", data: json))
+        }
+
+        var plan = PluginSavePlan(changeCount: changeCount)
+        func wanted(_ key: String) -> Bool { rewriteAll || modifiedSources.contains(key) || !sourceFiles.contains(key) }
+        var written: Set<String> = []
+        var dataOrder = dataKeys
+        if usesSynth { dataOrder.append(synthName) }
+        for key in dataOrder {
+            let primaryForcedByPacks = embedPacksInFile && key == dataTarget && !packs.isEmpty
+            guard wanted(key) || primaryForcedByPacks else { continue }
+            plan.dataFiles.append(.init(relativePath: key, format: fileFormats[key] ?? .rez,
+                                        collection: perFile[key] ?? ResourceCollection()))
+            written.insert(key)
+        }
+        if !embedPacksInFile {
+            for key in packs where wanted(key) {
+                let rel = String(key.dropFirst(Self.packPrefix.count))
+                let name = ((rel as NSString).lastPathComponent as NSString).deletingPathExtension
+                plan.packs.append(.init(relativePath: rel, name: name, collection: perFile[key] ?? ResourceCollection()))
+                written.insert(key)
+            }
+        }
+        plan.writtenKeys = written
+        return plan
+    }
+
+    /// Mark a `makeSavePlan` result as written: the document is clean again unless it changed since.
+    public func didSave(_ plan: PluginSavePlan) {
+        if changeCount == plan.changeCount { modifiedSources.subtract(plan.writtenKeys) }
+        savedChangeCount = plan.changeCount
+    }
+
+    static func safeFileName(_ name: String) -> String {
+        let bad = CharacterSet(charactersIn: "/\\:?*\"<>|").union(.controlCharacters)
+        let s = name.components(separatedBy: bad).joined(separator: "-").trimmingCharacters(in: .whitespaces)
+        return s.isEmpty ? "Untitled Plug-in" : s
+    }
+
+    // MARK: Opening several files
+
+    /// Open a plug-in made of several files (and/or `.nsx` packs) as one layer over `base`, with
+    /// per-resource source tracking. `files` are in load order, packs last. Pack blobs are
+    /// renumbered into the layer's `NSbl` id space (and back to `asset_N` files on save).
+    public static func open(files: [LoadedPluginFile], defaultName: String,
+                            base: ResourceCollection = ResourceCollection()) -> PluginDocument {
+        // Metadata: the primary file's wins, else the first one found.
+        var metas: [(key: String, meta: Metadata)] = []
+        var reservedBlobs = Set<Int>()
+        var cleaned: [LoadedPluginFile] = []
+        for var f in files {
+            if !f.isPack {
+                if let m = f.collection.resource(metadataType, metadataID),
+                   let decoded = try? JSONDecoder().decode(Metadata.self, from: m.data) {
+                    metas.append((f.key, decoded))
+                }
+                f.collection.remove(metadataType, metadataID)
+                reservedBlobs.formUnion(f.collection.resources(of: GraphicsEnhancementType.blob).map(\.id))
+            }
+            cleaned.append(f)
+        }
+        let primary: String? = {
+            let data = cleaned.filter { !$0.isPack }.map(\.key)
+            func b(_ k: String) -> String { (k as NSString).lastPathComponent.lowercased() }
+            return data.first { !b($0).contains("graphic") && !b($0).contains("sound") } ?? data.first
+        }()
+        let meta = metas.first(where: { $0.key == primary })?.meta ?? metas.first?.meta
+            ?? Metadata(name: defaultName, author: "", version: "1.0", notes: "")
+
+        var layer = ResourceCollection()
+        var map: [ResourceKey: String] = [:]
+        var shadow: [String: [Resource]] = [:]
+        for f in cleaned {
+            let col = f.isPack ? renumberedBlobs(f.collection, reserving: &reservedBlobs) : f.collection
+            for (type, rs) in col.byType {
+                for (id, r) in rs {
+                    let k = ResourceKey(type, id)
+                    if let prev = layer.resource(type, id), let ps = map[k] { shadow[ps, default: []].append(prev) }
+                    layer.add(r)
+                    map[k] = f.key
+                }
+            }
+        }
+        let doc = PluginDocument(name: meta.name, author: meta.author, version: meta.version,
+                                 notes: meta.notes, base: base, layer: layer)
+        doc.sourceFiles = cleaned.map(\.key)
+        for f in cleaned where !f.isPack { doc.fileFormats[f.key] = f.format }
+        doc.sourceMap = map
+        doc.shadowed = shadow
+        doc.modifiedSources = []
+        doc.savedChangeCount = doc.changeCount
+        return doc
+    }
+
+    /// `pack` with its `NSbl` blobs moved to ids not in `reserved` (which then grows), and the
+    /// descriptors' `blob` fields rewritten to match.
+    private static func renumberedBlobs(_ pack: ResourceCollection, reserving reserved: inout Set<Int>) -> ResourceCollection {
+        var out = ResourceCollection()
+        var idMap: [Int: Int] = [:]
+        var next = GraphicsPackEmbedding.firstBlobID
+        for r in pack.resources(of: GraphicsEnhancementType.blob) {
+            while reserved.contains(next) { next += 1 }
+            reserved.insert(next)
+            idMap[r.id] = next
+            out.add(Resource(type: r.type, id: next, name: r.name, attributes: r.attributes, data: r.data))
+        }
+        for (type, rs) in pack.byType where type != GraphicsEnhancementType.blob {
+            for (_, r) in rs {
+                guard type == GraphicsEnhancementType.descriptor,
+                      var g = try? JSONDecoder().decode(GraphicsEnhancement.self, from: r.data),
+                      let old = g.blob, let new = idMap[old], new != old else { out.add(r); continue }
+                g.blob = new
+                if let json = try? JSONEncoder().encode(g) {
+                    out.add(Resource(type: r.type, id: r.id, name: r.name, attributes: r.attributes, data: json))
+                } else { out.add(r) }
+            }
+        }
+        return out
     }
 
     // MARK: Save / open

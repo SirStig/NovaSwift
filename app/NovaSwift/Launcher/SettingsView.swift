@@ -356,6 +356,13 @@ struct SettingsView: View {
                 Toggle("Extra-sharp HD (uses more memory)",
                        isOn: Binding(get: { model.settings.hdDetail >= 4 },
                                      set: { model.settings.hdDetail = $0 ? 4 : 2 }))
+                // Live 3D turns each modelled ship in real time. It costs more
+                // than sprites, so it's opt-in and capped per device.
+                NovaMenuPicker(title: "Ships with 3D models", selection: Binding(
+                                    get: { model.settings.hullPresentation },
+                                    set: { model.settings.hullPresentation = $0
+                                           Task { await model.data.prewarmHDGraphics() } }),
+                               options: GameSettings.HullPresentation.allCases) { $0.label }
             }
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Windows hyperspace look", isOn: binding(\.ceHyperspaceLook))

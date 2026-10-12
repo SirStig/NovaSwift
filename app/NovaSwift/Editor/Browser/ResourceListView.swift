@@ -9,6 +9,15 @@ struct ResourceListView: View {
     @ObservedObject var model: EditorModel
     @ObservedObject var store: EditorProjectStore
     @ObservedObject var ui: EditorUIState
+    /// Which resources carry HD / 3D art (resolved off-main, shared with the Changes view).
+    @ObservedObject private var hd: EditorHDIndex
+
+    init(model: EditorModel, store: EditorProjectStore, ui: EditorUIState) {
+        self.model = model
+        self.store = store
+        self.ui = ui
+        _hd = ObservedObject(wrappedValue: EditorHDIndex.shared(for: model))
+    }
 
     enum Scope: String, CaseIterable, Identifiable {
         case all = "All", mine = "This plug-in", base = "Base"
@@ -41,7 +50,15 @@ struct ResourceListView: View {
         .task(id: RefreshKey(type: model.selectedType, rev: model.dataRevision, ready: model.dataReady)) {
             await refresh()
         }
+        .task(id: HDKey(rev: model.dataRevision, ready: model.dataReady)) {
+            // Behind the list itself, and coalesced across an edit burst.
+            try? await Task.sleep(for: .milliseconds(250))
+            if Task.isCancelled { return }
+            await hd.refresh(model)
+        }
     }
+
+    private struct HDKey: Hashable { let rev: Int; let ready: Bool }
 
     private struct RefreshKey: Hashable { let type: NovaSwiftKit.FourCharCode?; let rev: Int; let ready: Bool }
 
@@ -142,6 +159,14 @@ struct ResourceListView: View {
             Text(e.name.isEmpty ? "—" : e.name).lineLimit(1)
                 .foregroundStyle(e.name.isEmpty ? .tertiary : .primary)
             Spacer(minLength: 4)
+            if let others = model.conflicts[e.key], let winner = others.last {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10)).foregroundStyle(.orange)
+                    .help("Also defined by \(others.joined(separator: ", ")) — \(winner) wins")
+            }
+            if hd.result?.badgeKeys.contains(e.key) == true {
+                Image(systemName: "cube.fill").font(.system(size: 10)).foregroundStyle(Color.cyan)
+                    .help("Has an HD sprite or 3D model attached")
+            }
             if e.provenance != .base { ProvenanceBadge(provenance: e.provenance) }
         }
     }

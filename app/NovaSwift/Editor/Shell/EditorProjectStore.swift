@@ -9,6 +9,9 @@ struct EditorExportOptions: Equatable {
     var format: PluginFormat = .rez
     var embedMetadata = true
     var includeHD = true
+    /// Folder saves: fold `.nsx` graphics packs into the plug-in's data file (as `NSgx`/`NSbl`)
+    /// instead of writing them back as `.nsx` folders.
+    var embedPackHD = false
     /// Whole effective set incl. the base game (redistribution warning).
     var full = false
 }
@@ -106,6 +109,9 @@ final class EditorProjectStore: ObservableObject {
     func newPlugin() {
         replace(PluginDocument(base: baseForNew()), url: nil)
         installedID = nil
+        model.bundle = nil
+        model.conflicts = [:]
+        conflictGeneration += 1
         model.format = .rez
         clearRecovery()
         flash("New plug-in")
@@ -113,57 +119,166 @@ final class EditorProjectStore: ObservableObject {
 
     func openPanel() {
         let p = NSOpenPanel()
-        p.message = "Open a plug-in (.rez, .ndat or classic resource file)"
+        p.message = "Open a plug-in file (.rez, .ndat, classic), a plug-in folder, a total conversion, or an .nsx graphics pack"
         p.allowsMultipleSelection = false
-        p.canChooseDirectories = false
+        p.canChooseFiles = true
+        p.canChooseDirectories = true
         guard p.runModal() == .OK, let url = p.url else { return }
         open(url: url)
     }
 
+    private struct OpenFailure: Swift.Error, CustomStringConvertible { let description: String }
+
     func open(url: URL) {
         _ = url.startAccessingSecurityScopedResource()
-        let bundle = installedBundle(containing: url)
-        runBusy("Opening \(url.lastPathComponent)…") {
-            let base = try await self.base(excluding: bundle?.id)
-            self.busyText = "Reading \(url.lastPathComponent)…"
-            let box = try await Task.detached(priority: .userInitiated) {
-                DocBox(doc: try PluginDocument.open(url: url, base: base))
-            }.value
-            self.adopt(box.doc, url: url, installed: bundle?.id)
-            self.noteRecent(url)
+        let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        if isDir {
+            let installed = installedBundle(forFolder: url)
+            openLayout(installed: installed) {
+                if PluginBundleLoader.isGraphicsPack(url) { return PluginBundleLoader.layout(ofPack: url) }
+                guard let l = PluginBundleLoader.layout(ofFolder: url) else {
+                    throw OpenFailure(description: "\(url.lastPathComponent) holds no plug-in files (.rez / .ndat), total conversion or .nsx graphics pack")
+                }
+                return l
+            }
+            noteRecent(url)
+            return
         }
+        let bundle = installedBundle(containing: url)
+        openLayout(installed: bundle) {
+            // A file of a multi-file plug-in (or one with a pack beside it) opens the whole plug-in.
+            if let bundle {
+                let l = PluginBundleLoader.layout(of: bundle)
+                if l.dataFiles.count > 1 || !l.graphicsPacks.isEmpty || l.isTotalConversion { return l }
+            }
+            return PluginBundleLoader.layout(ofFile: url)
+        }
+        noteRecent(url)
     }
 
     func openInstalled(_ bundle: PluginBundle) {
-        runBusy("Opening \(bundle.name)…") {
-            let base = try await self.base(excluding: bundle.id)
-            self.busyText = "Reading \(bundle.name)…"
-            let files = bundle.allFileURLs
+        openLayout(installed: bundle) { PluginBundleLoader.layout(of: bundle) }
+    }
+
+    private struct DocBox: @unchecked Sendable {
+        let doc: PluginDocument
+        var layout: PluginLayout?
+        var skippedPacks: [URL] = []
+        var warnings: [String] = []
+    }
+
+    /// The one open path: scan the plug-in's layout, build its base, then read every file and
+    /// pack off the main actor. See docs/PLUGIN_EDITOR.md, "Plug-in shapes".
+    private func openLayout(installed: PluginBundle?, _ build: @escaping @Sendable () throws -> PluginLayout) {
+        runBusy("Opening plug-in…") {
+            self.busyText = "Looking at the plug-in's files…"
+            let layout = try await Task.detached(priority: .userInitiated) { try build() }.value
+            self.busyText = "Opening \(layout.name)…"
+            let base: ResourceCollection
+            if layout.isTotalConversion { base = try await self.totalConversionBase(layout) }
+            else { base = try await self.base(excluding: installed?.id) }
+            self.busyText = "Reading \(layout.name)…"
             let box = try await Task.detached(priority: .userInitiated) { () -> DocBox in
-                if files.count == 1 { return DocBox(doc: try PluginDocument.open(url: files[0], base: base)) }
-                var layer = ResourceCollection()
-                for f in files { layer.overlay(try ResourceFile.read(contentsOf: f)) }
-                return DocBox(doc: PluginDocument(name: bundle.name, base: base, layer: layer))
+                let loaded = try PluginBundleLoader.load(layout)
+                let doc = PluginDocument.open(files: loaded.files, defaultName: layout.name, base: base)
+                return DocBox(doc: doc, layout: layout, skippedPacks: loaded.skippedPacks, warnings: loaded.warnings)
             }.value
-            self.adopt(box.doc, url: files.count == 1 ? files[0] : nil, installed: bundle.id)
-            if files.count != 1 { self.flash("Multi-file plug-in merged — use Save As to write one file") }
+            self.adopt(box, installed: installed?.id)
+            if let w = box.warnings.first { self.flash(w) }
         }
     }
 
-    private struct DocBox: @unchecked Sendable { let doc: PluginDocument }
+    /// A total conversion's document base. The conversion replaces the stock `Nova Files`, so the
+    /// stock game is NOT mixed in (its ids mean different things there); the only shared piece is
+    /// `Nova.rez`, which the original loads for every scenario, and only when the conversion
+    /// doesn't ship its own. Otherwise the base is empty and the layer is the conversion itself.
+    private func totalConversionBase(_ layout: PluginLayout) async throws -> ResourceCollection {
+        guard let inputs = data?.editorMergeInputs() else { return ResourceCollection() }
+        let hasOwn = layout.novaFiles.contains { $0.lastPathComponent.uppercased() == "NOVA.REZ" }
+        let shared = hasOwn ? [] : inputs.baseFiles.filter { $0.lastPathComponent.uppercased() == "NOVA.REZ" }
+        guard !shared.isEmpty else { return ResourceCollection() }
+        busyText = "Loading the shared Nova.rez…"
+        return try await Task.detached(priority: .userInitiated) {
+            try GameLibrary.merge(baseFiles: shared, plugins: [])
+        }.value
+    }
 
-    private func adopt(_ doc: PluginDocument, url: URL?, installed: String?) {
+    private func adopt(_ box: DocBox, installed: String?) {
+        let doc = box.doc
         busyText = "Preparing data…"
+        let layout = box.layout
+        // A multi-file / pack document is addressed by its folder; a single file by itself.
+        let url: URL? = doc.usesFolderLayout ? layout?.root : layout?.dataFiles.first
         replace(doc, url: url)
         installedID = installed
-        if let url { model.format = url.pathExtension.lowercased() == "rez" ? .rez : .classic }
+        if let primary = doc.primaryFile, let f = doc.fileFormats[primary] { model.format = f }
+        else if let u = layout?.dataFiles.first { model.format = u.pathExtension.lowercased() == "rez" ? .rez : .classic }
+        if let layout { model.bundle = Self.bundleInfo(layout, skippedPacks: box.skippedPacks, installedID: installed) }
         clearRecovery()
+        refreshConflicts()
+    }
+
+    /// `EditorModel.bundle` for an opened / saved layout.
+    private static func bundleInfo(_ l: PluginLayout, skippedPacks: [URL] = [], installedID: String?) -> EditorBundleInfo {
+        let lone = l.dataFiles.count == 1 && l.graphicsPacks.isEmpty && l.otherFiles.isEmpty && !l.isTotalConversion
+        let skipped = Set(skippedPacks.map { $0.standardizedFileURL.path })
+        return EditorBundleInfo(name: l.name, folderURL: lone ? nil : l.root, resourceFiles: l.dataFiles,
+                                graphicsPacks: l.graphicsPacks.filter { !skipped.contains($0.standardizedFileURL.path) },
+                                otherFiles: l.otherFiles, isTotalConversion: l.isTotalConversion,
+                                installedID: installedID)
     }
 
     private func installedBundle(containing url: URL) -> PluginBundle? {
         let p = url.standardizedFileURL.path
         return data?.plugins.first { $0.allFileURLs.contains { $0.standardizedFileURL.path == p } }
     }
+
+    private func installedBundle(forFolder url: URL) -> PluginBundle? {
+        let p = url.standardizedFileURL.path
+        return data?.plugins.first { b in
+            if b.id == url.lastPathComponent { return true }
+            if let f = b.folderURL?.standardizedFileURL.path, f == p || p.hasPrefix(f + "/") { return true }
+            return false
+        }
+    }
+
+    // MARK: Conflicts
+
+    private let conflictScanner = EditorConflictScanner()
+    private var conflictGeneration = 0
+
+    /// Which other enabled plug-ins define the keys this document defines. Runs off-main after
+    /// opening / saving and never blocks either; parsed key sets are cached per file.
+    func refreshConflicts() {
+        conflictGeneration += 1
+        let gen = conflictGeneration
+        guard let data, !(model.bundle?.isTotalConversion ?? false) else { model.conflicts = [:]; return }
+        let thisID = installedID
+        let enabled = data.plugins.filter { $0.isEnabled && $0.id != thisID }
+        // With a total conversion selected, none of the global plug-ins load.
+        guard !enabled.contains(where: \.isTotalConversion) else { model.conflicts = [:]; return }
+        let flat = data.editorMergeInputs()?.flatPluginOrder ?? true
+        var files: [(name: String, url: URL)] = []
+        for b in enabled { for u in b.fileURLs.sorted(by: { Self.nameKey($0) < Self.nameKey($1) }) { files.append((b.name, u)) } }
+        if flat {
+            files = files.enumerated().sorted { a, b in
+                let ka = Self.nameKey(a.element.url), kb = Self.nameKey(b.element.url)
+                return ka != kb ? ka < kb : a.offset < b.offset
+            }.map(\.element)
+        }
+        let layer = model.document.layer
+        let scanner = conflictScanner
+        let inputs = files
+        Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                scanner.conflicts(of: layer, with: inputs)
+            }.value
+            guard let self, gen == self.conflictGeneration else { return }
+            self.model.conflicts = result
+        }
+    }
+
+    private static func nameKey(_ u: URL) -> String { u.lastPathComponent.uppercased() + "\u{0}" + u.lastPathComponent }
 
     /// Base game + other plug-ins, never including the document itself.
     private func base(excluding id: String?) async throws -> ResourceCollection {
@@ -188,11 +303,28 @@ final class EditorProjectStore: ObservableObject {
     // MARK: Save / export / install
 
     func save() {
+        if model.document.usesFolderLayout { saveFolder(); return }
         guard let url = model.fileURL else { saveAs(); return }
         write(to: url)
     }
 
     func saveAs() {
+        let doc = model.document
+        guard doc.usesFolderLayout else { saveAsSingleFile(); return }
+        let a = NSAlert()
+        a.messageText = "Save \(doc.sourceFiles.count) files"
+        a.informativeText = "This plug-in is made of \(doc.sourceFiles.count) files (data files and/or .nsx graphics packs). Save them to a new folder, each in its own file, or merge everything into one file?"
+        a.addButton(withTitle: "Save to Folder…")
+        a.addButton(withTitle: "Merge into One File…")
+        a.addButton(withTitle: "Cancel")
+        switch a.runModal() {
+        case .alertFirstButtonReturn: saveToNewFolder()
+        case .alertSecondButtonReturn: saveAsSingleFile()
+        default: break
+        }
+    }
+
+    private func saveAsSingleFile() {
         let panel = NSSavePanel()
         panel.title = "Save Plug-in"
         panel.canCreateDirectories = true
@@ -213,13 +345,68 @@ final class EditorProjectStore: ObservableObject {
 
     private func write(to url: URL) {
         do {
-            try model.document.save(to: url, format: model.format, embedMetadata: exportOptions.embedMetadata)
+            let doc = model.document
+            try doc.save(to: url, format: model.format, embedMetadata: exportOptions.embedMetadata)
+            // A merged multi-file document is now one file; later saves go to it.
+            if doc.usesFolderLayout { doc.collapseSources(to: url.lastPathComponent, format: model.format) }
             model.fileURL = url
+            model.bundle = Self.bundleInfo(PluginBundleLoader.layout(ofFile: url), installedID: installedID)
             model.metadataChanged()
             clearRecovery()
             noteRecent(url)
             flash("Saved \(url.lastPathComponent)")
+            refreshConflicts()
         } catch { errorText = "Couldn't save: \(error)" }
+    }
+
+    private func saveToNewFolder() {
+        let p = NSOpenPanel()
+        p.title = "Save Plug-in Files"
+        p.message = "Choose (or create) a folder for the plug-in's files"
+        p.prompt = "Save Here"
+        p.canChooseFiles = false
+        p.canChooseDirectories = true
+        p.canCreateDirectories = true
+        p.allowsMultipleSelection = false
+        guard p.runModal() == .OK, let url = p.url else { return }
+        _ = url.startAccessingSecurityScopedResource()
+        saveFolder(to: url)
+    }
+
+    /// Save a multi-file / pack document: only files that changed are rewritten (all of them for
+    /// a new folder), each in its original format, atomically; `.nsx` packs go back as `.nsx`
+    /// folders unless "embed HD in plug-in file" is on. Encoding and writing run off-main.
+    private func saveFolder(to dest: URL? = nil) {
+        let doc = model.document
+        guard let root = dest ?? model.bundle?.folderURL else { saveToNewFolder(); return }
+        let plan = doc.makeSavePlan(rewriteAll: dest != nil, embedPacksInFile: exportOptions.embedPackHD,
+                                    embedMetadata: exportOptions.embedMetadata)
+        runBusy("Saving \(doc.name)…") {
+            _ = try await Task.detached(priority: .userInitiated) { try plan.write(to: root) }.value
+            doc.didSave(plan)
+            if dest != nil {
+                // The document now lives in the new folder.
+                var b = self.model.bundle ?? EditorBundleInfo(name: doc.name, folderURL: root, resourceFiles: [],
+                                                              graphicsPacks: [], otherFiles: [],
+                                                              isTotalConversion: false, installedID: nil)
+                b.folderURL = root
+                b.resourceFiles = doc.sourceFiles.filter { !PluginDocument.isPackKey($0) }
+                    .map { root.appendingPathComponent($0) }
+                b.graphicsPacks = doc.sourceFiles.filter(PluginDocument.isPackKey)
+                    .map { root.appendingPathComponent(String($0.dropFirst(PluginDocument.packPrefix.count)), isDirectory: true) }
+                b.otherFiles = []
+                b.installedID = nil
+                self.model.bundle = b
+                self.model.fileURL = root
+                self.installedID = nil
+                self.noteRecent(root)
+            }
+            self.model.metadataChanged()
+            self.clearRecovery()
+            let n = plan.dataFiles.count + plan.packs.count
+            self.flash(n == 0 ? "Nothing to write — no file changed" : "Saved \(n) file\(n == 1 ? "" : "s")")
+            self.refreshConflicts()
+        }
     }
 
     func exportBytes(_ o: EditorExportOptions) throws -> Data {
@@ -334,7 +521,7 @@ final class EditorProjectStore: ObservableObject {
         // here and encode + write on a background thread so typing never hitches.
         let layer = d.layer
         let (name, author, version, notes) = (d.name, d.author, d.version, d.notes)
-        let info = RecoveryInfo(path: model.fileURL?.path, installedID: installedID, classic: model.format == .classic)
+        let info = RecoveryInfo(path: d.usesFolderLayout ? nil : model.fileURL?.path, installedID: installedID, classic: model.format == .classic)
         let dir = recoveryDir, file = recoveryURL, infoFile = recoveryInfoURL
         let gen = recoveryGeneration
         Task.detached(priority: .utility) { [weak self] in
@@ -377,6 +564,8 @@ final class EditorProjectStore: ObservableObject {
             self.replace(doc, url: info?.path.map { URL(fileURLWithPath: $0) })
             self.model.format = (info?.classic ?? false) ? .classic : .rez
             self.installedID = info?.installedID
+            self.model.bundle = nil
+            self.refreshConflicts()
             self.recoveryAvailable = false
             self.flash("Recovered unsaved work")
         }

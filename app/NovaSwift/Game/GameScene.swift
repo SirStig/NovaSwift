@@ -292,6 +292,8 @@ final class GameScene: SKScene {
     /// sequence. Entries are removed once `.shipDestroyed` retires the entityID.
     private var npcDeathSequenceStarted: Set<Int> = []
     private var shipSprite: SKSpriteNode?
+    /// The player's live 3D hull, when the hull draws as a model (HD "Full live 3D").
+    private var shipLive: LiveHull?
     private var debrisPodFrames: [SKTexture]?
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
@@ -1017,6 +1019,8 @@ final class GameScene: SKScene {
     private final class NPCNode {
         let container = SKNode()
         var sprite: SKSpriteNode?
+        /// The live 3D hull, when this ship draws as a model (HD "Full live 3D").
+        var live: LiveHull?
         var placeholder: SKShapeNode?
         var thruster: SKNode?
         var engineGlow: SKSpriteNode?
@@ -1533,6 +1537,17 @@ final class GameScene: SKScene {
             shieldSprite = shield
         }
 
+        // Full live 3D: the model replaces the baked base sprite. Overlays stay
+        // hidden for model hulls (see hullHidesOverlay).
+        shipLive = nil
+        if let base = galaxy?.game.shan(hullType)?.baseSpriteID,
+           let live = HDGraphics.shared.makeLiveHull(baseSpriteID: base) {
+            shipSprite?.isHidden = true
+            live.node.zPosition = 0.5
+            node.addChild(live.node)
+            shipLive = live
+        }
+
         addChild(node)
         shipNode = node
     }
@@ -1813,6 +1828,7 @@ final class GameScene: SKScene {
         } else if let tri = placeholder {
             tri.zRotation = -CGFloat(renderHeading(p))
         }
+        shipLive?.pose(heading: renderHeading(p), bank: Double(turn))
         if let hull = shipSprite { releaseIonize(hull); applyIonize(to: hull, ship: p) }
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
             glow.texture = engineGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: engineGlowTextures.count)]
@@ -4084,6 +4100,7 @@ final class GameScene: SKScene {
             } else if let tri = node.placeholder {
                 tri.zRotation = -CGFloat(renderHeading(npc))
             }
+            node.live?.pose(heading: renderHeading(npc), bank: Double(turn))
             // One fog slot per sprite (0x00428340): murk writes it, then ionization
             // overwrites it only where its level is higher (or murk is under 8).
             if let hull = node.sprite {
@@ -4180,6 +4197,13 @@ final class GameScene: SKScene {
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
+            if let base = galaxy?.game.shan(npc.shipTypeID)?.baseSpriteID,
+               let live = HDGraphics.shared.makeLiveHull(baseSpriteID: base) {
+                sprite.isHidden = true
+                live.node.zPosition = 0.5
+                n.container.addChild(live.node)
+                n.live = live
+            }
         } else {
             // Faction-tinted arrowhead when we can't resolve the hull sprite.
             let path = CGMutablePath()

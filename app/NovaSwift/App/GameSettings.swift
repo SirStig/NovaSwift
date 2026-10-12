@@ -91,6 +91,17 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
+    enum HullPresentation: String, Codable, CaseIterable, Identifiable {
+        case sprites, live
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .sprites: return "Sprites"
+            case .live: return "Full live 3D"
+            }
+        }
+    }
+
     enum FrameRateCap: String, Codable, CaseIterable, Identifiable {
         case fps30, fps60, fps120, unlimited
         var id: String { rawValue }
@@ -282,6 +293,10 @@ struct GameSettings: Codable, Equatable {
     /// HD texture detail, in pixels per original pixel (2 or 4). 4 is sharper
     /// up close but uses four times the memory per sprite.
     var hdDetail: Int = 2
+    /// How ships that have a 3D model draw once HD graphics are on: their baked
+    /// sprite frames (`sprites`), or the model turned live in 3D (`live`).
+    /// Presentation only; `live` falls back to sprites for any ship it can't fit.
+    var hullPresentation: HullPresentation = .sprites
     var frameRateCap: FrameRateCap = .platformDefault
     /// Engine exhaust / weapon glow effects.
     var engineGlow: Bool = true
@@ -525,6 +540,7 @@ struct GameSettings: Codable, Equatable {
         smoothSprites         = v(.smoothSprites, d.smoothSprites)
         hdGraphics            = v(.hdGraphics, d.hdGraphics)
         hdDetail              = v(.hdDetail, d.hdDetail)
+        hullPresentation      = v(.hullPresentation, d.hullPresentation)
         frameRateCap          = v(.frameRateCap, d.frameRateCap)
         engineGlow            = v(.engineGlow, d.engineGlow)
         ceHyperspaceLook      = v(.ceHyperspaceLook, d.ceHyperspaceLook)

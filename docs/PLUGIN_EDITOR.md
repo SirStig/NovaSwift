@@ -56,6 +56,52 @@ rlëD encoder (exact inverse of `RLED.decode`), PICT v2 encoder (readable by
   (spawn ships/fleets, give outfits, set bits, jump anywhere, god mode,
   start missions) built on the existing console commands.
 - Lint panel, NCB/bit graph, export (rez / classic / HD pack).
+- Changes view (`Changes/`, the landing tool for an opened plug-in): what the plug-in adds /
+  overrides by category, one-line field diffs (`ResourceDiff`), HD/3D attachments resolved to
+  their owners (`EditorHDIndex` over `SpriteOwnerIndex`), conflicts, and a Bundle Files pane.
+  The inspector shows a "Changes vs. base" panel (per-field revert) on overrides, and DITL/DLOG
+  open in a to-scale layout editor that patches item rects via `DialogCodec`.
+
+## Plug-in shapes
+
+What "a plug-in" is on disk decides how it opens and what Save writes. Opening goes through
+`PluginBundleLoader` (Kit, off-main) which scans the folder into a `PluginLayout`, parses every
+file concurrently and hands `PluginDocument.open(files:)` the parsed files. Every layer resource
+remembers its **source file** (`sourceFiles`, `sourceFile(of:)`, undoable `setSourceFile`,
+`targetFile` for where new resources go; keys are paths relative to the plug-in folder, packs are
+`pack:<path>.nsx`). `EditorModel.bundle` (folder, files in load order, packs, other files,
+total-conversion flag, installed id) is filled on every open / save-as; `EditorModel.conflicts`
+(other enabled plug-ins defining the same key, in load order) is computed in the background after
+open and save, with per-file key sets cached by path + size + mtime (`EditorConflictScanner`).
+
+- **Single file** (`.rez`, `.ndat`, classic fork): one source file. Save/Save As/Export behave as
+  before. Editor metadata (`NSmd`) lives in this file.
+- **Multi-file** (e.g. ARPIA2's 7 `.rez`): files merge into one layer in load order (later wins);
+  a resource a later file overrides is kept aside and written back to its own file. Save rewrites
+  only files that changed (others stay byte-identical), each in its original format (rez vs
+  classic), into the same folder; all files are written to temporaries first, then moved into
+  place. Unknown types are preserved untouched. Metadata is stored in the primary file only (the
+  first file that isn't named like a Graphics/Sounds file). Save As offers "Save to Folder" (all
+  files, new folder) or "Merge into One File". Export Copy / Install always produce one file.
+  New resources go to `targetFile`, else by type (sprites/PICT to a "...Graphics..." file, sounds
+  to a "...Sounds..." file, the rest to the primary file).
+- **`.nsx` graphics pack** (folder with `manifest.json` + PNG/USDZ, e.g. Nova Reimagined): its
+  entries are embedded into the layer as `NSgx`/`NSbl` (blob ids renumbered into the layer's id
+  space), tagged with source `pack:<name>.nsx`. Save writes the pack back as an `.nsx` folder via
+  `GraphicsPackEmbedding.extract` (only if it changed; name/author/license carried over) and never
+  into a `.rez`, unless **Embed HD in plug-in file** is on (Project tab), which folds the HD
+  resources into the data file instead. A graphics-only plug-in opens with its entries visible
+  as NSgx resources. Open... accepts an `.nsx` folder directly. A pack inside a plug-in folder
+  (or beside a loose file) opens with that plug-in.
+- **Total conversion** (folder with its own `Nova Files/` + `Plug-Ins/`): the layer is the
+  conversion's own `Nova Files` followed by its `Plug-Ins`, each file tracked separately, and the
+  base is empty (`bundle.isTotalConversion`). A conversion replaces the stock scenario, whose ids
+  mean different things there, so the stock game is never mixed in; the one exception is
+  `Nova.rez`, which the original shares with every scenario, loaded as base only when the
+  conversion doesn't ship its own. Conflicts are not computed for a conversion (global plug-ins
+  don't load under one).
+- `dsïg` #128 (an editor/version signature, 2-4 bytes, one per file) is registered as a raw
+  type, "Editor Signature". The game ignores it; it is preserved per file on save.
 
 ## Working rules for contributors (agents)
 
@@ -103,6 +149,12 @@ debug panel (spawn ships/fleets, outfits, bits, missions, jumps, time scale,
 god mode, console).
 
 Known gaps:
+- Multi-file saves rewrite changed files in place; other bundle files (fonts, movies, pilots,
+  readmes) are listed but never copied, so "Save to Folder" into a new folder writes only the
+  data files and packs. Recovery autosave stores a merged single file (it forgets file sources).
+- Conflicts are computed on open/save, not after every edit. A resource overridden by a later
+  file of the same plug-in stays hidden after deleting the winner (the earlier copy is kept).
+- "Embed HD in plug-in file" does not delete a stale `.nsx` folder already on disk.
 - Test-run landing is a dock stub (take off only — no trade/outfit/shipyard/
   mission board); hypergates, hail/board dialogs and crons aren't simulated
   there, and HD packs aren't loaded into editor games.

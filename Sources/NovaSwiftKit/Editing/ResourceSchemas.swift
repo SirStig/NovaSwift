@@ -35,6 +35,9 @@ public enum ResourceSchemas {
         NovaType.snd: (.sound, "Sound"),
         NovaType.ditl: (.raw, "Dialog Item List"),
         NovaType.dlog: (.raw, "Dialog Template"),
+        // `dsïg` #128 (2-4 bytes, e.g. 0000 or 0352028a) is a signature that plug-in editors stamp
+        // into a file. The game never asks for it; it is kept byte-exact on save and nothing else.
+        FourCharCode("dsïg")!: (.raw, "Editor Signature"),
     ]
 
     public static func editorKind(for type: FourCharCode) -> EditorKind {

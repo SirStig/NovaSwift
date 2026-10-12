@@ -42,6 +42,16 @@ struct DataSetupWizard: View {
     /// An iCloud restore kicked off from this wizard is in flight.
     @State private var restoring = false
 
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var hSize
+    /// Phones (and narrow iPad splits) get a full-screen page instead of a
+    /// floating card: a card centred on a 390pt screen is both squeezed and
+    /// far too tall, which is what made every step scroll.
+    private var usesFullScreenLayout: Bool { hSize == .compact }
+    #else
+    private var usesFullScreenLayout: Bool { false }
+    #endif
+
     init(onClose: @escaping () -> Void = {}, startAtImport: Bool = false) {
         self.onClose = onClose
         self.startAtImport = startAtImport
@@ -50,10 +60,16 @@ struct DataSetupWizard: View {
     }
 
     var body: some View {
-        NovaDialog(title: step.title, width: 500, buttons: footerButtons) {
-            VStack(alignment: .leading, spacing: 16) {
-                if step != .success { progressHeader }
-                stepBody
+        Group {
+            if usesFullScreenLayout {
+                fullScreenBody
+            } else {
+                NovaDialog(title: step.title, width: 500, buttons: footerButtons) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if step != .success { progressHeader }
+                        stepBody
+                    }
+                }
             }
         }
         .novaFileImporter(isPresented: $importing,
@@ -254,6 +270,112 @@ struct DataSetupWizard: View {
     }
     #endif
 
+    // MARK: Full-screen (phone) layout
+
+    /// The phone presentation: the wizard owns the screen. Progress sits in a
+    /// slim top bar, the step scrolls at full width in the middle, and the
+    /// actions are pinned to the bottom edge where a thumb reaches them — so a
+    /// button is never off-screen behind a scroll. Same steps, same content as
+    /// the dialog; only the chrome changes.
+    private var fullScreenBody: some View {
+        let buttons = footerButtons
+        return ZStack {
+            LinearGradient(colors: [Color(red: 0.03, green: 0.06, blue: 0.15), .black],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                phoneTopBar
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text(step.title)
+                            .novaFont(.heading, weight: .bold, size: 26)
+                            .foregroundStyle(novaAmber)
+                        stepBody
+                    }
+                    .frame(maxWidth: 520, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
+                }
+                .cursorScrollable()
+
+                phoneFooter(buttons)
+            }
+        }
+        // Scaled-down glyphs for the step graphics (see `setupCompact`).
+        .environment(\.setupCompact, true)
+        // Ⓑ: back a step, or close from the first step / the success page.
+        .cursorCancel {
+            if step == .success || currentIndex == 0 { onClose() } else { goBack() }
+        }
+        .cursorModal()
+    }
+
+    /// Step-count bar across the top: one segment per step, filled up to here.
+    private var phoneTopBar: some View {
+        let seq = sequence
+        let i = currentIndex
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                ForEach(0..<seq.count, id: \.self) { n in
+                    Capsule()
+                        .fill(n <= i ? novaAmber : Color.white.opacity(0.14))
+                        .frame(height: 4)
+                }
+            }
+            Text("Step \(i + 1) of \(seq.count)")
+                .novaFont(.caption, weight: .semibold, size: 12)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 24)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+
+    /// The footer strip: the primary action fills the row; a secondary
+    /// (Back / Close) sits beside it at its natural width.
+    private func phoneFooter(_ buttons: [NovaDialogButton]) -> some View {
+        HStack(spacing: 12) {
+            ForEach(buttons) { b in
+                phoneButton(b, fills: b.isDefault || buttons.count == 1)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+        .background(Color.black.opacity(0.35).ignoresSafeArea(edges: .bottom))
+    }
+
+    /// A thumb-sized pill (50pt tall) for the phone footer. Always the pill
+    /// style — the authentic three-slice art is sized to a fixed width, which
+    /// can't stretch to fill a phone's row.
+    private func phoneButton(_ b: NovaDialogButton, fills: Bool) -> some View {
+        CursorButton { model.audio.play(.uiSelect); b.action() } label: {
+            Text(b.title)
+                .novaFont(.button, weight: .bold, size: 17)
+                .foregroundStyle(!b.enabled ? Color(white: 0.45) : (b.isDefault ? .black : .white))
+                .frame(maxWidth: fills ? .infinity : nil)
+                .padding(.horizontal, 22)
+                .frame(height: 50)
+                .background(
+                    Capsule().fill(
+                        b.isDefault
+                        ? LinearGradient(colors: [novaAmber, novaAmber.opacity(0.82)],
+                                         startPoint: .top, endPoint: .bottom)
+                        : LinearGradient(colors: [Color(white: 0.34), Color(white: 0.20)],
+                                         startPoint: .top, endPoint: .bottom))
+                )
+                .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+                .contentShape(Capsule())
+        }
+        .disabled(!b.enabled)
+    }
+
     // MARK: Progress header
 
     private var progressHeader: some View {
@@ -393,17 +515,20 @@ struct DataSetupWizard: View {
                         .novaFont(.caption).foregroundStyle(.secondary)
                     #endif
                 }
+                // One status line, not three stacked captions: busy beats the
+                // last result, and the data's own status only shows while
+                // there's no result to report.
                 if busy {
                     HStack(spacing: 8) {
                         ProgressView().tint(novaAmber)
                         Text("Copying and reading your data — this can take a moment.")
                             .novaFont(.caption).foregroundStyle(.secondary)
                     }
-                }
-                if let message {
+                } else if let message {
                     Text(message).novaFont(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(model.data.status).novaFont(.caption).foregroundStyle(.tertiary)
                 }
-                Text(model.data.status).novaFont(.caption).foregroundStyle(.tertiary)
                 deviceSwitcher
             }
 
@@ -455,7 +580,7 @@ struct DataSetupWizard: View {
                                             @ViewBuilder text: () -> T) -> some View {
         VStack(spacing: 16) {
             graphic()
-                .frame(maxWidth: .infinity, minHeight: 130)
+                .frame(maxWidth: .infinity, minHeight: usesFullScreenLayout ? 88 : 130)
             VStack(alignment: .leading, spacing: 10) { text() }
                 .novaFont(.body)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -543,20 +668,32 @@ struct DataSetupWizard: View {
         .padding(.top, 2)
     }
 
+    /// The "On: Mac · iPhone · …" switch. On a phone the four labelled pills
+    /// don't fit a row, so they drop to icon-only pills (the device name stays
+    /// as the accessibility label) at a finger-sized hit area.
     private var deviceSwitcher: some View {
         HStack(spacing: 8) {
             Text("On:").novaFont(.caption).foregroundStyle(.tertiary)
             ForEach(SetupDevice.allCases, id: \.self) { d in
                 CursorButton { model.audio.play(.uiSelect); setDevice(d) } label: {
-                    Label(d.label, systemImage: d.icon)
-                        .labelStyle(.titleAndIcon)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .novaFont(.caption, weight: d == device ? .bold : .regular)
-                        .foregroundStyle(d == device ? .black : .secondary)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(d == device ? novaAmber : Color.white.opacity(0.05)))
-                        .overlay(Capsule().strokeBorder(.white.opacity(0.1)))
+                    Group {
+                        if usesFullScreenLayout {
+                            Image(systemName: d.icon)
+                                .font(.system(size: 15, weight: .semibold))
+                                .accessibilityLabel(d.label)
+                        } else {
+                            Label(d.label, systemImage: d.icon)
+                                .labelStyle(.titleAndIcon)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .novaFont(.caption, weight: d == device ? .bold : .regular)
+                        }
+                    }
+                    .foregroundStyle(d == device ? .black : .secondary)
+                    .frame(minWidth: usesFullScreenLayout ? 44 : nil, minHeight: usesFullScreenLayout ? 36 : nil)
+                    .padding(.horizontal, usesFullScreenLayout ? 4 : 10).padding(.vertical, usesFullScreenLayout ? 0 : 5)
+                    .background(Capsule().fill(d == device ? novaAmber : Color.white.opacity(0.05)))
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.1)))
                 }
                 .buttonStyle(.novaPlain)
             }
@@ -630,16 +767,32 @@ enum SetupDevice: CaseIterable {
 
 // MARK: - Illustration glyphs
 
+/// Set by the phone layout so the step glyphs shrink to leave room for the
+/// text on a 6–7" screen. Read by the glyph structs below, not by the wizard
+/// itself (the wizard is the one that sets it, so it can't read it back).
+private struct SetupCompactKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    var setupCompact: Bool {
+        get { self[SetupCompactKey.self] }
+        set { self[SetupCompactKey.self] = newValue }
+    }
+}
+
 /// A large SF Symbol in the amber accent inside a soft glowing disc — the
 /// default step illustration when no bespoke drawing is warranted.
 private struct WizardIcon: View {
     let systemName: String
+    @Environment(\.setupCompact) private var compact
     var body: some View {
+        let d: CGFloat = compact ? 84 : 118
         Image(systemName: systemName)
-            .font(.system(size: 54, weight: .semibold))
+            .font(.system(size: compact ? 38 : 54, weight: .semibold))
             .foregroundStyle(LinearGradient(colors: [.white, novaAmber],
                                             startPoint: .top, endPoint: .bottom))
-            .frame(width: 118, height: 118)
+            .frame(width: d, height: d)
             .background(Circle().fill(novaAmber.opacity(0.12)))
             .overlay(Circle().strokeBorder(novaAmber.opacity(0.35), lineWidth: 1))
     }
@@ -648,11 +801,12 @@ private struct WizardIcon: View {
 /// A drawn amber folder labelled "Nova Files" with two data-file chips beneath —
 /// so the player recognises exactly what they're hunting for.
 private struct FolderGlyph: View {
+    @Environment(\.setupCompact) private var compact
     var body: some View {
         VStack(spacing: 10) {
             ZStack {
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 74))
+                    .font(.system(size: compact ? 56 : 74))
                     .foregroundStyle(LinearGradient(colors: [novaAmber, novaAmber.opacity(0.72)],
                                                     startPoint: .top, endPoint: .bottom))
                 Text("Nova Files")
@@ -687,6 +841,7 @@ private struct DataFileChip: View {
 /// Mac → (AirDrop) → phone/tablet: the "move your files over" motif.
 private struct TransferGlyph: View {
     let device: SetupDevice
+    @Environment(\.setupCompact) private var compact
     var body: some View {
         HStack(spacing: 14) {
             deviceImage("laptopcomputer")
@@ -702,7 +857,7 @@ private struct TransferGlyph: View {
 
     private func deviceImage(_ name: String) -> some View {
         Image(systemName: name)
-            .font(.system(size: 46))
+            .font(.system(size: compact ? 36 : 46))
             .foregroundStyle(LinearGradient(colors: [.white, novaAmber],
                                             startPoint: .top, endPoint: .bottom))
     }

@@ -9,7 +9,7 @@ import NovaSwiftKit
 @MainActor
 final class EditorModel: ObservableObject {
     /// Top-level tool shown in the main area.
-    enum Tool: Hashable { case changes, resources, galaxy, system, story, lint, project }
+    enum Tool: Hashable { case changes, resources, galaxy, system, story, lint, project, bundleFiles }
 
     /// What the open document came from on disk: the plug-in's folder, its
     /// resource files, any `.nsx` graphics packs and other bundle files, and
@@ -25,7 +25,10 @@ final class EditorModel: ObservableObject {
     @Published var fileURL: URL?
     @Published var format: PluginFormat = .rez
 
-    @Published var tool: Tool = .resources
+    @Published var tool: Tool = .changes
+    /// Inspector tab a navigation wants opened on arrival (a `SpecTab` raw value, e.g. "HD / 3D").
+    /// The specialised inspector router consumes and clears it.
+    @Published var requestedInspectorTab: String?
     @Published var selectedType: NovaSwiftKit.FourCharCode?
     @Published var selection: ResourceKey?
     /// System the system editor is showing (sÿst id).
@@ -79,6 +82,9 @@ final class EditorModel: ObservableObject {
         selection = nil
         selectedType = nil
         focusedSystemID = nil
+        requestedInspectorTab = nil
+        // An opened plug-in lands on "what it changes"; a blank one goes straight to editing.
+        tool = doc.layer.totalCount == 0 ? .resources : .changes
         attach()
         dataRevision += 1
         revision += 1
@@ -168,6 +174,7 @@ final class EditorModel: ObservableObject {
 
     /// Jump to a resource in the browser (clears tool to `.resources`).
     func navigate(to key: ResourceKey) {
+        requestedInspectorTab = nil
         tool = .resources
         selectedType = key.type
         selection = key

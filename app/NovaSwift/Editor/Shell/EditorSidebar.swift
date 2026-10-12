@@ -41,6 +41,7 @@ struct EditorSidebar: View {
             Divider().overlay(alignment: .top) { EditorRefreshStrip(active: cache.statsBusy && cache.stats != nil) }
             List(selection: selection) {
                 Section("Tools") {
+                    toolRow(.changes, "Changes", "list.bullet.rectangle.portrait", badge: changeCount, badgeColor: novaAmber)
                     toolRow(.resources, "Resources", "tray.full")
                     toolRow(.galaxy, "Galaxy Map", "map")
                     toolRow(.system, "Star System", "sparkles")
@@ -48,6 +49,7 @@ struct EditorSidebar: View {
                     toolRow(.lint, "Validation", "checkmark.shield", badge: lint.errorCount + lint.warningCount,
                             badgeColor: lint.errorCount > 0 ? .red : .orange)
                     toolRow(.project, "Project & Export", "shippingbox")
+                    toolRow(.bundleFiles, "Bundle Files", "folder", badge: model.bundle?.otherFiles.count ?? 0)
                 }
                 Section {
                     if let stats = filteredStats {
@@ -78,6 +80,11 @@ struct EditorSidebar: View {
         .background(Color(white: 0.09))
         // Recount once per data revision (debounced, off-main); not on metadata/Save refreshes.
         .task(id: StatsKey(rev: model.dataRevision, ready: model.dataReady)) { cache.refreshStats(model) }
+    }
+
+    /// Resources this plug-in adds or overrides (NSbl asset payloads excluded — they ride with their NSgx).
+    private var changeCount: Int {
+        (cache.stats ?? []).reduce(0) { $0 + ($1.type == GraphicsEnhancementType.blob || $1.type.stringValue == "NSmd" ? 0 : $1.new + $1.overridden) }
     }
 
     private var filteredStats: [EditorTypeStat]? {

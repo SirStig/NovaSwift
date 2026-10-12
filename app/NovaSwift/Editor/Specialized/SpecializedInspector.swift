@@ -53,7 +53,16 @@ struct SpecializedInspectorRouter<Fallback: View>: View {
                 }
             }
             .id(key)
+            .onAppear { applyRequestedTab(tabs) }
+            .onChange(of: model.requestedInspectorTab) { _, _ in applyRequestedTab(tabs) }
         }
+    }
+
+    /// A navigation (Changes → HD row) can ask for a specific tab; honour it if this type has it.
+    private func applyRequestedTab(_ tabs: [SpecTab]) {
+        guard let raw = model.requestedInspectorTab else { return }
+        if let tab = SpecTab(rawValue: raw), tabs.contains(tab) { chosen[key.type.rawValue] = tab }
+        model.requestedInspectorTab = nil
     }
 }
 #endif

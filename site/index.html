@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NOVA Swift: EV Nova for Mac, iPad, iPhone and Apple TV</title>
-  <meta name="description" content="A fan rebuild of EV Nova (2002) in Swift, checked against the original game's code. Runs on Mac, iPad, iPhone and Apple TV. You need your own copy of the game." />
+  <title>NOVA Swift: EV Nova rebuilt in Swift</title>
+  <meta name="description" content="A reverse-engineered rebuild of EV Nova (2002) in Swift. Native on Mac, iPad, iPhone and Apple TV. Bring your own copy of the game." />
 
   <link rel="icon" type="image/png" href="assets/favicon-256.png?v=brand2" />
   <link rel="apple-touch-icon" href="assets/app-icon-180.png?v=brand2" />
 
-  <meta property="og:title" content="NOVA Swift: EV Nova for Mac, iPad, iPhone and Apple TV" />
-  <meta property="og:description" content="A fan rebuild of the 2002 space game in Swift. Native on Mac, iPad, iPhone and Apple TV." />
+  <meta property="og:title" content="NOVA Swift: EV Nova rebuilt in Swift" />
+  <meta property="og:description" content="A reverse-engineered rebuild of the 2002 space game in Swift. Native on Mac, iPad, iPhone and Apple TV." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="assets/launch-banner.png?v=brand2" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
 </head>
 <body>
   <div class="space-bg" aria-hidden="true"></div>
@@ -27,232 +27,248 @@
 
   <a class="skip" href="#main">Skip to content</a>
 
-  <!-- ═══ NAV ═══ -->
   <nav class="nav">
     <div class="nav-inner">
-      <a class="brand" href="#top">
-        <img src="assets/app-icon-96.png?v=brand2" alt="" width="34" height="34" />
+      <a class="brand" href="#top" aria-label="NOVA Swift home">
+        <img src="assets/app-icon-96.png?v=brand2" alt="" width="30" height="30" />
         <b>NOVA<i>·</i>SWIFT</b>
       </a>
       <div class="nav-links">
-        <a href="#progress">Progress</a>
-        <a href="#new">Screenshots</a>
+        <a href="#features">Features</a>
+        <a href="#original">Original code</a>
         <a href="#get">Get it</a>
       </div>
       <div class="nav-cta">
-        <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="GitHub repository">
+        <a class="btn btn-ghost sm" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener" aria-label="Source code on GitHub">
           <svg viewBox="0 0 24 24" fill="currentColor" width="17" height="17" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12a11.5 11.5 0 0 0 7.9 10.9c.6.1.8-.2.8-.5v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.7 1.2 3.4.9.1-.7.4-1.2.7-1.5-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.6 18.3 5 18.3 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5A11.5 11.5 0 0 0 23.5 12C23.5 5.7 18.3.5 12 .5Z"/></svg>
           <span>GitHub</span>
         </a>
-        <a class="btn btn-primary sm" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Get the beta</a>
+        <a class="btn btn-primary sm" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Join the beta</a>
       </div>
     </div>
   </nav>
 
   <span id="top"></span>
 
-  <!-- ═══ HERO ═══ -->
+  <main id="main">
+
+  <!-- HERO -->
   <header class="hero">
-    <div class="wrap">
-      <picture>
-        <source srcset="assets/launch-banner.webp?v=brand2" type="image/webp" />
-        <img class="hero-art" src="assets/launch-banner.png?v=brand2" width="1584" height="672" fetchpriority="high"
-             alt="NOVA Swift banner: the fire-lit NOVA lettering beside a blue-green world, a bright nova and ships inbound." />
-      </picture>
-      <h1>EV&nbsp;Nova, <span class="grad">flying again</span>.</h1>
-      <p class="lead">
-        A rebuild of the 2002 space game in Swift. It runs natively on Mac, iPad, iPhone and Apple&nbsp;TV,
-        with Linux and Windows in progress. You need your own copy of the game.
-      </p>
-      <div class="cta">
-        <a class="btn btn-primary" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Play the TestFlight beta</a>
-        <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">Source on GitHub</a>
-        <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift-Plugins" target="_blank" rel="noopener">Plugin catalog</a>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <h1>EV&nbsp;Nova, <span class="grad">rebuilt in Swift.</span></h1>
+        <p class="lead">Reverse-engineered from the 2002 original. Native on Mac, iPad, iPhone and Apple&nbsp;TV. Bring your own copy of EV&nbsp;Nova.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Join the beta</a>
+          <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift" target="_blank" rel="noopener">Read the source</a>
+        </div>
       </div>
-      <ul class="chips">
-        <li>macOS · iPadOS · iOS · tvOS</li>
-        <li>Native Swift, not an emulator</li>
-        <li>You bring the game data</li>
-      </ul>
+      <figure class="hero-art">
+        <picture>
+          <source srcset="assets/launch-banner.webp?v=brand2" type="image/webp" />
+          <img src="assets/launch-banner.png?v=brand2" width="1584" height="672" fetchpriority="high"
+               alt="The NOVA Swift wordmark in fire-lit gunmetal beside a blue-green planet, with a bright nova and ships inbound." />
+        </picture>
+      </figure>
     </div>
   </header>
 
-  <main id="main">
-
-  <!-- ═══ PROGRESS ═══ -->
-  <section class="section" id="progress">
+  <!-- ORIGINAL CODE: full-width panel -->
+  <section class="section" id="original">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Progress</p>
-        <h2>Checked against the original code.</h2>
-        <p>We decompiled the original game and compared every part of it with NovaSwift. Original behaviour is the
-           default; a few optional Enhancements live in Settings.</p>
+        <h2>Every system, checked against the original executable.</h2>
+        <p>The original Windows build (EV Nova CE) was reverse-engineered and studied in a decompiler. Each gameplay system was compared with NovaSwift and rewritten to match it. Original behaviour is the default.</p>
       </div>
-      <div class="summary-pair">
-        <div class="grid-card summary-card">
-          <img src="assets/fidelity-summary.svg?v=f55beacc" alt="How much of the original game's code has been compared with NovaSwift, by area" />
-        </div>
-        <div class="grid-card summary-card">
-          <img src="assets/features-summary.svg?v=589f2b2d" alt="Progress on NovaSwift's own features" />
-        </div>
-      </div>
-      <p class="note">This shows how much has been compared, not that the game is finished. NovaSwift is in beta and
-         still has bugs. <a href="progress.html">See the details</a> or
-         <a href="https://github.com/SirStig/NovaSwift/issues" target="_blank" rel="noopener">report something that plays differently</a>.</p>
+      <figure class="panel">
+        <img src="assets/fidelity-summary.svg?v=f55beacc" width="1200" height="600" loading="lazy" alt="Bar grid showing how much of each part of the original game's code has been compared with NovaSwift." />
+        <figcaption>Each block is roughly 5% of one part of the original code. Teal marks parts NovaSwift does differently on purpose, such as its save format and controls.</figcaption>
+      </figure>
+      <p class="aside-link"><a href="progress.html">Function-by-function progress</a> · <a href="https://github.com/SirStig/NovaSwift/blob/main/docs/reverse-engineering/README.md" target="_blank" rel="noopener">Reverse-engineering notes</a></p>
     </div>
   </section>
 
-  <!-- ═══ WHAT'S NEW ═══ -->
-  <section class="section" id="new">
+  <!-- PLUG-IN MANAGER: split -->
+  <section class="section" id="features">
+    <div class="wrap split">
+      <div class="split-copy">
+        <h2>Install, reorder and toggle plug-ins.</h2>
+        <p>Browse the community catalog and install in one tap. Installs work offline for anything you already have. Or import your own files, including old Mac <code>.sit</code> and <code>.hqx</code> archives.</p>
+        <ul class="ticks">
+          <li>Enable, disable, reorder and delete</li>
+          <li>Import classic EV Nova pilots</li>
+          <li>Add your own plug-in by pull request</li>
+        </ul>
+      </div>
+      <figure class="shot">
+        <img src="assets/screenshots/plugin-manager.webp" width="1800" height="1235" loading="lazy" alt="The Plug-ins screen listing an installed total conversion and a gameplay tweak, with reorder handles and enable switches." />
+      </figure>
+    </div>
+  </section>
+
+  <!-- PLUG-IN EDITOR: text-led feature grid -->
+  <section class="section">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Additions</p>
-        <h2>Things the original didn't have.</h2>
-        <p>None of these change the game's rules, and you can turn each one off.</p>
+        <h2>A full plug-in editor, inside the app.</h2>
+        <p>Available on macOS. Edit every resource type, draw the galaxy, and play your plug-in in a live game session before you ship it.</p>
       </div>
+      <ul class="matrix">
+        <li><b>Schema-driven inspector</b><span>Every EV Nova resource type, with a hex view for anything the schema doesn't cover.</span></li>
+        <li><b>Galaxy map</b><span>Place and drag systems, draw and erase hyperlinks, set government colours and nebulae.</span></li>
+        <li><b>Live preview</b><span>The effective game data, reloaded in place as each edit lands.</span></li>
+        <li><b>Test run</b><span>A full game session on your plug-in, with a debug panel to spawn fleets, grant outfits, set control bits and start missions.</span></li>
+        <li><b>Story graph</b><span>Control-bit analysis across missions, events and storylines.</span></li>
+        <li><b>Linter and export</b><span>Catches dangling references and missing sprites. Exports classic resource files or an HD pack.</span></li>
+      </ul>
+    </div>
+  </section>
 
-      <div class="tabs">
-        <input type="radio" name="feat" id="f1" checked />
-        <input type="radio" name="feat" id="f2" />
-        <input type="radio" name="feat" id="f3" />
-        <input type="radio" name="feat" id="f4" />
-        <input type="radio" name="feat" id="f5" />
-        <input type="radio" name="feat" id="f6" />
+  <!-- MULTIPLAYER: full-width screenshot with rules -->
+  <section class="section">
+    <div class="wrap">
+      <div class="head">
+        <h2>Fly the same galaxy as your friends.</h2>
+        <p>Co-op over local Wi-Fi or Game Center. The host sets the rules, and there are no servers to run.</p>
+      </div>
+      <figure class="panel">
+        <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy" alt="The Host Lobby with a Co-op or Full Stakes switch and checkboxes for PvP, real damage, friendly fire, permadeath and trading." />
+      </figure>
+      <ul class="rules">
+        <li>PvP</li>
+        <li>Real damage</li>
+        <li>Friendly fire</li>
+        <li>Permadeath</li>
+        <li>Player trading</li>
+      </ul>
+    </div>
+  </section>
 
-        <div class="tablist" role="tablist" aria-label="New features">
-          <label for="f1"><b>Story Guide</b><span>Progress through each campaign</span></label>
-          <label for="f2"><b>Multiplayer</b><span>Co-op, with rules the host sets</span></label>
-          <label for="f3"><b>Presentation presets</b><span>Classic, Enhanced or Nova Swift</span></label>
-          <label for="f4"><b>Gameplay settings</b><span>Traffic, hints, training</span></label>
-          <label for="f5"><b>Plugins</b><span>Install, import, order, toggle</span></label>
-          <label for="f6"><b>Debug suite</b><span>Logs, profiler, inspector</span></label>
+  <!-- STORY: split, reversed -->
+  <section class="section">
+    <div class="wrap split reverse">
+      <figure class="shot">
+        <img src="assets/screenshots/story-guide.webp" width="1800" height="1130" loading="lazy" alt="The Story Guide: campaigns with progress bars beside a step timeline, with locked steps and the mission that unlocks each one." />
+      </figure>
+      <div class="split-copy">
+        <h2>Every campaign, step by step.</h2>
+        <p>The Story Guide lists each storyline in your data as a sequence of steps, showing what you've done, what's locked, and which mission opens the next stage. It works with plug-in storylines too.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEBUG SUITE: stacked -->
+  <section class="section">
+    <div class="wrap">
+      <div class="head">
+        <h2>See inside the simulation.</h2>
+        <p>A debug suite that's built in, not bolted on.</p>
+      </div>
+      <figure class="panel">
+        <img src="assets/screenshots/dev-console.webp" width="1800" height="1120" loading="lazy" alt="The debug console: a filtered live log stream, a command prompt, an entity inspector and a frame-time breakdown per subsystem." />
+      </figure>
+      <ul class="rules">
+        <li>Searchable live logs</li>
+        <li>Frame time per subsystem</li>
+        <li>Ship and planet inspector</li>
+        <li>Command console</li>
+        <li>Bug reports with logs attached</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- PILOTS + ICLOUD: two text columns -->
+  <section class="section">
+    <div class="wrap">
+      <div class="head">
+        <h2>Bring your pilots with you.</h2>
+      </div>
+      <div class="two-col">
+        <div>
+          <h3>Import</h3>
+          <p>Windows <code>.plt</code> files and classic Mac pilots import directly. Keep several pilots in one store, each with its own backups.</p>
         </div>
-
-        <div class="panels">
-          <figure id="p1">
-            <img src="assets/screenshots/story-guide.webp" width="1800" height="1130"
-                 alt="The Story Guide: a list of campaigns with progress bars beside a step timeline marked YOU ARE HERE, showing locked steps and the missions that unlock them." />
-            <figcaption>Each campaign in your data as a list of steps: what you've done, what's locked, and which mission opens it. Works with plug-in storylines.</figcaption>
-          </figure>
-          <figure id="p2">
-            <img src="assets/screenshots/host-lobby.webp" width="1800" height="1130" loading="lazy"
-                 alt="The Host Lobby dialog with a Co-op / Full Stakes switch and checkboxes for PvP, real damage, friendly fire, permadeath and player trading." />
-            <figcaption>Fly the same system as a friend. The host sets the rules: PvP, real damage, friendly fire, permadeath, trading.</figcaption>
-          </figure>
-          <figure id="p3">
-            <img src="assets/screenshots/presentation-modes.webp" width="1800" height="1235" loading="lazy"
-                 alt="The Interface settings pane with Classic, Enhanced, Nova Swift and Custom presets above individual toggles for the modern map, menu, dialogs and HUD." />
-            <figcaption>Classic, Enhanced or Nova Swift sets the whole look at once. Any single item can then be switched on or off.</figcaption>
-          </figure>
-          <figure id="p4">
-            <img src="assets/screenshots/gameplay-settings.webp" width="1800" height="1170" loading="lazy"
-                 alt="The Gameplay settings pane: difficulty, a System Aliveness selector with 0.5× to 8× traffic multipliers, auto-target, auto-landing, tutorial hints and flight training." />
-            <figcaption>Traffic density from the original up to 8×, plus tutorial hints and a flight-training range.</figcaption>
-          </figure>
-          <figure id="p5">
-            <img src="assets/screenshots/plugin-manager.webp" width="1800" height="1235" loading="lazy"
-                 alt="The Plug-ins dialog listing an installed total conversion and a gameplay tweak, with reorder handles, delete and enable toggles, plus Installed and Store tabs." />
-            <figcaption>Install from the community catalog in one tap, or import your own files, old Mac <code>.sit</code> and <code>.hqx</code> archives included. Reorder plug-ins or switch them off. Old EV Nova pilots can be imported too. Plug-ins can also bring HD art and 3D ship and planet models.</figcaption>
-          </figure>
-          <figure id="p6">
-            <img src="assets/screenshots/dev-console.webp" width="1800" height="1120" loading="lazy"
-                 alt="The debug console overlay: filtered live log stream, a command prompt, an entity inspector and a frame-time breakdown per subsystem." />
-            <figcaption>Searchable live logs (tap a line to copy, re-run or filter it), frame time per subsystem, a ship and planet inspector, and a command console with suggestions.</figcaption>
-          </figure>
+        <div>
+          <h3>iCloud</h3>
+          <p>Imported game data syncs across your Apple devices through iCloud, so a pilot picked up on one device is ready on the next.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ═══ ON IPHONE ═══ -->
-  <section class="section" id="mobile">
+  <!-- 3D + HD: honest status -->
+  <section class="section">
+    <div class="wrap">
+      <div class="statement">
+        <h2>HD art and 3D models, from plug-ins.</h2>
+        <p>Plug-ins can add high-resolution sprites and 3D ship and planet models. Models are rendered into the classic frames, so every ship keeps its shape and hit-boxes. It's off by default and runs on Apple platforms.</p>
+        <p class="status">Live, real-time 3D is planned. It isn't built yet.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ON IPHONE: four-up strip -->
+  <section class="section">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Running on iPhone</p>
-        <h2>On a phone.</h2>
-        <p>EV Nova never ran on mobile. These are captures from an iPhone.</p>
+        <h2>Built for touch.</h2>
+        <p>EV Nova never ran on a phone. These are captures from an iPhone.</p>
       </div>
-      <div class="shots">
+      <div class="strip">
         <figure>
-          <picture>
-            <source srcset="assets/screenshots/flight-hud.webp" type="image/webp" />
-            <img src="assets/screenshots/flight-hud.png" loading="lazy" width="1600" height="736"
-               alt="Flight view on iPhone: a ship beside Earth, touch controls for turning, thrust and fire, and the classic status bar."  />
-          </picture>
-          <figcaption>Touch controls, classic status bar.</figcaption>
+          <img src="assets/screenshots/flight-hud.webp" width="1600" height="736" loading="lazy" alt="Flight view with touch controls for turning, thrust and fire." />
+          <figcaption>Touch controls and the classic status bar.</figcaption>
         </figure>
         <figure>
-          <picture>
-            <source srcset="assets/screenshots/galaxy-map.webp" type="image/webp" />
-            <img src="assets/screenshots/galaxy-map.png" loading="lazy" width="1600" height="736"
-               alt="The galaxy map centred on Sol, showing Federation space, planets with their services, and hypergate routes."  />
-          </picture>
+          <img src="assets/screenshots/galaxy-map.webp" width="1600" height="736" loading="lazy" alt="The galaxy map centred on Sol, with planets, their services and hypergate routes." />
           <figcaption>The galaxy map.</figcaption>
         </figure>
         <figure>
-          <picture>
-            <source srcset="assets/screenshots/multiplayer.webp" type="image/webp" />
-            <img src="assets/screenshots/multiplayer.png" loading="lazy" width="1600" height="736"
-               alt="The multiplayer lobby screen with Local and Online tabs, a Host a Lobby button, and a search for nearby lobbies."  />
-          </picture>
+          <img src="assets/screenshots/multiplayer.webp" width="1600" height="736" loading="lazy" alt="The multiplayer lobby with Local and Online tabs and a Host a Lobby button." />
           <figcaption>Local Wi-Fi or Game Center lobbies.</figcaption>
         </figure>
         <figure>
-          <picture>
-            <source srcset="assets/screenshots/plugin-store.webp" type="image/webp" />
-            <img src="assets/screenshots/plugin-store.png" loading="lazy" width="1600" height="736"
-               alt="The in-game plug-in store listing community total conversions, each with a Get button."  />
-          </picture>
-          <figcaption>Community plug-ins and total conversions, installed in one tap. <a href="https://github.com/SirStig/NovaSwift-Plugins" target="_blank" rel="noopener">Add yours</a>.</figcaption>
+          <img src="assets/screenshots/plugin-store.webp" width="1600" height="736" loading="lazy" alt="The plug-in store listing community total conversions, each with a Get button." />
+          <figcaption>Community plug-ins, installed in one tap.</figcaption>
         </figure>
       </div>
     </div>
   </section>
 
-  <!-- ═══ GET IT ═══ -->
+  <!-- GET IT -->
   <section class="section" id="get">
-    <div class="wrap">
-      <div class="get">
-        <div>
-          <p class="eyebrow">Get it</p>
-          <h2>Play the beta or build it.</h2>
-          <p class="lead sm">
-            The TestFlight beta covers all four Apple platforms.<br />
-            To build it yourself you need a Mac with Xcode. Your game data stays on your machine.
-          </p>
-          <div class="cta">
-            <a class="btn btn-primary" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Join the beta</a>
-            <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift/blob/main/docs/GET_THE_DATA.md" target="_blank" rel="noopener">Adding your data</a>
-          </div>
+    <div class="wrap get">
+      <div>
+        <h2>Play the beta, or build it.</h2>
+        <p class="lead sm">The TestFlight beta covers all four Apple platforms. To build it yourself you need a Mac with Xcode. A Godot frontend for Linux and Windows is in progress.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://testflight.apple.com/join/3FBzwwq1" target="_blank" rel="noopener">Join the beta</a>
+          <a class="btn btn-ghost" href="https://github.com/SirStig/NovaSwift/blob/main/docs/GET_THE_DATA.md" target="_blank" rel="noopener">Adding your data</a>
         </div>
-        <pre class="code"><code><span class="c"># clone and fetch dependencies</span>
+      </div>
+      <pre class="code"><code><span class="c"># clone and fetch dependencies</span>
 <span class="k">git clone</span> https://github.com/SirStig/NovaSwift.git
 <span class="k">cd</span> NovaSwift &amp;&amp; scripts/setup.sh
 
-<span class="c"># drop your own EV Nova data into data/base/</span>
+<span class="c"># put your own EV Nova data in data/base/</span>
 
-<span class="c"># then open it in Xcode, pick a target, hit Run</span>
+<span class="c"># open in Xcode, pick a target, Run</span>
 <span class="k">open</span> app/NovaSwift.xcodeproj</code></pre>
-      </div>
     </div>
   </section>
 
-  <!-- ═══ THE RULE ═══ -->
+  <!-- LEGAL -->
   <section class="section tight">
     <div class="wrap">
       <div class="rule">
         <h2>You bring the game.</h2>
-        <p>
-          EV Nova's content belongs to ATMOS. This project ships no game data and never will. It reads a copy
-          you own, at runtime, the same way OpenMW and OpenRA work.
-        </p>
+        <p>EV Nova's content belongs to ATMOS. This project ships no game data and never will. It reads a copy you own, at runtime, the same way OpenMW and OpenRA work.</p>
       </div>
     </div>
   </section>
 
   </main>
 
-  <!-- ═══ FOOTER ═══ -->
   <footer class="footer">
     <div class="wrap">
       <div class="footer-top">
@@ -269,10 +285,9 @@
         </div>
       </div>
       <p class="legal">
-        EV Nova and its data are copyrighted and are not distributed here; you supply your own copy.
-        This project's code is open source. It is a fan preservation project, not affiliated with or endorsed by
+        EV Nova and its data are copyrighted and are not distributed here. You supply your own copy.
+        NOVA Swift's code is open source. It is a fan preservation and interoperability project, not affiliated with or endorsed by
         Ambrosia Software or ATMOS. The artwork on this page is original to NOVA Swift.
-        AI tools were used in its development.
       </p>
     </div>
   </footer>

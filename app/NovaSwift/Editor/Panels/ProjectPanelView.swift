@@ -109,6 +109,10 @@ struct ProjectPanelView: View {
             Toggle("Embed editor metadata (name, author, notes)", isOn: $store.exportOptions.embedMetadata)
             Toggle("Include HD graphics layer (NSgx / NSbl)", isOn: $store.exportOptions.includeHD)
                 .help("NovaSwift-only; the original game ignores these resources.")
+            if model.document.sourceFiles.contains(where: PluginDocument.isPackKey) {
+                Toggle("Embed HD in plug-in file (instead of .nsx folders)", isOn: $store.exportOptions.embedPackHD)
+                    .help("Off: Save writes each .nsx graphics pack back as its own folder. On: its NSgx / NSbl resources go into the plug-in's data file and the packs are not written.")
+            }
             Toggle("Full export (include the base game)", isOn: $store.exportOptions.full)
             if store.exportOptions.full {
                 Label("A full export contains the base game's own data. Only share it if you may redistribute it.",
@@ -122,7 +126,7 @@ struct ProjectPanelView: View {
     private var openSection: some View {
         section("Open") {
             HStack(spacing: 8) {
-                Button("Open File…") { store.guardDirty("Open another plug-in?") { store.openPanel() } }
+                Button("Open File or Folder…") { store.guardDirty("Open another plug-in?") { store.openPanel() } }
                 Menu("Installed Plug-ins") {
                     if plugins.isEmpty { Text("No plug-ins installed") }
                     ForEach(plugins) { p in
