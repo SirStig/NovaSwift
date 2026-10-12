@@ -56,6 +56,8 @@ struct SystemEditorView: View {
     @State private var toast: String?
     @State private var toastTask: Task<Void, Never>?
     @State private var lastFit: Int?
+    /// System the live preview was last framed for (re-framed only on a switch).
+    @State private var previewSystem: Int?
     @State private var derivedRevision = -1
     @State private var derivedSystem: Int?
 
@@ -153,7 +155,15 @@ struct SystemEditorView: View {
 
     private func schedulePreview() {
         guard mode != .layout, let sid = systemID, model.document.resource(NovaType.syst, sid) != nil else { return }
+        let firstLook = previewSystem != sid
+        previewSystem = sid
         preview.update(collection: model.effective, systemID: sid, base: model.base)
+        // A new system opens framed on its centre, zoomed out enough to show
+        // the inner stellars (1× is the in-flight view — mostly empty space).
+        if firstLook {
+            preview.zoom = 3
+            preview.resetCamera()
+        }
     }
 
     private func centrePreview() {
@@ -204,9 +214,7 @@ struct SystemEditorView: View {
             }
             Spacer()
             Picker("", selection: $mode) { ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 200)
-            Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.help("Undo")
-            Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.help("Redo")
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -594,12 +602,19 @@ struct SystemEditorView: View {
         ctx.fill(Path(ellipseIn: CGRect(x: o.x - 4, y: o.y - 4, width: 8, height: 8)), with: .color(.yellow.opacity(0.7)))
 
         // Hyperlink exits.
+        // Exits sit on the canvas border along the ray from the system centre,
+        // so they never land among the stellars when zoomed out.
         let inset = CGRect(origin: .zero, size: sz).insetBy(dx: 46, dy: 38)
+        let c0 = vp.toScreen(.zero, sz)
+        let origin = CGPoint(x: min(max(c0.x, inset.minX), inset.maxX), y: min(max(c0.y, inset.minY), inset.maxY))
+        var placedLabels: [CGRect] = []
         for e in exits {
             let len = max(1, hypot(e.dx, e.dy))
             let dir = CGPoint(x: e.dx / len, y: e.dy / len)
-            var p = vp.toScreen(CGPoint(x: dir.x * 1800, y: dir.y * 1800), sz)
-            p.x = min(max(p.x, inset.minX), inset.maxX); p.y = min(max(p.y, inset.minY), inset.maxY)
+            let tx = dir.x > 0 ? (inset.maxX - origin.x) / dir.x : dir.x < 0 ? (inset.minX - origin.x) / dir.x : .infinity
+            let ty = dir.y > 0 ? (inset.maxY - origin.y) / dir.y : dir.y < 0 ? (inset.minY - origin.y) / dir.y : .infinity
+            let t = max(0, min(tx, ty))
+            let p = CGPoint(x: origin.x + dir.x * t, y: origin.y + dir.y * t)
             let ang = atan2(dir.y, dir.x)
             var arrow = Path()
             arrow.move(to: CGPoint(x: p.x + cos(ang) * 11, y: p.y + sin(ang) * 11))
@@ -607,8 +622,13 @@ struct SystemEditorView: View {
             arrow.addLine(to: CGPoint(x: p.x + cos(ang - 2.5) * 9, y: p.y + sin(ang - 2.5) * 9))
             arrow.closeSubpath()
             ctx.fill(arrow, with: .color(.cyan.opacity(0.75)))
-            ctx.draw(Text(e.name).font(.system(size: 10)).foregroundColor(.cyan.opacity(0.85)),
-                     at: CGPoint(x: p.x - cos(ang) * 14, y: p.y - sin(ang) * 14 + (sin(ang) > 0 ? -10 : 10)), anchor: .center)
+            let lp = CGPoint(x: p.x - cos(ang) * 14, y: p.y - sin(ang) * 14 + (sin(ang) > 0 ? -10 : 10))
+            let lw = CGFloat(e.name.count) * 5.6 + 6
+            let box = CGRect(x: lp.x - lw / 2, y: lp.y - 7, width: lw, height: 14)
+            if !placedLabels.contains(where: { $0.intersects(box) }) {
+                placedLabels.append(box)
+                ctx.draw(Text(e.name).font(.system(size: 10)).foregroundColor(.cyan.opacity(0.85)), at: lp, anchor: .center)
+            }
         }
 
         // Stellars.
@@ -621,8 +641,11 @@ struct SystemEditorView: View {
             let selected = model.selection == ResourceKey(NovaType.spob, s.id)
             var half: CGFloat = 14
             if let e = entry {
-                let r = CGRect(x: p.x - e.size.width * vp.zoom / 2, y: p.y - e.size.height * vp.zoom / 2,
-                               width: e.size.width * vp.zoom, height: e.size.height * vp.zoom)
+                // At least 28 pt on screen: the fit for a system with a far-out
+                // wormhole is ~5%, which would shrink planets to specks.
+                let scale = max(vp.zoom, 28 / max(1, max(e.size.width, e.size.height)))
+                let r = CGRect(x: p.x - e.size.width * scale / 2, y: p.y - e.size.height * scale / 2,
+                               width: e.size.width * scale, height: e.size.height * scale)
                 var shown = e.image
                 if let anim = s.anim, e.isAnimatable, isVisible(s) {
                     let f = clock.frame(spob: s.id, params: anim, frameCount: e.frames.count)
@@ -630,7 +653,6 @@ struct SystemEditorView: View {
                 }
                 ctx.draw(ctx.resolve(Image(decorative: shown, scale: 1)), in: r)
                 half = max(r.width, r.height) / 2
-                if vp.zoom < 0.12 { ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.white)) }
             } else {
                 // Sprite still decoding (or none for this type): government-coloured disc.
                 let tint = GalaxyMapData.shared.color(s.govt)
@@ -649,9 +671,19 @@ struct SystemEditorView: View {
             case .override: ctx.fill(Path(ellipseIn: CGRect(x: p.x + max(half, 8) * 0.7, y: p.y - max(half, 8) - 2, width: 6, height: 6)), with: .color(.orange))
             default: break
             }
-            ctx.draw(Text("\(s.slot). \(s.name)").font(.system(size: 10, weight: selected ? .semibold : .regular))
+            // Below the sprite, or above it when that spot is taken.
+            let text = "\(s.slot). \(s.name)"
+            let lw = CGFloat(text.count) * 5.6 + 6
+            var lp = CGPoint(x: p.x, y: p.y + max(half, 8) + 12)
+            var box = CGRect(x: lp.x - lw / 2, y: lp.y - 7, width: lw, height: 14)
+            if placedLabels.contains(where: { $0.intersects(box) }) {
+                lp.y = p.y - max(half, 8) - 12
+                box.origin.y = lp.y - 7
+            }
+            placedLabels.append(box)
+            ctx.draw(Text(text).font(.system(size: 10, weight: selected ? .semibold : .regular))
                         .foregroundColor(selected ? novaAmber : .white.opacity(0.85)),
-                     at: CGPoint(x: p.x, y: p.y + max(half, 8) + 12), anchor: .center)
+                     at: lp, anchor: .center)
         }
 
         // Scale bar.

@@ -151,7 +151,7 @@ struct EditorToolArea: View {
                 switch model.tool {
                 case .resources:
                     HSplitView {
-                        SkeletonList(rows: 16).frame(minWidth: 260, idealWidth: 320, maxWidth: 460, maxHeight: .infinity, alignment: .top)
+                        SkeletonList(rows: 16).frame(minWidth: 260, idealWidth: 320, maxWidth: 340, maxHeight: .infinity, alignment: .top)
                         SkeletonForm(groups: 4).frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 case .changes:
@@ -170,7 +170,7 @@ struct EditorToolArea: View {
             case .resources:
                 HSplitView {
                     ResourceListView(model: model, store: store, ui: ui)
-                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 460)
+                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 340)
                     InspectorView(model: model, store: store, ui: ui, lint: store.lint)
                         .frame(minWidth: 380, maxWidth: .infinity)
                 }

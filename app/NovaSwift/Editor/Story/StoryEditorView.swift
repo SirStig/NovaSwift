@@ -15,11 +15,14 @@ struct StoryEditorView: View {
     var body: some View {
         HSplitView {
             StoryLeftPane(model: model, analysis: analysis, ui: ui)
-                .frame(minWidth: 240, idealWidth: 290, maxWidth: 400)
+                .frame(minWidth: 240, idealWidth: 280, maxWidth: 300)
+            // The graph clips its own canvas so a wide layout can't paint
+            // under the side panes.
             StoryGraphView(model: model, analysis: analysis, ui: ui)
-                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
             StoryRightPane(model: model, analysis: analysis, ui: ui)
-                .frame(minWidth: 340, idealWidth: 420, maxWidth: 620)
+                .frame(minWidth: 300, idealWidth: 340, maxWidth: 360)
         }
         .onAppear { analysis.refresh(model, immediate: true) }
         .onChange(of: model.revision) { _, _ in analysis.refresh(model) }

@@ -43,11 +43,18 @@ struct ChangesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Opaque and above the list, so the pinned section headers of the
+            // lazy list can never draw over the title / search row.
             header
+                .fixedSize(horizontal: false, vertical: true)
+                .background(Color(white: 0.11))
+                .zIndex(1)
             Divider().overlay(alignment: .top) {
                 EditorRefreshStrip(active: changes.busy && changes.snapshot != nil)
             }
+            .zIndex(1)
             content
+                .clipped()
         }
         .background(Color(white: 0.11))
         .task(id: RefreshKey(rev: model.dataRevision, ready: model.dataReady, conflicts: model.conflicts.count)) {

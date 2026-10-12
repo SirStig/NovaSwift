@@ -168,9 +168,11 @@ final class ChangesModel: ObservableObject {
                 byCat[ChangeCategory.of(type), default: []]
                     .append(ChangeRow(key: ResourceKey(type, id), name: name, lowerName: name.lowercased(),
                                       kind: kind, identical: identical))
+                // HD descriptors are counted on their own chip only — they're
+                // art for existing objects, not new or overridden game data.
+                if type == GraphicsEnhancementType.descriptor { hd += 1; continue }
                 if kind == .new { n += 1 } else { o += 1; if identical { same += 1 } }
                 if type == NovaType.strList, kind == .override { strEdits += 1 }
-                if type == GraphicsEnhancementType.descriptor { hd += 1 }
             }
         }
         var sections: [ChangeSection] = []

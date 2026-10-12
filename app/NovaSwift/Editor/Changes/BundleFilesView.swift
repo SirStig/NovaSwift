@@ -64,7 +64,7 @@ struct BundleFilesView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().overlay(alignment: .top) { EditorRefreshStrip(active: items == nil) }
+            Divider().overlay(alignment: .top) { EditorRefreshStrip(active: model.bundle != nil && items == nil) }
             content
         }
         .background(Color(white: 0.11))

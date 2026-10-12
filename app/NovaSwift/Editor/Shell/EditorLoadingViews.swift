@@ -7,18 +7,23 @@ import SwiftUI
 // click always responds on the next frame.
 
 /// A soft pulsing placeholder bar.
+///
+/// Animated by `TimelineView`, never `withAnimation(...repeatForever)`: a
+/// repeating transaction started in `onAppear` leaks onto any layout change
+/// that lands in the same update, which made whole headers slide back and
+/// forth forever.
 struct SkeletonBar: View {
     var width: CGFloat? = nil
     var height: CGFloat = 10
-    @State private var lit = false
 
     var body: some View {
-        RoundedRectangle(cornerRadius: height / 2.5, style: .continuous)
-            .fill(Color.white.opacity(lit ? 0.11 : 0.05))
-            .frame(width: width, height: height)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { lit = true }
-            }
+        TimelineView(.animation(minimumInterval: 1.0 / 30)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let pulse = (sin(t * .pi / 0.9) + 1) / 2          // 0…1, 1.8 s period
+            RoundedRectangle(cornerRadius: height / 2.5, style: .continuous)
+                .fill(Color.white.opacity(0.05 + 0.06 * pulse))
+        }
+        .frame(width: width, height: height)
     }
 }
 
@@ -78,26 +83,27 @@ struct EditorLoadingOverlay: View {
 }
 
 /// A thin indeterminate strip for "refreshing in the background" — shown when
-/// stale data stays on screen while a recompute after an edit runs.
+/// stale data stays on screen while a recompute after an edit runs. Driven by
+/// `TimelineView` (see `SkeletonBar` for why not `repeatForever`).
 struct EditorRefreshStrip: View {
     var active: Bool
-    @State private var phase: CGFloat = -0.3
 
     var body: some View {
         GeometryReader { geo in
             if active {
-                Capsule()
-                    .fill(LinearGradient(colors: [.clear, novaAmber.opacity(0.8), .clear],
-                                         startPoint: .leading, endPoint: .trailing))
-                    .frame(width: geo.size.width * 0.3, height: 2)
-                    .offset(x: phase * geo.size.width)
-                    .onAppear {
-                        phase = -0.3
-                        withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { phase = 1 }
-                    }
+                TimelineView(.animation(minimumInterval: 1.0 / 60)) { ctx in
+                    let t = ctx.date.timeIntervalSinceReferenceDate
+                    let phase = (t.truncatingRemainder(dividingBy: 1.1)) / 1.1   // 0…1
+                    Capsule()
+                        .fill(LinearGradient(colors: [.clear, novaAmber.opacity(0.8), .clear],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geo.size.width * 0.3, height: 2)
+                        .offset(x: (CGFloat(phase) * 1.3 - 0.3) * geo.size.width)
+                }
             }
         }
         .frame(height: 2)
+        .clipped()
         .allowsHitTesting(false)
     }
 }

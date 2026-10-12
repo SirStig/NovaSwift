@@ -619,7 +619,25 @@ struct GalaxyEditorView: View {
         }
         ctx.stroke(newRing, with: .color(.green), lineWidth: 1.5)
         ctx.stroke(overrideRing, with: .color(.orange), lineWidth: 1.5)
+        // Declutter: a label that would overlap one already placed is skipped
+        // (the dot stays; hovering still names it). Width is estimated from
+        // the character count — close enough for a 10 pt system font — and a
+        // coarse grid keeps the overlap test cheap.
+        let cell: CGFloat = 48
+        var grid: [Int: [CGRect]] = [:]
+        func cells(_ r: CGRect) -> [Int] {
+            var out: [Int] = []
+            for cx in Int(floor(r.minX / cell))...Int(floor(r.maxX / cell)) {
+                for cy in Int(floor(r.minY / cell))...Int(floor(r.maxY / cell)) { out.append(cx &* 73_856_093 ^ cy &* 19_349_663) }
+            }
+            return out
+        }
         for (name, at, dim) in labels {
+            let w = CGFloat(name.count) * 5.6 + 6
+            let box = CGRect(x: at.x - w / 2, y: at.y - 7, width: w, height: 14)
+            let keys = cells(box)
+            if keys.contains(where: { k in grid[k]?.contains(where: { $0.intersects(box) }) ?? false }) { continue }
+            for k in keys { grid[k, default: []].append(box) }
             ctx.draw(Text(name).font(.system(size: 10)).foregroundColor(.white.opacity(dim ? 0.26 : 0.85)),
                      at: at, anchor: .center)
         }
@@ -740,7 +758,7 @@ struct GalaxyEditorView: View {
     private func pick(_ id: Int) { search = ""; focus(id, zoomIn: true) }
 
     private var legend: some View {
-        let rows = data.govts.filter { $0.count > 0 }.sorted { $0.count > $1.count }.prefix(14)
+        let rows = data.govts.filter { $0.count > 0 }.sorted { $0.count > $1.count }.prefix(10)
         return MapPalette {
             VStack(alignment: .leading, spacing: 3) {
                 Text("GOVERNMENTS").font(.system(size: 9, weight: .semibold)).foregroundStyle(novaAmber.opacity(0.8))
@@ -775,7 +793,7 @@ struct GalaxyEditorView: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
         .frame(maxWidth: .infinity)
-        .background(Color.black.opacity(0.8))
+        .background(Color(white: 0.07).opacity(0.94))
     }
 
     private var toolHint: String {

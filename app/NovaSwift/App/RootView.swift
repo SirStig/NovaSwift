@@ -152,8 +152,12 @@ struct RootView: View {
             // The controller-driven UI cursor, above everything so it can
             // click into any screen. Inert without a pad, during flight, and
             // while a sheet (with its own `.cursorHost()` cursor) is up.
-            ControllerCursorOverlay()
-                .zIndex(50)
+            // Not over the Plugin Editor: it's a mouse-and-keyboard Mac tool,
+            // and the parked cursor badge sat on top of its forms.
+            if model.screen != .editor {
+                ControllerCursorOverlay()
+                    .zIndex(50)
+            }
 
             #if os(tvOS)
             // NovaSwift is controller-required on Apple TV (the Siri Remote

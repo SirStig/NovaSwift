@@ -218,7 +218,7 @@ struct MapPalette<Content: View>: View {
     var body: some View {
         content
             .padding(4)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color.black.opacity(0.78)))
+            .background(RoundedRectangle(cornerRadius: 9).fill(Color(white: 0.07).opacity(0.94)))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.white.opacity(0.12), lineWidth: 1))
     }
 }

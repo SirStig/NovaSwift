@@ -311,41 +311,51 @@ struct StoryGraphView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Find mission…", text: $ui.graphSearch)
-                        .textFieldStyle(.plain).frame(width: 150)
-                        .onSubmit {
-                            updateScene()
-                            if let i = scene.matches.first { ui.focusKey = analysis.graph.nodes[i].key; ui.select(node: analysis.graph.nodes[i].key) }
+            // Two flexible rows: the graph column can be narrow (side panes take
+            // the rest), so nothing here may demand a fixed total width.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Find mission…", text: $ui.graphSearch)
+                            .textFieldStyle(.plain)
+                            .frame(minWidth: 80, maxWidth: .infinity)
+                            .onSubmit {
+                                updateScene()
+                                if let i = scene.matches.first { ui.focusKey = analysis.graph.nodes[i].key; ui.select(node: analysis.graph.nodes[i].key) }
+                            }
+                        if !ui.graphSearch.isEmpty {
+                            Text("\(scene.matches.count)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                            Button { ui.graphSearch = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary)
                         }
-                    if !ui.graphSearch.isEmpty {
-                        Text("\(scene.matches.count)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                        Button { ui.graphSearch = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary)
                     }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color(white: 0.16), in: RoundedRectangle(cornerRadius: 6))
+                    Toggle(isOn: $ui.onlyComponent) { Image(systemName: "circle.hexagongrid") }
+                        .toggleStyle(.button).help("Only the selection's connected component")
+                    Toggle(isOn: $ui.showIsolated) { Image(systemName: "circle.dotted") }
+                        .toggleStyle(.button).help("Show missions with no bit connections")
+                    Button { ui.fitTick += 1 } label: { Image(systemName: "arrow.up.left.and.down.right.magnifyingglass") }
+                        .help("Fit graph")
+                    if analysis.isComputing { ProgressView().controlSize(.small) }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color(white: 0.16), in: RoundedRectangle(cornerRadius: 6))
-                Picker("", selection: $ui.colorMode) {
-                    ForEach(StoryColorMode.allCases) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).frame(width: 230).labelsHidden().help("Colour nodes by")
-                Menu {
-                    Button("All storylines") { ui.storyline = nil }
-                    Divider()
-                    ForEach(analysis.storylines, id: \.self) { s in Button(s) { ui.storyline = s } }
-                } label: { Label(ui.storyline ?? "Storyline", systemImage: "line.3.horizontal.decrease.circle") }
-                    .menuStyle(.borderlessButton).fixedSize()
-                Toggle(isOn: $ui.onlyComponent) { Image(systemName: "circle.hexagongrid") }
-                    .toggleStyle(.button).help("Only the selection's connected component")
-                Toggle(isOn: $ui.showIsolated) { Image(systemName: "circle.dotted") }
-                    .toggleStyle(.button).help("Show missions with no bit connections")
-                Button { ui.fitTick += 1 } label: { Image(systemName: "arrow.up.left.and.down.right.magnifyingglass") }
-                    .help("Fit graph")
-                if analysis.isComputing { ProgressView().controlSize(.small) }
+                HStack(spacing: 8) {
+                    Picker("", selection: $ui.colorMode) {
+                        ForEach(StoryColorMode.allCases) { Text($0.rawValue).tag($0) }
+                    }.pickerStyle(.segmented).labelsHidden().fixedSize().help("Colour nodes by")
+                    Menu {
+                        Button("All storylines") { ui.storyline = nil }
+                        Divider()
+                        ForEach(analysis.storylines, id: \.self) { s in Button(s) { ui.storyline = s } }
+                    } label: { Label(ui.storyline ?? "All storylines", systemImage: "line.3.horizontal.decrease.circle").lineLimit(1) }
+                        .menuStyle(.borderlessButton)
+                        .frame(maxWidth: 220, alignment: .leading)
+                    Spacer(minLength: 0)
+                }
             }
             .padding(8)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9))
+            .background(Color(white: 0.11).opacity(0.96), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.white.opacity(0.06)))
             HStack(spacing: 10) {
                 legend(Color(red: 0.9, green: 0.2, blue: 0.2), "Unreachable")
                 legend(.orange, "Dead end")
@@ -353,6 +363,8 @@ struct StoryGraphView: View {
                 let g = analysis.graph
                 Text("\(g.nodes.count - g.nodes.filter(\.isolated).count) linked · \(g.edges.count) edges" + (g.hubBits.isEmpty ? "" : " · \(g.hubBits.count) hub bits hidden"))
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    .lineLimit(1).truncationMode(.tail)
+                    .help("\(g.nodes.count - g.nodes.filter(\.isolated).count) linked · \(g.edges.count) edges · \(g.hubBits.count) hub bits hidden")
             }
             .padding(.horizontal, 10)
         }

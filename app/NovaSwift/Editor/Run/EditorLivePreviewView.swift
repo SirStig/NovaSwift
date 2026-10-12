@@ -194,7 +194,9 @@ final class EditorPreviewModel: ObservableObject {
             opts.invulnerable = true
             opts.muted = true
             opts.hidePlayer = true
-            if sameSystem, let pose = cameraPose { opts.position = pose }
+            // Same system: keep the author's camera. A new one opens on its centre
+            // (matching the in-place path above), not the arrival spawn point.
+            opts.position = sameSystem ? (cameraPose ?? Vec2()) : Vec2()
             guard let newHost = GameHost.makeEditorHost(model: app, build: build, options: opts) else {
                 status = .failed("Couldn't build system #\(p.systemID)."); return
             }
