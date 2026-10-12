@@ -154,14 +154,11 @@ final class EditingSchemaTests: XCTestCase {
         return try GameLibrary.merge(baseFiles: files)
     }
 
-    private func c(_ x: NovaColor) -> FieldValue { .color(r: x.r, g: x.g, b: x.b) }
-    private func i(_ x: Int) -> FieldValue { .int(x) }
-    private func ints(_ x: [Int]) -> FieldValue { .array(x.map(FieldValue.int)) }
 
     /// Reads every stock resource of `type` through both the schema and the
     /// typed decoder and requires the named fields to agree.
     private func verify<T>(_ type: NovaSwiftKit.FourCharCode, in coll: ResourceCollection,
-                           decode: (Resource) -> T, _ pairs: [(String, (T) -> FieldValue)],
+                           decode: (Resource) -> T, _ probes: Probes<T>,
                            file: StaticString = #filePath, line: UInt = #line) throws {
         let schema = try XCTUnwrap(ResourceSchemas.schema(for: type), file: file, line: line)
         let all = coll.resources(of: type)
@@ -169,7 +166,7 @@ final class EditingSchemaTests: XCTestCase {
         var bad: [String] = []
         for r in all {
             let model = decode(r)
-            for (key, expect) in pairs {
+            for (key, expect) in probes.items {
                 guard let f = schema.field(key) else { XCTFail("schema \(schema.displayName) has no field \(key)", file: file, line: line); continue }
                 let got = FieldCodec.read(f, from: r.data)
                 let want = expect(model)
@@ -181,29 +178,52 @@ final class EditingSchemaTests: XCTestCase {
 
     func testSchemaAgreesWithTypedDecoders() throws {
         let coll = try stockCollection()
-        try verify(NovaType.ship, in: coll, decode: ShipRes.init, [
-            ("cargoSpace", { self.i($0.cargoSpace) }), ("shield", { self.i($0.shield) }),
-            ("acceleration", { self.i($0.acceleration) }), ("speed", { self.i($0.speed) }),
-            ("turnRate", { self.i($0.turnRate) }), ("fuel", { self.i($0.fuelCapacity) }),
-            ("freeMass", { self.i($0.freeMass) }), ("armor", { self.i($0.armor) }),
-            ("shieldRecharge", { self.i($0.shieldRecharge) }), ("maxGuns", { self.i($0.maxGuns) }),
-            ("maxTurrets", { self.i($0.maxTurrets) }), ("techLevel", { self.i($0.techLevel) }),
-            ("dispWeight", { self.i($0.displayWeight) }), ("cost", { self.i($0.cost) }),
-            ("deathDelay", { self.i($0.deathDelay) }), ("armorRecharge", { self.i($0.armorRecharge) }),
-            ("mass", { self.i($0.mass) }), ("length", { self.i($0.length) }), ("inherentAI", { self.i($0.inherentAI) }),
-            ("crew", { self.i($0.crew) }), ("strength", { self.i($0.strength) }),
-            ("inherentGovt", { self.i($0.inherentGovt) }), ("flags", { self.i(Int($0.flags)) }),
-            ("podCount", { self.i($0.podCount) }), ("fuelRegen", { self.i($0.fuelRegen) }),
-            ("flags2", { self.i(Int($0.flags2)) }), ("deionize", { self.i($0.deionize) }),
-            ("ionizeMax", { self.i($0.ionizeMax) }), ("keyCarried", { self.i($0.keyCarriedShipID) }),
-            ("contribute", { .uint64($0.contribute) }), ("require", { .uint64($0.require) }),
-            ("availability", { .string($0.availBits) }), ("appearOn", { .string($0.appearOn) }),
-            ("onPurchase", { .string($0.onPurchase) }), ("onCapture", { .string($0.onCapture) }),
-            ("onRetire", { .string($0.onRetire) }), ("subtitle", { .string($0.subtitle) }),
-            ("flags3", { self.i(Int($0.flags3)) }), ("upgradeTo", { self.i($0.escortUpgradesTo) }),
-            ("upgradeCost", { self.i($0.escortUpgradeCost) }), ("sellValue", { self.i($0.escortSellValue) }),
-            ("escortType", { self.i($0.escortCategory) }),
-        ])
+        do {
+            let p = Probes<ShipRes>()
+            p.i("cargoSpace") { $0.cargoSpace }
+            p.i("shield") { $0.shield }
+            p.i("acceleration") { $0.acceleration }
+            p.i("speed") { $0.speed }
+            p.i("turnRate") { $0.turnRate }
+            p.i("fuel") { $0.fuelCapacity }
+            p.i("freeMass") { $0.freeMass }
+            p.i("armor") { $0.armor }
+            p.i("shieldRecharge") { $0.shieldRecharge }
+            p.i("maxGuns") { $0.maxGuns }
+            p.i("maxTurrets") { $0.maxTurrets }
+            p.i("techLevel") { $0.techLevel }
+            p.i("dispWeight") { $0.displayWeight }
+            p.i("cost") { $0.cost }
+            p.i("deathDelay") { $0.deathDelay }
+            p.i("armorRecharge") { $0.armorRecharge }
+            p.i("mass") { $0.mass }
+            p.i("length") { $0.length }
+            p.i("inherentAI") { $0.inherentAI }
+            p.i("crew") { $0.crew }
+            p.i("strength") { $0.strength }
+            p.i("inherentGovt") { $0.inherentGovt }
+            p.i("flags") { Int($0.flags) }
+            p.i("podCount") { $0.podCount }
+            p.i("fuelRegen") { $0.fuelRegen }
+            p.i("flags2") { Int($0.flags2) }
+            p.i("deionize") { $0.deionize }
+            p.i("ionizeMax") { $0.ionizeMax }
+            p.i("keyCarried") { $0.keyCarriedShipID }
+            p.u("contribute") { $0.contribute }
+            p.u("require") { $0.require }
+            p.s("availability") { $0.availBits }
+            p.s("appearOn") { $0.appearOn }
+            p.s("onPurchase") { $0.onPurchase }
+            p.s("onCapture") { $0.onCapture }
+            p.s("onRetire") { $0.onRetire }
+            p.s("subtitle") { $0.subtitle }
+            p.i("flags3") { Int($0.flags3) }
+            p.i("upgradeTo") { $0.escortUpgradesTo }
+            p.i("upgradeCost") { $0.escortUpgradeCost }
+            p.i("sellValue") { $0.escortSellValue }
+            p.i("escortType") { $0.escortCategory }
+            try verify(NovaType.ship, in: coll, decode: ShipRes.init, p)
+        }
         // Stock weapon/outfit tables (the decoder drops unused slots; compare the used ones).
         let shipSchema = try XCTUnwrap(ResourceSchemas.schema(for: NovaType.ship))
         for r in coll.resources(of: NovaType.ship) {
@@ -217,58 +237,115 @@ final class EditingSchemaTests: XCTestCase {
             XCTAssertEqual(fromSchema.map { "\($0.0),\($0.1),\($0.2)" }, m.weapons.map { "\($0.id),\($0.count),\($0.ammo)" }, "ship #\(r.id) weapons")
         }
 
-        try verify(NovaType.outfit, in: coll, decode: OutfRes.init, [
-            ("dispWeight", { self.i($0.displayWeight) }), ("mass", { self.i($0.mass) }), ("techLevel", { self.i($0.techLevel) }),
-            ("maximum", { self.i($0.maxInstallable) }), ("cost", { self.i($0.cost) }), ("flags", { self.i(Int($0.flags)) }),
-            ("modType", { self.i($0.firstSlot.type) }), ("modValue", { self.i($0.firstSlot.value) }),
-            ("contribute", { .uint64($0.contribute) }), ("require", { .uint64($0.require) }),
-            ("availability", { .string($0.availBits) }), ("onPurchase", { .string($0.onPurchase) }),
-            ("onSell", { .string($0.onSell) }), ("shortName", { .string($0.outfitterName) }),
-            ("lowercaseName", { .string($0.lowercaseName) }), ("lowercasePlural", { .string($0.lowercasePlural) }),
-            ("itemClass", { self.i($0.itemClass) }), ("scanMask", { self.i(Int($0.scanMask)) }),
-            ("requireGovt", { self.i($0.requireGovt) }),
-        ])
+        do {
+            let p = Probes<OutfRes>()
+            p.i("dispWeight") { $0.displayWeight }
+            p.i("mass") { $0.mass }
+            p.i("techLevel") { $0.techLevel }
+            p.i("maximum") { $0.maxInstallable }
+            p.i("cost") { $0.cost }
+            p.i("flags") { Int($0.flags) }
+            p.i("modType") { $0.firstSlot.type }
+            p.i("modValue") { $0.firstSlot.value }
+            p.u("contribute") { $0.contribute }
+            p.u("require") { $0.require }
+            p.s("availability") { $0.availBits }
+            p.s("onPurchase") { $0.onPurchase }
+            p.s("onSell") { $0.onSell }
+            p.s("shortName") { $0.outfitterName }
+            p.s("lowercaseName") { $0.lowercaseName }
+            p.s("lowercasePlural") { $0.lowercasePlural }
+            p.i("itemClass") { $0.itemClass }
+            p.i("scanMask") { Int($0.scanMask) }
+            p.i("requireGovt") { $0.requireGovt }
+            try verify(NovaType.outfit, in: coll, decode: OutfRes.init, p)
+        }
 
-        try verify(NovaType.weapon, in: coll, decode: WeapRes.init, [
-            ("reload", { self.i($0.reload) }), ("duration", { self.i($0.duration) }),
-            ("massDamage", { self.i($0.armorDamage) }), ("energyDamage", { self.i($0.shieldDamage) }),
-            ("guidance", { self.i($0.guidanceRaw) }), ("speed", { self.i($0.speed) }), ("ammoType", { self.i($0.ammoType) }),
-            ("impact", { self.i($0.impact) }), ("proxRadius", { self.i($0.proxRadius) }), ("blastRadius", { self.i($0.blastRadius) }),
-            ("flags", { self.i(Int($0.flagsRaw)) }), ("seekerFlags", { self.i($0.seekerFlagsRaw) }),
-            ("smokeSet", { self.i($0.smokeSet) }), ("decay", { self.i($0.decay) }),
-            ("beamLength", { self.i($0.beamLength) }), ("beamWidth", { self.i($0.beamWidth) }),
-            ("coronaFalloff", { self.i($0.coronaFalloff) }), ("beamColor", { self.c($0.beamColor) }),
-            ("coronaColor", { self.c($0.coronaColor) }), ("subCount", { self.i($0.subCount) }), ("subType", { self.i($0.subID) }),
-            ("subTheta", { self.i($0.subTheta) }), ("subLimit", { self.i($0.subLimit) }), ("proxSafety", { self.i($0.proxSafety) }),
-            ("flags2", { self.i(Int($0.flags2Raw)) }), ("ionization", { self.i($0.ionization) }),
-            ("exitType", { self.i($0.exitType) }), ("burstCount", { self.i($0.burstCount) }),
-            ("burstReload", { self.i($0.burstReload) }), ("flags3", { self.i(Int($0.flags3Raw)) }),
-            ("durability", { self.i($0.durability) }), ("guidedTurn", { self.i($0.turnRate) }), ("maxAmmo", { self.i($0.maxAmmo) }),
-            ("liDensity", { self.i($0.lightningDensity) }), ("liAmplitude", { self.i($0.lightningAmplitude) }),
-            ("particles", { self.i($0.trailParticles.count) }), ("hitParticles", { self.i($0.hitParticles.count) }),
-        ])
+        do {
+            let p = Probes<WeapRes>()
+            p.i("reload") { $0.reload }
+            p.i("duration") { $0.duration }
+            p.i("massDamage") { $0.armorDamage }
+            p.i("energyDamage") { $0.shieldDamage }
+            p.i("guidance") { $0.guidanceRaw }
+            p.i("speed") { $0.speed }
+            p.i("ammoType") { $0.ammoType }
+            p.i("impact") { $0.impact }
+            p.i("proxRadius") { $0.proxRadius }
+            p.i("blastRadius") { $0.blastRadius }
+            p.i("flags") { Int($0.flagsRaw) }
+            p.i("seekerFlags") { $0.seekerFlagsRaw }
+            p.i("smokeSet") { $0.smokeSet }
+            p.i("decay") { $0.decay }
+            p.i("beamLength") { $0.beamLength }
+            p.i("beamWidth") { $0.beamWidth }
+            p.i("coronaFalloff") { $0.coronaFalloff }
+            p.c("beamColor") { $0.beamColor }
+            p.c("coronaColor") { $0.coronaColor }
+            p.i("subCount") { $0.subCount }
+            p.i("subType") { $0.subID }
+            p.i("subTheta") { $0.subTheta }
+            p.i("subLimit") { $0.subLimit }
+            p.i("proxSafety") { $0.proxSafety }
+            p.i("flags2") { Int($0.flags2Raw) }
+            p.i("ionization") { $0.ionization }
+            p.i("exitType") { $0.exitType }
+            p.i("burstCount") { $0.burstCount }
+            p.i("burstReload") { $0.burstReload }
+            p.i("flags3") { Int($0.flags3Raw) }
+            p.i("durability") { $0.durability }
+            p.i("guidedTurn") { $0.turnRate }
+            p.i("maxAmmo") { $0.maxAmmo }
+            p.i("liDensity") { $0.lightningDensity }
+            p.i("liAmplitude") { $0.lightningAmplitude }
+            p.i("particles") { $0.trailParticles.count }
+            p.i("hitParticles") { $0.hitParticles.count }
+            try verify(NovaType.weapon, in: coll, decode: WeapRes.init, p)
+        }
 
-        try verify(NovaType.spob, in: coll, decode: SpobRes.init, [
-            ("position", { .point($0.x, $0.y) }), ("type", { self.i($0.graphicRaw) }),
-            ("flags", { self.i(Int($0.flags & 0xFF)) }), ("techLevel", { self.i($0.techLevel) }), ("tribute", { self.i($0.tribute) }),
-            ("govt", { self.i($0.government) }), ("minStatus", { self.i($0.minStatus) }),
-            ("custPicID", { self.i($0.landingPictID & 0xFFFF) }),
-            ("defenseDude", { self.i($0.defenseDude) }), ("defCount", { self.i($0.defenseCountRaw) }),
-            ("flags2", { self.i(Int($0.flags2)) }), ("animDelay", { self.i($0.animationDelay) }), ("frame0Bias", { self.i($0.frame0Bias) }),
-            ("onDominate", { .string($0.onDominate) }), ("onRelease", { .string($0.onRelease) }),
-            ("onDestroy", { .string($0.onDestroy) }), ("onRegen", { .string($0.onRegen) }),
-            ("fee", { self.i($0.landingFee) }), ("gravity", { self.i($0.gravity) }), ("weapon", { self.i($0.defenseWeaponRaw) }),
-            ("strength", { self.i($0.strength) }), ("deadType", { self.i($0.destroyedGraphicRaw) }),
-            ("explodeType", { self.i($0.explosionRaw) }),
-        ])
+        do {
+            let p = Probes<SpobRes>()
+            p.pt("position") { ($0.x, $0.y) }
+            p.i("type") { $0.graphicRaw }
+            p.i("flags") { Int($0.flags & 0xFF) }
+            p.i("techLevel") { $0.techLevel }
+            p.i("tribute") { $0.tribute }
+            p.i("govt") { $0.government }
+            p.i("minStatus") { $0.minStatus }
+            p.i("custPicID") { Int(Int16(truncatingIfNeeded: $0.landingPictID)) }
+            p.i("defenseDude") { $0.defenseDude }
+            p.i("defCount") { $0.defenseCountRaw }
+            p.i("flags2") { Int($0.flags2) }
+            p.i("animDelay") { $0.animationDelay }
+            p.i("frame0Bias") { $0.frame0Bias }
+            p.s("onDominate") { $0.onDominate }
+            p.s("onRelease") { $0.onRelease }
+            p.s("onDestroy") { $0.onDestroy }
+            p.s("onRegen") { $0.onRegen }
+            p.i("fee") { $0.landingFee }
+            p.i("gravity") { $0.gravity }
+            p.i("weapon") { $0.defenseWeaponRaw }
+            p.i("strength") { $0.strength }
+            p.i("deadType") { $0.destroyedGraphicRaw }
+            p.i("explodeType") { $0.explosionRaw }
+            try verify(NovaType.spob, in: coll, decode: SpobRes.init, p)
+        }
 
-        try verify(NovaType.syst, in: coll, decode: SystRes.init, [
-            ("position", { .point($0.x, $0.y) }), ("avgShips", { self.i($0.averageShips) }), ("govt", { self.i($0.government) }),
-            ("message", { self.i($0.message) }), ("interference", { self.i($0.interference) }), ("murk", { self.i($0.murk) }),
-            ("background", { self.c($0.backgroundColor) }), ("visibility", { .string($0.visibility) }),
-            ("reinfFleet", { self.i($0.reinforcementFleet) }), ("reinfTime", { self.i($0.reinforcementDelay) }),
-            ("reinfInterval", { self.i($0.reinforcementRegen) }),
-        ])
+        do {
+            let p = Probes<SystRes>()
+            p.pt("position") { ($0.x, $0.y) }
+            p.i("avgShips") { $0.averageShips }
+            p.i("govt") { $0.government }
+            p.i("message") { $0.message }
+            p.i("interference") { $0.interference }
+            p.i("murk") { $0.murk }
+            p.c("background") { $0.backgroundColor }
+            p.s("visibility") { $0.visibility }
+            p.i("reinfFleet") { $0.reinforcementFleet }
+            p.i("reinfTime") { $0.reinforcementDelay }
+            p.i("reinfInterval") { $0.reinforcementRegen }
+            try verify(NovaType.syst, in: coll, decode: SystRes.init, p)
+        }
         // Link / stellar lists and asteroid bits (the decoder filters unused slots).
         let sys = try XCTUnwrap(ResourceSchemas.schema(for: NovaType.syst))
         for r in coll.resources(of: NovaType.syst) {
@@ -286,124 +363,261 @@ final class EditingSchemaTests: XCTestCase {
             XCTAssertEqual(ids, m.asteroidTypeIDs, "syst #\(r.id) asteroid types")
         }
 
-        try verify(NovaType.govt, in: coll, decode: GovtRes.init, [
-            ("voiceType", { self.i($0.voiceType) }), ("flags", { self.i(Int($0.flags1)) }), ("flags2", { self.i(Int($0.flags2)) }),
-            ("scanFine", { self.i($0.scanFine) }), ("crimeTolerance", { self.i($0.crimeTolerance) }),
-            ("smugglePenalty", { self.i($0.smugglePenalty) }), ("disablePenalty", { self.i($0.disablePenalty) }),
-            ("boardPenalty", { self.i($0.boardPenalty) }), ("killPenalty", { self.i($0.killPenalty) }),
-            ("shootPenalty", { self.i($0.shootPenalty) }), ("initialRecord", { self.i($0.initialRecord) }),
-            ("maxOdds", { self.i($0.maxOdds) }), ("classes", { self.ints($0.classSlots) }),
-            ("scanMask", { self.i(Int($0.scanMask)) }), ("require", { .uint64($0.require) }),
-            ("inherentJam", { self.ints($0.jamming) }), ("mediumName", { .string($0.mediumName) }),
-            ("color", { self.c($0.mapColor) }), ("shipColor", { self.c($0.shipColor) }),
-            ("interface", { self.i($0.interface) }), ("newsPicture", { self.i($0.newsPic) }),
-        ])
+        do {
+            let p = Probes<GovtRes>()
+            p.i("voiceType") { $0.voiceType }
+            p.i("flags") { Int($0.flags1) }
+            p.i("flags2") { Int($0.flags2) }
+            p.i("scanFine") { $0.scanFine }
+            p.i("crimeTolerance") { $0.crimeTolerance }
+            p.i("smugglePenalty") { $0.smugglePenalty }
+            p.i("disablePenalty") { $0.disablePenalty }
+            p.i("boardPenalty") { $0.boardPenalty }
+            p.i("killPenalty") { $0.killPenalty }
+            p.i("shootPenalty") { $0.shootPenalty }
+            p.i("initialRecord") { $0.initialRecord }
+            p.i("maxOdds") { $0.maxOdds }
+            p.ints("classes") { $0.classSlots }
+            p.i("scanMask") { Int($0.scanMask) }
+            p.u("require") { $0.require }
+            p.ints("inherentJam") { $0.jamming }
+            p.s("mediumName") { $0.mediumName }
+            p.c("color") { $0.mapColor }
+            p.c("shipColor") { $0.shipColor }
+            p.i("interface") { $0.interface }
+            p.i("newsPicture") { $0.newsPic }
+            try verify(NovaType.govt, in: coll, decode: GovtRes.init, p)
+        }
 
-        try verify(NovaType.mission, in: coll, decode: MissionRes.init, [
-            ("availRecord", { self.i($0.availRecord) }), ("availRating", { self.i($0.availRating) }),
-            ("availRandom", { self.i($0.availRandom) }), ("availBits", { .string($0.availBits) }),
-            ("cargoQty", { self.i($0.cargoQty) }), ("scanMask", { self.i($0.scanMask) }), ("payVal", { self.i($0.pay) }),
-            ("shipCount", { self.i($0.shipCount) }), ("shipSyst", { self.i($0.shipSystem) }), ("shipDude", { self.i($0.shipDude) }),
-            ("shipBehav", { self.i($0.shipBehavior) }), ("shipStart", { self.i($0.shipStart) }),
-            ("auxShipCount", { self.i($0.auxShipCount) }), ("auxShipDude", { self.i($0.auxShipDude) }),
-            ("auxShipSyst", { self.i($0.auxShipSystem) }), ("briefText", { self.i($0.briefText) }),
-            ("quickBrief", { self.i($0.quickBriefText) }), ("loadCargText", { self.i($0.loadCargoText) }),
-            ("dumpCargoText", { self.i($0.dropCargoText) }), ("compText", { self.i($0.completionText) }),
-            ("failText", { self.i($0.failureText) }), ("shipDoneText", { self.i($0.shipDoneText) }),
-            ("refuseText", { self.i($0.refuseText) }), ("timeLimit", { self.i($0.timeLimit) }),
-            ("flags", { self.i($0.flags1) }), ("flags2", { self.i($0.flags2) }),
-            ("datePostInc", { self.i($0.datePostIncrement) }), ("onAccept", { .string($0.onAccept) }),
-            ("onRefuse", { .string($0.onRefuse) }), ("onSuccess", { .string($0.onSuccess) }),
-            ("onFailure", { .string($0.onFailure) }), ("onAbort", { .string($0.onAbort) }),
-            ("onShipDone", { .string($0.onShipDone) }), ("require", { .uint64($0.require) }),
-            ("travelStel", { self.i($0.travelStellar) }), ("returnStel", { self.i($0.returnStellar) }),
-            ("compGovt", { self.i($0.compRewardGovt) }), ("compReward", { self.i($0.compLegalReward) }),
-        ])
+        do {
+            let p = Probes<MissionRes>()
+            p.i("availRecord") { $0.availRecord }
+            p.i("availRating") { $0.availRating }
+            p.i("availRandom") { $0.availRandom }
+            p.s("availBits") { $0.availBits }
+            p.i("cargoQty") { $0.cargoQty }
+            p.i("scanMask") { $0.scanMask }
+            p.i("payVal") { $0.pay }
+            p.i("shipCount") { $0.shipCount }
+            p.i("shipSyst") { $0.shipSystem }
+            p.i("shipDude") { $0.shipDude }
+            p.i("shipBehav") { $0.shipBehavior }
+            p.i("shipStart") { $0.shipStart }
+            p.i("auxShipCount") { $0.auxShipCount }
+            p.i("auxShipDude") { $0.auxShipDude }
+            p.i("auxShipSyst") { $0.auxShipSystem }
+            p.i("briefText") { $0.briefText }
+            p.i("quickBrief") { $0.quickBriefText }
+            p.i("loadCargText") { $0.loadCargoText }
+            p.i("dumpCargoText") { $0.dropCargoText }
+            p.i("compText") { $0.completionText }
+            p.i("failText") { $0.failureText }
+            p.i("shipDoneText") { $0.shipDoneText }
+            p.i("refuseText") { $0.refuseText }
+            p.i("timeLimit") { $0.timeLimit }
+            p.i("flags") { $0.flags1 }
+            p.i("flags2") { $0.flags2 }
+            p.i("datePostInc") { $0.datePostIncrement }
+            p.s("onAccept") { $0.onAccept }
+            p.s("onRefuse") { $0.onRefuse }
+            p.s("onSuccess") { $0.onSuccess }
+            p.s("onFailure") { $0.onFailure }
+            p.s("onAbort") { $0.onAbort }
+            p.s("onShipDone") { $0.onShipDone }
+            p.u("require") { $0.require }
+            p.i("travelStel") { $0.travelStellar }
+            p.i("returnStel") { $0.returnStellar }
+            p.i("compGovt") { $0.compRewardGovt }
+            p.i("compReward") { $0.compLegalReward }
+            try verify(NovaType.mission, in: coll, decode: MissionRes.init, p)
+        }
 
-        try verify(NovaType.cron, in: coll, decode: CronRes.init, [
-            ("firstDay", { self.i($0.firstDay) }), ("firstMonth", { self.i($0.firstMonth) }), ("firstYear", { self.i($0.firstYear) }),
-            ("lastDay", { self.i($0.lastDay) }), ("lastMonth", { self.i($0.lastMonth) }), ("lastYear", { self.i($0.lastYear) }),
-            ("random", { self.i($0.random) }), ("duration", { self.i($0.duration) }),
-            ("independentNews", { self.i($0.independentNewsStrID) }), ("flags", { self.i($0.flags) }),
-            ("contribute", { .uint64($0.contribute) }), ("require", { .uint64($0.require) }),
-            ("newsGovts", { self.ints($0.newsGovts) }), ("newsStrings", { self.ints($0.govtNewsStrs) }),
-        ])
+        do {
+            let p = Probes<CronRes>()
+            p.i("firstDay") { $0.firstDay }
+            p.i("firstMonth") { $0.firstMonth }
+            p.i("firstYear") { $0.firstYear }
+            p.i("lastDay") { $0.lastDay }
+            p.i("lastMonth") { $0.lastMonth }
+            p.i("lastYear") { $0.lastYear }
+            p.i("random") { $0.random }
+            p.i("duration") { $0.duration }
+            p.i("independentNews") { $0.independentNewsStrID }
+            p.i("flags") { $0.flags }
+            p.u("contribute") { $0.contribute }
+            p.u("require") { $0.require }
+            p.ints("newsGovts") { $0.newsGovts }
+            p.ints("newsStrings") { $0.govtNewsStrs }
+            try verify(NovaType.cron, in: coll, decode: CronRes.init, p)
+        }
 
-        try verify(NovaType.pers, in: coll, decode: PersRes.init, [
-            ("linkSystem", { self.i($0.linkSyst) }), ("govt", { self.i($0.govt) }), ("aiType", { self.i($0.aiType) }),
-            ("aggression", { self.i($0.aggression) }), ("coward", { self.i($0.coward) }), ("shipType", { self.i($0.shipType) }),
-            ("weaponTypes", { self.ints($0.weapType) }), ("weaponCounts", { self.ints($0.weapCount) }),
-            ("ammoLoads", { self.ints($0.ammoLoad) }), ("credits", { self.i($0.credits) }), ("shieldMod", { self.i($0.shieldMod) }),
-            ("hailPict", { self.i($0.hailPict) }), ("commQuote", { self.i($0.commQuote) }), ("hailQuote", { self.i($0.hailQuote) }),
-            ("linkMission", { self.i($0.linkMission) }), ("flags", { self.i(Int($0.flags)) }), ("flags2", { self.i(Int($0.flags2)) }),
-            ("grantClass", { self.i($0.grantClass) }), ("grantProb", { self.i($0.grantProb) }), ("grantCount", { self.i($0.grantCount) }),
-        ])
+        do {
+            let p = Probes<PersRes>()
+            p.i("linkSystem") { $0.linkSyst }
+            p.i("govt") { $0.govt }
+            p.i("aiType") { $0.aiType }
+            p.i("aggression") { $0.aggression }
+            p.i("coward") { $0.coward }
+            p.i("shipType") { $0.shipType }
+            p.ints("weaponTypes") { $0.weapType }
+            p.ints("weaponCounts") { $0.weapCount }
+            p.ints("ammoLoads") { $0.ammoLoad }
+            p.i("credits") { $0.credits }
+            p.i("shieldMod") { $0.shieldMod }
+            p.i("hailPict") { $0.hailPict }
+            p.i("commQuote") { $0.commQuote }
+            p.i("hailQuote") { $0.hailQuote }
+            p.i("linkMission") { $0.linkMission }
+            p.i("flags") { Int($0.flags) }
+            p.i("flags2") { Int($0.flags2) }
+            try verify(NovaType.pers, in: coll, decode: PersRes.init, p)
+        }
 
-        try verify(NovaType.dude, in: coll, decode: DudeRes.init, [
-            ("aiType", { self.i($0.aiTypeRaw) }), ("govt", { self.i($0.govt) }), ("booty", { self.i(Int($0.flags)) }),
-        ])
-        try verify(NovaType.fleet, in: coll, decode: FleetRes.init, [
-            ("leadShip", { self.i($0.leadShip) }), ("govt", { self.i($0.govt) }), ("linkSystem", { self.i($0.linkSystem) }),
-            ("appearOn", { .string($0.appearOn) }), ("quote", { self.i($0.hailQuote) }), ("flags", { self.i(Int($0.flags)) }),
-        ])
-        try verify(NovaType.rank, in: coll, decode: RankRes.init, [
-            ("weight", { self.i($0.weight) }), ("affilGovt", { self.i($0.govt) }), ("priceMod", { self.i($0.priceModifier) }),
-            ("salary", { self.i($0.salary) }), ("salaryCap", { self.i($0.salaryCap) }), ("contribute", { .uint64($0.contribute) }),
-            ("flags", { self.i($0.flags) }), ("convName", { .string($0.conversationName) }), ("shortName", { .string($0.shortName) }),
-        ])
-        try verify(NovaType.roid, in: coll, decode: RoidRes.init, [
-            ("strength", { self.i($0.strength) }), ("spinRate", { self.i($0.spinRate) }), ("yieldType", { self.i($0.yieldType) }),
-            ("yieldQty", { self.i($0.yieldQty) }), ("partCount", { self.i($0.partCount) }), ("partColor", { self.c($0.partColor) }),
-            ("fragType1", { self.i($0.fragType1) }), ("fragType2", { self.i($0.fragType2) }), ("fragCount", { self.i($0.fragCount) }),
-            ("explodeType", { self.i($0.explodeType) }), ("mass", { self.i($0.mass) }),
-        ])
-        try verify(NovaType.junk, in: coll, decode: JunkRes.init, [
-            ("basePrice", { self.i($0.basePrice) }), ("flags", { self.i(Int($0.flags)) }), ("scanMask", { self.i(Int($0.scanMask)) }),
-            ("lowercaseName", { .string($0.lowercaseName) }), ("buyOn", { .string($0.buyOn) }), ("sellOn", { .string($0.sellOn) }),
-        ])
-        try verify(NovaType.oops, in: coll, decode: OopsRes.init, [
-            ("stellar", { self.i($0.stellar) }), ("commodity", { self.i($0.commodity) }), ("priceDelta", { self.i($0.priceDelta) }),
-            ("duration", { self.i($0.duration) }), ("frequency", { self.i($0.freq) }), ("activateOn", { .string($0.activateOn) }),
-        ])
-        try verify(NovaType.boom, in: coll, decode: BoomRes.init, [
-            ("animationSpeed", { self.i($0.animationRate) }), ("graphicIndex", { self.i($0.graphicSpinID - 400) }),
-        ])
-        try verify(NovaType.nebula, in: coll, decode: NebuRes.init, [
-            ("position", { .point($0.x, $0.y) }), ("size", { .point($0.width, $0.height) }),
-            ("activeOn", { .string($0.activeOn) }), ("onExplore", { .string($0.onExplore) }),
-        ])
-        try verify(NovaType.spin, in: coll, decode: SpinRes.init, [
-            ("spriteID", { self.i($0.spriteID) }), ("maskID", { self.i($0.maskID) }),
-            ("tileSize", { .point($0.tileWidth, $0.tileHeight) }), ("tileGrid", { .point($0.tilesAcross, $0.tilesDown) }),
-        ])
-        try verify(NovaType.shan, in: coll, decode: ShanRes.init, [
-            ("baseSprite", { self.i($0.baseSpriteID) }), ("baseMask", { self.i($0.baseMaskID) }),
-            ("baseSetCount", { self.i($0.baseSetCount) }), ("baseSize", { .point($0.baseWidth, $0.baseHeight) }),
-            ("altSprite", { self.i($0.altSpriteID) }), ("glowSprite", { self.i($0.engineSpriteID) }),
-            ("glowSize", { .point($0.engineWidth, $0.engineHeight) }), ("lightSprite", { self.i($0.lightSpriteID) }),
-            ("weapSprite", { self.i($0.weaponGlowSpriteID) }), ("shieldSprite", { self.i($0.shieldSpriteID) }),
-            ("flags", { self.i($0.extraFrameFlags) }), ("animDelay", { self.i($0.animDelay) }),
-            ("weapDecay", { self.i($0.weapDecay) }), ("blinkMode", { self.i($0.blinkMode) }),
-            ("gunX", { self.ints($0.gunPoints.map(\.x)) }), ("gunY", { self.ints($0.gunPoints.map(\.y)) }),
-            ("gunZ", { self.ints($0.gunPoints.map(\.z)) }), ("turretX", { self.ints($0.turretPoints.map(\.x)) }),
-            ("guidedY", { self.ints($0.guidedPoints.map(\.y)) }), ("beamZ", { self.ints($0.beamPoints.map(\.z)) }),
-        ])
-        try verify(NovaType.char, in: coll, decode: CharRes.init, [
-            ("cash", { self.i($0.cash) }), ("shipType", { self.i($0.shipID) }), ("kills", { self.i($0.kills) }),
-            ("onStart", { .string($0.onStart) }), ("flags", { self.i($0.flags) }), ("startDay", { self.i($0.startDay) }),
-            ("startMonth", { self.i($0.startMonth) }), ("startYear", { self.i($0.startYear) }),
-            ("datePrefix", { .string($0.datePrefix) }), ("dateSuffix", { .string($0.dateSuffix) }),
-        ])
-        try verify(NovaType.colr, in: coll, decode: ColrRes.init, [
-            ("menuFont", { .string($0.menuFont) }), ("menuFontSize", { self.i($0.menuFontSize) }),
-            ("buttonFont", { .string($0.buttonFont) }), ("buttonFontSz", { self.i($0.buttonFontSz) }),
-            ("buttonUp", { self.c($0.buttonUp) }), ("buttonDown", { self.c($0.buttonDown) }), ("menuBrightColor", { self.c($0.menuColor1) }),
-        ])
-        try verify(NovaType.intf, in: coll, decode: IntfRes.init, [
-            ("statusFont", { .string($0.statusFont) }), ("statusFontSize", { self.i($0.statusFontSize) }),
-            ("subtitleSize", { self.i($0.subtitleFontSize) }), ("brightTextColor", { self.c($0.brightText) }),
-            ("radarArea", { .rect($0.radarArea.top, $0.radarArea.left, $0.radarArea.bottom, $0.radarArea.right) }),
-        ])
+        do {
+            let p = Probes<DudeRes>()
+            p.i("aiType") { $0.aiTypeRaw }
+            p.i("govt") { $0.govt }
+            p.i("booty") { Int($0.flags) }
+            try verify(NovaType.dude, in: coll, decode: DudeRes.init, p)
+        }
+        do {
+            let p = Probes<FleetRes>()
+            p.i("leadShip") { $0.leadShip }
+            p.i("govt") { $0.govt }
+            p.i("linkSystem") { $0.linkSystem }
+            p.s("appearOn") { $0.appearOn }
+            p.i("quote") { $0.hailQuote }
+            p.i("flags") { Int($0.flags) }
+            try verify(NovaType.fleet, in: coll, decode: FleetRes.init, p)
+        }
+        do {
+            let p = Probes<RankRes>()
+            p.i("weight") { $0.weight }
+            p.i("affilGovt") { $0.govt }
+            p.i("priceMod") { $0.priceModifier }
+            p.i("salary") { $0.salary }
+            p.i("salaryCap") { $0.salaryCap }
+            p.u("contribute") { $0.contribute }
+            p.i("flags") { $0.flags }
+            p.s("convName") { $0.conversationName }
+            p.s("shortName") { $0.shortName }
+            try verify(NovaType.rank, in: coll, decode: RankRes.init, p)
+        }
+        do {
+            let p = Probes<RoidRes>()
+            p.i("strength") { $0.strength }
+            p.i("spinRate") { $0.spinRate }
+            p.i("yieldType") { $0.yieldType }
+            p.i("yieldQty") { $0.yieldQty }
+            p.i("partCount") { $0.partCount }
+            p.c("partColor") { $0.partColor }
+            p.i("fragType1") { $0.fragType1 }
+            p.i("fragType2") { $0.fragType2 }
+            p.i("fragCount") { $0.fragCount }
+            p.i("explodeType") { $0.explodeType }
+            p.i("mass") { $0.mass }
+            try verify(NovaType.roid, in: coll, decode: RoidRes.init, p)
+        }
+        do {
+            let p = Probes<JunkRes>()
+            p.i("basePrice") { $0.basePrice }
+            p.i("flags") { Int($0.flags) }
+            p.i("scanMask") { Int($0.scanMask) }
+            p.s("lowercaseName") { $0.lowercaseName }
+            p.s("buyOn") { $0.buyOn }
+            p.s("sellOn") { $0.sellOn }
+            try verify(NovaType.junk, in: coll, decode: JunkRes.init, p)
+        }
+        do {
+            let p = Probes<OopsRes>()
+            p.i("stellar") { $0.stellar }
+            p.i("commodity") { $0.commodity }
+            p.i("priceDelta") { $0.priceDelta }
+            p.i("duration") { $0.duration }
+            p.i("frequency") { $0.freq }
+            p.s("activateOn") { $0.activateOn }
+            try verify(NovaType.oops, in: coll, decode: OopsRes.init, p)
+        }
+        do {
+            let p = Probes<BoomRes>()
+            p.i("animationSpeed") { $0.animationRate }
+            p.i("graphicIndex") { $0.graphicSpinID - 400 }
+            try verify(NovaType.boom, in: coll, decode: BoomRes.init, p)
+        }
+        do {
+            let p = Probes<NebuRes>()
+            p.pt("position") { ($0.x, $0.y) }
+            p.pt("size") { ($0.width, $0.height) }
+            p.s("activeOn") { $0.activeOn }
+            p.s("onExplore") { $0.onExplore }
+            try verify(NovaType.nebula, in: coll, decode: NebuRes.init, p)
+        }
+        do {
+            let p = Probes<SpinRes>()
+            p.i("spriteID") { $0.spriteID }
+            p.i("maskID") { $0.maskID }
+            p.pt("tileSize") { ($0.tileWidth, $0.tileHeight) }
+            p.pt("tileGrid") { ($0.tilesAcross, $0.tilesDown) }
+            try verify(NovaType.spin, in: coll, decode: SpinRes.init, p)
+        }
+        do {
+            let p = Probes<ShanRes>()
+            p.i("baseSprite") { $0.baseSpriteID }
+            p.i("baseMask") { $0.baseMaskID }
+            p.i("baseSetCount") { $0.baseSetCount }
+            p.pt("baseSize") { ($0.baseWidth, $0.baseHeight) }
+            p.i("altSprite") { $0.altSpriteID }
+            p.i("glowSprite") { $0.engineSpriteID }
+            p.pt("glowSize") { ($0.engineWidth, $0.engineHeight) }
+            p.i("lightSprite") { $0.lightSpriteID }
+            p.i("weapSprite") { $0.weaponGlowSpriteID }
+            p.i("shieldSprite") { $0.shieldSpriteID }
+            p.i("flags") { $0.extraFrameFlags }
+            p.i("animDelay") { $0.animDelay }
+            p.i("weapDecay") { $0.weapDecay }
+            p.i("blinkMode") { $0.blinkMode }
+            p.ints("gunX") { $0.gunPoints.map(\.x) }
+            p.ints("gunY") { $0.gunPoints.map(\.y) }
+            p.ints("gunZ") { $0.gunPoints.map(\.z) }
+            p.ints("turretX") { $0.turretPoints.map(\.x) }
+            p.ints("guidedY") { $0.guidedPoints.map(\.y) }
+            p.ints("beamZ") { $0.beamPoints.map(\.z) }
+            try verify(NovaType.shan, in: coll, decode: ShanRes.init, p)
+        }
+        do {
+            let p = Probes<CharRes>()
+            p.i("cash") { $0.cash }
+            p.i("shipType") { $0.shipID }
+            p.i("kills") { $0.kills }
+            p.s("onStart") { $0.onStart }
+            p.i("flags") { $0.flags }
+            p.i("startDay") { $0.startDay }
+            p.i("startMonth") { $0.startMonth }
+            p.i("startYear") { $0.startYear }
+            p.s("datePrefix") { $0.datePrefix }
+            p.s("dateSuffix") { $0.dateSuffix }
+            try verify(NovaType.char, in: coll, decode: CharRes.init, p)
+        }
+        do {
+            let p = Probes<ColrRes>()
+            p.s("menuFont") { $0.menuFont }
+            p.i("menuFontSize") { $0.menuFontSize }
+            p.s("buttonFont") { $0.buttonFont }
+            p.i("buttonFontSize") { $0.buttonFontSz }
+            p.c("buttonUp") { $0.buttonUp }
+            p.c("buttonDown") { $0.buttonDown }
+            p.c("menuBrightColor") { $0.menuColor1 }
+            try verify(NovaType.colr, in: coll, decode: ColrRes.init, p)
+        }
+        do {
+            let p = Probes<IntfRes>()
+            p.s("statusFont") { $0.statusFont }
+            p.i("statusFontSize") { $0.statusFontSize }
+            p.i("subtitleSize") { $0.subtitleFontSize }
+            p.c("brightTextColor") { $0.brightText }
+            p.rc("radarArea") { ($0.radarArea.top, $0.radarArea.left, $0.radarArea.bottom, $0.radarArea.right) }
+            try verify(NovaType.intf, in: coll, decode: IntfRes.init, p)
+        }
     }
 
     func testReadingThenWritingEveryFieldReproducesStockBytes() throws {
@@ -453,10 +667,28 @@ final class EditingSchemaTests: XCTestCase {
             }
         }
         for r in coll.resources(of: NovaType.desc) {
-            XCTAssertEqual(DescRecord(r.data).encode(), r.data, "dësc #\(r.id)")
+            let enc = DescRecord(r.data).encode()
+            if enc != r.data {
+                let at = zip(enc, r.data).enumerated().first { $0.element.0 != $0.element.1 }?.offset ?? -1
+                XCTFail("dësc #\(r.id) differs at byte \(at): \(at >= 0 ? "\(enc[at]) vs \(r.data[r.data.startIndex + at])" : "")")
+            }
             descs += 1
         }
         XCTAssertGreaterThan(lists, 10)
         XCTAssertGreaterThan(descs, 500)
     }
+}
+
+
+/// Statement-per-probe table of (schema key → decoder expression), kept out of
+/// array literals so the type checker stays fast.
+final class Probes<T> {
+    var items: [(String, (T) -> FieldValue)] = []
+    func i(_ k: String, _ f: @escaping (T) -> Int) { items.append((k, { .int(f($0)) })) }
+    func s(_ k: String, _ f: @escaping (T) -> String) { items.append((k, { .string(f($0)) })) }
+    func u(_ k: String, _ f: @escaping (T) -> UInt64) { items.append((k, { .uint64(f($0)) })) }
+    func c(_ k: String, _ f: @escaping (T) -> NovaColor) { items.append((k, { .color(r: f($0).r, g: f($0).g, b: f($0).b) })) }
+    func ints(_ k: String, _ f: @escaping (T) -> [Int]) { items.append((k, { .array(f($0).map(FieldValue.int)) })) }
+    func pt(_ k: String, _ f: @escaping (T) -> (Int, Int)) { items.append((k, { .point(f($0).0, f($0).1) })) }
+    func rc(_ k: String, _ f: @escaping (T) -> (Int, Int, Int, Int)) { items.append((k, { let v = f($0); return .rect(v.0, v.1, v.2, v.3) })) }
 }

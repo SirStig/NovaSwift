@@ -200,7 +200,8 @@ public struct ResourceReferences {
             }
             guard let (t, id) = f.reference(for: v, selector: sel), t == from.type, id == from.id else { continue }
             let new: Int
-            if f.contextual != nil { new = newID }
+            if let ctx = f.contextual, let sel { new = newID - ctx.meaning(for: sel).idBase }
+            else if f.contextual != nil { continue }
             else if let opt = f.option(for: v), opt.refType != nil { new = opt.value(forPayload: newID) }
             else if case let .ref(_, base) = f.kind { new = newID - base }
             else { continue }

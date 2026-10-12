@@ -406,6 +406,15 @@ final class GameDataController: ObservableObject {
         return (baseDir, GameLibrary.discoverResourceFiles(in: baseDir))
     }
 
+    #if os(macOS)
+    /// Plugin Editor: the inputs needed to rebuild the merged base *without* one
+    /// plug-in (the one being edited). Nil when no base data is installed.
+    func editorMergeInputs() -> (baseFiles: [URL], flatPluginOrder: Bool)? {
+        guard let dir = resolveBaseDir() else { return nil }
+        return (GameLibrary.discoverResourceFiles(in: dir), !pluginsAreManual)
+    }
+    #endif
+
     /// `EVNova.ini` string overrides (`[<STR# id>] S<n>`), from the data folder
     /// or the one above it (the install root in an unflattened layout).
     nonisolated static func loadIniOverrides(near baseDir: URL) -> [Int: [Int: String]] {

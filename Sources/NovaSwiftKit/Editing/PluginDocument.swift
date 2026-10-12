@@ -24,6 +24,7 @@ public enum PluginDocumentError: Swift.Error, CustomStringConvertible, Equatable
     case notInPlugin(ResourceKey)
     case idInUse(ResourceKey)
     case invalidID(Int)
+    case fullExportNotConfirmed
 
     public var description: String {
         switch self {
@@ -31,6 +32,8 @@ public enum PluginDocumentError: Swift.Error, CustomStringConvertible, Equatable
         case let .notInPlugin(k): return "\(k) isn't part of this plug-in (override it first)"
         case let .idInUse(k): return "\(k) is already taken by the base game or this plug-in"
         case let .invalidID(id): return "\(id) is not a valid resource id (must be -32768...32767)"
+        case .fullExportNotConfirmed:
+            return "A full export contains the base game's own data; confirm that you may redistribute it first"
         }
     }
 }
@@ -313,8 +316,7 @@ public final class PluginDocument {
 
     @discardableResult
     public func undo() -> Bool {
-        precondition(groupDepth == 0, "undo() inside an open group")
-        guard let entry = undoStack.popLast() else { return false }
+        guard groupDepth == 0, let entry = undoStack.popLast() else { return false }
         restore(entry.before)
         redoStack.append(entry)
         return true
@@ -322,8 +324,7 @@ public final class PluginDocument {
 
     @discardableResult
     public func redo() -> Bool {
-        precondition(groupDepth == 0, "redo() inside an open group")
-        guard let entry = redoStack.popLast() else { return false }
+        guard groupDepth == 0, let entry = redoStack.popLast() else { return false }
         restore(entry.after)
         undoStack.append(entry)
         return true
@@ -415,6 +416,15 @@ public final class PluginDocument {
         case .rez: return RezWriter.write(out)
         case .classic: return try ClassicForkWriter.write(out)
         }
+    }
+
+    /// The whole effective set (base game included) as one file. This
+    /// redistributes base game data, so it refuses to run unless the caller
+    /// passes `acknowledgingBaseRedistribution: true` after warning the user.
+    public func exportFull(format: PluginFormat, acknowledgingBaseRedistribution: Bool,
+                           embedMetadata: Bool = true) throws -> Data {
+        guard acknowledgingBaseRedistribution else { throw PluginDocumentError.fullExportNotConfirmed }
+        return try exportData(format: format, includeBase: true, embedMetadata: embedMetadata)
     }
 
     /// Write the plug-in to `url` and mark the document clean.

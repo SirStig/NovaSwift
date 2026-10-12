@@ -67,6 +67,8 @@ public enum FieldCodec {
         while oldLen < size, d[d.startIndex + off + oldLen] != 0 { oldLen += 1 }
         for (i, b) in bytes.enumerated() { d[d.startIndex + off + i] = b }
         var i = bytes.count
+        d[d.startIndex + off + i] = 0   // always terminate (bytes.count < size by construction)
+        i += 1
         while i <= oldLen, i < size { d[d.startIndex + off + i] = 0; i += 1 }
     }
 

@@ -68,6 +68,18 @@ public enum TextResourceCodec {
 /// Layout verified against `DescRes` and the Bible: `text\0`, `i16 pict`,
 /// `char[32] movie`, `u16 flags`.
 public struct DescRecord: Sendable, Hashable {
+    /// Trailer bytes as read, so stray bytes after the movie name's NUL (common
+    /// in shipped data) survive an edit untouched. Not part of equality.
+    private var rawTrailer = Data()
+
+    public static func == (a: DescRecord, b: DescRecord) -> Bool {
+        a.text == b.text && a.pictureID == b.pictureID && a.movieFile == b.movieFile
+            && a.flags == b.flags && a.extra == b.extra && a.hasTrailer == b.hasTrailer
+    }
+    public func hash(into h: inout Hasher) {
+        h.combine(text); h.combine(pictureID); h.combine(movieFile); h.combine(flags); h.combine(extra); h.combine(hasTrailer)
+    }
+
     public static let movieFieldSize = 32
     public static let trailerSize = 2 + movieFieldSize + 2
 
@@ -107,6 +119,7 @@ public struct DescRecord: Sendable, Hashable {
         flags = FieldCodec.readInt(data, t + 2 + Self.movieFieldSize, 2, signed: false)
         let end = t + Self.trailerSize
         extra = end < data.count ? Data(data[(data.startIndex + end)...]) : Data()
+        rawTrailer = Data(data[(data.startIndex + t)..<(data.startIndex + min(end, data.count))])
     }
 
     public func encode() -> Data {
@@ -115,7 +128,9 @@ public struct DescRecord: Sendable, Hashable {
         let isBlank = pictureID == 0 && movieFile.isEmpty && flags == 0 && extra.isEmpty
         guard hasTrailer || !isBlank else { return d }
         let t = d.count
-        d.append(Data(count: Self.trailerSize))
+        var trailer = rawTrailer
+        trailer.append(Data(count: max(0, Self.trailerSize - trailer.count)))
+        d.append(trailer)
         FieldCodec.writeUInt(&d, t, 2, UInt64(truncatingIfNeeded: pictureID))
         FieldCodec.writeCString(&d, t + 2, Self.movieFieldSize, movieFile)
         FieldCodec.writeUInt(&d, t + 2 + Self.movieFieldSize, 2, UInt64(truncatingIfNeeded: flags))

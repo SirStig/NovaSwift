@@ -65,8 +65,8 @@ public enum ResourceSchemas {
 extension ContextualValue {
     /// What `oütf` ModVal means for each ModType (Nova Bible, oütf section).
     static func outfitModValue(selector: String) -> ContextualValue {
-        func m(_ l: String, _ t: String? = nil, none: Set<Int> = [-1, 0], bits: [FlagBit] = [], _ h: String = "") -> Meaning {
-            Meaning(l, refType: t.map { ty($0) }, none: none, flagBits: bits, help: h)
+        func m(_ l: String, _ t: String? = nil, bits: [FlagBit] = []) -> Meaning {
+            Meaning(l, refType: t.map { ty($0) }, flagBits: bits)
         }
         let cloak: [FlagBit] = [.f(0x1, "Faster fading"), .f(0x2, "Visible on radar"), .f(0x4, "Drops shields on activation"),
                                 .f(0x8, "Deactivates when damaged"), .f(0x10, "1 fuel/sec"), .f(0x20, "2 fuel/sec"),
@@ -81,7 +81,7 @@ extension ContextualValue {
             6: m("Armor points"), 7: m("Acceleration added"), 8: m("Speed added"), 9: m("Turn rate (100 = 30°/s)"),
             12: m("Fuel (100 = 1 jump)"), 15: m("Fuel use per second"), 16: m("Map: jumps away (-1 inhabited independents, -1000- govt class)"),
             17: m("Cloak behaviour", bits: cloak), 18: m("Frames per fuel unit (negative sucks fuel)"),
-            21: m("Govt to clear record with (-1 = all)", "gövt", none: [-1, 0]),
+            21: m("Govt to clear record with (-1 = all)", "gövt"),
             22: m("Days of hyperspace time"), 23: m("No-jump zone radius change"), 24: m("Interference reduction"),
             25: m("Marines (crew, or -1..-100 = % capture odds)"), 27: m("Outfit whose maximum is raised", "oütf"),
             28: m("Murk change"), 29: m("Armor recharge speed"), 30: m("Cloak scanner", bits: scanner),
@@ -93,4 +93,19 @@ extension ContextualValue {
         ]
         return ContextualValue(selector: selector, meanings: table, fallback: m("Unused"))
     }
+
+    /// `spöb` CustSndID / CustPicID: on hypergates and wormholes (Flags2 0x1000 /
+    /// 0x2000) they are an exit angle / first-open frame, not a resource id.
+    static func stellarMedia(_ type: String, minID: Int) -> ContextualValue {
+        ContextualValue(selector: "flags2", selectorMask: 0x3000,
+                        meanings: [0: Meaning(type == "snd " ? "Ambient sound" : "Custom landscape", refType: ty(type), minValue: minID)],
+                        fallback: Meaning(type == "snd " ? "Ship exit angle (0-359, else random)" : "First open frame"))
+    }
+
+    /// `wëap` AmmoType: for fighter bays (Guidance 99) it is the carried ship's
+    /// id; otherwise it indexes the weapon whose ammo is used.
+    static let weaponAmmoType = ContextualValue(
+        selector: "guidance",
+        meanings: [99: Meaning("Carried ship", refType: ty("shïp"), minValue: 128)],
+        fallback: Meaning("Ammo from weapon (index)", refType: ty("wëap"), idBase: 128, minValue: 0))
 }

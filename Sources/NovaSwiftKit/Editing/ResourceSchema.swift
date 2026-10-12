@@ -150,29 +150,38 @@ public enum EditorKind: String, Sendable, Hashable {
 }
 
 /// What a field's value means depends on another field (`oütf` ModVal follows
-/// ModType). `reference(for:)` and the editor use this to pick the right control.
+/// ModType; `spöb` CustSndID is an exit angle on gates; `wëap` AmmoType names a
+/// ship for fighter bays). `reference(for:selector:)` and the editor use this to
+/// pick the right control.
 public struct ContextualValue: Sendable, Hashable {
     public struct Meaning: Sendable, Hashable {
         public let label: String
-        /// When set, the value is a resource id of this type (`none` values excluded).
+        /// When set, the value is a resource of this type with id `value + idBase`.
         public let refType: FourCharCode?
-        public let noneValues: Set<Int>
+        public let idBase: Int
+        /// Values below this are "none" / not a reference.
+        public let minValue: Int
         public let flagBits: [FlagBit]
         public let help: String
-        public init(_ label: String, refType: FourCharCode? = nil, none: Set<Int> = [-1, 0],
+        public init(_ label: String, refType: FourCharCode? = nil, idBase: Int = 0, minValue: Int = 1,
                     flagBits: [FlagBit] = [], help: String = "") {
-            self.label = label; self.refType = refType; self.noneValues = none
+            self.label = label; self.refType = refType; self.idBase = idBase; self.minValue = minValue
             self.flagBits = flagBits; self.help = help
         }
     }
     /// Key of the field whose value selects the meaning (element-wise for arrays).
     public let selector: String
+    /// Bits of the selector value that matter (-1 = all).
+    public let selectorMask: Int
     public let meanings: [Int: Meaning]
     public let fallback: Meaning
-    public init(selector: String, meanings: [Int: Meaning], fallback: Meaning) {
-        self.selector = selector; self.meanings = meanings; self.fallback = fallback
+    public init(selector: String, selectorMask: Int = -1, meanings: [Int: Meaning], fallback: Meaning) {
+        self.selector = selector; self.selectorMask = selectorMask
+        self.meanings = meanings; self.fallback = fallback
     }
-    public func meaning(for selectorValue: Int) -> Meaning { meanings[selectorValue] ?? fallback }
+    public func meaning(for selectorValue: Int) -> Meaning {
+        meanings[selectorMask == -1 ? selectorValue : selectorValue & selectorMask] ?? fallback
+    }
 }
 
 public struct SchemaField: Sendable, Hashable, Identifiable {
@@ -221,9 +230,10 @@ public struct SchemaField: Sendable, Hashable, Identifiable {
     /// "none" sentinel, a plain number, or not a reference field.
     public func reference(for value: Int, selector: Int? = nil) -> (type: FourCharCode, id: Int)? {
         if let ctx = contextual {
-            guard let selector, let t = ctx.meaning(for: selector).refType,
-                  !ctx.meaning(for: selector).noneValues.contains(value) else { return nil }
-            return (t, value)
+            guard let selector else { return nil }
+            let m = ctx.meaning(for: selector)
+            guard let t = m.refType, value >= m.minValue else { return nil }
+            return (t, value + m.idBase)
         }
         if let opt = option(for: value) {
             guard let t = opt.refType else { return nil }

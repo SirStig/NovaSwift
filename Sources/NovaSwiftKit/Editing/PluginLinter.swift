@@ -165,11 +165,31 @@ public enum PluginLinter {
 
     // MARK: References
 
+    /// Targets whose absence costs the player a picture, sound or line of text
+    /// rather than breaking a gameplay link.
+    private static let softTypes: Set<FourCharCode> = [NovaType.desc, NovaType.strList, NovaType.pict, NovaType.snd]
+
+    /// Mask PICTs only matter for PICT-based sprites (the Bible: "ignored if the
+    /// base image is an rleD/rle8 resource").
+    private static let maskSprite: [String: String] = [
+        "baseMask": "baseSprite", "altMask": "altSprite", "glowMask": "glowSprite", "lightMask": "lightSprite",
+        "weapMask": "weapSprite", "shieldMask": "shieldSprite", "maskID": "spriteID",
+    ]
+
+    private static func maskIsIrrelevant(_ r: Resource, field: String, schema: ResourceSchema?,
+                                         effective: ResourceCollection) -> Bool {
+        guard let schema, schema.type == NovaType.shan || schema.type == NovaType.spin,
+              let spriteKey = maskSprite[field], let f = schema.field(spriteKey) else { return false }
+        let sprite = FieldCodec.readInt(schema.padded(r.data), f.offset, 2, signed: true)
+        return sprite <= 0 || effective.resource(NovaType.rleD, sprite) != nil || effective.resource(NovaType.rle8, sprite) != nil
+    }
+
     private static func checkReferences(_ r: Resource, key: ResourceKey, effective: ResourceCollection,
                                         add: (LintIssue.Severity, String, String?, String) -> Void) {
         let schema = ResourceSchemas.schema(for: r.type)
         for ref in ResourceReferences.references(of: r) where !ref.isOptional {
             guard !ResourceReferences.exists(ref.target, in: effective) else { continue }
+            if maskIsIrrelevant(r, field: ref.fieldKey, schema: schema, effective: effective) { continue }
             let label = schema?.field(ref.fieldKey)?.label ?? ref.fieldKey
             let name = ResourceSchemas.displayName(for: ref.target.type)
             switch ref.kind {
@@ -178,7 +198,8 @@ public enum PluginLinter {
                     "“\(label)” refers to \(name) #\(ref.target.id), which doesn't exist")
             default:
                 let reserved = ref.target.id > 0 && ref.target.id < 128 && NovaType.slotRange[ref.target.type] != nil
-                add(.error, "dangling-ref", ref.fieldKey,
+                let severity: LintIssue.Severity = reserved || softTypes.contains(ref.target.type) ? .warning : .error
+                add(severity, "dangling-ref", ref.fieldKey,
                     reserved ? "“\(label)” points at \(name) #\(ref.target.id); ids below 128 aren't valid for this type"
                              : "“\(label)” points at \(name) #\(ref.target.id), which doesn't exist")
             }
@@ -224,7 +245,9 @@ public enum PluginLinter {
         }
         guard let s = ResourceSchemas.schema(for: NovaType.shan), let f = s.field("baseSprite") else { return }
         let sprite = FieldCodec.readInt(s.padded(shan.data), f.offset, 2, signed: true)
-        if sprite > 0, !ResourceReferences.exists(ResourceKey(NovaType.rleD, sprite), in: ctx.effective) {
+        if sprite <= 0 {
+            add(.warning, "ship-no-sprite", nil, "Its ship animation (shän #\(key.id)) has no base sprite set")
+        } else if !ResourceReferences.exists(ResourceKey(NovaType.rleD, sprite), in: ctx.effective) {
             add(.warning, "ship-no-sprite", nil,
                 "Its ship animation (shän #\(key.id)) uses sprite #\(sprite), which has no rlëD, rlë8 or PICT")
         }

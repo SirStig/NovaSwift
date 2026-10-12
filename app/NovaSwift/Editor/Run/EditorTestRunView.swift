@@ -21,6 +21,8 @@ struct EditorTestRunView: View {
     var base: ResourceCollection? = nil
     var startSystem: Int? = nil
     var startShip: Int? = nil
+    /// Called once the session is running (used by inspectors to equip / spawn a target).
+    var onReady: ((EditorTestSession) -> Void)? = nil
     var onExit: () -> Void
 
     @EnvironmentObject private var model: AppModel
@@ -48,7 +50,10 @@ struct EditorTestRunView: View {
                                           startSystem: startSystem, startShip: startShip)
                 holder.session = s
                 holder.objectWillChange.send()
-                Task { await s.start(app: model) }
+                Task {
+                    await s.start(app: model)
+                    if s.phase == .running { onReady?(s) }
+                }
             }
         }
         .onDisappear { holder.session?.shutdown() }
