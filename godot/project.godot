@@ -17,7 +17,7 @@ config/name="NOVA Swift (Godot)"
 config/description="Cross-platform desktop frontend for NOVA Swift, driving the Swift engine via a SwiftGodot GDExtension."
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
-config/icon="res://icon.svg"
+config/icon="res://icon.png"
 
 [display]
 

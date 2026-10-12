@@ -14,7 +14,7 @@ godot/
   project.godot          Godot 4 project
   NovaSwift.gdextension  loads the native bridge library per platform
   Main.tscn / Main.gd    the flight frontend (ships, shots, beams, rocks, HUD)
-  icon.svg               app icon
+  icon.png               app icon
   bin/                   built bridge libraries land here (git-ignored)
   bridge/                the Swift ↔ Godot bridge (its own SPM package)
     Package.swift
