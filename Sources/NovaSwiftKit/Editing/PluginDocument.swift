@@ -165,13 +165,20 @@ public final class PluginDocument {
         }
     }
 
-    /// Smallest id ≥ `from` that neither the base nor the plug-in uses. Ids
-    /// above 32767 aren't representable; a result beyond it means the range is
-    /// exhausted.
+    /// Smallest id ≥ `from` that neither the base nor the plug-in uses, wrapping
+    /// back to 128 when the top of the range is taken. Ids above 32767 aren't
+    /// representable; a result of 32768 means every id from 128 up is in use.
     public func nextFreeID(_ type: FourCharCode, from: Int = 128) -> Int {
-        var id = max(from, Int(Int16.min))
-        while layer.resource(type, id) != nil || base.resource(type, id) != nil { id += 1 }
-        return id
+        let top = Int(Int16.max)
+        let start = min(max(from, Int(Int16.min)), top + 1)
+        func used(_ id: Int) -> Bool { layer.resource(type, id) != nil || base.resource(type, id) != nil }
+        if start <= top {
+            for id in start...top where !used(id) { return id }
+        }
+        if start > 128 {
+            for id in 128..<start where !used(id) { return id }
+        }
+        return top + 1
     }
 
     // MARK: Editing

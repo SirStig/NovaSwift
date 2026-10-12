@@ -22,13 +22,13 @@ final class EditorModel: ObservableObject {
     /// System the system editor is showing (sÿst id).
     @Published var focusedSystemID: Int?
 
-    /// Set by any inspector (e.g. a ship's "Test fly") to ask the shell to open a test
-    /// run; the shell clears it once it has started the run. See `EditorTestRunRequest`.
+    /// Set by the specialised inspectors (ship "Test fly", weapon "Test on range") to ask
+    /// the shell to open an equipped test run; the shell clears it. See `EditorTestRunRequest`.
     @Published var testRunRequest: EditorTestRunRequest?
 
-    /// Set by tools (e.g. Story & Bits "Test this mission"); the shell presents a
-    /// test run for it and clears it. See `Story/EditorModel+TestRun.swift`.
-    @Published var testRunRequest: TestRunRequest?
+    /// Extra setup a tool wants applied to the next test run's session (set bits,
+    /// start a mission). Consumed by `runSessionSetup`; see `Story/EditorModel+TestRun.swift`.
+    var sessionSetup: ((EditorTestSession) -> Void)?
 
     /// Bumped on every document change; views key refreshes and previews off it.
     @Published private(set) var revision = 0

@@ -51,7 +51,7 @@ struct StoryBitList: View {
     @State private var freeRuns: [Int] = []
     @State private var showFree = false
 
-    private var filtered: [BitRow] {
+    private var filtered: [StoryBitRow] {
         let q = ui.bitSearch.trimmingCharacters(in: .whitespaces).lowercased()
         return analysis.rows.filter { r in
             switch ui.bitFilter {
@@ -84,7 +84,7 @@ struct StoryBitList: View {
             headerRow
             let rows = filtered
             List(rows, selection: Binding(get: { ui.selectedBit }, set: { if let b = $0 { ui.select(bit: b) } })) { r in
-                BitRowView(row: r, note: analysis.note(r.bit))
+                StoryBitRowView(row: r, note: analysis.note(r.bit))
                     .tag(r.bit)
                     .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
             }
@@ -140,8 +140,8 @@ struct StoryBitList: View {
     }
 }
 
-struct BitRowView: View {
-    let row: BitRow
+struct StoryBitRowView: View {
+    let row: StoryBitRow
     let note: BitNotes.Note
     var body: some View {
         HStack(spacing: 6) {

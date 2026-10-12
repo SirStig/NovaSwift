@@ -70,3 +70,29 @@ rlëD encoder (exact inverse of `RLED.decode`), PICT v2 encoder (readable by
 - Never launch or screenshot the app.
 - Real game data (for round-trip tests, never committed) is under `data/EV Nova/`
   (git-ignored); tests that need it must skip cleanly when absent.
+
+## Status (2026-10-12)
+
+Built: everything above. Entry point (both menus, macOS only) → full-window
+editor with resource browser, schema inspector for 23 types (verified
+byte-exact against every stock record), hex/text/graphic/sound editors with
+PNG/WAV import, ship/weapon/outfit overviews on the engine's own stat math,
+shän hardpoint editor, HD/3D attach + `.nsx` export, galaxy map and star
+system editors with an embedded live `GameScene` preview, Story & Bits
+(control-bit index, mission flow graph, mission/crön cards), validation,
+save/open/install in `.rez` or classic format, and a test run with a full
+debug panel (spawn ships/fleets, outfits, bits, missions, jumps, time scale,
+god mode, console).
+
+Known gaps:
+- Test-run landing is a dock stub (take off only — no trade/outfit/shipyard/
+  mission board); hypergates, hail/board dialogs and crons aren't simulated
+  there, and HD packs aren't loaded into editor games.
+- Map/system editors and the preview draw stellar frame 0 only.
+- Weapon DPS ignores sub-munitions; burst cycle is from the Bible, unverified.
+- Renumber reports, but doesn't move, implicit companions (shän, dësc, PICT).
+- Story "unreachable" check ignores `&`/`|` structure (conservative).
+- Exported PICT/cicn/`snd ` are verified only against our own decoders, not
+  QuickDraw or EV Nova CE.
+- The app is sandboxed: saving needs `files.user-selected.read-write` +
+  `files.bookmarks.app-scope` (added to NovaSwift.entitlements).

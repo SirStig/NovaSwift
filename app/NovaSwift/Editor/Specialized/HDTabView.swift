@@ -65,7 +65,14 @@ struct HDTabView: View {
     // Model attach form
     @State private var usdzURL: URL?
     @State private var usdzData: Data?
-    @State private var pitch = "", yaw = "", tilt = "", bankRoll = "", fit = "", exposure = "", bakeScale = "", spin = ""
+    @State private var pitch = ""
+    @State private var yaw = ""
+    @State private var tilt = ""
+    @State private var bankRoll = ""
+    @State private var fit = ""
+    @State private var exposure = ""
+    @State private var bakeScale = ""
+    @State private var spin = ""
 
     private struct TaskKey: Hashable { let key: ResourceKey; let revision: Int }
 

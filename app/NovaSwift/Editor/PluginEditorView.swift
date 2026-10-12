@@ -23,7 +23,7 @@ struct PluginEditorView: View {
         Group {
             if let t = testRun {
                 EditorTestRunView(collection: t.collection, base: t.base, startSystem: t.system, startShip: t.ship,
-                                  onReady: t.request.map { r in { session in r.prepare(session) } }) {
+                                  onReady: t.request.map { r in { session in r.prepare(session); store.model.runSessionSetup(session) } }) {
                     testRun = nil
                 }
             } else {
@@ -60,7 +60,6 @@ struct PluginEditorView: View {
         .background(Color(white: 0.1))
         .overlay { if store.isBusy { busyOverlay } }
         .background(shortcuts)
-        .background(TestRunRequestWatcher(model: model) { startTestRun(request: $0) })
         .onChange(of: model.revision) { _, _ in store.lint.schedule(model) }
         .sheet(item: Binding(get: { ui.renumberTarget.map(EditorKeyItem.init) }, set: { ui.renumberTarget = $0?.key })) { item in
             RenumberSheet(model: model, key: item.key) { ui.renumberTarget = nil }
@@ -130,12 +129,8 @@ struct PluginEditorView: View {
         if !store.model.document.isDirty { then() }
     }
 
-    private func startTestRun(request: TestRunRequest? = nil) {
+    private func startTestRun() {
         let model = store.model
-        if let request {
-            testRun = TestRun(collection: model.effective, base: model.base, system: request.system, ship: nil, request: request)
-            return
-        }
         var system = model.focusedSystemID
         if system == nil, let s = model.selection, s.type == NovaType.syst { system = s.id }
         var ship: Int?

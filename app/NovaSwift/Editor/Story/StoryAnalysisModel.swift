@@ -3,7 +3,7 @@ import SwiftUI
 import NovaSwiftKit
 
 /// One row of the bit index table.
-struct BitRow: Identifiable, Sendable {
+struct StoryBitRow: Identifiable, Sendable {
     var id: Int { bit }
     let bit: Int
     let setters: Int
@@ -20,7 +20,7 @@ struct BitRow: Identifiable, Sendable {
 final class StoryAnalysisModel: ObservableObject {
     @Published private(set) var index = ControlBitIndex(ResourceCollection())
     @Published private(set) var graph = StoryGraph()
-    @Published private(set) var rows: [BitRow] = []
+    @Published private(set) var rows: [StoryBitRow] = []
     @Published private(set) var notes = BitNotes()
     @Published private(set) var isComputing = false
     /// Increments each time a fresh result lands (graph view re-fits on the first one).
@@ -45,12 +45,12 @@ final class StoryAnalysisModel: ObservableObject {
             if !immediate { try? await Task.sleep(for: .milliseconds(380)) }
             if Task.isCancelled { return }
             let t0 = Date()
-            let result = await Task.detached(priority: .userInitiated) { () -> (ControlBitIndex, StoryGraph, [BitRow], [String]) in
+            let result = await Task.detached(priority: .userInitiated) { () -> (ControlBitIndex, StoryGraph, [StoryBitRow], [String]) in
                 let idx = ControlBitIndex(eff, touched: touched)
                 let g = StoryGraph(collection: eff, index: idx, touched: touched)
-                let rows = idx.usedBits.map { b -> BitRow in
+                let rows = idx.usedBits.map { b -> StoryBitRow in
                     let refs = idx.references(bit: b)
-                    return BitRow(bit: b, setters: refs.filter { !$0.isTest }.count, testers: refs.filter(\.isTest).count,
+                    return StoryBitRow(bit: b, setters: refs.filter { !$0.isTest }.count, testers: refs.filter(\.isTest).count,
                                   status: idx.status(of: b), touched: idx.pluginTouchedBits.contains(b))
                 }
                 let lines = Set(g.nodes.compactMap(\.storyline)).sorted()
@@ -121,7 +121,6 @@ final class StoryUIState: ObservableObject {
     @Published var graphSearch = ""
     @Published var onlyComponent = false       // restrict to the selection's connected component
     @Published var showIsolated = false
-    @Published var showHubless = true
     @Published var viewport = MapViewport()
     /// Node to centre next draw.
     @Published var focusKey: ResourceKey?

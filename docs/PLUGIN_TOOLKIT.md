@@ -1,8 +1,9 @@
 # Plug-in toolkit
 
-**Status: mostly planned.** The HD extension format, loader and model
-rendering (Part 2, steps 6 to 8) are built; see [HD_PIPELINE.md](HD_PIPELINE.md).
-The rest is not built yet except the pieces called out as existing.
+**Status: Part 1 (the editor) is built, macOS only** — see
+[PLUGIN_EDITOR.md](PLUGIN_EDITOR.md) for what exists and its known gaps. The HD
+extension format, loader and model rendering (Part 2, steps 6 to 8) are built;
+see [HD_PIPELINE.md](HD_PIPELINE.md).
 
 The goal is to give plug-in makers tools the original game never had: a full
 editor for every resource, and a way to ship HD art, 3D models and better audio

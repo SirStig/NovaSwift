@@ -209,14 +209,7 @@ struct InlineStat: View {
     var body: some View {
         let f = ResourceSchemas.schema(for: key.type)?.field(field)
         let v = model.readValue(field, of: key)?.intValue ?? 0
-        var range: ClosedRange<Int> = -32768...32767
-        if let kind = f?.kind {
-            switch kind {
-            case let .int(w, s): range = editorIntRange(w, signed: s)
-            case let .enumeration(w, s): range = editorIntRange(w, signed: s)
-            default: break
-            }
-        }
+        let range = Self.range(of: f)
         HStack(spacing: 6) {
             Text(label ?? f?.label ?? field).font(.system(size: 12)).foregroundStyle(.secondary)
                 .help(f?.help ?? "")
@@ -227,6 +220,17 @@ struct InlineStat: View {
             if !note.isEmpty {
                 Text(note).font(.system(size: 10)).foregroundStyle(.tertiary).frame(minWidth: 70, alignment: .leading)
             }
+        }
+    }
+}
+
+extension InlineStat {
+    static func range(of f: SchemaField?) -> ClosedRange<Int> {
+        guard let kind = f?.kind else { return -32768...32767 }
+        switch kind {
+        case let .int(w, s): return editorIntRange(w, signed: s)
+        case let .enumeration(w, s): return editorIntRange(w, signed: s)
+        default: return -32768...32767
         }
     }
 }
