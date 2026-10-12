@@ -4059,11 +4059,36 @@ final class GameScene: SKScene {
         made.node.zPosition = sprite.zPosition
         made.node.alpha = opacity
         container.addChild(made.node)
+        // What the ship looked like just before the swap: the baked sprite is the
+        // reference the live hull is tuned to (`tuneLiveHull`).
+        if let baked = sprite.texture?.cgImage(), HDGraphics.shared.needsLiveTune(baseSpriteID: base) {
+            tuneLiveHull(made, spriteID: base, baked: baked, delay: 0.6)
+        }
         sprite.isHidden = true
         live = made
         liveInUse += 1
         liveBuiltThisFrame += 1
         return made
+    }
+
+    /// Match a freshly drawn live hull's brightness to its baked sprite. The
+    /// offscreen calibration can't see how the on-screen rig lights the model,
+    /// so the gain is measured here, `liveTuneSteps` times per model, and saved.
+    private func tuneLiveHull(_ hull: LiveHull, spriteID: Int, baked: CGImage, delay: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak hull] in
+            guard let self, let hull, let b = ClassicFootprint.tones(of: [baked]),
+                  let image = self.view?.texture(from: hull.node)?.cgImage(),
+                  let l = ClassicFootprint.tones(of: [image]), l.mid > 0.005 else { return }
+            let ratio = (b.mid / l.mid + b.high / max(l.high, 0.01)) / 2
+            guard let applied = HDGraphics.shared.applyLiveTune(baseSpriteID: spriteID, factor: ratio) else { return }
+            hull.stage.scaleLights(by: applied)
+            #if DEBUG
+            print("[LiveTune] sprite \(spriteID) baked mid=\(b.mid) live mid=\(l.mid) applied x\(applied)")
+            #endif
+            if HDGraphics.shared.needsLiveTune(baseSpriteID: spriteID) {
+                self.tuneLiveHull(hull, spriteID: spriteID, baked: baked, delay: delay)
+            }
+        }
     }
 
     private func dropLiveHull(_ live: inout LiveHull?, sprite: SKSpriteNode?) {

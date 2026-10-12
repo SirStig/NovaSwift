@@ -238,6 +238,38 @@ final class HDGraphics: @unchecked Sendable {
                         overlayLayers: model.overlayLayers, size: fit.size, simpleLighting: simple)
     }
 
+    /// On-screen corrections per model before its fit counts as tuned.
+    static let liveTuneSteps = 2
+
+    /// Whether a model's live fit still needs tuning against its on-screen draw.
+    func needsLiveTune(baseSpriteID id: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let fit = liveFits[id] else { return false }
+        return fit.tuneSteps < Self.liveTuneSteps
+    }
+
+    /// One on-screen correction: the offscreen calibration can't see how the
+    /// live rig lights a model, so the gain is measured from the drawn hull
+    /// against its baked sprite. `factor` multiplies the model's light level
+    /// (clamped per step); after `liveTuneSteps` the fit is saved as tuned.
+    /// Returns the factor applied, for the caller to apply to the hull it measured.
+    func applyLiveTune(baseSpriteID id: Int, factor: Double) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        guard var fit = liveFits[id], let e = catalog.bySprite[id], let classic = liveSheets[id],
+              let layout = layouts?.layout(for: classic) else { return nil }
+        let k = min(3, max(0.5, factor))
+        fit.calibration.lightScale = min(8, max(0.2, fit.calibration.lightScale * k))
+        fit.tuneSteps += 1
+        liveFits[id] = fit
+        if let key = HDAssetPipeline.liveCacheKey(for: e, layout: layout) {
+            bakeCache?.storeList(key, [String(fit.calibration.orthographicScale), String(fit.calibration.lightScale)])
+        }
+        if fit.tuneSteps >= Self.liveTuneSteps, let tunedKey = HDAssetPipeline.liveCacheKey(for: e, layout: layout, tuned: true) {
+            bakeCache?.storeList(tunedKey, ["tuned"])
+        }
+        return k
+    }
+
     /// Load (and simplify) a hull's model off the main thread, and fit it on
     /// first use: the calibration renders a few frames under the bake lock,
     /// then is cached on disk, so this is a one-time cost per hull.
@@ -254,7 +286,11 @@ final class HDGraphics: @unchecked Sendable {
                 if fit == nil {   // measured on the full model, before any simplifying
                     let c = try HDAssetPipeline.liveCalibration(for: e, classic: classic, layout: layout,
                                                                 model: node, cache: bakeCache)
-                    fit = LiveFit(calibration: c, size: CGSize(width: layout.frameWidth, height: layout.frameHeight))
+                    // A fit saved after on-screen tuning doesn't need tuning again.
+                    let tunedKey = HDAssetPipeline.liveCacheKey(for: e, layout: layout, tuned: true)
+                    let tuned = tunedKey.flatMap { bakeCache?.loadList($0) } != nil
+                    fit = LiveFit(calibration: c, size: CGSize(width: layout.frameWidth, height: layout.frameHeight),
+                                  tuneSteps: tuned ? Self.liveTuneSteps : 0)
                 }
                 if let cells = detail.cells {
                     let t = MeshSimplifier.simplify(node, cells: cells)
@@ -619,8 +655,10 @@ final class HDGraphics: @unchecked Sendable {
 
 /// A model hull's live-drawing fit, and the frame size it's fitted to.
 private struct LiveFit {
-    let calibration: LiveHullCalibration
+    var calibration: LiveHullCalibration
     let size: CGSize
+    /// On-screen corrections applied so far (`HDGraphics.applyLiveTune`).
+    var tuneSteps: Int
 }
 
 /// A loaded live model (at the current detail) and the effect layers its

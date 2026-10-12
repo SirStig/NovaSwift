@@ -72,15 +72,23 @@ public final class ModelBaker {
         // orthographicScale = half the visible height in world units; the
         // model's radius is 1, so start from "diameter fills the target".
         stage.orthographicScale = Double(layout.frameHeight) / (target * fit)
-        for _ in 0..<2 {   // a second pass absorbs the measurement's own rounding
+        // Measure zoomed out: a model that overfills the frame is clipped at its
+        // edges, so its measured extent saturates at the frame size and the
+        // ratio reads ~1 — the overfill would never shrink (planets came out
+        // with flat cut edges).
+        let pad = 1.6
+        for _ in 0..<3 {   // later passes absorb the measurement's own rounding
+            let ortho = stage.orthographicScale
+            stage.orthographicScale = ortho * pad
             var ratios: [Double] = []
             for f in samples {
                 let pose = layout.pose(frame: f)
                 stage.pose(pose.set, heading: pose.heading)
                 if let img = snapshot(size), let e = ClassicFootprint.extent(of: img) {
-                    ratios.append((e / s) / ((classicExtents[f] ?? target) * fit))
+                    ratios.append((e * pad / s) / ((classicExtents[f] ?? target) * fit))
                 }
             }
+            stage.orthographicScale = ortho
             guard !ratios.isEmpty else { return }
             stage.orthographicScale *= ratios.reduce(0, +) / Double(ratios.count)
         }
@@ -362,7 +370,7 @@ public final class ModelBaker {
 public final class HDBakeCache: @unchecked Sendable {
     public let directory: URL
     /// Bump to invalidate every bake when the renderer's output changes.
-    public static let version = 10   // 10: lighting matched to the classic art's brightness
+    public static let version = 11   // 11: fit measured zoomed out (no clipped overfill)
 
     public convenience init?(subdirectory: String = "NovaSwift/HDBakes") {
         guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
@@ -483,8 +491,7 @@ public enum HDAssetPipeline {
     /// never placed); otherwise it's loaded here on a cache miss.
     public static func liveCalibration(for e: ResolvedGraphicsEnhancement, classic: SpriteSheet, layout: BakeLayout,
                                        model loaded: SCNNode? = nil, cache: HDBakeCache?) throws -> LiveHullCalibration {
-        guard e.descriptor.kind == .model, let content = e.source.contentKey() else { throw PipelineError.unreadable }
-        let key = HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "live-v1")
+        guard e.descriptor.kind == .model, let key = liveCacheKey(for: e, layout: layout) else { throw PipelineError.unreadable }
         if let list = cache?.loadList(key), list.count == 2, let o = Double(list[0]), let l = Double(list[1]) {
             return LiveHullCalibration(orthographicScale: o, lightScale: l)
         }
@@ -495,6 +502,15 @@ public enum HDAssetPipeline {
         let c = baker.calibrateLive(model: model, descriptor: e.descriptor, layout: layout, classic: classic)
         cache?.storeList(key, [String(c.orthographicScale), String(c.lightScale)])
         return c
+    }
+
+    /// Where a model's live fit is cached. `tuned` marks a fit that has been
+    /// corrected against the on-screen hull (`HDGraphics.applyLiveTune`).
+    public static func liveCacheKey(for e: ResolvedGraphicsEnhancement, layout: BakeLayout,
+                                    tuned: Bool = false) -> String? {
+        guard let content = e.source.contentKey() else { return nil }
+        return HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1,
+                               part: tuned ? "live-v2-tuned" : "live-v2")
     }
 
     /// Just the hull/sprite atlas (no effect layers).
