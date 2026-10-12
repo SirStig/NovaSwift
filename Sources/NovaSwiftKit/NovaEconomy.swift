@@ -271,37 +271,57 @@ extension NovaGame {
     /// `owned` skips the roll: the original zeroes the roll of anything the
     /// player owns, so it stays listed (0x0046a220).
     public func outfitsSold(at spob: SpobRes, day: Int? = nil, owned: Set<Int> = []) -> [OutfRes] {
+        outfitList(at: spob, day: day, owned: Dictionary(uniqueKeysWithValues: owned.map { ($0, 1) }),
+                   availabilityPasses: { _ in true }, requirePasses: { _ in true })
+    }
+
+    /// `Outfit_RebuildAvailableOutfitListForTravelStellar` 0x0046a220: the
+    /// outfitter's list at `spob`, in the original's order of tests. An outfit
+    /// is first made available by (1) spöb Flags2 0x0400 with one owned and
+    /// oütf Flags 0x0008 clear, or (2) a TechLevel in 0..<32767 that is within
+    /// the stellar's tech or one of its special techs. With none owned it must
+    /// then pass the Availability test when Flags 0x4000 is set, the Require
+    /// test when Flags 0x0100 is set, and the day's BuyRandom roll (BuyRandom
+    /// under 1 never stocks). Flags 0x0800 with one owned forces it in. Only
+    /// then does each remaining Flags 0x1000 item (id order) hide every
+    /// higher id of the same DispWeight, and the list sorts by DispWeight
+    /// descending, then id. `owned` maps outfit id to count.
+    public func outfitList(at spob: SpobRes, day: Int?, owned: [Int: Int],
+                           availabilityPasses: (OutfRes) -> Bool,
+                           requirePasses: (OutfRes) -> Bool) -> [OutfRes] {
         guard spob.hasOutfitter else { return [] }
-        let available = outfits()
-            // Bible `Flags 0x0800`: "This item can be sold anywhere, regardless
-            // of tech level, requirements, or mission bits" — sell-side only
-            // (waives the outfitter-stock restriction when selling an owned
-            // item back; see the sell-back path). It does NOT bypass the
-            // buy-listing tech-level gate — see OUTFITTERS.md §3.5.
-            .filter { sells(techLevel: $0.techLevel, at: spob) }
-            .filter { outfit in
-                guard let day, !owned.contains(outfit.id) else { return true }
-                return Self.stocked(buyRandom: outfit.buyRandom,
-                                    roll: Self.dailyStockRoll(day: day, itemID: outfit.id, salt: 0))
+        let special = spobSpecialTech(spob.id)
+        var listed: [OutfRes] = []
+        for o in outfits().sorted(by: { $0.id < $1.id }) {
+            let count = owned[o.id] ?? 0
+            var available = spob.buysAnyOutfit && count > 0 && !o.cannotBeSold
+            if o.techLevel >= 0, o.techLevel < 0x7fff,
+               spob.techLevel >= o.techLevel || special.contains(o.techLevel) { available = true }
+            if available, o.flags & 0x4000 != 0, count < 1 { available = availabilityPasses(o) }
+            if available, o.flags & 0x0100 != 0, count < 1 { available = requirePasses(o) }
+            if available, count < 1, let day {
+                available = Self.stocked(buyRandom: o.buyRandom,
+                                         roll: Self.dailyStockRoll(day: day, itemID: o.id, salt: 0))
             }
+            // Bible `Flags 0x0800`: "This item can be sold anywhere, regardless of
+            // tech level, requirements, or mission bits" — for an owned unit.
+            if o.ignoresRequirements, count > 0 { available = true }
+            if available { listed.append(o) }
+        }
         // Bible `Flags 0x1000`: "When this item is available for sale, it
         // prevents all higher-numbered items with equal DispWeight from being
-        // made available for sale at the same time." The lowest-id flagged
-        // item in each weight tier caps that tier.
-        var suppressorID: [Int: Int] = [:]   // displayWeight → lowest flagged id
-        for o in available where o.suppressesHigherIDsAtSameWeight {
-            suppressorID[o.displayWeight] = min(suppressorID[o.displayWeight] ?? Int.max, o.id)
+        // made available for sale at the same time." Walked in id order, so a
+        // suppressed item no longer suppresses.
+        var hidden = Set<Int>()
+        for (i, o) in listed.enumerated() where o.suppressesHigherIDsAtSameWeight && !hidden.contains(o.id) {
+            for later in listed[(i + 1)...] where later.displayWeight == o.displayWeight { hidden.insert(later.id) }
         }
-        return available
-            .filter { o in o.id <= (suppressorID[o.displayWeight] ?? Int.max) }
-            // Bible `DispWeight`: "Items with a higher display weight are shown
-            // closer to the top of the outfit dialog" — descending weight,
-            // ascending id within a tier.
-            .sorted {
-                $0.displayWeight != $1.displayWeight
-                    ? $0.displayWeight > $1.displayWeight
-                    : $0.id < $1.id
-            }
+        // Bible `DispWeight`: "Items with a higher display weight are shown
+        // closer to the top of the outfit dialog" — descending weight,
+        // ascending id within a tier.
+        return listed.filter { !hidden.contains($0.id) }.sorted {
+            $0.displayWeight != $1.displayWeight ? $0.displayWeight > $1.displayWeight : $0.id < $1.id
+        }
     }
 
     /// The hulls for sale at `spob` in the shipyard's order (`shipyardList`,

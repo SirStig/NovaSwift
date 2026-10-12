@@ -30,14 +30,15 @@ public enum CICN {
 
         try r.advance(4)                         // mask baseAddr
         let maskRowBytes = Int(try r.readU16())
-        let maskTop = Int(try r.readI16()); try r.advance(4)
-        let maskBottom = Int(try r.readI16())
+        // Rect is top, left, bottom, right.
+        let maskTop = Int(try r.readI16()); try r.advance(2)
+        let maskBottom = Int(try r.readI16()); try r.advance(2)
         let maskHeight = maskBottom - maskTop
 
         try r.advance(4)                         // bitmap baseAddr
         let bmapRowBytes = Int(try r.readU16())
-        let bmapTop = Int(try r.readI16()); try r.advance(4)
-        let bmapBottom = Int(try r.readI16())
+        let bmapTop = Int(try r.readI16()); try r.advance(2)
+        let bmapBottom = Int(try r.readI16()); try r.advance(2)
         let bmapHeight = bmapBottom - bmapTop
         try r.advance(4)                         // reserved (icon handle)
 

@@ -1027,7 +1027,11 @@ public struct WeapRes {
         let rawSound = ai16(d, 18)
         fireSoundID = OriginalAudio.weaponSoundID(raw: rawSound)   // played only when ≥ 0
         impact = ai16(d, 20)
-        explosionBoomID = boomID(raw: ai16(d, 22))
+        // 0x004211d0: only ExplodType 0..63 (or 1000..1063) names a bööm; 64..999 and
+        // 1064+ draw nothing.
+        let rawBoom = ai16(d, 22)
+        let boomIndex = rawBoom >= 1000 ? rawBoom - 1000 : rawBoom
+        explosionBoomID = (0..<64).contains(boomIndex) ? boomID(raw: boomIndex) : nil
         explosionIsBig = ai16(d, 22) >= 1000
         let flags = au16(d, 28)
         loopSound = flags & 0x0010 != 0

@@ -54,6 +54,17 @@ final class AudioResourceModelTests: XCTestCase {
         XCTAssertEqual(w.explosionBoomID, 133)
     }
 
+    func testWeaponExplosionIdsOutsideTheBoomRangeDrawNothing() throws {
+        // 0x004211d0: only 0..63 and 1000..1063 name a bööm; 64..999 and 1064+ are ignored.
+        for (raw, expected): (Int, Int?) in [(63, 191), (64, nil), (500, nil), (999, nil),
+                                             (1000, 128), (1063, 191), (1064, nil)] {
+            let body = payload(120, [(22, raw)])
+            let fork = ClassicForkBuilder.build(type: "wëap", resources: [(id: 131, name: "Boom", payload: body)])
+            let w = try XCTUnwrap(NovaGame(try ResourceFile.read(fork)).weapon(131))
+            XCTAssertEqual(w.explosionBoomID, expected, "raw \(raw)")
+        }
+    }
+
     // MARK: bööm — explosion sound + graphic
 
     func testBoomDecode() throws {

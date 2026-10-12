@@ -332,7 +332,7 @@ final class GameScene: SKScene {
     private var animClock: Double = 0
     private var blinkClock: Double = 0
     private var playerBank = BankTracker()
-    /// Clamped per-frame delta, cached so `syncNPCs()` (no dt param) can decay
+    /// Clamped per-frame delta, cached so `syncNPCs(visible:)` (no dt param) can decay
     /// each NPC's shield flare at the same rate as the player's.
     private var frameDT: TimeInterval = 1.0 / 60.0
     private var shipRadius: CGFloat = 16
@@ -677,6 +677,9 @@ final class GameScene: SKScene {
               isPlayerLandTarget(body), p.isAlive, canLand(on: body, p) else { return nil }
         return id
     }
+
+    /// `Frame_CancelCombatChatter` (0x004313c0), run when the player lands.
+    func cancelCombatChatter() { world?.cancelCombatChatter() }
 
     // MARK: Hypergate / wormhole state
     /// Hypergates the player has switched on this session (wormholes are always
@@ -1779,7 +1782,7 @@ final class GameScene: SKScene {
         lap("sync.projectiles")
         syncBeams()
         lap("sync.beams")
-        syncNPCs()
+        syncNPCs(visible: npcCullRect(around: scenePos))
         lap("sync.npcs")
         syncAsteroids()
         lap("sync.asteroids")
@@ -4021,7 +4024,20 @@ final class GameScene: SKScene {
         return s.renderPrevAngle + d * renderAlpha
     }
 
-    private func syncNPCs() {
+    /// The world-space region whose NPCs get their visuals refreshed this frame:
+    /// the viewport at the current zoom, padded by `npcCullMargin` so a ship's
+    /// textures are current a few frames before any of it can scroll on screen.
+    private func npcCullRect(around center: CGPoint) -> CGRect {
+        let halfW = size.width * cameraZoom / 2 + Self.npcCullMargin
+        let halfH = size.height * cameraZoom / 2 + Self.npcCullMargin
+        return CGRect(x: center.x - halfW, y: center.y - halfH, width: halfW * 2, height: halfH * 2)
+    }
+
+    /// Covers the largest hull/shield sprite's half-extent plus camera shake and
+    /// a frame or two of closing speed.
+    private static let npcCullMargin: CGFloat = 600
+
+    private func syncNPCs(visible: CGRect) {
         defer { if hdDebugOverlay { updateHDDebugOverlay() } }
         var seen = Set<Int>()
         // A cloak scanner's 0x0002 bit ("reveal cloaked ships on the screen")
@@ -4038,8 +4054,25 @@ final class GameScene: SKScene {
             node.container.alpha = screenRevealsCloaked ? 1.0 : CGFloat(1 - npc.effectiveCloakLevel)
             node.animClock += frameDT
             node.blinkClock += frameDT
-            let heading = node.hullAnim.heading(forAngle: renderHeading(npc))
             let turn = node.bank.update(angle: npc.angle, dt: frameDT)
+            // Off-screen: SpriteKit already skips drawing it, so skip the
+            // texture/effect writes too. Only stateful bits advance (clocks and
+            // bank above, flares and gate fade here) so the ship is current the
+            // moment it re-enters the padded rect.
+            if !visible.contains(node.container.position) {
+                node.weaponGlowFlare = node.hullAnim.weaponGlowAfter(node.weaponGlowFlare, dt: frameDT)
+                if npc.disabled {
+                    node.shieldFlare = 0
+                } else {
+                    node.shieldFlare = Self.advanceShieldFlare(node.shieldFlare, shieldNow: npc.shield,
+                                                               shieldWas: node.lastShield,
+                                                               maxShield: npc.maxShield, dt: frameDT)
+                }
+                node.lastShield = npc.shield
+                applyGateFade(to: node, entityID: npc.entityID)
+                continue
+            }
+            let heading = node.hullAnim.heading(forAngle: renderHeading(npc))
             let set = node.hullAnim.baseSet(turnSign: turn, animClock: node.animClock,
                                             disabled: npc.disabled, carriesKeyShip: npc.carriesKeyShip)
             let spin = hdSpin(renderHeading(npc), framesPerSet: node.hullAnim.framesPerSet, texture: node.textures.first)
@@ -4069,7 +4102,11 @@ final class GameScene: SKScene {
                     lights.texture = node.lightTextures[node.hullAnim.frameIndex(set: set, heading: heading, count: node.lightTextures.count)]
                     let intensity = node.hullAnim.lightIntensity(clock: node.blinkClock)
                     lights.isHidden = intensity <= 0.02
-                    lights.alpha = intensity
+                    // NPC lights carry a third of the hull's murk fog (0x0042954c)
+                    // and the same intensity cap as the glow (0x00428340).
+                    let lightFog = Int(Double(npcHullFog(node)) * 0.333)
+                    let capped = min(intensity, CGFloat(Int(32 - Double(lightFog) * 1.5)) / 32)
+                    lights.alpha = max(0, capped) * (1 - CGFloat(lightFog) / 32)
                 }
             }
             if let alt = node.alt, !node.altTextures.isEmpty {
@@ -4360,9 +4397,14 @@ final class GameScene: SKScene {
         currentMurk = murk
         murkOrigin = renderPoint(world.player)
         // The background sprites take their own fixed level (0x0042e590).
-        let starAlpha = 1 - CGFloat(MurkFog.backgroundLevel(murk: max(0, murk))) / 32
+        // Both tests read the raw system murk, not the clamped effective one
+        // (0x0046ede0 hides the field on a negative sÿst murk).
+        // Stars blend additively at t/32 of their brightness (t = trunc(murk x
+        // 0.9), 2...29); zero murk leaves them untouched.
+        let starLevel = MurkFog.backgroundLevel(murk: max(0, world.systemMurk))
+        let starAlpha = starLevel == 0 ? 1 : CGFloat(starLevel) / 32
         for layer in starLayers {
-            layer.container.isHidden = murk < 0
+            layer.container.isHidden = world.systemMurk < 0
             layer.container.alpha = starAlpha
         }
         murkFog?.isHidden = true
@@ -4713,6 +4755,26 @@ final class GameScene: SKScene {
         onSystemReloaded?(systemID)
     }
 
+    #if os(macOS)
+    // MARK: - Plugin Editor hooks (macOS only; used by app/NovaSwift/Editor/Run/)
+
+    /// The live simulation world, for the editor's debug panel (spawn, AI freeze,
+    /// traffic toggle). Read-mostly; the scene still owns it.
+    var editorWorld: World? { world }
+    /// The catalog the current world was built from.
+    var editorGalaxy: Galaxy? { galaxy }
+    /// The system currently loaded in the scene.
+    var editorSystemID: Int { systemID }
+    /// Hide/show the player's own ship sprite (the live preview flies an
+    /// invisible camera-ship).
+    func editorSetPlayerVisible(_ visible: Bool) { shipNode?.isHidden = !visible }
+    /// Swap the world to `destSystemID` in place, exactly like the arrival half
+    /// of a hyperjump (no flash/maneuver) — the editor's "jump to any system".
+    func editorReloadSystem(to destSystemID: Int) {
+        reloadSystem(to: destSystemID, outboundHeading: 0)
+    }
+    #endif
+
     /// A hypergate the player pops out of closes its glow again a moment later;
     /// a wormhole stays shimmering. (The emerging ship's own white fade-in is
     /// `applyGateFade`; the original draws no ring.)
@@ -5053,6 +5115,12 @@ final class GameScene: SKScene {
         return n.container
     }
 
+    /// The murk fog level (0...31) of an NPC's hull sprite from the player.
+    private func npcHullFog(_ n: NPCNode) -> Int {
+        MurkFog.level(murk: currentMurk, dx: Double(n.container.position.x - murkOrigin.x),
+                      dy: Double(n.container.position.y - murkOrigin.y))
+    }
+
     private func updateNPCThruster(_ n: NPCNode, npc: Ship) {
         // We don't see the NPC's intent, so infer "thrusting" from moving forward
         // near its own heading at a decent clip.
@@ -5066,7 +5134,11 @@ final class GameScene: SKScene {
             if active {
                 let target: CGFloat = .random(in: 0.55...0.8)
                 n.thrusterAlpha = n.thrusterAlpha * 0.85 + target * 0.15
-                glow.alpha = n.thrusterAlpha
+                // Murk caps an NPC's glow at trunc(32 - fog * 1.5)/32 (the player
+                // sits at fog 0), and the hull's fog dims it on top (0x00428340).
+                let fog = npcHullFog(n)
+                let cap = CGFloat(Int(32 - Double(fog) * 1.5)) / 32
+                glow.alpha = max(0, min(n.thrusterAlpha, cap)) * (1 - CGFloat(fog) / 32)
             }
             n.thruster?.isHidden = true
             return
@@ -5450,16 +5522,26 @@ final class GameScene: SKScene {
     /// charge/capacity reaches 0.33 the hull takes a flat blend of the weapon's
     /// IonizeColor, level = clamp(round(intensity * 0.24), 16, 24) + Random(5) - 2
     /// re-rolled every frame (so a 14-18/32 flicker), blend factor = level / 32.
-    /// It takes the fog slot only if murk's level here is below it (or under 8).
+    /// It takes the fog slot only if murk's level here is below it (or under 8);
+    /// otherwise the fog stays but its colour becomes near-black blue.
     private func applyIonize(to sprite: SKSpriteNode, ship: Ship) {
         guard ship.ionizeMax > 0 else { return }
         let intensity = ship.ionCharge / ship.ionizeMax
         guard intensity >= 0.33 else { return }
         let level = min(24, max(16, Int((intensity * 0.24).rounded()))) + Int.random(in: 0..<5) - 2
         let murkLevel = sprite.userData?["murk"] != nil ? Int((sprite.colorBlendFactor * 32).rounded()) : 0
-        guard murkLevel < level || murkLevel < 8 else { return }
         if sprite.userData == nil { sprite.userData = NSMutableDictionary() }
         sprite.userData?["ionSaved"] = [sprite.color, sprite.colorBlendFactor] as [Any]
+        guard murkLevel < level || murkLevel < 8 else {
+            // Heavy murk wins the fog slot, but the original (0x0042a0c5, the
+            // 16/32-bit path) then stores colour `0x20 - fog` as the sprite's
+            // space colour — a packed RGB555 whose only live channel is blue,
+            // so the ionized hull fades toward near-black blue, not the
+            // background. The fog's own blend factor is kept.
+            let blue = CGFloat(max(0, 32 - murkLevel)) / 31
+            sprite.color = SKColor(red: 0, green: 0, blue: blue, alpha: 1)
+            return
+        }
         // The weapon's own IonizeColor, or the Bible's bluish default when none.
         let c = ship.ionizeColor ?? (r: 0.4, g: 0.6, b: 1.0)
         sprite.color = SKColor(red: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: 1)

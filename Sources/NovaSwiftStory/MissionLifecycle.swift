@@ -390,6 +390,10 @@ extension StoryEngine {
             showMissionText(m.loadCargoText, for: m, active: player.activeMissions[i])
             player.activeMissions[i].shipsBoarded = (am.shipsBoarded ?? 0) + 1
         } else if m.shipGoal == .board || m.shipGoal == .rescue {
+            // Original quirk (0x00443c60): the 2nd and later special ships still
+            // demand the free hold space, but load nothing — the cargo is
+            // already aboard.
+            if m.cargoPickup == .onSpecialShip, !cargoRoomCheck(am.resolvedCargoQty ?? 0) { return false }
             player.activeMissions[i].shipsBoarded = (am.shipsBoarded ?? 0) + 1
         }
         updateRemaining(at: i, m)

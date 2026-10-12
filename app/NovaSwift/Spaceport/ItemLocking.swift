@@ -67,11 +67,21 @@ extension NovaGame {
         // mission bits") — it does not waive the buy-side Require/Availability
         // gate here. See OUTFITTERS.md §3.5.
         if pilot.hasOutfit(item.id) { return .available }
-        let availOK = NCBTest(item.availBits).evaluate(pilot)
-        let requireOK = requireGovtApplies(item.requireGovt, at: spob, diplomacy: diplomacy)
-            && (item.require & contributedBits(pilot: pilot)) == item.require
+        let availOK = outfitAvailabilityPasses(item, pilot: pilot)
+        let requireOK = outfitRequirePasses(item, pilot: pilot, at: spob, diplomacy: diplomacy)
         if availOK && requireOK { return .available }
         return item.hidesWhenLocked ? .hidden : .locked
+    }
+
+    /// The outfit's Availability test (`oütf.AvailBits`).
+    func outfitAvailabilityPasses(_ item: OutfRes, pilot: PlayerState) -> Bool {
+        NCBTest(item.availBits).evaluate(pilot)
+    }
+
+    /// The outfit's Require test: its `RequireGovt` scope and Require bits.
+    func outfitRequirePasses(_ item: OutfRes, pilot: PlayerState, at spob: SpobRes, diplomacy: Diplomacy) -> Bool {
+        requireGovtApplies(item.requireGovt, at: spob, diplomacy: diplomacy)
+            && (item.require & contributedBits(pilot: pilot)) == item.require
     }
 
     /// Lock state for a ship class (no documented `RequireGovt` for ships —

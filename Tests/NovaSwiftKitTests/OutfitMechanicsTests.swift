@@ -230,6 +230,39 @@ final class OutfitMechanicsTests: XCTestCase {
         XCTAssertEqual(Set(game.outfitsSold(at: game.spob(400)!).map(\.id)), [199, 200, 300])
     }
 
+    func testSuppressionRunsAfterAvailabilityHiding() {
+        // 0x0046a220: a 0x1000 item whose Availability (0x4000) fails is not
+        // available, so it suppresses nothing.
+        var col = ResourceCollection()
+        col.add(outfitterSpob())
+        col.add(outfit(200, flags: 0x1000 | 0x4000, dispWeight: 5))
+        col.add(outfit(201, dispWeight: 5))
+        let game = NovaGame(col)
+        let spob = game.spob(400)!
+        let failing = game.outfitList(at: spob, day: nil, owned: [:],
+                                      availabilityPasses: { _ in false }, requirePasses: { _ in true })
+        XCTAssertEqual(failing.map(\.id), [201])
+        let passing = game.outfitList(at: spob, day: nil, owned: [:],
+                                      availabilityPasses: { _ in true }, requirePasses: { _ in true })
+        XCTAssertEqual(passing.map(\.id), [200])
+    }
+
+    func testTechZeroIsStockedUnlessBuyRandomIsUnder1() {
+        // Tech 0 counts as covered at any port (0..<32767); BuyRandom 0 never stocks.
+        var col = ResourceCollection()
+        col.add(outfitterSpob())
+        col.add(outfit(200, tech: 0))
+        col.add(outfit(201, tech: 32767))
+        var b = [UInt8](repeating: 0, count: 1028)
+        put16(&b, 4, 0); put16(&b, 1008, 100)
+        col.add(Resource(type: NovaType.outfit, id: 202, name: "Rand", data: Data(b)))
+        let game = NovaGame(col)
+        let ids = game.outfitList(at: game.spob(400)!, day: 5, owned: [:],
+                                  availabilityPasses: { _ in true }, requirePasses: { _ in true }).map(\.id)
+        XCTAssertFalse(ids.contains(200), "BuyRandom 0 is never stocked")
+        XCTAssertFalse(ids.contains(201), "tech 32767 is never offered")
+    }
+
     // MARK: outfitter display strings @811/@875/@939
 
     func testOutfitterDisplayStringsDecodeWithFallbacks() {

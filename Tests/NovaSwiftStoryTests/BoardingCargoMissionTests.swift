@@ -88,6 +88,24 @@ final class BoardingCargoMissionTests: XCTestCase {
         XCTAssertEqual(engine.player.cargo[4], 2, "delivery removes only the resolved mission tonnage")
     }
 
+    func testLaterTargetsStillNeedTheFreeSpaceButLoadNothing() {
+        // Original quirk (0x00443c60): with the cargo already aboard, the next
+        // special ship is refused when the hold lacks the same room again.
+        var spec = sampleMission()
+        spec.shipCount = 2
+        let (engine, _) = engine(spec)
+        XCTAssertTrue(engine.accept(900))
+        engine.player.activeMissions[0].resolvedCargoType = 4
+        engine.player.activeMissions[0].resolvedCargoQty = 60
+        XCTAssertTrue(engine.missionShipBoarded(missionID: 900))
+        XCTAssertEqual(engine.player.cargo[4], 60)
+        XCTAssertFalse(engine.missionShipBoarded(missionID: 900), "40 t free < 60 t")
+        XCTAssertEqual(engine.player.cargo[4], 60, "and nothing more is loaded")
+        engine.player.cargo[4] = 0
+        XCTAssertTrue(engine.missionShipBoarded(missionID: 900))
+        XCTAssertEqual(engine.player.cargo[4] ?? 0, 0, "a later target yields 0 tons")
+    }
+
     func testRescueBoardingAlsoPicksUpSpecialShipCargo() {
         let (engine, _) = engine(sampleMission(goal: 5))
         XCTAssertTrue(engine.accept(900))

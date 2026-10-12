@@ -4273,7 +4273,8 @@ public final class World {
     /// disabled (WP-26). Player-squad shots pass through ships whose
     /// government is immune to the player (gövt Flags 0x0008) or never
     /// attacks the player (0x0040, against the player or a direct escort),
-    /// and through the squad's second-level escorts. A planet-type weapon
+    /// and through the squad's second-level escorts; an escort of a
+    /// never-attacks-the-player government hits nothing. A planet-type weapon
     /// hits only planet-type ships, and an ordinary one never does. A
     /// stellar battery's shot hits only its target.
     func canShotHit(_ shot: Projectile, _ victim: Ship) -> Bool {
@@ -4307,6 +4308,11 @@ public final class World {
             if let lid = victim.brain?.leaderID, lid != World.playerEntityID,
                ship(id: lid)?.brain?.leaderID == World.playerEntityID { return false }
             if (govtRes(victim.government)?.flags1 ?? 0) & 0x0008 != 0 { return false }
+            // Original quirk: an escort whose own government never attacks the
+            // player (0x0040) can't hit anything at all (0x00426ef0). The player
+            // flies for no government there.
+            if let owner, !owner.isPlayerControlled,
+               (govtRes(owner.government)?.flags1 ?? 0) & 0x0040 != 0 { return false }
         }
         if !victim.isPlayer, (govtRes(victim.government)?.flags1 ?? 0) & 0x0040 != 0,
            isCreditedToPlayer(shot.ownerID) { return false }
@@ -4596,8 +4602,9 @@ public final class World {
     /// A tractor beam's hold on a ship (`Ship_HandleShip` 0x00433050): the
     /// lock lapses 30 ticks after the last hit, or at once when the locking
     /// ship is gone or disabled; meanwhile the ship's velocity is dragged
-    /// toward the locker's (rest, for a self-lock) by a quarter of its thrust
-    /// per tick on each axis.
+    /// toward the locker's (rest, for a self-lock) by a quarter of the PLAYER's
+    /// thrust per tick on each axis — the original reads the thrust of ship
+    /// slot 0 for every ship, not the dragged ship's own.
     private func updateBeamLock(_ s: Ship, dt: Double) {
         guard let lockID = s.velocityMatchTargetID else { return }
         var target = Vec2()
@@ -4611,7 +4618,7 @@ public final class World {
         s.beamLockTicksLeft -= ticks
         if s.beamLockTicksLeft <= 0 { s.velocityMatchTargetID = nil; return }
         if s.isPlayerControlled { return }
-        let t = s.effectiveAcceleration / OriginalClock.ticksPerSecond * 0.25 * ticks
+        let t = player.effectiveAcceleration / OriginalClock.ticksPerSecond * 0.25 * ticks
         func drag(_ v: Double, _ goal: Double) -> Double {
             if goal + t < v { return v - t }
             if v < goal - t { return v + t }

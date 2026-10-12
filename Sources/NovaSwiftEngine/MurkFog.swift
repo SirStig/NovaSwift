@@ -13,10 +13,11 @@ public enum MurkFog {
         return max(0, min(31, d))
     }
 
-    /// The fog level of the background sprites (0x0042e590): none for zero
-    /// murk, else `round(murk × 0.9)` kept within 2...29.
+    /// The tint level of the background (star) sprites (0x0042e590): none for
+    /// zero murk, else `trunc(murk × 0.9)` kept within 2...29. The stars draw
+    /// additively at level/32 of their brightness (zero murk: untouched).
     public static func backgroundLevel(murk: Int) -> Int {
         guard murk != 0 else { return 0 }
-        return max(2, min(29, Int((Double(murk) * 0.9).rounded())))
+        return max(2, min(29, Int(Double(murk) * 0.9)))
     }
 }

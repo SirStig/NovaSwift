@@ -75,6 +75,7 @@ struct ModernMainMenuView: View {
                     // only appears once base data is present).
                     smallButton("Plugins", "puzzlepiece.extension.fill", scale: scale) { sheet = .plugins }
                     #if os(macOS)
+                    smallButton("Plugin Editor", "hammer.fill", scale: scale) { model.screen = .editor }
                     smallButton("Quit", "power", scale: scale) { NSApplication.shared.terminate(nil) }
                     #endif
                 }

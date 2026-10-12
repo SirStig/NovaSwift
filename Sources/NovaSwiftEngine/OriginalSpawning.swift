@@ -464,7 +464,6 @@ extension Spawner {
         leadBrain.isFleetMember = true
         leadBrain.fleetID = fleetID
         lead.brain = leadBrain
-        originalFleetCargo(fleet, ship: lead, shipID: fleet.leadShip, world: world)
         placeArrival(lead, world: world)
         let leadID = lead.entityID
 
@@ -493,7 +492,6 @@ extension Spawner {
                 brain.isFleetMember = true
                 brain.fleetID = fleetID
                 e.brain = brain
-                originalFleetCargo(fleet, ship: e, shipID: escort.shipID, world: world)
                 if let gateID = gateID(of: lead, world: world) {
                     e.position = lead.position
                     let eid = world.addNPC(e, arrival: .gate(spobID: gateID))
@@ -516,14 +514,6 @@ extension Spawner {
 
     private func gateID(of ship: Ship, world: World) -> Int? {
         world.systemContext.bodies.first { $0.isGate && $0.position == ship.position }?.id
-    }
-
-    private func originalFleetCargo(_ fleet: FleetRes, ship: Ship, shipID: Int, world: World) {
-        guard fleet.freightersHaveRandomCargo,
-              let hull = galaxy.game.ship(shipID), hull.inherentAI < 3 else { return }
-        let bin = world.rng.range(6)
-        let tons = world.rng.range(hull.cargoSpace) + 1
-        ship.cargo[bin, default: 0] += tons
     }
 
     /// `Pers_SpawnShipFromPersDef` 0x004235c0. Without `forcedID` it collects

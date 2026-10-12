@@ -123,7 +123,8 @@ extension OriginalAI {
     /// `Ship_IsThreatenedByEnemyOfShip` (0x00410110): the player is
     /// threatened when any pressing ship is an enemy of `context`; an NPC
     /// when it keeps pressing itself, or when some third ship `c` that is an
-    /// enemy of `context` is attacking it (0x0040faa0(c, ship)).
+    /// enemy of `context` is being attacked by it (0x0040faa0(c, ship): `ship`
+    /// is the acquirer, so `ship` attacks `c`).
     func isThreatenedByEnemy(_ ship: Ship, of context: Ship, host: OriginalAIHost) -> Bool {
         if ship.isPlayer {
             return host.ships.contains { other in
@@ -134,7 +135,7 @@ extension OriginalAI {
         if keepsPressing(ship, host: host) { return true }
         return host.ships.contains { c in
             !c.isPlayer && c.isAlive && c.entityID != context.entityID && c.entityID != ship.entityID
-                && isAttacking(c, ship, host: host) && isEnemy(context, c, host: host)
+                && isAttacking(ship, c, host: host) && isEnemy(context, c, host: host)
         }
     }
 

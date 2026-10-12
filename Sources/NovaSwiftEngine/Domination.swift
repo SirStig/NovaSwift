@@ -97,8 +97,8 @@ extension World {
 
         // Open the contest and scramble the first wave.
         applyTributeCrime(spob, floods: 5, lowerToMinStatus: false)
-        let govt = spob.government >= 128 ? spob.government
-                 : (galaxy.game.dude(spob.defenseDude)?.govt ?? independentGovt)
+        // 0x00421fd0 writes the stellar's govt raw (independent stays −1).
+        let govt = spob.government >= 128 ? spob.government : independentGovt
         var defense = StellarDefense(spobID: spobID, dudeID: spob.defenseDude, govt: govt,
                                      waveSize: spob.defenseWaveSize, poolRemaining: garrison)
         let n = topUpDefenders(&defense, spob: spob)
@@ -232,8 +232,8 @@ extension World {
         let origin = systemContext.bodies.first { $0.id == defense.spobID }?.position ?? systemContext.center
         var launched: [Int] = []
         for _ in 0..<want {
-            let roll = rng.int(in: 0...9999)
-            guard let shipID = dude.pickShip(roll: roll) else { continue }
+            // 0x0041c9f0 via 0x00421fd0: an available hull first, then any.
+            guard let shipID = missionHull(dude, allowUnavailable: true) else { continue }
             let ang = Double(rng.range(360)) * .pi / 180
             guard let ship = galaxy.makeLoadedShip(shipID, government: defense.govt,
                                                    at: origin, angle: ang,

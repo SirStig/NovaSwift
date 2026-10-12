@@ -201,4 +201,30 @@ final class HullFittingsTests: XCTestCase {
         XCTAssertEqual(engine.player.outfits[201], 1)
         XCTAssertEqual(engine.player.outfits[202], 20, "30 + 12 missiles clamped to one launcher's 20")
     }
+
+    // MARK: Original quirk: carried fighters omitted on Hxxx/Exxx and new pilots
+
+    private func carrierGame() -> NovaGame {
+        var bay = [UInt8](weaponResource(id: 305, name: "Fighter Bay").data)
+        Bytes.i16(&bay, 8, 99)                             // guidance 99: carried ship
+        Bytes.i16(&bay, 12, 129)
+        return makeGame([
+            shipResource(id: 129, cargo: 10, freeMass: 40, stockWeapons: [(id: 305, count: 1, ammo: 4)]),
+            Resource(type: NovaType.weapon, id: 305, name: "Fighter Bay", data: Data(bay)),
+            outfitResource(id: 203, name: "Fighter Bay", installsWeapon: 305),
+            outfitResource(id: 204, name: "Fighter", ammoFor: 305),
+        ])
+    }
+
+    func testHxxxLeavesBayEmptyButPurchaseKeepsFighters() {
+        let game = carrierGame()
+        var pilot = PlayerState(shipType: 128)
+        let engine = StoryEngine(game: game, player: pilot)
+        engine.apply(set: "H129")
+        XCTAssertEqual(engine.player.outfits[203], 1, "the bay itself is installed")
+        XCTAssertNil(engine.player.outfits[204], "original: the class-slot write leaves the bay with no fighters")
+        // A shipyard purchase / capture special-cases mode-99 bays and keeps them.
+        PilotEconomy.grantHullFittings(&pilot, ship: game.ship(129)!, game: game)
+        XCTAssertEqual(pilot.outfits[204], 4)
+    }
 }

@@ -579,6 +579,7 @@ struct MissionBBSView: View {
         }
         .overlay { StoryTextOverlay(services: services) }
         .cursorCancel(onDone)
+        .missionWindowKeys(bbsKey)
         .gameHint(GameHints.missionBBS, active: showHints, dismissed: $hintDismissed)
         .animation(.easeInOut(duration: 0.25), value: hintDismissed)
         .onAppear(perform: buildEngine)
@@ -589,6 +590,33 @@ struct MissionBBSView: View {
 
     private func reopen() {
         if let onReopen { onReopen() } else { onDone() }
+    }
+
+    /// 0x00440c90: Return, Esc and `l` leave; `a` accepts the selection; Tab and
+    /// Down step to the next listing (wrapping to the first), Up to the previous
+    /// (wrapping to the last).
+    private func bbsKey(_ press: KeyPress) -> Bool {
+        guard services.storyText == nil else { return false }
+        switch press.key {
+        case .return, .escape: onDone(); return true
+        case .tab, .downArrow: step(1); return true
+        case .upArrow: step(-1); return true
+        default: break
+        }
+        switch press.characters.lowercased() {
+        case "l": onDone(); return true
+        case "a":
+            guard let offer = services.pendingOffer else { return false }
+            accept(offer); return true
+        default: return false
+        }
+    }
+
+    private func step(_ delta: Int) {
+        guard !offered.isEmpty else { return }
+        let current = offered.firstIndex { $0.id == services.pendingOffer?.mission.id }
+        let next = current.map { ($0 + delta + offered.count) % offered.count } ?? (delta > 0 ? 0 : offered.count - 1)
+        present(offered[next])
     }
 
     private func offerList(width: CGFloat) -> some View {

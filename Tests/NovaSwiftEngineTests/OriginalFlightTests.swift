@@ -256,6 +256,23 @@ final class OriginalFlightTests: XCTestCase {
                        "×0.333 instead of ×2.0: a sixth of normal thrust")
     }
 
+    /// Tractor-beam drag (0x00433050) steps by a quarter of the PLAYER's thrust
+    /// (ship slot 0), whatever the dragged ship's own acceleration is.
+    func testBeamLockDragUsesThePlayersThrust() {
+        func dragged(playerAccel: Double) -> Double {
+            let world = World(player: ship(speed: 90, accel: playerAccel))
+            let npc = ship(speed: 90, accel: 54)
+            npc.velocity = Vec2(80, 0)
+            world.addNPC(npc)
+            npc.velocityMatchTargetID = npc.entityID      // self-lock: drag toward rest
+            npc.beamLockTicksLeft = 30
+            world.step(tick)
+            return npc.velocity.x
+        }
+        XCTAssertLessThan(dragged(playerAccel: 540), dragged(playerAccel: 54) - 0.1,
+                          "a stronger player tugs harder; the NPC's own thrust is irrelevant")
+    }
+
     // MARK: FL-17 disabled drift
 
     func testDisabledHulkDampsPerRawCall() {

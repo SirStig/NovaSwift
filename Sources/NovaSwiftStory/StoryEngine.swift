@@ -287,7 +287,7 @@ public final class StoryEngine {
             Log.mission.error("addHullFittings: unknown ship id \(shipID)")
             return
         }
-        PilotEconomy.grantHullFittings(&player, ship: s, game: game)
+        PilotEconomy.grantHullFittings(&player, ship: s, game: game, seedBayFighters: false)
     }
 
     /// Remove every non-persistent outfit the player currently owns (the `H`

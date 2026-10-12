@@ -168,7 +168,7 @@ was re-read in the Ghidra export, with constants read from the executable.
 | ~~Autosave on jump, periodic heartbeat, backgrounding, combat events; in-flight position/heading saved~~ | Now the `frequentAutosave` enhancement | UI-01 |
 | ~~Every NPC spawn drops DefaultItems (`includeDefaultItems: false`)~~ | Fixed: capabilities read them (OS-01) | OS-01 |
 | ~~Fighter bays and ammo rebuilt full on every takeoff~~ | Now the `freeMunitionsRefill` enhancement | OS-03, UI-02 |
-| ~~Hull PodCount alone grants a survivable escape pod~~ | Now the `forgivingEscapePod` enhancement | OS-02 |
+| ~~Hull PodCount alone grants a survivable escape pod~~ | Now the original only (no toggle); a hull's PodCount alone no longer grants a survivable pod | OS-02 |
 | ~~Plug-ins start disabled; discovered recursively; case-sensitive order~~ | Now the `manualPluginOrder` enhancement (UI-16) | UI-16 |
 | Presentation defaults (`screenShake` has since moved to the Enhancements list, off) `screenShake = true`, `shipBarPosition = .above`, `sidebarPauseMenu = true`, `showMissionStorylineTags = true` | `App/App/GameSettings.swift:279–282` | Decision 2 |
 
@@ -830,8 +830,8 @@ models, so later batches can rely on them.
 
 #### FL-08 · Afterburner — **DONE**
 - **Done.** Player-only per-call push and 1.8× caps decaying thrust × 0.4 per call, no thrust key
-  needed; burn = last owned ModType 15 × 0.0333/tick. Oracle-pinned. NPC afterburning survives as
-  the new `npcAfterburners` enhancement. Not reproduced: the original's one-tick lag between cap
+  needed; burn = last owned ModType 15 × 0.0333/tick. Oracle-pinned. NPC afterburning follows the original
+  rules only (no toggle). Not reproduced: the original's one-tick lag between cap
   update and clamp.
 - **Original** (decomp `spaceflight_movement.cpp`, 0x00451630 tail):
   - Engages when held, ModType 15 is owned, the maneuver timer ≤ 0, and `0 < burn ≤ fuel`.
@@ -1411,7 +1411,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   `Projectile.animFrame` every `BeamWidth` ticks per raw call, wrapping or holding (Flags2
   0x0002), frame 0 during ProxSafety with Flags2 0x0001. Proximity width is the hull frame width.
   Ships without sprite data (hand-built test ships) keep the swept circle; a shot without a
-  graphic is one opaque pixel. Enhancement `sweptShotContact` restores the old swept circle.
+  graphic is one opaque pixel. The old swept circle is gone; only ships without sprite data keep it.
   Cost (release, 144×144 hull vs 48×48 shot, broad phase included): ≈ 170 ns per candidate test;
   a mask frame is 8 B × ⌈w/64⌉ × h (3.4 KB for a 144 px frame, 124 KB for 36 such frames).
 - **Approximations.** The hull mask is the level-flight set's heading frame (banking/animation
@@ -1423,7 +1423,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   when the frame is ≤ 0x20 wide or scaled ≥ 2.0 (0x00475be0). Proximity is
   `trunc(ProxRadius + 0.333 × shipFrameWidth)`.
 - **NovaSwift (before).** Swept point against a `max(w,h)/2` circle; proximity `radius + ProxRadius`.
-- **Class.** FIX+ENH → `sweptShotContact`. **Impact** low-medium. **Confidence** high.
+- **Class.** FIX (original only, no toggle). **Impact** low-medium. **Confidence** high.
 - **Test.** `SpriteCollisionTests` (a pixel inside the old circle but clear on a stock hull misses,
   the centre hits, a ≤ 32 px frame uses the circle, the circle is strict); `SpriteMaskTests`
   (masks equal the decoded alpha of stock sheets).
@@ -1560,7 +1560,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 #### OS-02 · Escape pods, eject and respawn — merges outfits_special O2 and ui_rules B3 — **DONE**
 - **Done.** Engine `EscapePod.swift` (eject rules, wreck, pod flight, bay-fighter eject),
   `EscapePodRespawn` in NovaSwiftStory, host wiring in `GameContainerView.respawnFromEscapePod`;
-  Alt+X is the `eject` action. The old rescue is `forgivingEscapePod`. **From the exe:** a pod
+  Alt+X is the `eject` action. The old forgiving rescue is gone; there is no toggle. **From the exe:** a pod
   releases the player's escorts (the host drops the escort roster); the old class's OnRetire runs
   at the eject; the pilot respawns in flight at (50, 50). Not reproduced: the respawn's armor bug
   is clamped to max armor by the host's ship build; dësc 13999 shows in the story dialog.
@@ -1589,7 +1589,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   death system (`App/Game/GameContainerView.swift:519`) in the chär start hull with **all**
   outfits cleared (:531–552); no days, missions and record kept, always saves and returns to the
   main menu (:331–342).
-- **Class.** FIX+ENH → `forgivingEscapePod`. Needs WP-03 (player disable). **Impact** high.
+- **Class.** FIX (original only, no toggle). Needs WP-03 (player disable). **Impact** high.
   **Confidence** high.
 - **Test.** Destroyed with a ModType-11 pod but no auto-eject and no key press: the pilot dies.
   Ejecting: 15–44 days pass, the pilot is in shïp 128 in a neighbouring system with no active
@@ -1732,8 +1732,8 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   banks) and its best turret / quadrant bank. Range is the whole-pixel distance within
   `BeamLength + 32` / `range + 32`. Under the original AI (Batch 6) the control modes ask for a
   kind of bank and only the selectors for that kind run (`ControlIntent.npcMounts`, with the
-  unguided 0x0040d7e0 and general 0x0040d910 selectors added); under `novaSwiftAI` the selectors
-  still run every trigger.
+  unguided 0x0040d7e0 and general 0x0040d910 selectors added); the original selectors are the only ones; there is no
+  alternate AI path.
 - **Batch 2 note.** Not taken in Batch 2: AI-03 doesn't need it; the bank selectors belong with the Batch 3 fire
   control. Batch 2 did port the per-bank firing envelope (`World.npcFireEnvelope`), and NPCs no
   longer get the port's `range × 1.05` gate.
@@ -1993,8 +1993,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   from the state machine's retreat / attack arms and brave traders): ReinfFleet present, no
   countdown, delay spent, odds > 0, fleet government allied, `MaxOdds × 0.5 < odds`; a latched
   ModType-44 inhibitor on either government spends the system's call for the visit. With the
-  original AI flying, the system-level strength comparison no longer triggers (it stays for
-  `novaSwiftAI` and the port model; `reinforcementShortcut` still applies).
+  original AI flying, the system-level strength comparison no longer triggers (`reinforcementShortcut` still applies).
 - **Done (AI pass 2).** The day delay persists: a call (or an inhibitor-spent call) emits
   `.reinforcementsCalled(systemID, max(ReinfIntrval, 1) / 1)`, the app keeps
   `PlayerState.reinforcementRetriggerDays`, the daily tick counts it down
@@ -2986,7 +2985,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 ### Batch 6 — the AI state machine
 
 #### AI-18 · Port the two-level state machine — **DONE**
-- **Status.** `Engine/OriginalAI/` (`OriginalAI` + supervisors, state machine, controls) drives every brained NPC by default; `AIBrain` runs under `novaSwiftAI`. Period and state-0x13 roll modelled; per-behavior traces are unit tests, not oracle goldens yet. **Merge wiring:** `WorldAIHost` now reads Batch 3's AI-05 ladder (`Diplomacy.reputationLadderFlagsPlayer`, current-system reputation; xenophobe arm on `reputationHere`), `GovtRelations` allied/hostile (a government is its own ally, as 0x0046bc90), the AI-07 grudge (`Ship.personFlags` 0x0001), Batch 2's lethal-weapon rule (`AIBrain.hasLethalWeapon`), ModType-37 fast jump (`Ship.instantJump`), and routes AI-06 responders into state 4 (`OriginalAI.joinAttack`). Still adapter-side: the EC-15 scan gate. AI pass 2 closed the rest: the comm window (AI-42/43/44), escort category groups (AI-35), the boarding capture arm and the player's boarded latch (AI-29). **Determinism:** the headless sim is a pure function of its seed (`SimulationDeterminismTests`); loadout outfits and fighter bays are walked in id order, and `novaswift-extract ai` has `NOVASWIFT_SIM_DIGEST=1` to diff two runs phase by phase.
+- **Status.** `Engine/OriginalAI/` (`OriginalAI` + supervisors, state machine, controls) drives every brained NPC; there is no alternate AI path. Period and state-0x13 roll modelled; per-behavior traces are unit tests, not oracle goldens yet. **Merge wiring:** `WorldAIHost` now reads Batch 3's AI-05 ladder (`Diplomacy.reputationLadderFlagsPlayer`, current-system reputation; xenophobe arm on `reputationHere`), `GovtRelations` allied/hostile (a government is its own ally, as 0x0046bc90), the AI-07 grudge (`Ship.personFlags` 0x0001), Batch 2's lethal-weapon rule (`AIBrain.hasLethalWeapon`), ModType-37 fast jump (`Ship.instantJump`), and routes AI-06 responders into state 4 (`OriginalAI.joinAttack`). Still adapter-side: the EC-15 scan gate. AI pass 2 closed the rest: the comm window (AI-42/43/44), escort category groups (AI-35), the boarding capture arm and the player's boarded latch (AI-29). **Determinism:** the headless sim is a pure function of its seed (`SimulationDeterminismTests`); loadout outfits and fighter bays are walked in id order, and `novaswift-extract ai` has `NOVASWIFT_SIM_DIGEST=1` to diff two runs phase by phase.
 - **Original.** `Ship_UpdateShipAI` 0x00401000 dispatches. `Ship_UpdateShipAiState` 0x00405590
   selects `ai_state_code` 0x00–0x16 and `ai_control_mode` 0x00–0x17 each frame;
   `Ship_ApplyShipAiControls` 0x00408150 executes. Four behavior supervisors drive it (Wimpy
@@ -3202,7 +3201,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Class.** FIX (applies across Batch 6). **Impact** low. **Confidence** high.
 
 #### AI-34 · Request Assistance — **DONE**
-- **Status.** States 9 (1.0 fuel/tick to 100) and 0x0F (repair); the whole decision tree, its lines and the payment run through the original comm window (AI-42, `OriginalAI.pressAssistance`). The port's flat tiers (`assistanceTier`) remain only under `novaSwiftAI`; no separate `modernRequestAssistance` toggle was added since that path already sits behind the AI enhancement.
+- **Status.** States 9 (1.0 fuel/tick to 100) and 0x0F (repair); the whole decision tree, its lines and the payment run through the original comm window (AI-42, `OriginalAI.pressAssistance`). No separate toggle exists: the original decision tree is the only behaviour.
 - **Original.** 0x0047e470 and `Ship_DoesShipLikePlayer` 0x0040fd20:
   - "In your dreams, pal." when the ship dislikes the player, is xenophobic, or is a warship of a
     Flags-0x1000 government.
@@ -3220,7 +3219,7 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
 - **Test.** A disabled player who pays a trader is repaired over time.
 
 #### AI-35 · Player escort orders — **DONE**
-- **Status.** Formation default, Defend 550 / 639 px, Attack copies the target, Hold, turret-only formation escorts. **AI pass 2:** `OriginalAI.commandPlayerEscortGroup` ports 0x0045c880 — each escort keeps its own order (+0xc90a, `playerOrder`); an order goes to one EscortType group or all; Return to Hangar reaches carried fighters only and sends anyone else not already in formation back to Formation; a fighter heading home is turned round by any other order; the HUD reads "New escort orders assigned: <group> <action>" (STR# 2002 #134–#159, the jump-time variants included) for 250 frames. The escort window, under the original AI, gains a group selector (All → Fighters → Medium → Warships → Freighters, STR# #140–#144) and a Return to Hangar button, and labels its four buttons Attack / Defend / Formation / Hold Position. The port's whole-wing orders remain under `novaSwiftAI`. The original's combat chatter voice (Frame_QueueCombatChatter) is not played.
+- **Status.** Formation default, Defend 550 / 639 px, Attack copies the target, Hold, turret-only formation escorts. **AI pass 2:** `OriginalAI.commandPlayerEscortGroup` ports 0x0045c880 — each escort keeps its own order (+0xc90a, `playerOrder`); an order goes to one EscortType group or all; Return to Hangar reaches carried fighters only and sends anyone else not already in formation back to Formation; a fighter heading home is turned round by any other order; the HUD reads "New escort orders assigned: <group> <action>" (STR# 2002 #134–#159, the jump-time variants included) for 250 frames. The escort window, under the original AI, gains a group selector (All → Fighters → Medium → Warships → Freighters, STR# #140–#144) and a Return to Hangar button, and labels its four buttons Attack / Defend / Formation / Hold Position. The port's older whole-wing orders are gone; the original per-escort orders are the only behaviour. The original's combat chatter voice (Frame_QueueCombatChatter) is not played.
 - **Original.** `Ship_CommandPlayerEscortGroup` 0x0045c880:
   - 0 Formation is the default. **Settled (OQ D8):** formation escorts fire **turrets only**
     (guidance 3/4/7/8) through `Ship_EscortFireAtUnprovokedTarget` 0x00411540, at a uniformly
@@ -3286,11 +3285,10 @@ Batch 2 landed in `Engine/World.swift` (damage, shots, beams, point defense, clo
   mission now replaces the përs ship with the mission's ship (its own hull when the dude flies
   it) on the same pose (`World.replaceWithMissionShip`, 0x00454910). The replacement is not linked
   to the player — the original makes ShipBehav-1 ships escorts only while building a system — so
-  it joins at the next jump (known bug #119). Enhancement `immediateMissionEscortLink` links it
-  at once.
+  it joins at the next jump (known bug #119). The port reproduces this; there is no toggle to link it at once.
 - **Original.** Known bug #119: a përs LinkMission ShipGoal-3 replacement is not linked to the
   player until the next jump.
-- **Class.** FIX+ENH → `immediateMissionEscortLink`. **Impact** low. **Confidence** high.
+- **Class.** Original only (no toggle). **Impact** low. **Confidence** high.
 
 #### AI-40 · Formation geometry — **DONE**
 - **Status.** Spacing, 20-slot table, truncated heading, 10 × thrust creep with an 8 px deadzone.
@@ -3795,3 +3793,46 @@ Also done: chatter categories 0 and 2, the capture name prompt (#119), comm and 
 - **Screen shake: FIXED.** The original never moves the camera. It is now the `screenShake` Enhancement (off), no longer a Graphics toggle, and no presentation preset touches it.
 - **Cloak sounds 380/381: FIXED.** Already wired (player only, plain `nv_PlaySound`); now played at the original's priority 8 instead of 1.
 - **Hull blast on death: already DONE** (WP-13, `World.deathBlast`); the audit's MISSING row was stale. Debris puffs (`syncDebrisPuffs`) also exist.
+
+### Open-gap reconciliation (2026-10-12)
+The 26 sweep rows that still said `PORT: OPEN` were checked against the current code. Each row in `audit/sweep` now says FIXED or REPLACED.
+- 0x410110 Ship_IsThreatenedByEnemyOfShip: FIXED now. `isThreatenedByEnemy` asks whether the supporter attacks the third ship (argument order was reversed); the old test that pinned the wrong order was rewritten.
+- 0x415b00 self-destruct docked boarders: STALE, already fixed in `stepSelfDestruct`; a stale "not modelled" comment was corrected.
+- 0x41c9f0 Dude_SpawnShipFromDudeDefInSystem: FIXED now for defenders (available hull first, then any; stellar govt raw, -1 for independent). Aux ships were already done.
+- 0x4211d0 area-impact booms: FIXED now. `wëap` ExplodType outside 0..63 / 1000..1063 draws nothing; the extra small booms were already scattered.
+- 0x421500 bööm pool: STALE, 32-slot cap and start delay exist.
+- 0x422400 hired escort placement: REPLACED. Pilot-load polar offset and govt -1 exist; a fresh hire is spawned at takeoff, when the player is already on the stellar.
+- 0x426d10 mission ship announcement: STALE, `{G..}` and `<..>` expansion runs through the HUD text pass; ambush path has the 'STR ' override and 0x1a4 duration.
+- 0x42e590 background sprites: REPLACED. Tiled star layers keep their own wrap; the murk level now reads the raw system murk.
+- 0x4313c0 cancel combat chatter: FIXED now on landing (jump already cleared it).
+- 0x438db0 murk fog: STALE, per-sprite distance fog (`MurkFog`).
+- 0x440c90 mission BBS keys: FIXED now (Return/Esc/l leave, a accepts, Tab/Down/Up step).
+- 0x446e00 mission computer window: STALE, QuickBrief only, date, "Abort" #35; header is in the PICT.
+- 0x447170 mission offer keys: FIXED now (Return and first letters of the accept/refuse labels) in both offer dialogs.
+- 0x45ea66 shield bar: STALE, tall rects fill bottom-up in whole pixels.
+- 0x45efe0 / 0x45f086 fuel bar: STALE, empty while disabled, vertical supported.
+- 0x466810 key capture: STALE, `KeyBindings.isCapturable` skips 1-4, Caps Lock, F1-F5.
+- 0x46a220 outfit list order: FIXED now. New `NovaEconomy.outfitList` follows the original order (tech 0 allowed, 32767 not, Availability/Require/BuyRandom before 0x1000 suppression, sell-back merged and sorted); the outfitter uses it.
+- 0x46c5c0 exit point to world offset: STALE, sprite-frame angle, near/far pair, drop.
+- 0x46ede0 starfield hide: FIXED now; it tests the raw system murk.
+- 0x48d6f0 trade center strip: STALE, `LandedServices.tradeStatus`.
+- 0x4b68d0 / 0x4f1940 input flush: STALE, held keys cleared whenever flight controls hand over to or from a dialog.
+- 0x4ceac0 CNTL/MENU popup: REPLACED, SwiftUI dialogs.
+- 0x4d2010 NovaList_Draw: REPLACED, SwiftUI lists.
+- 0x4d6900 IMA4 decode: REPLACED, per-packet reseed tracks the true waveform; PCM stays lossless.
+- 0x428090 / 0x43b170 debris puffs: tag fixed, verdict now `DIVERGES ... PORT: FIXED`.
+Still open: none from this list. Not changed: the added spark and flash accent on bööm sprites (presentation).
+
+### Original-quirk audit (2026-10-12)
+The roughly 106 documented quirks in wraitii's `known_original_bugs.md` were checked against the code and the decompile (`~/Projects/evnova-re/audit/quirks.md`). Policy: the original executable is ground truth, so a quirk wraitii "fixed" is still reproduced by default. Before this pass the audit counted 82 REPRODUCES, 9 DIVERGES, 12 UNCLEAR and 10 N/A. This pass fixed 6 divergences, kept 3 on purpose, and resolved 8 of the unclear rows (4 now REPRODUCES, 1 now DIVERGES, 3 still unclear with the open question written down); 5 low-impact unclear rows were not looked at.
+- Fixed, carried fighters (row 26): a new pilot and `Hxxx`/`Exxx` ship changes leave a fighter bay empty unless the pilot owns the fighter ammo outfit (`PilotEconomy.grantHullFittings(seedBayFighters:)`). Shipyard purchase and captured hulls keep their fighters, as in the decompile.
+- Fixed, tractor beam (row 29): the drag step is a quarter of the player's thrust for every ship (`World.updateBeamLock`).
+- Fixed, multi-ship cargo (row 23): later special ships need the same free hold space but load nothing (`MissionLifecycle.missionShipBoarded`).
+- Fixed, ionized hull in heavy murk (row 62): the fog colour becomes near-black blue (`GameScene.applyIonize`).
+- Fixed, NPC lights and glow in murk (row 64): lights get a third of the hull fog and both obey the murk intensity cap (`GameScene.npcHullFog`).
+- Fixed, fleet random-cargo flag (row 61): fleet ships have empty holds (`Spawner`, `OriginalSpawning`).
+- Fixed on resolving the unclear rows: the starfield tint follows the raw murk, `trunc(murk x 0.9)` in 2...29, additive (row 19, `MurkFog.backgroundLevel`, `GameScene.updateMurkFog`); an escort of a never-attacks-the-player government hits nothing (row 65, `World.canShotHit`).
+- Kept, DeathDelay 0/1 (row 7): a 1.8 s death replaces the immortal ghost.
+- Kept, `OnAccept` double briefing (row 58): the nested script runs separately, so the second briefing shows once.
+- Kept, random stellar after a next-day system change (row 38): twin systems are approximated; waiting for an oracle case.
+- Open, folding hulls (Q8): `shän` Flags 0x0002 is not wired to hyperspace or landing at all (`HullAnim.baseSet`), so the unfold is missing rather than misapplied.

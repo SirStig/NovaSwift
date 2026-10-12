@@ -85,22 +85,29 @@ final class AICombatFidelityTests: XCTestCase {
                        "a ship still emerging from a gate can't be seen, so it isn't pressing")
     }
 
-    /// 0x00410110 (argument order as shipped, confirmed by the caller
-    /// investigation): an enemy of the context ship attacking the supporter
-    /// counts it as threatened.
-    func testSupporterAttackedByAnEnemyCountsAsThreatened() {
+    /// 0x00410110 calls 0x0040faa0(X, S), which asks whether S attacks X: a
+    /// supporter that is itself attacking an enemy of the context ship counts
+    /// as threatened (and doubles); one merely being attacked does not.
+    func testSupporterAttackingAnEnemyCountsAsThreatened() {
         let w = world()
         let context = npc("Context", govt: 128, at: Vec2(0, 0))
         let supporter = npc("Supporter", govt: 128, at: Vec2(100, 0))
         let enemy = npc("Enemy", govt: 129, at: Vec2(300, 0))
         for s in [context, supporter, enemy] { w.addNPC(s) }
-        _ = rec(w, context); _ = rec(w, supporter)
-        let r = rec(w, enemy)
-        r.primary = supporter.entityID
+        _ = rec(w, context); _ = rec(w, enemy)
+        let r = rec(w, supporter)
+        r.primary = enemy.entityID
         r.state = OriginalAIState.attack
+        w.originalAI.pressingCache.removeAll()
         XCTAssertTrue(w.originalAI.isThreatenedByEnemy(supporter, of: context, host: host(w)))
         r.primary = nil
         r.state = OriginalAIState.idle
+        w.originalAI.pressingCache.removeAll()
+        XCTAssertFalse(w.originalAI.isThreatenedByEnemy(supporter, of: context, host: host(w)))
+        // The reverse (enemy attacks supporter, supporter idle) does not count.
+        let e = rec(w, enemy)
+        e.primary = supporter.entityID
+        e.state = OriginalAIState.attack
         XCTAssertFalse(w.originalAI.isThreatenedByEnemy(supporter, of: context, host: host(w)))
     }
 

@@ -549,6 +549,10 @@ struct AuthenticMainMenuView: View {
                 // Flight Training and Import Data moved into Settings (this menu
                 // only appears once base data is present).
                 extraButton("Plugins", "puzzlepiece.extension.fill") { sheet = .plugins }
+                #if os(macOS)
+                // The Plugin Editor takes over the whole window (AppModel.Screen.editor).
+                extraButton("Plugin Editor", "hammer.fill") { model.screen = .editor }
+                #endif
                 Spacer()
             }
             .padding(.leading, 20)

@@ -11,7 +11,9 @@ import GameKit
 /// (base data + plug-in catalog with enabled state).
 @MainActor
 final class AppModel: ObservableObject {
-    enum Screen: Equatable { case launcher, mainMenu, loading, game }
+    /// `.editor` is the macOS-only Plugin Editor, which replaces the game UI
+    /// (see docs/PLUGIN_EDITOR.md); nothing else ever routes to it.
+    enum Screen: Equatable { case launcher, mainMenu, loading, game, editor }
 
     @Published var screen: Screen = .launcher {
         didSet { audio.setMusicAllowed(screen == .mainMenu) }

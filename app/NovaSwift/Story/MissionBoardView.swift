@@ -3,6 +3,45 @@ import AVKit
 import NovaSwiftKit
 import NovaSwiftStory
 
+/// Keyboard handling for the original's mission windows (0x00440c90 BBS,
+/// 0x00447170 offer popup): the window takes focus and offers each key press
+/// to `onKey`, which returns whether it used it.
+private struct MissionWindowKeys: ViewModifier {
+    let onKey: (KeyPress) -> Bool
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focusable().focusEffectDisabled().focused($focused)
+            .onAppear { focused = true }
+            .onKeyPress(phases: .down) { onKey($0) ? .handled : .ignored }
+    }
+}
+
+extension View {
+    func missionWindowKeys(_ onKey: @escaping (KeyPress) -> Bool) -> some View {
+        modifier(MissionWindowKeys(onKey: onKey))
+    }
+}
+
+/// What a key does in the mission offer window (0x00447170): Return or the
+/// accept label's first letter accepts; the refuse label's first letter refuses
+/// when the offer can be refused. Equal first letters match neither letter.
+enum MissionOfferKey {
+    case accept, refuse
+
+    static func resolve(_ press: KeyPress, acceptLabel: String, refuseLabel: String,
+                        canRefuse: Bool) -> MissionOfferKey? {
+        if press.key == .return { return .accept }
+        guard let typed = press.characters.lowercased().first,
+              let a = acceptLabel.lowercased().first, let r = refuseLabel.lowercased().first,
+              a != r else { return nil }
+        if typed == a { return .accept }
+        if canRefuse, typed == r { return .refuse }
+        return nil
+    }
+}
+
 /// A list of real `mïsn` offers at one `MissionOfferLocation`, shared by the
 /// Mission BBS and Bar screens (`AvailLoc` 0 and 1 respectively — the two
 /// locations the Bible/repo docs call out as the common case). Backed by the
@@ -355,6 +394,14 @@ private struct MissionInfoSheet: View {
         }
         // Ⓑ refuses, when the offer can be refused.
         .cursorCancel(offer.canRefuse ? onDecline : nil)
+        .missionWindowKeys { press in
+            switch MissionOfferKey.resolve(press, acceptLabel: offer.acceptButton,
+                                           refuseLabel: offer.refuseButton, canRefuse: offer.canRefuse) {
+            case .accept: onAccept(); return true
+            case .refuse: onDecline(); return true
+            case nil: return false
+            }
+        }
     }
 
     private func offersList(_ size: CGSize) -> some View {
@@ -491,6 +538,15 @@ struct MissionSingleDialog: View {
         .overlay { if moviePlayer != nil { moviePlayerOverlay } }
         // Ⓑ refuses, when the offer can be refused.
         .cursorCancel(offer.canRefuse ? { finish(onDecline) } : nil)
+        .missionWindowKeys { press in
+            guard moviePlayer == nil, movieGIF == nil else { return false }
+            switch MissionOfferKey.resolve(press, acceptLabel: offer.acceptButton,
+                                           refuseLabel: offer.refuseButton, canRefuse: offer.canRefuse) {
+            case .accept: finish(onAccept); return true
+            case .refuse: finish(onDecline); return true
+            case nil: return false
+            }
+        }
         // The offer's dësc movie plays by itself before the text, unless its
         // Flags put it after (0x00442510).
         .onAppear { if !movieAfterText { playMovie() } }

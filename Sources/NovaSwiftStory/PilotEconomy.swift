@@ -57,7 +57,8 @@ public enum PilotEconomy {
     ///   which keeps the player's own items and adds none of the hull's — but
     ///   still has to arm it.
     public static func hullFittings(_ ship: ShipRes, game: NovaGame,
-                                    includeDefaultItems: Bool = true) -> [Int: Int] {
+                                    includeDefaultItems: Bool = true,
+                                    seedBayFighters: Bool = true) -> [Int: Int] {
         var fittings: [Int: Int] = [:]
         if includeDefaultItems {
             for (oid, count) in ship.outfits where count > 0 {
@@ -70,6 +71,10 @@ public enum PilotEconomy {
             }
             // `AmmoLoad` rounds arrive as the matching ammunition outfit, one
             // per round — the same unit `Loadout` counts them in.
+            // A carried-fighter bay's stock load is skipped when `seedBayFighters`
+            // is false: the original's new-game seed and `Hxxx`/`Exxx` write the
+            // count into the carried class's slot, so the bay reads empty.
+            if !seedBayFighters, game.weapon(w.id)?.isFighterBay == true { continue }
             if w.ammo > 0, let ammoID = game.outfitLoadingAmmo(for: w.id) {
                 fittings[ammoID, default: 0] += w.ammo
             }
@@ -79,9 +84,15 @@ public enum PilotEconomy {
 
     /// Grant `ship`'s fittings to a pilot taking delivery of it (new pilot,
     /// purchase, capture, mission hull swap) and mark them recorded.
-    public static func grantHullFittings(_ state: inout PlayerState, ship: ShipRes, game: NovaGame) {
+    ///
+    /// `seedBayFighters: false` reproduces the original's omission of carried
+    /// fighters for the new-pilot start and `Hxxx`/`Exxx` swaps (a purchase and a
+    /// capture keep them — the shipyard and `Player_ReplaceShipWithCapturedHull`
+    /// special-case mode-99 bays).
+    public static func grantHullFittings(_ state: inout PlayerState, ship: ShipRes, game: NovaGame,
+                                         seedBayFighters: Bool = true) {
         state.hullFittingsGranted = true
-        for (oid, count) in hullFittings(ship, game: game) {
+        for (oid, count) in hullFittings(ship, game: game, seedBayFighters: seedBayFighters) {
             state.grantOutfit(oid, count: count)
         }
     }

@@ -115,7 +115,7 @@ public enum PilotFactory {
         // is purely a `WeapType`, which is why covering only DefaultItems left the
         // most-reported case still broken.
         if let hull = game.ship(shipID) {
-            PilotEconomy.grantHullFittings(&player, ship: hull, game: game)
+            PilotEconomy.grantHullFittings(&player, ship: hull, game: game, seedBayFighters: false)
         }
 
         // `spöb.Flags2` 0x0040 ("Starts destroyed"): some stellars begin every new

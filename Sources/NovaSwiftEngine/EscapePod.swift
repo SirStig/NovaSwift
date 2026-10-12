@@ -39,8 +39,7 @@ extension World {
     /// seconds." (#385 #395 N #389, 0x46), and at 1 tick or less the ship blows
     /// up: shields 0, armor −1, target cleared ("Have a nice day.", #390). The beeps
     /// are snd 153 on arming, 152 on each countdown line, 151 on the abort and
-    /// the blast. Not modelled: the hulls docked to the player that detonate
-    /// with it.
+    /// the blast. The hulls docked to the player detonate with it (0x00415b00).
     func stepSelfDestruct(held: Bool, ticks: Double) {
         func line(_ ids: [Int], _ count: String? = nil, frames: Int, beep: Int) {
             let misc = galaxy?.game.stringList(2002)

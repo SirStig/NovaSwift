@@ -266,6 +266,9 @@ final class DebrisPuffTests: XCTestCase {
         XCTAssertEqual(MurkFog.backgroundLevel(murk: 0), 0)
         XCTAssertEqual(MurkFog.backgroundLevel(murk: 1), 2)
         XCTAssertEqual(MurkFog.backgroundLevel(murk: 20), 18)
+        XCTAssertEqual(MurkFog.backgroundLevel(murk: 3), 2, "2.7 truncates to 2")
+        XCTAssertEqual(MurkFog.backgroundLevel(murk: 7), 6, "6.3 truncates to 6")
+        XCTAssertEqual(MurkFog.backgroundLevel(murk: 9), 8, "8.1 truncates to 8")
         XCTAssertEqual(MurkFog.backgroundLevel(murk: 100), 29)
     }
 

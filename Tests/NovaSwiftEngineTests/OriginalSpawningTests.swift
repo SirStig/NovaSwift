@@ -278,7 +278,7 @@ final class OriginalSpawningTests: XCTestCase {
         XCTAssertEqual(Double(fleets), expected, accuracy: expected * 0.2)
     }
 
-    func testFleetEscortsStartWithin150PxOfTheLeadAndRandomCargoIsOneBin() {
+    func testFleetEscortsStartWithin150PxOfTheLeadAndFleetShipsCarryNoCargo() {
         var col = ResourceCollection()
         col.add(ship(128, cargo: 40))
         col.add(govt(128))
@@ -294,11 +294,8 @@ final class OriginalSpawningTests: XCTestCase {
             XCTAssertLessThanOrEqual(abs(e.position.y - lead.position.y), 150)
             XCTAssertEqual(e.brain?.leaderID, lead.entityID)
         }
-        // Hull InherentAI 0 (< 3): one random commodity, 1...holds tons.
-        for s in w.npcs {
-            XCTAssertEqual(s.cargo.count, 1)
-            XCTAssertTrue((1...40).contains(s.cargo.values.first ?? 0))
-        }
+        // The fleet "random cargo" flag does nothing in the original: empty holds.
+        for s in w.npcs { XCTAssertTrue(s.cargo.isEmpty) }
     }
 
     // MARK: përs (AI-11)

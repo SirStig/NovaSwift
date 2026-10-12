@@ -481,9 +481,18 @@ final class GameHost {
     /// Designated initializer for the training sandbox (see `makeTrainingHost`).
     /// Sets up the scene from a pre-built ship/system and wires nothing that could
     /// mutate the live pilot — deliberately far leaner than the play-session init.
+    ///
+    /// The trailing defaulted parameters exist for the macOS Plugin Editor's test
+    /// run / live preview (`app/NovaSwift/Editor/Run/`), which needs the full
+    /// ship art set, a muted scene, and its own damage policy. Every default
+    /// reproduces the tutorial's original behaviour exactly.
     init(training model: AppModel, ship: Ship, textures: [SKTexture],
          engineTextures: [SKTexture], shipName: String, systemID: Int,
-         planets: [PlanetVisual], systemName: String, game: NovaGame?, galaxy: Galaxy?) {
+         planets: [PlanetVisual], systemName: String, game: NovaGame?, galaxy: Galaxy?,
+         shieldTextures: [SKTexture] = [], lightTextures: [SKTexture] = [],
+         weaponGlowTextures: [SKTexture] = [], altTextures: [SKTexture] = [],
+         hullAnim: HullAnim = HullAnim(),
+         playerDamageScale: Double? = 0, muted: Bool = false) {
         controller = GameControllerInput(input: input)
         controller.bindings = model.padBindings
         self.game = game
@@ -495,11 +504,15 @@ final class GameHost {
         hud.systemName = systemName
         scene.scaleMode = .resizeFill
         scene.configure(player: ship, textures: textures, engineTextures: engineTextures,
+                        shieldTextures: shieldTextures,
+                        lightTextures: lightTextures, weaponGlowTextures: weaponGlowTextures,
+                        altTextures: altTextures, hullAnim: hullAnim,
                         settings: model.settings,
-                        input: input, controller: controller, hud: hud, audio: model.audio,
+                        input: input, controller: controller, hud: hud,
+                        audio: muted ? nil : model.audio,
                         planets: planets, systemName: systemName,
                         game: game, systemID: systemID, galaxy: galaxy,
-                        arrivedViaJump: false, playerDamageScaleOverride: 0)
+                        arrivedViaJump: false, playerDamageScaleOverride: playerDamageScale)
         startMemoryPressureMonitoring()
     }
 
@@ -1276,6 +1289,7 @@ struct GameContainerView: View {
         }
         .onChange(of: landedSpobID) { _, id in
             setScenePaused(id != nil, reason: "landedSpobID=\(id.map(String.init) ?? "nil")")
+            if id != nil { host?.scene.cancelCombatChatter() }   // 0x004313c0 on landing
             // Mirror the docked state into the persisted pilot so the on-land save
             // records *where* we landed — that's what lets a reload lift off from
             // this pad instead of the system centre. Cleared on departure below.

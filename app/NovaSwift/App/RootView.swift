@@ -71,6 +71,14 @@ struct RootView: View {
             case .game:
                 GameContainerView()
                     .transition(.opacity)
+            case .editor:
+                #if os(macOS)
+                PluginEditorView(onClose: { model.screen = .mainMenu })
+                    .transition(.opacity)
+                #else
+                // Never routed to off macOS — the entry point is hidden there.
+                Color.black.onAppear { model.screen = .mainMenu }
+                #endif
             }
 
             // "Brightness" preference: the original sets a display gamma of

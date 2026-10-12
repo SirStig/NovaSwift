@@ -372,59 +372,27 @@ struct OutfitterView: View {
     /// What the player owned when this outfitter opened: units beyond it were
     /// bought this visit and sell back at full price, the rest at half (EC-07).
     @State private var ownedAtOpen: [Int: Int]?
-    /// Tech-level-eligible, `BuyRandom`-rolled-in stock for today, with any
-    /// items that opt into full hiding (Bible `oütf.Flags` 0x0100/0x4000)
-    /// dropped when the player doesn't meet their Availability/Require and
-    /// doesn't already own one.
-    private var stock: [OutfRes] {
-        let sold = game.outfitsSold(at: spob, day: pilot.state.date.julianDay, owned: ownedIDs)
-            .filter { lockState(for: $0) != .hidden }
-        let stocked = Set(sold.map(\.id))
-        let extras = sellBackOnly(excluding: stocked)
-        return extras.isEmpty ? sold : sold + extras
-    }
+    /// The outfitter's list as 0x0046a220 builds it: tech-eligible,
+    /// `BuyRandom`-rolled stock for today, with Availability / Require hiding
+    /// (Flags 0x4000 / 0x0100) applied only to what the player doesn't own,
+    /// owned outfits the port buys back merged in (spöb Flags2 0x0400, oütf
+    /// Flags 0x0800), then Flags 0x1000 suppression and the DispWeight sort.
+    private var stock: [OutfRes] { outfitList(owned: pilot.state.outfits) }
 
-    /// Owned outfits this port will *buy back* but isn't stocking today. An
-    /// outfit the grid doesn't list can't even be selected, so anything missing
-    /// from here is an item the player can see on their ship and never unload.
-    ///
-    /// Three Bible rules put an item here:
-    ///
-    /// - The port's own tech level. `spöb.Flags2` 0x0400 is worded "it can buy
-    ///   any nonpermanent outfits the player owns, **regardless of tech level**"
-    ///   — so the *baseline*, without that flag, is that an outfitter buys back
-    ///   what its tech level covers. What it happens to have in stock today is a
-    ///   separate thing: `oütf.BuyRandom` re-rolls the shelves daily and
-    ///   `Flags` 0x1000 suppresses same-weight siblings, and listing only that
-    ///   roll meant a fitted turret was sellable one day and invisible the next.
-    /// - `spöb.Flags2` 0x0400: this outfitter takes anything at all.
-    /// - `oütf.Flags` 0x0800, "This item can be sold anywhere, regardless of
-    ///   tech level, requirements, or mission bits" — sell-side only, so it
-    ///   never widens what's for *sale* (see OUTFITTERS.md §3.5).
-    ///
-    /// "Nonpermanent" is the Bible's own qualifier: an `oütf.Flags` 0x0008
-    /// ("can't be sold") item — a license, a story grant — is never bought back,
-    /// so it isn't padded into the grid as a tile that can only be looked at.
-    private func sellBackOnly(excluding stocked: Set<Int>) -> [OutfRes] {
-        pilot.state.outfits
-            .filter { $0.value > 0 && !stocked.contains($0.key) }
-            .keys.compactMap { game.outfit($0) }
-            .filter { !$0.cannotBeSold }
-            .filter { spob.buysAnyOutfit || $0.ignoresRequirements
-                       || game.sells(techLevel: $0.techLevel, at: spob) }
-            .sorted { $0.id < $1.id }
+    private func outfitList(owned: [Int: Int]) -> [OutfRes] {
+        game.outfitList(at: spob, day: pilot.state.date.julianDay, owned: owned,
+                        availabilityPasses: { game.outfitAvailabilityPasses($0, pilot: pilot.state) },
+                        requirePasses: { game.outfitRequirePasses($0, pilot: pilot.state, at: spob,
+                                                                  diplomacy: diplomacy) })
     }
-
-    /// Owned outfits skip the day's `BuyRandom` roll (the original zeroes it).
-    private var ownedIDs: Set<Int> { Set(pilot.state.outfits.filter { $0.value > 0 }.keys) }
 
     /// Units of `o` owned when the outfitter opened.
     private func ownedAtOpen(_ o: OutfRes) -> Int? { ownedAtOpen.map { $0[o.id] ?? 0 } }
 
     /// Outfits listed for sell-back only — they can be sold here but never bought.
     private var sellOnlyIDs: Set<Int> {
-        let stocked = Set(game.outfitsSold(at: spob, day: pilot.state.date.julianDay, owned: ownedIDs).map(\.id))
-        return Set(sellBackOnly(excluding: stocked).map(\.id))
+        let forSale = Set(outfitList(owned: [:]).map(\.id))
+        return Set(stock.map(\.id)).subtracting(forSale)
     }
     private var selected: OutfRes? {
         stock.first { $0.id == selectedID } ?? stock.first
