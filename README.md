@@ -87,9 +87,10 @@ game data syncs through iCloud on every device, Apple TV included. See
 [ICLOUD_SYNC.md](docs/ICLOUD_SYNC.md).
 
 **HD art and 3D models.** Plug-ins can ship high-resolution sprites and 3D ship
-and planet models. Models are rendered into the classic sprite frames, so hit
-boxes and gameplay are unchanged. Off by default, Apple platforms only. Live,
-real-time 3D is planned. See [HD_PIPELINE.md](docs/HD_PIPELINE.md).
+and planet models. Models are baked into the classic sprite frames by default,
+or drawn live in 3D (Settings ▸ Graphics), turning and banking with the ship.
+Hit boxes and gameplay are unchanged either way. Apple platforms only; live 3D
+is new and still being tested on hardware. See [HD_PIPELINE.md](docs/HD_PIPELINE.md).
 
 **Debug suite.** Searchable live logs, frame time per subsystem, a ship and
 planet inspector, and a command console. Settings ▸ Support ▸ Report a Bug
@@ -104,6 +105,14 @@ autosave, quick hyperjump, forgiving landing, automatic route plotting,
 nearest-first targeting, a modern key layout and tight formations.
 
 ## Screenshots
+
+| Plug-in Editor: galaxy map | Plug-in Editor: test run |
+|---|---|
+| ![Galaxy map editor](docs/branding/screenshots/editor-galaxy.webp) | ![Test run with debug panel](docs/branding/screenshots/editor-testrun.webp) |
+
+| Plug-in Editor: ship | Plug-in Editor: star system |
+|---|---|
+| ![Ship overview](docs/branding/screenshots/editor-ship.webp) | ![Star system editor with live preview](docs/branding/screenshots/editor-system.webp) |
 
 | Flight (iPhone) | Galaxy map |
 |---|---|

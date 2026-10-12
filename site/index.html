@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="styles.css?v=12" />
 </head>
 <body>
   <div class="space-bg" aria-hidden="true"></div>
@@ -94,6 +94,34 @@
       <div class="head">
         <h2>A plug-in editor that runs the game.</h2>
         <p>Built into the Mac app. Edit any resource, draw the galaxy, then fly your plug-in without leaving the editor.</p>
+      </div>
+      <figure class="panel">
+        <img src="assets/screenshots/editor-galaxy.webp" width="1800" height="1131" loading="lazy"
+             alt="The Plug-in Editor's galaxy map: 545 systems coloured by government, hyperlinks, nebulae and a government legend, with the editing tools on the left." />
+        <figcaption>The galaxy map editor, with one-way hyperlinks flagged in red.</figcaption>
+      </figure>
+      <div class="pair">
+        <figure>
+          <img src="assets/screenshots/editor-ship.webp" width="1800" height="1131" loading="lazy"
+               alt="The Fed Destroyer open in the editor: a spinning sprite preview with its layers, and flight, shield, armour and cargo stats." />
+          <figcaption>Ships show their sprite, layers and the stats the engine will actually use.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/screenshots/editor-system.webp" width="1800" height="1131" loading="lazy"
+               alt="The Sol system in the editor: planets and stations laid out on a grid above a live game preview, with the system's traffic table on the right." />
+          <figcaption>Lay out a system and watch it run in the live preview below.</figcaption>
+        </figure>
+      </div>
+      <div class="split clip">
+        <figure class="shot">
+          <video src="assets/video/editor-testrun.mp4" poster="assets/video/editor-testrun-poster.webp"
+                 width="1600" height="1004" autoplay muted loop playsinline preload="metadata"
+                 aria-label="A test run: a Federation group and pirate raiders spawned from the debug panel close in around the player's Fed Destroyer."></video>
+        </figure>
+        <div class="split-copy">
+          <h3>Fly it before you ship it.</h3>
+          <p>Test Run starts a real game session on your plug-in. Spawn fleets as friends or enemies, grant outfits, set control bits, start missions and jump anywhere, with god mode on while you look around.</p>
+        </div>
       </div>
       <ul class="matrix">
         <li><b>Every resource type</b><span>Forms for 23 types, checked byte-for-byte against the stock data, with a hex view for the rest.</span></li>
@@ -187,7 +215,7 @@
       </div>
       <div>
         <h2>HD art and 3D models.</h2>
-        <p>Plug-ins can bring high-resolution art and 3D ship and planet models. The models are rendered into the classic frames, so ships keep their hit boxes and the game plays the same. Live, real-time 3D is planned.</p>
+        <p>Plug-ins can bring high-resolution art and 3D ship and planet models. Models draw into the classic frames, or live in 3D, turning and banking with the ship. Hit boxes and gameplay stay the same either way.</p>
       </div>
     </div>
   </section>

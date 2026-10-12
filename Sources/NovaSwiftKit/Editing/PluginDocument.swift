@@ -12,7 +12,7 @@ public enum Provenance: Hashable, Sendable {
     case otherPlugin(String)
 }
 
-public enum PluginFormat: String, Sendable, CaseIterable {
+public enum PluginFormat: String, Codable, Sendable, CaseIterable {
     /// Windows/Graphite "BRGR" `.rez` — what EV Nova CE loads.
     case rez
     /// Classic Macintosh resource fork bytes (also valid as an `.ndat` data fork).

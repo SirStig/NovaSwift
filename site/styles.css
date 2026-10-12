@@ -150,10 +150,10 @@ h3 { font-size: 1.35rem; margin-bottom: var(--s1); }
   align-items: center;
 }
 .hero h1 {
-  font-size: clamp(2.4rem, 4.4vw, 3.6rem);
+  font-size: clamp(2.3rem, 3.7vw, 3.2rem);
   letter-spacing: -0.01em;
   margin-bottom: var(--s3);
-  max-width: 15ch;
+  max-width: 20ch;
   text-wrap: balance;
 }
 .lead {
@@ -194,7 +194,17 @@ h3 { font-size: 1.35rem; margin-bottom: var(--s1); }
 .split-copy h2 { margin-bottom: var(--s2); }
 .split-copy p { color: var(--text); margin: 0 0 var(--s2); max-width: 52ch; }
 .shot { margin: 0; }
-.shot img { width: 100%; border: 1px solid var(--line-2); }
+.shot img, .shot video { width: 100%; height: auto; display: block; border: 1px solid var(--line-2); background: #000; }
+
+/* two screenshots side by side */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-top: var(--s4); }
+.pair figure { margin: 0; }
+.pair img { width: 100%; border: 1px solid var(--line-2); }
+.pair figcaption, .panel figcaption { margin-top: var(--s2); font-size: 0.95rem; color: var(--muted); }
+
+/* video beside a short caption block */
+.split.clip { margin: var(--s5) 0; grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr); }
+.split-copy h3 { font-size: clamp(1.4rem, 2.2vw, 1.8rem); margin-bottom: var(--s2); }
 
 /* matrix: text feature grid, no cards */
 .matrix {
@@ -246,7 +256,7 @@ p.links a { font-weight: 700; }
 
 /* four-up phone strip */
 .strip {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3);
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4) var(--s3);
 }
 .strip figure { margin: 0; }
 .strip img { width: 100%; border: 1px solid var(--line-2); }
@@ -268,6 +278,7 @@ p.links a { font-weight: 700; }
   color: var(--text);
   overflow-x: auto;
 }
+.code code { background: none; padding: 0; color: inherit; font-size: inherit; }
 .code .c { color: #7e7e89; }
 .code .k { color: var(--accent); }
 
@@ -379,7 +390,8 @@ details.grid-card[open] > summary { margin-bottom: var(--s2); }
 /* ---------- Responsive ---------- */
 @media (max-width: 960px) {
   .nav-links { display: none; }
-  .hero-grid, .split, .split.reverse, .get { grid-template-columns: 1fr; gap: var(--s4); }
+  .hero-grid, .split, .split.reverse, .split.clip, .get { grid-template-columns: 1fr; gap: var(--s4); }
+  .pair { grid-template-columns: 1fr; }
   .split.reverse .shot { order: 0; }
   .matrix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
