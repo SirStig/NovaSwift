@@ -3,6 +3,7 @@ import NovaSwiftKit
 import Crypto
 #if canImport(SceneKit)
 import SceneKit
+import simd
 import Metal
 #if canImport(AppKit)
 import AppKit
@@ -58,40 +59,80 @@ public final class ModelBaker {
     }
 
     /// The orthographic scale that makes the model cover the classic art's
-    /// extent, measured over a few headings of the level set.
+    /// extent, averaged over a few headings of the level set. The extent is
+    /// read from the model's vertices projected through the stage camera, so
+    /// it needs no render: an overfilling model can't be clipped by the frame,
+    /// and the result is the same every run.
     public func fit(stage: ModelStage, layout: BakeLayout, classic: SpriteSheet?, scale s: Double) {
-        renderer.scene = stage.scene
-        renderer.pointOfView = stage.camera
-        let size = CGSize(width: Double(layout.frameWidth) * s, height: Double(layout.frameHeight) * s)
         let fit = stage.settings.fit ?? 1
         let n = layout.framesPerSet
         let samples = Array(Set([0, n / 4, n / 2, 3 * n / 4])).filter { $0 < layout.frameCount }.sorted()
         let classicExtents = classic.map { ClassicFootprint.extents(of: $0, frames: samples) } ?? [:]
         let fallback = Double(min(layout.frameWidth, layout.frameHeight)) * 0.9
         let target = classicExtents.isEmpty ? fallback : classicExtents.values.reduce(0, +) / Double(classicExtents.count)
-        // orthographicScale = half the visible height in world units; the
-        // model's radius is 1, so start from "diameter fills the target".
-        stage.orthographicScale = Double(layout.frameHeight) / (target * fit)
-        // Measure zoomed out: a model that overfills the frame is clipped at its
-        // edges, so its measured extent saturates at the frame size and the
-        // ratio reads ~1 — the overfill would never shrink (planets came out
-        // with flat cut edges).
-        let pad = 1.6
-        for _ in 0..<3 {   // later passes absorb the measurement's own rounding
-            let ortho = stage.orthographicScale
-            stage.orthographicScale = ortho * pad
-            var ratios: [Double] = []
-            for f in samples {
-                let pose = layout.pose(frame: f)
-                stage.pose(pose.set, heading: pose.heading)
-                if let img = snapshot(size), let e = ClassicFootprint.extent(of: img) {
-                    ratios.append((e * pad / s) / ((classicExtents[f] ?? target) * fit))
+        // Visible height is 2·orthographicScale world units across frameHeight
+        // pixels, so a silhouette of `units` covers units·H / (2·ortho) pixels.
+        // Solve for the scale that makes it cover the classic extent.
+        let height = Double(layout.frameHeight)
+        var scales: [Double] = []
+        for f in samples {
+            let pose = layout.pose(frame: f)
+            stage.pose(pose.set, heading: pose.heading)
+            guard let units = ModelBaker.projectedExtent(of: stage.scene.rootNode, camera: stage.camera), units > 0 else { continue }
+            let wanted = (classicExtents[f] ?? target) * fit
+            guard wanted > 0 else { continue }
+            // A planet's atmosphere shell is additive (so not counted above) but
+            // its rim is visible: fit the shell, not the sphere, or the rim runs
+            // past the frame and is cut flat where the classic art fills it.
+            let silhouette = stage.settings.atmosphere?.count == 3 ? units * ModelStage.atmosphereScale : units
+            scales.append(silhouette * height / (2 * wanted))
+        }
+        guard !scales.isEmpty else {
+            stage.orthographicScale = height / (target * fit)
+            return
+        }
+        stage.orthographicScale = scales.reduce(0, +) / Double(scales.count)
+    }
+
+    /// The width or height, in camera units, of the silhouette `root` makes in
+    /// an orthographic `camera`: the bounding box of its visible vertices in
+    /// the camera's view. Nil when there are no visible vertices.
+    static func projectedExtent(of root: SCNNode, camera: SCNNode) -> Double? {
+        let view = simd_inverse(camera.simdWorldTransform)
+        var lo = SIMD2<Float>(repeating: .infinity), hi = SIMD2<Float>(repeating: -.infinity)
+        var any = false
+        func visit(_ node: SCNNode) {
+            guard !node.isHidden else { return }   // hidden emitters and layers aren't in the hull's silhouette
+            if let g = node.geometry, g.materials.first?.blendMode != .add,   // additive glow shells aren't solid
+               let src = g.sources(for: .vertex).first, src.componentsPerVector >= 3,
+               src.bytesPerComponent == 4 || src.bytesPerComponent == 8 {
+                let model = node.simdWorldTransform
+                let m = view * model
+                let wide = src.bytesPerComponent == 8
+                src.data.withUnsafeBytes { raw in
+                    for i in 0..<src.vectorCount {
+                        let base = src.dataOffset + i * src.dataStride
+                        let x, y, z: Float
+                        if wide {
+                            x = Float(raw.loadUnaligned(fromByteOffset: base, as: Double.self))
+                            y = Float(raw.loadUnaligned(fromByteOffset: base + 8, as: Double.self))
+                            z = Float(raw.loadUnaligned(fromByteOffset: base + 16, as: Double.self))
+                        } else {
+                            x = raw.loadUnaligned(fromByteOffset: base, as: Float.self)
+                            y = raw.loadUnaligned(fromByteOffset: base + 4, as: Float.self)
+                            z = raw.loadUnaligned(fromByteOffset: base + 8, as: Float.self)
+                        }
+                        let c = m * SIMD4<Float>(x, y, z, 1)
+                        lo = simd_min(lo, SIMD2(c.x, c.y)); hi = simd_max(hi, SIMD2(c.x, c.y))
+                        any = true
+                    }
                 }
             }
-            stage.orthographicScale = ortho
-            guard !ratios.isEmpty else { return }
-            stage.orthographicScale *= ratios.reduce(0, +) / Double(ratios.count)
+            for child in node.childNodes { visit(child) }
         }
+        visit(root)
+        guard any else { return nil }
+        return Double(max(hi.x - lo.x, hi.y - lo.y))
     }
 
     /// Scale the lighting so the model's mid and upper-mid tones match the
@@ -370,7 +411,7 @@ public final class ModelBaker {
 public final class HDBakeCache: @unchecked Sendable {
     public let directory: URL
     /// Bump to invalidate every bake when the renderer's output changes.
-    public static let version = 11   // 11: fit measured zoomed out (no clipped overfill)
+    public static let version = 13   // 13: planets fit to their atmosphere shell
 
     public convenience init?(subdirectory: String = "NovaSwift/HDBakes") {
         guard let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
@@ -504,13 +545,10 @@ public enum HDAssetPipeline {
         return c
     }
 
-    /// Where a model's live fit is cached. `tuned` marks a fit that has been
-    /// corrected against the on-screen hull (`HDGraphics.applyLiveTune`).
-    public static func liveCacheKey(for e: ResolvedGraphicsEnhancement, layout: BakeLayout,
-                                    tuned: Bool = false) -> String? {
+    /// Where a model's live fit is cached.
+    public static func liveCacheKey(for e: ResolvedGraphicsEnhancement, layout: BakeLayout) -> String? {
         guard let content = e.source.contentKey() else { return nil }
-        return HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1,
-                               part: tuned ? "live-v2-tuned" : "live-v2")
+        return HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "live-v4")
     }
 
     /// Just the hull/sprite atlas (no effect layers).

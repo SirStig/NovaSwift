@@ -56,11 +56,33 @@ public final class LiveHull {
                 }
             }
         }
+        // SK3DNode shows SceneKit's output as if it were already sRGB, but
+        // SceneKit writes linear values, so unencoded the hull draws darker than
+        // its baked sprite (a grey of v comes out as v^2.2). Encoding every
+        // fragment here puts the live hull on the same footing as the bake.
+        stage.scene.rootNode.enumerateHierarchy { n, _ in
+            guard let g = n.geometry else { return }
+            g.materials = g.materials.map { m in
+                let c = m.copy() as! SCNMaterial
+                c.shaderModifiers = Self.srgbEncoded(c.shaderModifiers)
+                return c
+            }
+        }
         node = SK3DNode(viewportSize: size)
         node.scnScene = stage.scene
         node.pointOfView = stage.camera
         node.name = "live3D"
         node.autoenablesDefaultLighting = false
+    }
+
+    /// The material's fragment shader with the sRGB encode appended (keeping
+    /// any modifier it already has, such as an atmosphere's glow).
+    private static func srgbEncoded(_ modifiers: [SCNShaderModifierEntryPoint: String]?) -> [SCNShaderModifierEntryPoint: String] {
+        var out = modifiers ?? [:]
+        let encode = "_output.color.rgb = pow(_output.color.rgb, float3(1.0 / 2.2));"
+        if let body = out[.fragment] { out[.fragment] = body + "\n" + encode }
+        else { out[.fragment] = "#pragma body\n" + encode }
+        return out
     }
 
     /// Turn the model to `heading` (radians, the baked frames' convention:

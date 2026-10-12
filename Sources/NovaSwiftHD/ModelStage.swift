@@ -179,12 +179,15 @@ public final class ModelStage {
         if let a = settings.atmosphere, a.count == 3 { addAtmosphere(around: model, color: a) }
     }
 
+    /// The atmosphere shell's radius relative to the planet's.
+    public static let atmosphereScale = 1.035
+
     /// A slightly larger shell around a (spherical) model that glows at the
     /// limb — strongest on the sunlit side — and is clear face-on.
     private func addAtmosphere(around model: SCNNode, color a: [Double]) {
         let (lo, hi) = model.boundingBox
         let s = Double(model.scale.x)
-        let r = Double(max(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z)) * s / 2 * 1.035
+        let r = Double(max(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z)) * s / 2 * ModelStage.atmosphereScale
         let shell = SCNSphere(radius: CGFloat(r))
         shell.segmentCount = 96
         let m = SCNMaterial()
