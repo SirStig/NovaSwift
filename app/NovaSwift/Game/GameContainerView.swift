@@ -594,6 +594,16 @@ final class GameHost {
         hud.credits = model.pilot.state.credits
     }
 
+    #if os(macOS)
+    /// Plugin Editor test run: `refreshHUDStyle(model:)` for a sandbox pilot (the editor's
+    /// `PilotStore(editorSandbox:)` isn't `AppModel.pilot`). Reskins the status bar for the
+    /// hull now flown and refreshes the credit readout.
+    func editorRefreshHUD(shipType: Int, credits: Int) {
+        hudStyle = GameHost.makeHUDStyle(game, shipType: shipType)
+        hud.credits = credits
+    }
+    #endif
+
     /// Decode the authentic status bar: the ïntf interface definition + its
     /// backdrop PICT, from the player's own data. Returns nil if unavailable
     /// (the container then falls back to `GameHUDView`, our own non-authentic HUD).
@@ -4339,12 +4349,20 @@ struct GameContainerView: View {
                 prepareAndRefresh()
                 return "HD graphics \(sub). Rebuilding the live system's art…"
             case "detail":
-                guard let d = args.dropFirst().first.flatMap(Int.init), d == 2 || d == 4 else {
-                    throw ConsoleController.CommandError(message: "Usage: hd detail <2|4>")
+                guard let d = args.dropFirst().first.flatMap(Int.init), [1, 2, 4].contains(d) else {
+                    throw ConsoleController.CommandError(message: "Usage: hd detail <1|2|4>")
                 }
                 setting { $0.hdDetail = d }
                 prepareAndRefresh()
                 return "HD detail \(d)×. Re-preparing…"
+            case "3d":
+                guard let mode = args.dropFirst().first.flatMap({ GameSettings.HullPresentation(rawValue: $0.lowercased()) }) else {
+                    let l = HDGraphics.shared.liveStatus()
+                    return "Ships with 3D models: \(model.settings.hullPresentation.label). \(l.fitted) hull(s) fitted, \(l.loaded) model(s) loaded (cap \(HDGraphics.liveModelCap)), \(l.failed) failed; device ceiling \(HDGraphics.liveCeiling) live hull(s).\nUsage: hd 3d <sprites|live>"
+                }
+                setting { $0.hullPresentation = mode }
+                prepareAndRefresh()
+                return "Ships with 3D models: \(mode.label). Preparing…"
             case "overlay":
                 let on = args.dropFirst().first.map { $0.lowercased() == "on" } ?? !debug.hdOverlay
                 debug.hdOverlay = on
@@ -4361,7 +4379,7 @@ struct GameContainerView: View {
                 debug.showHDViewer = true
                 return "Opening the HD / 3D viewer."
             default:
-                throw ConsoleController.CommandError(message: "Usage: hd [status | on | off | detail <2|4> | overlay <on|off> | reload | clearcache | view]")
+                throw ConsoleController.CommandError(message: "Usage: hd [status | on | off | detail <1|2|4> | 3d <sprites|live> | overlay <on|off> | reload | clearcache | view]")
             }
         })
 

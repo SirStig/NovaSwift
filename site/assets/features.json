@@ -779,44 +779,53 @@
    "tasks": [
     {
      "name": "Resource write path and round-trip tests",
-     "status": "planned"
+     "status": "done",
+     "where": "Sources/NovaSwiftKit/Editing/, Tests/NovaSwiftKitTests/Editing*Tests.swift"
     },
     {
      "name": "Schemas for every resource type",
-     "status": "planned"
+     "status": "done",
+     "where": "23 types, checked byte-exact against every stock record"
     },
     {
      "name": "Browser, hex editor and previews",
-     "status": "planned"
+     "status": "done",
+     "where": "app/NovaSwift/Editor/Browser, Inspector"
     },
     {
      "name": "Ship, outfit and weapon editors",
-     "status": "planned"
+     "status": "done",
+     "where": "app/NovaSwift/Editor/Specialized"
     },
     {
      "name": "Galaxy editor",
-     "status": "planned"
+     "status": "done",
+     "where": "app/NovaSwift/Editor/Map"
     },
     {
      "name": "Mission and control-bit editor",
-     "status": "planned"
+     "status": "done",
+     "where": "app/NovaSwift/Editor/Story"
     },
     {
      "name": "Validation against the original's rules",
-     "status": "planned"
+     "status": "done",
+     "where": "Sources/NovaSwiftKit/Editing/PluginLinter.swift"
     },
     {
      "name": "HD art and 3D models: pack, embed, preview",
-     "status": "planned",
-     "where": ""
+     "status": "done",
+     "where": "HD tab, .nsx export"
     },
     {
      "name": "Test in engine",
-     "status": "planned"
+     "status": "partial",
+     "where": "test run with debug panel; landing is a dock stub (no trade, outfitter, shipyard or mission board)"
     },
     {
      "name": "Export to Windows and Mac plug-in formats",
-     "status": "planned"
+     "status": "partial",
+     "where": ".rez and classic resource files; PICT, cicn and snd output not yet checked in EV Nova CE"
     },
     {
      "name": "Publish to the plug-in store",

@@ -1,5 +1,6 @@
 #if os(macOS)
 import SwiftUI
+import Combine
 import SpriteKit
 import NovaSwiftKit
 import NovaSwiftEngine
@@ -29,7 +30,9 @@ struct EditorPick: Identifiable, Hashable, Sendable {
 /// or loadout rebuild the host in place (same system, same pose); everything
 /// else drives the live scene directly.
 ///
-/// Nothing here ever calls `PilotStore.save()` or any roster API.
+/// The pilot is a `PilotStore(editorSandbox:)`: in-memory only, `save()`/`reset()` are
+/// no-ops, so the real spaceport screens can be driven against it (see
+/// `EditorTestSession+Story.swift`). Nothing here calls a roster API or `AppModel.autosave`.
 @MainActor
 final class EditorTestSession: ObservableObject {
 
@@ -49,9 +52,17 @@ final class EditorTestSession: ObservableObject {
     @Published private(set) var host: GameHost?
     @Published private(set) var build: EditorBuild?
     @Published private(set) var systemID: Int = 0
-    @Published private(set) var shipID: Int = 0
-    /// The spöb the player is docked at (test-run landing stub), if any.
+    @Published var shipID: Int = 0
+    /// The spöb the player is docked at (the real spaceport is shown), if any.
     @Published var landedSpobID: Int?
+    /// The Mission Info window (active missions + objectives).
+    @Published var showMissionInfo = false { didSet { applyPause() } }
+    /// The open hail dialog, if any.
+    @Published var hail: HailDialogState? { didSet { applyPause() } }
+    /// The boarded hulk's manifest while the plunder dialog is up.
+    @Published var boardManifest: World.BoardingManifest? { didSet { applyPause() } }
+    /// Bumped after each loot action so the plunder dialog re-reads the manifest.
+    @Published var boardRefresh = 0
     @Published var paused = false { didSet { applyPause() } }
     @Published var timeScale: Double = 1
     @Published private(set) var aiFrozen = false
@@ -72,27 +83,43 @@ final class EditorTestSession: ObservableObject {
     let debug = DebugController()
     let console = ConsoleController()
     let nav = NavigationModel(game: nil, startSystemID: 128)
-    /// Throwaway pilot. `PilotStore()` reads (never writes) the live autosave on
-    /// init; its state is replaced immediately and `save()` is never called.
-    let pilot = PilotStore()
+    /// Throwaway pilot: an in-memory `PilotStore` that never reads or writes the live save
+    /// (`save()` and `reset()` are no-ops on a sandbox store).
+    let pilot = PilotStore(editorSandbox: PlayerState())
+    /// The story seam for everything this session runs through `StoryEngine` (mission
+    /// scripts, crön ticks, texts, offers). Bound to the live scene in `wireStoryServices()`.
+    let missionServices = AppGameServices()
 
     /// The pointer position inside the play viewport (SwiftUI top-left origin)
     /// and that viewport's size — for "spawn at cursor".
     var cursorViewPoint: CGPoint?
     var playViewSize: CGSize = .zero
 
-    private weak var app: AppModel?
+    weak var app: AppModel?
     let collection: ResourceCollection
     private let base: ResourceCollection?
     private let startSystem: Int?
     private let startShip: Int?
     var startSystemID: Int? { startSystem }
     var startShipID: Int? { startShip }
-    private var departedSpobID: Int?
+    var departedSpobID: Int?
     private var frozenBrains: [Int: AIBrain] = [:]
     private var frozenSpawner: Spawner?
-    private var rebuildTask: Task<Void, Never>?
+    private var pilotWatch: AnyCancellable?
+    var rebuildTask: Task<Void, Never>?
     private var started = false
+    // Story / spaceport / comms state (logic in EditorTestSession+Story.swift).
+    var plunderPanic: World.PlunderPanic?
+    var persOfferEngine: StoryEngine?
+    var persOfferPersonID: Int?
+    var stagedLaunchQuote: String?
+    /// A story `M`/`N` move that fired while docked (keepPosition) — applied on take-off.
+    var dockedMove: Bool?
+    var departing = false
+    /// Loot granted while boarding changed the loadout: refit the ship when the dialog closes.
+    var loadoutDirtyDuringBoarding = false
+    /// The comm window's per-jump bribe latch (−1 until rolled).
+    var bribeLatch = -1
 
     init(collection: ResourceCollection, base: ResourceCollection?, startSystem: Int?, startShip: Int?) {
         self.collection = collection
@@ -111,10 +138,12 @@ final class EditorTestSession: ObservableObject {
         guard !started else { return }
         started = true
         self.app = app
+        EditorHD.shared.acquire(self)
         let result = await EditorGameFactory.build(
             collection: collection, base: base,
             flightTuning: FlightTuning(enhancements: app.settings.enhancements),
-            systemID: startSystem, shipID: startShip, catalogs: true)
+            systemID: startSystem, shipID: startShip, catalogs: true,
+            hd: EditorHD.inputs(app: app, base: base))
         switch result {
         case .failure(let e):
             phase = .failed(e.localizedDescription)
@@ -138,6 +167,11 @@ final class EditorTestSession: ObservableObject {
             pilot.state = prep.state
             nav.hiddenSystems = prep.hidden
             registerCommands()
+            wireStoryServices()
+            // Spaceport purchases / accepted missions mutate the pilot directly: keep the panel fresh.
+            pilotWatch = pilot.objectWillChange.sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.touch() }
+            }
             nav.configure(game: b.game, startSystemID: sys)
             systemID = sys
             shipID = ship
@@ -160,8 +194,17 @@ final class EditorTestSession: ObservableObject {
         host?.scene.persSpawnEligible = nil
         host?.scene.shipSpawnEligible = nil
         host?.scene.debug = nil
+        unwireStoryCallbacks(host?.scene)
         debug.attach(nil)
         host = nil
+        hail = nil; boardManifest = nil
+        missionServices.onLeaveStellar = nil; missionServices.onOverlayMessage = nil
+        missionServices.onSpawnMissionShips = nil; missionServices.onChangePlayerShip = nil
+        missionServices.onMovePlayer = nil; missionServices.onSetStellarDestroyed = nil
+        missionServices.onReleaseMissionShips = nil; missionServices.onEscortDeparted = nil
+        missionServices.onCloseSpaceportScreen = nil
+        pilotWatch = nil
+        EditorHD.shared.release(self, app: app)
     }
 
     // MARK: Sandbox pilot
@@ -201,24 +244,24 @@ final class EditorTestSession: ObservableObject {
         refreshNavVisibility()
     }
 
-    private func refreshNavVisibility() {
+    func refreshNavVisibility() {
         guard let game else { return }
         nav.hiddenSystems = game.hiddenSystemIDs(for: pilot.state)
     }
 
-    private func touch() { stateRevision &+= 1 }
+    func touch() { stateRevision &+= 1 }
 
     // MARK: Host construction
 
-    private struct Pose { var position: Vec2; var angle: Double; var velocity: Vec2 }
+    struct Pose { var position: Vec2; var angle: Double; var velocity: Vec2 }
 
-    private func currentPose() -> Pose? {
+    func currentPose() -> Pose? {
         guard let p = host?.scene.playerShip else { return nil }
         return Pose(position: p.position, angle: p.angle, velocity: p.velocity)
     }
 
     /// (Re)build the host. `pose == nil` starts at the default spot.
-    private func installHost(systemID: Int, shipID: Int, pose: Pose?) async {
+    func installHost(systemID: Int, shipID: Int, pose: Pose?) async {
         guard let app, let build else { return }
         await Task.detached(priority: .userInitiated) {
             EditorGameFactory.warm(game: build.game, systemID: systemID, shipID: shipID)
@@ -237,12 +280,20 @@ final class EditorTestSession: ObservableObject {
         wire(newHost)
         debug.godMode = god; debug.infiniteFuel = fuel; debug.aiDebugEnabled = ai
         newHost.hud.credits = pilot.state.credits
+        // The sandbox pilot's hold and fuel carry into the fresh ship; the new world gets the
+        // active missions' ships and the escort wing again.
+        if let ship = newHost.scene.playerShip {
+            ship.cargo = pilot.state.cargo
+            if let f = pilot.state.fuel { ship.fuel = min(f, ship.maxFuel) }
+        }
+        hail = nil; boardManifest = nil
+        systemEntered()
         touch()
     }
 
     /// Hand-off to the scene: callbacks capture `self` weakly so the scene can
     /// never keep the session (or the session the scene) alive after End Test.
-    private func wire(_ host: GameHost) {
+    func wire(_ host: GameHost) {
         let scene = host.scene
         debug.attach(scene)
         scene.onSystemReloaded = { [weak self] id in self?.systemReloaded(id) }
@@ -262,16 +313,18 @@ final class EditorTestSession: ObservableObject {
         }
         scene.isPaused = paused
         nav.attachShip(scene.playerShip)
+        wireStoryCallbacks(host)
     }
 
-    private func applyPause() {
+    func applyPause() {
         host?.scene.isPaused = paused || landedSpobID != nil || nav.showingMap
+            || showMissionInfo || hail != nil || boardManifest != nil
     }
 
     /// Re-sync after anything that pauses (map, landing).
     func refreshPause() { applyPause() }
 
-    private func systemReloaded(_ id: Int) {
+    func systemReloaded(_ id: Int) {
         systemID = id
         pilot.state.currentSystem = id
         pilot.state.exploredSystems.insert(id)
@@ -280,6 +333,8 @@ final class EditorTestSession: ObservableObject {
         if let name = game?.system(id)?.displayName {
             host?.hud.post("Entering the \(name) system.")
         }
+        bribeLatch = -1
+        systemEntered()      // mission ships (ShipSyst), escorts, nav visibility
         touch()
     }
 
@@ -294,7 +349,7 @@ final class EditorTestSession: ObservableObject {
     }
 
     /// Debounced rebuild after hull/loadout edits (same system, same pose).
-    private func scheduleRebuild() {
+    func scheduleRebuild() {
         rebuildTask?.cancel()
         rebuildTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(350))
@@ -316,52 +371,7 @@ final class EditorTestSession: ObservableObject {
         else { host?.hud.post("Get closer and slow down to land.") }
     }
 
-    func land(_ id: Int) {
-        guard landedSpobID == nil, host != nil else { return }
-        host?.scene.cancelCombatChatter()
-        departedSpobID = id
-        landedSpobID = id
-        applyPause()
-    }
-
-    func takeOff() {
-        guard let host, let game, let build, let spob = departedSpobID else { landedSpobID = nil; return }
-        let ship = GameHost.editorShip(game: game, galaxy: build.galaxy, shipID: shipID, outfits: pilot.state.outfits)
-        let art = GameHost.editorShipArt(game: game, shipID: shipID)
-        if let ship {
-            host.scene.reloadForDeparture(spobID: spob, player: ship, textures: art.textures,
-                                          engineTextures: art.engine, shieldTextures: art.shield,
-                                          lightTextures: art.lights, weaponGlowTextures: art.weaponGlow,
-                                          altTextures: art.alt, hullAnim: art.hullAnim)
-            nav.attachShip(host.scene.playerShip)
-        }
-        landedSpobID = nil
-        applyPause()
-        host.hud.post("Launched from \(game.spob(spob)?.displayName ?? "the stellar").")
-    }
-
-    /// Engage the hyperdrive along the map's armed route (the `J` key / map button).
-    @discardableResult
-    func attemptJump() -> Bool {
-        guard let host, let game, !host.scene.isJumping else { return false }
-        let hops = nav.nextJumpHopCount
-        guard hops > 0 else { host.hud.post("No hyperspace course is armed — open the map (M)."); return false }
-        guard nav.canAfford(hops: hops) else { host.hud.post("Insufficient fuel for a jump."); return false }
-        guard host.scene.canEnterHyperspace() else { nav.showingMap = false; return true }
-        let destID = nav.route[hops - 1]
-        var outbound = 0.0
-        if let a = game.system(nav.currentSystemID), let b = game.system(nav.route[0]), a.x != b.x || a.y != b.y {
-            outbound = atan2(Double(b.x - a.x), Double(-(b.y - a.y)))
-        }
-        nav.showingMap = false
-        host.scene.beginJump(to: destID, outboundHeading: outbound, instant: false, speed: 1) { [weak self] in
-            guard let self else { return }
-            _ = self.nav.commitArrival(at: destID, hops: hops)
-            self.pilot.state.fuel = self.host?.scene.playerShip?.fuel
-            self.pilot.state.date = self.pilot.state.date.adding(days: 1)
-        }
-        return true
-    }
+    // `land(_:)`, `takeOff()` and `attemptJump()` live in EditorTestSession+Story.swift.
 
     // MARK: Debug actions — cheats & world
 
@@ -371,11 +381,13 @@ final class EditorTestSession: ObservableObject {
     func heal() {
         guard let s = host?.scene.playerShip else { return }
         s.shield = s.maxShield; s.armor = s.maxArmor; s.ionCharge = 0
+        pilot.state.shield = nil; pilot.state.armor = nil
     }
 
     func refuel() {
         guard let s = host?.scene.playerShip else { return }
         s.fuel = s.maxFuel
+        pilot.state.fuel = s.maxFuel
     }
 
     func setCredits(_ amount: Int, add: Bool) {
@@ -385,10 +397,10 @@ final class EditorTestSession: ObservableObject {
         touch()
     }
 
+    /// Advance the calendar `n` days through the story engine's daily tick, so crön events
+    /// start/end, deadlines and tribute run exactly as on a jump or a spaceport visit.
     func addDays(_ n: Int) {
-        pilot.state.date = pilot.state.date.adding(days: n)
-        refreshNavVisibility()
-        touch()
+        advanceGameDays(n)
     }
 
     func setPaused(_ p: Bool) { paused = p }
@@ -574,8 +586,10 @@ final class EditorTestSession: ObservableObject {
 
     func jump(to id: Int) -> Bool {
         guard let game, game.system(id) != nil, let host, landedSpobID == nil else { return false }
-        host.scene.editorReloadSystem(to: id)
+        creditSurvivingAuxShips()
+        storyArrival(in: id)
         nav.configure(game: game, startSystemID: id)
+        host.scene.editorReloadSystem(to: id)       // → onSystemReloaded → systemReloaded
         nav.attachShip(host.scene.playerShip)
         refreshNavVisibility()
         return true
@@ -602,7 +616,7 @@ final class EditorTestSession: ObservableObject {
     func startMission(_ id: Int) -> Bool {
         guard let game, let m = game.mission(id) else { return false }
         let before = pilot.state.activeMissions.count
-        let engine = StoryEngine(game: game, player: pilot.state)
+        let engine = StoryEngine(game: game, player: pilot.state, services: missionServices)
         engine.startMission(id)
         pilot.state = engine.player
         guard pilot.state.activeMissions.count > before else { return false }
@@ -621,9 +635,9 @@ final class EditorTestSession: ObservableObject {
         return true
     }
 
-    private func missionGoal(_ missionID: Int, _ goal: MissionShipGoal) {
+    func missionGoal(_ missionID: Int, _ goal: MissionShipGoal) {
         guard let game else { return }
-        let engine = StoryEngine(game: game, player: pilot.state)
+        let engine = StoryEngine(game: game, player: pilot.state, services: missionServices)
         switch goal {
         case .disable, .escort: engine.missionShipDisabled(missionID: missionID)
         case .board, .rescue: engine.missionShipBoarded(missionID: missionID)

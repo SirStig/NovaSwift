@@ -227,7 +227,7 @@ struct ShipOverviewView: View {
     }
 
     private func armament(_ s: ShipStatSheet) -> some View {
-        SpecSection(title: "Armament", trailing: "DPS = damage ÷ reload × mounts") {
+        SpecSection(title: "Armament", trailing: "DPS = (damage + submunitions) × shots/s, burst-aware") {
             if s.weapons.isEmpty {
                 Text("No stock weapons.").font(.system(size: 12)).foregroundStyle(.tertiary)
             } else {

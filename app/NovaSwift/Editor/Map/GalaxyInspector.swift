@@ -16,6 +16,10 @@ struct GalaxyInspector: View {
     var onDelete: ([Int]) -> Void
     var onDeleteNebula: (Int) -> Void
 
+    @EnvironmentObject private var app: AppModel
+    /// Stellar thumbnails for the system's stellar list (animated, HD when on).
+    @StateObject private var sprites = StellarSpriteCache()
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -28,6 +32,11 @@ struct GalaxyInspector: View {
             .padding(12)
         }
         .background(Color(white: 0.105))
+        .onAppear { sprites.bindHD(app: app, base: model.base) }
+        .onChange(of: model.revision) { _, _ in
+            if model.lastChanged.contains(where: { StellarSpriteCache.relevant.contains($0.type) }) { sprites.invalidate() }
+        }
+        .onDisappear { sprites.teardown() }
     }
 
     // MARK: Empty / multi
@@ -176,7 +185,10 @@ struct GalaxyInspector: View {
                     model.selection = ResourceKey(NovaType.spob, sp)
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "globe.europe.africa").font(.system(size: 10)).foregroundStyle(novaAmber)
+                        StellarThumbnail(sprites: sprites, collection: model.effective, spob: sp,
+                                         type: model.intField("type", ResourceKey(NovaType.spob, sp), default: -1),
+                                         anim: model.document.resource(NovaType.spob, sp).flatMap { StellarAnimParams($0) },
+                                         side: 22)
                         Text(model.displayName(NovaType.spob, sp)).font(.system(size: 11))
                         Spacer()
                         Text("#\(sp)").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
@@ -221,6 +233,49 @@ struct GalaxyInspector: View {
                 Button(role: .destructive) { onDeleteNebula(id) } label: { Image(systemName: "trash") }
             }
         }
+    }
+}
+
+/// A small stellar sprite for lists: every frame of an animated stellar at the spöb's own delay /
+/// bias / flags, on a modest 12 fps clock that only runs while the row is on screen and the
+/// sprite really animates. Falls back to a globe symbol while the sprite decodes (or has none).
+struct StellarThumbnail: View {
+    @ObservedObject var sprites: StellarSpriteCache
+    let collection: ResourceCollection
+    let spob: Int
+    let type: Int
+    let anim: StellarAnimParams?
+    var side: CGFloat = 22
+
+    @State private var clock = StellarAnimationClock()
+    @State private var onScreen = false
+
+    var body: some View {
+        let entry = sprites.entry(type: type, collection: collection)
+        let animating = onScreen && anim != nil && (entry?.isAnimatable ?? false)
+        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: !animating)) { tl in
+            ZStack {
+                if let e = entry {
+                    let image = frame(of: e, at: tl.date)
+                    let scale = min(1.5, side / max(1, max(e.size.width, e.size.height)))
+                    Image(decorative: image, scale: 1)
+                        .resizable().interpolation(.high)
+                        .frame(width: e.size.width * scale, height: e.size.height * scale)
+                } else {
+                    Image(systemName: "globe.europe.africa").font(.system(size: 10)).foregroundStyle(novaAmber)
+                }
+            }
+            .frame(width: side, height: side)
+        }
+        .frame(width: side, height: side)
+        .onAppear { onScreen = true }
+        .onDisappear { onScreen = false }
+    }
+
+    private func frame(of e: StellarSpriteCache.Entry, at date: Date) -> CGImage {
+        guard let anim, e.isAnimatable else { return e.image }
+        clock.advance(to: date)
+        return e.frames[clock.frame(spob: spob, params: anim, frameCount: e.frames.count)]
     }
 }
 #endif

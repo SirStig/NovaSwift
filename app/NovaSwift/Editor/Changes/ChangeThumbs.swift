@@ -59,6 +59,7 @@ final class ChangeThumbCache: @unchecked Sendable {
     nonisolated static func decodeSheet(type: NovaSwiftKit.FourCharCode, data: Data) -> SpriteSheet? {
         switch type {
         case NovaType.rleD: return try? RLED.decode(data)
+        case NovaType.rle8: return try? RLE8.decode(data)
         case NovaType.pict: return try? PICT.decode(data)
         case NovaType.cicn: return try? CICN.decode(data)
         case NovaType.ppat, NovaType.ppatAlt: return try? PixPat.decode(data)

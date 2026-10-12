@@ -37,7 +37,8 @@ built out. This file is the shared contract the implementation follows.
 
 ### 2. Graphics codecs — `Sources/NovaSwiftKit/Editing/Graphics/`
 
-rlëD encoder (exact inverse of `RLED.decode`), PICT v2 encoder (readable by
+rlëD encoder (exact inverse of `RLED.decode`), `RLE8` decoder / `RLE8Encoder` (8-bit
+palette-indexed twin; spec and decomp addresses in `RLE8Decoder.swift`), PICT v2 encoder (readable by
 `PICT.decode` and QuickDraw), cicn encoder, PNG/CGImage → sprite-sheet import
 (grid or per-frame, rotation count), spïn helpers, HD/3D pack authoring via
 `GraphicsPackEmbedding`.
@@ -50,8 +51,11 @@ rlëD encoder (exact inverse of `RLED.decode`), PICT v2 encoder (readable by
   hardpoints, HD/3D side-by-side).
 - Galaxy map editor (drag systems, draw/erase hyperlinks, govt colours,
   nebulae) and star-system editor (place stellars with real sprites).
-- Live preview: an embedded `GameScene` running the effective collection,
-  reloaded in place as edits land.
+- Live preview: an embedded `GameScene` running the effective collection; edits adopt the new
+  catalog and reload the system in place in the same scene (a new scene only when the camera
+  ship's shïp/shän changed). Stellar sprites in the layout canvas and the galaxy inspector's
+  stellar list animate (all frames, spöb delay/bias/flags, 12 fps, visible stellars only) and
+  show HD art when HD is on.
 - Test run: full game session on base ⊕ document with a debug panel
   (spawn ships/fleets, give outfits, set bits, jump anywhere, god mode,
   start missions) built on the existing console commands.
@@ -84,7 +88,9 @@ open and save, with per-file key sets cached by path + size + mtime (`EditorConf
   first file that isn't named like a Graphics/Sounds file). Save As offers "Save to Folder" (all
   files, new folder) or "Merge into One File". Export Copy / Install always produce one file.
   New resources go to `targetFile`, else by type (sprites/PICT to a "...Graphics..." file, sounds
-  to a "...Sounds..." file, the rest to the primary file).
+  to a "...Sounds..." file, the rest to the primary file). Save As "Save to Folder" into a new
+  folder also copies `bundle.otherFiles` (fonts, movies, music, pilots, `.nplay`, readmes, images),
+  keeping relative paths and never overwriting an existing file, off-main with progress.
 - **`.nsx` graphics pack** (folder with `manifest.json` + PNG/USDZ, e.g. Nova Reimagined): its
   entries are embedded into the layer as `NSgx`/`NSbl` (blob ids renumbered into the layer's id
   space), tagged with source `pack:<name>.nsx`. Save writes the pack back as an `.nsx` folder via
@@ -100,6 +106,20 @@ open and save, with per-file key sets cached by path + size + mtime (`EditorConf
   `Nova.rez`, which the original shares with every scenario, loaded as base only when the
   conversion doesn't ship its own. Conflicts are not computed for a conversion (global plug-ins
   don't load under one).
+- **Save / Export / Install** snapshot the document on the main actor (`makeExportJob`,
+  `makeSavePlan`) and encode + write in a detached task behind `busyText`; errors land in
+  `errorText`. Panels stay on the main actor.
+- **Recovery autosave** (60 s, dirty documents) writes a recovery bundle under
+  `NovaSwift/Editor/Recovery`: `recovery.json` (source files in order, formats, `targetFile`,
+  bundle info, installed id) + `bundle/` (every source file and `.nsx` pack at its relative path,
+  metadata in the primary file). Restore reloads it through `PluginBundleLoader`, so resources keep
+  their files and `model.bundle` comes back. A document with no tracked sources uses the old
+  single `recovery.rez`.
+- **Conflicts** refresh ~1 s after the last data edit (debounced on `dataRevision`): other
+  plug-ins' key sets are cached per file, so it is a set intersection with the layer keys.
+- **Renumber** can also move the schema's implicit companions (`shän` = `shïp` id, `dësc` /
+  `PICT` offsets) in the same undo step (`moveCompanions`); `PluginDocument.companionPlan` drives
+  the checkbox list in the sheet.
 - `dsïg` #128 (an editor/version signature, 2-4 bytes, one per file) is registered as a raw
   type, "Editor Signature". The game ignores it; it is preserved per file on save.
 
@@ -149,19 +169,36 @@ debug panel (spawn ships/fleets, outfits, bits, missions, jumps, time scale,
 god mode, console).
 
 Known gaps:
-- Multi-file saves rewrite changed files in place; other bundle files (fonts, movies, pilots,
-  readmes) are listed but never copied, so "Save to Folder" into a new folder writes only the
-  data files and packs. Recovery autosave stores a merged single file (it forgets file sources).
-- Conflicts are computed on open/save, not after every edit. A resource overridden by a later
-  file of the same plug-in stays hidden after deleting the winner (the earlier copy is kept).
+- A resource overridden by a later file of the same plug-in stays hidden after deleting the winner
+  (the earlier copy is kept).
+- Install still hands the encoded file to `GameDataController.importPlugin` on the main actor
+  (encoding and the temp write are off-main). Building a save plan / recovery snapshot
+  (`makeSavePlan`) is O(layer) on the main actor, once per save or 60 s autosave.
+- `rlë8` (8-bit sprites) decodes with the Mac system palette and an inferred repeat opcode: the
+  original only loads rlë8 on an 8-bit display, no shipped data has one, so both are unverified
+  against real files. The game never uses rlë8 (it is a direct-colour renderer, like the original
+  at 16/32-bit), so only the editor previews/imports it.
 - "Embed HD in plug-in file" does not delete a stale `.nsx` folder already on disk.
-- Test-run landing is a dock stub (take off only — no trade/outfit/shipyard/
-  mission board); hypergates, hail/board dialogs and crons aren't simulated
-  there, and HD packs aren't loaded into editor games.
-- Map/system editors and the preview draw stellar frame 0 only.
-- Weapon DPS ignores sub-munitions; burst cycle is from the Bible, unverified.
-- Renumber reports, but doesn't move, implicit companions (shän, dësc, PICT).
-- Story "unreachable" check ignores `&`/`|` structure (conservative).
+- Test run: landing is the REAL spaceport (`SpaceportView`: trade, outfitter, shipyard, bar, mission
+  BBS) on the in-memory sandbox pilot, with the story runtime (mission scripts, crön ticks on
+  every jump / visit / "+days", ShipSyst mission ships, Mission Info, objective list), hail and
+  board dialogs. Still not simulated: the landing-clearance exchange, bribes / paid assistance /
+  Demand Tribute and escort commands in the comm windows, capturing from the plunder dialog
+  (use the panel's Capture), hypergates / wormholes, domination, and `Q`-style launches while a
+  story move is pending (a docked `M`/`N` launches into a freshly built ship). Storyline badges
+  in the BBS come from the loaded game's tag table, not the edited data.
+- HD/3D art: editor games install the document's `NSgx`/`NSbl` (incl. `.nsx` packs loaded into it)
+  over the user's installed packs into the shared `HDGraphics` (the game's own layer is restored
+  ~4 s after the last editor game closes). A big pack's first prewarm can take a while (bakes are
+  cached); the user's HD setting is honoured.
+- Weapon DPS assumes every submunition lands and counts only the schema's fixed-offset
+  companions for Renumber (a `spïn`'s sprite is a stored field, so its references are rewritten
+  but the sprite resource itself is not moved).
+- Story "unreachable" check evaluates each availability test with a port of the game's NCB test
+  interpreter (`NCBProbe`: `&`, `|`, `!`, `( )`, `[ ]`), treating every bit as clear-able and as
+  settable once a reachable source raises it. It is still per-bit independent (no ordering in
+  time: `b1 & !b1` is caught, "set by the same mission that needs it clear" is not), and the
+  copy of the interpreter must be kept in step with `NCBTest` (NovaSwiftStory).
 - Exported PICT/cicn/`snd ` are verified only against our own decoders, not
   QuickDraw or EV Nova CE.
 - The app is sandboxed: saving needs `files.user-selected.read-write` +

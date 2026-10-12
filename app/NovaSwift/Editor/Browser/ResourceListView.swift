@@ -245,7 +245,15 @@ struct RenumberSheet: View {
     var done: () -> Void
     @State private var newID: String
     @State private var rewrite = true
+    @State private var moveCompanions = true
     @State private var report: String?
+
+    /// What would move along with the resource, for the id currently typed. Reads only the layer
+    /// and base (a few lookups), so it is safe to evaluate in `body`.
+    private var companions: [CompanionMove] {
+        guard let to = Int(newID.trimmingCharacters(in: .whitespaces)), to != key.id else { return [] }
+        return model.document.companionPlan(key.type, from: key.id, to: to)
+    }
 
     init(model: EditorModel, key: ResourceKey, done: @escaping () -> Void) {
         self.model = model; self.key = key; self.done = done
@@ -259,6 +267,21 @@ struct RenumberSheet: View {
                 Text("New ID"); TextField("", text: $newID).frame(width: 90).textFieldStyle(.roundedBorder)
             }
             Toggle("Update references in this plug-in", isOn: $rewrite)
+            let plan = report == nil && model.dataReady ? companions : []
+            if !plan.isEmpty {
+                Toggle("Move companion resources too", isOn: $moveCompanions)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(plan, id: \.from) { c in
+                        HStack(spacing: 4) {
+                            Image(systemName: c.movable && moveCompanions ? "arrow.right" : "minus")
+                            Text("\(c.label): \(c.from.description) → #\(c.to.id)")
+                            if let why = c.blockedReason { Text("(\(why))").foregroundStyle(.tertiary) }
+                        }
+                        .font(.system(size: 11)).foregroundStyle(c.movable && moveCompanions ? Color.secondary : Color.secondary.opacity(0.6))
+                    }
+                }
+                .padding(.leading, 20)
+            }
             if !model.referencesReady && report == nil {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -273,7 +296,7 @@ struct RenumberSheet: View {
                     if report != nil { done(); return }
                     apply()
                 }.keyboardShortcut(.defaultAction)
-                    .disabled(report == nil && !model.referencesReady)
+                    .disabled(report == nil && !(model.referencesReady && model.dataReady))
             }
         }
         .padding(20).frame(width: 380)
@@ -282,13 +305,18 @@ struct RenumberSheet: View {
     private func apply() {
         guard let to = Int(newID.trimmingCharacters(in: .whitespaces)) else { report = "Enter a whole number."; return }
         do {
-            let r = try model.document.renumber(key.type, from: key.id, to: to, rewriteReferences: rewrite)
+            let r = try model.document.renumber(key.type, from: key.id, to: to, rewriteReferences: rewrite,
+                                                moveCompanions: moveCompanions)
             model.selection = r.to
             var lines = ["Renumbered to #\(to)."]
             if !r.rewritten.isEmpty { lines.append("\(r.rewritten.count) resource(s) updated.") }
             if !r.externalReferrers.isEmpty { lines.append("\(r.externalReferrers.count) outside resource(s) still point at the old id: \(r.externalReferrers.prefix(4).map(\.description).joined(separator: ", "))…") }
-            if !r.implicitRelatives.isEmpty { lines.append("Related by id: \(r.implicitRelatives.map(\.description).joined(separator: ", ")) — move them too.") }
-            if r.externalReferrers.isEmpty && r.implicitRelatives.isEmpty { done() } else { report = lines.joined(separator: " ") }
+            if !r.movedCompanions.isEmpty { lines.append("Moved with it: \(r.movedCompanions.map(\.description).joined(separator: ", ")).") }
+            if !r.blockedCompanions.isEmpty { lines.append("Left in place (not in this plug-in, or target id taken): \(r.blockedCompanions.map(\.description).joined(separator: ", ")).") }
+            if !r.implicitRelatives.isEmpty && r.blockedCompanions.isEmpty {
+                lines.append("Related by id: \(r.implicitRelatives.map(\.description).joined(separator: ", ")) — move them too.")
+            }
+            if r.externalReferrers.isEmpty && r.implicitRelatives.isEmpty && r.blockedCompanions.isEmpty { done() } else { report = lines.joined(separator: " ") }
         } catch { report = "\(error)" }
     }
 }

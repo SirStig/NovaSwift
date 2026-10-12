@@ -12,6 +12,8 @@ struct StellarRec: Identifiable {
     var govt: Int
     var slot: Int
     var provenance: Provenance
+    /// Frame-animation fields of the spöb (nil = still).
+    var anim: StellarAnimParams? = nil
     var point: CGPoint { CGPoint(x: x, y: y) }
 }
 
@@ -29,6 +31,10 @@ struct SystemEditorView: View {
     @ObservedObject var model: EditorModel
     @StateObject private var sprites = StellarSpriteCache()
     @StateObject private var preview = EditorPreviewModel()
+    @EnvironmentObject private var app: AppModel
+    /// Steps animated stellars' frames while the layout canvas is on screen (not observable:
+    /// the TimelineView below redraws the canvas).
+    @State private var clock = StellarAnimationClock()
 
     enum Mode: String, CaseIterable { case layout = "Layout", split = "Split", preview = "Preview" }
     enum InspectorTab: String, CaseIterable { case stellar = "Stellar", system = "System" }
@@ -91,6 +97,7 @@ struct SystemEditorView: View {
         .onAppear {
             // First frame: layout from the document (≤16 stellars, cheap). The live
             // preview is requested one tick later so the tool switch paints first.
+            sprites.bindHD(app: app, base: model.base)
             refreshDerived(); fitIfNeeded()
             Task { @MainActor in
                 await Task.yield()
@@ -107,7 +114,7 @@ struct SystemEditorView: View {
             if k?.type == NovaType.spob, stellars.contains(where: { $0.id == k?.id }) { tab = .stellar; centrePreview() }
         }
         .onChange(of: preview.status) { _, s in if s == .ready { centrePreview() } }
-        .onDisappear { preview.teardown() }
+        .onDisappear { preview.teardown(); sprites.teardown() }
     }
 
     // MARK: Derived data
@@ -131,7 +138,8 @@ struct SystemEditorView: View {
             let p = model.pointField("position", key)
             return StellarRec(id: id, name: r.name.isEmpty ? "Stellar #\(id)" : r.name, x: p.0, y: p.1,
                               type: model.intField("type", key, default: -1), govt: model.intField("govt", key, default: -1),
-                              slot: i + 1, provenance: doc.provenance(NovaType.spob, id) ?? .base)
+                              slot: i + 1, provenance: doc.provenance(NovaType.spob, id) ?? .base,
+                              anim: StellarAnimParams(r))
         }
         // Direct sÿst decodes for this system and its ≤16 neighbours; no NovaGame needed.
         guard let meRes = doc.resource(NovaType.syst, sid) else { exits = []; return }
@@ -240,7 +248,10 @@ struct SystemEditorView: View {
 
     private var layoutPane: some View {
         ZStack {
-            Canvas(rendersAsynchronously: false) { ctx, sz in draw(&ctx, sz) }
+            // Modest 12 fps clock, paused unless an animated stellar is actually on screen.
+            TimelineView(.animation(minimumInterval: 1.0 / 12, paused: !needsAnimationClock)) { tl in
+                Canvas(rendersAsynchronously: false) { ctx, sz in draw(&ctx, sz, date: tl.date) }
+            }
                 .background(Color(white: 0.04))
                 .background(GeometryReader { g in
                     Color.clear.onAppear { size = g.size; fitIfNeeded() }.onChange(of: g.size) { _, s in size = s }
@@ -531,8 +542,23 @@ struct SystemEditorView: View {
         return steps.first { $0 >= target } ?? 10000
     }
 
-    private func draw(_ ctx: inout GraphicsContext, _ sz: CGSize) {
+    /// A stellar's centre is inside the canvas (plus a margin for its sprite).
+    private func isVisible(_ s: StellarRec, margin: CGFloat = 80) -> Bool {
+        let p = vp.toScreen(s.point, size)
+        return p.x > -margin && p.y > -margin && p.x < size.width + margin && p.y < size.height + margin
+    }
+
+    /// Whether the animation clock needs to run: some visible stellar has a multi-frame
+    /// sheet and an authored animation (looked up without starting decodes).
+    private var needsAnimationClock: Bool {
+        mode != .preview && stellars.contains { s in
+            s.anim != nil && (sprites.peek(type: s.type)?.isAnimatable ?? false) && isVisible(s)
+        }
+    }
+
+    private func draw(_ ctx: inout GraphicsContext, _ sz: CGSize, date: Date) {
         _ = sprites.version
+        clock.advance(to: date)
         let o = vp.toScreen(.zero, sz)
         let tl = vp.toWorld(.zero, sz), br = vp.toWorld(CGPoint(x: sz.width, y: sz.height), sz)
 
@@ -597,7 +623,12 @@ struct SystemEditorView: View {
             if let e = entry {
                 let r = CGRect(x: p.x - e.size.width * vp.zoom / 2, y: p.y - e.size.height * vp.zoom / 2,
                                width: e.size.width * vp.zoom, height: e.size.height * vp.zoom)
-                ctx.draw(ctx.resolve(Image(decorative: e.image, scale: 1)), in: r)
+                var shown = e.image
+                if let anim = s.anim, e.isAnimatable, isVisible(s) {
+                    let f = clock.frame(spob: s.id, params: anim, frameCount: e.frames.count)
+                    shown = e.frames[f]
+                }
+                ctx.draw(ctx.resolve(Image(decorative: shown, scale: 1)), in: r)
                 half = max(r.width, r.height) / 2
                 if vp.zoom < 0.12 { ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.white)) }
             } else {

@@ -134,7 +134,12 @@ struct WeaponOverviewView: View {
                 StatRow(label: "Guidance", value: l.guidance)
                 StatRow(label: "DPS vs shields / armor", value: "\(SpecFormat.num(l.dpsShield)) / \(SpecFormat.num(l.dpsArmor))")
                 StatRow(label: "Per shot", value: "\(SpecFormat.num(l.shieldDamage, 0)) / \(SpecFormat.num(l.armorDamage, 0))")
-                StatRow(label: "Fire rate", value: l.reloadSeconds > 0 ? "\(SpecFormat.num(1 / l.reloadSeconds, 2))/s" : "every tick")
+                if l.subShieldDamage > 0 || l.subArmorDamage > 0 {
+                    StatRow(label: "+ submunitions", value: "\(SpecFormat.num(l.subShieldDamage, 0)) / \(SpecFormat.num(l.subArmorDamage, 0))",
+                            note: l.subTruncated ? "all hit; recursion capped" : "if all hit; counted in DPS")
+                }
+                StatRow(label: "Fire rate", value: "\(SpecFormat.num(l.shotsPerSecond, 2))/s",
+                        note: w.burstCount > 0 ? "burst cycle" : nil)
                 StatRow(label: "Range", value: "\(Int(l.range)) px")
                 if !l.isBeam {
                     StatRow(label: "Lifetime", value: "\(SpecFormat.num(Double(w.duration) / 30, 2)) s", note: "\(w.duration) frames")

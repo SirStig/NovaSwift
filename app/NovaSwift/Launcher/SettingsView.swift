@@ -181,6 +181,44 @@ struct SettingsView: View {
     /// A one-tap preset stamps the interface toggles below; editing any of them
     /// flips the selector to "Custom". `.custom` isn't user-selectable — it only
     /// reflects a hand-mixed state.
+    private var graphicsQualityBinding: Binding<GameSettings.GraphicsQuality> {
+        Binding(
+            get: { model.settings.matchedGraphicsQuality },
+            set: { newValue in
+                guard newValue != .custom else { return }
+                let detail = model.settings.hdDetail
+                newValue.apply(to: &model.settings)
+                model.commitSettings()
+                if model.settings.hdDetail != detail { rebuildHDGraphics() }
+            }
+        )
+    }
+
+    private var hdDetailBinding: Binding<Int> {
+        Binding(
+            get: { model.settings.hdDetail },
+            set: { model.settings.hdDetail = $0; model.commitSettings(); rebuildHDGraphics() }
+        )
+    }
+
+    private var livePresentationBinding: Binding<GameSettings.HullPresentation> {
+        Binding(
+            get: { model.settings.hullPresentation },
+            set: {
+                model.settings.hullPresentation = $0
+                model.commitSettings()
+                // Models load and fit as ships need them, so nothing to rebuild.
+                HDGraphics.shared.update(settings: model.settings)
+            }
+        )
+    }
+
+    /// Re-prepare HD art for changed settings, off the main thread.
+    private func rebuildHDGraphics() {
+        HDGraphics.shared.update(settings: model.settings)
+        Task { await model.data.prewarmHDGraphics() }
+    }
+
     private var presetBinding: Binding<GameSettings.UIMode> {
         Binding(
             get: { model.settings.matchedPreset },
@@ -340,6 +378,11 @@ struct SettingsView: View {
 
     private var graphicsSection: some View {
         Section {
+            // Custom only shows when the options don't match a level.
+            NovaSegmentedPicker(selection: graphicsQualityBinding,
+                                options: GameSettings.GraphicsQuality.allCases.filter {
+                                    $0 != .custom || model.settings.matchedGraphicsQuality == .custom
+                                }) { $0.label }
             sliderRow("Starfield density", binding(\.starfieldDensity), 0.2...2.0)
             sliderRow("Camera zoom", binding(\.cameraZoom), 0.5...2.5)
             NovaMenuPicker(title: "Frame rate limit", selection: binding(\.frameRateCap),
@@ -353,17 +396,23 @@ struct SettingsView: View {
                     .novaFont(.caption).foregroundStyle(.secondary)
             }
             if model.settings.hdGraphics {
-                Toggle("Extra-sharp HD (uses more memory)",
-                       isOn: Binding(get: { model.settings.hdDetail >= 4 },
-                                     set: { model.settings.hdDetail = $0 ? 4 : 2 }))
+                NovaMenuPicker(title: "HD detail", selection: hdDetailBinding, options: [1, 2, 4]) {
+                    switch $0 { case 1: return "Low (1×)"; case 4: return "Sharp (4×)"; default: return "Standard (2×)" }
+                }
                 // Live 3D turns each modelled ship in real time. It costs more
-                // than sprites, so it's opt-in and capped per device.
-                NovaMenuPicker(title: "Ships with 3D models", selection: Binding(
-                                    get: { model.settings.hullPresentation },
-                                    set: { model.settings.hullPresentation = $0
-                                           Task { await model.data.prewarmHDGraphics() } }),
+                // than sprites, so it's opt-in and drawn only for as many ships
+                // as the device keeps its frame rate with.
+                NovaMenuPicker(title: "Ships with 3D models", selection: livePresentationBinding,
                                options: GameSettings.HullPresentation.allCases) { $0.label }
+                if model.settings.hullPresentation == .live {
+                    NovaMenuPicker(title: "3D model detail", selection: binding(\.modelDetail),
+                                   options: GameSettings.ModelDetail.allCases) { $0.label }
+                    NovaMenuPicker(title: "3D lighting", selection: binding(\.liveLighting),
+                                   options: GameSettings.LiveLighting.allCases) { $0.label }
+                }
             }
+            NovaMenuPicker(title: "Particle effects", selection: binding(\.particleDensity),
+                           options: GameSettings.ParticleDensity.allCases) { $0.label }
             Toggle("Engine & weapon glow", isOn: binding(\.engineGlow))
             Toggle("Windows hyperspace look", isOn: binding(\.ceHyperspaceLook))
             Toggle("Hyperspace effects", isOn: Binding(get: { !model.settings.noHyperspaceEffects },
@@ -371,7 +420,7 @@ struct SettingsView: View {
         } header: {
             sectionHeader("Graphics", icon: "sparkles")
         } footer: {
-            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. HD graphics draws the high-resolution art and 3D models that graphics plug-ins such as Nova Reimagined provide, in place of the originals; ships still handle and collide exactly as in the original. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes. Jump timing is the same either way. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
+            Text("EV Nova's art is pixel art — leave smooth scaling off for the crisp, faithful look. HD graphics draws the high-resolution art and 3D models that graphics plug-ins such as Nova Reimagined provide, in place of the originals; ships still handle and collide exactly as in the original. Graphics quality sets HD detail, 3D model detail and lighting, particles and starfield density together; change any of them afterwards to fine-tune. Full live 3D turns ships that have 3D models in real time instead of drawing their pre-rendered frames, for as many ships as the device keeps its frame rate with; the rest draw as sprites. Lower model detail and simple lighting help phones and older Macs. Hyperspace jumps fade to white as on the Mac; the Windows look skips the fade and only flashes. Jump timing is the same either way. Camera zoom is world pixels shown per screen point; 1.0 is the original's own native scale (higher shows more of the system at once, everything reading smaller). iPhone starts a bit further out than that by default, since its screen is far fewer points across than a Mac window or iPad. A lower frame-rate limit saves battery on mobile.")
         }
     }
 

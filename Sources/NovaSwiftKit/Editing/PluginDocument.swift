@@ -50,6 +50,23 @@ public struct RenumberReport: Sendable {
     /// Resources tied to the old id by id arithmetic (`shän`, `dësc`, `PICT`
     /// companions) that the caller may want to move with it.
     public let implicitRelatives: [ResourceKey]
+    /// Companions (`implicitRelatives` that live in the plug-in) moved along with the resource,
+    /// by `moveCompanions: true`. Old keys.
+    public let movedCompanions: [ResourceKey]
+    /// Companions that could not move (not in the plug-in, or the target id is taken / out of range).
+    public let blockedCompanions: [ResourceKey]
+}
+
+/// One implicit companion of a resource and what a renumber would do with it
+/// (see `PluginDocument.companionPlan`).
+public struct CompanionMove: Sendable, Hashable {
+    public let label: String
+    public let from: ResourceKey
+    public let to: ResourceKey
+    /// True when the companion is in the plug-in and `to` is free, so it can move.
+    public let movable: Bool
+    /// Why it can't move, for the UI.
+    public let blockedReason: String?
 }
 
 /// The editor's working document: a **layer** holding only the resources a
@@ -271,11 +288,39 @@ public final class PluginDocument {
         return newID
     }
 
+    /// The implicit companions (`shän` with the same id as a `shïp`, `dësc` / `PICT` at fixed id
+    /// offsets per type, from the schema's `related` list) that exist for `type`/`from`, with where
+    /// each would go if the resource moved to `to`. Reads only the layer and base, so it is cheap
+    /// enough for a live preview in a sheet.
+    public func companionPlan(_ type: FourCharCode, from: Int, to: Int) -> [CompanionMove] {
+        guard let schema = ResourceSchemas.schema(for: type) else { return [] }
+        let valid = Int(Int16.min)...Int(Int16.max)
+        var out: [CompanionMove] = []
+        for rel in schema.related {
+            let src = ResourceKey(rel.type, from + rel.idOffset)
+            // layer ∪ base == effective, without forcing the merged view to be built.
+            guard layer.resource(src.type, src.id) != nil || base.resource(src.type, src.id) != nil else { continue }
+            let dst = ResourceKey(rel.type, to + rel.idOffset)
+            var reason: String?
+            if layer.resource(src.type, src.id) == nil { reason = "not part of this plug-in" }
+            else if !valid.contains(dst.id) { reason = "new id out of range" }
+            else if src == dst { reason = "id unchanged" }
+            else if layer.resource(dst.type, dst.id) != nil || base.resource(dst.type, dst.id) != nil { reason = "target id in use" }
+            out.append(CompanionMove(label: rel.label, from: src, to: dst, movable: reason == nil, blockedReason: reason))
+        }
+        return out
+    }
+
     /// Give a plug-in resource a new id. With `rewriteReferences`, every
     /// plug-in resource that points at the old id (fields and NCB scripts) is
-    /// updated in the same undo step.
+    /// updated in the same undo step. With `moveCompanions`, the plug-in's own
+    /// implicit companions (see `companionPlan`) move to the matching new ids in
+    /// the same undo step, and their references are rewritten too when
+    /// `rewriteReferences` is on. Companions that can't move are reported in
+    /// `blockedCompanions` / `implicitRelatives`.
     @discardableResult
-    public func renumber(_ type: FourCharCode, from: Int, to: Int, rewriteReferences: Bool = false) throws -> RenumberReport {
+    public func renumber(_ type: FourCharCode, from: Int, to: Int, rewriteReferences: Bool = false,
+                         moveCompanions: Bool = false) throws -> RenumberReport {
         let src = ResourceKey(type, from), dst = ResourceKey(type, to)
         guard (Int(Int16.min)...Int(Int16.max)).contains(to) else { throw PluginDocumentError.invalidID(to) }
         guard let res = layer.resource(type, from) else {
@@ -285,33 +330,61 @@ public final class PluginDocument {
 
         var rewritten: [ResourceKey] = []
         var external: [ResourceKey] = []
-        let referrers = references.usedBy(src).filter { $0.kind != .implicit }.map(\.source)
-        var implicit: [ResourceKey] = []
-        if let schema = ResourceSchemas.schema(for: type) {
-            implicit = schema.related.map { ResourceKey($0.type, from + $0.idOffset) }
-                .filter { effective.resource($0.type, $0.id) != nil }
+        let plan = companionPlan(type, from: from, to: to)
+        let implicit = plan.map(\.from)
+        let toMove = moveCompanions ? plan.filter(\.movable) : []
+        let blocked = moveCompanions ? plan.filter { !$0.movable }.map(\.from) : []
+
+        // Every old -> new pair this renumber performs (the resource itself, then companions).
+        var moves: [(from: ResourceKey, to: ResourceKey)] = [(src, dst)]
+        for c in toMove { moves.append((c.from, c.to)) }
+        var movedMap: [ResourceKey: ResourceKey] = [:]
+        for m in moves { movedMap[m.from] = m.to }
+        var referrersByMove: [[ResourceKey]] = []
+        for m in moves {
+            referrersByMove.append(references.usedBy(m.from).filter { $0.kind != .implicit }.map(\.source))
         }
 
         beginGroup("Renumber \(src) → \(to)")
         defer { endGroup() }
-        let moved = Resource(type: type, id: to, name: res.name, attributes: res.attributes, data: res.data)
-        apply([src, dst], label: "Renumber \(src)") { $0.remove(type, from); $0.add(moved) }
+        for m in moves {
+            guard let r = layer.resource(m.from.type, m.from.id) else { continue }
+            let moved = Resource(type: m.to.type, id: m.to.id, name: r.name, attributes: r.attributes, data: r.data)
+            let file = sourceMap[m.from]          // the moved resource stays in the file it was in
+            apply([m.from, m.to], label: "Renumber \(m.from)") { $0.remove(m.from.type, m.from.id); $0.add(moved) }
+            if let file, sourceFiles.contains(file) {
+                sourceMap[m.to] = file
+                modifiedSources.insert(file)
+            }
+        }
 
         if rewriteReferences {
-            for key in Set(referrers) {
-                guard let r = layer.resource(key.type, key.id == from && key.type == type ? to : key.id) else {
-                    external.append(key); continue
-                }
-                if let updated = ResourceReferences.rewritten(r, from: src, to: to) {
-                    put(updated, label: "Update references in \(ResourceKey(r.type, r.id))")
-                    rewritten.append(ResourceKey(r.type, r.id))
+            for (n, m) in moves.enumerated() {
+                for key in Set(referrersByMove[n]) {
+                    let current = movedMap[key] ?? key
+                    guard let r = layer.resource(current.type, current.id) else {
+                        external.append(key); continue
+                    }
+                    if let updated = ResourceReferences.rewritten(r, from: m.from, to: m.to.id) {
+                        put(updated, label: "Update references in \(ResourceKey(r.type, r.id))")
+                        let k = ResourceKey(r.type, r.id)
+                        if !rewritten.contains(k) { rewritten.append(k) }
+                    }
                 }
             }
         } else {
-            external = referrers.filter { layer.resource($0.type, $0.id) == nil }
+            for (n, _) in moves.enumerated() {
+                external.append(contentsOf: referrersByMove[n].filter { k in
+                    let current = movedMap[k] ?? k
+                    return layer.resource(current.type, current.id) == nil
+                })
+            }
         }
+        let movedOld = toMove.map(\.from)
         return RenumberReport(from: src, to: dst, rewritten: rewritten.sorted(),
-                              externalReferrers: Array(Set(external)).sorted(), implicitRelatives: implicit)
+                              externalReferrers: Array(Set(external)).sorted(),
+                              implicitRelatives: implicit.filter { !movedOld.contains($0) },
+                              movedCompanions: movedOld, blockedCompanions: blocked)
     }
 
     // MARK: Field editing conveniences
@@ -565,6 +638,10 @@ public final class PluginDocument {
         }
     }
 
+    /// Treat every source file as changed, so the next Save rewrites all of them (used after a
+    /// recovery restore, where the on-disk originals may not match the recovered content).
+    public func markAllSourcesModified() { modifiedSources = Set(sourceFiles) }
+
     /// Fold every source file into one (after "merge into a single file" saves).
     public func collapseSources(to name: String, format: PluginFormat) {
         sourceFiles = [name]
@@ -755,20 +832,61 @@ public final class PluginDocument {
 
     private struct Metadata: Codable { var name: String; var author: String; var version: String; var notes: String }
 
+    /// A plain-value snapshot of what a single-file export would write, so the (slow) encoding and
+    /// the file write can run off the main actor. Make it with `makeExportJob`.
+    public struct ExportJob: Sendable {
+        let layer: ResourceCollection
+        /// Non-nil for a full export: the base the layer is overlaid on.
+        let base: ResourceCollection?
+        let metadata: Data?
+        let excludeHD: Bool
+        public let format: PluginFormat
+        /// `changeCount` when the snapshot was taken (pass to `markSaved(atChangeCount:)`).
+        public let changeCount: Int
+
+        /// Encode the plug-in file.
+        public func encode() throws -> Data {
+            var out: ResourceCollection
+            if let base {
+                out = base
+                out.overlay(layer)
+            } else if excludeHD {
+                out = ResourceCollection()
+                for (t, rs) in layer.byType where t != GraphicsEnhancementType.descriptor && t != GraphicsEnhancementType.blob {
+                    for r in rs.values { out.add(r) }
+                }
+            } else {
+                out = layer
+            }
+            if let metadata {
+                out.add(Resource(type: PluginDocument.metadataType, id: PluginDocument.metadataID,
+                                 name: "Editor metadata", data: metadata))
+            }
+            switch format {
+            case .rez: return RezWriter.write(out)
+            case .classic: return try ClassicForkWriter.write(out)
+            }
+        }
+    }
+
+    /// Snapshot for an off-main export (cheap: value-type copies). `includeBase` redistributes base
+    /// game data, so only pass it after the caller's explicit, warned confirmation.
+    public func makeExportJob(format: PluginFormat, includeBase: Bool = false, embedMetadata: Bool = true,
+                              excludeHD: Bool = false) -> ExportJob {
+        var json: Data?
+        if embedMetadata {
+            json = try? JSONEncoder().encode(Metadata(name: name, author: author, version: version, notes: notes))
+        }
+        return ExportJob(layer: layer, base: includeBase ? base : nil, metadata: json, excludeHD: excludeHD,
+                         format: format, changeCount: changeCount)
+    }
+
     /// The bytes of the plug-in file. By default only the plug-in's own
     /// resources are written. `includeBase: true` writes the whole effective
     /// set, base game included — this **redistributes base game data**, so
     /// callers must only offer it behind an explicit, warned choice.
     public func exportData(format: PluginFormat, includeBase: Bool = false, embedMetadata: Bool = true) throws -> Data {
-        var out = includeBase ? effective : layer
-        if embedMetadata,
-           let json = try? JSONEncoder().encode(Metadata(name: name, author: author, version: version, notes: notes)) {
-            out.add(Resource(type: Self.metadataType, id: Self.metadataID, name: "Editor metadata", data: json))
-        }
-        switch format {
-        case .rez: return RezWriter.write(out)
-        case .classic: return try ClassicForkWriter.write(out)
-        }
+        try makeExportJob(format: format, includeBase: includeBase, embedMetadata: embedMetadata).encode()
     }
 
     /// The whole effective set (base game included) as one file. This
@@ -785,6 +903,10 @@ public final class PluginDocument {
         try exportData(format: format, includeBase: includeBase, embedMetadata: embedMetadata).write(to: url, options: .atomic)
         savedChangeCount = changeCount
     }
+
+    /// Mark the document clean as of `count` (an `ExportJob.changeCount`) after an off-main save
+    /// succeeded; edits made while it was writing keep the document dirty.
+    public func markSaved(atChangeCount count: Int) { savedChangeCount = count }
 
     /// Load a plug-in file (`.rez`, classic fork, `.ndat`) as the layer over `base`.
     public static func open(url: URL, base: ResourceCollection = ResourceCollection()) throws -> PluginDocument {

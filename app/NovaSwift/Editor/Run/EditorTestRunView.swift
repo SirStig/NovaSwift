@@ -5,16 +5,19 @@ import NovaSwiftKit
 import NovaSwiftEngine
 
 /// A full-window test game on a `ResourceCollection` (base ⊕ the author's
-/// plugin layer): real flight controls, real HUD, landing (a stub dock screen
-/// with Take Off — no spaceport services), galaxy map + hyperjump inside the
-/// edited galaxy, and a collapsible right-hand debug panel.
+/// plugin layer): real flight controls, real HUD, landing into the REAL spaceport
+/// (trade / outfitter / shipyard / bar / mission BBS on the sandbox pilot), the story
+/// runtime (missions, crön ticks, mission ships, Mission Info), hail and board dialogs,
+/// galaxy map + hyperjump inside the edited galaxy, and a collapsible right-hand
+/// debug panel.
 ///
 ///     EditorTestRunView(collection: doc.effective, base: doc.base,
 ///                       startSystem: 128, startShip: 128,
 ///                       onExit: { editor.endTest() })
 ///
-/// Sandbox guarantee: the session owns a throwaway pilot that is never saved;
-/// no pilot-store callbacks are wired; the live roster/autosave is untouched.
+/// Sandbox guarantee: the session owns an in-memory `PilotStore(editorSandbox:)` whose
+/// `save()`/`reset()` are no-ops and that never reads the live save; the spaceport screens
+/// are handed that store only; `AppModel.autosave` / the roster are never called.
 /// Needs `AppModel` in the environment (settings, key bindings, audio).
 struct EditorTestRunView: View {
     let collection: ResourceCollection
@@ -130,11 +133,14 @@ private struct GameArea: View {
     var focused: FocusState<Bool>.Binding
     @EnvironmentObject private var model: AppModel
     @ObservedObject private var nav: NavigationModel
+    /// The story seam's queue (texts, a përs's mission offer).
+    @ObservedObject private var services: AppGameServices
 
     init(session: EditorTestSession, focused: FocusState<Bool>.Binding) {
         self.session = session
         self.focused = focused
         self._nav = ObservedObject(wrappedValue: session.nav)
+        self._services = ObservedObject(wrappedValue: session.missionServices)
     }
 
     private var hudStyle: AuthenticHUDStyle? { model.settings.modernHUD ? nil : session.host?.hudStyle }
@@ -157,8 +163,8 @@ private struct GameArea: View {
                     sceneLayer(host)
                     hudLayer(host)
                     GeometryReader { geo in
-                        ContextualActionsView(hud: host.hud, landOnly: true,
-                                              onAction: { if $0 == .land { session.landKeyPressed() } },
+                        ContextualActionsView(hud: host.hud,
+                                              onAction: { handleDiscrete($0) },
                                               rightInset: sidebarWidth(geo.size, hudStyle))
                     }
                     MessageLogView(hud: host.hud)
@@ -170,19 +176,25 @@ private struct GameArea: View {
                             .transition(.opacity)
                     }
                     if let spob = session.landedSpobID {
-                        LandedStub(session: session, spobID: spob)
+                        landedLayer(host, spob)
                     }
+                    flightDialogs(host)
+                    storyLayers(host)
                     hint
                 }
             }
         }
         .onChange(of: nav.showingMap) { _, _ in session.refreshPause(); if !nav.showingMap { focused.wrappedValue = true } }
+        .onChange(of: session.landedSpobID) { _, id in if id == nil { grabFocus() } }
+        .onChange(of: session.hail == nil && session.boardManifest == nil && !session.showMissionInfo) { _, free in
+            if free { grabFocus() }
+        }
     }
 
     private var hint: some View {
         VStack {
             Spacer()
-            Text("Test run — sandbox pilot, nothing is saved.  Click the game to fly · M map · J jump · L land")
+            Text("Test run — sandbox pilot, nothing is saved.  Click the game to fly · M map · J jump · L land · hail / board / mission info use your key bindings")
                 .font(.system(size: 10)).foregroundStyle(.white.opacity(0.35))
                 .padding(.bottom, 4)
         }.allowsHitTesting(false)
@@ -242,12 +254,100 @@ private struct GameArea: View {
         return min(style.nativeSize.width * scale, size.width * 0.35)
     }
 
+    // MARK: Landed + dialogs
+
+    /// The real spaceport (frame PICT 8500 and its services) over the play viewport, so the
+    /// status-bar HUD stays visible exactly as in the game. It works on the sandbox pilot.
+    @ViewBuilder
+    private func landedLayer(_ host: GameHost, _ spobID: Int) -> some View {
+        if let graphics = host.graphics, let galaxy = host.galaxy, let spob = host.game?.spob(spobID) {
+            GeometryReader { geo in
+                let playWidth = max(0, geo.size.width - sidebarWidth(geo.size, hudStyle))
+                SpaceportView(graphics: graphics, galaxy: galaxy, spob: spob, pilot: session.pilot,
+                              onDepart: { session.takeOff() },
+                              onLiveSync: { session.syncHUDFromPilotState() },
+                              showHints: false)
+                    .frame(width: playWidth, height: geo.size.height)
+                    .position(x: playWidth / 2, y: geo.size.height / 2)
+            }
+            .transition(.opacity)
+        } else {
+            LandedStub(session: session, spobID: spobID)   // data without the interface PICTs
+        }
+    }
+
+    /// Hail, plunder and the Mission Info window.
+    @ViewBuilder
+    private func flightDialogs(_ host: GameHost) -> some View {
+        if let state = session.hail {
+            HailDialogView(state: state, portrait: session.hailPortrait(state), graphics: host.graphics,
+                           showAssistButton: false, assistEnabled: false,
+                           onGreetings: { session.hailGreetings() },
+                           onRequestAssistance: {},
+                           onClose: { session.closeHail() })
+        }
+        if let m = session.boardManifest {
+            let _ = session.boardRefresh      // re-read after taking loot
+            PlunderView(
+                graphics: host.graphics,
+                targetName: m.name,
+                cargoLines: m.cargo.map { PlunderLine(label: commodityLabel($0.commodity), amount: "\($0.tons)") },
+                creditsAboard: m.credits,
+                ammoAboard: host.scene.ammoAboard(m.shipID, freeMass: session.plunderFreeMass),
+                energyAboard: Int(host.scene.fuelAboard(m.shipID).rounded()),
+                captureChance: m.captureChance,
+                onTakeCargo: { session.plunderTakeCargo(m.shipID) },
+                onTakeCredits: { session.plunderTakeCredits(m.shipID) },
+                onTakeAmmo: { session.plunderTakeAmmo(m.shipID) },
+                onTakeEnergy: { session.plunderTakeFuel(m.shipID) },
+                onCaptureShip: { session.plunderCaptureUnsupported() },
+                onDismiss: { session.finishBoarding() })
+                .transition(.opacity)
+        }
+        if session.showMissionInfo, let graphics = host.graphics, let game = session.game {
+            MissionInfoView(graphics: graphics, game: game, pilot: session.pilot,
+                            onClose: { session.showMissionInfo = false })
+                .transition(.opacity)
+        }
+    }
+
+    /// Story texts (briefings, completion / failure texts, cron news) and a përs's offered
+    /// LinkMission — above every other layer, like the game.
+    @ViewBuilder
+    private func storyLayers(_ host: GameHost) -> some View {
+        if let offer = services.pendingOffer, session.landedSpobID == nil, let graphics = host.graphics {
+            ZStack {
+                Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                MissionSingleDialog(graphics: graphics, offer: offer, offered: [offer.mission],
+                                    onPage: { _ in },
+                                    onAccept: { session.acceptPersOffer(offer) },
+                                    onDecline: { session.declinePersOffer(offer) })
+                    .transition(.opacity)
+            }
+        }
+        if let story = services.storyText {
+            ZStack {
+                Color.black.opacity(0.5).ignoresSafeArea().transition(.opacity)
+                DescTextDialog(title: story.title, text: story.text,
+                               graphicID: services.storyDescID.flatMap { session.game?.desc($0)?.pictureID }) {
+                    services.storyText = nil
+                }
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private func commodityLabel(_ id: Int) -> String {
+        if let c = Commodity(rawValue: id) { return session.game?.commodityName(c) ?? "Cargo" }
+        return "Cargo"
+    }
+
     // MARK: Input
 
     private func handleDiscrete(_ action: GameAction) {
         guard let scene = session.host?.scene else { return }
         if scene.isJumping { switch action { case .land, .hyperjump: return; default: break } }
-        if session.landedSpobID != nil { return }
+        if session.landedSpobID != nil || session.hail != nil || session.boardManifest != nil { return }
         switch action {
         case .land: session.landKeyPressed()
         case .openMenu, .pauseGame:
@@ -273,7 +373,15 @@ private struct GameArea: View {
         case .recallFighters: scene.recallPlayerFighters()
         case .eject: scene.requestEject()
         case .dismissMessage: session.host?.hud.dismissMessage()
-        default: break   // hail / board dialogs, info windows, escort panels: not in the test run
+        case .hailTarget: session.hailTarget()
+        case .hailStellar: session.hailTarget(stellar: true)
+        case .board: session.boardTarget()
+        case .missionInfo:
+            if session.showMissionInfo { session.showMissionInfo = false }
+            else if session.pilot.state.activeMissions.isEmpty {
+                session.host?.hud.post(session.game?.stringList(2002)?.string(at: 354) ?? "You aren't on any missions.")
+            } else { session.showMissionInfo = true }
+        default: break   // info windows, escort panels: not in the test run
         }
     }
 
@@ -291,7 +399,7 @@ private struct GameArea: View {
 
 // MARK: - Landing stub
 
-/// The test run's stand-in for the spaceport: what you landed on, and Take Off.
+/// Fallback landing card for data sets without the spaceport interface PICTs: what you landed on, and Take Off.
 private struct LandedStub: View {
     @ObservedObject var session: EditorTestSession
     let spobID: Int
@@ -307,7 +415,7 @@ private struct LandedStub: View {
                 if let spob {
                     Text(summary(spob)).font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Spaceport services (trade, outfitter, shipyard, missions) aren't part of the test run.\nUse the debug panel to change ship, outfits, bits and missions.")
+                Text("This data set has no spaceport interface graphics (PICT 8500), so only Take Off is offered.\nUse the debug panel to change ship, outfits, bits and missions.")
                     .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 Button { session.takeOff() } label: {
                     Label("Take Off", systemImage: "arrow.up.forward.circle.fill")

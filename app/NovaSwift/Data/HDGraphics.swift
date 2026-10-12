@@ -1,6 +1,7 @@
 import Foundation
 import SpriteKit
 import SceneKit
+import Metal
 import NovaSwiftKit
 import NovaSwiftHD
 #if canImport(UIKit)
@@ -31,10 +32,20 @@ final class HDGraphics: @unchecked Sendable {
     private var enabled = false
     private var maxScale = 2.0
     private var presentation: GameSettings.HullPresentation = .sprites
-    /// Models fitted for the live 3D presentation, by base sprite id (see `prepareLiveTemplate`).
-    private var liveTemplates: [Int: LiveHullTemplate] = [:]
-    /// Live hulls in use right now, against `liveHullBudget`.
-    private var liveHulls = 0
+    private var modelDetail: GameSettings.ModelDetail = .full
+    private var simpleLighting = false
+    /// Live 3D: each model hull's classic sheet (noted by `prepare`, for fitting).
+    private var liveSheets: [Int: SpriteSheet] = [:]
+    /// Live 3D: each model hull's fit and light level, by base sprite id;
+    /// kept when its model is evicted, so a reload measures nothing.
+    private var liveFits: [Int: LiveFit] = [:]
+    /// Live 3D: loaded models at the current detail, least recently used first
+    /// in `liveModelOrder`. Only the hulls actually flying are kept, up to
+    /// `liveModelCap`, so memory follows the system, not the whole pack.
+    private var liveModels: [Int: LiveModel] = [:]
+    private var liveModelOrder: [Int] = []
+    private var liveLoading: Set<Int> = []
+    private var liveFailed: Set<Int> = []
     private var generation = 0
     private var atlases: [Int: HDAtlas] = [:]
     private var textures: [Int: [SKTexture]] = [:]
@@ -72,7 +83,7 @@ final class HDGraphics: @unchecked Sendable {
         generation += 1
         atlases = [:]; textures = [:]; pending = []; failed = []; modelHulls = [:]; portraits = [:]; portraitsOnBlack = [:]; portraitsOnBackdrop = [:]; tintedPortraits = [:]
         shieldAtlases = [:]; shieldTextures = [:]
-        liveTemplates = [:]
+        dropLiveState()
         apply(settings)
         for p in catalog.problems { NovaSwiftKit.Log.graphics.error("HD pack: \(p, privacy: .public)") }
         if !catalog.isEmpty {
@@ -83,15 +94,23 @@ final class HDGraphics: @unchecked Sendable {
     /// Follow the Settings toggles. A detail change rebuilds on next prewarm.
     func update(settings: GameSettings) {
         lock.lock(); defer { lock.unlock() }
-        let oldScale = maxScale
+        let oldScale = maxScale, oldDetail = modelDetail
         apply(settings)
         if oldScale != maxScale { atlases = [:]; textures = [:]; failed = []; modelHulls = [:]; shieldAtlases = [:]; shieldTextures = [:]; generation += 1 }
+        // Models reload at the new detail as ships need them.
+        if oldDetail != modelDetail { liveModels = [:]; liveModelOrder = [] }
     }
 
     private func apply(_ s: GameSettings) {
         enabled = s.hdGraphics
-        maxScale = Double(min(4, max(2, s.hdDetail)))
+        maxScale = Double(min(4, max(1, s.hdDetail)))
         presentation = s.hullPresentation
+        modelDetail = s.modelDetail
+        simpleLighting = s.liveLighting == .simple
+    }
+
+    private func dropLiveState() {
+        liveSheets = [:]; liveFits = [:]; liveModels = [:]; liveModelOrder = []; liveLoading = []; liveFailed = []
     }
 
     var isActive: Bool {
@@ -177,61 +196,117 @@ final class HDGraphics: @unchecked Sendable {
         return (enabled && !catalog.isEmpty, atlases.count, bytes / 1_048_576, textures.count)
     }
 
-    /// Live 3D needs the model loaded and its scale fitted to the classic
-    /// footprint, which the baked frames never need on their own. Done here,
-    /// off the frame loop, once per hull, and kept apart from the atlases so a
-    /// sprite already baked for the sprites presentation still gets one.
-    private func prepareLiveTemplate(_ e: ResolvedGraphicsEnhancement, classic: SpriteSheet, generation gen: Int) {
-        lock.lock()
-        guard enabled, presentation == .live, e.descriptor.kind == .model, e.descriptor.live != false,
-              liveTemplates[e.spriteID] == nil, layouts != nil || game != nil else { lock.unlock(); return }
-        if layouts == nil, let game { layouts = SpriteLayouts(game: game) }
-        let layout = layouts?.layout(for: classic)
-        lock.unlock()
-        guard let layout, let baker = ModelBaker(), let model = try? ModelLoader.load(e.source) else { return }
-        let settings = e.descriptor.bake ?? GraphicsEnhancement.BakeSettings()
-        // Fit on a throwaway stage: the template itself stays unplaced, so every
-        // live hull can clone it and wrap its own stage.
-        let probe = ModelStage(model: model.clone(), settings: settings)
-        baker.fit(stage: probe, layout: layout, classic: classic, scale: 1)
-        let template = LiveHullTemplate(model: model, settings: settings,
-                                        orthographicScale: probe.orthographicScale,
-                                        size: CGSize(width: layout.frameWidth, height: layout.frameHeight))
-        lock.lock()
-        if gen == generation { liveTemplates[e.spriteID] = template }
-        lock.unlock()
+    // MARK: Live 3D
+
+    /// Remember a model hull's classic sheet: live 3D fits the model to it
+    /// when a ship first needs one. Nothing is measured or loaded here, so
+    /// turning live 3D on costs nothing until ships appear.
+    private func noteLiveSheet(_ e: ResolvedGraphicsEnhancement, classic: SpriteSheet) {
+        guard e.descriptor.kind == .model, e.descriptor.live != false else { return }
+        lock.lock(); liveSheets[e.spriteID] = classic; lock.unlock()
     }
 
-    /// A live 3D hull for a ship whose hull is a model, or nil: the sprite
-    /// draws instead when the presentation is sprites, the model isn't ready
-    /// yet, or the live budget is full. Call from the scene's main thread.
-    func makeLiveHull(baseSpriteID: Int) -> LiveHull? {
+    /// A live 3D hull for a ship whose hull is a model, or nil to draw the
+    /// sprite: the presentation is sprites, the hull has no model (or its
+    /// sprite hasn't been prepared yet), or its model is still loading
+    /// (asked for here; a later call gets it).
+    /// Call from the scene's main thread; how many to draw is the scene's
+    /// call (`LiveHullBudget`).
+    func makeLiveHull(baseSpriteID id: Int) -> LiveHull? {
         lock.lock()
-        guard enabled, presentation == .live, let t = liveTemplates[baseSpriteID],
-              liveHulls < Self.liveHullBudget else { lock.unlock(); return nil }
-        liveHulls += 1
+        guard enabled, presentation == .live, let e = catalog.bySprite[id], let classic = liveSheets[id] else {
+            lock.unlock(); return nil
+        }
+        guard let model = liveModels[id], let fit = liveFits[id] else {
+            if !liveLoading.contains(id), !liveFailed.contains(id) {
+                liveLoading.insert(id)
+                let gen = generation, detail = modelDetail
+                if layouts == nil, let game { layouts = SpriteLayouts(game: game) }
+                let layout = layouts?.layout(for: classic)
+                lock.unlock()
+                loadLiveModel(e, classic: classic, layout: layout, detail: detail, generation: gen)
+            } else {
+                lock.unlock()
+            }
+            return nil
+        }
+        if let i = liveModelOrder.firstIndex(of: id) { liveModelOrder.remove(at: i) }
+        liveModelOrder.append(id)
+        let simple = simpleLighting
         lock.unlock()
-        return LiveHull(template: t.model, settings: t.settings, orthographicScale: t.orthographicScale,
-                        size: t.size) { [weak self] in self?.releaseLiveHull() }
+        return LiveHull(template: model.node, descriptor: e.descriptor, calibration: fit.calibration,
+                        overlayLayers: model.overlayLayers, size: fit.size, simpleLighting: simple)
     }
 
-    private func releaseLiveHull() {
-        lock.lock(); liveHulls = max(0, liveHulls - 1); lock.unlock()
+    /// Load (and simplify) a hull's model off the main thread, and fit it on
+    /// first use: the calibration renders a few frames under the bake lock,
+    /// then is cached on disk, so this is a one-time cost per hull.
+    private func loadLiveModel(_ e: ResolvedGraphicsEnhancement, classic: SpriteSheet, layout: BakeLayout?,
+                               detail: GameSettings.ModelDetail, generation gen: Int) {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let layers = Set(overlayTargets(forBase: e.spriteID).map(\.target.layer))
+            let start = Date()
+            lock.lock(); var fit = liveFits[e.spriteID]; lock.unlock()
+            var loaded: SCNNode?
+            do {
+                guard let layout else { throw HDAssetPipeline.PipelineError.unreadable }
+                let node = try ModelLoader.load(e.source)
+                if fit == nil {   // measured on the full model, before any simplifying
+                    let c = try HDAssetPipeline.liveCalibration(for: e, classic: classic, layout: layout,
+                                                                model: node, cache: bakeCache)
+                    fit = LiveFit(calibration: c, size: CGSize(width: layout.frameWidth, height: layout.frameHeight))
+                }
+                if let cells = detail.cells {
+                    let t = MeshSimplifier.simplify(node, cells: cells)
+                    NovaSwiftKit.Log.graphics.info("HD: live model \(e.spriteID, privacy: .public) simplified \(t.before, privacy: .public) → \(t.after, privacy: .public) triangles")
+                }
+                loaded = node
+            } catch {
+                NovaSwiftKit.Log.graphics.error("HD: live model \(e.spriteID, privacy: .public) unavailable: \(String(describing: error), privacy: .public)")
+            }
+            lock.lock(); defer { lock.unlock() }
+            liveLoading.remove(e.spriteID)
+            guard gen == generation else { return }
+            guard let loaded, let fit else { liveFailed.insert(e.spriteID); return }
+            liveFits[e.spriteID] = fit
+            guard detail == modelDetail else { return }   // detail changed meanwhile: the next ask reloads
+            liveModels[e.spriteID] = LiveModel(node: loaded, overlayLayers: layers)
+            liveModelOrder.append(e.spriteID)
+            while liveModelOrder.count > Self.liveModelCap { liveModels[liveModelOrder.removeFirst()] = nil }
+            NovaSwiftKit.Log.graphics.info("HD: live model \(e.spriteID, privacy: .public) ready in \(Int(Date().timeIntervalSince(start) * 1000), privacy: .public) ms")
+        }
     }
 
-    /// Live hulls drawn at once. Each is its own SceneKit render pass, so
-    /// this caps the cost; ships past it draw as sprites. Phones and tablets
-    /// get a small budget, and so do Macs with 8 GB or less.
-    static let liveHullBudget: Int = {
-        #if os(iOS) || os(tvOS) || os(visionOS)
-        return 6
+    /// Live 3D counts for the dev console (`hd 3d`).
+    func liveStatus() -> (fitted: Int, loaded: Int, failed: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (liveFits.count, liveModels.count, liveFailed.count)   // fitted = measured at least once
+    }
+
+    /// The most live hulls this device is ever given (`LiveHullBudget.ceiling`).
+    static let liveCeiling: Int = {
+        let memoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        #if os(macOS)
+        let device = MTLCreateSystemDefaultDevice()
+        return LiveHullBudget.ceiling(mobile: false, appleGPU: device?.supportsFamily(.apple7) ?? false,
+                                      lowPowerGPU: device?.isLowPower ?? true, memoryGB: memoryGB)
         #else
-        return ProcessInfo.processInfo.physicalMemory <= 8 << 30 ? 8 : 24
+        return LiveHullBudget.ceiling(mobile: true, appleGPU: true, lowPowerGPU: false, memoryGB: memoryGB)
+        #endif
+    }()
+
+    /// Distinct live models kept loaded. Ships already flying keep theirs
+    /// (a live hull holds its own clone); an evicted type reloads on demand.
+    static let liveModelCap: Int = {
+        #if os(macOS)
+        return liveCeiling >= 10 ? 16 : 8
+        #else
+        return 6
         #endif
     }()
 
     private func prepare(_ e: ResolvedGraphicsEnhancement, classic: SpriteSheet, generation gen: Int) {
-        prepareLiveTemplate(e, classic: classic, generation: gen)
+        noteLiveSheet(e, classic: classic)
         lock.lock()
         if atlases[e.spriteID] != nil || failed.contains(e.spriteID) { lock.unlock(); return }
         let signpost = PerfMonitor.signposter.beginInterval("HD prepare", id: PerfMonitor.signposter.makeSignpostID(), "sprite \(e.spriteID)")
@@ -528,6 +603,7 @@ final class HDGraphics: @unchecked Sendable {
     func reset(clearDiskCache disk: Bool) {
         lock.lock()
         atlases = [:]; textures = [:]; failed = []; pending = []; modelHulls = [:]; shieldAtlases = [:]; shieldTextures = [:]; generation += 1
+        dropLiveState()
         lock.unlock()
         if disk { bakeCache?.removeAll() }
     }
@@ -541,10 +617,15 @@ final class HDGraphics: @unchecked Sendable {
     }
 }
 
-/// A model fitted for live drawing: what each live hull is built from.
-private struct LiveHullTemplate {
-    let model: SCNNode
-    let settings: GraphicsEnhancement.BakeSettings
-    let orthographicScale: Double
+/// A model hull's live-drawing fit, and the frame size it's fitted to.
+private struct LiveFit {
+    let calibration: LiveHullCalibration
     let size: CGSize
+}
+
+/// A loaded live model (at the current detail) and the effect layers its
+/// hull has classic overlays for (those glow as their own baked sheets).
+private struct LiveModel {
+    let node: SCNNode
+    let overlayLayers: Set<GraphicsEnhancement.EffectLayer>
 }

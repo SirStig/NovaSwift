@@ -102,6 +102,103 @@ struct GameSettings: Codable, Equatable {
         }
     }
 
+    enum ModelDetail: String, Codable, CaseIterable, Identifiable {
+        case full, high, medium, low
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .full: return "Full"
+            case .high: return "High"
+            case .medium: return "Medium"
+            case .low: return "Low"
+            }
+        }
+        /// Grid cubes across the model's widest side for `MeshSimplifier`; nil = untouched.
+        var cells: Int? {
+            switch self {
+            case .full: return nil
+            case .high: return 96
+            case .medium: return 56
+            case .low: return 32
+            }
+        }
+    }
+
+    enum LiveLighting: String, Codable, CaseIterable, Identifiable {
+        case full, simple
+        var id: String { rawValue }
+        var label: String { self == .full ? "Full" : "Simple" }
+    }
+
+    enum ParticleDensity: String, Codable, CaseIterable, Identifiable {
+        case full, reduced, minimal
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .full: return "Full"
+            case .reduced: return "Reduced"
+            case .minimal: return "Minimal"
+            }
+        }
+        /// Share of each burst that spawns.
+        var share: Double {
+            switch self {
+            case .full: return 1
+            case .reduced: return 0.5
+            case .minimal: return 0.25
+            }
+        }
+    }
+
+    /// One-tap graphics quality: sets every graphics-cost option below it at
+    /// once. Like the presentation presets it's a template, not a mode: any
+    /// option can still be changed on its own, which shows as `custom`.
+    enum GraphicsQuality: String, CaseIterable, Identifiable {
+        case low, medium, high, ultra, custom
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .low: return "Low"
+            case .medium: return "Medium"
+            case .high: return "High"
+            case .ultra: return "Ultra"
+            case .custom: return "Custom"
+            }
+        }
+
+        func apply(to s: inout GameSettings) {
+            let d = GameSettings()
+            switch self {
+            case .low:
+                s.hdDetail = 1; s.modelDetail = .low; s.liveLighting = .simple
+                s.particleDensity = .minimal; s.starfieldDensity = 0.5
+            case .medium:
+                s.hdDetail = 2; s.modelDetail = .medium; s.liveLighting = .simple
+                s.particleDensity = .reduced; s.starfieldDensity = 0.8
+            case .high:
+                s.hdDetail = 2; s.modelDetail = .full; s.liveLighting = .full
+                s.particleDensity = .full; s.starfieldDensity = d.starfieldDensity
+            case .ultra:
+                s.hdDetail = 4; s.modelDetail = .full; s.liveLighting = .full
+                s.particleDensity = .full; s.starfieldDensity = d.starfieldDensity
+            case .custom:
+                break
+            }
+        }
+    }
+
+    /// The quality level the current options match, or `custom`.
+    var matchedGraphicsQuality: GraphicsQuality {
+        GraphicsQuality.allCases.first { q in
+            guard q != .custom else { return false }
+            var probe = self
+            q.apply(to: &probe)
+            return probe.hdDetail == hdDetail && probe.modelDetail == modelDetail
+                && probe.liveLighting == liveLighting && probe.particleDensity == particleDensity
+                && probe.starfieldDensity == starfieldDensity
+        } ?? .custom
+    }
+
     enum FrameRateCap: String, Codable, CaseIterable, Identifiable {
         case fps30, fps60, fps120, unlimited
         var id: String { rawValue }
@@ -290,13 +387,24 @@ struct GameSettings: Codable, Equatable {
     /// supply in place of the original sprites. Presentation only — hit-boxes,
     /// frames and gameplay are the original's. Off by default: the original art.
     var hdGraphics: Bool = false
-    /// HD texture detail, in pixels per original pixel (2 or 4). 4 is sharper
-    /// up close but uses four times the memory per sprite.
+    /// HD texture detail, in pixels per original pixel (1, 2 or 4): the
+    /// resolution HD sprites load at and 3D models bake to. 4 is sharper up
+    /// close but uses four times the memory of 2; 1 is the original's
+    /// resolution, smoothed, for low-memory devices.
     var hdDetail: Int = 2
     /// How ships that have a 3D model draw once HD graphics are on: their baked
     /// sprite frames (`sprites`), or the model turned live in 3D (`live`).
-    /// Presentation only; `live` falls back to sprites for any ship it can't fit.
+    /// Presentation only; `live` falls back to sprites for any ship it can't fit,
+    /// and draws only as many as the device holds its frame rate with.
     var hullPresentation: HullPresentation = .sprites
+    /// Triangles kept in live 3D models (`MeshSimplifier`).
+    var modelDetail: ModelDetail = .full
+    /// Live 3D shading: the models' own materials and reflections, or plain
+    /// diffuse lighting for slower GPUs.
+    var liveLighting: LiveLighting = .full
+    /// Debris, spark and smoke particles, as a share of what the original
+    /// spawns. `full` is the original.
+    var particleDensity: ParticleDensity = .full
     var frameRateCap: FrameRateCap = .platformDefault
     /// Engine exhaust / weapon glow effects.
     var engineGlow: Bool = true
@@ -541,6 +649,9 @@ struct GameSettings: Codable, Equatable {
         hdGraphics            = v(.hdGraphics, d.hdGraphics)
         hdDetail              = v(.hdDetail, d.hdDetail)
         hullPresentation      = v(.hullPresentation, d.hullPresentation)
+        modelDetail           = v(.modelDetail, d.modelDetail)
+        liveLighting          = v(.liveLighting, d.liveLighting)
+        particleDensity       = v(.particleDensity, d.particleDensity)
         frameRateCap          = v(.frameRateCap, d.frameRateCap)
         engineGlow            = v(.engineGlow, d.engineGlow)
         ceHyperspaceLook      = v(.ceHyperspaceLook, d.ceHyperspaceLook)

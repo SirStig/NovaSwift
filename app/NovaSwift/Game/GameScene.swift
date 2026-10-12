@@ -4,6 +4,7 @@ import CoreImage
 import GameController
 import NovaSwiftKit
 import NovaSwiftEngine
+import NovaSwiftHD
 #if os(macOS)
 import AppKit
 #else
@@ -294,6 +295,14 @@ final class GameScene: SKScene {
     private var shipSprite: SKSpriteNode?
     /// The player's live 3D hull, when the hull draws as a model (HD "Full live 3D").
     private var shipLive: LiveHull?
+    /// The player's hull sprite id, to ask `HDGraphics` for a live hull (nil: no hull sprite).
+    private var shipLiveBase: Int?
+    private var shipLiveRetry: Double = 0
+    /// Live 3D: how many hulls may draw live (follows the frame rate), how
+    /// many drew this frame, and how many were built this frame.
+    private var liveBudget = LiveHullBudget(ceiling: HDGraphics.liveCeiling)
+    private var liveInUse = 0
+    private var liveBuiltThisFrame = 0
     private var debrisPodFrames: [SKTexture]?
     private var rotationTextures: [SKTexture] = []
     private var placeholder: SKShapeNode?
@@ -1021,6 +1030,9 @@ final class GameScene: SKScene {
         var sprite: SKSpriteNode?
         /// The live 3D hull, when this ship draws as a model (HD "Full live 3D").
         var live: LiveHull?
+        /// Hull sprite id to ask `HDGraphics` for a live hull, and the wait before asking again.
+        var liveBase: Int?
+        var liveRetry: Double = 0
         var placeholder: SKShapeNode?
         var thruster: SKNode?
         var engineGlow: SKSpriteNode?
@@ -1537,16 +1549,10 @@ final class GameScene: SKScene {
             shieldSprite = shield
         }
 
-        // Full live 3D: the model replaces the baked base sprite. Overlays stay
-        // hidden for model hulls (see hullHidesOverlay).
+        // Full live 3D: a candidate; `syncLiveHull` gives it a model each frame there's room.
         shipLive = nil
-        if let base = galaxy?.game.shan(hullType)?.baseSpriteID,
-           let live = HDGraphics.shared.makeLiveHull(baseSpriteID: base) {
-            shipSprite?.isHidden = true
-            live.node.zPosition = 0.5
-            node.addChild(live.node)
-            shipLive = live
-        }
+        shipLiveRetry = 0
+        shipLiveBase = shipSprite == nil ? nil : galaxy?.game.shan(hullType)?.baseSpriteID
 
         addChild(node)
         shipNode = node
@@ -1605,6 +1611,11 @@ final class GameScene: SKScene {
         lastUpdate = currentTime
         if debug != nil { samplePerformance(rawFrame: rawFrame, dt: dt) }
         PerfMonitor.shared.frame(seconds: rawFrame, at: currentTime)
+        if livePresentationOn {
+            liveBudget.frame(seconds: rawFrame, target: settings.frameRateCap.fps.map { 1 / Double($0) },
+                             inUse: liveInUse)
+        }
+        liveInUse = 0; liveBuiltThisFrame = 0
 
         // Game-speed option: scale the *simulation* timestep (not the real frame
         // delta used for perf/diagnostics above). `x1` is exactly real-time —
@@ -1797,6 +1808,10 @@ final class GameScene: SKScene {
         lap("sync.projectiles")
         syncBeams()
         lap("sync.beams")
+        if let node = shipNode {   // the player's hull claims its live slot before any NPC
+            syncLiveHull(&shipLive, retry: &shipLiveRetry, base: shipLiveBase, sprite: shipSprite,
+                         in: node, opacity: hullAnim.baseOpacity)
+        }
         syncNPCs(visible: npcCullRect(around: scenePos))
         lap("sync.npcs")
         syncAsteroids()
@@ -1828,7 +1843,7 @@ final class GameScene: SKScene {
         } else if let tri = placeholder {
             tri.zRotation = -CGFloat(renderHeading(p))
         }
-        shipLive?.pose(heading: renderHeading(p), bank: Double(turn))
+        shipLive?.update(heading: renderHeading(p), bank: liveBank(turn, hullAnim, disabled: false), dt: dt)
         if let hull = shipSprite { releaseIonize(hull); applyIonize(to: hull, ship: p) }
         if let glow = engineGlowSprite, !engineGlowTextures.isEmpty {
             glow.texture = engineGlowTextures[hullAnim.frameIndex(set: baseSet, heading: heading, count: engineGlowTextures.count)]
@@ -3489,8 +3504,9 @@ final class GameScene: SKScene {
             projectileNodes.append(dot)
         }
         // Hide only the pool slots that were showing shots last frame.
-        if projectileVisibleCount > shots.count {
-            for i in shots.count..<projectileVisibleCount { projectileNodes[i].isHidden = true }
+        let shown = min(projectileVisibleCount, projectileNodes.count)
+        if shown > shots.count {
+            for i in shots.count..<shown { projectileNodes[i].isHidden = true }
         }
         projectileVisibleCount = shots.count
         for i in 0..<shots.count {
@@ -4014,6 +4030,61 @@ final class GameScene: SKScene {
         return CGPoint(x: px + (CGFloat(curr.x) - px) * a,
                        y: py + (CGFloat(curr.y) - py) * a)
     }
+    // MARK: - Live 3D hulls
+
+    private var livePresentationOn: Bool { settings.hdGraphics && settings.hullPresentation == .live }
+
+    /// New live hulls per frame at most: each builds a scene and clones a
+    /// model, so a system full of ships phases in over a few frames.
+    private static let liveBuildsPerFrame = 2
+
+    /// Keep, build or give back one ship's live hull for this frame, within
+    /// `liveBudget`. Returns the hull to pose, or nil when the sprite draws.
+    /// Ships keep their hull in the order they're visited (player first), so
+    /// a full budget doesn't trade hulls back and forth between frames.
+    @discardableResult
+    private func syncLiveHull(_ live: inout LiveHull?, retry: inout Double, base: Int?, sprite: SKSpriteNode?,
+                              in container: SKNode, opacity: CGFloat) -> LiveHull? {
+        let room = livePresentationOn && liveInUse < liveBudget.allowed
+        if let current = live {
+            guard room else { dropLiveHull(&live, sprite: sprite); return nil }
+            liveInUse += 1
+            return current
+        }
+        guard room, let base, let sprite, liveBuiltThisFrame < Self.liveBuildsPerFrame else { return nil }
+        retry -= frameDT
+        guard retry <= 0 else { return nil }
+        // nil while the model loads (or for a hull with no model): ask again shortly.
+        guard let made = HDGraphics.shared.makeLiveHull(baseSpriteID: base) else { retry = 0.5; return nil }
+        made.node.zPosition = sprite.zPosition
+        made.node.alpha = opacity
+        container.addChild(made.node)
+        sprite.isHidden = true
+        live = made
+        liveInUse += 1
+        liveBuiltThisFrame += 1
+        return made
+    }
+
+    private func dropLiveHull(_ live: inout LiveHull?, sprite: SKSpriteNode?) {
+        guard let current = live else { return }
+        current.node.removeFromParent()
+        live = nil
+        sprite?.isHidden = false
+    }
+
+    private func dropAllLiveHulls() {
+        dropLiveHull(&shipLive, sprite: shipSprite)
+        for (_, n) in npcNodes { dropLiveHull(&n.live, sprite: n.sprite) }
+    }
+
+    /// A live hull banks only where its classic sheets do (shän banking
+    /// sets), as the original draws it; a hulk flies level.
+    private func liveBank(_ turn: Int, _ anim: HullAnim, disabled: Bool) -> Double {
+        guard !disabled, anim.mode == .banking, anim.setCount > 1 else { return 0 }
+        return Double(max(-1, min(1, turn)))
+    }
+
     /// Render-interpolated world position for a ship. See `Ship.renderPrevPosition`.
     private func renderPoint(_ s: Ship) -> CGPoint { renderLerp(s.renderPrevPosition, s.position) }
     /// Render-interpolated heading (shortest-path), for smooth sprite-frame changes.
@@ -4086,6 +4157,7 @@ final class GameScene: SKScene {
                 }
                 node.lastShield = npc.shield
                 applyGateFade(to: node, entityID: npc.entityID)
+                dropLiveHull(&node.live, sprite: node.sprite)   // its budget goes to a ship on screen
                 continue
             }
             let heading = node.hullAnim.heading(forAngle: renderHeading(npc))
@@ -4100,7 +4172,11 @@ final class GameScene: SKScene {
             } else if let tri = node.placeholder {
                 tri.zRotation = -CGFloat(renderHeading(npc))
             }
-            node.live?.pose(heading: renderHeading(npc), bank: Double(turn))
+            if let live = syncLiveHull(&node.live, retry: &node.liveRetry, base: node.liveBase, sprite: node.sprite,
+                                       in: node.container, opacity: node.hullAnim.baseOpacity) {
+                live.update(heading: renderHeading(npc), bank: liveBank(turn, node.hullAnim, disabled: npc.disabled),
+                            dt: frameDT)
+            }
             // One fog slot per sprite (0x00428340): murk writes it, then ionization
             // overwrites it only where its level is higher (or murk is under 8).
             if let hull = node.sprite {
@@ -4197,13 +4273,7 @@ final class GameScene: SKScene {
             n.container.addChild(sprite)
             n.sprite = sprite
             n.radius = max(first.size().width, first.size().height) / 2
-            if let base = galaxy?.game.shan(npc.shipTypeID)?.baseSpriteID,
-               let live = HDGraphics.shared.makeLiveHull(baseSpriteID: base) {
-                sprite.isHidden = true
-                live.node.zPosition = 0.5
-                n.container.addChild(live.node)
-                n.live = live
-            }
+            n.liveBase = galaxy?.game.shan(npc.shipTypeID)?.baseSpriteID   // live 3D candidate
         } else {
             // Faction-tinted arrowhead when we can't resolve the hull sprite.
             let path = CGMutablePath()
@@ -4797,6 +4867,21 @@ final class GameScene: SKScene {
     func editorReloadSystem(to destSystemID: Int) {
         reloadSystem(to: destSystemID, outboundHeading: 0)
     }
+    /// Re-point the scene at a freshly built catalog (the author edited system / stellar / NPC
+    /// data) so the next `editorReloadSystem(to:)` builds from it, keeping this scene (and the
+    /// view presenting it) alive. Drops every texture cache keyed by resource id, since an
+    /// edited sprite would otherwise keep drawing its old art. The player ship and its
+    /// textures are NOT rebuilt — callers rebuild the whole host when those changed.
+    func editorAdoptGalaxy(_ newGalaxy: Galaxy) {
+        galaxy = newGalaxy
+        debrisPodFrames = nil
+        weaponGraphicCache = [:]; boomFrameCache = [:]; weaponTrailCache = [:]; weaponLightningCache = [:]
+        weaponBeamGraphicCache = [:]; weaponCoronaTextureCache = [:]; weaponUsesShipSpriteCache = [:]
+        cicnTextureCache = [:]; asteroidTextureCache = [:]; freeflightTextureCache = [:]
+        npcTextureCache = [:]; npcEngineGlowCache = [:]; npcShieldCache = [:]
+        npcLightCache = [:]; npcWeaponGlowCache = [:]; npcAltCache = [:]
+        smokeFrameCache = [:]; smokeSetCache = [:]
+    }
     #endif
 
     /// A hypergate the player pops out of closes its glow again a moment later;
@@ -5007,6 +5092,9 @@ final class GameScene: SKScene {
         npcNodes.removeAll()
         for n in projectileNodes { n.removeFromParent() }
         projectileNodes.removeAll()
+        // The count indexes into the pool just emptied; left stale, the next
+        // frame's hide loop ran off the end (TestFlight 429 launch/jump crash).
+        projectileVisibleCount = 0
         for (_, n) in asteroidNodes { n.container.removeFromParent() }
         asteroidNodes.removeAll()
         for (_, n) in freeflightNodes { n.container.removeFromParent() }
@@ -5224,8 +5312,16 @@ final class GameScene: SKScene {
     func applyDisplaySettings(_ newSettings: GameSettings) {
         let filterChanged = newSettings.smoothSprites != settings.smoothSprites
         let zoomChanged = newSettings.cameraZoom != settings.cameraZoom
+        let liveChanged = newSettings.hdGraphics != settings.hdGraphics
+            || newSettings.hullPresentation != settings.hullPresentation
+            || newSettings.modelDetail != settings.modelDetail
+            || newSettings.liveLighting != settings.liveLighting
         settings = newSettings
         HDGraphics.shared.update(settings: newSettings)   // HD art applies to ships/planets built from now on
+        if liveChanged {   // live hulls rebuild next frame with the new settings
+            dropAllLiveHulls()
+            liveBudget = LiveHullBudget(ceiling: HDGraphics.liveCeiling)
+        }
         if zoomChanged { cameraNode.setScale(cameraZoom) }
         controllerInput?.deadzone = Float(settings.stickDeadzone)   // live "Stick dead zone"
         Haptics.enabled = settings.hapticsEnabled
@@ -5966,7 +6062,10 @@ final class GameScene: SKScene {
                                 cone: (angle: CGFloat, spread: CGFloat)? = nil) {
         guard count > 0, !settings.reduceFlashing else { return }
         let classic = !settings.modernHUD
-        let n = min(count, (classic ? OriginalRendering.particlePoolSize : maxParticles) - activeParticles.count)
+        // Graphics quality: a share of each burst (at least one particle), `full` = the original.
+        let wanted = settings.particleDensity == .full ? count
+            : max(1, Int((Double(count) * settings.particleDensity.share).rounded()))
+        let n = min(wanted, (classic ? OriginalRendering.particlePoolSize : maxParticles) - activeParticles.count)
         guard n > 0 else { return }
         for _ in 0..<n {
             let node = particlePool.popLast() ?? {

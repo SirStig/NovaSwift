@@ -27,12 +27,31 @@ import NovaSwiftStory
 //   EditorLivePreviewView(model: EditorPreviewModel)           — EditorLivePreviewView.swift
 //       Embeddable (non-fullscreen) real-`GameScene` view of one system.
 //       `EditorPreviewModel.update(collection:systemID:base:)` rebuilds
-//       (debounced 300 ms) and swaps the scene in place, keeping the camera.
+//       (debounced 300 ms) off-main, then REUSES the one live scene: the new catalog is
+//       adopted and the system reloaded in place (camera kept). A fresh scene/host is
+//       built only the first time, or when the camera ship's own data (shïp/shän) changed.
 //
 //   EditorTestRunView(collection:base:startSystem:startShip:onExit:)   — EditorTestRunView.swift
-//       Full-window test game (real controls + HUD, landing stub, galaxy map +
-//       hyperjump inside the edited galaxy) with a collapsible right-hand debug
-//       panel (EditorDebugPanel.swift) built on `EditorTestSession`.
+//       Full-window test game: real controls + HUD, the REAL spaceport (SpaceportView with
+//       trade / outfitter / shipyard / bar / mission BBS) on a sandbox pilot, the story
+//       runtime (missions, crön ticks on date change, mission ships, objective log), hail
+//       and board dialogs, galaxy map + hyperjump inside the edited galaxy, and a
+//       collapsible right-hand debug panel (EditorDebugPanel.swift) built on
+//       `EditorTestSession` (+ `EditorTestSession+Story.swift` for the landed/story half).
+//
+//   EditorHD (EditorHD.swift)
+//       Installs HD/3D art (NSgx/NSbl of the document's effective collection, incl. `.nsx`
+//       packs loaded into it, layered over the user's installed packs) into the shared
+//       `HDGraphics` for editor games, honouring the user's HD setting, and restores the
+//       game's own HD layer once the last editor game is gone.
+//
+// SANDBOX SAFETY (nothing here may reach the player's saves):
+//   * The session's pilot is `PilotStore(editorSandbox:)`: `save()`, `reset()`, `begin`,
+//     `bind`, `newGame` and every economy forwarder (they all end in `save()`) are no-ops
+//     on a sandbox store, and it never reads the live autosave. The spaceport, mission BBS,
+//     bar and info screens are handed that store (they never touch `AppModel.pilot`).
+//   * `AppModel.autosave`, `PilotRoster` and `saveGame` are never called from this folder.
+//   * Only the preview/test run's own throwaway sprite cache (`EditorSpriteSync`) is written.
 
 /// The expensive-to-make, host-independent half of a session: the game data and
 /// catalog for one collection. `@unchecked Sendable` because `Galaxy` is a
@@ -98,11 +117,14 @@ enum EditorGameFactory {
     ///     frame doesn't hitch on the main thread. `nil` = the scenario default,
     ///     which is resolved here (off-main) and returned as `defaultStart`.
     ///   - catalogs: also build the debug panel's searchable lists off-main.
+    ///   - hd: when given, the HD/3D layer is installed for this collection (document + the
+    ///     user's installed packs, `EditorHD`) and prepared before the first sprite is built.
     static func build(collection: ResourceCollection,
                       base: ResourceCollection?,
                       flightTuning: FlightTuning,
                       systemID: Int?, shipID: Int?,
-                      catalogs wantsCatalogs: Bool = false) async -> Result<EditorBuild, Error> {
+                      catalogs wantsCatalogs: Bool = false,
+                      hd: EditorHD.Inputs? = nil) async -> Result<EditorBuild, Error> {
         await Task.detached(priority: .userInitiated) {
             let t0 = DispatchTime.now().uptimeNanoseconds
             func ms(since t: UInt64) -> Double { Double(DispatchTime.now().uptimeNanoseconds - t) / 1_000_000 }
@@ -124,6 +146,7 @@ enum EditorGameFactory {
             guard !game.ships().isEmpty else { return .failure(BuildError.noShips) }
             let galaxy = Galaxy(game: game, flightTuning: flightTuning)
 
+            if let hd { EditorHD.shared.ensure(collection: collection, game: game, inputs: hd) }
             let tw = DispatchTime.now().uptimeNanoseconds
             let dflt = defaultStart(game: game)
             warm(game: game, systemID: systemID ?? dflt?.systemID, shipID: shipID ?? dflt?.shipID)

@@ -161,6 +161,15 @@ final class NavigationModel: ObservableObject {
         plan.shiftClick(id, current: currentSystemID, linked: isLinked)
     }
 
+    /// Whether `id` is a hop only Shift+click could add: off the route, one
+    /// link past its tail, and not linked to the current system (where a
+    /// plain click already does the right thing by arming it).
+    func extendsRouteTail(_ id: Int) -> Bool {
+        guard let tail = route.last, route.count < StarMapRoute.maxHops,
+              id != currentSystemID, !route.contains(id) else { return false }
+        return isLinked(tail, id) && !isLinked(currentSystemID, id)
+    }
+
     /// The cycle key (0x0044b120): step the armed link through the current
     /// system's resolvable links, wrapping, and arm it. False without links.
     @discardableResult

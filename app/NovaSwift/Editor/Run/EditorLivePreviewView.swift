@@ -14,9 +14,11 @@ import NovaSwiftEngine
 //     preview.update(collection: doc.effective, systemID: selectedSystem, base: doc.base)
 //
 // `update` is cheap to call on every edit: it debounces (~300 ms), rebuilds the
-// game data off-main, and swaps a fresh real `GameScene` into the *same*
-// SKView, keeping the camera where the author left it. The view needs
-// `AppModel` in the environment (settings / key bindings come from it).
+// game data off-main, and then reloads the system IN PLACE in the one live
+// `GameScene` (`editorAdoptGalaxy` + `editorReloadSystem`), keeping the camera where
+// the author left it. A fresh scene is built only for the first rebuild or when the
+// camera ship's own data (shïp / shän) changed. HD/3D art comes from `EditorHD`. The view
+// needs `AppModel` in the environment (settings / key bindings come from it).
 //
 // Interaction: drag = pan, scroll / pinch = zoom. The camera is an invisible,
 // invulnerable player ship that never moves on its own.
@@ -54,6 +56,12 @@ final class EditorPreviewModel: ObservableObject {
     private var holdTimer: Timer?
     /// The camera (player) position to restore after a rebuild.
     private var cameraPose: Vec2?
+    /// What the live scene's camera ship was built from (hull id + shïp/shän bytes). While it
+    /// is unchanged a rebuild only reloads the system in place.
+    private var playerKey: Int?
+    /// How many rebuilds reused the scene vs built a new one (perf readout / tests).
+    private(set) var reusedScenes = 0
+    private(set) var freshScenes = 0
 
     init() {}
 
@@ -99,7 +107,9 @@ final class EditorPreviewModel: ObservableObject {
         debounceTask?.cancel()
         holdTimer?.invalidate(); holdTimer = nil
         host = nil
+        playerKey = nil
         status = .idle
+        EditorHD.shared.release(self, app: app)
     }
 
     // MARK: Internals (view-facing)
@@ -136,11 +146,14 @@ final class EditorPreviewModel: ObservableObject {
         if let ship = host?.scene.playerShip { cameraPose = ship.position }
 
         // Nothing heavy on main: the default ship is resolved inside the off-main build
-        // (`shipID: nil` = scenario default, returned as `build.defaultStart`).
+        // (`shipID: nil` = scenario default, returned as `build.defaultStart`). HD art is
+        // installed/prepared there too, so the scene below picks it up when it builds sprites.
+        EditorHD.shared.acquire(self)
         let result = await EditorGameFactory.build(
             collection: p.collection, base: p.base,
             flightTuning: FlightTuning(enhancements: app.settings.enhancements),
-            systemID: p.systemID, shipID: nil)
+            systemID: p.systemID, shipID: nil,
+            hd: EditorHD.inputs(app: app, base: p.base))
         guard gen == generation, !Task.isCancelled else { return }   // superseded
         // Let the loading state / refresh strip paint before the main-actor scene construction.
         await Task.yield()
@@ -153,6 +166,30 @@ final class EditorPreviewModel: ObservableObject {
             guard let shipID = build.defaultStart?.shipID else {
                 status = .failed("No ship available to host the preview."); return
             }
+            let key = Self.playerKey(shipID: shipID, in: p.collection)
+
+            // Same camera ship, system still exists: keep the scene and its view, adopt the new
+            // catalog and reload the system in place (cheap on main; no SKView scene swap).
+            if let host, playerKey == key, build.game.system(p.systemID) != nil {
+                host.scene.editorAdoptGalaxy(build.galaxy)
+                host.scene.editorReloadSystem(to: p.systemID)
+                if let ship = host.scene.playerShip {
+                    if sameSystem, let pose = cameraPose { ship.position = pose }
+                    else { ship.position = Vec2() }
+                    ship.velocity = Vec2()
+                    host.scene.camera?.position = CGPoint(x: ship.position.x, y: ship.position.y)
+                    cameraPose = ship.position
+                }
+                systemID = host.scene.editorSystemID
+                lastBuild = build
+                reusedScenes += 1
+                applyAll()
+                lastRebuildMillis = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+                status = .ready
+                Log.scene.info("EditorPreviewModel: reloaded system \(p.systemID, privacy: .public) in place in \(self.lastRebuildMillis, format: .fixed(precision: 1), privacy: .public) ms")
+                return
+            }
+
             var opts = EditorHostOptions(systemID: p.systemID, shipID: shipID)
             opts.invulnerable = true
             opts.muted = true
@@ -162,6 +199,8 @@ final class EditorPreviewModel: ObservableObject {
                 status = .failed("Couldn't build system #\(p.systemID)."); return
             }
             host = newHost
+            playerKey = key
+            freshScenes += 1
             systemID = newHost.scene.editorSystemID
             lastBuild = build
             cameraPose = newHost.scene.playerShip?.position
@@ -171,6 +210,16 @@ final class EditorPreviewModel: ObservableObject {
             status = .ready
             Log.scene.info("EditorPreviewModel: rebuilt system \(p.systemID, privacy: .public) in \(self.lastRebuildMillis, format: .fixed(precision: 1), privacy: .public) ms")
         }
+    }
+
+    /// Identity of the data the camera ship was built from: the hull id plus its shïp and
+    /// shän records. (Its sprite is hidden, so sprite edits don't matter.)
+    private static func playerKey(shipID: Int, in c: ResourceCollection) -> Int {
+        var h = Hasher()
+        h.combine(shipID)
+        h.combine(c.resource(NovaType.ship, shipID)?.data)
+        h.combine(c.resource(NovaType.shan, shipID)?.data)
+        return h.finalize()
     }
 
     private func applyAll() {

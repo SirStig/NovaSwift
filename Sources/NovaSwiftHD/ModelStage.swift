@@ -80,6 +80,18 @@ public enum ModelLoader {
         return try normalized(scene.rootNode)
     }
 
+    /// A copy of a loaded model whose materials can be changed without
+    /// touching the original: `clone()` shares geometry objects, so an effect
+    /// pass on a clone would rewrite the original's materials. Each geometry
+    /// here is its own object; the vertex data is still shared.
+    public static func instance(of template: SCNNode) -> SCNNode {
+        let copy = template.clone()
+        copy.enumerateHierarchy { n, _ in
+            if let g = n.geometry?.copy() as? SCNGeometry { n.geometry = g }
+        }
+        return copy
+    }
+
     /// Wrap `root`'s children in a container centred on their bounds and
     /// scaled to radius 1 in the horizontal (XZ) plane.
     public static func normalized(_ root: SCNNode) throws -> SCNNode {

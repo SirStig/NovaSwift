@@ -41,6 +41,7 @@ final class EditorSpriteCache: @unchecked Sendable {
             let sheet: SpriteSheet
             switch type {
             case NovaType.rleD: sheet = try RLED.decode(data)
+            case NovaType.rle8: sheet = try RLE8.decode(data)
             case NovaType.pict: sheet = try PICT.decode(data)
             case NovaType.cicn: sheet = try CICN.decode(data)
             default: return (nil, "No preview for \(type.stringValue)")
@@ -397,6 +398,7 @@ struct GraphicImportSheet: View {
             let bytes: Data
             switch key.type {
             case NovaType.rleD: bytes = try RLEDEncoder.encode(preview.sheet, alphaThreshold: UInt8(alpha))
+            case NovaType.rle8: bytes = try RLE8Encoder.encode(preview.sheet, alphaThreshold: UInt8(alpha))
             case NovaType.pict: bytes = try PICTEncoder.encode(preview.sheet, depth: pictDepth16 ? .bits16 : .bits32)
             case NovaType.cicn: bytes = try CICNEncoder.encode(preview.sheet, alphaThreshold: UInt8(alpha))
             default: return

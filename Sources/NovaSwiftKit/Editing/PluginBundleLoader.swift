@@ -326,3 +326,49 @@ public enum PluginBundleLoader {
         return url.lastPathComponent
     }
 }
+
+// MARK: Copying a bundle's other files
+
+extension PluginBundleLoader {
+
+    public struct CopyResult: Sendable, Equatable {
+        /// Where each file that is now present in the destination lives (copied or already there),
+        /// in input order.
+        public var present: [URL] = []
+        /// Source files that were missing or couldn't be copied (name, reason).
+        public var failed: [String] = []
+        /// How many files were actually copied this time.
+        public var copiedCount = 0
+
+        public init(present: [URL] = [], failed: [String] = [], copiedCount: Int = 0) {
+            self.present = present; self.failed = failed; self.copiedCount = copiedCount
+        }
+    }
+
+    /// Copy the non-data files of a plug-in folder (fonts, movies, music, pilots, `.nplay`, readmes,
+    /// images…) into `dest`, keeping each one's path relative to `root`. A file already at its
+    /// destination (same path, or an existing file there) is left alone and never overwritten.
+    /// Safe to call off the main actor; `progress(done, total)` is called after every file.
+    public static func copyBundleFiles(_ files: [URL], from root: URL, to dest: URL,
+                                       progress: (@Sendable (Int, Int) -> Void)? = nil) -> CopyResult {
+        let fm = FileManager.default
+        var result = CopyResult()
+        for (i, file) in files.enumerated() {
+            defer { progress?(i + 1, files.count) }
+            let target = dest.appendingPathComponent(relativePath(file, from: root))
+            if target.standardizedFileURL.path == file.standardizedFileURL.path || fm.fileExists(atPath: target.path) {
+                result.present.append(target)
+                continue
+            }
+            do {
+                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.copyItem(at: file, to: target)
+                result.present.append(target)
+                result.copiedCount += 1
+            } catch {
+                result.failed.append("\(file.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        return result
+    }
+}

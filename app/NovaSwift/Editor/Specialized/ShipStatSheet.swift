@@ -20,6 +20,14 @@ struct ShipStatSheet {
         var dpsShield: Double
         var dpsArmor: Double
         var isBeam: Bool
+        /// Extra damage per shot from submunitions (assuming they all land), already counted in the
+        /// DPS figures. See `SubmunitionDamage`.
+        var subShieldDamage = 0.0
+        var subArmorDamage = 0.0
+        /// The submunition walk hit its depth cap (an unbounded self-splitting weapon).
+        var subTruncated = false
+        /// Shots per second the cadence works out to (see `WeaponCadence`).
+        var shotsPerSecond = 0.0
     }
 
     var shipID: Int
@@ -80,26 +88,35 @@ struct ShipStatSheet {
         return s
     }
 
-    /// One weapon's numbers as the engine's `WeaponSpec` sees them. DPS multiplies by the
-    /// mount count; burst weapons use the full burst cycle. Sub-munitions are not folded
-    /// into DPS (they're listed on the weapon's own page).
+    /// One weapon's numbers as the engine's `WeaponSpec` sees them. DPS = (own damage + the damage
+    /// of its submunitions, all assumed to land) x steady-state shots per second for `count` mounts.
+    /// Cadence follows the original's fire loop (`WeaponCadence`, Weapon_GetWeaponFireIntervalTicks
+    /// 0x0046f270 and the burst tail of Weapon_FirePlayerWeaponBank 0x00455150): staggered mounts
+    /// fire at `reload / count`, simultaneous ones together every `reload`, and a burst weapon
+    /// spends its BurstReload instead of the normal cooldown after `BurstCount` volleys
+    /// (x `count` when staggered). Submunitions: `SubmunitionDamage` (0x00420d30 rules).
     static func weaponLine(galaxy: Galaxy, game: NovaGame, id: Int, count: Int) -> WeaponLine? {
         guard let spec = galaxy.weaponSpec(id), let raw = game.weapon(id) else { return nil }
-        var cycle = spec.reloadSeconds
-        var shots = 1.0
-        if raw.burstCount > 1, raw.burstReload > 0 {
-            let fps = galaxy.combatTuning.framesPerSecond
-            shots = Double(raw.burstCount)
-            cycle = (Double(raw.burstCount - 1) * Double(max(0, raw.reload)) + Double(raw.burstReload)) / fps
+        let cadence = WeaponCadence.compute(reloadTicks: raw.reload, burstCount: raw.burstCount,
+                                            burstReloadTicks: raw.burstReload, mounts: max(1, count),
+                                            simultaneous: raw.fireSimultaneously,
+                                            framesPerSecond: galaxy.combatTuning.framesPerSecond)
+        let rate = cadence.shotsPerSecond
+        let sub = SubmunitionDamage.total(of: id) { wid -> SubmunitionNode? in
+            guard let s = galaxy.weaponSpec(wid), let r = game.weapon(wid) else { return nil }
+            return SubmunitionNode(shieldDamage: s.shieldDamage, armorDamage: s.armorDamage,
+                                   subID: r.hasSubmunition ? r.subID : -1, subCount: r.hasSubmunition ? r.subCount : 0,
+                                   subLimit: r.subLimit, cannotBeSubmunition: s.isBeam || r.isFighterBay)
         }
-        let rate = cycle > 0 ? shots / cycle : 0
-        let n = Double(max(1, count))
         return WeaponLine(id: id, name: spec.name, count: count, ammo: 0,
                           shieldDamage: spec.shieldDamage, armorDamage: spec.armorDamage,
                           reloadSeconds: spec.reloadSeconds, range: spec.range,
                           guidance: guidanceName(raw.guidance),
-                          dpsShield: spec.shieldDamage * rate * n, dpsArmor: spec.armorDamage * rate * n,
-                          isBeam: spec.isBeam)
+                          dpsShield: (spec.shieldDamage + sub.shield) * rate,
+                          dpsArmor: (spec.armorDamage + sub.armor) * rate,
+                          isBeam: spec.isBeam,
+                          subShieldDamage: sub.shield, subArmorDamage: sub.armor, subTruncated: sub.truncated,
+                          shotsPerSecond: rate)
     }
 
     static func guidanceName(_ g: WeaponGuidance) -> String {

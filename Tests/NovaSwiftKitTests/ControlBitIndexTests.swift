@@ -40,6 +40,47 @@ final class ControlBitIndexTests: XCTestCase {
         XCTAssertFalse(idx.unreachable.contains(ResourceKey(NovaType.mission, 129)))
     }
 
+    func testReachabilityHonoursBooleanStructure() {
+        var c = ResourceCollection()
+        c.add(mission(128, "Src", success: "b100"))                 // makes b100 live
+        c.add(mission(129, "OrOk", avail: "b100 | b200"))            // b100 live -> reachable
+        c.add(mission(130, "AndDead", avail: "b100 & b200"))         // b200 never set -> dead
+        c.add(mission(131, "NotOk", avail: "!b200"))                 // never set, so clear -> reachable
+        c.add(mission(132, "Contradiction", avail: "b100 & !b100"))  // unsatisfiable
+        c.add(mission(133, "ParenOk", avail: "(b100 | b200) & b100"))
+        c.add(mission(134, "ParenDead", avail: "(b200 | b201) & b100"))
+        c.add(mission(135, "NotGroupOk", avail: "!(b200 | b201)"))   // both clear -> true
+        c.add(mission(136, "NotGroupDead", avail: "!(b100 | b200) & b100"))
+        c.add(mission(137, "FreeAtom", avail: "o128 & b100"))        // outfit operand can be either
+        c.add(mission(138, "Chain", avail: "b129"))                  // b129 only raised by an unreachable mission
+        c.add(mission(139, "Raiser", avail: "b200", success: "b129"))
+        let idx = ControlBitIndex(c)
+        func dead(_ id: Int) -> Bool { idx.unreachable.contains(ResourceKey(NovaType.mission, id)) }
+        XCTAssertFalse(dead(129))
+        XCTAssertTrue(dead(130))
+        XCTAssertFalse(dead(131))
+        XCTAssertTrue(dead(132))
+        XCTAssertFalse(dead(133))
+        XCTAssertTrue(dead(134))
+        XCTAssertFalse(dead(135))
+        XCTAssertTrue(dead(136))
+        XCTAssertFalse(dead(137))
+        XCTAssertTrue(dead(139))
+        XCTAssertTrue(dead(138), "gated only by a bit that an unreachable mission raises")
+    }
+
+    func testProbeMatchesInterpreterOnSimpleShapes() {
+        func sat(_ s: String, set: Set<Int>) -> Bool { NCBProbe(s).isSatisfiable(canBeSet: { set.contains($0) }) }
+        XCTAssertTrue(sat("", set: []))
+        XCTAssertTrue(sat("!b5", set: []))
+        XCTAssertFalse(sat("b5", set: []))
+        XCTAssertTrue(sat("b5", set: [5]))
+        XCTAssertTrue(sat("b5 | b6", set: [6]))
+        XCTAssertFalse(sat("b5 & b6", set: [6]))
+        XCTAssertFalse(sat(" b5", set: [5]), "a leading space fails the original's start check")
+        XCTAssertEqual(NCBProbe("b5 & (b6 | !b7) & o3").atoms.count, 4)
+    }
+
     func testFreeRunsAndGraph() {
         var c = ResourceCollection()
         c.add(mission(128, "A; Foo1", success: "b0 b1 b3"))

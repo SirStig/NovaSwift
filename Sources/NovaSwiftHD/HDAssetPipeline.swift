@@ -90,10 +90,11 @@ public final class ModelBaker {
     /// classic frames at the same headings: remastered textures come out
     /// darker or lighter than the original renders, and a ship should read
     /// as bright as the one it replaces.
-    private func matchBrightness(stage: ModelStage, layout: BakeLayout, classic: SpriteSheet, scale s: Double) {
+    @discardableResult
+    private func matchBrightness(stage: ModelStage, layout: BakeLayout, classic: SpriteSheet, scale s: Double) -> Double {
         let n = layout.framesPerSet
         let samples = Array(Set((0..<8).map { $0 * n / 8 })).filter { $0 < layout.frameCount && $0 < classic.frameCount }.sorted()
-        guard let target = ClassicFootprint.tones(of: classic, frames: samples), target.mid > 0.02 else { return }
+        guard let target = ClassicFootprint.tones(of: classic, frames: samples), target.mid > 0.02 else { return 1 }
         let size = CGSize(width: Double(layout.frameWidth) * s, height: Double(layout.frameHeight) * s)
         var total = 1.0
         for _ in 0..<2 {   // lighting isn't linear through the tone curve; a second pass settles it
@@ -102,13 +103,14 @@ public final class ModelBaker {
                 stage.pose(pose.set, heading: pose.heading)
                 return snapshot(size)
             }
-            guard let got = ClassicFootprint.tones(of: frames), got.mid > 0.01 else { return }
+            guard let got = ClassicFootprint.tones(of: frames), got.mid > 0.01 else { return total }
             let ratio = (target.mid / got.mid + target.high / max(got.high, 0.01)) / 2
             let k = min(3.0, max(0.6, total * ratio)) / total
-            if abs(k - 1) < 0.04 { return }
+            if abs(k - 1) < 0.04 { return total }
             stage.scaleLights(by: k)
             total *= k
         }
+        return total
     }
 
     /// An effect layer to render: the hull's classic overlay it replaces.
@@ -300,6 +302,23 @@ public final class ModelBaker {
         return framed(stage, size: size)
     }
 
+    /// What a live hull needs to match its baked frames: the same fit to the
+    /// classic footprint and the same light level the bake would use.
+    public func calibrateLive(model: SCNNode, descriptor: GraphicsEnhancement, layout: BakeLayout,
+                              classic: SpriteSheet?) -> LiveHullCalibration {
+        let stage = ModelStage(model: model, settings: descriptor.bake ?? .init())
+        stage.prepareEffects(for: descriptor)
+        stage.setPass(.hull(baked: []))
+        defer { renderer.scene = nil }
+        let s = 2.0   // the fit compares ratios, so any scale measures the same; 2 rounds less
+        fit(stage: stage, layout: layout, classic: classic, scale: s)
+        var light = 1.0
+        if let classic, descriptor.bake?.exposure == nil, descriptor.bake?.atmosphere == nil {
+            light = matchBrightness(stage: stage, layout: layout, classic: classic, scale: s)
+        }
+        return LiveHullCalibration(orthographicScale: stage.orthographicScale, lightScale: light)
+    }
+
     /// Hull only, no effect layers (tools and simple models).
     public func bake(model: SCNNode, settings: GraphicsEnhancement.BakeSettings, layout: BakeLayout,
                      classic: SpriteSheet?, scale: Double, stats: inout Stats) -> HDAtlas? {
@@ -456,6 +475,26 @@ public enum HDAssetPipeline {
         else { throw PipelineError.bakeFailed }
         cache?.store(key, HDAtlas(image: image, frameWidth: size, frameHeight: size, frameCount: 1, columns: 1, pixelScale: 1))
         return image
+    }
+
+    /// A model's live-drawing calibration (`ModelBaker.calibrateLive`),
+    /// cached with the bakes so a warm start renders nothing.
+    /// `model`: the already loaded model, if the caller has one (it's cloned,
+    /// never placed); otherwise it's loaded here on a cache miss.
+    public static func liveCalibration(for e: ResolvedGraphicsEnhancement, classic: SpriteSheet, layout: BakeLayout,
+                                       model loaded: SCNNode? = nil, cache: HDBakeCache?) throws -> LiveHullCalibration {
+        guard e.descriptor.kind == .model, let content = e.source.contentKey() else { throw PipelineError.unreadable }
+        let key = HDBakeCache.key(contentKey: content, descriptor: e.descriptor, layout: layout, scale: 1, part: "live-v1")
+        if let list = cache?.loadList(key), list.count == 2, let o = Double(list[0]), let l = Double(list[1]) {
+            return LiveHullCalibration(orthographicScale: o, lightScale: l)
+        }
+        let model = try loaded.map(ModelLoader.instance(of:)) ?? ModelLoader.load(e.source)
+        bakeLock.lock(); defer { bakeLock.unlock() }
+        if sharedBaker == nil { sharedBaker = ModelBaker() }
+        guard let baker = sharedBaker else { throw PipelineError.noRenderer }
+        let c = baker.calibrateLive(model: model, descriptor: e.descriptor, layout: layout, classic: classic)
+        cache?.storeList(key, [String(c.orthographicScale), String(c.lightScale)])
+        return c
     }
 
     /// Just the hull/sprite atlas (no effect layers).

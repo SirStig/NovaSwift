@@ -399,10 +399,35 @@ struct EditorDebugPanel: View {
             ActionButton(title: "Start mission", symbol: "flag.fill", disabled: mission == nil) {
                 if let m = mission { say(session.startMission(m) ? "Mission #\(m) started." : "Mission didn't start.") }
             }
-            if !session.activeMissionTitles.isEmpty {
+            let summaries = session.missionSummaries
+            if !summaries.isEmpty {
+                DisclosureGroup("Objectives (\(summaries.count))") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(summaries) { m in
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("#\(m.id) \(m.name)" + (m.failed ? " — FAILED" : ""))
+                                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(m.failed ? .red : novaAmber)
+                                if !m.objective.isEmpty {
+                                    Text(m.objective).font(.system(size: 10)).foregroundStyle(.secondary)
+                                }
+                                if !m.destinationSpob.isEmpty {
+                                    Text("→ \(m.destinationSpob)" + (m.destinationSystem.isEmpty ? "" : " (\(m.destinationSystem))"))
+                                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                                }
+                                if let d = m.deadline {
+                                    Text("Due \(d.description)").font(.system(size: 10)).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }.font(.system(size: 11))
+                ActionButton(title: "Mission info window", symbol: "list.bullet.clipboard") { session.showMissionInfo.toggle() }
+            } else if !session.activeMissionTitles.isEmpty {
                 Text("Active: " + session.activeMissionTitles.joined(separator: " · "))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
+            Text("Date: \(session.pilot.state.date.description)").font(.system(size: 10)).foregroundStyle(.secondary)
             Divider().overlay(Color.white.opacity(0.1))
             HStack(spacing: 6) {
                 Text("Date").font(.system(size: 10)).foregroundStyle(.secondary)

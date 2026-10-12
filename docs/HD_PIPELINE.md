@@ -203,6 +203,15 @@ File paths are relative to the `.nsx` folder and must stay inside it.
 | `bake.atmosphere` | model | planets: rim-glow colour `[r, g, b]`. Also switches to a single-sun light |
 | `bake.spin` | model | reserved for live 3D drawing (degrees per second); ignored for now |
 
+**Live 3D.** Settings → Graphics → *Ships with 3D models*: `Sprites` (baked frames, default) or `Full live 3D`. A live hull (`LiveHull`, NovaSwiftHD) is an `SK3DNode` running the same `ModelStage` the baker uses, set up the same way: camera, pitch, lights and orientation, plus the bake's fit and light level (`ModelBaker.calibrateLive`, cached with the bakes as `live-v1`). It also runs the same effect pass, so glow layers with a classic overlay stay dark on the model and keep drawing as their baked sheets on top. It turns to the ship's interpolated heading every frame and eases into the bank. Only hulls whose sheets bank (shän banking sets) roll, and hulks fly level. Models with `live: false` stay sprites.
+
+Cost control, aimed at phones and older Macs:
+- **Budget.** `LiveHullBudget` (NovaSwiftKit) caps how many hulls draw live at once. The ceiling depends on the device: 2–6 on phones, tablets and TV by memory; 2 on Intel Macs with integrated GPUs and 6 with discrete; 10 on Apple silicon with 8 GB; 24 above that. The cap then follows the frame rate actually achieved: a slow second sheds a quarter of the live hulls, and three steady seconds earn one back. Ships past the cap draw their sprites. The player claims a slot first. Off-screen ships give theirs back, and at most two hulls are built per frame.
+- **Memory.** Models load in the background when a ship needs one, and only `liveModelCap` distinct models stay resident (6 mobile, 8–16 Mac, least recently used first). Each live hull clones its model and shares the vertex data.
+- **Detail.** Settings → Graphics: *3D model detail* (`MeshSimplifier`, vertex clustering on position, facing and texture patch; on a 286k-triangle hull, High ≈ 73%, Medium ≈ 52%, Low ≈ 35% of the triangles, ~100 ms) and *3D lighting* (`Simple` = diffuse only, no reflections).
+
+**Graphics quality.** Low / Medium / High / Ultra set *HD detail* (1×, 2×, 2×, 4×; 1× is new and bakes and loads at the original resolution), *3D model detail*, *3D lighting*, *Particle effects* (Full = the original; Reduced and Minimal spawn a half and a quarter of each burst) and *Starfield density* together. Changing any one of them afterwards shows as Custom. High matches the defaults. Dev console: `hd detail <1|2|4>`, `hd 3d <sprites|live>` (without an argument it reports fitted/loaded/failed models and the device ceiling).
+
 ## Making a pack
 
 1. Find the sprite id (see the table above). `novaswift-extract ship <Nova Files> <id>`
@@ -315,8 +324,12 @@ art for one pack rather than tools every pack needs.
 - **Ship packs as finished sheets.** Shipping hulls as pre-rendered `sprite`
   atlases (as the 2D route does) makes a pack load like any other mod; models
   stay supported for creators and are rendered on first run.
-- Live 3D presentation (smooth rotation and real lighting via `SK3DNode`) for
-  models marked `live`.
+- Live 3D on real hardware: check the device ceilings and the frame-rate
+  governor on an iPhone, an iPad, an Intel Mac and an 8 GB Apple silicon Mac.
+  Animated hulls (shän animation sets) and per-ship tints (pers colour,
+  paint), ionization and murk aren't drawn on live models yet; a ship
+  shows them only while it's drawn as a sprite. Live 3D needs hull models: no shipped pack has
+  any (Nova Reimagined's were withdrawn).
 - HD for interface art, landing pictures and the shipyard/outfitter images.
 - A plug-in editor (a modern Mission Computer) covering the classic resource
   types and these HD/3D additions. The embed, extract and validation code lives

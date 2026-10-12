@@ -100,12 +100,10 @@ struct InspectorView: View {
             else if key.type == GraphicsEnhancementType.descriptor { RawTextEditor(key: key, data: res.data, model: model) }
             else { SingleStringEditor(key: key, data: res.data, model: model) }
         case .graphic:
-            if key.type == NovaType.rleD || key.type == NovaType.pict || key.type == NovaType.cicn {
+            if key.type == NovaType.rleD || key.type == NovaType.rle8 || key.type == NovaType.pict || key.type == NovaType.cicn {
                 GraphicEditor(key: key, data: res.data, model: model)
             } else if key.type == NovaType.ppat || key.type == NovaType.ppatAlt {
                 PixPatPreview(key: key, data: res.data, model: model)
-            } else if key.type == NovaType.rle8 {
-                Rle8InfoView(data: res.data)
             } else {
                 EditorEmptyState(icon: "photo", title: "No preview for \(key.type.stringValue)", subtitle: "Switch to Raw to edit the bytes.")
                     .frame(minHeight: 200)

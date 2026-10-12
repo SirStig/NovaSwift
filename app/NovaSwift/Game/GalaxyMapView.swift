@@ -886,7 +886,7 @@ struct GalaxyMapView: View {
         let palette: [Color] = [.cyan, .green, .yellow, .pink, .mint, .purple, .teal, .blue]
         var hash = 5381
         for byte in id.utf8 { hash = (hash &* 33) &+ Int(byte) }
-        return palette[abs(hash) % palette.count]
+        return palette[Int(hash.magnitude % UInt(palette.count))]   // abs(Int.min) traps
     }
 
     /// Four corner brackets around a point (the classic map cursor).
@@ -939,8 +939,12 @@ struct GalaxyMapView: View {
         // Classic (0x004a3aa0): an unlatched system is still clickable when
         // it is linked from the current system, or from the route's tail
         // with Shift held (so a route can run one hop past the known map).
+        // Touch has no Shift, so there both bases count.
         let reachBase = (Self.isShiftHeld && !nav.route.isEmpty) ? (nav.route.last ?? cur.id) : cur.id
-        let reachable = Set(nav.game?.systemNeighbors(reachBase) ?? [])
+        var reachable = Set(nav.game?.systemNeighbors(reachBase) ?? [])
+        if Self.touchExtendsRoute, !Self.isShiftHeld, let tail = nav.route.last {
+            reachable.formUnion(nav.game?.systemNeighbors(tail) ?? [])
+        }
         for s in nav.systems() {
             // Story-hidden systems can't be targeted at all.
             guard !nav.hiddenSystems.contains(s.id) else { continue }
@@ -966,9 +970,12 @@ struct GalaxyMapView: View {
         if nav.autoRoutePlotting {
             // The `autoRoutePlotting` enhancement: any tap plots the shortest course.
             if hit.id == nav.currentSystemID { nav.clearCourse() } else { nav.plotCourse(to: hit.id) }
-        } else if Self.isShiftHeld || (Self.touchExtendsRoute && hit.id == nav.selectedSystemID) {
+        } else if Self.isShiftHeld || (Self.touchExtendsRoute
+                    && (hit.id == nav.selectedSystemID || nav.extendsRouteTail(hit.id))) {
             // Shift+click builds the route hop by hop. Without a keyboard, a
-            // second tap on the selected system stands in for it.
+            // tap on the system one link past the route's tail extends it (one
+            // tap per hop, as Shift+click is), and a second tap on the selected
+            // system stands in for Shift+click anywhere else.
             nav.shiftClick(system: hit.id)
         } else {
             nav.click(system: hit.id)

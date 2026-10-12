@@ -93,34 +93,4 @@ private struct TiledPatternView: View {
         }
     }
 }
-
-/// `rlë8`: header facts and an honest "no preview" — the editor doesn't decode palette-indexed
-/// sprite sheets (only the 16-bit `rlëD` format is verified), and guessing a palette would
-/// show wrong colours.
-struct Rle8InfoView: View {
-    let data: Data
-
-    var body: some View {
-        let w = FieldCodec.readInt(data, 0, 2, signed: true), h = FieldCodec.readInt(data, 2, 2, signed: true)
-        let bpp = FieldCodec.readInt(data, 4, 2, signed: true), pal = FieldCodec.readInt(data, 6, 2, signed: true)
-        let frames = FieldCodec.readInt(data, 8, 2, signed: true)
-        let valid = data.count >= 16 && w > 0 && h > 0
-        VStack(alignment: .leading, spacing: 10) {
-            EditorEmptyState(icon: "photo.badge.exclamationmark", title: "8-bit sprite — preview unavailable",
-                             subtitle: "Palette-indexed sprite sheets (rlë8) aren't decoded by the editor.\nThe bytes are preserved untouched; use Raw to inspect them.")
-                .frame(minHeight: 150)
-            if valid {
-                VStack(alignment: .leading, spacing: 4) {
-                    StatRow(label: "Frame size", value: "\(w)×\(h) px")
-                    StatRow(label: "Frames", value: "\(frames)")
-                    StatRow(label: "Bits per pixel", value: "\(bpp)")
-                    StatRow(label: "Palette id", value: "\(pal)")
-                    StatRow(label: "Size", value: ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))
-                }
-                .padding(10)
-                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-            }
-        }
-    }
-}
 #endif

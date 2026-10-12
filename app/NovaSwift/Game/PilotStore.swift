@@ -26,6 +26,21 @@ final class PilotStore: ObservableObject {
     /// (FL-05). Reset when the player lands; session-only.
     var visitDays = SpaceportVisitDays()
 
+    #if os(macOS)
+    /// Plugin Editor test runs only (`app/NovaSwift/Editor/Run/`): a store that lives purely
+    /// in memory. Every disk write — `save()` (and so every economy forwarder, `newGame`,
+    /// `begin`, `bind`, `migrateIfNeeded`) and `reset()` — is a no-op, and it never reads the
+    /// live autosave, so the real spaceport UI can run against it without any path to the
+    /// player's saves.
+    private(set) var isSandbox = false
+
+    init(editorSandbox initial: PlayerState) {
+        state = initial
+        started = true
+        isSandbox = true
+    }
+    #endif
+
     // MARK: Location on disk
 
     private static var saveURL: URL {
@@ -120,6 +135,9 @@ final class PilotStore: ObservableObject {
     }
 
     func save() {
+        #if os(macOS)
+        if isSandbox { return }   // editor test run: in-memory only
+        #endif
         guard started else { return }
         guard let data = try? JSONEncoder().encode(state) else {
             Log.pilot.error("PilotStore.save: failed to encode live pilot state; save skipped")
@@ -165,6 +183,9 @@ final class PilotStore: ObservableObject {
 
     /// Wipe the save (for "New Pilot").
     func reset() {
+        #if os(macOS)
+        if isSandbox { state = PlayerState(); return }   // never touch the live save file
+        #endif
         do {
             try FileManager.default.removeItem(at: PilotStore.saveURL)
         } catch {
